@@ -118,6 +118,12 @@ place instead:
 .\target\release-dev\tze_hud.exe --print-attach-info   # MCP URL + client config, no window
 ```
 
+Launching `%LOCALAPPDATA%\Programs\tze_hud\tze_hud.exe` with no arguments
+uses `%APPDATA%\tze_hud\config.toml` and overlay mode, just like autostart,
+regardless of the working directory. Restart and update retain those effective
+arguments. Explicit arguments keep the normal CLI/environment defaults;
+use `--window-mode fullscreen` when you want fullscreen.
+
 ### One instance per user
 
 Only one HUD runs per Windows user, enforced by the named mutex

@@ -41,6 +41,13 @@ install dir it installs for the current user, no admin rights:
   `HKCU\...\App Paths\tze_hud.exe`;
 - relaunches the installed copy detached and exits.
 
+Double-clicking the installed exe (or running it with no arguments from any
+working directory) starts overlay mode with `%APPDATA%\tze_hud\config.toml`,
+using the same arguments as autostart. Its installed config and overlay mode
+take precedence over `TZE_HUD_CONFIG`, a working-directory `tze_hud.toml`, and
+`TZE_HUD_WINDOW_MODE`. Restart and update retain those effective arguments.
+An unreadable or invalid installed config still fails startup.
+
 Running a newer download the same way upgrades in place: the running instance
 is asked to quit, then the new one starts. Any command-line argument runs the
 exe where it is instead; `--install` forces the install. One instance runs per

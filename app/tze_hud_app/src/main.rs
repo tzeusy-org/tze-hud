@@ -66,8 +66,8 @@
 //! ## Examples
 //!
 //! ```sh
-//! # Fullscreen (default)
-//! tze_hud
+//! # Explicit fullscreen (any argument runs in place)
+//! tze_hud --window-mode fullscreen
 //!
 //! # Overlay mode at 1280×720 with gRPC enabled
 //! tze_hud --window-mode overlay --width 1280 --height 720 --grpc-port 50051
@@ -78,6 +78,9 @@
 //! # Disable gRPC (standalone compositor only)
 //! tze_hud --grpc-port 0
 //! ```
+//!
+//! On Windows a downloaded bare exe self-installs. A bare launch of the
+//! installed exe uses the installed config and overlay mode, like autostart.
 
 use tze_hud_config::{agents_file, agents_path_for, resolve_config_path, validate_config};
 use tze_hud_runtime::operator::handoff::{self, HandoffChild};
@@ -108,7 +111,8 @@ USAGE:
 OPTIONS:
     --config <path>        Path to TOML config file
                            (env: TZE_HUD_CONFIG; auto-resolved if omitted)
-    --window-mode <mode>   Window mode: fullscreen | overlay  [default: fullscreen]
+    --window-mode <mode>   Window mode: fullscreen | overlay  [default: fullscreen;
+                           installed Windows bare launch: overlay]
                            (env: TZE_HUD_WINDOW_MODE)
     --width <px>           Window width in pixels  [default: auto-detect in overlay mode, 1920 otherwise]
                            (env: TZE_HUD_WINDOW_WIDTH)
@@ -144,7 +148,8 @@ OPTIONS:
     --install              Install per user (%LOCALAPPDATA%\Programs\tze_hud), register
                            autostart, and relaunch. A bare launch with no arguments
                            from outside the install dir does this automatically;
-                           any argument runs in place instead.
+                           the installed bare exe uses the installed config and
+                           overlay mode, like autostart. Any argument runs in place.
     --uninstall            Remove autostart and the install dir and stop the running
                            instance. Keeps %APPDATA%\tze_hud (config, paired agents).
     --purge                With --uninstall: also delete %APPDATA%\tze_hud and
@@ -296,6 +301,25 @@ enum StartupAction {
         StartupOptions,
     ),
     Child(tze_hud_runtime::remote_firewall::ChildRequest),
+}
+
+/// An installed Windows bare launch uses the same explicit arguments as
+/// autostart. Keep these effective arguments for restart/update as well.
+fn runtime_launch_args(
+    raw_args: &[String],
+    current_exe: &std::path::Path,
+    paths: &InstallPaths,
+    windows: bool,
+) -> Vec<String> {
+    if windows && raw_args.is_empty() && install::same_path(current_exe, &paths.exe) {
+        paths
+            .launch_args()
+            .into_iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect()
+    } else {
+        raw_args.to_vec()
+    }
 }
 
 /// One-shot helpers must never open ordinary environment-selected log files,
@@ -991,8 +1015,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // (the pre-hud-q2glv default) was always immune (Codex P2 on PR #1143).
     ignore_console_ctrl_c();
 
-    // Collect CLI args, skipping argv[0] (the binary name).
-    let args: Vec<String> = std::env::args().skip(1).collect();
+    // Keep the original argv for install selection; the runtime and its
+    // replacements use the effective installed-launch arguments.
+    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    let args = if cfg!(windows) && raw_args.is_empty() {
+        match (std::env::current_exe(), InstallPaths::from_env()) {
+            (Ok(exe), Ok(paths)) => runtime_launch_args(&raw_args, &exe, &paths, true),
+            _ => raw_args.clone(),
+        }
+    } else {
+        raw_args.clone()
+    };
 
     let startup = prepare_startup(&args, || {
         init_logging();
@@ -1069,7 +1102,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Install / uninstall / single instance (T6) ────────────────────────────
     let request = install::Request {
-        any_args: !args.is_empty(),
+        any_args: !raw_args.is_empty(),
         install: opts.install,
         uninstall: opts.uninstall,
         purge: opts.purge,
@@ -1330,6 +1363,7 @@ mod tests {
         unsafe {
             for key in [
                 "TZE_HUD_WINDOW_MODE",
+                "TZE_HUD_CONFIG",
                 "TZE_HUD_WINDOW_WIDTH",
                 "TZE_HUD_WINDOW_HEIGHT",
                 "TZE_HUD_GRPC_PORT",
@@ -1879,6 +1913,152 @@ mod tests {
                 .unwrap_or_else(|| panic!("case {name:?} should be rejected"));
             for hint in *hints {
                 assert!(err.contains(hint), "case {name:?}: {err:?} lacks {hint:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn installed_bare_launch_uses_autostart_args_without_changing_other_launches() {
+        use std::path::Path;
+
+        let paths = InstallPaths::from_dirs(
+            Path::new(r"C:\Local AppData"),
+            Path::new(r"C:\Roaming AppData"),
+        );
+        let installed_config = paths.config_file.to_string_lossy();
+        let outside = Path::new(r"C:\Downloads\tze_hud.exe");
+        struct LaunchCase<'a> {
+            name: &'a str,
+            exe: &'a Path,
+            windows: bool,
+            raw: &'a [&'a str],
+            mode: WindowMode,
+            config: Option<&'a str>,
+            action: Action,
+        }
+        let cases = [
+            LaunchCase {
+                name: "installed",
+                exe: &paths.exe,
+                windows: true,
+                raw: &[],
+                mode: WindowMode::Overlay,
+                config: Some(&installed_config),
+                action: Action::Run,
+            },
+            LaunchCase {
+                name: "installed path spelling",
+                exe: Path::new("c:/local appdata/programs/tze_hud/TZE_HUD.EXE"),
+                windows: true,
+                raw: &[],
+                mode: WindowMode::Overlay,
+                config: Some(&installed_config),
+                action: Action::Run,
+            },
+            LaunchCase {
+                name: "downloaded",
+                exe: outside,
+                windows: true,
+                raw: &[],
+                mode: WindowMode::Fullscreen,
+                config: None,
+                action: Action::Install,
+            },
+            LaunchCase {
+                name: "non-Windows",
+                exe: &paths.exe,
+                windows: false,
+                raw: &[],
+                mode: WindowMode::Fullscreen,
+                config: None,
+                action: Action::Run,
+            },
+            LaunchCase {
+                name: "explicit fullscreen",
+                exe: &paths.exe,
+                windows: true,
+                raw: &["--window-mode", "fullscreen"],
+                mode: WindowMode::Fullscreen,
+                config: None,
+                action: Action::Run,
+            },
+            LaunchCase {
+                name: "explicit config",
+                exe: &paths.exe,
+                windows: true,
+                raw: &["--config", "custom.toml"],
+                mode: WindowMode::Fullscreen,
+                config: Some("custom.toml"),
+                action: Action::Run,
+            },
+            LaunchCase {
+                name: "explicit benchmark",
+                exe: outside,
+                windows: true,
+                raw: &["--benchmark-emit", "report.json"],
+                mode: WindowMode::Fullscreen,
+                config: None,
+                action: Action::Run,
+            },
+        ];
+        for LaunchCase {
+            name,
+            exe,
+            windows,
+            raw,
+            mode,
+            config,
+            action,
+        } in cases
+        {
+            let raw_args = raw.iter().map(|arg| (*arg).to_owned()).collect::<Vec<_>>();
+            let args = runtime_launch_args(&raw_args, exe, &paths, windows);
+            let argv = args.iter().map(String::as_str).collect::<Vec<_>>();
+            let opts = parse_with_env(
+                &[
+                    ("TZE_HUD_WINDOW_MODE", "fullscreen"),
+                    ("TZE_HUD_CONFIG", "other.toml"),
+                    ("TZE_HUD_MCP_PORT", "9191"),
+                ],
+                &argv,
+            )
+            .unwrap_or_else(|error| panic!("case {name}: {error}"));
+            assert_eq!(opts.window_mode, mode, "case {name}");
+            assert_eq!(opts.mcp_port, 9191, "case {name}: unrelated env override");
+            assert_eq!(opts.config_path.as_deref(), config, "case {name}");
+            assert_eq!(
+                install::decide(
+                    install::Request {
+                        any_args: !raw_args.is_empty(),
+                        ..Default::default()
+                    },
+                    exe,
+                    &paths,
+                    windows,
+                ),
+                action,
+                "case {name}: install selection uses raw argv",
+            );
+            assert_eq!(
+                runtime_launch_args(&args, exe, &paths, windows),
+                args,
+                "case {name}: effective argv remains stable on relaunch",
+            );
+            if mode == WindowMode::Overlay {
+                let canonical = paths
+                    .launch_args()
+                    .into_iter()
+                    .map(|arg| arg.to_string_lossy().into_owned())
+                    .collect::<Vec<_>>();
+                assert_eq!(args, canonical, "case {name}: matches the Run command");
+                assert!(install::is_canonical_launch(&args, &paths));
+                assert_eq!(
+                    handoff::child_args(&args),
+                    args,
+                    "the runtime's effective args survive restart/update",
+                );
+            } else {
+                assert_eq!(args, raw_args, "case {name}: explicit/dev argv preserved");
             }
         }
     }
