@@ -91,6 +91,23 @@ Payload shapes, content types per zone, and widget params:
 durable widget state at the end (`--cleanup-on-exit` or
 `scripts/widget-cleanup.json`).
 
+## Resident tiles from WSL
+
+Use the [resident guide](references/resident-exemplars.md) after pairing. Its
+single `uv run` command installs the scripts' PEP 723 dependencies (`grpcio`,
+`protobuf`, `Pillow`, `blake3`); system Python alone need not have them. A venv
+alternative is documented there. The paired agent needs `allow = ["tiles"]`
+(or `"*"`), which includes resource upload and input events.
+
+The resident client derives identity from the paired PSK; `--agent` optionally
+asserts that identity. Card labels are cosmetic. It defaults gRPC DNS to
+`native` before importing gRPC so WSL can resolve Tailscale short hostnames;
+an explicit `GRPC_DNS_RESOLVER` override is honored. Accepted tile/node/update
+IDs prove protocol progress. Text/avatar pixels, orphan badges and reclaim
+still need a screenshot or owner observation, separately from offline checks.
+The exemplar emits those visual observations as `unverified` and drops one
+transport without `SessionClose` to exercise orphan grace.
+
 ## Behavior Rules
 
 - Require a successful `hud_surfaces` (or `hud_admin.py status`) before

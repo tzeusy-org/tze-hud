@@ -11,6 +11,10 @@
 import asyncio
 import contextlib
 import io
+from pathlib import Path
+import subprocess
+import sys
+import uuid
 import unittest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -319,71 +323,91 @@ class HudGrpcClientTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_create_presence_card_tile_sequences_helper_calls(self):
         client = HudClient("example.invalid:50051", psk="test-key")
-        lease_id = b"\x22" * 16
-        client.claim_tile = AsyncMock(
-            return_value=ClaimedTile(lease_id=lease_id, tile_id=b"tile-id", node_ids=[])
-        )
-        client.update_tile_input_mode = AsyncMock()
-        client.set_tile_root = AsyncMock()
-        client.add_node = AsyncMock(side_effect=[f"node-{idx}".encode() for idx in range(12)])
+        lease_id = uuid.UUID("22334455-6677-7889-9abc-ddeeff001122").bytes
+        tile_id = uuid.UUID("33445566-7788-799a-abcd-eeff00112233").bytes
+        node_ids = [uuid.UUID(int=index + 1).bytes for index in range(13)]
+        client._request = AsyncMock(return_value=session_pb2.RequestResult(
+            ok=True, lease_id=lease_id, ids=[tile_id, *node_ids], ttl_ms=60000,
+        ))
+        client.submit_mutation_batch = AsyncMock(return_value=session_pb2.RequestResult(ok=True))
+        claimed = await client.create_presence_card_tile("alpha", b"x" * 32)
+        self.assertEqual(claimed.node_ids, node_ids)
+        claim = client._request.await_args.kwargs["claim_tile"]
+        self.assertEqual(claim.placement.anchor, session_pb2.TILE_ANCHOR_BOTTOM_LEFT)
+        self.assertEqual(claim.placement.size, session_pb2.TILE_SIZE_MEDIUM)
+        self.assertEqual(len(claim.root.children), 12)
+        self.assertEqual([claim.root.id, *[node.id for node in claim.root.children]], [b""] * 13)
+        mode = client.submit_mutation_batch.await_args.args[1][0].update_tile_input_mode
+        self.assertEqual(mode.input_mode, types_pb2.TILE_INPUT_MODE_CAPTURE)
 
-        avatar_resource_id = b"\x44" * 32
+        # Also exercise the original observed SetTileRoot/AddNode path. Returned
+        # bytes deliberately differ from little-endian outgoing NodeProto.id.
+        root = build_presence_card_root_node()
+        root_id = uuid.UUID("11223344-5566-7788-99aa-bbccddeeff00").bytes
+        body_id = uuid.UUID("abcdef01-2345-7678-9abc-def012345678").bytes
+        client.configure_mutation_retry(3)
+        client.submit_mutation_batch.reset_mock()
+        client.submit_mutation_batch.side_effect = [
+            session_pb2.RequestResult(ok=True, ids=[root_id]),
+            session_pb2.RequestResult(ok=True, ids=[body_id]),
+            session_pb2.RequestResult(ok=True),
+        ]
+        acknowledged_root = await client.set_tile_root(lease_id, tile_id, root)
+        acknowledged_body = await client.add_node(
+            lease_id, tile_id, build_presence_card_text_node("alpha"), parent_id=acknowledged_root,
+        )
+        await client.update_node_content(
+            lease_id, tile_id, acknowledged_body, build_presence_card_text_node("alpha", "UPDATED"),
+        )
+        self.assertEqual(acknowledged_root, root_id)
+        self.assertEqual(acknowledged_body, body_id)
+        calls = client.submit_mutation_batch.await_args_list
+        self.assertEqual(calls[1].args[1][0].add_node.parent_id, root_id)
+        updated = calls[2].args[1][0].update_node_content
+        self.assertEqual(updated.node_id, body_id)
+        self.assertIn("UPDATED", updated.text_markdown.content)
+        self.assertTrue(all(call.kwargs["retries"] == 0 for call in calls))
 
-        claimed = await client.create_presence_card_tile(
-            agent_name="agent-alpha",
-            avatar_resource_id=avatar_resource_id,
-        )
+    async def test_created_ids_fail_before_followup_writes(self):
+        client = HudClient("example.invalid:50051", psk="test-key")
+        for malformed in ([], [b"short"], [b"\0" * 16]):
+            with self.subTest(ids=malformed):
+                client.submit_mutation_batch = AsyncMock(return_value=session_pb2.RequestResult(ok=True, ids=malformed))
+                with self.assertRaisesRegex(RuntimeError, "malformed acknowledged IDs"):
+                    await client.set_tile_root(b"l" * 16, b"t" * 16, build_presence_card_root_node())
+                self.assertEqual(client.submit_mutation_batch.await_count, 1)
+                client._request = AsyncMock(return_value=session_pb2.RequestResult(
+                    ok=True, lease_id=b"l" * 16, ids=[b"t" * 16, *malformed],
+                ))
+                client.update_tile_input_mode = AsyncMock()
+                with self.assertRaisesRegex(RuntimeError, "malformed acknowledged IDs"):
+                    await client.create_presence_card_tile("alpha", b"a" * 32)
+                client.update_tile_input_mode.assert_not_awaited()
 
-        self.assertEqual(claimed.tile_id, b"tile-id")
-        client.claim_tile.assert_awaited_once_with(
-            anchor=session_pb2.TILE_ANCHOR_BOTTOM_LEFT,
-            size=session_pb2.TILE_SIZE_MEDIUM,
-            ttl_ms=60000,
-        )
-        client.update_tile_input_mode.assert_awaited_once_with(
-            lease_id,
-            b"tile-id",
-            types_pb2.TILE_INPUT_MODE_CAPTURE,
-        )
-        client.set_tile_root.assert_awaited_once()
-        client.add_node.assert_awaited()
-        root_node = client.set_tile_root.await_args.args[2]
-        self.assertTrue(root_node.HasField("solid_color"))
-        self.assertEqual(root_node.solid_color.bounds.width, 320.0)
-        self.assertEqual(root_node.solid_color.bounds.height, 112.0)
-        self.assertEqual(root_node.solid_color.radius, 12.0)
-
-        self.assertEqual(client.add_node.await_count, 12)
-        for awaited in client.add_node.await_args_list:
-            self.assertEqual(awaited.kwargs["parent_id"], root_node.id)
-
-        self.assertTrue(client.add_node.await_args_list[0].args[2].HasField("solid_color"))
-        self.assertTrue(client.add_node.await_args_list[3].args[2].HasField("static_image"))
-        self.assertEqual(
-            client.add_node.await_args_list[4].args[2].text_markdown.content,
-            "RESIDENT AGENT",
-        )
-        self.assertEqual(
-            client.add_node.await_args_list[5].args[2].text_markdown.content,
-            "**agent-alpha**",
-        )
-        self.assertEqual(
-            client.add_node.await_args_list[6].args[2].text_markdown.content,
-            "Connected • last active now",
-        )
-        self.assertEqual(
-            client.add_node.await_args_list[8].args[2].text_markdown.content,
-            "NOW",
-        )
-        self.assertTrue(client.add_node.await_args_list[9].args[2].HasField("solid_color"))
-        self.assertEqual(
-            client.add_node.await_args_list[10].args[2].text_markdown.content,
-            "X",
-        )
-        self.assertEqual(
-            client.add_node.await_args_list[11].args[2].hit_region.interaction_id,
-            "dismiss-card",
-        )
+    def test_native_resolver_is_selected_before_grpc_import(self):
+        script_dir = Path(__file__).resolve().parent
+        child = """
+import os, sys
+class ObserveGrpcImport:
+    observed = False
+    def find_spec(self, name, path=None, target=None):
+        if name == 'grpc':
+            self.observed = True
+            assert os.environ['GRPC_DNS_RESOLVER'] == sys.argv[1]
+        return None
+observer = ObserveGrpcImport()
+sys.meta_path.insert(0, observer)
+import hud_grpc_client
+assert observer.observed
+"""
+        for override in (None, "ares"):
+            with self.subTest(override=override):
+                env = {"PYTHONPATH": str(script_dir)}
+                if override:
+                    env["GRPC_DNS_RESOLVER"] = override
+                result = subprocess.run([sys.executable, "-c", child, override or "native"],
+                                        env=env, capture_output=True, text=True, timeout=30)
+                self.assertEqual(result.returncode, 0, result.stderr)
 
     async def test_disconnect_primitives_split_graceful_and_hard_paths(self):
         client = HudClient("example.invalid:50051", psk="test-key")
