@@ -174,12 +174,6 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
     baseline_png = ws.encode_png_rgba(20, 20, background)
     decode = ws.decode_png_rgba
 
-    class ClockInfo:
-        def __init__(self, name):
-            self.implementation = "offline-" + name
-            self.resolution = 0.015625 if name == "monotonic" else 0.000001
-            self.monotonic, self.adjustable = True, False
-
     class Response:
         def __init__(self, body, status=200, ctype="application/json"):
             self.body, self.status = body, status
@@ -199,6 +193,7 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
             self.clock, self.case = clock, case
             self.held, self.due = True, None  # Earlier screenshot content.
             self.publishes, self.captures, self.clears = [], [], 0
+            self.rpc_s, self.capture_s = (0.001, 0.0005) if case == "coarse monotonic" else (0.05, 0.05)
 
         def urlopen(self, request, timeout):
             if request.get_method() == "GET":
@@ -238,7 +233,7 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                         body = b"x" * (ws.MAX_PNG_BYTES + 1)
                     elif self.case == "transport":
                         raise ws.urllib.error.URLError("synthetic unavailable capture")
-                self.clock.now += 3 if self.case == "cross-due capture" and shot == 3 else 0.05
+                self.clock.now += 3 if self.case == "cross-due capture" and shot == 3 else self.capture_s
                 self.captures.append((started, self.clock()))
                 return Response(body, status, ctype)
 
@@ -261,20 +256,22 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                 assert args == {"surface": "zone:subtitle", "content": "CI DELAYED CONTENT IS VISIBLE", "delay_ms": 3000, "ttl_ms": 20000}
                 self.held, self.due = True, self.clock() + 3
                 sent = self.clock()
-                self.clock.now += 4 if self.case == "slow acknowledgement" else 0.05
+                self.clock.now += 4 if self.case == "slow acknowledgement" else self.rpc_s
                 self.publishes.append((sent, self.clock()))
                 payload = {"ok": self.case != "publish rejected", "expires_in_ms": 23000}
-            self.clock.now += 0.05 if tool != "hud_publish" else 0
+            self.clock.now += self.rpc_s if tool != "hud_publish" else 0
             result = {"content": [{"type": "text", "text": ws.json.dumps(payload)}]}
             return Response(ws.json.dumps({"result": result}).encode())
 
     def run(case, *, success):
         clock = FakeClock()
+        if case == "coarse monotonic":
+            clock.now = 0.010
         endpoint = Endpoint(clock, case)
         with monkeypatch.context() as patch:
-            patch.setattr(ws.time, "monotonic", clock)
-            patch.setattr(ws.time, "perf_counter", lambda: clock() + 123.0)
-            patch.setattr(ws.time, "get_clock_info", ClockInfo)
+            monotonic = (lambda: int(clock() * 64) / 64) if case == "coarse monotonic" else clock
+            patch.setattr(ws.time, "monotonic", monotonic)
+            patch.setattr(ws.time, "perf_counter", clock)
             patch.setattr(ws.time, "sleep", clock.sleep)
             patch.setattr(ws.urllib.request, "urlopen", endpoint.urlopen)
             if case == "slow decode":
@@ -306,38 +303,8 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                 output = capsys.readouterr()
                 assert "synthetic-unused-key" not in output.out + output.err
                 assert "CI DELAYED CONTENT IS VISIBLE" not in output.out + output.err
-                records = [ws.json.loads(line.removeprefix("[DEBUG-hud-4gqnb] "))
-                           for line in output.out.splitlines() if line.startswith("[DEBUG-hud-4gqnb] ")]
-                baseline_failed = case in ("unstable baseline", "baseline dimensions")
-                assert len(records) == (0 if baseline_failed else 1)
-                if records:
-                    record = records[0]
-                    assert set(record) == {"python_version", "clocks", "events"}
-                    assert record["python_version"] == list(sys.version_info[:3])
-                    assert record["clocks"] == {
-                        name: {"implementation": "offline-" + name,
-                               "resolution_s": 0.015625 if name == "monotonic" else 0.000001,
-                               "monotonic": True, "adjustable": False}
-                        for name in ("monotonic", "perf_counter")
-                    }
-                    events = record["events"]
-                    assert 1 <= len(events) <= 6
-                    assert events[0]["event"] == "publish_sent"
-                    for event in events:
-                        assert set(event) == {"event", "monotonic_s", "perf_counter_s"}
-                        assert isinstance(event["monotonic_s"], (int, float))
-                        assert event["perf_counter_s"] == event["monotonic_s"] + 123.0
-                    if success or case in ("missing", "too few pixels", "native observed footprint"):
-                        assert [event["event"] for event in events] == [
-                            "publish_sent", "publish_acknowledged", "early_request", "early_response",
-                            "late_request", "late_response",
-                        ]
-                        captures = endpoint.captures[invocation * 5 :]
-                        assert [event["monotonic_s"] for event in events] == [
-                            *endpoint.publishes[-1], *captures[2], *captures[3],
-                        ]
-
-    run("normal", success=True)  # The unchanged checker rejects correct held=true.
+    run("coarse monotonic", success=True)  # Coarse request bounds can under-sleep the actual acknowledgement.
+    run("normal", success=True)
     run("slow decode", success=True)  # Capture timing ends before PNG CPU work.
     for case in (
         "premature", "missing", "too few pixels", "native observed footprint", "unstable baseline", "not restored",

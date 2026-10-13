@@ -453,28 +453,25 @@ def check_delay(smoke: Smoke) -> None:
     width, height, before = baseline
 
     delay_ms = 3_000
-    clock_trace: list[dict] = []
-    sent = time.monotonic()
-    record_delay_clock(clock_trace, "publish_sent", sent)
+    sent = time.perf_counter()
     try:
         published = smoke.ok("hud_publish", {"surface": zone, "content": "CI DELAYED CONTENT IS VISIBLE", "delay_ms": delay_ms, "ttl_ms": 20_000})
-        accepted = time.monotonic()
-        record_delay_clock(clock_trace, "publish_acknowledged", accepted)
+        accepted = time.perf_counter()
         assert published.get("ok") is True, f"hud_publish {zone} was not accepted"
         assert is_held(surfaces_of(smoke), zone), f"{zone} scheduled publication is not held"
 
         # Processing occurred between the request and its acknowledgement. Use
         # both bounds; a capture spanning the earliest due time proves no absence.
         earliest_due, latest_due = sent + delay_ms / 1000, accepted + delay_ms / 1000
-        early, _, early_finished = capture_frame(smoke, delay_trace=clock_trace, delay_phase="early")
+        early, _, early_finished = capture_frame(smoke)
         assert early_finished < earliest_due, "capture did not finish before the earliest due time"
         assert early[:2] == (width, height), "screenshot dimensions changed before due"
         assert early[2] == before, f"{zone} rendered content before its {delay_ms} ms delay"
 
-        remaining = latest_due - time.monotonic()
+        remaining = latest_due - time.perf_counter()
         if remaining > 0:
             time.sleep(remaining)
-        late, late_started, late_finished = capture_frame(smoke, delay_trace=clock_trace, delay_phase="late")
+        late, late_started, late_finished = capture_frame(smoke)
         assert late_started >= latest_due, "capture started before the latest due time"
         assert late[:2] == (width, height), "screenshot dimensions changed after due"
         after = late[2]
@@ -484,12 +481,7 @@ def check_delay(smoke: Smoke) -> None:
         )
     finally:
         # Includes an accepted publication whose response/observation failed.
-        try:
-            smoke.ok("hud_clear", {"surface": zone})
-        finally:
-            # Emit after the timing-sensitive captures and cleanup. This is
-            # diagnostic evidence only; enforcement still uses monotonic().
-            print_delay_clocks(clock_trace)
+        smoke.ok("hud_clear", {"surface": zone})
 
     assert not is_held(surfaces_of(smoke), zone), f"{zone} still held after delayed content was cleared"
     restored, _, _ = capture_frame(smoke)
@@ -944,38 +936,16 @@ def post_capture_comment(output: Path) -> int:
         return 1
 
 
-def record_delay_clock(trace: list[dict], event: str, monotonic_s: float) -> None:
-    """[DEBUG-hud-4gqnb] Pair clocks without comparing their absolute origins."""
-    trace.append({"event": event, "monotonic_s": monotonic_s, "perf_counter_s": time.perf_counter()})
-
-
-def print_delay_clocks(trace: list[dict]) -> None:
-    """[DEBUG-hud-4gqnb] Only clock metadata and six bounded numeric samples."""
-    clocks = {}
-    for name in ("monotonic", "perf_counter"):
-        info = time.get_clock_info(name)
-        clocks[name] = {"implementation": info.implementation, "resolution_s": info.resolution,
-                        "monotonic": info.monotonic, "adjustable": info.adjustable}
-    diagnostic = {"python_version": list(sys.version_info[:3]), "clocks": clocks, "events": trace}
-    print("[DEBUG-hud-4gqnb] " + json.dumps(diagnostic, separators=(",", ":")), flush=True)
-
-
-def capture_frame(
-    smoke: Smoke, *, delay_trace: list[dict] | None = None, delay_phase: str = ""
-) -> tuple[tuple[int, int, bytes], float, float]:
-    """Decode one own-frame capture, bounded by monotonic request/response times.
+def capture_frame(smoke: Smoke) -> tuple[tuple[int, int, bytes], float, float]:
+    """Decode one own-frame capture, bounded by high-resolution monotonic times.
 
     The response timestamp precedes PNG decoding: CPU decode time is not part
     of the interval in which the compositor could have captured the frame.
     Capture failures propagate; this helper never retries unavailable evidence.
     """
-    started = time.monotonic()
-    if delay_trace is not None:
-        record_delay_clock(delay_trace, delay_phase + "_request", started)
+    started = time.perf_counter()
     status, ctype, body = smoke.get_bytes("/admin/screenshot")
-    finished = time.monotonic()
-    if delay_trace is not None:
-        record_delay_clock(delay_trace, delay_phase + "_response", finished)
+    finished = time.perf_counter()
     assert status == 200 and ctype == "image/png", f"/admin/screenshot: {status} {ctype}"
     return decode_png_rgba(body), started, finished
 
