@@ -69,11 +69,11 @@ use serde::{Deserialize, Serialize};
 /// it must either be dispatched to the chrome layer or suppressed, but portal
 /// resize MUST NOT consume it.
 ///
-/// The reserved set mirrors `ChromeShortcut` (in
-/// `tze_hud_runtime::shell::chrome`) and the pairing shortcut
-/// (`Ctrl+Shift+P`) that is handled at the OS-event stage.  It is
-/// replicated here so that `tze_hud_input` can classify a key before any
-/// portal resize attempt without depending on the runtime crate.
+/// The reserved set includes the tab actions in `ChromeShortcut` (in
+/// `tze_hud_runtime::shell::chrome`), shell-reserved no-ops such as
+/// `Ctrl+Shift+M`, and the pairing shortcut (`Ctrl+Shift+P`) handled at the
+/// OS-event stage. It is replicated here so that `tze_hud_input` can classify
+/// a key before any portal resize attempt without depending on the runtime.
 ///
 /// # Why replicate instead of calling into the runtime?
 ///
@@ -102,7 +102,7 @@ impl ShellReservedShortcut {
     /// | `Ctrl+Shift+Tab` | PrevTab |
     /// | `Ctrl+1` … `Ctrl+8` | GotoTab(1..8) |
     /// | `Ctrl+9` | LastTab |
-    /// | `Ctrl+Shift+M` | MuteToggle (v1-reserved) |
+    /// | `Ctrl+Shift+M` | Shell-reserved no-op; consumed without an action |
     /// | `Ctrl+Shift+Escape` | SafeMode toggle |
     /// | `Ctrl+Shift+P` | Show a pairing code |
     pub fn is_reserved(key: &str, ctrl: bool, shift: bool, alt: bool) -> bool {
@@ -116,7 +116,7 @@ impl ShellReservedShortcut {
             ("Tab", true) => true,  // Ctrl+Shift+Tab → PrevTab
             // Numbered tab jump (Ctrl+1..9)
             ("1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9", false) => true,
-            // Mute toggle (v1-reserved noop, but still consumed)
+            // Shell-reserved no-op, still consumed before agent routing
             ("m" | "M", true) => true, // Ctrl+Shift+M
             // Safe mode toggle
             ("Escape", true) => true, // Ctrl+Shift+Escape
@@ -2147,15 +2147,23 @@ mod tests {
     }
 
     #[test]
-    fn shell_reserved_ctrl_shift_m_mute() {
-        assert!(
-            ShellReservedShortcut::is_reserved("m", true, true, false),
-            "Ctrl+Shift+m must be reserved (MuteToggle)"
-        );
-        assert!(
-            ShellReservedShortcut::is_reserved("M", true, true, false),
-            "Ctrl+Shift+M must be reserved (MuteToggle)"
-        );
+    fn shell_reserved_ctrl_shift_m_noop() {
+        for key in ["m", "M"] {
+            assert!(
+                ShellReservedShortcut::is_reserved(key, true, true, false),
+                "Ctrl+Shift+{key} must remain shell-reserved"
+            );
+            for (ctrl, shift, alt) in [
+                (false, true, false),
+                (true, false, false),
+                (true, true, true),
+            ] {
+                assert!(
+                    !ShellReservedShortcut::is_reserved(key, ctrl, shift, alt),
+                    "{key} requires Ctrl+Shift without Alt to be shell-reserved"
+                );
+            }
+        }
     }
 
     #[test]
