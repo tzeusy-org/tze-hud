@@ -164,6 +164,7 @@ impl WindowedRuntimeState {
             secondary_recreates: Default::default(),
             overlay_refits: Default::default(),
             press_window: None,
+            zone_press: None,
             primary_drag_gesture: None,
             global_tokens: HashMap::new(),
             element_repositioned_tx: None,
@@ -865,6 +866,142 @@ mod tests {
             },
             timestamp_mono_us: MonoUs(ts),
         })
+    }
+
+    /// A harness showing one notification with Approve and Reject actions,
+    /// ticked so its hit regions are live.
+    fn approve_reject_notification_harness() -> HeadlessEventLoopHarness {
+        use tze_hud_scene::{
+            ContentionPolicy, GeometryPolicy, LayerAttachment, NotificationAction,
+            NotificationPayload, RenderingPolicy, ZoneContent, ZoneDefinition, ZoneMediaType,
+        };
+
+        let mut harness = HeadlessEventLoopHarness::new();
+        {
+            let shared = harness.app.state.shared_state.blocking_lock();
+            let mut scene = shared.scene.blocking_lock();
+            *scene = SceneGraph::new(1920.0, 1080.0);
+            scene.create_tab("Main", 0).unwrap();
+            scene.register_zone(ZoneDefinition {
+                id: SceneId::new(),
+                name: "notification-area".to_string(),
+                description: "notifications".to_string(),
+                geometry_policy: GeometryPolicy::Relative {
+                    x_pct: 0.6,
+                    y_pct: 0.0,
+                    width_pct: 0.35,
+                    height_pct: 0.3,
+                },
+                accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
+                rendering_policy: RenderingPolicy::default(),
+                contention_policy: ContentionPolicy::Stack { max_depth: 5 },
+                max_publishers: 4,
+                auto_clear_ms: None,
+                layer_attachment: LayerAttachment::Chrome,
+                ephemeral: false,
+            });
+            let action = |id: &str, label: &str| NotificationAction {
+                label: label.to_string(),
+                callback_id: id.to_string(),
+            };
+            scene
+                .publish_to_zone(
+                    "notification-area",
+                    ZoneContent::Notification(NotificationPayload {
+                        text: "Click Approve".to_string(),
+                        icon: String::new(),
+                        urgency: 2,
+                        ttl_ms: None,
+                        title: "Action check".to_string(),
+                        actions: vec![action("approve", "Approve"), action("reject", "Reject")],
+                    }),
+                    "notif-agent",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+        while !harness.tick() {}
+        harness
+    }
+
+    fn take_action_ids(harness: &HeadlessEventLoopHarness) -> Vec<String> {
+        let shared = harness.app.state.shared_state.blocking_lock();
+        let mut scene = shared.scene.blocking_lock();
+        scene
+            .take_pending_actions("notif-agent")
+            .into_iter()
+            .map(|action| action.callback_id)
+            .collect()
+    }
+
+    fn dismiss_center(harness: &HeadlessEventLoopHarness) -> (f32, f32) {
+        let shared = harness.app.state.shared_state.blocking_lock();
+        let scene = shared.scene.blocking_lock();
+        let dismiss = scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|region| matches!(region.kind, ZoneInteractionKind::Dismiss))
+            .expect("the notification has a dismiss button");
+        (
+            dismiss.bounds.x + dismiss.bounds.width / 2.0,
+            dismiss.bounds.y + dismiss.bounds.height / 2.0,
+        )
+    }
+
+    /// A release that arrives after the press was already ended (the runtime
+    /// saw the button physically up and synthesized the Up) must not repeat
+    /// the click: one press on Approve queues exactly one `approve` (hud-z21e9).
+    #[test]
+    fn late_os_release_after_synthesized_up_queues_one_action() {
+        let mut harness = approve_reject_notification_harness();
+        let (x, y) = harness.notification_action_center("approve").unwrap();
+        harness.app.state.cursor_x = x;
+        harness.app.state.cursor_y = y;
+        let window = winit::window::WindowId::dummy();
+
+        harness.app.handle_left_button(true, window, None);
+        // The button was seen physically up before winit's release arrived.
+        harness.app.release_left_press();
+        harness.app.handle_left_button(false, window, None);
+        harness.drain();
+
+        assert_eq!(take_action_ids(&harness), ["approve"]);
+    }
+
+    /// A release activates an action only when the press began on that same
+    /// button: pressing Approve and releasing over Reject, or pressing the
+    /// dismiss button, queues no action the user did not press (hud-z21e9).
+    #[test]
+    fn release_activates_only_the_button_the_press_began_on() {
+        let mut harness = approve_reject_notification_harness();
+        let approve = harness.notification_action_center("approve").unwrap();
+        let reject = harness.notification_action_center("reject").unwrap();
+
+        harness.app.state.cursor_x = approve.0;
+        harness.app.state.cursor_y = approve.1;
+        harness.app.enqueue_pointer_event(PointerEventKind::Down);
+        harness.app.state.cursor_x = reject.0;
+        harness.app.state.cursor_y = reject.1;
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        // An Up with no press at all activates nothing either.
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        harness.drain();
+        assert!(
+            take_action_ids(&harness).is_empty(),
+            "a press that began on Approve must not fire Reject"
+        );
+
+        let (x, y) = dismiss_center(&harness);
+        harness.click(x, y);
+        harness.drain();
+        assert!(
+            take_action_ids(&harness).is_empty(),
+            "the dismiss button queues no action"
+        );
+        assert_eq!(harness.zone_publication_count("notification-area"), 0);
     }
 
     /// A pointer press on a notification action button, dispatched through the

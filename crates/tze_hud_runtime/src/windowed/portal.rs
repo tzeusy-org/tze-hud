@@ -2318,6 +2318,7 @@ mod tests {
             secondary_recreates: Default::default(),
             overlay_refits: Default::default(),
             press_window: None,
+            zone_press: None,
             primary_drag_gesture: None,
             global_tokens: std::collections::HashMap::new(),
             element_repositioned_tx: None,
