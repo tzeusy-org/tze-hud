@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pure helpers of the Windows CI smoke: polling, surface parsing, schedule checks."""
+"""Offline Windows smoke checks: polling, ownership, timing and captured pixels."""
 
 from __future__ import annotations
 
@@ -165,6 +165,147 @@ def test_assert_not_early_allows_slack_but_rejects_an_early_event():
     ws.assert_not_early(2.6, 3.0, "x")
     with pytest.raises(AssertionError, match="before its 3.00s schedule"):
         ws.assert_not_early(1.0, 3.0, "x")
+
+
+def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subtests):
+    """Exercise the real smoke/PNG path with one publish and an offline clock."""
+    background = b"\x10\x20\x30\xff" * 400
+    shown = b"\x90\xa0\xb0\xff" * 200 + background[800:]
+    baseline_png = ws.encode_png_rgba(20, 20, background)
+    decode = ws.decode_png_rgba
+
+    class Response:
+        def __init__(self, body, status=200, ctype="application/json"):
+            self.body, self.status = body, status
+            self.headers = {"Content-Type": ctype}
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def read(self):
+            return self.body
+
+    class Endpoint:
+        def __init__(self, clock, case):
+            self.clock, self.case = clock, case
+            self.held, self.due = True, None  # Earlier screenshot content.
+            self.publishes, self.captures, self.clears = [], [], 0
+
+        def urlopen(self, request, timeout):
+            if request.get_method() == "GET":
+                assert request.full_url.endswith("/admin/screenshot") and timeout == 15
+                started = self.clock()
+                shot = len(self.captures) + 1
+                visible = self.due is not None and started >= self.due
+                pixels = shown if visible else background
+                width, height, status, ctype = 20, 20, 200, "image/png"
+                if self.case == "unstable baseline" and shot == 2:
+                    pixels = b"\x11" + background[1:]
+                if self.case == "premature" and shot == 3:
+                    pixels = b"\x11" + background[1:]  # Even one pixel is early.
+                if self.case == "missing" and shot == 4:
+                    pixels = background
+                if self.case == "too few pixels" and shot == 4:
+                    pixels = shown[:796] + background[796:]
+                if self.case == "native observed footprint" and shot == 4:
+                    pixels = shown[:768] + background[768:]  # 192 still fails the 200-pixel guard.
+                if self.case == "not restored" and shot == 5:
+                    pixels = shown
+                dimension_shots = {"baseline dimensions": 2, "early dimensions": 3,
+                                   "late dimensions": 4, "clear dimensions": 5}
+                if dimension_shots.get(self.case) == shot:
+                    width, pixels = 21, background + background[:80]
+                body = ws.encode_png_rgba(width, height, pixels)
+                if shot == 3:
+                    if self.case in ("401", "403", "429", "503"):
+                        status = int(self.case)
+                    elif self.case == "wrong content type":
+                        ctype = "application/json"
+                    elif self.case == "malformed PNG":
+                        body = b"not a PNG"
+                    elif self.case == "truncated PNG":
+                        body = baseline_png[:-1]
+                    elif self.case == "oversize PNG":
+                        body = b"x" * (ws.MAX_PNG_BYTES + 1)
+                    elif self.case == "transport":
+                        raise ws.urllib.error.URLError("synthetic unavailable capture")
+                self.clock.now += 3 if self.case == "cross-due capture" and shot == 3 else 0.05
+                self.captures.append((started, self.clock()))
+                return Response(body, status, ctype)
+
+            assert timeout == 10
+            rpc = ws.json.loads(request.data)
+            assert rpc["method"] == "tools/call"
+            tool, args = rpc["params"]["name"], rpc["params"]["arguments"]
+            if tool == "hud_surfaces":
+                surface = {"s": "zone:subtitle", "accepts": "text"}
+                if self.held and not (self.publishes and self.case == "not held"):
+                    surface["held"] = True
+                payload = {"surfaces": [] if self.publishes and self.case == "missing surface" else [surface]}
+            elif tool == "hud_clear":
+                self.clears += 1
+                self.held = self.case == "clear failed" and bool(self.publishes)
+                self.due = None
+                payload = {"ok": True}
+            else:
+                assert tool == "hud_publish"
+                assert args == {"surface": "zone:subtitle", "content": "CI DELAYED CONTENT IS VISIBLE", "delay_ms": 3000, "ttl_ms": 20000}
+                self.held, self.due = True, self.clock() + 3
+                sent = self.clock()
+                self.clock.now += 4 if self.case == "slow acknowledgement" else 0.05
+                self.publishes.append((sent, self.clock()))
+                payload = {"ok": self.case != "publish rejected", "expires_in_ms": 23000}
+            self.clock.now += 0.05 if tool != "hud_publish" else 0
+            result = {"content": [{"type": "text", "text": ws.json.dumps(payload)}]}
+            return Response(ws.json.dumps({"result": result}).encode())
+
+    def run(case, *, success):
+        clock = FakeClock()
+        endpoint = Endpoint(clock, case)
+        with monkeypatch.context() as patch:
+            patch.setattr(ws.time, "monotonic", clock)
+            patch.setattr(ws.time, "sleep", clock.sleep)
+            patch.setattr(ws.urllib.request, "urlopen", endpoint.urlopen)
+            if case == "slow decode":
+                def slow_decode(body):
+                    frame = decode(body)
+                    clock.now += 1.5
+                    return frame
+
+                patch.setattr(ws, "decode_png_rgba", slow_decode)
+            smoke = ws.Smoke("http://offline-smoke/", "synthetic-unused-key")
+            for invocation in range(2 if case == "normal" else 1):
+                if success:
+                    ws.check_delay(smoke)
+                    assert endpoint.held is False and endpoint.due is None
+                    assert len(endpoint.publishes) == invocation + 1
+                    captures = endpoint.captures[invocation * 5 :]
+                    sent, acknowledged = endpoint.publishes[-1]
+                    assert len(captures) == 5
+                    assert captures[2][1] < sent + 3
+                    assert captures[3][0] >= acknowledged + 3
+                else:
+                    with pytest.raises(AssertionError):
+                        ws.check_delay(smoke)
+                    baseline_failed = case in ("unstable baseline", "baseline dimensions")
+                    assert len(endpoint.publishes) == (0 if baseline_failed else 1)
+                    assert endpoint.clears == (1 if baseline_failed else 2)
+                    assert len(endpoint.captures) <= 5  # No retry on invalid evidence.
+
+    run("normal", success=True)  # The unchanged checker rejects correct held=true.
+    run("slow decode", success=True)  # Capture timing ends before PNG CPU work.
+    for case in (
+        "premature", "missing", "too few pixels", "native observed footprint", "unstable baseline", "not restored",
+        "baseline dimensions", "early dimensions", "late dimensions", "clear dimensions",
+        "cross-due capture", "slow acknowledgement", "not held",
+        "missing surface", "publish rejected", "clear failed", "401", "403", "429", "503",
+        "wrong content type", "malformed PNG", "truncated PNG", "oversize PNG", "transport",
+    ):
+        with subtests.test(case=case):
+            run(case, success=False)
 
 
 def test_parse_tile_count_finds_the_line_among_other_output():
