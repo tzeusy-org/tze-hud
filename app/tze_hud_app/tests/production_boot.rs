@@ -184,23 +184,23 @@ async fn production_config_rejects_unpaired_psk() {
     use tze_hud_protocol::proto::session::server_message::Payload as Reply;
     use tze_hud_protocol::proto::session::{ClientMessage, SessionInit};
 
-    let port = std::net::TcpListener::bind("[::1]:0")
-        .unwrap()
-        .local_addr()
-        .unwrap()
-        .port();
+    // Keep the actual endpoint owned through initialization into the real server.
+    let listener = tokio::net::TcpListener::bind("[::1]:0")
+        .await
+        .expect("bind IPv6 fixture listener");
+    let addr = listener.local_addr().expect("fixture listener address");
     let paired = tze_hud_config::AgentsFile::default()
         .with_agent("paired-agent", "paired-key", &["tiles"])
         .directory()
         .expect("paired agent directory");
     let runtime = gpu_init::serialized_headless_init(HeadlessRuntime::new(HeadlessConfig {
-        grpc_port: port,
+        grpc_port: addr.port(),
         agents: paired,
         ..canonical_headless_config()
     }))
     .await
     .expect("runtime must start with canonical app production config");
-    let _server = runtime.start_grpc_server().await.expect("gRPC server");
+    let _server = runtime.start_grpc_server_on_listener(listener);
 
     let (tx, rx) = tokio::sync::mpsc::channel(1);
     tx.send(ClientMessage {
@@ -216,7 +216,7 @@ async fn production_config_rejects_unpaired_psk() {
     })
     .await
     .unwrap();
-    let mut replies = HudSessionClient::connect(format!("http://[::1]:{port}"))
+    let mut replies = HudSessionClient::connect(format!("http://{addr}"))
         .await
         .expect("connect")
         .session(tokio_stream::wrappers::ReceiverStream::new(rx))
@@ -233,4 +233,10 @@ async fn production_config_rejects_unpaired_psk() {
         Some(Reply::SessionError(e)) => assert_eq!(e.code, "AUTH_FAILED"),
         other => panic!("expected SessionError(AUTH_FAILED), got {other:?}"),
     }
+    let state = runtime.shared_state();
+    assert_eq!(
+        state.lock().await.sessions.session_count(),
+        0,
+        "rejected authentication must not register a session"
+    );
 }
