@@ -762,7 +762,15 @@ mod tests {
     #[test]
     fn child_args_drop_a_previous_handoff_and_add_nothing_else() {
         let a = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
-        let base = a(&["--config", "c.toml", "--window-mode", "overlay"]);
+        let paths = super::super::install::InstallPaths::from_dirs(
+            std::path::Path::new(r"C:\Local AppData"),
+            std::path::Path::new(r"C:\Roaming AppData"),
+        );
+        let base = paths
+            .launch_args()
+            .into_iter()
+            .map(|arg| arg.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
         assert_eq!(child_args(&base), base);
         let mut bare = base.clone();
         bare.push("--handoff".into());
@@ -770,6 +778,10 @@ mod tests {
         let mut spec = a(&["--handoff", "127.0.0.1:1:abcdef0123"]);
         spec.extend(base.clone());
         assert_eq!(child_args(&spec), base);
+        spec.extend(a(&["--updated-from", "abc1234"]));
+        let restarted = child_args(&spec);
+        assert_eq!(restarted, base);
+        assert_eq!(child_args(&restarted), base);
         assert_eq!(
             child_args(&a(&["--handoff=127.0.0.1:1:abcdef0123", "--mcp-port", "9"])),
             a(&["--mcp-port", "9"])
