@@ -13,11 +13,14 @@ There are two ways to work on this machine:
 - **WSL2.** Keep the repo and agents in Linux, and run only the HUD as a
   Windows process. See [Developing from WSL2](#developing-from-wsl2).
 
-Linux CI (`ci.yml`) is still the merge gate. The Windows CI job (`windows.yml`)
-builds the release exe, boot-smokes it, and runs an install and uninstall
-smoke test. Linux CI also runs clippy for the `windows-gnu` target. Neither
-runs `cargo test` on Windows, so a green Windows test run proves less than a
-green CI.
+[Linux CI](../../.github/workflows/ci.yml) supplies the required merge checks,
+including Clippy for the `windows-gnu` target. The informational
+[Windows workflow](../../.github/workflows/windows.yml) builds the exe, runs
+runtime library and app parser tests, and exercises boot, install and uninstall.
+It skips docs-only PR/main updates and does not run on merge groups. Its test
+subset does not establish that the full workspace suite passes on Windows.
+See [architecture](../architecture.md) for component ownership and
+[scope](../scope.md) for the current project boundaries.
 
 ## One-time setup
 
@@ -29,7 +32,7 @@ Install these and make sure each one is on `PATH`:
 | rustup | Toolchain | `rust-toolchain.toml` pins 1.88 with rustfmt and clippy. The default host triple must be `x86_64-pc-windows-msvc` |
 | Git for Windows | Git, plus `sh`, `bash`, `env` and `cygpath` for `just` recipes and git hooks | See [Git settings](#git-settings); Bash shebang recipes use their declared interpreter |
 | `just` | `just ci` and other recipes | `winget install Casey.Just` |
-| `cargo-nextest`0.9.114 | Required by `just test` | `cargo install --locked --version 0.9.114 cargo-nextest`; verify `cargo nextest --version` |
+| `cargo-nextest` 0.9.114 | Required by `just test` | `cargo install --locked --version 0.9.114 cargo-nextest`; verify `cargo nextest --version` |
 | Python 3 | `scripts/ci/*.py`, skill scripts | See [`python3`](#python3) |
 | `gh` | PRs, releases | |
 | Tailscale | Reaching the Beads Dolt server | See [Beads](#beads) |
@@ -92,7 +95,7 @@ Alternatively, add Defender exclusions for those paths.
 cargo build --profile release-dev -p tze_hud_app --bin tze_hud
 ```
 
-PR, merge-queue, main, and manual Windows builds use `release-dev`: optimized
+Non-docs PR/main builds and manual Windows builds use `release-dev`: optimized
 code with thin LTO and 16 codegen units. Version tags keep `--release` with
 full LTO and one codegen unit; `perf-budget.yml` also keeps `--release`.
 `perf-assert.yml` keeps its existing default test profile.
@@ -223,15 +226,15 @@ recipes, including `test`, use their declared `#!/usr/bin/env bash` interpreter.
 The recipes also use POSIX utilities and `python3`. Run `just` from Git Bash,
 or from PowerShell with Git's `usr\bin` on `PATH` so `sh`, `bash`, `env` and
 `cygpath` are available. In plain PowerShell without that, shell recipes fail.
-`just test` requires exactly `cargo-nextest`0.9.114 and uses the same arguments
+`just test` requires exactly `cargo-nextest` 0.9.114 and uses the same arguments
 as Linux CI: `cargo nextest run --workspace --all-targets --exclude integration --features tze_hud_runtime/dev-mode`.
 
 | Recipe | On Windows |
 |---|---|
 | `check`, `fmt`, `clippy`, `dev-mode-guard`, `dead-code` | Work. On Windows, clippy checks the `cfg(windows)` code, so leave the `cfg(not(windows))` code to Linux CI |
-| `test`, `test-integration`, `production-boot`, `canonical-app-boot`, `token-footprint` | Run on WARP through `HEADLESS_FORCE_SOFTWARE=1`. The llvmpipe pin (`VK_ICD_FILENAMES`) applies only when the Linux ICD file exists, so it does nothing here. CI never runs these on Windows, so treat a failure as a possible Windows-only gap and check it against Linux CI. Running them with a hardware GPU present has not been tested (see the note below) |
+| `test`, `test-integration`, `production-boot`, `canonical-app-boot`, `token-footprint` | Run on WARP through `HEADLESS_FORCE_SOFTWARE=1`. The llvmpipe pin (`VK_ICD_FILENAMES`) applies only when the Linux ICD file exists, so it does nothing here. Windows CI runs a runtime/app subset, not these full recipes; investigate Windows failures alongside Linux CI. Running them with a hardware GPU present has not been tested (see the note below) |
 | `test-gpu` | Always fails: it requires the Linux Mesa llvmpipe ICD. Leave it to CI |
-| `clippy-windows-gnu` | Prints `SKIPPED` unless the `x86_64-pc-windows-gnu` target and MinGW are installed. On an MSVC host, plain `clippy` already covers the same Windows code paths |
+| `clippy-windows-gnu` | Prints `SKIPPED` unless the `x86_64-pc-windows-gnu` Rust target is installed. This lint recipe uses portable Rust and does not require MinGW. On an MSVC host, plain `clippy` already covers the same Windows code paths |
 | `cargo-deny`, `deps-unused` | Need `cargo install --locked cargo-deny cargo-machete` |
 | `idle-efficiency-checker`, `test-python` | Work once `python3` is fixed |
 
@@ -250,7 +253,7 @@ the normal parallel merge gate or proof that the full Windows suite passes.
 All workspace targets, tests included, compiled for Windows as of 2026-10-04.
 This was checked with
 `cargo check --workspace --all-targets --target x86_64-pc-windows-gnu` from
-Linux. Whether they pass on Windows has not been checked. Tests marked
+Linux. That compile-only observation does not establish full-suite execution on Windows; the current Windows workflow exercises the subset below. Tests marked
 `#[cfg(unix)]` (for example in `crates/tze_hud_projection/src/tests/mod.rs`)
 don't run on Windows. Linux CI covers them.
 
@@ -375,7 +378,7 @@ again whenever a dependency is added. It is idempotent, and it installs or
 reports everything the gates need. That includes `mesa-vulkan-drivers` and
 `libvulkan1`, so GPU recipes pin llvmpipe instead of the WSL GPU driver,
 `mingw-w64` for actual Windows cross-linking (GNU Clippy uses portable Rust), required pinned
-`cargo-nextest`0.9.114 for `just test`, and the Python venv for `just test-python`. Without passwordless sudo, it prints the
+`cargo-nextest` 0.9.114 for `just test`, and the Python venv for `just test-python`. Without passwordless sudo, it prints the
 `apt-get install` line to run, and `just bootstrap --check` reports without
 installing. It also checks WSL interop, networking mode, and Tailscale. New
 dependencies go in its manifest at the top of `scripts/dev-bootstrap.sh`, and

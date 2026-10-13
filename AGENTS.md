@@ -2,6 +2,16 @@
 
 This project uses **bd** (beads) for issue tracking. Run `bd onboard` to get started.
 
+## Current project documentation
+
+Read `docs/vision.md` for direction, `docs/scope.md` for the source-evidenced
+T0–T10 status, `docs/architecture.md` for code ownership, and `docs/api.md` /
+`docs/invariants.md` for current contracts. The 2026-10-02 slim reset retired
+`about/`, OpenSpec and their navigation skills; references to those paths in
+older notes below are historical, not instructions to restore them. Update
+current docs alongside behavior changes. Source implementation and Windows
+owner acceptance are separate evidence.
+
 ## Local Dev Harness
 
 The repo ships a `justfile` that reproduces CI gates locally. Requires [just](https://github.com/casey/just).
