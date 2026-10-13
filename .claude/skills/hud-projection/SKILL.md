@@ -53,11 +53,13 @@ zones and widgets (`docs/api.md`):
 - `content` **appends** an output fragment. Send only the new text each turn.
 - `key` coalesces: publishes with the same key replace each other in place
   (progress lines).
-- `status` sets the lifecycle state: `attached`, `active`, `degraded`,
-  `hud_unavailable`, or `detached`.
+- `status` labels agent activity: `active` or `degraded`; it can be sent
+  without content. Omit content and status for a bare attach; `hud_clear` detaches.
 - `expects_reply: true` arms the composer.
-- A portal publish rejects `ttl_ms` and `delay_ms` with `INVALID_ARGUMENT`;
-  portal lifetime is set only by `hud_hold`.
+- `ttl_ms` on publish holds the portal in that same call, just like `hud_hold`
+  (0 = until clear). `delay_ms` is not valid for portals.
+- Publish returns `reattached` (true after runtime reclaim) and `pending_input`
+  (queued replies); poll `hud_input` to collect them.
 - `hud_input` returns input from every surface you hold, oldest first,
   including notification action presses. Unacked items are redelivered, so
   ack each one once handled; the ack rides on your next poll.
@@ -65,7 +67,8 @@ zones and widgets (`docs/api.md`):
   `pending_input`.
 - A portal you stop calling degrades after 30 s and is reclaimed 30 s later,
   transcript included. Publishing or polling keeps it; for quiet stretches
-  call `hud_hold {"surface": "portal:my-session", "ttl_ms": 600000}`
+  include `ttl_ms` in publish or call
+  `hud_hold {"surface": "portal:my-session", "ttl_ms": 600000}`
   (`ttl_ms: 0` holds until `hud_clear`).
 - If the runtime restarts, the next `hud_publish` attaches a fresh portal;
   republish whatever context the human needs.
@@ -89,7 +92,7 @@ Outside an MCP client, drive the same calls with
 
 ```bash
 CLIENT=.claude/skills/hud-projection/scripts/portal_client.py
-python3 $CLIENT publish --id my-session --display-name "My Session" --state active --text "hello"
+python3 $CLIENT publish --id my-session --display-name "My Session" --state active --text "hello" --ttl-ms 600000
 python3 $CLIENT publish --id my-session --text "Ship it?" --expects-reply
 python3 $CLIENT poll    --wait-ms 30000 --rounds 6      # NDJSON items; exit 3 if none
 python3 $CLIENT ack     --input-id i7

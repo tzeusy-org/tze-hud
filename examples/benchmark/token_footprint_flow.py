@@ -99,6 +99,7 @@ def main():
             "content": "Tests pass. Ship it?",
             "status": "active",
             "expects_reply": True,
+            "ttl_ms": 120000,
         },
     )
     polled = tool("portal", "2_input_poll", "hud_input", {"wait_ms": 1000})

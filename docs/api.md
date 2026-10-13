@@ -33,7 +33,8 @@ MCP `tools/list` has five tools. The resident tile API is gRPC only.
 (`tile.close_button.*` tokens). Pressing it reclaims the tile's lease on the
 spot, with no agent round trip: a gRPC agent gets `Reclaimed{OVERRIDE}` for
 `tile:<id>`. A dismissed portal is detached; the agent's next `hud_publish` to
-`portal:<id>` attaches a fresh one, `hud_hold` answers `NOT_HELD` and
+`portal:<id>` attaches a fresh one and reports `reattached: true`;
+`hud_hold` answers `NOT_HELD` and
 `hud_clear` succeeds as a no-op.
 
 ## MCP tools
@@ -57,12 +58,15 @@ milliseconds, named `*_ms`, everywhere.
 
 It includes nothing the model doesn't act on: no UUIDs, geometry, or
 timestamps. Holdings are the entries with `held: true`; `held` is omitted
-otherwise.
+otherwise. Scheduled zone publications count as held before presentation;
+`expires_in_ms`, when present, includes their presentation delay.
 
 **`hud_publish`** `{surface*, content | params, ttl_ms?, delay_ms?, key?, status?, expects_reply?, display_name?}`
 
 - Zone: `content` is a string, or a typed object for structured zones
-  (`notification` with `title`, `body`, `urgency`, `actions`). `type` may be
+  (`notification` with optional `title`, `body`, integer `urgency` 0–3
+  (default 1), and optional `actions: [{label, callback_id}]`; both action
+  fields are non-empty strings). `type` may be
   omitted; the runtime infers it from what the zone accepts. `key` is the
   merge key.
 - Widget: `params` is the typed parameter map. Configured HUD startup resolves
@@ -79,16 +83,30 @@ otherwise.
   unless explicitly overridden by zone policy, and Stack TTL fades use the
   exit duration/curve without extending authoritative expiry.
 - Portal: the first publish to `portal:<id>` attaches (`display_name` is
-  optional). `content` is the output text, `status` is the lifecycle state,
-  and `expects_reply` arms the composer. `key` replaces the newest output
+  optional). Omit content for a bare attach or status-only update.
+  `content` appends only the new output text; `status` labels agent activity
+  (`active` or `degraded`), and `expects_reply` arms the composer. `key`
+  replaces the newest output
   with the same key (progress lines). Portals are per agent: another agent's
   `portal:<id>` with the same id is a separate portal.
 - `ttl_ms` defaults to 60000 for zones; widgets are durable unless given one.
-  0 means held until cleared.
+  0 means held until cleared. On a portal, an optional `ttl_ms` holds the
+  portal atomically with this publish, with the same semantics as `hud_hold`.
 - `delay_ms` (zones, ≤ 300000) holds the content until then (invariant 1);
   the expiry counts from presentation, and `ttl_ms: 0` holds a delayed
   publish until cleared just like an immediate one.
-- Returns `{"ok":true,"expires_in_ms":8000}`. It doesn't echo the request.
+- Returns `{"ok":true,"expires_in_ms":8000}` when a TTL is set. Portal
+  publishes also return `reattached` (true when this call replaces a
+  runtime-reclaimed portal) and `pending_input` (queued replies). First attach,
+  live update, and attach after explicit clear report false. The response
+  describes the completed publish; it does not echo content.
+
+For example, publish a notification whose button arrives at `hud_input` as
+`{"action":"approve","s":"zone:notification-area",...}`:
+
+```json
+{"surface":"zone:notification-area","content":{"body":"Build complete","urgency":1,"actions":[{"label":"Approve","callback_id":"approve"}]},"ttl_ms":10000}
+```
 
 **`hud_hold`** `{surface*, ttl_ms*}` extends a holding, for any surface type.
 On a zone or widget, `ttl_ms` replaces the expiry with now + `ttl_ms` (not
@@ -101,7 +119,7 @@ or until `hud_clear` when 0, even with no other calls. Without a hold, a
 portal is degraded after 30 s with no publish, poll, or hold, and reclaimed
 30 s later.
 
-**`hud_clear`** `{surface*, reason?}` releases a zone publication, a widget
+**`hud_clear`** `{surface*}` releases a zone publication, a widget
 instance, or a portal (detach). On a zone it also cancels the caller's own
 delayed publishes that haven't presented yet; other agents' are untouched.
 The gRPC `Hold` and `Clear` behave the same on zones. A `ClearZone` inside a
@@ -415,13 +433,16 @@ baselined against regressions.
 
 | Measure | Before T5 (wire) | Wire | Model-visible | Budget (model-visible) |
 |---|---|---|---|---|
-| `tools/list` | 4,418 | 495 | 458 | ≤ 900 |
+| `tools/list` | 4,418 | 554 | 517 | ≤ 900 |
 | Discover (default scene) | ~430 (`list_zones`) | 181 | 113 | ≤ 150 |
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
 | Widget publish | ~168 | 73 | 22 | ≤ 80 |
-| Portal: attach+publish, poll, ack, clear | ~575 over 5 round trips | 319 over 4 | 113 over 4 | ≤ 250 |
+| Portal: attach+publish+hold, poll, ack, clear | ~575 over 5 round trips | 343 over 4 | 137 over 4 | ≤ 250 |
 | Discover (`production.toml`: 6 zones, 3 built-in widgets) | n/a | n/a | ~232 | ≤ 250 |
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
+
+These current measurements use canonical flow version 3; its refreshed baseline
+is pending owner review, with every budget unchanged.
 
 The portal flow takes 4 round trips in the canonical fixture because the
 first poll has nothing to ack; in a steady loop each `hud_input` both acks

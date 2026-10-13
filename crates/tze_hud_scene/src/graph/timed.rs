@@ -96,6 +96,26 @@ impl SceneGraph {
         held
     }
 
+    /// Expiry of each caller-owned pending publication, for holding discovery.
+    pub fn scheduled_zone_publication_expiries<'a>(
+        &'a self,
+        zone: &'a str,
+        namespace: &'a str,
+    ) -> impl Iterator<Item = Option<u64>> + 'a {
+        self.scheduled_batches
+            .iter()
+            .filter(move |s| s.batch.agent_namespace == namespace)
+            .flat_map(|s| &s.batch.mutations)
+            .filter_map(move |m| match m {
+                SceneMutation::PublishToZone {
+                    zone_name,
+                    expires_at_wall_us,
+                    ..
+                } if zone_name == zone => Some(*expires_at_wall_us),
+                _ => None,
+            })
+    }
+
     /// Apply every scheduled batch whose `present_at` has arrived, oldest
     /// deadline first. Returns each batch's result so callers can report
     /// late rejections.

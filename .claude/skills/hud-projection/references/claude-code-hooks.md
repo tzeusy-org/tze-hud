@@ -158,14 +158,14 @@ subagent identity. There is no invented version field in the documented input.
 | UserPromptSubmit | Record current prompt immediately; schedule bounded content-free active status |
 | PreToolUse | Fixed tool label plus `running`, keyed by a hash of prompt/tool-use IDs |
 | PostToolUse / PostToolUseFailure | Same key plus `completed` / `failed`; late start cannot replace terminal stage |
-| Stop | Close current prompt; mirror `last_assistant_message` and attached status; no continuation/control output |
+| Stop | Close current prompt; mirror `last_assistant_message`; omit status; no continuation/control output |
 | SessionEnd | Mark generation ended first, then attempt bounded owner-surface clear |
 
 Unknown/MCP tool names become fixed `Tool`/`MCP tool` labels. Inputs, results,
 errors, command descriptions, cwd, transcript/scratchpad paths and unknown
 payload fields are discarded. Stop's documented final-text field is used
 instead of a potentially lagging transcript. Missing/nonstring final text can
-send attached status, but does not prove final-reply acceptance. Final text
+send a content-free publish, but does not prove final-reply acceptance. Final text
 has escape/control sequences removed and is truncated at a valid UTF-8 boundary
 to 8 KiB, including a visible truncation marker. Recognizable private-key/token/
 credential forms discard the entire final string. This is not a universal
@@ -218,7 +218,7 @@ rejects that retry. Compact/fork/unknown SessionStart sources do not reopen.
 
 After each acknowledgment the child revalidates the atomic marker before
 committing delivery hashes or sending a hold. An already-SENT old final may
-briefly append its own prompt-keyed text or set attached after a new prompt.
+briefly append its own prompt-keyed text or publish without a status after a new prompt.
 Within the same watchdog, at most one content-free active catch-up restores
 the latest open prompt after acknowledgment. An ended marker permits a
 compensating clear only for that same generation; no old cleanup is admitted

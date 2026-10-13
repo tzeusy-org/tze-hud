@@ -8,10 +8,10 @@
     "vocab_fingerprint": "sha256:446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d",
     "counting_policy": "each canonical JSON-RPC body independently; UTF-8 bytes; encode_with_special_tokens; operation and flow totals are integer sums; model_visible counts tool name + arguments + result text only"
   },
-  "fixture_fingerprint": "blake3:c2c6e4830582edfa5267ba2d64fa7ade27f5be117c1adaf0f907a3e5a15aa644",
+  "fixture_fingerprint": "blake3:d8b2281f2162d971247febe20f5468905ecea50692d3699e78fc12db1e20e435",
   "flows": {
     "discover": {
-      "flow_version": 2,
+      "flow_version": 3,
       "flow_fingerprint": "blake3:cc4dff8555f55c50b9b1128d1c5d2b973d3ec9b6432c72da889c5cc7cc936f12",
       "operations": {
         "hud_surfaces": {
@@ -43,7 +43,7 @@
       }
     },
     "error": {
-      "flow_version": 2,
+      "flow_version": 3,
       "flow_fingerprint": "blake3:231d2c1864b13ecf6342cc100ae24bde413c965a89bbbc7c09c6eddf70ebb821",
       "operations": {
         "hud_publish": {
@@ -75,25 +75,25 @@
       }
     },
     "portal": {
-      "flow_version": 2,
-      "flow_fingerprint": "blake3:dc6a82ff9c996432e5fd0b6c3ad9a771d4d557b21e31654db9dcd26a0c82131b",
+      "flow_version": 3,
+      "flow_fingerprint": "blake3:d6f1d951533d70300e2260aebc84ed2aac676a58e99c5f40479e78c1ccba7168",
       "operations": {
         "1_publish_attach": {
           "request": {
-            "bytes": 195,
-            "tokens": 54
+            "bytes": 211,
+            "tokens": 60
           },
           "response": {
-            "bytes": 86,
-            "tokens": 31
+            "bytes": 152,
+            "tokens": 49
           },
           "total": {
-            "bytes": 281,
-            "tokens": 85
+            "bytes": 363,
+            "tokens": 109
           },
           "model_visible": {
-            "bytes": 126,
-            "tokens": 34
+            "bytes": 202,
+            "tokens": 58
           }
         },
         "2_input_poll": {
@@ -152,17 +152,17 @@
         }
       },
       "total": {
-        "bytes": 1027,
-        "tokens": 319
+        "bytes": 1109,
+        "tokens": 343
       },
       "model_visible": {
-        "bytes": 391,
-        "tokens": 113
+        "bytes": 467,
+        "tokens": 137
       }
     },
     "tools_list": {
-      "flow_version": 2,
-      "flow_fingerprint": "blake3:de9d93e0555c968037fecb4f88f3933ad7f23a61c46bbc5ddb5183bd5745a4f2",
+      "flow_version": 3,
+      "flow_fingerprint": "blake3:b050fb412f31b7724e2a8ab2b8a043f51e647902051aa74e07b92f9eea68c232",
       "operations": {
         "tools/list": {
           "request": {
@@ -170,30 +170,30 @@
             "tokens": 21
           },
           "response": {
-            "bytes": 1984,
-            "tokens": 474
+            "bytes": 2292,
+            "tokens": 533
           },
           "total": {
-            "bytes": 2042,
-            "tokens": 495
+            "bytes": 2350,
+            "tokens": 554
           },
           "model_visible": {
-            "bytes": 1940,
-            "tokens": 458
+            "bytes": 2248,
+            "tokens": 517
           }
         }
       },
       "total": {
-        "bytes": 2042,
-        "tokens": 495
+        "bytes": 2350,
+        "tokens": 554
       },
       "model_visible": {
-        "bytes": 1940,
-        "tokens": 458
+        "bytes": 2248,
+        "tokens": 517
       }
     },
     "widget_publish": {
-      "flow_version": 2,
+      "flow_version": 3,
       "flow_fingerprint": "blake3:d21c41f58ce472b20861dcc976f4dc882d43fbf633be0831e4eebaaf187b7fc1",
       "operations": {
         "hud_publish": {
@@ -225,7 +225,7 @@
       }
     },
     "zone_publish": {
-      "flow_version": 2,
+      "flow_version": 3,
       "flow_fingerprint": "blake3:b23b19459a1e296716916f4756166f99a634a962ba612d61cb65a33a48cbbee1",
       "operations": {
         "hud_publish": {
@@ -269,8 +269,8 @@
     }
   },
   "approval": {
-    "status": "owner_approved",
-    "decision_reference": "Owner approved in PR #1241 review (2026-10-02)",
-    "basis": "T5 S3 (2026-10-02) replaced the 22 MCP tools with five hud_* verbs and re-recorded every flow against the docs/api.md token budgets. Every measured integer, flow and fixture fingerprint, and tokenizer identity is comparison authority."
+    "status": "pending_owner_review",
+    "decision_reference": "hud-ximtf.3 implementation PR: owner review pending for the corrected MCP contracts and canonical flow version 3",
+    "basis": "Measured from the actual MCP handlers after truthful tools/list, portal publish responses, and atomic publish+hold updates. All original model-visible token budgets are unchanged. This re-recording is not owner approval."
   }
 }

@@ -16,7 +16,8 @@ disappears on schedule without the agent returning; content scheduled with
 `present_at` is not shown early. This is what makes a HUD different from a
 dashboard: an agent can say "show this for 8 seconds" in one call.
 
-- `tze_hud_mcp` [`test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept`](../crates/tze_hud_mcp/src/server/tests.rs),
+- `tze_hud_mcp` [`portal_flow_attach_publish_poll_ack_clear`](../crates/tze_hud_mcp/src/server/tests.rs) (atomic publish + portal hold),
+  [`test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept`](../crates/tze_hud_mcp/src/server/tests.rs),
   [`delay_ms_holds_content_until_due`](../crates/tze_hud_mcp/src/server/tests.rs), [`notification_ttl_zero_is_held_and_hold_retimes_it`](../crates/tze_hud_mcp/src/server/tests.rs)
 - `tze_hud_scene` [`graph::widget_tests::widget_ttl_only_expired_publication_removed_when_mixed`](../crates/tze_hud_scene/src/graph/widget_tests.rs)
 - `tze_hud_compositor` [`test_publication_ttl_ms_uses_expires_at_wall_us`](../crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs),
@@ -42,7 +43,10 @@ change must not give one class another's delivery semantics.
 
 Safe mode and dismiss work without any agent's cooperation and take
 effect even when agents are hung. Agents never see or address chrome, and
-shell state exposes no portal identity or transcript.
+shell state exposes no portal identity or transcript. A subsequent portal
+publish intentionally attaches fresh after runtime reclaim and reports
+`reattached: true`; agents cannot publish attached/detached or availability
+as status labels. Discovery includes caller-owned scheduled zone holdings.
 
 Owner decision (2026-10-07): freeze promise removed; safe mode already pauses agents; updates during a pause are rejected, not buffered.
 

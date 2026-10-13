@@ -635,6 +635,17 @@ async fn clear_cancels_only_own_pending_delayed_publish() {
     let (server, clock, a, b) = two_agents();
     delayed_subtitle(&server, &a, 5000, 0).await;
     delayed_subtitle(&server, &b, 8000, 0).await;
+    for who in [&a, &b] {
+        let (v, _) = call_as(&server, who, "hud_surfaces", json!({})).await;
+        let own = v["surfaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["s"] == "zone:subtitle")
+            .unwrap();
+        assert_eq!(own["held"], true);
+        assert!(own.get("expires_in_ms").is_none());
+    }
     let (v, _) = call_as(
         &server,
         &a,
@@ -643,6 +654,16 @@ async fn clear_cancels_only_own_pending_delayed_publish() {
     )
     .await;
     assert_eq!(v, json!({"ok": true}));
+    for (who, held) in [(&a, false), (&b, true)] {
+        let (v, _) = call_as(&server, who, "hud_surfaces", json!({})).await;
+        let own = v["surfaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["s"] == "zone:subtitle")
+            .unwrap();
+        assert_eq!(own.get("held").is_some(), held);
+    }
     {
         let scene = server.scene.lock().await;
         assert_eq!(scene.scheduled_batches.len(), 1, "b's batch survives");
@@ -686,12 +707,31 @@ async fn clear_of_last_pending_publish_drops_the_wake_deadline() {
 async fn hold_retimes_own_pending_delayed_publish() {
     let (server, clock, a, b) = two_agents();
     delayed_subtitle(&server, &a, 5000, 1000).await;
+    for (who, expiry) in [(&a, Some(6000)), (&b, None)] {
+        let (v, _) = call_as(&server, who, "hud_surfaces", json!({})).await;
+        let own = v["surfaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["s"] == "zone:subtitle")
+            .unwrap();
+        assert_eq!(own.get("expires_in_ms").and_then(Value::as_u64), expiry);
+        assert_eq!(own.get("held").is_some(), expiry.is_some());
+    }
     let hold = json!({"surface": "zone:subtitle", "ttl_ms": 3000});
     let (err, is_error) = call_as(&server, &b, "hud_hold", hold.clone()).await;
     assert!(is_error);
     assert_eq!(err["code"], "NOT_HELD");
     let (v, _) = call_as(&server, &a, "hud_hold", hold).await;
     assert_eq!(v, json!({"ok": true, "expires_in_ms": 3000}));
+    let (v, _) = call_as(&server, &a, "hud_surfaces", json!({})).await;
+    let own = v["surfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["s"] == "zone:subtitle")
+        .unwrap();
+    assert_eq!(own["expires_in_ms"], 8000);
     clock.advance(5_000);
     let mut scene = server.scene.lock().await;
     scene.apply_due_batches();
@@ -1008,15 +1048,21 @@ fn hub_portal(server: McpServer) -> (McpServer, Arc<std::sync::Mutex<PortalHub>>
 #[tokio::test]
 async fn portal_output_too_large_is_content_rejected() {
     let (server, _) = server();
-    let (server, _) = hub_portal(server);
+    let (server, hub) = hub_portal(server);
     let e = call_err(
         &server,
         "hud_publish",
-        json!({"surface": "portal:main", "content": "x".repeat(16 * 1024 + 1)}),
+        json!({"surface": "portal:main", "content": "x".repeat(16 * 1024 + 1), "ttl_ms": 0}),
     )
     .await;
     assert_eq!(e["code"], "CONTENT_REJECTED");
     assert!(!e["hint"].as_str().unwrap().is_empty());
+    assert!(
+        hub.lock()
+            .unwrap()
+            .get(&PortalKey::new(psk_agent(), "main"))
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -1025,9 +1071,19 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
     let (server, hub) = hub_portal(server);
     let key = PortalKey::new(psk_agent(), "main");
 
+    let empty = call(&server, "hud_publish", json!({"surface": "portal:main"})).await;
+    assert_eq!(
+        empty,
+        json!({"ok": true, "reattached": false, "pending_input": 0})
+    );
+    assert!(hub.lock().unwrap().get(&key).unwrap().transcript.is_empty());
+
     // The first publish attaches; identity is the caller's PSK, no token.
     let v = call(&server, "hud_publish", json!({"surface": "portal:main", "content": "Working on it", "status": "active", "expects_reply": true})).await;
-    assert_eq!(v, json!({"ok": true}));
+    assert_eq!(
+        v,
+        json!({"ok": true, "reattached": false, "pending_input": 0})
+    );
     call(
         &server,
         "hud_publish",
@@ -1051,6 +1107,47 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         .unwrap()
         .submit_reply(&key, "ship it".into(), 0)
         .unwrap();
+    let status = call(
+        &server,
+        "hud_publish",
+        json!({"surface": "portal:main", "status": "degraded", "ttl_ms": 120000}),
+    )
+    .await;
+    assert_eq!(
+        status,
+        json!({"ok": true, "reattached": false, "pending_input": 1, "expires_in_ms": 120000})
+    );
+    assert_eq!(
+        hub.lock().unwrap().get(&key).unwrap().hold_until_us,
+        Some(120_000_000)
+    );
+    for bad in [
+        json!({"surface": "portal:main", "status": "attached", "ttl_ms": 0}),
+        json!({"surface": "portal:main", "status": "detached", "ttl_ms": 0}),
+        json!({"surface": "portal:main", "status": "hud_unavailable", "ttl_ms": 0}),
+        json!({"surface": "portal:main", "content": {}, "ttl_ms": 0}),
+    ] {
+        let e = call_err(&server, "hud_publish", bad).await;
+        assert_eq!(e["code"], "INVALID_ARGUMENT");
+        let hub = hub.lock().unwrap();
+        let p = hub.get(&key).unwrap();
+        assert_eq!(p.transcript.len(), 2);
+        assert_eq!(p.status, PortalStatus::Degraded);
+        assert_eq!(p.hold_until_us, Some(120_000_000));
+    }
+    let e = call_err(
+        &server,
+        "hud_clear",
+        json!({"surface": "portal:main", "reason": "done"}),
+    )
+    .await;
+    assert_eq!(e["code"], "INVALID_ARGUMENT");
+    call(
+        &server,
+        "hud_publish",
+        json!({"surface": "portal:main", "status": "active"}),
+    )
+    .await;
     let v = call(&server, "hud_surfaces", json!({})).await;
     let portal = v["surfaces"]
         .as_array()
@@ -1076,6 +1173,22 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
     );
     let v = call(&server, "hud_input", json!({"ack": [id]})).await;
     assert_eq!(v, json!({"items": [], "remaining": 0}));
+
+    for text in ["progress 1", "progress 2"] {
+        call(
+            &server,
+            "hud_publish",
+            json!({"surface": "portal:main", "content": text, "key": "progress", "ttl_ms": 0}),
+        )
+        .await;
+    }
+    {
+        let hub = hub.lock().unwrap();
+        let p = hub.get(&key).unwrap();
+        assert_eq!(p.transcript.len(), 3);
+        assert_eq!(p.transcript.back().unwrap().text, "progress 2");
+        assert_eq!(p.hold_until_us, Some(u64::MAX));
+    }
 
     let v = call(
         &server,
@@ -1169,7 +1282,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
                 json!({"surface":"portal:main", "content":"first during wait"})
             )
             .await,
-            json!({"ok":true})
+            json!({"ok":true, "reattached":false, "pending_input":0})
         );
         hub.lock()
             .unwrap()
@@ -1479,6 +1592,15 @@ async fn resume_restores_mcp_publishing() {
 #[tokio::test]
 async fn user_test_zone_fixtures_and_documented_examples_match_production_parser() {
     fn zone_messages(value: Value, origin: &str) -> Vec<(String, Value)> {
+        if let Some(surface) = value.get("surface").and_then(Value::as_str) {
+            return value
+                .get("content")
+                .map(|content| vec![(surface.to_string(), content.clone())])
+                .unwrap_or_default();
+        }
+        if value.is_object() {
+            return Vec::new(); // Other API response examples have no publish content.
+        }
         value
             .as_array()
             .unwrap_or_else(|| panic!("{origin}: expected a message array"))
@@ -1524,33 +1646,45 @@ async fn user_test_zone_fixtures_and_documented_examples_match_production_parser
     );
     let fixture_count = messages.len();
 
-    let reference = std::fs::read_to_string(skill.join("references/message-payloads.md")).unwrap();
-    let mut block = None::<String>;
-    for line in reference.lines() {
-        match line.trim() {
-            "```json" => {
-                assert!(block.is_none(), "nested JSON fence in message-payloads.md");
-                block = Some(String::new());
-            }
-            "```" => {
-                if let Some(text) = block.take() {
-                    let value = serde_json::from_str(&text)
-                        .expect("message-payloads.md JSON examples must remain executable");
-                    messages.extend(zone_messages(value, "message-payloads.md"));
+    for path in [
+        skill.join("references/message-payloads.md"),
+        root.join("docs/api.md"),
+    ] {
+        let reference = std::fs::read_to_string(&path).unwrap();
+        let before = messages.len();
+        let mut block = None::<String>;
+        for line in reference.lines() {
+            match line.trim() {
+                "```json" => {
+                    assert!(block.is_none(), "nested JSON fence in {}", path.display());
+                    block = Some(String::new());
                 }
-            }
-            _ => {
-                if let Some(text) = block.as_mut() {
-                    text.push_str(line);
-                    text.push('\n');
+                "```" => {
+                    if let Some(text) = block.take() {
+                        let value = serde_json::from_str(&text)
+                            .expect("documented JSON examples must remain executable");
+                        messages.extend(zone_messages(value, &path.display().to_string()));
+                    }
+                }
+                _ => {
+                    if let Some(text) = block.as_mut() {
+                        text.push_str(line);
+                        text.push('\n');
+                    }
                 }
             }
         }
+        assert!(
+            block.is_none(),
+            "unterminated JSON example in {}",
+            path.display()
+        );
+        assert!(
+            messages.len() > before,
+            "no publish example in {}",
+            path.display()
+        );
     }
-    assert!(
-        block.is_none(),
-        "unterminated JSON example in message-payloads.md"
-    );
     assert!(
         messages.len() > fixture_count,
         "no documented zone examples were checked"
