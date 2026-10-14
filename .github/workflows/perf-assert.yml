@@ -16,11 +16,10 @@
 # in the test suite becomes active.  On a reference host these pass; on shared
 # runners they may flake (that is expected and acceptable).
 #
-# Artifact policy (craft-and-care: "track trends not just pass/fail")
-# ──────────────────────────────────────────────────────────────────────
-# p99 JSON results are uploaded unconditionally (`if: always()`) so trend data
-# is preserved even on runs that fail.  The artifact contains one JSON file per
-# test target with raw latency samples emitted by the test harness.
+# Artifact policy
+# ───────────────
+# Unit and budget jobs upload p99 JSON summaries with `if: always()`.
+# Integration timing assertions still run, without an unused trend artifact.
 #
 # To run locally:
 #   TZE_HUD_PERF_ASSERT=1 cargo test --workspace --all-targets --exclude integration
@@ -166,36 +165,6 @@ jobs:
             --test dashboard_tile_input \
             --test text_stream_portal_cadence \
             -- --nocapture 2>&1 | tee /tmp/perf-assert-integration.log
-
-      - name: Collect p99 JSON trend artifacts
-        if: always()
-        run: |
-          mkdir -p test_results/perf-assert
-          python3 - <<'EOF'
-          import json, re, pathlib
-
-          log = pathlib.Path("/tmp/perf-assert-integration.log").read_text(errors="replace")
-          entries = []
-          for line in log.splitlines():
-              m = re.match(r'\[(PASS|SKIP-TIMING|UNCALIBRATED)\]\s+(\S+)\s+p99=(\d+)', line)
-              if m:
-                  entries.append({
-                      "status": m.group(1),
-                      "metric": m.group(2),
-                      "p99_us": int(m.group(3)),
-                  })
-          out = pathlib.Path("test_results/perf-assert/integration-p99.json")
-          out.write_text(json.dumps({"entries": entries}, indent=2))
-          print(f"Captured {len(entries)} p99 entries -> {out}")
-          EOF
-
-      - name: Upload p99 trend artifacts
-        uses: actions/upload-artifact@v6
-        if: always()
-        with:
-          name: perf-assert-integration-p99
-          path: test_results/perf-assert/
-          if-no-files-found: warn
 
   # ── Vertical slice budget assertions ─────────────────────────────────────────
   #

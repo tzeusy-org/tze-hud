@@ -898,7 +898,8 @@ async fn test_status_bar_key_icon_map_produces_per_entry_text_items() {
 /// publications are present (regression guard).
 #[tokio::test]
 async fn test_latest_wins_zone_renders_only_latest_publication() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
 
     let mut scene = SceneGraph::new(1280.0, 720.0);
     scene.register_zone(ZoneDefinition {
@@ -962,5 +963,77 @@ async fn test_latest_wins_zone_renders_only_latest_publication() {
         items[0].text.contains("New content"),
         "LatestWins must render latest publish; got: {}",
         items[0].text
+    );
+
+    // Distinct text keeps the two zones' shaping-cache controls independent.
+    scene.register_zone(ZoneDefinition {
+        id: SceneId::new(),
+        name: "secondary".to_owned(),
+        description: "unchanged shaping control".to_owned(),
+        geometry_policy: GeometryPolicy::EdgeAnchored {
+            edge: DisplayEdge::Top,
+            height_pct: 0.10,
+            width_pct: 0.80,
+            margin_px: 16.0,
+        },
+        accepted_media_types: vec![ZoneMediaType::StreamText],
+        rendering_policy: RenderingPolicy {
+            backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 0.7)),
+            text_color: Some(Rgba::WHITE),
+            ..Default::default()
+        },
+        contention_policy: ContentionPolicy::LatestWins,
+        max_publishers: 1,
+        auto_clear_ms: None,
+        ephemeral: false,
+        layer_attachment: LayerAttachment::Content,
+    });
+    scene
+        .publish_to_zone(
+            "secondary",
+            ZoneContent::StreamText("Secondary control".to_owned()),
+            "agent",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+    // Both zones shape once, then the real unchanged frame reuses both buffers.
+    for expected_layout in [2, 0] {
+        compositor.prime_markdown_cache(&scene);
+        compositor.render_frame_headless(&mut scene, &surface);
+        let work = compositor.take_work_counts().expect("completed zone frame");
+        assert_eq!(
+            (work.layout, work.raster, work.upload),
+            (expected_layout, 0, 0),
+            "warm/unchanged zone work: {work:?}"
+        );
+    }
+
+    scene
+        .publish_to_zone(
+            "subtitle",
+            ZoneContent::StreamText("Changed content".to_owned()),
+            "agent",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    // Only changed text shapes. Zero widget work does not mean no GPU submit.
+    for expected_layout in [1, 0] {
+        compositor.prime_markdown_cache(&scene);
+        compositor.render_frame_headless(&mut scene, &surface);
+        let work = compositor.take_work_counts().expect("completed zone frame");
+        assert_eq!(
+            (work.layout, work.raster, work.upload),
+            (expected_layout, 0, 0),
+            "changed/unchanged zone work: {work:?}"
+        );
+    }
+    assert!(
+        compositor.take_work_counts().is_none(),
+        "single-frame drain"
     );
 }

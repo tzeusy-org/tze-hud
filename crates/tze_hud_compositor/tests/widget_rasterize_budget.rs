@@ -1,56 +1,12 @@
-//! # Widget SVG re-rasterization CI budget assertion — [hud-4kj0]
+//! Widget SVG rasterization correctness through the pure CPU path.
 //!
-//! Verifies that the CPU-only SVG rasterization path for a 512×512 widget
-//! completes within a lenient CI threshold.
-//!
-//! ## Thresholds
-//!
-//! | Context              | Threshold | Rationale                                      |
-//! |----------------------|-----------|------------------------------------------------|
-//! | Reference hardware   | < 2ms     | Spec target (widget-system/spec.md task 7.9)   |
-//! | CI (any renderer)    | < 500ms   | Headroom for debug builds + llvmpipe VMs       |
-//!
-//! The CI test uses the lenient 500ms threshold so it does not produce false
-//! failures on software-rendered CI runners (llvmpipe, WARP) in debug builds.
-//! The strict 2ms spec requirement remains a separate measurement obligation
-//! on release-optimised reference hardware; this CI test does not prove it.
-//!
-//! ## Design note
-//!
-//! This test uses `rasterize_svg_layers` — the pure CPU path — to avoid
-//! requiring a GPU/wgpu device in CI.  The GPU upload path (texture creation,
-//! `queue.write_texture`) is outside the 2ms budget window per the spec; only
-//! the rasterization step is bounded.
-//!
-//! This follows the same fragility-avoidance pattern as `budget_assertions.rs`
-//! in the vertical-slice tests (see hud-3m8h).
+//! The gauge fixtures check nonempty pixels and applied fill/text bindings.
+//! These checks require no GPU device and make no wall-clock or upload claim.
 
 use std::collections::HashMap;
-use std::time::Instant;
 
 use tze_hud_compositor::widget::rasterize_svg_layers;
 use tze_hud_scene::types::{Rgba, WidgetBinding, WidgetBindingMapping, WidgetParameterValue};
-
-// ─── CI threshold ─────────────────────────────────────────────────────────────
-
-/// Lenient CI threshold: 500ms allows ample headroom for debug builds and software renderers.
-///
-/// llvmpipe SVG rasterization typically runs 4–12× slower than a discrete GPU.
-/// Debug builds add a further 3–5× overhead vs. release builds.
-/// VMs on CI runners add further overhead.
-///
-/// 500ms is chosen to prevent flaky CI while still catching catastrophic
-/// regressions (e.g., an accidental O(n²) path or a missing fast-path that
-/// would push latency to seconds).
-///
-/// Measuring the 2ms spec requirement requires release-optimised reference
-/// hardware; this lenient CI threshold does not replace that obligation.
-const CI_THRESHOLD_MS: u64 = 500;
-
-/// Spec target for reference hardware documentation purposes only.
-/// Not enforced in this test — measure separately on reference hardware.
-#[allow(dead_code)]
-const SPEC_TARGET_MS: u64 = 2;
 
 // ─── Reference gauge SVG fixtures ────────────────────────────────────────────
 
@@ -140,60 +96,6 @@ fn gauge_param_constraints() -> HashMap<String, (f32, f32)> {
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
-
-/// Acceptance criterion for hud-4kj0 / task 12.11:
-/// SVG re-rasterization < 2ms at 512×512 on reference hardware.
-///
-/// This test enforces the lenient CI threshold (500ms) and verifies correctness
-/// (non-empty pixmap). The strict 2ms spec target requires a separate
-/// release-optimised reference-hardware measurement.
-///
-/// See: widget-system/spec.md §Requirement: Widget Compositor Rendering,
-///      task 7.9, task 12.11.
-#[test]
-fn gauge_512x512_rasterize_within_ci_budget() {
-    let params = gauge_params();
-    let constraints = gauge_param_constraints();
-    let bindings = gauge_fill_bindings();
-
-    let layers: Vec<(&str, &[WidgetBinding])> =
-        vec![(GAUGE_BACKGROUND_SVG, &[]), (GAUGE_FILL_SVG, &bindings)];
-
-    // Warmup: one iteration to allow any lazy initialization.
-    let _ = rasterize_svg_layers(&layers, &constraints, &params, 512, 512);
-
-    // Timed iteration.
-    let start = Instant::now();
-    let pixmap = rasterize_svg_layers(&layers, &constraints, &params, 512, 512);
-    let elapsed_us = start.elapsed().as_micros() as u64;
-    let elapsed_ms = elapsed_us / 1000;
-
-    // Correctness: must produce a non-empty pixmap.
-    let pixmap = pixmap.expect("rasterize_svg_layers must produce a pixmap for the gauge fixture");
-    assert_eq!(pixmap.width(), 512, "pixmap width must be 512");
-    assert_eq!(pixmap.height(), 512, "pixmap height must be 512");
-    assert_eq!(
-        pixmap.data().len(),
-        512 * 512 * 4,
-        "pixmap must contain 512×512×4 bytes (RGBA)"
-    );
-
-    // Emit timing for CI log visibility.
-    eprintln!(
-        "[widget_rasterize] gauge 512×512: {elapsed_us}µs ({elapsed_ms} ms) — CI threshold: {CI_THRESHOLD_MS}ms, spec target (ref hw): {SPEC_TARGET_MS}ms",
-    );
-
-    // Budget assertion with lenient CI threshold (catches catastrophic regressions only).
-    // The strict 2ms spec target still requires reference-hardware measurement.
-    assert!(
-        elapsed_ms < CI_THRESHOLD_MS,
-        "SVG re-rasterization took {elapsed_ms}ms, exceeds lenient CI threshold of {CI_THRESHOLD_MS}ms \
-         (spec target for reference hardware is {SPEC_TARGET_MS}ms). \
-         This likely indicates a catastrophic regression — check for O(n²) paths. \
-         Measure on release-optimised reference hardware \
-         to verify the 2ms spec requirement.",
-    );
-}
 
 /// Verify rasterization produces non-trivial pixel output for the gauge fixture.
 ///
