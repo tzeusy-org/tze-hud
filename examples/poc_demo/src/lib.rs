@@ -27,8 +27,8 @@ use tze_hud_protocol::proto::session::client_message::Payload as Request;
 use tze_hud_protocol::proto::session::hud_session_client::HudSessionClient;
 use tze_hud_protocol::proto::session::server_message::Payload as Reply;
 use tze_hud_protocol::proto::session::{
-    self as wire, ClaimTile, Clear, ClientMessage, Hold, MutationBatch, RequestResult, SessionInit,
-    TileAnchor, TilePlacement, TileSize,
+    self as wire, ClaimTile, Clear, ClientMessage, Heartbeat, Hold, MutationBatch, RequestResult,
+    SessionInit, TileAnchor, TilePlacement, TileSize,
 };
 use tze_hud_protocol::proto::{
     MutationProto, NodeProto, Rect, Rgba, TextMarkdownNodeProto, UpdateNodeContentMutation,
@@ -38,6 +38,9 @@ use tze_hud_protocol::proto::{
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 pub const SUBTITLE: &str = "zone:subtitle";
+
+/// The runtime's default `heartbeat_interval_ms`.
+const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 pub const NOTIFICATION: &str = "zone:notification-area";
 pub const GAUGE: &str = "widget:main-gauge";
 pub const PROGRESS: &str = "widget:main-progress";
@@ -438,8 +441,19 @@ async fn claim_update_hold(target: &Target) -> Result<()> {
     );
     let reclaimed = tokio::time::timeout(target.human_wait, async {
         loop {
-            if let Reply::Reclaimed(r) = session.next_reply().await? {
-                return Ok::<_, Box<dyn std::error::Error>>(r);
+            // The runtime drops a session that is silent for three heartbeat
+            // intervals, so keep beating while the viewer decides.
+            match tokio::time::timeout(HEARTBEAT_INTERVAL, session.next_reply()).await {
+                Ok(reply) => {
+                    if let Reply::Reclaimed(r) = reply? {
+                        return Ok::<_, Box<dyn std::error::Error>>(r);
+                    }
+                }
+                Err(_) => {
+                    session
+                        .send(Request::Heartbeat(Heartbeat::default()))
+                        .await?;
+                }
             }
         }
     })

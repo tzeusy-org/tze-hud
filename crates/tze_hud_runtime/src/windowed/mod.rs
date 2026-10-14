@@ -732,7 +732,47 @@ fn shutdown_after_terminal_surface_recovery(
     wake.notify_main(crate::idle_efficiency::RuntimeWakeupSource::Shutdown);
 }
 
+/// The part of winit's [`ActiveEventLoop`] that leaving the loop uses.
+trait LoopExit {
+    fn set_control_flow(&self, control_flow: ControlFlow);
+    fn exit(&self);
+}
+
+impl LoopExit for ActiveEventLoop {
+    fn set_control_flow(&self, control_flow: ControlFlow) {
+        ActiveEventLoop::set_control_flow(self, control_flow);
+    }
+
+    fn exit(&self) {
+        ActiveEventLoop::exit(self);
+    }
+}
+
+/// Leave the event loop without waiting for another message.
+///
+/// winit on Windows checks the exit flag only after the wait that follows
+/// `about_to_wait` returns. Under `ControlFlow::Wait`, `exit()` alone keeps the
+/// process alive until some unrelated message arrives: about 2 s on a busy
+/// desktop, minutes on an idle HUD, while the old instance holds the
+/// single-instance mutex an update or installer is waiting for (hud-gr6jp).
+/// `Poll` makes that wait return at once.
+fn leave_event_loop(event_loop: &impl LoopExit) {
+    lifecycle::disable_all_chrome_observers();
+    event_loop.set_control_flow(ControlFlow::Poll);
+    event_loop.exit();
+}
+
 impl WinitApp {
+    /// Leave the event loop if shutdown was requested; true when it did.
+    fn leave_if_shutdown(&self, event_loop: &impl LoopExit) -> bool {
+        if !self.state.shutdown.is_triggered() {
+            return false;
+        }
+        tracing::info!("main thread: shutdown observed; leaving event loop");
+        leave_event_loop(event_loop);
+        true
+    }
+
     /// Arrange one completion-driven retry for main-thread work that could not
     /// inspect or mutate the shared scene because either async mutex was held.
     ///
@@ -942,9 +982,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         // Notifications racing after this checkpoint retain a later generation
         // for the next event-loop turn and cannot be erased at settle time.
         let main_work_checkpoint = self.state.wake.main_work_checkpoint();
-        if self.state.shutdown.is_triggered() {
-            lifecycle::disable_all_chrome_observers();
-            event_loop.exit();
+        if self.leave_if_shutdown(event_loop) {
             return;
         }
         if displays::take_dirty(&self.state.displays_dirty) {
@@ -1015,8 +1053,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             self.state
                 .shutdown
                 .trigger(crate::threads::ShutdownReason::Clean);
-            lifecycle::disable_all_chrome_observers();
-            event_loop.exit();
+            leave_event_loop(event_loop);
             return;
         }
 
@@ -1202,8 +1239,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             Ok(w) => Arc::new(w),
             Err(e) => {
                 tracing::error!("failed to create window: {e}");
-                lifecycle::disable_all_chrome_observers();
-                event_loop.exit();
+                leave_event_loop(event_loop);
                 return;
             }
         };
@@ -2328,8 +2364,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 self.state
                     .shutdown
                     .trigger(crate::threads::ShutdownReason::Clean);
-                lifecycle::disable_all_chrome_observers();
-                event_loop.exit();
+                leave_event_loop(event_loop);
             }
 
             // ── Monitor layout may have changed (hud-1pt5h) ───────────────
@@ -2727,6 +2762,11 @@ impl WindowedRuntime {
     /// Per spec §Main Thread Responsibilities (line 33): "The main thread MUST
     /// run the winit event loop."
     ///
+    /// Once its threads have stopped, this arms
+    /// [`crate::threads::arm_exit_deadline`]: the caller must exit the process
+    /// within [`crate::threads::EXIT_DEADLINE`] of the return, or it is
+    /// terminated.
+    ///
     /// # Errors
     ///
     /// Returns an error if the winit event loop or window creation fails.
@@ -2896,6 +2936,7 @@ impl WindowedRuntime {
             let shutdown = shutdown.clone();
             let wake = wake.clone();
             Arc::new(move || {
+                tracing::info!("quit requested; waking main thread");
                 shutdown.trigger(crate::threads::ShutdownReason::Clean);
                 wake.notify_main(crate::idle_efficiency::RuntimeWakeupSource::Shutdown);
             })
@@ -3208,6 +3249,7 @@ impl WindowedRuntime {
         // Per spec §Main Thread Responsibilities: winit event loop MUST run on main thread.
         let mut chrome_observers = lifecycle::ChromeObserverScope::new();
         event_loop.run_app(&mut app)?;
+        tracing::info!("event loop returned");
         chrome_observers.detach();
 
         // ── Post-event-loop cleanup ───────────────────────────────────────────
@@ -3263,19 +3305,24 @@ impl WindowedRuntime {
             tracing::info!("network runtime shutdown complete");
         }
 
-        if app
+        let terminal_surface_recovery_failed = app
             .state
             .terminal_surface_recovery_failed
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
-            return Err("windowed surface recovery failed terminally".into());
-        }
-
-        if app
+            .load(std::sync::atomic::Ordering::Acquire);
+        let benchmark_failed = app
             .state
             .benchmark_failed
-            .load(std::sync::atomic::Ordering::Acquire)
-        {
+            .load(std::sync::atomic::Ordering::Acquire);
+        // Every runtime thread has stopped; bound what teardown remains.
+        crate::threads::arm_exit_deadline(crate::threads::EXIT_DEADLINE);
+        tracing::info!("releasing windows and GPU surfaces");
+        drop(app);
+        tracing::info!("windows and GPU surfaces released");
+
+        if terminal_surface_recovery_failed {
+            return Err("windowed surface recovery failed terminally".into());
+        }
+        if benchmark_failed {
             return Err("windowed benchmark artifact write failed".into());
         }
 

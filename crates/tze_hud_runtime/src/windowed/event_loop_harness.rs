@@ -1820,7 +1820,14 @@ mod tests {
         assert_eq!(hover(&mut harness.app, 900.0, 900.0), None);
         harness.app.state.cursor_left_window = true;
         assert_eq!(hover(&mut harness.app, 300.0, 200.0), None);
-        harness.app.state.cursor_left_window = false;
+        // An OS cursor read (the click-through path) overrides a stale
+        // CursorLeft from the last capture flip.
+        harness.app.apply_os_cursor_position(300.0, 200.0);
+        harness.app.push_tile_close_hover();
+        assert_eq!(
+            *harness.app.state.tile_close_hover_state.lock().unwrap(),
+            Some(tile_id)
+        );
 
         // The compositor registers the button's hit region once the tile is
         // hovered; stand in for it here (the harness has no compositor).
@@ -3092,5 +3099,42 @@ mod tests {
         harness.app.on_resume_time_reached(now);
         assert!(!harness.app.state.cursor_entry.tick);
         assert_eq!(harness.app.state.wake.main_work_generation(), before + 1);
+    }
+
+    /// A quit must leave winit's loop without another OS message: winit on
+    /// Windows checks `exit()` only after the wait that follows
+    /// `about_to_wait`, so the exit must also stop that wait (hud-gr6jp).
+    #[test]
+    fn shutdown_leaves_the_event_loop_without_waiting_for_a_message() {
+        use std::cell::RefCell;
+        use winit::event_loop::ControlFlow;
+
+        #[derive(Default)]
+        struct Recorder(RefCell<Vec<Option<ControlFlow>>>);
+        impl crate::windowed::LoopExit for Recorder {
+            fn set_control_flow(&self, control_flow: ControlFlow) {
+                self.0.borrow_mut().push(Some(control_flow));
+            }
+            fn exit(&self) {
+                self.0.borrow_mut().push(None);
+            }
+        }
+
+        let harness = HeadlessEventLoopHarness::new();
+        let idle = Recorder::default();
+        assert!(!harness.app.leave_if_shutdown(&idle));
+        assert!(
+            idle.0.borrow().is_empty(),
+            "no shutdown: the loop is untouched"
+        );
+
+        harness
+            .app
+            .state
+            .shutdown
+            .trigger(crate::threads::ShutdownReason::Clean);
+        let quitting = Recorder::default();
+        assert!(harness.app.leave_if_shutdown(&quitting));
+        assert_eq!(*quitting.0.borrow(), [Some(ControlFlow::Poll), None]);
     }
 }
