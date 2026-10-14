@@ -17,7 +17,10 @@ use crate::text::TextItem;
 
 use super::icon::parse_notification_icon;
 use super::tile_render::node_uses_display_tile_scroll;
-use super::token_colors::{DISCONNECT_BADGE_LABEL, resolve_disconnect_badge_tokens};
+use super::token_colors::{
+    DISCONNECT_BADGE_LABEL, TILE_CLOSE_GLYPH, resolve_disconnect_badge_tokens,
+    resolve_tile_close_tokens, tile_close_button_bounds,
+};
 use super::token_colors::{
     ICON_SIZE_PX, ICON_TEXT_GAP_PX, NOTIFICATION_BODY_SCALE, NOTIFICATION_DISMISS_BUTTON_SIZE_PX,
     NOTIFICATION_DISMISS_FONT_SIZE_PX, NOTIFICATION_DISMISS_FONT_WEIGHT,
@@ -44,6 +47,10 @@ const DEFAULT_LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
 /// screen (hud-dat3x).  Chosen well below one 8-bit alpha step (1/255 ≈ 0.0039)
 /// so any perceptible fraction still blends.
 const TILE_TEXT_OPACITY_EPSILON: f32 = 1e-4;
+
+/// Font size of the close button's x mark relative to the button: a `×` fills
+/// about half its em, so the mark spans roughly 40% of the button.
+const TILE_CLOSE_GLYPH_SCALE: f32 = 0.9;
 
 // ─── Text-collection impl block ───────────────────────────────────────────────
 
@@ -1193,6 +1200,39 @@ impl super::Compositor {
                 styled_runs: Box::new([]),
                 line_height_multiplier: crate::markdown::MarkdownTokens::default()
                     .line_height_multiplier,
+                viewport: crate::overflow::TruncationViewport::HeadAnchored,
+            });
+        }
+
+        // ── Close button x mark on the hovered tile ──────────────────────────
+        // Text over the fill `append_tile_close_button_vertices` draws, so the
+        // diagonals are antialiased.
+        if let Some(tile) = self.tile_close_target(scene) {
+            let tokens = resolve_tile_close_tokens(&self.token_map);
+            let button = tile_close_button_bounds(tile.bounds, &tokens);
+            let font_size_px = button.height * TILE_CLOSE_GLYPH_SCALE;
+            items.push(TextItem {
+                text: Arc::from(TILE_CLOSE_GLYPH),
+                pixel_x: button.x,
+                pixel_y: button.y + (button.height - font_size_px) / 2.0,
+                bounds_width: button.width,
+                bounds_height: font_size_px,
+                clip_pixel_x: button.x,
+                clip_pixel_y: button.y,
+                clip_bounds_width: button.width,
+                clip_bounds_height: button.height,
+                font_size_px,
+                font_family: FontFamily::SystemSansSerif,
+                font_weight: 400,
+                color: crate::text::rgba_to_srgb_u8(tokens.glyph_color),
+                alignment: TextAlign::Center,
+                overflow: TextOverflow::Clip,
+                outline_color: None,
+                outline_width: None,
+                opacity: self.tile_effective_opacity(tile, scene),
+                color_runs: Box::new([]),
+                styled_runs: Box::new([]),
+                line_height_multiplier: 1.0,
                 viewport: crate::overflow::TruncationViewport::HeadAnchored,
             });
         }

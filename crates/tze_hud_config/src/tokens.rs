@@ -496,11 +496,6 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Color of the hover close button's x mark (RGBA hex)",
         default_value: "#FFFFFF",
     },
-    CanonicalToken {
-        key: "tile.close_button.glyph_stroke_px",
-        description: "Stroke thickness of the hover close button's x mark (px)",
-        default_value: "2",
-    },
     // Safe-mode overlay (docs/invariants.md section 5), drawn by the compositor.
     CanonicalToken {
         key: "safe_mode.overlay.color",

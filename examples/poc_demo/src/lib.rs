@@ -541,12 +541,13 @@ fn tile_surface(id: &[u8]) -> String {
 fn text_node(text: &str) -> TextMarkdownNodeProto {
     TextMarkdownNodeProto {
         content: text.to_string(),
-        // Inset within the medium tile (360x220 px) and sized for a 4K panel.
+        // Inset within the medium tile (tonal-glass: 540x330 px) and sized for
+        // a 4K panel.
         bounds: Some(Rect {
-            x: 20.0,
-            y: 16.0,
-            width: 320.0,
-            height: 160.0,
+            x: 24.0,
+            y: 20.0,
+            width: 440.0,
+            height: 280.0,
         }),
         font_size_px: 24.0,
         color: Some(Rgba {
