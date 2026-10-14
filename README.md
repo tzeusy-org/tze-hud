@@ -360,8 +360,9 @@ CI and `just test` use the same runner arguments:
 `cargo nextest run --workspace --all-targets --exclude integration --features tze_hud_runtime/dev-mode`.
 The default profile assigns GPU-owning packages' non-bench tests to one Nextest
 test group with capacity one, conservatively including some CPU cases. Other
-CPU packages and the five known CPU Criterion targets remain parallel. The
-separate integration and focused libtest recipes below remain unchanged.
+CPU packages remain parallel. No Criterion benchmark targets are currently
+declared. The separate integration and focused libtest recipes below remain
+unchanged.
 
 ### Scene/property tests
 
