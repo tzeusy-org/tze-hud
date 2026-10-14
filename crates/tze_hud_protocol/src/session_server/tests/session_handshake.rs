@@ -494,6 +494,447 @@ async fn test_graceful_disconnect_session_close() {
         .await
         .expect("real session cleanup did not complete")
         .expect("cleanup witness dropped before normal cleanup completed");
+
+    // Observe the existing protocol-facing ownership contract; this witness
+    // does not reproduce the runtime's aggregate resource or rate policy.
+    struct RecordingEnforcer {
+        state: Arc<Mutex<SharedState>>,
+        entries: std::sync::Mutex<HashMap<SceneId, (String, MutationBudgetUsage)>>,
+        removals: std::sync::Mutex<HashMap<SceneId, usize>>,
+        registered: tokio::sync::mpsc::UnboundedSender<(SceneId, String, MutationBudgetUsage)>,
+        block_next: std::sync::Mutex<bool>,
+        barrier: std::sync::Mutex<Option<tokio::sync::OwnedMutexGuard<SharedState>>>,
+    }
+
+    impl MutationBudgetEnforcer for RecordingEnforcer {
+        fn register_session(
+            &self,
+            id: SceneId,
+            namespace: String,
+            _budget: ResourceBudget,
+            _resident: bool,
+            usage: MutationBudgetUsage,
+        ) -> MutationBudgetDecision {
+            if namespace == "budget-rejected" {
+                return MutationBudgetDecision::Reject {
+                    error_code: "RESOURCE_EXHAUSTED",
+                    message: "fixture registration refused".to_string(),
+                };
+            }
+            assert!(
+                self.entries
+                    .lock()
+                    .unwrap()
+                    .insert(id, (namespace.clone(), usage))
+                    .is_none()
+            );
+            if std::mem::take(&mut *self.block_next.lock().unwrap()) {
+                // Init and Resume release earlier state/token/usage locks before
+                // register_session. Take this real lock before returning Allow,
+                // so their next awaited state lock is deterministically pending.
+                let guard = Arc::clone(&self.state)
+                    .try_lock_owned()
+                    .expect("registration barrier must acquire the actual test state");
+                assert!(self.barrier.lock().unwrap().replace(guard).is_none());
+            }
+            self.registered.send((id, namespace, usage)).unwrap();
+            MutationBudgetDecision::Allow
+        }
+
+        fn remove_session(&self, id: SceneId) {
+            self.entries.lock().unwrap().remove(&id);
+            *self.removals.lock().unwrap().entry(id).or_default() += 1;
+        }
+
+        fn reserve_mutation(
+            &self,
+            _id: SceneId,
+            _tiles: i32,
+            _texture_bytes: i64,
+            _nodes: u32,
+        ) -> MutationBudgetDecision {
+            MutationBudgetDecision::Allow
+        }
+
+        fn rollback_mutation(&self, _id: SceneId, _tiles: i32, _texture_bytes: i64) {}
+    }
+
+    async fn open_owned_stream(
+        client: &mut HudSessionClient<tonic::transport::Channel>,
+        payload: ClientPayload,
+        handlers: &mut tokio::sync::mpsc::UnboundedReceiver<ObservedSessionHandler>,
+    ) -> (
+        tokio::sync::mpsc::Sender<ClientMessage>,
+        tonic::Streaming<ServerMessage>,
+        ObservedSessionHandler,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::channel(64);
+        tx.send(ClientMessage {
+            sequence: 1,
+            timestamp_wall_us: now_wall_us(),
+            payload: Some(payload),
+        })
+        .await
+        .unwrap();
+        let stream = client
+            .session(tokio_stream::wrappers::ReceiverStream::new(rx))
+            .await
+            .unwrap()
+            .into_inner();
+        let handler = tokio::time::timeout(Duration::from_secs(5), handlers.recv())
+            .await
+            .expect("actual session handler was not observed")
+            .expect("handler observation channel closed");
+        (tx, stream, handler)
+    }
+
+    fn init(agent: &str) -> ClientPayload {
+        ClientPayload::SessionInit(SessionInit {
+            agent_id: agent.to_string(),
+            initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
+            min_protocol_version: 1000,
+            max_protocol_version: 1001,
+            auth_credential: Some(crate::auth::psk_credential("test-key")),
+            ..Default::default()
+        })
+    }
+
+    async fn registered_id(
+        registered: &mut tokio::sync::mpsc::UnboundedReceiver<(
+            SceneId,
+            String,
+            MutationBudgetUsage,
+        )>,
+        namespace: &str,
+    ) -> SceneId {
+        let (id, actual_namespace, usage) =
+            tokio::time::timeout(Duration::from_secs(5), registered.recv())
+                .await
+                .expect("real handshake did not register a budget entry")
+                .expect("registration witness closed");
+        assert_eq!(actual_namespace, namespace);
+        assert_eq!(usage, MutationBudgetUsage::default());
+        id
+    }
+
+    async fn ready(stream: &mut tonic::Streaming<ServerMessage>, resume: bool) -> Vec<u8> {
+        let message = tokio::time::timeout(Duration::from_secs(5), stream.next())
+            .await
+            .expect("handshake reply timed out")
+            .unwrap()
+            .unwrap();
+        let token = match message.payload {
+            Some(ServerPayload::SessionEstablished(established)) if !resume => {
+                established.resume_token
+            }
+            Some(ServerPayload::SessionResumeResult(result)) if resume => {
+                assert!(result.accepted);
+                result.new_session_token
+            }
+            other => panic!("expected successful handshake, got {other:?}"),
+        };
+        assert!(!token.is_empty());
+        for snapshot in [true, false] {
+            let message = tokio::time::timeout(Duration::from_secs(5), stream.next())
+                .await
+                .expect("ordered handshake messages timed out")
+                .unwrap()
+                .unwrap();
+            if snapshot {
+                assert!(matches!(
+                    message.payload,
+                    Some(ServerPayload::SceneSnapshot(_))
+                ));
+            } else {
+                assert!(matches!(
+                    message.payload,
+                    Some(ServerPayload::DegradationNotice(_))
+                ));
+            }
+        }
+        token
+    }
+
+    async fn normal_close(
+        state: &Arc<Mutex<SharedState>>,
+        witness: &RecordingEnforcer,
+        id: SceneId,
+        tx: tokio::sync::mpsc::Sender<ClientMessage>,
+        mut stream: tonic::Streaming<ServerMessage>,
+        handler: ObservedSessionHandler,
+        sequence: u64,
+    ) {
+        let cleanup = state.lock().await.sessions.observe_cleanup(&id);
+        tx.send(ClientMessage {
+            sequence,
+            timestamp_wall_us: now_wall_us(),
+            payload: Some(ClientPayload::SessionClose(SessionClose {
+                reason: "budget witness normal close".to_string(),
+            })),
+        })
+        .await
+        .unwrap();
+        drop(tx);
+        assert!(observe_stream_end(&mut stream, Duration::from_millis(500)).await);
+        tokio::time::timeout(Duration::from_secs(5), cleanup)
+            .await
+            .expect("normal owning cleanup timed out")
+            .expect("normal cleanup witness dropped");
+        tokio::time::timeout(Duration::from_secs(5), handler.task)
+            .await
+            .expect("normal actual handler did not complete")
+            .expect("normal actual handler panicked or was cancelled");
+        assert!(!witness.entries.lock().unwrap().contains_key(&id));
+        assert_eq!(witness.removals.lock().unwrap().get(&id), Some(&1));
+    }
+
+    let mut service = HudSessionImpl::new(SceneGraph::new(800.0, 600.0), "test-key");
+    let owned_state = Arc::clone(&service.state);
+    let (registered_tx, mut registrations) = tokio::sync::mpsc::unbounded_channel();
+    let witness = Arc::new(RecordingEnforcer {
+        state: Arc::clone(&owned_state),
+        entries: std::sync::Mutex::new(HashMap::new()),
+        removals: std::sync::Mutex::new(HashMap::new()),
+        registered: registered_tx,
+        block_next: std::sync::Mutex::new(false),
+        barrier: std::sync::Mutex::new(None),
+    });
+    service.budget_enforcer = Some(witness.clone());
+    let (_observer, mut handlers) = observe_session_handlers(&owned_state);
+    let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let server = tokio::spawn(async move {
+        tonic::transport::Server::builder()
+            .add_service(HudSessionServer::new(service))
+            .serve_with_incoming(tokio_stream::wrappers::TcpListenerStream::new(listener))
+            .await
+            .unwrap();
+    });
+    let mut owned_client = connect_test_client_with_retry(port).await;
+    let mut peers = Vec::new();
+    for namespace in ["budget-cleanup", "budget-peer"] {
+        let (tx, mut stream, handler) =
+            open_owned_stream(&mut owned_client, init(namespace), &mut handlers).await;
+        let id = registered_id(&mut registrations, namespace).await;
+        ready(&mut stream, false).await;
+        peers.push((namespace, id, tx, stream, handler, 2u64));
+    }
+
+    let mut outcomes = Vec::new();
+    for (resume, preguard, panic_handler) in [
+        (false, true, false),
+        (false, true, true),
+        (true, true, false),
+        (true, true, true),
+        (false, false, false),
+        (false, false, true),
+    ] {
+        let payload = if resume {
+            let (tx, mut stream, handler) =
+                open_owned_stream(&mut owned_client, init("budget-cleanup"), &mut handlers).await;
+            let seed_id = registered_id(&mut registrations, "budget-cleanup").await;
+            let token = ready(&mut stream, false).await;
+            normal_close(&owned_state, &witness, seed_id, tx, stream, handler, 2).await;
+            ClientPayload::SessionResume(SessionResume {
+                agent_id: "budget-cleanup".to_string(),
+                resume_token: token,
+                auth_credential: Some(crate::auth::psk_credential("test-key")),
+                ..Default::default()
+            })
+        } else {
+            init("budget-cleanup")
+        };
+        *witness.block_next.lock().unwrap() = preguard;
+        let (tx, mut stream, handler) =
+            open_owned_stream(&mut owned_client, payload, &mut handlers).await;
+        let id = registered_id(&mut registrations, "budget-cleanup").await;
+        if preguard {
+            assert!(witness.barrier.lock().unwrap().is_some());
+        } else {
+            ready(&mut stream, false).await;
+        }
+        let ObservedSessionHandler { task, panic } = handler;
+        if panic_handler {
+            panic.send(()).expect("actual handler panic lane closed");
+        } else {
+            task.abort();
+        }
+        let error = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("controlled actual handler did not stop")
+            .expect_err("controlled actual handler unexpectedly completed normally");
+        if panic_handler {
+            assert!(error.is_panic());
+        } else {
+            assert!(error.is_cancelled());
+        }
+        // Retain the real barrier until the exact handler's JoinError is consumed.
+        let barrier = witness.barrier.lock().unwrap().take();
+        assert_eq!(barrier.is_some(), preguard);
+        drop(barrier);
+        drop(tx);
+        assert!(observe_stream_end(&mut stream, Duration::from_millis(500)).await);
+
+        for (_namespace, peer_id, peer_tx, peer_stream, _handler, sequence) in &mut peers {
+            assert!(witness.entries.lock().unwrap().contains_key(peer_id));
+            assert!(!witness.removals.lock().unwrap().contains_key(peer_id));
+            let nonce = *sequence * 100;
+            peer_tx
+                .send(ClientMessage {
+                    sequence: *sequence,
+                    timestamp_wall_us: now_wall_us(),
+                    payload: Some(ClientPayload::Heartbeat(Heartbeat {
+                        timestamp_mono_us: nonce,
+                    })),
+                })
+                .await
+                .unwrap();
+            let reply = tokio::time::timeout(Duration::from_secs(5), peer_stream.next())
+                .await
+                .expect("unaffected peer stopped responding")
+                .unwrap()
+                .unwrap();
+            let Some(ServerPayload::Heartbeat(echo)) = reply.payload else {
+                panic!("unaffected peer did not echo its real heartbeat");
+            };
+            assert_eq!(echo.timestamp_mono_us, nonce);
+            *sequence += 1;
+        }
+        let removal_calls = witness
+            .removals
+            .lock()
+            .unwrap()
+            .get(&id)
+            .copied()
+            .unwrap_or(0);
+        let remains = witness.entries.lock().unwrap().contains_key(&id);
+        eprintln!(
+            "budget_handler_vector resume={resume} preguard={preguard} panic={panic_handler} id={id:?} removal_calls={removal_calls} remains={remains} peers_live=true"
+        );
+        outcomes.push((resume, preguard, panic_handler, removal_calls, remains));
+    }
+
+    // A completed Resume keeps its own registration until real normal cleanup.
+    let (seed_tx, mut seed_stream, seed_handler) =
+        open_owned_stream(&mut owned_client, init("budget-cleanup"), &mut handlers).await;
+    let seed_id = registered_id(&mut registrations, "budget-cleanup").await;
+    let token = ready(&mut seed_stream, false).await;
+    normal_close(
+        &owned_state,
+        &witness,
+        seed_id,
+        seed_tx,
+        seed_stream,
+        seed_handler,
+        2,
+    )
+    .await;
+    assert_eq!(
+        owned_state.lock().await.sessions.session_count(),
+        peers.len()
+    );
+    let (resume_tx, mut resume_stream, resume_handler) = open_owned_stream(
+        &mut owned_client,
+        ClientPayload::SessionResume(SessionResume {
+            agent_id: "budget-cleanup".to_string(),
+            resume_token: token,
+            auth_credential: Some(crate::auth::psk_credential("test-key")),
+            ..Default::default()
+        }),
+        &mut handlers,
+    )
+    .await;
+    let resume_id = registered_id(&mut registrations, "budget-cleanup").await;
+    assert_ne!(resume_id, seed_id);
+    ready(&mut resume_stream, true).await;
+    assert_eq!(
+        owned_state.lock().await.sessions.session_count(),
+        peers.len() + 1
+    );
+    normal_close(
+        &owned_state,
+        &witness,
+        resume_id,
+        resume_tx,
+        resume_stream,
+        resume_handler,
+        2,
+    )
+    .await;
+    assert_eq!(
+        owned_state.lock().await.sessions.session_count(),
+        peers.len()
+    );
+    for (_namespace, peer_id, peer_tx, peer_stream, _handler, sequence) in &mut peers {
+        assert!(witness.entries.lock().unwrap().contains_key(peer_id));
+        assert!(!witness.removals.lock().unwrap().contains_key(peer_id));
+        let nonce = *sequence * 100;
+        peer_tx
+            .send(ClientMessage {
+                sequence: *sequence,
+                timestamp_wall_us: now_wall_us(),
+                payload: Some(ClientPayload::Heartbeat(Heartbeat {
+                    timestamp_mono_us: nonce,
+                })),
+            })
+            .await
+            .unwrap();
+        let reply = tokio::time::timeout(Duration::from_secs(5), peer_stream.next())
+            .await
+            .expect("unaffected peer stopped responding after normal Resume")
+            .unwrap()
+            .unwrap();
+        let Some(ServerPayload::Heartbeat(echo)) = reply.payload else {
+            panic!("unaffected peer did not echo after normal Resume");
+        };
+        assert_eq!(echo.timestamp_mono_us, nonce);
+        *sequence += 1;
+    }
+    eprintln!(
+        "budget_handler_normal_resume id={resume_id:?} removal_calls=1 registry_absent=true peers_live=true"
+    );
+
+    // Rejected registration never owns an entry and must not receive removal.
+    let before_reject = witness.entries.lock().unwrap().len();
+    let before_removals = witness.removals.lock().unwrap().clone();
+    let (reject_tx, mut reject_stream, reject_handler) =
+        open_owned_stream(&mut owned_client, init("budget-rejected"), &mut handlers).await;
+    let rejected = tokio::time::timeout(Duration::from_secs(5), reject_stream.next())
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap();
+    let Some(ServerPayload::SessionError(rejected)) = rejected.payload else {
+        panic!("expected actual handler registration rejection");
+    };
+    assert_eq!(rejected.code, "RESOURCE_EXHAUSTED");
+    assert!(rejected.hint.contains("capacity"));
+    drop(reject_tx);
+    assert!(observe_stream_end(&mut reject_stream, Duration::from_millis(500)).await);
+    tokio::time::timeout(Duration::from_secs(5), reject_handler.task)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(witness.entries.lock().unwrap().len(), before_reject);
+    assert_eq!(*witness.removals.lock().unwrap(), before_removals);
+    for (_namespace, id, tx, stream, handler, sequence) in peers {
+        normal_close(&owned_state, &witness, id, tx, stream, handler, sequence).await;
+    }
+    server.abort();
+    assert!(server.await.unwrap_err().is_cancelled());
+
+    // Emit every actual owning-task row before asserting the intended RED.
+    assert_eq!(outcomes.len(), 6);
+    for (resume, preguard, panic_handler, removal_calls, remains) in outcomes {
+        assert_eq!(
+            removal_calls, 1,
+            "successful budget registration needs one owning removal: resume={resume} preguard={preguard} panic={panic_handler}"
+        );
+        assert!(
+            !remains,
+            "terminated handler retained its budget registration"
+        );
+    }
 }
 
 // ─── Handshake auth, version, capability, subscription ───────────────────────

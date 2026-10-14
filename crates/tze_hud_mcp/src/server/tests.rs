@@ -635,6 +635,17 @@ async fn clear_cancels_only_own_pending_delayed_publish() {
     let (server, clock, a, b) = two_agents();
     delayed_subtitle(&server, &a, 5000, 0).await;
     delayed_subtitle(&server, &b, 8000, 0).await;
+    for who in [&a, &b] {
+        let (v, _) = call_as(&server, who, "hud_surfaces", json!({})).await;
+        let own = v["surfaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["s"] == "zone:subtitle")
+            .unwrap();
+        assert_eq!(own["held"], true);
+        assert!(own.get("expires_in_ms").is_none());
+    }
     let (v, _) = call_as(
         &server,
         &a,
@@ -643,6 +654,16 @@ async fn clear_cancels_only_own_pending_delayed_publish() {
     )
     .await;
     assert_eq!(v, json!({"ok": true}));
+    for (who, held) in [(&a, false), (&b, true)] {
+        let (v, _) = call_as(&server, who, "hud_surfaces", json!({})).await;
+        let own = v["surfaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["s"] == "zone:subtitle")
+            .unwrap();
+        assert_eq!(own.get("held").is_some(), held);
+    }
     {
         let scene = server.scene.lock().await;
         assert_eq!(scene.scheduled_batches.len(), 1, "b's batch survives");
@@ -686,12 +707,31 @@ async fn clear_of_last_pending_publish_drops_the_wake_deadline() {
 async fn hold_retimes_own_pending_delayed_publish() {
     let (server, clock, a, b) = two_agents();
     delayed_subtitle(&server, &a, 5000, 1000).await;
+    for (who, expiry) in [(&a, Some(6000)), (&b, None)] {
+        let (v, _) = call_as(&server, who, "hud_surfaces", json!({})).await;
+        let own = v["surfaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|s| s["s"] == "zone:subtitle")
+            .unwrap();
+        assert_eq!(own.get("expires_in_ms").and_then(Value::as_u64), expiry);
+        assert_eq!(own.get("held").is_some(), expiry.is_some());
+    }
     let hold = json!({"surface": "zone:subtitle", "ttl_ms": 3000});
     let (err, is_error) = call_as(&server, &b, "hud_hold", hold.clone()).await;
     assert!(is_error);
     assert_eq!(err["code"], "NOT_HELD");
     let (v, _) = call_as(&server, &a, "hud_hold", hold).await;
     assert_eq!(v, json!({"ok": true, "expires_in_ms": 3000}));
+    let (v, _) = call_as(&server, &a, "hud_surfaces", json!({})).await;
+    let own = v["surfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["s"] == "zone:subtitle")
+        .unwrap();
+    assert_eq!(own["expires_in_ms"], 8000);
     clock.advance(5_000);
     let mut scene = server.scene.lock().await;
     scene.apply_due_batches();
@@ -899,10 +939,18 @@ async fn mcp_lease_is_reused_across_publishes() {
 
 #[tokio::test]
 async fn widget_publish_hold_clear() {
-    let (server, _) = server();
+    let (server, clock) = server();
     let mut config = McpConfig::with_psk(psk());
     config.widget_transition_ms = 200;
     let server = server.with_config(config);
+    let invalid = call_err(
+        &server,
+        "hud_publish",
+        json!({"surface":"widget:gauge","params":{"level":2.0}}),
+    )
+    .await;
+    assert_eq!(invalid["code"], "WIDGET_PARAMETER_INVALID");
+    assert!(server.scene.lock().await.leases.is_empty());
     let v = call(
         &server,
         "hud_publish",
@@ -923,6 +971,110 @@ async fn widget_publish_hold_clear() {
         assert_eq!(
             record.params["fill_color"],
             WidgetParameterValue::Color(Rgba::new(1.0, 0.0, 0.0, 1.0))
+        );
+    }
+    let before = {
+        let scene = server.scene.lock().await;
+        (
+            scene.version,
+            scene.widget_registry.instances["gauge"]
+                .current_params
+                .clone(),
+            scene.widget_registry.active_publishes["gauge"][0]
+                .params
+                .clone(),
+            scene.leases.clone(),
+        )
+    };
+    clock.advance(1000);
+    let mut bad = vec![
+        (json!({"level": -0.1}), "0..1"),
+        (json!({"level": 2.0}), "0..1"),
+        (json!({"level": 1.0000000001}), "0..1"),
+        (json!({"level": 1e100}), "finite"),
+        (json!({"level": "high"}), "f32"),
+    ];
+    for value in [
+        json!({}),
+        json!({"r": 0, "g": 1}),
+        json!({"r": "0", "g": 1, "b": 0}),
+        json!({"r": 0, "g": 1, "b": 0, "a": null}),
+        json!("#123"),
+        json!("#12345678"),
+        json!("#GG0000"),
+        json!("red"),
+        json!("#ééé"),
+        json!([0, 1, 0]),
+    ] {
+        bad.push((json!({"fill_color": value}), "0..1"));
+    }
+    for channel in ["r", "g", "b", "a"] {
+        for value in [json!(true), json!("0.5"), json!(null)] {
+            let mut color = json!({"r": 0.2, "g": 0.3, "b": 0.4, "a": 1});
+            color[channel] = value;
+            bad.push((json!({"fill_color": color}), "numeric"));
+        }
+        if channel != "a" {
+            let mut color = json!({"r": 0.2, "g": 0.3, "b": 0.4});
+            color.as_object_mut().unwrap().remove(channel);
+            bad.push((json!({"fill_color": color}), "numeric"));
+        }
+        for value in [-0.1, 1.0000000001, 255.0, 1e100] {
+            let mut color = json!({"r": 0.2, "g": 0.3, "b": 0.4, "a": 1});
+            color[channel] = json!(value);
+            bad.push((json!({"fill_color": color}), "0..1"));
+        }
+    }
+    for (mut params, hint) in bad {
+        params["label"] = json!("changed");
+        for _ in 0..2 {
+            let error = call_err(
+                &server,
+                "hud_publish",
+                json!({"surface": "widget:gauge", "params": params}),
+            )
+            .await;
+            assert_eq!(error["code"], "WIDGET_PARAMETER_INVALID", "{error}");
+            assert!(error["hint"].as_str().unwrap().contains(hint), "{error}");
+            let scene = server.scene.lock().await;
+            assert_eq!(scene.version, before.0);
+            assert_eq!(scene.leases, before.3);
+            assert_eq!(
+                scene.widget_registry.instances["gauge"].current_params,
+                before.1
+            );
+            let pubs = &scene.widget_registry.active_publishes["gauge"];
+            assert_eq!(pubs.len(), 1);
+            assert_eq!(pubs[0].params, before.2);
+            assert_eq!(pubs[0].transition_ms, 200);
+        }
+    }
+    for (level, color, expected) in [
+        (
+            0.0,
+            json!("#4A9eFF"),
+            Rgba::new(74.0 / 255.0, 158.0 / 255.0, 1.0, 1.0),
+        ),
+        (
+            0.5,
+            json!({"r": 0, "g": 1, "b": 0.5}),
+            Rgba::new(0.0, 1.0, 0.5, 1.0),
+        ),
+        (
+            1.0,
+            json!({"r": 1, "g": 0, "b": 0, "a": 0}),
+            Rgba::new(1.0, 0.0, 0.0, 0.0),
+        ),
+    ] {
+        call(
+            &server,
+            "hud_publish",
+            json!({"surface":"widget:gauge", "params":{"level":level, "fill_color":color}}),
+        )
+        .await;
+        assert_eq!(
+            server.scene.lock().await.widget_registry.instances["gauge"].current_params["fill_color"],
+            WidgetParameterValue::Color(expected)
         );
     }
     let err = call_err(
@@ -1008,15 +1160,21 @@ fn hub_portal(server: McpServer) -> (McpServer, Arc<std::sync::Mutex<PortalHub>>
 #[tokio::test]
 async fn portal_output_too_large_is_content_rejected() {
     let (server, _) = server();
-    let (server, _) = hub_portal(server);
+    let (server, hub) = hub_portal(server);
     let e = call_err(
         &server,
         "hud_publish",
-        json!({"surface": "portal:main", "content": "x".repeat(16 * 1024 + 1)}),
+        json!({"surface": "portal:main", "content": "x".repeat(16 * 1024 + 1), "ttl_ms": 0}),
     )
     .await;
     assert_eq!(e["code"], "CONTENT_REJECTED");
     assert!(!e["hint"].as_str().unwrap().is_empty());
+    assert!(
+        hub.lock()
+            .unwrap()
+            .get(&PortalKey::new(psk_agent(), "main"))
+            .is_none()
+    );
 }
 
 #[tokio::test]
@@ -1025,9 +1183,19 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
     let (server, hub) = hub_portal(server);
     let key = PortalKey::new(psk_agent(), "main");
 
+    let empty = call(&server, "hud_publish", json!({"surface": "portal:main"})).await;
+    assert_eq!(
+        empty,
+        json!({"ok": true, "reattached": false, "pending_input": 0})
+    );
+    assert!(hub.lock().unwrap().get(&key).unwrap().transcript.is_empty());
+
     // The first publish attaches; identity is the caller's PSK, no token.
     let v = call(&server, "hud_publish", json!({"surface": "portal:main", "content": "Working on it", "status": "active", "expects_reply": true})).await;
-    assert_eq!(v, json!({"ok": true}));
+    assert_eq!(
+        v,
+        json!({"ok": true, "reattached": false, "pending_input": 0})
+    );
     call(
         &server,
         "hud_publish",
@@ -1051,6 +1219,47 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         .unwrap()
         .submit_reply(&key, "ship it".into(), 0)
         .unwrap();
+    let status = call(
+        &server,
+        "hud_publish",
+        json!({"surface": "portal:main", "status": "degraded", "ttl_ms": 120000}),
+    )
+    .await;
+    assert_eq!(
+        status,
+        json!({"ok": true, "reattached": false, "pending_input": 1, "expires_in_ms": 120000})
+    );
+    assert_eq!(
+        hub.lock().unwrap().get(&key).unwrap().hold_until_us,
+        Some(120_000_000)
+    );
+    for bad in [
+        json!({"surface": "portal:main", "status": "attached", "ttl_ms": 0}),
+        json!({"surface": "portal:main", "status": "detached", "ttl_ms": 0}),
+        json!({"surface": "portal:main", "status": "hud_unavailable", "ttl_ms": 0}),
+        json!({"surface": "portal:main", "content": {}, "ttl_ms": 0}),
+    ] {
+        let e = call_err(&server, "hud_publish", bad).await;
+        assert_eq!(e["code"], "INVALID_ARGUMENT");
+        let hub = hub.lock().unwrap();
+        let p = hub.get(&key).unwrap();
+        assert_eq!(p.transcript.len(), 2);
+        assert_eq!(p.status, PortalStatus::Degraded);
+        assert_eq!(p.hold_until_us, Some(120_000_000));
+    }
+    let e = call_err(
+        &server,
+        "hud_clear",
+        json!({"surface": "portal:main", "reason": "done"}),
+    )
+    .await;
+    assert_eq!(e["code"], "INVALID_ARGUMENT");
+    call(
+        &server,
+        "hud_publish",
+        json!({"surface": "portal:main", "status": "active"}),
+    )
+    .await;
     let v = call(&server, "hud_surfaces", json!({})).await;
     let portal = v["surfaces"]
         .as_array()
@@ -1076,6 +1285,22 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
     );
     let v = call(&server, "hud_input", json!({"ack": [id]})).await;
     assert_eq!(v, json!({"items": [], "remaining": 0}));
+
+    for text in ["progress 1", "progress 2"] {
+        call(
+            &server,
+            "hud_publish",
+            json!({"surface": "portal:main", "content": text, "key": "progress", "ttl_ms": 0}),
+        )
+        .await;
+    }
+    {
+        let hub = hub.lock().unwrap();
+        let p = hub.get(&key).unwrap();
+        assert_eq!(p.transcript.len(), 3);
+        assert_eq!(p.transcript.back().unwrap().text, "progress 2");
+        assert_eq!(p.hold_until_us, Some(u64::MAX));
+    }
 
     let v = call(
         &server,
@@ -1169,7 +1394,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
                 json!({"surface":"portal:main", "content":"first during wait"})
             )
             .await,
-            json!({"ok":true})
+            json!({"ok":true, "reattached":false, "pending_input":0})
         );
         hub.lock()
             .unwrap()
@@ -1479,6 +1704,15 @@ async fn resume_restores_mcp_publishing() {
 #[tokio::test]
 async fn user_test_zone_fixtures_and_documented_examples_match_production_parser() {
     fn zone_messages(value: Value, origin: &str) -> Vec<(String, Value)> {
+        if let Some(surface) = value.get("surface").and_then(Value::as_str) {
+            return value
+                .get("content")
+                .map(|content| vec![(surface.to_string(), content.clone())])
+                .unwrap_or_default();
+        }
+        if value.is_object() {
+            return Vec::new(); // Other API response examples have no publish content.
+        }
         value
             .as_array()
             .unwrap_or_else(|| panic!("{origin}: expected a message array"))
@@ -1524,33 +1758,45 @@ async fn user_test_zone_fixtures_and_documented_examples_match_production_parser
     );
     let fixture_count = messages.len();
 
-    let reference = std::fs::read_to_string(skill.join("references/message-payloads.md")).unwrap();
-    let mut block = None::<String>;
-    for line in reference.lines() {
-        match line.trim() {
-            "```json" => {
-                assert!(block.is_none(), "nested JSON fence in message-payloads.md");
-                block = Some(String::new());
-            }
-            "```" => {
-                if let Some(text) = block.take() {
-                    let value = serde_json::from_str(&text)
-                        .expect("message-payloads.md JSON examples must remain executable");
-                    messages.extend(zone_messages(value, "message-payloads.md"));
+    for path in [
+        skill.join("references/message-payloads.md"),
+        root.join("docs/api.md"),
+    ] {
+        let reference = std::fs::read_to_string(&path).unwrap();
+        let before = messages.len();
+        let mut block = None::<String>;
+        for line in reference.lines() {
+            match line.trim() {
+                "```json" => {
+                    assert!(block.is_none(), "nested JSON fence in {}", path.display());
+                    block = Some(String::new());
                 }
-            }
-            _ => {
-                if let Some(text) = block.as_mut() {
-                    text.push_str(line);
-                    text.push('\n');
+                "```" => {
+                    if let Some(text) = block.take() {
+                        let value = serde_json::from_str(&text)
+                            .expect("documented JSON examples must remain executable");
+                        messages.extend(zone_messages(value, &path.display().to_string()));
+                    }
+                }
+                _ => {
+                    if let Some(text) = block.as_mut() {
+                        text.push_str(line);
+                        text.push('\n');
+                    }
                 }
             }
         }
+        assert!(
+            block.is_none(),
+            "unterminated JSON example in {}",
+            path.display()
+        );
+        assert!(
+            messages.len() > before,
+            "no publish example in {}",
+            path.display()
+        );
     }
-    assert!(
-        block.is_none(),
-        "unterminated JSON example in message-payloads.md"
-    );
     assert!(
         messages.len() > fixture_count,
         "no documented zone examples were checked"
@@ -1633,5 +1879,120 @@ async fn user_test_zone_fixtures_and_documented_examples_match_production_parser
         .await;
         assert_eq!(error["code"], "INVALID_ARGUMENT", "{error}");
         assert!(error["hint"].as_str().unwrap().contains(hint), "{error}");
+    }
+    let mut invalid = Vec::new();
+    for urgency in [
+        json!("high"),
+        json!(-1),
+        json!(0.5),
+        json!(true),
+        json!(null),
+        json!(4),
+        json!(4294967297_u64),
+        json!(1e100),
+    ] {
+        invalid.push((
+            "zone:notification-area",
+            json!({"body":"valid", "urgency":urgency}),
+            "urgency",
+        ));
+    }
+    for ttl in [json!(1000), json!(0), json!(null), json!("1000"), json!({})] {
+        invalid.push((
+            "zone:notification-area",
+            json!({"body":"valid", "ttl_ms":ttl}),
+            "top-level",
+        ));
+    }
+    for value in [json!(1), json!(true), json!(null), json!({}), json!([])] {
+        invalid.push((
+            "zone:status-bar",
+            json!({"entries":{"good":"ok", "bad":value}}),
+            "entries.bad",
+        ));
+    }
+    for (surface, content, hint) in invalid {
+        let (server, clock) = server();
+        let before = server.scene.lock().await.version;
+        for _ in 0..2 {
+            let error = call_err(
+                &server,
+                "hud_publish",
+                json!({"surface":surface,"content":content,"delay_ms":1000}),
+            )
+            .await;
+            assert_eq!(error["code"], "INVALID_ARGUMENT", "{error}");
+            assert!(error["hint"].as_str().unwrap().contains(hint), "{error}");
+            clock.advance(2000);
+            let mut scene = server.scene.lock().await;
+            assert_eq!(scene.version, before);
+            assert!(
+                scene.leases.is_empty(),
+                "bad content must not grant a lease"
+            );
+            assert!(
+                scene.apply_due_batches().is_empty(),
+                "bad content must not schedule"
+            );
+        }
+        let seed = if surface == "zone:status-bar" {
+            json!({"entries":{"existing":"kept"}})
+        } else {
+            json!({"body":"kept","urgency":1})
+        };
+        call(
+            &server,
+            "hud_publish",
+            json!({"surface":surface,"content":seed,"ttl_ms":0}),
+        )
+        .await;
+        let zone = surface.strip_prefix("zone:").unwrap();
+        let before = {
+            let scene = server.scene.lock().await;
+            (
+                scene.version,
+                scene.leases.clone(),
+                scene.zone_registry.active_publishes[zone][0]
+                    .content
+                    .clone(),
+            )
+        };
+        let error = call_err(
+            &server,
+            "hud_publish",
+            json!({"surface":surface,"content":content,"delay_ms":1000}),
+        )
+        .await;
+        assert_eq!(error["code"], "INVALID_ARGUMENT", "{error}");
+        assert!(error["hint"].as_str().unwrap().contains(hint), "{error}");
+        clock.advance(2000);
+        let mut scene = server.scene.lock().await;
+        assert_eq!(scene.version, before.0);
+        assert_eq!(scene.leases, before.1);
+        assert!(scene.apply_due_batches().is_empty());
+        let pubs = &scene.zone_registry.active_publishes[zone];
+        assert_eq!(pubs.len(), 1);
+        assert_eq!(pubs[0].content, before.2);
+        assert_eq!(pubs[0].expires_at_wall_us, None);
+    }
+    for urgency in [None, Some(0), Some(1), Some(2), Some(3)] {
+        let (server, _) = server();
+        let mut content = json!({"body":"valid"});
+        if let Some(urgency) = urgency {
+            content["urgency"] = json!(urgency);
+        }
+        call(
+            &server,
+            "hud_publish",
+            json!({"surface":"zone:notification-area","content":content,"ttl_ms":1000}),
+        )
+        .await;
+        let scene = server.scene.lock().await;
+        let record = &scene.zone_registry.active_publishes["notification-area"][0];
+        let ZoneContent::Notification(payload) = &record.content else {
+            panic!("notification")
+        };
+        assert_eq!(payload.urgency, urgency.unwrap_or(1));
+        assert_eq!(record.expires_at_wall_us, Some(2_000_000));
     }
 }

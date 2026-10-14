@@ -33,7 +33,8 @@ MCP `tools/list` has five tools. The resident tile API is gRPC only.
 (`tile.close_button.*` tokens). Pressing it reclaims the tile's lease on the
 spot, with no agent round trip: a gRPC agent gets `Reclaimed{OVERRIDE}` for
 `tile:<id>`. A dismissed portal is detached; the agent's next `hud_publish` to
-`portal:<id>` attaches a fresh one, `hud_hold` answers `NOT_HELD` and
+`portal:<id>` attaches a fresh one and reports `reattached: true`;
+`hud_hold` answers `NOT_HELD` and
 `hud_clear` succeeds as a no-op.
 
 ## MCP tools
@@ -57,15 +58,30 @@ milliseconds, named `*_ms`, everywhere.
 
 It includes nothing the model doesn't act on: no UUIDs, geometry, or
 timestamps. Holdings are the entries with `held: true`; `held` is omitted
-otherwise.
+otherwise. Scheduled zone publications count as held before presentation;
+`expires_in_ms`, when present, includes their presentation delay.
 
 **`hud_publish`** `{surface*, content | params, ttl_ms?, delay_ms?, key?, status?, expects_reply?, display_name?}`
 
 - Zone: `content` is a string, or a typed object for structured zones
-  (`notification` with `title`, `body`, `urgency`, `actions`). `type` may be
+  (`notification` with optional `title`, `body`, integer `urgency` 0–3
+  (default 1), and optional `actions: [{label, callback_id}]`; both action
+  fields are non-empty strings). `type` may be
   omitted; the runtime infers it from what the zone accepts. `key` is the
-  merge key.
-- Widget: `params` is the typed parameter map. Configured HUD startup resolves
+  merge key. Supplied notification urgency must be an integer 0–3; only
+  omission defaults to 1. `status_bar.entries` must be a non-empty object
+  whose every value is a string; an empty string removes that entry.
+  Notification TTL belongs at the publish's top-level `ttl_ms`; an inner
+  `content.ttl_ms` is rejected with a hint to move it.
+- Widget: `params` is the typed parameter map. F32 values must be finite and
+  within the declaration's inclusive bounds (including one-sided bounds).
+  Both MCP and gRPC reject out-of-range values rather than clamping them.
+  MCP colors are exact `#RRGGBB` strings or `{r,g,b,a?}` objects: RGB are
+  required numeric channels in 0–1, alpha defaults to 1 only when absent,
+  and supplied alpha must also be numeric in 0–1. Both planes reject
+  nonfinite/out-of-range RGBA. Config bundle byte-array defaults are a separate
+  loader format, normalized before admission.
+  Configured HUD startup resolves
   the selected theme and config overrides once; MCP publishes use its
   `motion.state.ms` duration without adding a tool parameter. gRPC publishes
   retain their explicit `transition_ms`. A positive duration eases f32 and
@@ -79,16 +95,30 @@ otherwise.
   unless explicitly overridden by zone policy, and Stack TTL fades use the
   exit duration/curve without extending authoritative expiry.
 - Portal: the first publish to `portal:<id>` attaches (`display_name` is
-  optional). `content` is the output text, `status` is the lifecycle state,
-  and `expects_reply` arms the composer. `key` replaces the newest output
+  optional). Omit content for a bare attach or status-only update.
+  `content` appends only the new output text; `status` labels agent activity
+  (`active` or `degraded`), and `expects_reply` arms the composer. `key`
+  replaces the newest output
   with the same key (progress lines). Portals are per agent: another agent's
   `portal:<id>` with the same id is a separate portal.
 - `ttl_ms` defaults to 60000 for zones; widgets are durable unless given one.
-  0 means held until cleared.
+  0 means held until cleared. On a portal, an optional `ttl_ms` holds the
+  portal atomically with this publish, with the same semantics as `hud_hold`.
 - `delay_ms` (zones, ≤ 300000) holds the content until then (invariant 1);
   the expiry counts from presentation, and `ttl_ms: 0` holds a delayed
   publish until cleared just like an immediate one.
-- Returns `{"ok":true,"expires_in_ms":8000}`. It doesn't echo the request.
+- Returns `{"ok":true,"expires_in_ms":8000}` when a TTL is set. Portal
+  publishes also return `reattached` (true when this call replaces a
+  runtime-reclaimed portal) and `pending_input` (queued replies). First attach,
+  live update, and attach after explicit clear report false. The response
+  describes the completed publish; it does not echo content.
+
+For example, publish a notification whose button arrives at `hud_input` as
+`{"action":"approve","s":"zone:notification-area",...}`:
+
+```json
+{"surface":"zone:notification-area","content":{"body":"Build complete","urgency":1,"actions":[{"label":"Approve","callback_id":"approve"}]},"ttl_ms":10000}
+```
 
 **`hud_hold`** `{surface*, ttl_ms*}` extends a holding, for any surface type.
 On a zone or widget, `ttl_ms` replaces the expiry with now + `ttl_ms` (not
@@ -101,7 +131,7 @@ or until `hud_clear` when 0, even with no other calls. Without a hold, a
 portal is degraded after 30 s with no publish, poll, or hold, and reclaimed
 30 s later.
 
-**`hud_clear`** `{surface*, reason?}` releases a zone publication, a widget
+**`hud_clear`** `{surface*}` releases a zone publication, a widget
 instance, or a portal (detach). On a zone it also cancels the caller's own
 delayed publishes that haven't presented yet; other agents' are untouched.
 The gRPC `Hold` and `Clear` behave the same on zones. A `ClearZone` inside a
@@ -199,6 +229,10 @@ unknown PSK) is a JSON-RPC error.
 
 - The message isn't repeated. The hint names the next call.
 - Typed zone content is strict: an unknown or nested key is `INVALID_ARGUMENT` with the allowed keys in the hint, and so is empty content (a notification with no title or body, `stream_text` without text, `solid_color` missing r/g/b; over gRPC, a blank notification).
+- Invalid widget values return `WIDGET_PARAMETER_INVALID` with the parameter
+  and its required type/range; invalid urgency/status entries/inner TTL return
+  `INVALID_ARGUMENT`. Mixed valid/invalid updates reject whole before changing
+  publications, current parameters, transitions or MCP lease renewals.
 - A sequence-valid post-handshake gRPC `ClientMessage` with no recognized request payload returns `RequestResult{ok: false, code: INVALID_ARGUMENT}` with a hint to use the current schema and a supported request. This covers empty envelopes and requests containing only unknown or removed fields. Protobuf discards those fields, so the server cannot identify the discarded request tag or name. Unknown fields alongside a recognized request keep its normal behavior.
 - Codes are a closed set shared by both planes (invariant 8;
   `crates/tze_hud_scene/src/error_codes.rs` `ERROR_CODES`, kept in sync with
@@ -260,6 +294,21 @@ down to the lifecycle.
 - **Timing hints are honored**, not just validated: `present_at_us` holds
   content, and `expires_at_us` sweeps it (invariant 1). On `Publish`,
   `expires_at_us` wins over `ttl_ms`, which counts from presentation.
+- **Zero means the surface default on `Publish`.** Omitted scalar fields
+  arrive as zero. With both `ttl_ms` and `expires_at_us` zero, notifications
+  expire after 8 s (urgency 0/1), 15 s (2), or 30 s (3+), counted from
+  presentation. Other zone content and widget publications have no derived
+  content expiry. MCP differs: omitted zone `ttl_ms` gives 60 s, while an
+  explicit `ttl_ms: 0` holds even a notification until cleared.
+- **Hold a notification with `Publish`, then `Hold{surface, ttl_ms: 0}`.**
+  Hold removes content expiry from the agent's active and pending publications
+  on that zone; it is namespace-wide, not limited to one merge key. Pending
+  content still waits for `present_at_us`, and `Clear` cancels it. The two
+  requests are not atomic: if nothing remains when Hold arrives, it returns
+  `NOT_HELD`. A later Publish uses its own timing, so republishing a
+  notification can restore an expiry. Held content remains subject to
+  clearing, human override and lease/session-origin reclamation (invariant 4);
+  Hold does not make a lease immortal. There is no atomic held mode on Publish.
 - **Runtime-internal mutations.** `CreateTile`, `PublishToTile`, and the
   portal mutations (`MutationProto` 13–17) are applied only by the runtime's
   in-process portal driver. The session server rejects them from agents with
@@ -400,13 +449,16 @@ baselined against regressions.
 
 | Measure | Before T5 (wire) | Wire | Model-visible | Budget (model-visible) |
 |---|---|---|---|---|
-| `tools/list` | 4,418 | 495 | 458 | ≤ 900 |
+| `tools/list` | 4,418 | 554 | 517 | ≤ 900 |
 | Discover (default scene) | ~430 (`list_zones`) | 181 | 113 | ≤ 150 |
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
 | Widget publish | ~168 | 73 | 22 | ≤ 80 |
-| Portal: attach+publish, poll, ack, clear | ~575 over 5 round trips | 319 over 4 | 113 over 4 | ≤ 250 |
+| Portal: attach+publish+hold, poll, ack, clear | ~575 over 5 round trips | 343 over 4 | 137 over 4 | ≤ 250 |
 | Discover (`production.toml`: 6 zones, 3 built-in widgets) | n/a | n/a | ~232 | ≤ 250 |
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
+
+These current measurements use canonical flow version 3; its refreshed baseline
+is pending owner review, with every budget unchanged.
 
 The portal flow takes 4 round trips in the canonical fixture because the
 first poll has nothing to ack; in a steady loop each `hud_input` both acks
@@ -417,6 +469,19 @@ acceptance flows (`docs/scope.md`), run end to end against `production.toml`.
 Its discover budget is the production row above: the three built-in widgets
 add about 100 tokens, all typed parameter names and ranges the model needs to
 publish, so shrinking further would drop information the model acts on.
+
+These four parameters remain because they control behavior in the shipped bundles:
+
+- `status-indicator.theme` selects the widget's minimal, system, or friendly
+  appearance independently of the global `[design_tokens].theme`; publishers
+  need that choice when selecting a status presentation.
+- `status-indicator.tooltip_visible` is a declared `f32` parameter used by the
+  delayed runtime-local hover path to reveal the tooltip. The loader validates
+  that hover target and its SVG bindings against the parameter schema.
+- `gauge.label` supplies publisher-chosen metric identification inside the hover
+  tooltip, so a gauge can explain which quantity its value represents.
+- `progress-bar.label` supplies publisher-chosen task or progress text centered
+  on the bar, bounded to 32 bytes by its schema.
 
 ## Design decisions (T5, 2026-10-02)
 

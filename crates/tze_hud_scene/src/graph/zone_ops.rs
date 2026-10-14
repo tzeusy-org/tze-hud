@@ -1,7 +1,37 @@
 use super::*;
 
 impl SceneGraph {
-    pub(super) fn coerce_widget_param_value(
+    /// Validate before narrowing JSON f64 values, so rounding cannot hide a
+    /// range violation. Typed f32 callers use the same check.
+    pub fn validate_widget_f32_value(
+        widget: &str,
+        param: &str,
+        decl: &crate::types::WidgetParameterDeclaration,
+        value: f64,
+    ) -> Result<f32, ValidationError> {
+        let min = decl.constraints.as_ref().and_then(|c| c.f32_min);
+        let max = decl.constraints.as_ref().and_then(|c| c.f32_max);
+        if !value.is_finite()
+            || value.abs() > f64::from(f32::MAX)
+            || min.is_some_and(|min| value < f64::from(min))
+            || max.is_some_and(|max| value > f64::from(max))
+        {
+            let range = match (min, max) {
+                (Some(min), Some(max)) => format!("{min}..{max} inclusive"),
+                (Some(min), None) => format!("at least {min}"),
+                (None, Some(max)) => format!("at most {max}"),
+                (None, None) => format!("within +/-{}", f64::from(f32::MAX)),
+            };
+            return Err(ValidationError::WidgetParameterInvalidValue {
+                widget: widget.to_string(),
+                param: param.to_string(),
+                reason: format!("f32 must be finite and {range}"),
+            });
+        }
+        Ok(value as f32)
+    }
+
+    fn validate_widget_param_value(
         widget_name: &str,
         param_name: &str,
         decl: &crate::types::WidgetParameterDeclaration,
@@ -14,27 +44,8 @@ impl SceneGraph {
 
         match (&decl.param_type, submitted_value) {
             (WidgetParamType::F32, WidgetParameterValue::F32(v)) => {
-                if v.is_nan() {
-                    return Err(ValidationError::WidgetParameterInvalidValue {
-                        widget: widget_name.to_string(),
-                        param: param_name.to_string(),
-                        reason: "NaN is not a valid f32 parameter value".to_string(),
-                    });
-                }
-                if v.is_infinite() {
-                    return Err(ValidationError::WidgetParameterInvalidValue {
-                        widget: widget_name.to_string(),
-                        param: param_name.to_string(),
-                        reason: "infinity is not a valid f32 parameter value".to_string(),
-                    });
-                }
-                let clamped = match (constraints.f32_min, constraints.f32_max) {
-                    (Some(mn), Some(mx)) => v.clamp(mn, mx),
-                    (Some(mn), None) => v.max(mn),
-                    (None, Some(mx)) => v.min(mx),
-                    (None, None) => *v,
-                };
-                Ok(WidgetParameterValue::F32(clamped))
+                Self::validate_widget_f32_value(widget_name, param_name, decl, f64::from(*v))
+                    .map(WidgetParameterValue::F32)
             }
             (WidgetParamType::F32, _) => Err(ValidationError::WidgetParameterTypeMismatch {
                 widget: widget_name.to_string(),
@@ -63,13 +74,16 @@ impl SceneGraph {
                 param: param_name.to_string(),
             }),
             (WidgetParamType::Color, WidgetParameterValue::Color(c)) => {
-                let clamped_color = Rgba {
-                    r: c.r.clamp(0.0, 1.0),
-                    g: c.g.clamp(0.0, 1.0),
-                    b: c.b.clamp(0.0, 1.0),
-                    a: c.a.clamp(0.0, 1.0),
-                };
-                Ok(WidgetParameterValue::Color(clamped_color))
+                for (channel, value) in [("r", c.r), ("g", c.g), ("b", c.b), ("a", c.a)] {
+                    if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                        return Err(ValidationError::WidgetParameterInvalidValue {
+                            widget: widget_name.to_string(),
+                            param: param_name.to_string(),
+                            reason: format!("color.{channel} must be finite in 0..1 inclusive"),
+                        });
+                    }
+                }
+                Ok(WidgetParameterValue::Color(*c))
             }
             (WidgetParamType::Color, _) => Err(ValidationError::WidgetParameterTypeMismatch {
                 widget: widget_name.to_string(),
@@ -455,7 +469,8 @@ impl SceneGraph {
     /// - NaN/infinity (f32) → `WidgetParameterInvalidValue`
     /// - String exceeds max_length → `WidgetParameterInvalidValue`
     /// - Enum value not in allowed_values → `WidgetParameterInvalidValue`
-    /// - f32 out of [min, max] range → clamped (NOT rejected)
+    /// - f32 outside declared inclusive bounds, or color outside finite 0..1
+    ///   → `WidgetParameterInvalidValue` (no clamping)
     ///
     /// # Contention
     ///
@@ -553,25 +568,8 @@ impl SceneGraph {
 
         let is_ephemeral = definition.ephemeral;
 
-        // ── Step 2: Validate and coerce each submitted parameter ─────────────
-        let mut validated_params: std::collections::HashMap<String, WidgetParameterValue> =
-            std::collections::HashMap::new();
-
-        for (param_name, submitted_value) in &params {
-            // Look up declaration in schema
-            let decl = definition
-                .parameter_schema
-                .iter()
-                .find(|d| &d.name == param_name)
-                .ok_or_else(|| ValidationError::WidgetUnknownParameter {
-                    widget: widget_name.to_string(),
-                    param: param_name.clone(),
-                })?;
-
-            let coerced =
-                Self::coerce_widget_param_value(widget_name, param_name, decl, submitted_value)?;
-            validated_params.insert(param_name.clone(), coerced);
-        }
+        // Validate the whole map before recording or changing current_params.
+        let validated_params = self.validate_widget_params(widget_name, &params)?;
 
         // ── Step 3: Apply contention policy and record publication ────────────
         let contention_policy = instance
@@ -667,10 +665,11 @@ impl SceneGraph {
                 param: param_name.to_string(),
             })?;
 
-        let coerced = Self::coerce_widget_param_value(widget_name, param_name, decl, &value)?;
+        let validated = Self::validate_widget_param_value(widget_name, param_name, decl, &value)?;
 
         if let Some(inst) = self.widget_registry.instances.get_mut(widget_name) {
-            inst.current_params.insert(param_name.to_string(), coerced);
+            inst.current_params
+                .insert(param_name.to_string(), validated);
             self.prune_publication_orphans();
             self.version += 1;
             return Ok(());
@@ -679,6 +678,39 @@ impl SceneGraph {
         Err(ValidationError::WidgetNotFound {
             name: widget_name.to_string(),
         })
+    }
+
+    /// Validate without effects, so transports can reject before renewing a lease.
+    pub fn validate_widget_params(
+        &self,
+        widget_name: &str,
+        params: &std::collections::HashMap<String, WidgetParameterValue>,
+    ) -> Result<std::collections::HashMap<String, WidgetParameterValue>, ValidationError> {
+        let definition = self
+            .widget_registry
+            .instances
+            .get(widget_name)
+            .and_then(|i| self.widget_registry.definitions.get(&i.widget_type_name))
+            .ok_or_else(|| ValidationError::WidgetNotFound {
+                name: widget_name.to_string(),
+            })?;
+        params
+            .iter()
+            .map(|(name, value)| {
+                let decl = definition
+                    .parameter_schema
+                    .iter()
+                    .find(|d| d.name == *name)
+                    .ok_or_else(|| ValidationError::WidgetUnknownParameter {
+                        widget: widget_name.to_string(),
+                        param: name.clone(),
+                    })?;
+                Ok((
+                    name.clone(),
+                    Self::validate_widget_param_value(widget_name, name, decl, value)?,
+                ))
+            })
+            .collect()
     }
 
     /// Clear all active publishes for a zone (regardless of publisher).

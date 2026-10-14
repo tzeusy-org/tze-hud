@@ -18,7 +18,7 @@ mod calibration {
     };
 
     const PSK: &str = "token-calibration-resident-psk";
-    const CANONICAL_FLOW_VERSION: u32 = 2;
+    const CANONICAL_FLOW_VERSION: u32 = 3;
     const VOCAB_FINGERPRINT: &str =
         "sha256:446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d";
 

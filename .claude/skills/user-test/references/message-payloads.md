@@ -28,7 +28,7 @@ Message shape — `content` is either a plain string (StreamText) or a typed JSO
   },
   {
     "zone": "notification-area",
-    "content": {"body": "Build complete", "urgency": 1},
+    "content": {"body": "Build complete", "urgency": 1, "actions": [{"label": "Approve", "callback_id": "approve"}]},
     "ttl_ms": 10000
   },
   {
@@ -47,12 +47,18 @@ Message shape — `content` is either a plain string (StreamText) or a typed JSO
 **Content types by zone:**
 - `alert-banner`, `subtitle`: plain string (StreamText)
 - `status-bar`: `{"type":"status_bar","entries":{"key":"value",...}}` with `key`
-- `notification-area`: `{"body":"...","urgency":0-3,"title":"...","actions":[...]}` (`title` and `actions` optional)
+- `notification-area`: `{"body":"...","urgency":0-3,"title":"...","actions":[{"label":"Approve","callback_id":"approve"}]}` (`title` and `actions` optional; action fields must be non-empty strings)
 - `ambient-background`, `pip`: `{"type":"solid_color","r":0-1,"g":0-1,"b":0-1,"a":0-1}`
 
 `key` and `ttl_ms` are optional per message. The publisher namespace is the
 agent the PSK belongs to; a message cannot set it. `type` may be omitted: the
 runtime infers it from what the zone accepts.
+
+Notification urgency, when supplied, is an integer 0–3; omission defaults to 1.
+Put TTL at the message/publish top level, never inside notification content.
+Every status entry must be a string; an empty string removes its key.
+Widget f32 values must satisfy their discovered ranges. Widget colors accept
+`#RRGGBB` or numeric `{r,g,b,a?}` in 0–1, with absent alpha defaulting to 1.
 
 - `widget_messages`: array of widget publishes (optional)
 

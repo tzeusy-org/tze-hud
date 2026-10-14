@@ -26,12 +26,14 @@
 //!   gRPC SceneSnapshot contains subtitle zone with LatestWins contention and StreamText type.
 //!
 //! All tests are headless (no display server required).
-//! Each test creates its own runtime on a unique port to avoid conflicts.
+//! Each test continuously owns a kernel-assigned listener through runtime startup.
 //!
 //! Spec: openspec/changes/exemplar-subtitle/specs/exemplar-subtitle/spec.md
 //!   §Subtitle Streaming Word-by-Word Reveal
 //!   §Subtitle Contention Policy — Latest Wins
 //!   §Subtitle MCP Test Fixtures
+
+use std::net::SocketAddr;
 
 use tze_hud_protocol::auth::{RUNTIME_MAX_VERSION, RUNTIME_MIN_VERSION};
 use tze_hud_protocol::proto;
@@ -42,6 +44,7 @@ use tze_hud_runtime::HeadlessRuntime;
 use tze_hud_runtime::headless::HeadlessConfig;
 use tze_hud_scene::types::ZoneRegistry;
 
+use tokio::{net::TcpListener, task::JoinHandle};
 use tokio_stream::StreamExt;
 
 // ─── Shared gRPC session harness ─────────────────────────────────────────────
@@ -53,26 +56,9 @@ use tokio_stream::StreamExt;
 #[path = "common/mod.rs"]
 mod common;
 
-// ─── Port assignments (must not conflict with other integration tests) ────────
-//
-// Other tests use:
-//   50052  multi_agent
-//   50053  soak
-//   50055  multi_agent (same-anchor stacking)
-//   50056-50060 reserved for this file
-//
-// Port per test for isolation (tests run in parallel by default):
-
 const TEST_PSK: &str = "subtitle-streaming-test-key";
 const DISPLAY_W: u32 = 1920;
 const DISPLAY_H: u32 = 1080;
-
-// Individual test ports (one per async test to prevent bind conflicts)
-const PORT_BREAKPOINTS_FORWARDED: u16 = 50056;
-const PORT_EMPTY_BREAKPOINTS: u16 = 50057;
-const PORT_REPLACEMENT_CANCELS: u16 = 50058;
-const PORT_MCP_PARITY: u16 = 50059;
-const PORT_LIST_ZONES_METADATA: u16 = 50060;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 // now_wall_us() is provided by the shared common harness (common::now_wall_us).
@@ -91,14 +77,15 @@ impl AgentSession {
     }
 }
 
-/// Start a headless runtime on the given port with default zones.
-async fn start_runtime_with_subtitle_zone(
-    port: u16,
-) -> Result<HeadlessRuntime, Box<dyn std::error::Error>> {
+/// Bind once, retain the listener through GPU initialization, and serve on it.
+async fn start_runtime_with_subtitle_zone()
+-> Result<(HeadlessRuntime, JoinHandle<()>, SocketAddr), Box<dyn std::error::Error>> {
+    let listener = TcpListener::bind("[::1]:0").await?;
+    let addr = listener.local_addr()?;
     let config = HeadlessConfig {
         width: DISPLAY_W,
         height: DISPLAY_H,
-        grpc_port: port,
+        grpc_port: addr.port(),
         agents: tze_hud_scene::config::AgentDirectory::unrestricted(TEST_PSK),
         config_toml: None,
     };
@@ -113,15 +100,16 @@ async fn start_runtime_with_subtitle_zone(
         scene.zone_registry = ZoneRegistry::with_defaults();
     }
 
-    Ok(runtime)
+    let server_handle = runtime.start_grpc_server_on_listener(listener);
+    Ok((runtime, server_handle, addr))
 }
 
-/// Connect to the runtime at the given port and acquire a lease.
+/// Connect to the runtime's actual listening address and acquire a lease.
 async fn connect_agent_with_zone_publish_cap(
-    port: u16,
+    addr: SocketAddr,
     agent_id: &str,
 ) -> Result<AgentSession, Box<dyn std::error::Error>> {
-    let mut client = HudSessionClient::connect(format!("http://[::1]:{port}")).await?;
+    let mut client = HudSessionClient::connect(format!("http://{addr}")).await?;
 
     let (tx, rx_chan) = tokio::sync::mpsc::channel::<session_proto::ClientMessage>(64);
     let stream = tokio_stream::wrappers::ReceiverStream::new(rx_chan);
@@ -248,12 +236,23 @@ async fn zone_publish_stream_text(
 #[tokio::test]
 async fn test_grpc_zone_publish_with_breakpoints_forwarded()
 -> Result<(), Box<dyn std::error::Error>> {
-    let runtime = start_runtime_with_subtitle_zone(PORT_BREAKPOINTS_FORWARDED).await?;
-    let _server_handle = runtime.start_grpc_server().await?;
+    // Occupy the former fixed endpoint for the entire scenario. An existing
+    // listener is also a valid precondition; all other bind errors must fail.
+    let former_port_listener = match TcpListener::bind("[::1]:50056").await {
+        Ok(listener) => Some(listener),
+        Err(error) if error.kind() == std::io::ErrorKind::AddrInUse => None,
+        Err(error) => return Err(error.into()),
+    };
+    let (runtime, _server_handle, addr) = start_runtime_with_subtitle_zone().await?;
+    if former_port_listener.is_some() {
+        assert_ne!(
+            addr.port(),
+            50056,
+            "the occupied former port must not be reused"
+        );
+    }
 
-    let mut agent =
-        connect_agent_with_zone_publish_cap(PORT_BREAKPOINTS_FORWARDED, "grpc-stream-agent")
-            .await?;
+    let mut agent = connect_agent_with_zone_publish_cap(addr, "grpc-stream-agent").await?;
 
     // "The quick brown fox" — breakpoints at word boundaries
     // byte offsets: after "The"=3, after "quick"=9, after "brown"=15
@@ -301,11 +300,9 @@ async fn test_grpc_zone_publish_with_breakpoints_forwarded()
 #[tokio::test]
 async fn test_grpc_zone_publish_empty_breakpoints_reveals_immediately()
 -> Result<(), Box<dyn std::error::Error>> {
-    let runtime = start_runtime_with_subtitle_zone(PORT_EMPTY_BREAKPOINTS).await?;
-    let _server_handle = runtime.start_grpc_server().await?;
+    let (runtime, _server_handle, addr) = start_runtime_with_subtitle_zone().await?;
 
-    let mut agent =
-        connect_agent_with_zone_publish_cap(PORT_EMPTY_BREAKPOINTS, "grpc-empty-bp-agent").await?;
+    let mut agent = connect_agent_with_zone_publish_cap(addr, "grpc-empty-bp-agent").await?;
 
     // Publish with empty breakpoints (should reveal immediately, no streaming)
     zone_publish_stream_text(&mut agent, "subtitle", "Instant display", vec![]).await?;
@@ -336,11 +333,9 @@ async fn test_grpc_zone_publish_empty_breakpoints_reveals_immediately()
 #[tokio::test]
 async fn test_grpc_zone_publish_replacement_cancels_breakpoints()
 -> Result<(), Box<dyn std::error::Error>> {
-    let runtime = start_runtime_with_subtitle_zone(PORT_REPLACEMENT_CANCELS).await?;
-    let _server_handle = runtime.start_grpc_server().await?;
+    let (runtime, _server_handle, addr) = start_runtime_with_subtitle_zone().await?;
 
-    let mut agent =
-        connect_agent_with_zone_publish_cap(PORT_REPLACEMENT_CANCELS, "grpc-replace-agent").await?;
+    let mut agent = connect_agent_with_zone_publish_cap(addr, "grpc-replace-agent").await?;
 
     // First publish: streaming with breakpoints
     zone_publish_stream_text(
@@ -390,11 +385,9 @@ async fn test_grpc_zone_publish_replacement_cancels_breakpoints()
 #[tokio::test]
 async fn test_grpc_zone_publish_breakpoints_match_mcp_behavior()
 -> Result<(), Box<dyn std::error::Error>> {
-    let runtime = start_runtime_with_subtitle_zone(PORT_MCP_PARITY).await?;
-    let _server_handle = runtime.start_grpc_server().await?;
+    let (runtime, _server_handle, addr) = start_runtime_with_subtitle_zone().await?;
 
-    let mut agent =
-        connect_agent_with_zone_publish_cap(PORT_MCP_PARITY, "grpc-parity-agent").await?;
+    let mut agent = connect_agent_with_zone_publish_cap(addr, "grpc-parity-agent").await?;
 
     // Same payload as subtitle-streaming.json fixture:
     // "The quick brown fox jumps over the lazy dog" with breakpoints at word boundaries
@@ -433,8 +426,7 @@ async fn test_grpc_zone_publish_breakpoints_match_mcp_behavior()
 /// Spec §Subtitle MCP Test Fixtures — zone_name: "subtitle".
 #[tokio::test]
 async fn test_grpc_list_zones_subtitle_metadata() -> Result<(), Box<dyn std::error::Error>> {
-    let runtime = start_runtime_with_subtitle_zone(PORT_LIST_ZONES_METADATA).await?;
-    let _server_handle = runtime.start_grpc_server().await?;
+    let (runtime, _server_handle, _addr) = start_runtime_with_subtitle_zone().await?;
 
     // Verify the subtitle zone metadata directly via the scene graph
     // (the gRPC snapshot and MCP hud_surfaces serialize from the same data).

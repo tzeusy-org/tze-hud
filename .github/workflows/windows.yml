@@ -7,8 +7,11 @@
 #   reclaimed after its grace, plus an informational idle-with-content
 #   measurement), then exercises self-install, single instance, and uninstall
 #   (scripts/ci/windows_install_smoke.py).
-#   Runs on every PR, merge-queue entry, push to main, and v* tag. Non-tag
-#   events use release-dev; v* tags keep the full release profile.
+#   Runs on non-docs PRs and main pushes, v* tags, and manual dispatch.
+#   Informational: omit merge_group while this check is not required. Restore
+#   merge_group in the same hud-bstmy.8.8 change that makes it required.
+#   Docs-only PR/main updates skip; tag and manual runs are unaffected.
+#   Non-tag events use release-dev; v* tags keep the full release profile.
 # release — signs the exe with minisign (secret MINISIGN_SECRET_KEY; public key
 #   app/tze_hud_app/minisign.pub) and publishes it:
 #     push to main → rolling `dev` prerelease (tag `dev` moves to the commit)
@@ -19,10 +22,15 @@ name: windows
 
 on:
   pull_request:
-  merge_group:
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
   push:
     branches: [main]
     tags: ["v*"]
+    paths-ignore:
+      - "docs/**"
+      - "*.md"
   workflow_dispatch: {}
 
 permissions:
@@ -37,6 +45,12 @@ jobs:
     name: windows build + boot smoke
     runs-on: windows-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+      actions: read
+      # Changed-only capture comment; fork tokens may be read-only. Never use
+      # pull_request_target or grant write access to repository contents.
+      pull-requests: write
     env:
       HUD_BUILD_PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'release-dev' }}
     steps:
@@ -51,15 +65,6 @@ jobs:
         timeout-minutes: 10
         with:
           shared-key: windows-msvc-${{ env.HUD_BUILD_PROFILE }}
-
-      - name: Install protoc
-        timeout-minutes: 5
-        shell: pwsh
-        run: |
-          $dir = Join-Path $env:RUNNER_TEMP "protoc"
-          Invoke-WebRequest -Uri "https://github.com/protocolbuffers/protobuf/releases/download/v29.3/protoc-29.3-win64.zip" -OutFile "$dir.zip"
-          Expand-Archive "$dir.zip" -DestinationPath $dir
-          "$dir\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Build tze_hud.exe (selected profile, static CRT)
         env:
@@ -98,6 +103,9 @@ jobs:
 
       - name: Boot smoke (production config, MCP lifecycle, POC stages)
         timeout-minutes: 10
+        env:
+          TZE_HUD_LOG: error,tze_hud_mcp_phases=debug
+          TZE_HUD_LOG_JSON: "1"
         run: python scripts/ci/windows_smoke.py --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --poc-demo "target/$env:HUD_BUILD_PROFILE/poc_demo.exe" --config app/tze_hud_app/config/production.toml
 
       # Informational, not a gate: boots a second HUD under the runtime's own
@@ -113,6 +121,35 @@ jobs:
       - name: Install, single-instance, uninstall smoke
         timeout-minutes: 5
         run: python scripts/ci/windows_install_smoke.py --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe"
+
+      # Own-frame WARP comparisons are informational, not owner signoff or a
+      # required check. First main run bootstraps an explicitly absent baseline.
+      - name: Theme fixture captures (informational)
+        id: captures
+        continue-on-error: true
+        timeout-minutes: 10
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/ci/windows_smoke.py --captures "$env:RUNNER_TEMP/windows-captures" --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --config app/tze_hud_app/config/production.toml
+
+      - name: Upload theme captures
+        id: capture-upload
+        if: always() && steps.captures.outcome != 'skipped'
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-captures
+          path: ${{ runner.temp }}/windows-captures/captures.zip
+          compression-level: 0
+          if-no-files-found: error
+
+      - name: Changed-scene PR comment (informational)
+        if: github.event_name == 'pull_request' && steps.captures.outcome == 'success' && steps.capture-upload.outcome == 'success'
+        continue-on-error: true
+        timeout-minutes: 2
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/ci/windows_smoke.py --capture-comment "$env:RUNNER_TEMP/windows-captures"
 
       - name: Stage artifact
         shell: bash

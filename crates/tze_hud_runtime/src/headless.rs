@@ -55,7 +55,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 use tze_hud_compositor::{Compositor, HeadlessSurface};
 use tze_hud_config::resolve_runtime_widget_asset_store;
-use tze_hud_input::{AgentDispatch, InputProcessor, InputResult, PointerEvent, ScrollEvent};
+use tze_hud_input::{AgentDispatch, InputProcessor, InputResult, PointerEvent};
 use tze_hud_protocol::proto::FramePresented;
 use tze_hud_protocol::proto::session::hud_session_server::HudSessionServer;
 use tze_hud_protocol::session::SharedState;
@@ -722,8 +722,9 @@ impl HeadlessRuntime {
 
     /// Adopt a continuously owned fixture listener without changing the public
     /// configured-port checks or binding behavior.
-    #[cfg(test)]
-    fn start_grpc_server_on_listener(
+    /// Available only to unit tests and the explicit `test-harness` feature.
+    #[cfg(any(test, feature = "test-harness"))]
+    pub fn start_grpc_server_on_listener(
         &self,
         listener: tokio::net::TcpListener,
     ) -> tokio::task::JoinHandle<()> {
@@ -759,15 +760,6 @@ impl HeadlessRuntime {
                 .await
                 .expect("gRPC server failed");
         })
-    }
-
-    /// Process a wheel/trackpad scroll event through the local-first scroll path.
-    pub fn process_scroll_event(
-        &mut self,
-        event: &ScrollEvent,
-        scene: &mut SceneGraph,
-    ) -> Option<tze_hud_input::ScrollOffsetChangedEvent> {
-        self.input_processor.process_scroll_event(event, scene)
     }
 }
 

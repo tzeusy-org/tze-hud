@@ -7,8 +7,15 @@ composer), ambient zones (one MCP call to put text on screen), agent-owned
 tiles (gRPC), and SVG widgets, rendered on a Windows overlay. The runtime
 owns layout, styling, and rendering; models only state intent.
 
-See [`docs/vision.md`](docs/vision.md) for what this is and isn't, and
-[`docs/scope.md`](docs/scope.md) for the in-progress scope reset.
+See [vision](docs/vision.md) for intent, [scope](docs/scope.md) for retained
+capabilities and open boundaries, and [architecture](docs/architecture.md) for
+how the current implementation fits together. For native Windows and WSL
+setup, use the [development guide](docs/development/windows.md).
+
+Documentation follows the code: behavior changes update the affected docs in
+the same change. Recheck command and CI claims against the [justfile](justfile)
+and [workflows](.github/workflows); fix stale claims or mark their evidence
+limits explicitly.
 
 ---
 
@@ -42,17 +49,21 @@ The rest of this README is command-first and focused on four workflows:
 
 ## Required Gates / CI
 
-CI (`.github/workflows/ci.yml`) runs the gates below on every PR; `just ci`
-reproduces the blocking set locally (requires [just](https://github.com/casey/just)).
-`clippy-windows-gnu`, `cargo-deny` and `overlay-harness-contract` are tool-gated:
-if the tool (windows-gnu target + mingw, cargo-deny, `pwsh`) is missing they print
+[Linux CI](.github/workflows/ci.yml) runs the gates below on PRs, main pushes,
+and merge groups. `just ci` reproduces the local sweep (requires
+[just](https://github.com/casey/just)); it excludes the Windows workflow and
+weekly performance lanes. Workflow failures and required branch checks are
+separate: consult the merge-queue ruleset for the required subset.
+`clippy-windows-gnu` and `cargo-deny` are tool-gated:
+if the tool (windows-gnu Rust target or cargo-deny) is missing they print
 `SKIPPED: <reason>` and pass, so a green local `just ci` does not prove them;
 CI always runs them.
 Each local recipe maps to a CI job:
 
 | Local recipe (`just …`) | CI job | Checks |
 |---|---|---|
-| `check` | `check` | `cargo check` (fast compile gate) |
+| `check` | `check` | `cargo check --workspace` (fast compile gate); CI also validates locked dependency metadata |
+| `untracked-evidence` | `fmt` | local evidence roots must stay out of Git |
 | `fmt` | `fmt` | `cargo fmt --check` |
 | `clippy` | `clippy` | `cargo clippy --workspace --all-targets -D warnings` |
 | `test` | `test-unit` | workspace tests (excludes `integration`), including the GPU compositor tests and `pixel_readback` on Mesa llvmpipe |
@@ -63,7 +74,6 @@ Each local recipe maps to a CI job:
 | `canonical-app-boot` | `canonical-app-production-boot` | canonical app production-config boot |
 | `dev-mode-guard` | `dev-mode-guard` | dev-mode not enabled in any package's default-build dependency closure (shipped binary included) |
 | `deps-unused` | `check` | `cargo machete`: unused dependencies |
-| `overlay-harness-contract` | `check` | pwsh fullscreen-vs-overlay harness contract test |
 | `idle-efficiency-checker` | `check` | fail-closed idle artifact contract tests |
 | `test-gpu` | — | GPU subset of `test` only (compositor + `pixel_readback`), llvmpipe-pinned with timeouts; already covered by `test`, so not a separate `just ci` step |
 | `clippy-windows-gnu` | `clippy-windows-gnu` | clippy on the `x86_64-pc-windows-gnu` target for the crates carrying `cfg(windows)` code |
@@ -81,10 +91,10 @@ The toolchain is pinned in `rust-toolchain.toml` (Rust 1.88, matching CI and the
 **Important:** This project distinguishes between the **canonical runtime application binary** and demo/reference binaries.
 
 ### Canonical Runtime App Binary
-- **Purpose**: Production-ready runtime executable for cross-machine deployment and MCP publishing operations.
+- **Purpose**: Canonical runtime executable for cross-machine deployment and MCP publishing operations.
 - **Binary name**: `tze_hud` (from the `tze_hud_app` crate, canonical application binary, part of a non-demo binary target in Cargo workspace)
 - **Windows artifact**: `target/x86_64-pc-windows-gnu/release/tze_hud.exe`
-- **Configuration**: Supports TOML configuration file with windowed display settings and network endpoint configuration.
+- **Configuration**: TOML scene/runtime configuration; window mode and endpoint ports are CLI or environment settings (see below).
 - **Network support**: Includes full `NetworkRuntime` with MCP HTTP listener lifecycle in windowed mode.
 - **Use case**: Remote deployment, cross-machine validation, automated publish workflows.
 
@@ -138,13 +148,18 @@ GPU-free headless runtime.
 
 ## 1) Build on Linux / Windows
 
+Protocol generation fetches pinned `protoc-bin-vendored =3.2.0` (protoc 31.1)
+through Cargo and selects the build-host binary explicitly. No system protoc
+installation or `PROTOC` override is used. The original three schemas regenerate
+into `OUT_DIR` during the build; unsupported hosts fail without a system fallback.
+
 ### Linux (Ubuntu/Debian) - Native Build
 
 ```bash
-# System deps (Rust toolchain deps + protobuf compiler + common windowing libs)
+# System deps (Rust toolchain deps + common windowing libs)
 sudo apt update
 sudo apt install -y \
-  build-essential pkg-config protobuf-compiler \
+  build-essential pkg-config \
   libx11-dev libxrandr-dev libxi-dev libxcursor-dev libxinerama-dev \
   libxkbcommon-dev libwayland-dev
 
@@ -183,7 +198,6 @@ cargo build --bin tze_hud --release --target x86_64-pc-windows-gnu
 ```powershell
 # Install toolchain/deps (run in elevated PowerShell)
 winget install -e --id Rustlang.Rustup
-winget install -e --id ProtocolBuffers.Protobuf
 winget install -e --id Microsoft.VisualStudio.2022.BuildTools
 
 # Rust toolchain
@@ -202,7 +216,7 @@ If `cl.exe` is not found, run the build in **Developer PowerShell for VS 2022**.
 
 **Output artifact path (Windows):**
 ```
-target\x86_64-pc-windows-msvc\release\tze_hud.exe
+target\release\tze_hud.exe
 ```
 
 ## 1.1) Configuration for Canonical Runtime App
@@ -268,12 +282,13 @@ To install on Windows, see [Windows install and operation](#12-windows-install-a
 
 CI-backed checks for the canonical path:
 - `app/tze_hud_app/tests/canonical_config_schema.rs` validates `app/tze_hud_app/config/production.toml`.
-- CI `test-unit` job runs pinned Nextest0.9.114 with `cargo nextest run --workspace --all-targets --exclude integration --features tze_hud_runtime/dev-mode`, which includes that test.
+- CI `test-unit` job runs pinned Nextest 0.9.114 with `cargo nextest run --workspace --all-targets --exclude integration --features tze_hud_runtime/dev-mode`, which includes that test.
 
 ## 1.2) Windows install and operation
 
-CI builds a signed `tze_hud.exe` for every merge to `main` (`dev`) and every
-`v*` tag. Download it, double-click it, and pair an agent from the code on the
+[Windows CI](.github/workflows/windows.yml) publishes a signed `tze_hud.exe`
+after successful non-docs pushes to `main` (`dev`) and `v*` tag builds.
+Docs-only main updates skip this workflow, so `dev` can lag the latest commit. Download it, double-click it, and pair an agent from the code on the
 HUD card. Install, pairing, update, restart, uninstall, and the `/admin`
 operator endpoints are in
 [`docs/operations/windows-install.md`](docs/operations/windows-install.md).
@@ -308,7 +323,7 @@ vncserver :1 -localhost no -geometry 1920x1080 -depth 24
 
 # Run the windowed app inside that display
 export DISPLAY=:1
-cargo run -p tze_hud_app
+cargo run -p tze_hud_app -- --config app/tze_hud_app/config/production.toml
 ```
 
 ### From Windows client
@@ -320,7 +335,7 @@ cargo run -p tze_hud_app
 Then open TigerVNC Viewer and connect to:
 
 ```text
-localhost:5901
+<linux-host>:5901
 ```
 
 To stop VNC on Linux:
@@ -333,7 +348,7 @@ vncserver -kill :1
 
 ### Fast baseline (workspace tests except `integration` package)
 
-Install pinned `cargo-nextest`0.9.114 (`just bootstrap` on Linux/WSL, or
+Install pinned `cargo-nextest` 0.9.114 (`just bootstrap` on Linux/WSL, or
 `cargo install --locked --version 0.9.114 cargo-nextest`) and verify
 `cargo nextest --version`. Then run the software/required-GPU harness:
 
@@ -370,14 +385,11 @@ just test-gpu
 ### Integration tests
 
 ```bash
-cargo test -p integration --tests
+just test-integration
 ```
 
-Multi-agent integration tests:
-
-```bash
-cargo test -p integration --test multi_agent -- --nocapture
-```
+This includes the `multi_agent` target and pins software rendering when the
+llvmpipe ICD is installed.
 
 ## 4) Trigger publish-to-server + UI-control/overlay checks
 

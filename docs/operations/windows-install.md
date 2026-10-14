@@ -1,10 +1,11 @@
 # Installing tze_hud on Windows
 
 CI builds `tze_hud.exe` (`x86_64-pc-windows-msvc`, static CRT, one file) and
-publishes it from `.github/workflows/windows.yml`:
+publishes it from [the Windows workflow](../../.github/workflows/windows.yml):
 
-- **`dev`**: a rolling prerelease rebuilt from every merge to `main`.
-- **`v*`**: a release per tag.
+- **`dev`**: a rolling prerelease published after successful non-docs pushes to
+  `main`. Docs-only main updates skip the workflow, so `dev` can lag main.
+- **`v*`**: a release after a successful tag build.
 
 Each release carries `tze_hud.exe`, `tze_hud.exe.sha256`, `tze_hud.exe.minisig`,
 and `tze_hud.pdb` (symbols for WPA, PIX, and crash dumps) when emitted.
@@ -39,6 +40,13 @@ install dir it installs for the current user, no admin rights:
 - registers `HKCU\...\Run\tze_hud` (autostart at logon, overlay mode) and
   `HKCU\...\App Paths\tze_hud.exe`;
 - relaunches the installed copy detached and exits.
+
+Double-clicking the installed exe (or running it with no arguments from any
+working directory) starts overlay mode with `%APPDATA%\tze_hud\config.toml`,
+using the same arguments as autostart. Its installed config and overlay mode
+take precedence over `TZE_HUD_CONFIG`, a working-directory `tze_hud.toml`, and
+`TZE_HUD_WINDOW_MODE`. Restart and update retain those effective arguments.
+An unreadable or invalid installed config still fails startup.
 
 Running a newer download the same way upgrades in place: the running instance
 is asked to quit, then the new one starts. Any command-line argument runs the

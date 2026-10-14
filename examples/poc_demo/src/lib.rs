@@ -501,8 +501,13 @@ pub async fn tile_count(target: &Target) -> Result<usize> {
 /// counts before a claim, while the claimant is orphaned, and after the grace
 /// period.
 pub async fn snapshot(target: &Target) -> Result<()> {
-    println!("tiles {}", tile_count(target).await?);
+    print!("{}", snapshot_tile_count_output(tile_count(target).await?));
     Ok(())
+}
+
+/// The complete stdout line consumed by the Windows smoke's tile-count parser.
+fn snapshot_tile_count_output(count: usize) -> String {
+    format!("tiles {count}\n")
 }
 
 /// `tile:<uuid>` from the 16 id bytes a `ClaimTile` reply carries.
@@ -565,7 +570,7 @@ pub fn psk_from_file_text(text: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::psk_from_file_text;
+    use super::{psk_from_file_text, snapshot_tile_count_output};
 
     #[test]
     fn credential_files_hold_a_bare_psk_or_a_pair_reply() {
@@ -580,5 +585,18 @@ mod tests {
             !err.to_string().contains("secret-looking"),
             "must not echo the file"
         );
+    }
+
+    #[test]
+    fn snapshot_tile_count_output_is_stable() {
+        for (count, expected) in [
+            (0, "tiles 0\n"),
+            (1, "tiles 1\n"),
+            (12_345, "tiles 12345\n"),
+        ] {
+            let output = snapshot_tile_count_output(count);
+            assert_eq!(output.as_bytes(), expected.as_bytes());
+            assert_eq!(output.bytes().filter(|byte| *byte == b'\n').count(), 1);
+        }
     }
 }

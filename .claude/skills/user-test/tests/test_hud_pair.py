@@ -136,13 +136,15 @@ def hud(tmp_path):
     FakeHud.requests, FakeHud.modes, FakeHud.entered = [], {}, {}
     FakeHud.release = threading.Event()
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeHud)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    # Teardown is fixture housekeeping, not part of an adapter deadline.
+    thread = threading.Thread(target=lambda: server.serve_forever(poll_interval=0.01), daemon=True)
     thread.start()
     yield f"127.0.0.1:{server.server_port}", tmp_path
     FakeHud.release.set()
     server.shutdown()
     server.server_close()
     thread.join(timeout=2)
+    assert not thread.is_alive()
 
 
 def endpoint_file(home):
@@ -568,6 +570,173 @@ def test_mcp_headers_needs_a_bare_host(hud, monkeypatch):
     bad = run({**env, "HUD_HOST": "127.0.0.1:9090"})
     assert bad.returncode == 1 and "bare host" in bad.stderr and not bad.stdout
 
+    # Execute the production admission/reaping clock, without waiting out 60s
+    # or giving established hud_input (including queued work) the startup cap.
+    import runpy
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    module = runpy.run_path(str(SCRIPTS / "hud_mcp_stdio.py"), run_name="deadline_fixture")
+    assert module["INITIALIZE_SECONDS"] == 3.0 and module["REQUEST_SECONDS"] == 60.0
+    client = module["Adapter"].__new__(module["Adapter"])
+    client.__dict__.update(endpoint={}, selector=Mock(), tasks=[], waiting=[], output=bytearray(),
+                           output_registered=False, initialized_pending=False, initialized=True,
+                           protocol="2025-06-18", initializing=False, stop=False, fatal=False)
+    process = SimpleNamespace(pid=99, stdin=Mock(), stdout=Mock(), poll=lambda: None)
+    clock = [100.0]
+    with monkeypatch.context() as patch:
+        patch.setattr(module["time"], "monotonic", lambda: clock[0])
+        patch.setattr(module["subprocess"], "Popen", lambda *a, **kw: process)
+        patch.setattr(module["os"], "pidfd_open", lambda pid: 99)
+        patch.setattr(module["os"], "set_blocking", lambda *a: None)
+        send_signal = Mock()
+        patch.setattr(module["signal"], "pidfd_send_signal", send_signal)
+        request = {"jsonrpc": "2.0", "id": "clock-input", "method": "tools/call",
+                   "params": {"name": "hud_input", "arguments": {"wait_ms": 30000}}}
+        client.admit(request)
+        task = client.tasks[0]
+        assert task.deadline == 160.0
+        clock[0] = 159.999
+        assert client.reap() and not task.cancelled and not client.output
+        send_signal.assert_not_called()
+        clock[0] = 160.0
+        assert client.reap() and task.cancelled and task.abort_phase == "term"
+        expired = json.loads(client.output)
+        assert expired["id"] == "clock-input" and "deadline exceeded" in expired["error"]["message"]
+        send_signal.assert_called_once_with(99, signal.SIGTERM)
+
+        client.tasks.clear()
+        client.output.clear()
+        client.initialized_pending = True
+        clock[0] = 200.0
+        client.admit({**request, "id": "queued-input"})
+        assert not client.tasks and client.waiting[0][1] == 260.0
+        queued, deadline = client.waiting.pop()
+        client.initialized_pending = False
+        clock[0] = 259.999
+        client.admit(queued, deadline)
+        assert client.tasks[0].deadline == 260.0
+        assert client.reap() and not client.tasks[0].cancelled and not client.output
+        clock[0] = 260.0
+        assert client.reap() and client.tasks[0].cancelled
+        assert json.loads(client.output)["id"] == "queued-input"
+
+        client.tasks.clear()
+        client.output.clear()
+        client.protocol = None
+        client.initialized = False
+        clock[0] = 300.0
+        client.input = bytearray(b'{"jsonrpc":"2.0","id":"clock-init","method":"initialize"}\n')
+        original_loads = module["json"].loads
+
+        def delayed_parse(*a, **kw):
+            clock[0] = 301.5
+            return original_loads(*a, **kw)
+
+        patch.setattr(module["json"], "loads", delayed_parse)
+        client.frames()
+        assert client.tasks[0].deadline == 303.0  # Charged before parsing/worker startup.
+        patch.setattr(module["json"], "loads", original_loads)
+        clock[0] = 302.999
+        assert client.reap() and not client.tasks[0].cancelled
+        clock[0] = 303.0
+        assert client.reap() and client.tasks[0].cancelled
+        assert "phase unavailable" in json.loads(client.output)["error"]["message"]
+
+    # Controlled worker failures execute the actual key/network/error path in
+    # private subprocesses. Exception details must never become MCP output.
+    endpoint = {"host": "127.0.0.1", "url": f"http://{host}/mcp", "explicit": True}
+    for layer, injection in [
+        ("DNS", "import socket; socket.getaddrinfo=lambda *a,**kw: (_ for _ in ()).throw(socket.gaierror(-3,'PRIVATE_FAILURE_SENTINEL'))"),
+        ("TCP", "import http.client; http.client.HTTPConnection.connect=lambda s: (_ for _ in ()).throw(ConnectionRefusedError('PRIVATE_FAILURE_SENTINEL'))"),
+        ("TCP", "import http.client; http.client.HTTPConnection.connect=lambda s: (_ for _ in ()).throw(TimeoutError('PRIVATE_FAILURE_SENTINEL'))"),
+        ("response/read", "import http.client; http.client.HTTPConnection.getresponse=lambda s: (_ for _ in ()).throw(TimeoutError('PRIVATE_FAILURE_SENTINEL'))"),
+    ]:
+        worker_code = ("import runpy,sys,os; m=runpy.run_path(sys.argv[1],run_name='worker_fixture'); "
+                       + injection + "; raise SystemExit(m['worker'](os.getppid(),float(sys.argv[2])))")
+        job = {"request": {"jsonrpc": "2.0", "id": "controlled-" + layer, "method": "initialize"},
+               "endpoint": endpoint, "protocol": None}
+        result = subprocess.run([sys.executable, "-c", worker_code, str(SCRIPTS / "hud_mcp_stdio.py"),
+                                 str(time.monotonic() + 3.0)], input=json.dumps(job), capture_output=True,
+                                text=True, env={**os.environ, "HOME": str(home)}, timeout=5)
+        assert result.returncode == 0 and not result.stderr
+        refused = json.loads(result.stdout)
+        assert refused["id"] == job["request"]["id"] and refused["error"]["code"] == -32603
+        assert refused["error"]["message"] == f"HUD initialize {layer} " + ("lookup failed" if layer == "DNS" else "failed")
+        assert "PRIVATE_FAILURE_SENTINEL" not in result.stdout and FakeHud.last_psk not in result.stdout
+
+    original_reply = FakeHud.reply
+    for status in (401, 403):
+        request_id = f"initialize-auth-{status}"
+
+        def auth_reply(self, code, payload):
+            if isinstance(payload, dict) and payload.get("id") == request_id:
+                return original_reply(self, status, {"code": "UNAUTHORIZED"})
+            return original_reply(self, code, payload)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(FakeHud, "reply", auth_reply)
+            with AdapterProcess(home) as adapter:
+                adapter.send("initialize", request_id)
+                refused = adapter.receive()
+                assert refused["id"] == request_id and refused["error"]["message"] == "HUD initialize auth failed"
+                adapter.send("ping", "after-" + request_id)
+                assert "not ready" in adapter.receive()["error"]["message"]
+        assert sum(r["body"].get("id") == request_id for r in FakeHud.requests) == 1
+        assert FakeHud.last_psk not in adapter.stderr
+
+    try:
+        psk_file(home).write_text("invalid\nselected-key\n")
+        previous = len(FakeHud.requests)
+        with AdapterProcess(home) as adapter:
+            adapter.send("initialize", "local-auth-refusal")
+            refused = adapter.receive()
+            assert refused["id"] == "local-auth-refusal" and refused["error"]["message"] == "HUD initialize auth failed"
+        assert len(FakeHud.requests) == previous and FakeHud.last_psk not in adapter.stderr
+    finally:
+        psk_file(home).write_text(FakeHud.last_psk)
+
+    # A reserved unroutable destination uses a synthetic key in a separate fake
+    # HOME. Refusal may be immediate; a stalled resolver/connect is still bounded.
+    unreachable_home = home / "unreachable"
+    key = unreachable_home / ".config/tze-hud/192.0.2.1.psk"
+    key.parent.mkdir(parents=True, mode=0o700)
+    key.write_text(FakeHud.last_psk)
+    key.chmod(0o600)
+    with AdapterProcess(unreachable_home, host="192.0.2.1:9") as adapter:
+        started = time.monotonic()
+        adapter.send("initialize", "unroutable-init")
+        refused = adapter.receive(timeout=6)
+        elapsed = time.monotonic() - started
+        assert refused["id"] == "unroutable-init" and refused["error"]["code"] == -32603
+        message = refused["error"]["message"]
+        assert message == "HUD initialize TCP failed" or "phase unavailable" in message
+        assert elapsed < 5.5  # 3s from accepted frame + interpreter/OS cleanup allowance.
+        assert adapter.stop() == 0 and FakeHud.last_psk not in adapter.stderr
+
+    FakeHud.release = threading.Event()
+    FakeHud.modes["initialize-held"] = "hold"
+    with AdapterProcess(home) as adapter:
+        started = time.monotonic()
+        adapter.send("initialize", "initialize-held")
+        wait_request("initialize-held")
+        held = owned_children(adapter.process.pid)
+        adapter.send("notifications/cancelled", params={"requestId": "initialize-held"})
+        refused = adapter.receive(timeout=6)
+        elapsed = time.monotonic() - started
+        assert refused["id"] == "initialize-held" and refused["error"]["code"] == -32603
+        message = refused["error"]["message"]
+        assert message == "HUD initialize response/read failed" or ("deadline" in message and "phase unavailable" in message)
+        assert 2.7 <= elapsed < 5.5
+        adapter.send("ping", "after-held-init")
+        assert "not ready" in adapter.receive()["error"]["message"]
+        assert adapter.stop() == 0
+        assert held and all(not Path(f"/proc/{pid}").exists() for pid in held)
+    assert sum(r["body"].get("id") == "initialize-held" for r in FakeHud.requests) == 1
+    assert FakeHud.last_psk not in adapter.stderr
+    FakeHud.release.set()
+    FakeHud.release = threading.Event()
+
     with AdapterProcess(home) as adapter:
         initialize = adapter.ready()
         assert initialize["result"]["protocolVersion"] == "2025-06-18"
@@ -629,6 +798,8 @@ def test_mcp_headers_needs_a_bare_host(hud, monkeypatch):
         FakeHud.release.set()
     FakeHud.release = threading.Event()
     FakeHud.modes[60] = "trickle"
+    # The production 60s admission/expiry is exercised by the clock above.
+    # Use the same loop with a short private budget for real HTTP/worker cleanup.
     with AdapterProcess(home, short=0.3) as adapter:
         adapter.ready()
         adapter.send("ping", 60)
@@ -637,20 +808,6 @@ def test_mcp_headers_needs_a_bare_host(hud, monkeypatch):
         result = adapter.receive(timeout=3)
         assert result["id"] == 60 and result["error"]["code"] == -32603
     assert sum(r["body"].get("id") == 60 for r in FakeHud.requests) == 1
-    FakeHud.release.set()
-    FakeHud.release = threading.Event()
-    FakeHud.modes[61] = "trickle"
-    with AdapterProcess(home) as adapter:  # Exact shipped/default60s path, not private shortened fixture.
-        adapter.ready()
-        started = time.monotonic()
-        adapter.send("ping", 61)
-        wait_request(61)
-        adapter.sample()
-        timed_out = adapter.receive(timeout=65)
-        elapsed = time.monotonic() - started
-        assert timed_out["id"] == 61 and timed_out["error"]["code"] == -32603
-        assert 59 <= elapsed < 64
-    assert sum(r["body"].get("id") == 61 for r in FakeHud.requests) == 1
     FakeHud.release.set()
     FakeHud.modes[70] = "large"
     with AdapterProcess(home, stall=0.2) as adapter:

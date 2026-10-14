@@ -10,9 +10,11 @@ screen (placement, timing, composition, permissions); the LLM session
 
 > Platform note: the steps below are for running the portal on your **own Linux
 > desktop** (a local display server / X or Wayland session). For fullscreen wall
-> displays, overlay mode on Windows, or cross-machine deployment, see the
-> **Cross-Machine Deployment** and **TigerVNC** sections of the top-level
-> [`README.md`](../README.md). A headless CI box cannot open a GUI window.
+> displays and Linux virtual desktops, see the
+> [TigerVNC instructions](../README.md#2-linux--tigervnc-then-connect-from-windows).
+> For Windows deployment, use the [install runbook](operations/windows-install.md);
+> for native or WSL development, use the [Windows development guide](development/windows.md).
+> A headless CI box cannot open a GUI window.
 
 ---
 
@@ -29,7 +31,7 @@ scripts/quickstart.sh --window-mode overlay
 `quickstart.sh` scaffolds a minimal config, generates a strong PSK, prints the
 redacted **ATTACH INFO** block (MCP URL + credential instructions + a client
 config template), and launches the runtime. Then jump to
-[Step 4: attach a session](#step-4-attach-an-llm-session).
+[Step 4: attach a session](#step-4--attach-an-llm-session).
 
 To create a ready-to-use client config without building or launching the
 runtime, use the protected-file form (implemented by
@@ -66,8 +68,9 @@ The rest of this doc is the same flow, step by step, explaining each piece.
 
 - Linux with a display server (X11 or Wayland) — you need to be able to open a
   GPU window. Build deps and toolchain are in [`README.md`](../README.md)
-  (§1 Build). In short: `build-essential pkg-config protobuf-compiler`, the X/
-  Wayland `-dev` libs, and Rust 1.88 (pinned in `rust-toolchain.toml`).
+  (§1 Build). In short: `build-essential pkg-config`, the X/
+  Wayland `-dev` libs, and Rust 1.88 (pinned in `rust-toolchain.toml`). Cargo
+  fetches bundled protoc 31.1 for protocol generation; system protoc is unnecessary.
 - An LLM client that speaks **MCP over HTTP** and lets you set a bearer header —
   e.g. Claude Code or Codex with an MCP server entry.
 
@@ -282,4 +285,4 @@ curl -s -X POST http://127.0.0.1:9090/mcp \
 - **One-shot zone/widget publishing** (no session lifecycle): the `th-hud-publish` skill
 - **Full config surface** (widgets, agents, profiles): [`app/tze_hud_app/config/production.toml`](../app/tze_hud_app/config/production.toml)
 - **All CLI flags / env vars:** `./target/release/tze_hud --help`
-- **Cross-machine / Windows deployment:** [`README.md`](../README.md)
+- **Cross-machine / Windows deployment:** [install runbook](operations/windows-install.md)

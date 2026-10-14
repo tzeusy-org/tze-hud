@@ -28,6 +28,7 @@ use std::sync::Arc;
 
 use tokio::net::TcpListener;
 use tokio::sync::Mutex;
+use tracing::Instrument;
 use tze_hud_mcp::{McpConfig, McpServer};
 use tze_hud_scene::config::SharedAgents;
 use tze_hud_scene::graph::SceneGraph;
@@ -386,7 +387,23 @@ async fn run_accept_loop(
                     Ok((stream, peer)) => {
                         let srv = Arc::clone(&server);
                         let admin = Arc::clone(&admin);
-                        tokio::spawn(handle_connection(stream, peer, srv, admin));
+                        let connection = handle_connection(stream, peer, srv, admin);
+                        if tracing::enabled!(target: "tze_hud_mcp_phases", tracing::Level::DEBUG) {
+                            // One HTTP request per connection. The subscriber owns
+                            // this process-local ID; it is not a JSON-RPC or agent ID.
+                            let span = tracing::debug_span!(
+                                target: "tze_hud_mcp_phases",
+                                "mcp_request",
+                                request_span_id = tracing::field::Empty
+                            );
+                            if let Some(id) = span.id() {
+                                span.record("request_span_id", id.into_u64());
+                            }
+                            // Enter on each poll, never hold an enter guard across await.
+                            tokio::spawn(connection.instrument(span));
+                        } else {
+                            tokio::spawn(connection);
+                        }
                     }
                     Err(e) => {
                         tracing::error!(
@@ -414,14 +431,56 @@ async fn handle_connection(
     use crate::http::{self, OperatorCode, OperatorError, ReadError, Response, Route};
     use tokio::io::AsyncWriteExt;
 
-    let response = match http::read_request(&mut stream, http::READ_TIMEOUT).await {
+    let phase_started = tracing::enabled!(target: "tze_hud_mcp_phases", tracing::Level::DEBUG)
+        .then(std::time::Instant::now);
+    if phase_started.is_some() {
+        tracing::debug!(target: "tze_hud_mcp_phases", phase = "request_read_begin");
+    }
+    let request = http::read_request(&mut stream, http::READ_TIMEOUT).await;
+    if let Some(started) = &phase_started {
+        match &request {
+            Ok(_) => tracing::debug!(
+                target: "tze_hud_mcp_phases",
+                phase = "request_received",
+                elapsed_us = started.elapsed().as_micros()
+            ),
+            Err(error) => tracing::debug!(
+                target: "tze_hud_mcp_phases",
+                phase = "request_read_error",
+                code = match error {
+                    ReadError::Closed => "CLOSED",
+                    ReadError::TooLarge => "TOO_LARGE",
+                    ReadError::Malformed => "MALFORMED",
+                    ReadError::NotImplemented => "NOT_IMPLEMENTED",
+                    ReadError::Timeout => "TIMEOUT",
+                },
+                elapsed_us = started.elapsed().as_micros()
+            ),
+        }
+    }
+    let response = match request {
         Ok(req) => match http::route(&req.method, &req.path) {
             Route::Mcp => {
                 // Config-gated resident-principal grant (hud-nu65o); the PSK
                 // check still happens independently inside `dispatch`.
                 let ctx = server.caller_context(req.bearer);
                 let body = std::str::from_utf8(&req.body).unwrap_or("");
-                Response::json(server.dispatch(body, &ctx).await)
+                if let Some(started) = &phase_started {
+                    tracing::debug!(
+                        target: "tze_hud_mcp_phases",
+                        phase = "dispatch_begin",
+                        elapsed_us = started.elapsed().as_micros()
+                    );
+                }
+                let result = server.dispatch(body, &ctx).await;
+                if let Some(started) = &phase_started {
+                    tracing::debug!(
+                        target: "tze_hud_mcp_phases",
+                        phase = "dispatch_complete",
+                        elapsed_us = started.elapsed().as_micros()
+                    );
+                }
+                Response::json(result)
             }
             Route::Pair => match &admin.pairing {
                 Some(pairing) => pairing.pair(&req.body),
@@ -441,7 +500,38 @@ async fn handle_connection(
         }
     };
 
-    if let Err(e) = stream.write_all(&response.to_bytes()).await {
+    let bytes = response.to_bytes();
+    if let Some(started) = &phase_started {
+        tracing::debug!(
+            target: "tze_hud_mcp_phases",
+            phase = "response_ready",
+            status = response.status,
+            bytes = bytes.len(),
+            elapsed_us = started.elapsed().as_micros()
+        );
+        tracing::debug!(
+            target: "tze_hud_mcp_phases",
+            phase = "response_write_begin",
+            elapsed_us = started.elapsed().as_micros()
+        );
+    }
+    let written = stream.write_all(&bytes).await;
+    if let Some(started) = &phase_started {
+        match &written {
+            Ok(()) => tracing::debug!(
+                target: "tze_hud_mcp_phases",
+                phase = "response_write_complete",
+                elapsed_us = started.elapsed().as_micros()
+            ),
+            Err(error) => tracing::debug!(
+                target: "tze_hud_mcp_phases",
+                phase = "response_write_error",
+                io_kind = ?error.kind(),
+                elapsed_us = started.elapsed().as_micros()
+            ),
+        }
+    }
+    if let Err(e) = written {
         tracing::debug!(peer = %peer, error = %e, "MCP: write error");
     }
 }

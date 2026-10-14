@@ -1222,7 +1222,7 @@ pub enum LeaseError {
     InvalidTransition { from: LeaseState, to: LeaseState },
     /// Lease not found in the scene graph.
     LeaseNotFound(SceneId),
-    /// Lease caps exceeded (runtime-wide or per-session).
+    /// Runtime-wide lease cap (`MAX_RUNTIME_LEASES` = 64) exceeded.
     CapsExceeded(CapsError),
 }
 
@@ -1905,12 +1905,9 @@ pub struct NotificationPayload {
     pub icon: String,
     /// 0=low, 1=normal, 2=urgent, 3=critical.
     pub urgency: u32,
-    /// Per-publication TTL in milliseconds.
-    ///
-    /// When `Some`, the compositor begins a 150ms fade-out this many milliseconds
-    /// after the publication is first rendered.  When `None`, the zone's
-    /// `auto_clear_ms` is used as the default TTL (typically 8 000 ms for the
-    /// `notification-area` zone).
+    /// Legacy payload member, not an authoritative expiry or fade control.
+    /// Transports use top-level Publish TTL/expiry; MCP rejects this inner field.
+    /// Rendering follows the publication's absolute expiry and resolved motion.
     #[serde(default)]
     pub ttl_ms: Option<u64>,
     /// Optional bold title for two-line notification layout.

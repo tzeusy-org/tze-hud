@@ -791,7 +791,14 @@ async fn test_notification_card_border_is_an_sdf_border() {
 /// fill, and the bounding-box corner outside the curve stays clear.
 #[tokio::test]
 async fn test_rounded_card_border_follows_the_corner() {
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    let built = make_compositor_and_surface(1280, 720).await;
+    if std::env::var("TZE_HUD_REQUIRE_GPU").as_deref() == Ok("1") {
+        assert!(
+            built.is_some(),
+            "required hairline GPU constructor must succeed"
+        );
+    }
+    let (mut compositor, surface) = require_gpu!(built);
     let mut tokens = HashMap::new();
     tokens.insert("color.border.default".to_string(), "#00FF00".to_string());
     tokens.insert(
@@ -842,6 +849,37 @@ async fn test_rounded_card_border_follows_the_corner() {
     let outside = px(960, 14 + 1);
     let clear = px(10, 700);
     assert_eq!(outside, clear, "outside the curve stays clear");
+
+    // The straight top edge is one device-pixel row at fractional y=14.4.
+    // Read away from corner AA, text and dismiss chrome; the existing middle
+    // fill oracle supplies the exact fill-only RGBA reference.
+    let top_border = px(1144, 14);
+    let below_border = px(1144, 15);
+    let interior = px(1144, 16);
+    eprintln!(
+        "[SDF-HAIRLINE-RGBA] x1144 row14={top_border:?} row15={below_border:?} row16={interior:?} fill={fill:?} actual_gpu_readback=true"
+    );
+    assert!(
+        below_border
+            .iter()
+            .zip(interior)
+            .all(|(actual, expected)| actual.abs_diff(expected) <= 3),
+        "row15 must match row16 fill only, not a second hairline row: {below_border:?}, row16 {interior:?}"
+    );
+    assert!(
+        interior
+            .iter()
+            .zip(fill)
+            .all(|(actual, expected)| actual.abs_diff(expected) <= 3),
+        "row16 must retain fill RGBA: {interior:?}, fill {fill:?}"
+    );
+    assert!(
+        top_border
+            .iter()
+            .zip([0, 255, 0, 255])
+            .all(|(actual, expected)| actual.abs_diff(expected) <= 3),
+        "row14 must cover the single green device-pixel hairline: {top_border:?}"
+    );
 }
 
 /// alert-banner gets no border — the card border is only for
@@ -1261,6 +1299,15 @@ async fn test_notification_no_backdrop_when_backdrop_is_none() {
         vertices.is_empty(),
         "no backdrop or border quads should be rendered when policy.backdrop is None, got {} vertices",
         vertices.len()
+    );
+
+    // Notification borders use the SDF pass, separate from flat backdrop vertices.
+    let rounded_rects = compositor.collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0);
+    assert!(
+        rounded_rects.background.is_empty()
+            && rounded_rects.content.is_empty()
+            && rounded_rects.chrome.is_empty(),
+        "no rounded-rect commands should be rendered when policy.backdrop is None"
     );
 }
 

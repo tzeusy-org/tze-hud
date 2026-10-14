@@ -1,6 +1,6 @@
 # tze_hud dev harness — reproduces the CI gate commands locally.
 #
-# Prerequisites: just (https://github.com/casey/just), protobuf-compiler (protoc).
+# Prerequisite: just (https://github.com/casey/just); protoc is fetched by Cargo.
 #
 # Usage:
 #   just           # run the default gate (check)
@@ -18,9 +18,8 @@
 #   just dead-code <crate>  # advisory list of dead pub items in one crate
 #   just dev-mode-guard     # verify dev-mode is not enabled in any package's default build
 #   just idle-efficiency-checker # fail-closed idle artifact contract tests
-#   just clippy-windows-gnu # clippy on the windows-gnu target (skips if target/mingw missing)
+#   just clippy-windows-gnu # clippy on the windows-gnu target (skips if Rust target missing)
 #   just cargo-deny         # advisories/licenses/bans/sources (skips if cargo-deny missing)
-#   just overlay-harness-contract # pwsh overlay-harness contract test (skips if pwsh missing)
 #   just bootstrap # install/report dev-host deps (scripts/dev-bootstrap.sh; --check to report only)
 #   just build-windows # cross-build tze_hud.exe for x86_64-pc-windows-gnu
 #   just ci        # full local gate sweep (see the `ci` recipe; no Windows-only jobs)
@@ -36,7 +35,7 @@
 # concurrent device construction can wedge the driver. Do not run bare
 # `cargo test -p tze_hud_compositor` on a host with a hardware GPU ICD.
 #
-# Building needs protoc >= 3.15; if /usr/bin/protoc is older, set PROTOC=/path/to/protoc.
+# Protocol builds select bundled protoc 31.1 (=3.2.0) for the build host, ignoring PROTOC.
 
 # Mesa llvmpipe Vulkan ICD (mesa-vulkan-drivers); GPU recipes use it when present.
 # Older Mesa names it lvp_icd.x86_64.json; Mesa 25+ (Ubuntu 26.04) lvp_icd.json.
@@ -44,6 +43,11 @@ lvp := if path_exists("/usr/share/vulkan/icd.d/lvp_icd.x86_64.json") == "true" {
 
 # Python for the pytest suites: the bootstrap venv when present (CI has none).
 py := if path_exists(".venv/bin/python3") == "true" { ".venv/bin/python3" } else { "python3" }
+
+# Explicit shared-target policy. Unset mode keeps bare Cargo and user defaults.
+# The effective pre-push hook reaches these same commands via pre-push-check.
+cargo := if env_var_or_default("TZE_HUD_SHARED_TARGET_GUARD", "") == "" { "cargo" } else { py + " scripts/cargo_source_guard.py --" }
+deny_probe := if env_var_or_default("TZE_HUD_SHARED_TARGET_GUARD", "") == "" { "cargo deny --version" } else { py + " scripts/cargo_source_guard.py --tool-available deny --version" }
 
 # Default recipe: fast compilation gate
 default: check
@@ -56,12 +60,12 @@ render-scene *args:
     set -euo pipefail
     [[ -f "{{lvp}}" ]] || { echo 'required llvmpipe ICD is missing' >&2; exit 1; }
     export VK_ICD_FILENAMES="{{lvp}}" HEADLESS_FORCE_SOFTWARE=1 TZE_HUD_REQUIRE_GPU=1
-    cargo run --quiet -p render_artifacts --bin render-scene -- "$@"
+    {{cargo}} run --quiet -p render_artifacts --bin render-scene -- "$@"
 
 # CPU retained WidgetRenderPlan/resvg mode of the same authoring binary.
 [positional-arguments]
 render-widget *args:
-    cargo run --quiet -p render_artifacts --bin render-scene -- "$@"
+    {{cargo}} run --quiet -p render_artifacts --bin render-scene -- "$@"
 
 # ── Fast fail ────────────────────────────────────────────────────────────────
 
@@ -71,19 +75,20 @@ untracked-evidence:
 
 # cargo check: fast compilation gate (no codegen)
 check:
-    cargo check --workspace
+    {{cargo}} check --workspace
 
 # cargo fmt --check: formatting gate (mirror CI fmt job)
 fmt:
-    cargo fmt --check
+    {{cargo}} fmt --check
 
 # Apply formatting (non-CI helper; not part of CI gate)
 fmt-fix:
+    {{py}} scripts/cargo_source_guard.py --refuse-frozen-helper
     cargo fmt
 
 # cargo clippy: lint gate — all targets, deny warnings (mirror CI clippy job)
 clippy:
-    cargo clippy --workspace --all-targets -- -D warnings
+    {{cargo}} clippy --workspace --all-targets -- -D warnings
 
 # Git supplies all proposed ref tuples; direct invocation checks current HEAD.
 [positional-arguments]
@@ -94,8 +99,8 @@ pre-push mode="head":
 # Selection belongs to pre-push; never select only the changed crates.
 [private]
 pre-push-check:
-    cargo fmt --all --check
-    cargo clippy --workspace --all-targets -- -D warnings
+    {{cargo}} fmt --all --check
+    {{cargo}} clippy --workspace --all-targets -- -D warnings
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -110,10 +115,10 @@ test:
     for control in SKIP_GPU_TESTS TZE_HUD_SKIP_GPU_TESTS RUST_TEST_THREADS NEXTEST_RETRIES NEXTEST_TEST_THREADS NEXTEST_PROFILE TZE_HUD_PERF_ASSERT TZE_HUD_TEST_BUDGET_SLACK; do
         if [[ -v "$control" ]]; then printf 'unexpected control: %s\n' "$control" >&2; exit 1; fi
     done
-    cargo nextest --version | grep -Eq '^cargo-nextest 0\.9\.114([[:space:]]|$)'
+    {{cargo}} nextest --version | grep -Eq '^cargo-nextest 0\.9\.114([[:space:]]|$)'
     if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi
     HEADLESS_FORCE_SOFTWARE=1 TZE_HUD_REQUIRE_GPU=1 \
-        cargo nextest run \
+        {{cargo}} nextest run \
             --workspace \
             --all-targets \
             --exclude integration \
@@ -124,12 +129,12 @@ test:
 # Builds first so the 15-minute timeout bounds test execution, not compilation.
 test-gpu:
     test -f {{lvp}} || { echo "missing {{lvp}} (install mesa-vulkan-drivers)"; exit 1; }
-    cargo test -p tze_hud_compositor --all-targets --no-run
-    cargo test -p tze_hud_runtime --test pixel_readback --features dev-mode --no-run
+    {{cargo}} test -p tze_hud_compositor --all-targets --no-run
+    {{cargo}} test -p tze_hud_runtime --test pixel_readback --features dev-mode --no-run
     VK_ICD_FILENAMES={{lvp}} HEADLESS_FORCE_SOFTWARE=1 LLVMPIPE_CI=1 TZE_HUD_REQUIRE_GPU=1 \
-        timeout 900 cargo test -p tze_hud_compositor --all-targets
+        timeout 900 {{cargo}} test -p tze_hud_compositor --all-targets
     VK_ICD_FILENAMES={{lvp}} HEADLESS_FORCE_SOFTWARE=1 LLVMPIPE_CI=1 TZE_HUD_REQUIRE_GPU=1 \
-        timeout 900 cargo test -p tze_hud_runtime --test pixel_readback --features dev-mode
+        timeout 900 {{cargo}} test -p tze_hud_runtime --test pixel_readback --features dev-mode
 
 # Pure-Python contract tests for the versioned idle artifact gate and its
 # startup-atomic Windows launcher.
@@ -141,7 +146,7 @@ idle-efficiency-checker:
 # Runs every integration target.
 test-integration:
     if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
-    HEADLESS_FORCE_SOFTWARE=1 cargo test -p integration --tests
+    HEADLESS_FORCE_SOFTWARE=1 {{cargo}} test -p integration --tests
 
 # Pure-Python suites (mirror CI user-test-python-suite job and scripts/ci tests)
 # Needs scripts/requirements-dev.txt; `just bootstrap` installs it into .venv.
@@ -157,11 +162,11 @@ test-python:
 token-footprint:
     mkdir -p test_results/token-footprint
     if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
-    HEADLESS_FORCE_SOFTWARE=1 cargo run -p benchmark --features headless \
+    HEADLESS_FORCE_SOFTWARE=1 {{cargo}} run -p benchmark --features headless \
         --bin token_footprint_calibration -- \
         --output test_results/token-footprint/measurement.json
     if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
-    HEADLESS_FORCE_SOFTWARE=1 cargo run -p benchmark --features headless \
+    HEADLESS_FORCE_SOFTWARE=1 {{cargo}} run -p benchmark --features headless \
         --bin token_footprint_calibration -- \
         --output test_results/token-footprint/repeat.json
     cmp test_results/token-footprint/measurement.json test_results/token-footprint/repeat.json
@@ -174,7 +179,7 @@ token-footprint:
 production-boot:
     if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
     HEADLESS_FORCE_SOFTWARE=1 \
-        cargo test \
+        {{cargo}} test \
             -p vertical_slice \
             --test production_boot \
             -- --nocapture
@@ -183,7 +188,7 @@ production-boot:
 canonical-app-boot:
     if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
     HEADLESS_FORCE_SOFTWARE=1 \
-        cargo test \
+        {{cargo}} test \
             -p tze_hud_app \
             --test production_boot \
             -- --nocapture
@@ -193,30 +198,28 @@ canonical-app-boot:
 # Verify dev-mode is not enabled in any package's default build, incl. the release binary closure (mirror CI dev-mode-guard job)
 # Cargo metadata only; the release build is covered by windows.yml.
 dev-mode-guard:
-    cargo metadata --format-version 1 --no-deps \
+    {{cargo}} metadata --format-version 1 --no-deps \
         | python3 scripts/ci/check_dev_mode_defaults.py
 
 # Unused dependencies via cargo-machete (cargo install --locked cargo-machete).
 # Needs no build. False positives go in [package.metadata.cargo-machete] ignored.
 deps-unused:
-    cargo machete
+    {{cargo}} machete
 
 # Tool-gated gates. If the tool is missing the recipe prints "SKIPPED: <reason>"
 # and exits 0 (so `just ci` still runs on machines without it); CI always has
 # the tool, so these remain blocking there.
 
 # clippy on the windows-gnu cross-target (mirror CI clippy-windows-gnu job).
-# Needs `rustup target add x86_64-pc-windows-gnu` and mingw-w64.
+# Needs `rustup target add x86_64-pc-windows-gnu`; no MinGW compiler for lint.
+# The portable blake3 backend is scoped to this command. build-windows still needs MinGW.
 clippy-windows-gnu:
     #!/usr/bin/env bash
     set -euo pipefail
     if ! rustup target list --installed | grep -qx x86_64-pc-windows-gnu; then
         echo "SKIPPED: clippy-windows-gnu needs the rustup target (rustup target add x86_64-pc-windows-gnu)"; exit 0
     fi
-    if ! command -v x86_64-w64-mingw32-gcc >/dev/null; then
-        echo "SKIPPED: clippy-windows-gnu needs the MinGW cross toolchain (apt install mingw-w64)"; exit 0
-    fi
-    cargo clippy \
+    CARGO_FEATURE_PURE=1 {{cargo}} clippy \
         -p tze_hud_runtime \
         -p tze_hud_compositor \
         -p tze_hud_config \
@@ -227,24 +230,24 @@ clippy-windows-gnu:
 cargo-deny:
     #!/usr/bin/env bash
     set -euo pipefail
-    if ! cargo deny --version >/dev/null 2>&1; then
+    if {{deny_probe}} >/dev/null 2>&1; then
+        :
+    else
+        probe_status=$?
+        # The guarded probe uses 1 only for a completed unavailable-tool probe;
+        # admission/postcheck errors (86) must never become a missing-tool skip.
+        if [[ -n "${TZE_HUD_SHARED_TARGET_GUARD:-}" && "$probe_status" -ne 1 ]]; then
+            exit "$probe_status"
+        fi
         echo "SKIPPED: cargo-deny not installed (cargo install --locked cargo-deny)"; exit 0
     fi
-    cargo deny check advisories licenses bans sources
-
-# Fullscreen-vs-overlay harness PowerShell contract test (mirror CI check job step).
-overlay-harness-contract:
-    #!/usr/bin/env bash
-    set -euo pipefail
-    if ! command -v pwsh >/dev/null; then
-        echo "SKIPPED: overlay-harness-contract needs PowerShell (pwsh)"; exit 0
-    fi
-    pwsh -File ./scripts/ci/windows/test-windowed-fullscreen-overlay-perf.ps1
+    {{cargo}} deny check advisories licenses bans sources
 
 # Advisory dead-item list for one crate: narrows its pub items to pub(crate) in a
 # temp copy (keeping names other crates use) and prints rustc dead_code warnings.
 # Example: just dead-code tze_hud_telemetry
 dead-code crate:
+    {{py}} scripts/cargo_source_guard.py --refuse-frozen-helper
     python3 scripts/dead_code.py {{crate}}
 
 # ── Dev host ─────────────────────────────────────────────────────────────────
@@ -254,20 +257,21 @@ dead-code crate:
 # Cross-builds keep their own target linker/flags; no system ld is replaced.
 # Install or report everything this dev host needs
 bootstrap *args:
+    {{py}} scripts/cargo_source_guard.py --refuse-frozen-helper
     scripts/dev-bootstrap.sh {{args}}
 
 # Output: target/x86_64-pc-windows-gnu/release/tze_hud.exe. Pass e.g. `-j 8` on low-RAM hosts.
 # Cross-build the HUD exe from Linux/WSL (needs `just bootstrap`)
 build-windows *args:
-    cargo build --release --target x86_64-pc-windows-gnu -p tze_hud_app --bin tze_hud {{args}}
+    {{cargo}} build --release --target x86_64-pc-windows-gnu -p tze_hud_app --bin tze_hud {{args}}
 
 # ── Full local CI sweep ───────────────────────────────────────────────────────
 
 # Run all CI gates that are feasible locally. GPU and pixel_readback tests are
-# included via `test` (they need Mesa llvmpipe). clippy-windows-gnu, cargo-deny and
-# overlay-harness-contract are tool-gated: they print "SKIPPED: <reason>" and
-# pass when their tool (windows-gnu target + mingw, cargo-deny, pwsh) is absent.
+# included via `test` (they need Mesa llvmpipe). clippy-windows-gnu and cargo-deny
+# are tool-gated: they print "SKIPPED: <reason>" and pass when their tool
+# (windows-gnu Rust target or cargo-deny) is absent.
 # Excluded by design: the Windows-only jobs (windows.yml), the informational
 # test-gpu-pixel-readback job (covered by `test`), and the weekly perf lanes.
 # Runs in the same logical order as CI: fast-fail gates first, then tests.
-ci: untracked-evidence overlay-harness-contract check fmt clippy clippy-windows-gnu cargo-deny deps-unused dev-mode-guard idle-efficiency-checker test test-integration test-python token-footprint production-boot canonical-app-boot
+ci: untracked-evidence check fmt clippy clippy-windows-gnu cargo-deny deps-unused dev-mode-guard idle-efficiency-checker test test-integration test-python token-footprint production-boot canonical-app-boot

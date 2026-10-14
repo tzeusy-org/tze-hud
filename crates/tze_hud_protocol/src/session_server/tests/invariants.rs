@@ -874,6 +874,168 @@ async fn grpc_zone_publish_ttl_sets_expiry_and_is_swept() {
     );
     drop(scene);
     drop(st);
+
+    // Publish's omitted/zero timing retains urgency defaults. Hold is a
+    // separate request that removes expiry, including before presentation.
+    let surface = "zone:notification-area";
+    let mut sequence = 3;
+    for (urgency, default_ttl_ms, scheduled) in [
+        (0, 8_000, false),
+        (1, 8_000, false),
+        (2, 15_000, true),
+        (3, 30_000, true),
+    ] {
+        let notification = Publish {
+            surface: surface.into(),
+            content: Some(crate::proto::ZoneContent {
+                payload: Some(crate::proto::zone_content::Payload::Notification(
+                    crate::proto::NotificationPayload {
+                        text: "Keep this notification".into(),
+                        urgency,
+                        ..Default::default()
+                    },
+                )),
+            }),
+            ..Default::default()
+        };
+        let shown_at = clock.now_us() + if scheduled { 5_000_000 } else { 0 };
+        let publish = if scheduled {
+            Publish {
+                ttl_ms: 0,
+                expires_at_us: 0,
+                present_at_us: shown_at,
+                ..notification.clone()
+            }
+        } else {
+            notification.clone()
+        };
+        let ack = publish_and_ack(&tx, &mut stream, sequence, publish).await;
+        sequence += 1;
+        assert!(ack.ok, "{ack:?}");
+        {
+            let st = state.lock().await;
+            let scene = st.scene.lock().await;
+            let records = scene
+                .zone_registry
+                .active_publishes
+                .get("notification-area");
+            if scheduled {
+                assert!(records.is_none_or(Vec::is_empty), "not shown early");
+            } else {
+                assert_eq!(
+                    records.unwrap()[0].expires_at_wall_us,
+                    Some(shown_at + default_ttl_ms * 1_000),
+                    "omitted timing uses the notification's urgency default"
+                );
+            }
+        }
+        let held = request(
+            &tx,
+            &mut stream,
+            sequence,
+            ClientPayload::Hold(Hold {
+                surface: surface.into(),
+                ttl_ms: 0,
+            }),
+        )
+        .await;
+        sequence += 1;
+        assert!(held.ok, "{held:?}");
+        {
+            let st = state.lock().await;
+            let mut scene = st.scene.lock().await;
+            if scheduled {
+                clock.advance(4_999);
+                assert!(scene.apply_due_batches().is_empty(), "still not due");
+                clock.advance(1);
+                let applied = scene.apply_due_batches();
+                assert_eq!(applied.len(), 1);
+                assert!(applied[0].applied);
+            }
+            let records = &scene.zone_registry.active_publishes["notification-area"];
+            assert_eq!(records.len(), 1);
+            assert_eq!(records[0].expires_at_wall_us, None);
+            clock.advance(default_ttl_ms + 1);
+            assert_eq!(scene.drain_expired_zone_publications(), 0);
+            assert_eq!(
+                scene.zone_registry.active_publishes["notification-area"].len(),
+                1
+            );
+        }
+        let cleared = request(
+            &tx,
+            &mut stream,
+            sequence,
+            ClientPayload::Clear(Clear {
+                surface: surface.into(),
+            }),
+        )
+        .await;
+        sequence += 1;
+        assert!(cleared.ok, "{cleared:?}");
+        {
+            let st = state.lock().await;
+            let scene = st.scene.lock().await;
+            assert!(
+                scene
+                    .zone_registry
+                    .active_publishes
+                    .get("notification-area")
+                    .is_none_or(Vec::is_empty)
+            );
+        }
+
+        if scheduled {
+            // Clear also cancels a held publication that has not presented.
+            let ack = publish_and_ack(
+                &tx,
+                &mut stream,
+                sequence,
+                Publish {
+                    present_at_us: clock.now_us() + 5_000_000,
+                    ..notification
+                },
+            )
+            .await;
+            sequence += 1;
+            assert!(ack.ok, "{ack:?}");
+            let held = request(
+                &tx,
+                &mut stream,
+                sequence,
+                ClientPayload::Hold(Hold {
+                    surface: surface.into(),
+                    ttl_ms: 0,
+                }),
+            )
+            .await;
+            sequence += 1;
+            assert!(held.ok, "{held:?}");
+            let cleared = request(
+                &tx,
+                &mut stream,
+                sequence,
+                ClientPayload::Clear(Clear {
+                    surface: surface.into(),
+                }),
+            )
+            .await;
+            sequence += 1;
+            assert!(cleared.ok, "{cleared:?}");
+            let st = state.lock().await;
+            let mut scene = st.scene.lock().await;
+            assert!(scene.scheduled_batches.is_empty());
+            clock.advance(5_001);
+            assert!(scene.apply_due_batches().is_empty());
+            assert!(
+                scene
+                    .zone_registry
+                    .active_publishes
+                    .get("notification-area")
+                    .is_none_or(Vec::is_empty)
+            );
+        }
+    }
     server.abort();
 }
 

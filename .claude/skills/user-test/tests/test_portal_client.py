@@ -48,7 +48,7 @@ def run(argv, replies):
 
 def test_publish_attaches_through_hud_publish(capsys):
     calls = run(
-        ["publish", "--id", "s1", "--text", "hi", "--expects-reply", "--state", "active"],
+        ["publish", "--id", "s1", "--text", "hi", "--expects-reply", "--state", "active", "--ttl-ms", "0"],
         [tool_response({"ok": True})],
     )
     assert calls == [
@@ -61,11 +61,15 @@ def test_publish_attaches_through_hud_publish(capsys):
                     "content": "hi",
                     "expects_reply": True,
                     "status": "active",
+                    "ttl_ms": 0,
                 },
             },
         )
     ]
     assert json.loads(capsys.readouterr().out) == {"ok": True}
+    calls = run(["publish", "--id", "s1"], [tool_response({"ok": True})])
+    assert calls[0][1]["arguments"] == {"surface": "portal:s1"}
+    capsys.readouterr()
     with mock.patch.object(client, "rpc", return_value=tool_response({"ok": True})) as rpc:
         assert client.call_tool("hud_publish", {"surface": "portal:s1"}, timeout=0.35) == {"ok": True}
         rpc.assert_called_once_with("tools/call", {"name": "hud_publish", "arguments": {"surface": "portal:s1"}}, timeout=0.35)
@@ -124,6 +128,7 @@ class HookHarness:
     def __init__(self, home):
         self.home = home
         home.mkdir()
+        self.private_cwd = str(home.resolve())
         self.records = []
         self.release = threading.Event()
         self.received = threading.Event()
@@ -172,7 +177,8 @@ class HookHarness:
 
         self.server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Server)
         self.server.daemon_threads = True
-        self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
+        # Avoid paying the default half-second shutdown poll for every case.
+        self.thread = threading.Thread(target=lambda: self.server.serve_forever(poll_interval=0.01), daemon=True)
         self.thread.start()
         self.env = os.environ.copy()
         self.env.update(HOME=str(home), HUD_HOST=f"127.0.0.1:{self.server.server_port}")
@@ -192,6 +198,7 @@ class HookHarness:
         self.server.shutdown()
         self.server.server_close()
         self.thread.join(2)
+        assert not self.thread.is_alive()
 
     def payload(self, kind, **fields):
         value = {"hook_event_name": kind, "session_id": "synthetic-session", "prompt_id": self.prompt}
@@ -225,7 +232,7 @@ class HookHarness:
             if not entry.name.isdigit():
                 continue
             try:
-                if (entry / "cwd").resolve() == self.home:
+                if os.readlink(entry / "cwd") == self.private_cwd:
                     args = (entry / "cmdline").read_bytes().split(b"\0")
                     if str(HOOK).encode() in args:
                         found.append(int(entry.name))
@@ -265,7 +272,7 @@ def test_hook_lifecycle_over_real_mcp_surface(tmp_path):
         assert [p["content"] for p in content] == ["Read: running", "Read: completed", "Read: running", "Read: failed", "MCP tool: running", "Final reply"]
         assert content[0]["key"] == content[1]["key"]
         assert content[2]["key"] == content[3]["key"] != content[0]["key"]
-        assert content[-1]["status"] == "attached"
+        assert "status" not in content[-1]
         assert all(p["surface"] == "portal:synthetic-session" and "ttl_ms" not in p for p in publishes)
         assert all(len(p["key"].encode()) < 128 for p in content)
         assert all(r["method"] == "tools/call" for r in h.records)
@@ -330,7 +337,7 @@ def test_hook_subprocess_replay_prompt_races_and_reaping(tmp_path):
         h.wait_idle()
         after_final = h.publications()
         index = next(i for i, p in enumerate(after_final) if p.get("content") == "inflight old final")
-        assert after_final[index]["status"] == "attached"
+        assert "status" not in after_final[index]
         assert after_final[index + 1:]
         assert after_final[-1]["status"] == "active"
         assert all("content" not in p and p["status"] == "active" for p in after_final[index + 1:])
@@ -560,7 +567,7 @@ def test_hook_unavailable_malformed_privacy_and_state_failures(tmp_path):
             h.prompt = str(uuid.uuid4())
             h.event("UserPromptSubmit")
             h.event("Stop", last_assistant_message=final)
-            assert h.publications()[-1] == {"surface": "portal:synthetic-session", "status": "attached"}
+            assert h.publications()[-1] == {"surface": "portal:synthetic-session"}
             assert final not in json.dumps(h.records)
         h.prompt = str(uuid.uuid4())
         h.event("UserPromptSubmit")

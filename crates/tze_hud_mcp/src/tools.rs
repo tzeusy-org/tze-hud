@@ -229,7 +229,24 @@ pub async fn hud_surfaces(ctx: &ToolCtx<'_>) -> McpResult<Value> {
     let ns = ctx.agent.agent_id.as_str();
     let mut surfaces = Vec::new();
     {
+        let lock_started = tracing::enabled!(target: "tze_hud_mcp_phases", tracing::Level::DEBUG)
+            .then(std::time::Instant::now);
+        if lock_started.is_some() {
+            tracing::debug!(
+                target: "tze_hud_mcp_phases",
+                phase = "scene_lock_wait",
+                operation = "surfaces"
+            );
+        }
         let scene = ctx.scene.lock().await;
+        if let Some(started) = &lock_started {
+            tracing::debug!(
+                target: "tze_hud_mcp_phases",
+                phase = "scene_lock_acquired",
+                operation = "surfaces",
+                elapsed_us = started.elapsed().as_micros()
+            );
+        }
         let now = now_us(&scene);
         let mut zones: Vec<_> = scene.zone_registry.zones.values().collect();
         zones.sort_by(|a, b| a.name.cmp(&b.name));
@@ -241,20 +258,22 @@ pub async fn hud_surfaces(ctx: &ToolCtx<'_>) -> McpResult<Value> {
             let mut o = Map::new();
             o.insert("s".into(), json!(format!("zone:{}", z.name)));
             o.insert("accepts".into(), json!(accepts(&z.accepted_media_types)));
-            let mine: Vec<_> = scene
+            let expiries: Vec<_> = scene
                 .zone_registry
                 .active_publishes
                 .get(&z.name)
                 .into_iter()
                 .flatten()
                 .filter(|r| r.publisher_namespace == ns)
+                .map(|r| r.expires_at_wall_us)
+                .chain(scene.scheduled_zone_publication_expiries(&z.name, ns))
                 .collect();
-            if !mine.is_empty() {
+            if !expiries.is_empty() {
                 o.insert("held".into(), json!(true));
             }
-            if let Some(ms) = mine
+            if let Some(ms) = expiries
                 .iter()
-                .filter_map(|r| remaining_ms(r.expires_at_wall_us, now))
+                .filter_map(|expiry| remaining_ms(*expiry, now))
                 .max()
             {
                 o.insert("expires_in_ms".into(), json!(ms));
@@ -373,7 +392,6 @@ fn check_fields(surface: &Surface, p: &PublishParams) -> McpResult<()> {
         .find(|(_, set)| *set),
         Surface::Portal(_) => [
             ("params", p.params.is_some()),
-            ("ttl_ms", p.ttl_ms.is_some()),
             ("delay_ms", p.delay_ms.is_some()),
         ]
         .into_iter()
@@ -448,10 +466,17 @@ pub fn scene_error(e: &ValidationError) -> McpError {
             "WIDGET_PARAMETER_INVALID",
             format!("{widget} has no param {param}; see params in hud_surfaces"),
         ),
-        V::WidgetParameterTypeMismatch { widget, param }
-        | V::WidgetParameterInvalidValue { widget, param, .. } => tool_err(
+        V::WidgetParameterTypeMismatch { widget, param } => tool_err(
             "WIDGET_PARAMETER_INVALID",
             format!("bad value for {widget}.{param}; see params in hud_surfaces"),
+        ),
+        V::WidgetParameterInvalidValue {
+            widget,
+            param,
+            reason,
+        } => tool_err(
+            "WIDGET_PARAMETER_INVALID",
+            format!("{widget}.{param}: {reason}"),
         ),
         V::WidgetMaxPublishersReached { widget, .. } => tool_err(
             "CONTENT_REJECTED",
@@ -498,7 +523,24 @@ async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpRes
         ));
     }
     let ttl_ms = p.ttl_ms.unwrap_or(DEFAULT_ZONE_TTL_MS);
+    let lock_started = tracing::enabled!(target: "tze_hud_mcp_phases", tracing::Level::DEBUG)
+        .then(std::time::Instant::now);
+    if lock_started.is_some() {
+        tracing::debug!(
+            target: "tze_hud_mcp_phases",
+            phase = "scene_lock_wait",
+            operation = "publish_zone"
+        );
+    }
     let mut scene = ctx.scene.lock().await;
+    if let Some(started) = &lock_started {
+        tracing::debug!(
+            target: "tze_hud_mcp_phases",
+            phase = "scene_lock_acquired",
+            operation = "publish_zone",
+            elapsed_us = started.elapsed().as_micros()
+        );
+    }
     let Some(def) = scene.zone_registry.zones.get(zone) else {
         return Err(tool_err(
             "ZONE_NOT_FOUND",
@@ -558,6 +600,9 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
             json_to_widget_param_value(value, name, &scene, widget)?,
         );
     }
+    let typed = scene
+        .validate_widget_params(widget, &typed)
+        .map_err(|e| scene_error(&e))?;
     let lease_id = ensure_lease(ctx, &mut scene)?;
     let ttl_ms = p.ttl_ms.unwrap_or(0);
     let expires = (ttl_ms > 0).then(|| now_us(&scene).saturating_add(ttl_ms * 1_000));
@@ -596,15 +641,47 @@ fn with_portals<T>(
         )
     };
     let portals = ctx.portals.ok_or_else(unavailable)?;
+    let portal_started = tracing::enabled!(target: "tze_hud_mcp_phases", tracing::Level::DEBUG)
+        .then(std::time::Instant::now);
+    if portal_started.is_some() {
+        tracing::debug!(target: "tze_hud_mcp_phases", phase = "portal_lock_wait");
+    }
     let (result, changed) = {
         let mut hub = portals.hub.lock().map_err(|_| {
+            if let Some(started) = &portal_started {
+                tracing::debug!(
+                    target: "tze_hud_mcp_phases",
+                    phase = "portal_lock_error",
+                    code = "INTERNAL",
+                    elapsed_us = started.elapsed().as_micros()
+                );
+            }
             tool_err(
                 "INTERNAL",
                 "the portal service failed; retry after it restarts",
             )
         })?;
+        if let Some(started) = &portal_started {
+            tracing::debug!(
+                target: "tze_hud_mcp_phases",
+                phase = "portal_lock_acquired",
+                elapsed_us = started.elapsed().as_micros()
+            );
+        }
         apply(&mut hub, portals.clock.now_us())
     };
+    if let Some(started) = &portal_started {
+        // The current Hub returns synchronously; this is not a remote acknowledgement.
+        tracing::debug!(
+            target: "tze_hud_mcp_phases",
+            phase = "portal_reply",
+            code = match &result {
+                Ok(_) => "OK",
+                Err(error) => error.code(),
+            },
+            elapsed_us = started.elapsed().as_micros()
+        );
+    }
     if result.is_ok() && changed {
         ctx.portal_wake.notify();
     }
@@ -634,10 +711,10 @@ async fn publish_portal(ctx: &ToolCtx<'_>, pid: &str, p: PublishParams) -> McpRe
         .as_deref()
         .map(PortalStatus::parse)
         .transpose()
-        .map_err(|e| portal_err(e, &p.surface))?;
-    with_portals(ctx, |hub, now| {
+        .map_err(|_| invalid("portal status must be active or degraded; hud_clear detaches"))?;
+    let outcome = with_portals(ctx, |hub, now| {
         (
-            hub.publish(
+            hub.publish_with_hold(
                 &PortalKey::new(ctx.agent.agent_id.clone(), pid),
                 Publish {
                     display_name: p.display_name,
@@ -646,13 +723,17 @@ async fn publish_portal(ctx: &ToolCtx<'_>, pid: &str, p: PublishParams) -> McpRe
                     expects_reply: p.expects_reply.unwrap_or(false),
                     status,
                 },
+                p.ttl_ms,
                 now,
             )
             .map_err(|e| portal_err(e, &p.surface)),
             true,
         )
     })?;
-    Ok(json!({ "ok": true }))
+    let mut result = ok_with_expiry(p.ttl_ms.filter(|ms| *ms > 0));
+    result["reattached"] = json!(outcome.reattached);
+    result["pending_input"] = json!(outcome.pending_input);
+    Ok(result)
 }
 
 // ─── hud_hold ────────────────────────────────────────────────────────────────
@@ -718,8 +799,6 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
 #[serde(deny_unknown_fields)]
 pub struct ClearParams {
     pub surface: String,
-    #[serde(default)]
-    pub reason: Option<String>,
 }
 
 /// Release a zone publication, a widget publication, or a portal (detach).
@@ -911,8 +990,17 @@ fn parse_zone_content(content: &Value) -> Result<ZoneContent, McpError> {
                         .and_then(|v| v.as_str())
                         .unwrap_or_default()
                         .to_string();
-                    let urgency = obj.get("urgency").and_then(|v| v.as_u64()).unwrap_or(1) as u32;
-                    let ttl_ms = obj.get("ttl_ms").and_then(|v| v.as_u64());
+                    let urgency = match obj.get("urgency") {
+                        None => 1,
+                        Some(value) => value.as_u64().filter(|v| *v <= 3).ok_or_else(|| {
+                            invalid("notification.urgency must be an integer in 0..3")
+                        })? as u32,
+                    };
+                    if obj.contains_key("ttl_ms") {
+                        return Err(invalid(
+                            "notification.content.ttl_ms is not supported; use top-level hud_publish ttl_ms",
+                        ));
+                    }
                     let title = obj
                         .get("title")
                         .and_then(|v| v.as_str())
@@ -962,7 +1050,7 @@ fn parse_zone_content(content: &Value) -> Result<ZoneContent, McpError> {
                         text,
                         icon,
                         urgency,
-                        ttl_ms,
+                        ttl_ms: None,
                         title,
                         actions,
                     };
@@ -972,21 +1060,20 @@ fn parse_zone_content(content: &Value) -> Result<ZoneContent, McpError> {
                     Ok(ZoneContent::Notification(n))
                 }
                 "status_bar" => {
-                    let entries: HashMap<String, String> = obj
-                        .get("entries")
-                        .and_then(|v| v.as_object())
-                        .map(|m| {
-                            m.iter()
-                                .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                                .collect()
+                    let values = obj.get("entries").and_then(Value::as_object)
+                        .filter(|m| !m.is_empty())
+                        .ok_or_else(|| invalid("status_bar content must have a non-empty entries object with string values"))?;
+                    let entries = values
+                        .iter()
+                        .map(|(key, value)| {
+                            value
+                                .as_str()
+                                .map(|v| (key.clone(), v.to_string()))
+                                .ok_or_else(|| {
+                                    invalid(format!("status_bar.entries.{key} must be a string"))
+                                })
                         })
-                        .unwrap_or_default();
-                    if entries.is_empty() {
-                        return Err(invalid(
-                            "status_bar content must have a non-empty \"entries\" object"
-                                .to_string(),
-                        ));
-                    }
+                        .collect::<McpResult<HashMap<_, _>>>()?;
                     Ok(ZoneContent::StatusBar(StatusBarPayload { entries }))
                 }
                 "solid_color" => {
@@ -1071,21 +1158,52 @@ fn json_to_widget_param_value(
         })?;
     Ok(match decl.param_type {
         WidgetParamType::F32 => {
-            WidgetParameterValue::F32(v.as_f64().ok_or_else(|| bad("a number"))? as f32)
+            let number = v.as_f64().ok_or_else(|| bad("a finite f32 number"))?;
+            WidgetParameterValue::F32(
+                SceneGraph::validate_widget_f32_value(widget_name, param_name, decl, number)
+                    .map_err(|e| scene_error(&e))?,
+            )
         }
         WidgetParamType::String => {
             WidgetParameterValue::String(v.as_str().ok_or_else(|| bad("a string"))?.to_string())
         }
         WidgetParamType::Color => {
-            let o = v
-                .as_object()
-                .ok_or_else(|| bad("a color {r,g,b,a} in 0..1"))?;
-            let c = |k: &str, d: f64| o.get(k).and_then(Value::as_f64).unwrap_or(d) as f32;
+            let shape = "#RRGGBB or {r,g,b,a?} with finite numeric channels in 0..1";
+            if let Some(hex) = v.as_str() {
+                let bytes = hex.as_bytes();
+                if bytes.len() != 7
+                    || bytes[0] != b'#'
+                    || !bytes[1..].iter().all(u8::is_ascii_hexdigit)
+                {
+                    return Err(bad(shape));
+                }
+                let channel =
+                    |start| u8::from_str_radix(&hex[start..start + 2], 16).unwrap() as f32 / 255.0;
+                return Ok(WidgetParameterValue::Color(Rgba::new(
+                    channel(1),
+                    channel(3),
+                    channel(5),
+                    1.0,
+                )));
+            }
+            let o = v.as_object().ok_or_else(|| bad(shape))?;
+            let c = |k: &str| {
+                let value = match o.get(k) {
+                    None if k == "a" => return Ok(1.0),
+                    Some(value) => value.as_f64(),
+                    None => None,
+                }
+                .ok_or_else(|| bad(&format!("{shape}; {k} must be numeric")))?;
+                if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+                    return Err(bad(&format!("{shape}; {k} is outside 0..1")));
+                }
+                Ok(value as f32)
+            };
             WidgetParameterValue::Color(Rgba {
-                r: c("r", 0.0),
-                g: c("g", 0.0),
-                b: c("b", 0.0),
-                a: c("a", 1.0),
+                r: c("r")?,
+                g: c("g")?,
+                b: c("b")?,
+                a: c("a")?,
             })
         }
         WidgetParamType::Enum => WidgetParameterValue::Enum(

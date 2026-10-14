@@ -786,17 +786,21 @@ impl WindowedBenchmarkRunState {
     }
 
     pub(super) fn record(&mut self, telemetry: &tze_hud_telemetry::FrameTelemetry) -> bool {
+        self.record_at(telemetry, Instant::now())
+    }
+
+    fn record_at(&mut self, telemetry: &tze_hud_telemetry::FrameTelemetry, now: Instant) -> bool {
         if telemetry.stage7_gpu_submit_us == 0 {
             return false;
         }
-        self.last_frame_at = Instant::now();
+        self.last_frame_at = now;
         if self.warmup_seen < self.config.warmup_frames {
             self.warmup_seen += 1;
             return false;
         }
 
         if self.measured_start.is_none() {
-            self.measured_start = Some(Instant::now());
+            self.measured_start = Some(now);
         }
         self.summary
             .record_frame(telemetry.frame_time_us, telemetry.tile_count);
@@ -871,7 +875,11 @@ impl WindowedBenchmarkRunState {
     /// When it fires, the caller should emit a partial result and exit non-zero
     /// instead of hanging indefinitely.
     pub(super) fn is_stalled(&self, timeout: std::time::Duration) -> bool {
-        self.last_frame_at.elapsed() > timeout
+        self.is_stalled_at(timeout, Instant::now())
+    }
+
+    fn is_stalled_at(&self, timeout: std::time::Duration, now: Instant) -> bool {
+        now.saturating_duration_since(self.last_frame_at) > timeout
     }
 
     /// Emit a partial/diagnostic JSON artifact for a watchdog-aborted benchmark.
@@ -2831,10 +2839,14 @@ mod tests {
     #[test]
     fn benchmark_watchdog_fires_when_no_frame_recorded_past_timeout() {
         let state = make_benchmark_state(0, 10);
-        // Sleep long enough that elapsed() > the test timeout.
-        std::thread::sleep(Duration::from_millis(5));
+        let created_at = state.last_frame_at;
+        let timeout = Duration::from_millis(1);
         assert!(
-            state.is_stalled(Duration::from_millis(1)),
+            !state.is_stalled_at(timeout, created_at + timeout),
+            "watchdog must remain active exactly at the timeout boundary"
+        );
+        assert!(
+            state.is_stalled_at(timeout, created_at + timeout + Duration::from_millis(1)),
             "watchdog must fire when no frame recorded past the timeout"
         );
     }
@@ -2842,16 +2854,34 @@ mod tests {
     #[test]
     fn benchmark_watchdog_does_not_fire_immediately_after_record() {
         let mut state = make_benchmark_state(0, 10);
-        // Age the creation timestamp well past a short threshold.
-        std::thread::sleep(Duration::from_millis(5));
+        let created_at = state.last_frame_at;
+        let timeout = Duration::from_millis(100);
+        let recorded_at = created_at + Duration::from_millis(200);
+        assert!(state.is_stalled_at(timeout, recorded_at));
+
         let mut telem = tze_hud_telemetry::FrameTelemetry::new(1);
         telem.frame_time_us = 8_000;
         telem.stage7_gpu_submit_us = 1;
-        state.record(&telem);
-        // Immediately after record(), last_frame_at is fresh — generous threshold.
+        state.record_at(&telem, recorded_at);
         assert!(
-            !state.is_stalled(Duration::from_millis(100)),
+            !state.is_stalled_at(timeout, recorded_at),
             "watchdog must not fire immediately after a frame is recorded"
+        );
+        assert!(
+            !state.is_stalled_at(timeout, recorded_at + timeout),
+            "a successful record must refresh the exact timeout boundary"
+        );
+        assert!(
+            !state.is_stalled_at(timeout, created_at),
+            "an earlier injected timestamp must not panic or spuriously stall"
+        );
+
+        telem.stage7_gpu_submit_us = 0;
+        let skipped_at = recorded_at + timeout + Duration::from_millis(1);
+        assert!(!state.record_at(&telem, skipped_at));
+        assert!(
+            state.is_stalled_at(timeout, skipped_at),
+            "a skipped submit must not refresh watchdog progress"
         );
     }
 

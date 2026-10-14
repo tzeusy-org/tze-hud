@@ -75,7 +75,7 @@ jobs:
           toolchain: "1.88"
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Install Mesa / llvmpipe + protobuf compiler
+      - name: Install Mesa / llvmpipe
         timeout-minutes: 5
         run: |
           sudo apt-get $APT_OPTS update -q
@@ -84,8 +84,7 @@ jobs:
             mesa-vulkan-drivers \
             mesa-utils \
             libegl-mesa0 \
-            libgl1-mesa-dri \
-            protobuf-compiler
+            libgl1-mesa-dri
 
       - name: cargo test (workspace unit, TZE_HUD_PERF_ASSERT=1)
         run: |
@@ -149,7 +148,7 @@ jobs:
           toolchain: "1.88"
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Install Mesa / llvmpipe + protobuf compiler
+      - name: Install Mesa / llvmpipe
         timeout-minutes: 5
         run: |
           sudo apt-get $APT_OPTS update -q
@@ -158,8 +157,7 @@ jobs:
             mesa-vulkan-drivers \
             mesa-utils \
             libegl-mesa0 \
-            libgl1-mesa-dri \
-            protobuf-compiler
+            libgl1-mesa-dri
 
       - name: cargo test -p integration (perf-assert targets, TZE_HUD_PERF_ASSERT=1)
         run: |
@@ -219,7 +217,7 @@ jobs:
           toolchain: "1.88"
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
-      - name: Install Mesa / llvmpipe + protobuf compiler
+      - name: Install Mesa / llvmpipe
         timeout-minutes: 5
         run: |
           sudo apt-get $APT_OPTS update -q
@@ -228,8 +226,7 @@ jobs:
             mesa-vulkan-drivers \
             mesa-utils \
             libegl-mesa0 \
-            libgl1-mesa-dri \
-            protobuf-compiler
+            libgl1-mesa-dri
 
       - name: cargo test -p vertical_slice budget_assertions (TZE_HUD_PERF_ASSERT=1)
         run: |

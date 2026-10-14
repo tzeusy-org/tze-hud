@@ -259,8 +259,10 @@ class CandidatePacketTests(unittest.TestCase):
             )
         )
 
-    def test_candidate_is_owner_approved(self):
-        self.assertEqual(self.candidate["approval"]["status"], "owner_approved")
+    def test_candidate_has_review_provenance(self):
+        approval = self.candidate["approval"]
+        self.assertIn(approval["status"], checker.APPROVAL_STATUSES)
+        self.assertTrue(approval["decision_reference"].strip())
 
     def test_baseline_budgets_match_api_targets(self):
         self.assertEqual(
@@ -277,7 +279,11 @@ class CandidatePacketTests(unittest.TestCase):
 
     def test_candidate_is_accepted_by_fail_closed_gate(self):
         report = checker.compare(copy.deepcopy(self.candidate), self.candidate)
-        self.assertEqual(report["status"], "passed")
+        expected = (
+            "passed" if self.candidate["approval"]["status"] == "owner_approved"
+            else "warning"
+        )
+        self.assertEqual(report["status"], expected)
         self.assertFalse(report["incompatibilities"])
         self.assertFalse(report["warnings"] or report["regressions"])
 

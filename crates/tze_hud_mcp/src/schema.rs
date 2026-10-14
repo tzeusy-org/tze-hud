@@ -21,13 +21,13 @@ pub fn initialize_result() -> Value {
         "capabilities": {
             "tools": { "listChanged": false }
         },
-        "instructions": "Call hud_surfaces, then hud_publish to a surface it lists.",
+        "instructions": "Call hud_surfaces for zones/widgets; choose portal:<id> to attach.",
     })
 }
 
 /// Build the `tools/list` result.
 pub fn tools_list_result() -> Value {
-    let surface = json!({"type": "string", "description": "From hud_surfaces, e.g. zone:subtitle"});
+    let surface = json!({"type": "string", "description": "Zone/widget from hud_surfaces; portal:<your-id> attaches"});
     let ttl = json!({"type": "integer", "minimum": 0, "description": "0 = until cleared"});
     json!({ "tools": [
         {
@@ -37,20 +37,22 @@ pub fn tools_list_result() -> Value {
         },
         {
             "name": "hud_publish",
-            "description": "Show content on a surface (replaces your previous content there). \
-                Zone: content is text, or an object for structured zones. Widget: params. \
-                Portal: first publish attaches; content is output text.",
+            "description": "Zone: publish text or a structured object; notification is \
+                {title?,body,urgency?:0-3,actions?:[{label,callback_id}]}. Widget: typed params from hud_surfaces. \
+                Portal: choose portal:<id>; first publish attaches, even without content. \
+                Send only new output text: content appends; same key replaces the newest matching output. \
+                Returns reattached and pending_input; poll hud_input for replies.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
                     "surface": surface,
                     "content": {"type": ["string", "object"]},
                     "params": {"type": "object"},
-                    "ttl_ms": {"type": "integer", "minimum": 0, "description": "zone default 60000; 0 = until cleared"},
+                    "ttl_ms": {"type": "integer", "minimum": 0, "description": "zone default 60000; widget durable; portal hold; 0 = until cleared"},
                     "delay_ms": {"type": "integer", "minimum": 0, "maximum": 300000, "description": "show later"},
                     "key": {"type": "string", "description": "merge key: same key replaces"},
-                    "status": {"type": "string", "enum": ["attached", "active", "degraded", "hud_unavailable", "detached"]},
-                    "expects_reply": {"type": "boolean"},
+                    "status": {"type": "string", "enum": ["active", "degraded"], "description": "portal agent status; content optional"},
+                    "expects_reply": {"type": "boolean", "description": "portal: arm reply composer"},
                     "display_name": {"type": "string"},
                 },
                 "required": ["surface"],
@@ -70,7 +72,7 @@ pub fn tools_list_result() -> Value {
             "description": "Remove your content from a surface, or detach a portal.",
             "inputSchema": {
                 "type": "object",
-                "properties": {"surface": surface, "reason": {"type": "string"}},
+                "properties": {"surface": surface},
                 "required": ["surface"],
             },
         },
@@ -142,7 +144,7 @@ mod tests {
     #[test]
     fn tools_list_properties_match_params_structs() {
         let sample = |p: &str| match p {
-            "content" | "surface" | "key" | "status" | "reason" | "display_name" => json!("x"),
+            "content" | "surface" | "key" | "status" | "display_name" => json!("x"),
             "params" => json!({}),
             "expects_reply" => json!(true),
             "ack" => json!(["i1"]),

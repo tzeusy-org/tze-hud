@@ -117,8 +117,8 @@ def cmd_publish(args):
         arguments["display_name"] = args.display_name
     if args.state:
         arguments["status"] = args.state
-    if "content" not in arguments and "status" not in arguments:
-        die("publish needs --text, --text-file, or --state")
+    if args.ttl_ms is not None:
+        arguments["ttl_ms"] = args.ttl_ms
     emit(call_tool("hud_publish", arguments))
 
 
@@ -154,8 +154,6 @@ def cmd_ack(args):
 
 def cmd_clear(args):
     arguments = {"surface": f"portal:{args.id}"}
-    if args.reason:
-        arguments["reason"] = args.reason
     emit(call_tool("hud_clear", arguments))
 
 
@@ -176,7 +174,8 @@ def build_parser():
     sp.add_argument("--key", help="coalesce key: a publish with the same key replaces in place")
     sp.add_argument("--expects-reply", action="store_true")
     sp.add_argument("--display-name", help="name shown when this publish attaches")
-    sp.add_argument("--state", help="also set the lifecycle state")
+    sp.add_argument("--state", choices=["active", "degraded"], help="also set agent status")
+    sp.add_argument("--ttl-ms", type=int, help="hold this publish (0 = until clear)")
     sp.set_defaults(func=cmd_publish)
 
     sp = sub.add_parser("status")
@@ -184,7 +183,7 @@ def build_parser():
     sp.add_argument(
         "--state",
         required=True,
-        choices=["attached", "active", "degraded", "hud_unavailable", "detached"],
+        choices=["active", "degraded"],
     )
     sp.set_defaults(func=cmd_status)
 
@@ -206,7 +205,6 @@ def build_parser():
 
     sp = sub.add_parser("clear")
     sp.add_argument("--id", required=True)
-    sp.add_argument("--reason")
     sp.set_defaults(func=cmd_clear)
     return parser
 
