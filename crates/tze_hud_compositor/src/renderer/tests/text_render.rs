@@ -563,3 +563,130 @@ async fn font_tokens_select_role_families_and_rebuild_only_on_change() {
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
     assert_eq!(compositor.resolved_fonts().unwrap().sans, "DejaVu Sans");
 }
+
+/// Single-line Ellipsis labels in boxes shorter than one line height still
+/// render, and replacing their content changes the pixels (hud-pcscu).
+///
+/// The Presence Card sizes its labels to the glyphs, not the 1.4x line height:
+/// 20 px name in a 26 px box, 13 px status in 18 px, 11 px eyebrow in 12 px.
+/// Proto `TextOverflow` defaults to Ellipsis, whose whole-line budget was
+/// `floor(height / line_height) == 0`, so those labels drew nothing while the
+/// 10 px chip in a 20 px box did.
+#[tokio::test]
+async fn ellipsis_labels_shorter_than_a_line_render_and_update() {
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(320, 112).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut scene = SceneGraph::new(320.0, 112.0);
+    let tab_id = scene.create_tab("card", 0).unwrap();
+    let lease_id = scene.grant_lease("card", 60_000);
+    let tile_id = scene
+        .create_tile(
+            tab_id,
+            "card",
+            lease_id,
+            Rect::new(0.0, 0.0, 320.0, 112.0),
+            1,
+        )
+        .unwrap();
+    let root = Node {
+        layout: Default::default(),
+        id: SceneId::new(),
+        children: vec![],
+        data: NodeData::SolidColor(SolidColorNode {
+            color: Rgba::new(0.0, 0.0, 0.0, 1.0),
+            bounds: Rect::new(0.0, 0.0, 320.0, 112.0),
+            radius: None,
+        }),
+    };
+    let root_id = root.id;
+    scene.set_tile_root(tile_id, root).unwrap();
+
+    let label = |content: &str, bounds: Rect, font_size_px: f32| {
+        NodeData::TextMarkdown(TextMarkdownNode {
+            content: content.to_owned(),
+            bounds,
+            font_size_px,
+            font_family: FontFamily::SystemSansSerif,
+            color: Rgba::new(1.0, 1.0, 1.0, 1.0),
+            background: None,
+            alignment: TextAlign::Start,
+            overflow: TextOverflow::Ellipsis,
+            color_runs: Box::default(),
+        })
+    };
+    let labels = [
+        (
+            "eyebrow",
+            "RESIDENT AGENT",
+            Rect::new(96.0, 18.0, 152.0, 12.0),
+            11.0,
+        ),
+        (
+            "name",
+            "**POC tile**",
+            Rect::new(96.0, 34.0, 152.0, 26.0),
+            20.0,
+        ),
+        (
+            "status",
+            "Connected",
+            Rect::new(96.0, 68.0, 148.0, 18.0),
+            13.0,
+        ),
+    ];
+    let mut status_id = None;
+    for (name, content, bounds, size) in labels {
+        let node = Node {
+            layout: Default::default(),
+            id: SceneId::new(),
+            children: vec![],
+            data: label(content, bounds, size),
+        };
+        if name == "status" {
+            status_id = Some(node.id);
+        }
+        scene
+            .add_node_to_tile(tile_id, Some(root_id), node)
+            .unwrap();
+    }
+
+    let render = |compositor: &mut Compositor, scene: &mut SceneGraph| {
+        compositor.prime_markdown_cache(scene);
+        compositor.prime_truncation_cache(scene);
+        compositor.render_frame_headless(scene, &surface);
+        surface.read_pixels(&compositor.device)
+    };
+    let region = |pixels: &[u8], r: Rect| -> Vec<u8> {
+        let mut out = Vec::new();
+        for y in r.y as usize..(r.y + r.height) as usize {
+            for x in r.x as usize..(r.x + r.width) as usize {
+                out.push(pixels[(y * 320 + x) * 4]);
+            }
+        }
+        out
+    };
+
+    let before = render(&mut compositor, &mut scene);
+    for (name, _, bounds, _) in labels {
+        let lit = region(&before, bounds).iter().filter(|&&r| r > 128).count();
+        assert!(
+            lit > 20,
+            "{name} label drew {lit} lit pixels; expected visible text"
+        );
+    }
+
+    let status_bounds = labels[2].2;
+    scene
+        .update_node_content(
+            tile_id,
+            status_id.unwrap(),
+            label("UPDATED", status_bounds, 13.0),
+        )
+        .unwrap();
+    let after = render(&mut compositor, &mut scene);
+    assert_ne!(
+        region(&before, status_bounds),
+        region(&after, status_bounds),
+        "replacing the status text must change its pixels"
+    );
+}

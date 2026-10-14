@@ -382,17 +382,41 @@ impl SceneGraph {
         }
     }
 
-    /// Set hover state for a chrome drag handle interaction id.
-    pub fn set_drag_handle_hovered(&mut self, interaction_id: &str, hovered: bool) {
-        if let Some(state) = self.overlay.drag_handle_states.get_mut(interaction_id) {
-            state.hovered = hovered;
+    /// Set hover state for a runtime chrome control (drag handle or
+    /// notification dismiss/action button), keyed by its interaction id.
+    pub fn set_chrome_hovered(&mut self, interaction_id: &str, hovered: bool) {
+        self.update_chrome_state(interaction_id, |state| state.hovered = hovered);
+    }
+
+    /// Apply `update` to one chrome control's local state. Only non-default
+    /// states are stored, so an idle control leaves no entry behind (and
+    /// retained rendering stays eligible). A real change bumps the geometry
+    /// epoch so the idle gate presents exactly one frame for it, without
+    /// invalidating content caches.
+    fn update_chrome_state(
+        &mut self,
+        interaction_id: &str,
+        update: impl FnOnce(&mut ChromeLocalState),
+    ) {
+        let before = self
+            .overlay
+            .chrome_states
+            .get(interaction_id)
+            .copied()
+            .unwrap_or_default();
+        let mut after = before;
+        update(&mut after);
+        if after == before {
+            return;
+        }
+        if after == ChromeLocalState::default() {
+            self.overlay.chrome_states.remove(interaction_id);
         } else {
             self.overlay
-                .drag_handle_states
-                .entry(interaction_id.to_string())
-                .or_default()
-                .hovered = hovered;
+                .chrome_states
+                .insert(interaction_id.to_string(), after);
         }
+        self.bump_geometry_epoch();
     }
 
     /// Mark the viewer's drag-feedback target without invalidating content caches.
@@ -414,17 +438,10 @@ impl SceneGraph {
         self.overlay.drag_active_elements.contains(&element_id)
     }
 
-    /// Set pressed state for a chrome drag handle interaction id.
-    pub fn set_drag_handle_pressed(&mut self, interaction_id: &str, pressed: bool) {
-        if let Some(state) = self.overlay.drag_handle_states.get_mut(interaction_id) {
-            state.pressed = pressed;
-        } else {
-            self.overlay
-                .drag_handle_states
-                .entry(interaction_id.to_string())
-                .or_default()
-                .pressed = pressed;
-        }
+    /// Set pressed state for a runtime chrome control, keyed by its
+    /// interaction id (see [`Self::set_chrome_hovered`]).
+    pub fn set_chrome_pressed(&mut self, interaction_id: &str, pressed: bool) {
+        self.update_chrome_state(interaction_id, |state| state.pressed = pressed);
     }
 
     /// True when a header-band drag handle should yield the point to an

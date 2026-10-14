@@ -70,8 +70,8 @@ Each local recipe maps to a CI job:
 | `test-integration` | `test-integration` | headless integration suites |
 | `token-footprint` | `test-integration` | deterministic LLM-facing token-footprint gate |
 | `test-python` | `user-test-python-suite` | pure-Python suites (pytest + `scripts/ci` unittest) |
-| `production-boot` | `production-boot-vertical-slice` | vertical-slice production-config boot |
-| `canonical-app-boot` | `canonical-app-production-boot` | canonical app production-config boot |
+| `production-boot` | `test-unit` | vertical-slice production-config boot; focused local recipe |
+| `canonical-app-boot` | `test-unit` | canonical app production-config boot; focused local recipe |
 | `dev-mode-guard` | `dev-mode-guard` | dev-mode not enabled in any package's default-build dependency closure (shipped binary included) |
 | `deps-unused` | `check` | `cargo machete`: unused dependencies |
 | `idle-efficiency-checker` | `check` | fail-closed idle artifact contract tests |

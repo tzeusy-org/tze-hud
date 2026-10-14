@@ -1,14 +1,15 @@
 # tze_hud CI — merge gates.
 #
-# Merge-gate jobs must finish in under ~8 minutes. Anything slower goes in the
-# weekly lanes (perf-budget.yml, perf-assert.yml). Every job has a job-level
-# timeout-minutes and every apt step has its own, so a stalled runner or
-# mirror fails fast instead of timing out the merge queue.
+# Required checks must finish within 6 minutes of a merge-group run starting
+# and pass on the first attempt (docs/scope.md "Merge gate and testability").
+# Anything slower goes in the weekly lanes (perf-budget.yml, perf-assert.yml).
+# Every job has a job-level timeout-minutes and every apt step has its own, so
+# a stalled runner or mirror fails fast instead of timing out the merge queue.
 #
 # Required checks (ruleset "main merge queue"; job `name:`s must not change):
 #   cargo check, cargo fmt, cargo clippy, cargo test (unit),
-#   vertical_slice production config boot, canonical app production config boot gate,
-#   dev-mode guard (release build), cargo clippy (windows-gnu cross-target)
+#   cargo test (integration), dev-mode guard (release build),
+#   cargo clippy (windows-gnu cross-target)
 #
 # Job map:
 #   check          — cargo check: fast compilation gate (no codegen)
@@ -22,18 +23,15 @@
 #                    --features tze_hud_runtime/dev-mode (required check name unchanged)
 #   test-integration — cargo test -p integration --tests
 #                    + deterministic LLM-facing token-footprint gate
-#   production-boot-vertical-slice / canonical-app-production-boot — boot the
-#     runtime with the committed production configs
+#   test-unit also runs both production_boot suites and runtime pixel_readback;
+#     the focused local boot/GPU recipes remain available
 #   user-test-python-suite — pytest over the user-test and repo script suites;
 #     pure-Python tests only, with no GPU, Windows, live HUD runtime, or network
 #   dev-mode-guard — cargo-metadata check (no build) that dev-mode is not enabled in the
 #     default-build dependency closure of any workspace package, incl. the shipped
 #     binary (the actual release build runs in windows.yml)
 #   cargo-deny     — advisories + licenses + bans + sources (workflow-blocking;
-#     outside the current eight required checks)
-#   test-gpu-pixel-readback — pixel readback on llvmpipe (informational duplicate: the
-#     same pixel_readback tests already run, blocking, inside test-unit via workspace
-#     the explicit tze_hud_runtime/dev-mode feature)
+#     outside the current seven required checks)
 #
 # GPU jobs run with HEADLESS_FORCE_SOFTWARE=1 (llvmpipe on Linux) so no
 # hardware GPU is needed.
@@ -85,6 +83,8 @@ jobs:
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Validate locked dependency graph
         run: cargo metadata --locked --format-version 1 >/dev/null
       - name: cargo check (workspace)
@@ -140,12 +140,14 @@ jobs:
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo clippy (workspace, all targets, deny warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
 
   # ── Windows-target clippy (cfg(windows) coverage) ──────────────────────────
   #
-  # The `clippy` job above runs on ubuntu-latest, so it never compiles code
+  # The `clippy` job above runs on ubuntu-24.04, so it never compiles code
   # gated on #[cfg(target_os = "windows")] — that code is entirely invisible
   # to the Linux lint gate. hud-53s6m found a real clippy::io_other_error
   # regression in element_store.rs's Windows-only MoveFileExW path that this
@@ -185,6 +187,8 @@ jobs:
           targets: x86_64-pc-windows-gnu
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo clippy (windows-gnu, cfg(windows) crates, deny warnings)
         env:
           # Lint only; real Windows builds retain their compiler/hash backend.
@@ -210,7 +214,6 @@ jobs:
     name: cargo test (unit)
     runs-on: ubuntu-24.04
     timeout-minutes: 8
-    needs: [check]
     env:
       # Native Linux only; preserve Windows target linkage.
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
@@ -230,6 +233,8 @@ jobs:
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install Mesa / llvmpipe
         timeout-minutes: 5
         run: |
@@ -329,7 +334,6 @@ jobs:
     name: cargo test (integration)
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    needs: [check]
     env:
       # Native Linux only: preserve MinGW/MSVC flags and the system ld.
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
@@ -349,6 +353,8 @@ jobs:
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
       - uses: Swatinem/rust-cache@v2.9.1
         timeout-minutes: 10
+        with:
+          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: Install Mesa / llvmpipe
         timeout-minutes: 5
         run: |
@@ -399,126 +405,6 @@ jobs:
           name: token-footprint-calibration
           path: test_results/token-footprint/
           if-no-files-found: error
-
-  # ── Example production config boot (vertical_slice) ────────────────────────
-  #
-  # Boots the runtime with the example's committed production config
-  # (examples/vertical_slice/config/production.toml) and its paired agents
-  # (agents.toml). If either file is malformed or governance config parsing
-  # regresses, this fails.
-  #
-  # The test lives at examples/vertical_slice/tests/production_boot.rs: it
-  # builds HeadlessRuntime from the config and asserts startup succeeds, with
-  # no dev-mode. The unpaired-PSK gate lives in tze_hud_app's production_boot,
-  # and the full agent lifecycle in the vertical_slice binary's own tests.
-
-  production-boot-vertical-slice:
-    name: vertical_slice production config boot
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    needs: [check]
-    env:
-      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
-      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install pinned mold (native Linux linker)
-        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
-        timeout-minutes: 5
-        with:
-          mold-version: "2.42.1"
-          make-default: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.88"
-      # timeout-minutes caps cache-save hangs (incident: PR #606, canonical-app-production-boot
-      # hung 15+ min in the Swatinem/rust-cache post-step, required --admin merge).
-      # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
-      - uses: Swatinem/rust-cache@v2.9.1
-        timeout-minutes: 10
-      - name: Install Mesa / llvmpipe
-        timeout-minutes: 5
-        run: |
-          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
-          # An unsupported hosted image layout must fail before package acquisition.
-          apt_mirror_list=/etc/apt/apt-mirrors.txt
-          test -f "$apt_mirror_list"
-          test ! -L "$apt_mirror_list"
-          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
-          sudo apt-get $APT_OPTS update -q --error-on=any
-          sudo apt-get $APT_OPTS install -y --no-install-recommends \
-            libvulkan1 \
-            mesa-vulkan-drivers \
-            mesa-utils \
-            libegl-mesa0 \
-            libgl1-mesa-dri
-      - name: cargo test -p vertical_slice --test production_boot
-        run: |
-          cargo test \
-            -p vertical_slice \
-            --test production_boot \
-            -- --nocapture
-
-  # ── Canonical app production config boot gate ───────────────────────────────
-  #
-  # Boots the runtime with the committed canonical app config:
-  #   app/tze_hud_app/config/production.toml
-  #
-  # This gate must fail when startup silently falls back to default/headless
-  # behavior. The backing test asserts config-declared widget instances/types and
-  # profile-driven zone policy are present, not just that runtime construction
-  # returns Ok.
-
-  canonical-app-production-boot:
-    name: canonical app production config boot gate
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    needs: [check]
-    env:
-      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
-      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install pinned mold (native Linux linker)
-        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
-        timeout-minutes: 5
-        with:
-          mold-version: "2.42.1"
-          make-default: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.88"
-      # timeout-minutes caps cache-save hangs (incident: PR #606, canonical-app-production-boot
-      # hung 15+ min in the Swatinem/rust-cache post-step, required --admin merge).
-      # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
-      - uses: Swatinem/rust-cache@v2.9.1
-        timeout-minutes: 10
-      - name: Install Mesa / llvmpipe
-        timeout-minutes: 5
-        run: |
-          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
-          # An unsupported hosted image layout must fail before package acquisition.
-          apt_mirror_list=/etc/apt/apt-mirrors.txt
-          test -f "$apt_mirror_list"
-          test ! -L "$apt_mirror_list"
-          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
-          sudo apt-get $APT_OPTS update -q --error-on=any
-          sudo apt-get $APT_OPTS install -y --no-install-recommends \
-            libvulkan1 \
-            mesa-vulkan-drivers \
-            mesa-utils \
-            libegl-mesa0 \
-            libgl1-mesa-dri
-      - name: cargo test -p tze_hud_app --test production_boot
-        run: |
-          cargo test \
-            -p tze_hud_app \
-            --test production_boot \
-            -- --nocapture
 
   # ── User-test Python suite ──────────────────────────────────────────────────
   #
@@ -573,7 +459,6 @@ jobs:
     name: dev-mode guard (release build)
     runs-on: ubuntu-24.04
     timeout-minutes: 5
-    needs: [check]
     steps:
       - uses: actions/checkout@v5
       - name: Verify dev-mode is not a default feature
@@ -609,83 +494,3 @@ jobs:
           # Log level: warn surfaces yanked-crate and duplicate-version notices
           # without failing the job.
           log-level: warn
-
-  # ── GPU pixel readback (informational) ────────────────────────────────────────────
-  #
-  # Runs the pixel readback integration tests that validate the full GPU
-  # compositing pipeline (Layer 1 colour assertions).  These require either:
-  # - A real GPU (hardware CI runner), or
-  # - Mesa llvmpipe (software Vulkan, available on Linux)
-  #
-  # On GitHub-hosted runners, llvmpipe is available via mesa-vulkan-drivers
-  # but performance is much slower.  Pixel assertions use a wider tolerance
-  # in CI (configured via the LLVMPIPE_CI env var in the test harness).
-  #
-  # To run locally:
-  #   just test-gpu
-  #
-  # This job is INFORMATIONAL only on PRs and does not block merge. It is a
-  # pure duplicate: the workspace-wide `cargo test` in test-unit (a required
-  # check) already builds and runs pixel_readback, because workspace feature
-  # unification enables tze_hud_runtime/dev-mode. Making this job blocking would
-  # add nothing; see bead hud-bstmy.8.6 for its disposition.
-
-  test-gpu-pixel-readback:
-    name: pixel readback (GPU / llvmpipe, informational)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    needs: [test-unit]
-    continue-on-error: true  # informational duplicate of test-unit coverage; see comment above
-    env:
-      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
-      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install pinned mold (native Linux linker)
-        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
-        timeout-minutes: 5
-        with:
-          mold-version: "2.42.1"
-          make-default: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.88"
-      # timeout-minutes caps cache-save hangs (incident: PR #606, canonical-app-production-boot
-      # hung 15+ min in the Swatinem/rust-cache post-step, required --admin merge).
-      # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
-      - uses: Swatinem/rust-cache@v2.9.1
-        timeout-minutes: 10
-      - name: Install Mesa / llvmpipe + Vulkan loader
-        timeout-minutes: 5
-        run: |
-          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
-          # An unsupported hosted image layout must fail before package acquisition.
-          apt_mirror_list=/etc/apt/apt-mirrors.txt
-          test -f "$apt_mirror_list"
-          test ! -L "$apt_mirror_list"
-          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
-          sudo apt-get $APT_OPTS update -q --error-on=any
-          sudo apt-get $APT_OPTS install -y --no-install-recommends \
-            libvulkan1 \
-            mesa-vulkan-drivers \
-            mesa-utils \
-            libegl-mesa0 \
-            libgl1-mesa-dri \
-            vulkan-tools
-      - name: Verify Vulkan adapter available
-        run: vulkaninfo --summary 2>&1 | head -30 || true
-      - name: cargo test pixel_readback (software GPU)
-        run: |
-          cargo test \
-            -p tze_hud_runtime \
-            --test pixel_readback \
-            --features dev-mode \
-            -- --nocapture
-        env:
-          HEADLESS_FORCE_SOFTWARE: "1"
-          LLVMPIPE_CI: "1"
-          # Canary: fail loudly if the adapter is missing instead of silently
-          # skipping GPU tests (hud-2sxfk).
-          TZE_HUD_REQUIRE_GPU: "1"

@@ -63,13 +63,7 @@ impl Compositor {
                 });
         }
 
-        scene.overlay.drag_handle_states.retain(|k, _| {
-            scene
-                .overlay
-                .drag_handle_hit_regions
-                .iter()
-                .any(|r| &r.interaction_id == k)
-        });
+        prune_chrome_states(scene);
     }
 
     // ── Chrome context menu rendering (hud-zc7f) ─────────────────────────────
@@ -348,10 +342,7 @@ pub(crate) fn populate_notification_hit_regions_in(
             // ── Dismiss (×) button ────────────────────────────────────────
             // Top-right corner of the slot; same bounds the renderer draws.
             let dismiss_bounds = notification_dismiss_bounds(zx, slot_y, zw, effective_slot_h);
-            let dismiss_id = format!(
-                "zone:{}:dismiss:{}:{}",
-                zone_name, record.published_at_wall_us, record.publisher_namespace,
-            );
+            let dismiss_id = notification_dismiss_interaction_id(zone_name, record);
             scene.overlay.zone_hit_regions.push(ZoneHitRegion {
                 zone_name: zone_name.clone(),
                 published_at_wall_us: record.published_at_wall_us,
@@ -370,13 +361,8 @@ pub(crate) fn populate_notification_hit_regions_in(
                     notification_action_button_bounds(zx, slot_y, zw, effective_slot_h, n_actions);
 
                 for (action, action_bounds) in n_payload.actions.iter().zip(action_rects) {
-                    let action_id = format!(
-                        "zone:{}:action:{}:{}:{}",
-                        zone_name,
-                        record.published_at_wall_us,
-                        record.publisher_namespace,
-                        action.callback_id,
-                    );
+                    let action_id =
+                        notification_action_interaction_id(zone_name, record, &action.callback_id);
                     scene.overlay.zone_hit_regions.push(ZoneHitRegion {
                         zone_name: zone_name.clone(),
                         published_at_wall_us: record.published_at_wall_us,
@@ -393,5 +379,48 @@ pub(crate) fn populate_notification_hit_regions_in(
             }
         }
     }
+    prune_chrome_states(scene);
     tab_order
+}
+
+/// Interaction id of a notification's dismiss (×) button; also the key of its
+/// local hover/press state in `scene.overlay.chrome_states`.
+pub(super) fn notification_dismiss_interaction_id(
+    zone_name: &str,
+    record: &ZonePublishRecord,
+) -> String {
+    format!(
+        "zone:{}:dismiss:{}:{}",
+        zone_name, record.published_at_wall_us, record.publisher_namespace,
+    )
+}
+
+/// Interaction id of one notification action button; also the key of its
+/// local hover/press state in `scene.overlay.chrome_states`.
+pub(super) fn notification_action_interaction_id(
+    zone_name: &str,
+    record: &ZonePublishRecord,
+    callback_id: &str,
+) -> String {
+    format!(
+        "zone:{}:action:{}:{}:{}",
+        zone_name, record.published_at_wall_us, record.publisher_namespace, callback_id,
+    )
+}
+
+/// Drop local hover/press state for chrome controls whose hit region is gone
+/// (a dismissed notification, a removed tile's drag handle), so stale
+/// feedback never outlives its control.
+fn prune_chrome_states(scene: &mut SceneGraph) {
+    let overlay = &mut scene.overlay;
+    overlay.chrome_states.retain(|k, _| {
+        overlay
+            .drag_handle_hit_regions
+            .iter()
+            .any(|r| &r.interaction_id == k)
+            || overlay
+                .zone_hit_regions
+                .iter()
+                .any(|r| &r.interaction_id == k)
+    });
 }

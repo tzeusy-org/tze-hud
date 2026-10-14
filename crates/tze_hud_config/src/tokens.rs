@@ -477,6 +477,16 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "#FFFFFF26",
     },
     CanonicalToken {
+        key: "notification.action.background_hover",
+        description: "Fill of a hovered notification action or dismiss button (RGBA hex)",
+        default_value: "#FFFFFF4D",
+    },
+    CanonicalToken {
+        key: "notification.action.background_pressed",
+        description: "Fill of a pressed notification action or dismiss button (RGBA hex)",
+        default_value: "#FFFFFF80",
+    },
+    CanonicalToken {
         key: "typography.notification.action.font_size_px",
         description: "Notification action button label font size (px)",
         default_value: "12",

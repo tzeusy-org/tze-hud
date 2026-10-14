@@ -34,8 +34,8 @@ use super::draw_cmds::TexturedDrawCmd;
 use super::token_colors::{
     ICON_SIZE_PX, NOTIFICATION_BACKDROP_OPACITY, NOTIFICATION_BODY_SCALE,
     NOTIFICATION_ICON_SIZE_PX, NOTIFICATION_INTER_LINE_GAP, STATIC_IMAGE_PLACEHOLDER_COLOR,
-    is_alert_banner_zone, notification_action_button_bounds, resolve_notification_action_tokens,
-    sort_alert_banner_indices, urgency_to_notification_color, urgency_to_severity_color,
+    is_alert_banner_zone, sort_alert_banner_indices, urgency_to_notification_color,
+    urgency_to_severity_color,
 };
 use crate::pipeline::RectVertex;
 use crate::pipeline::rect_vertices;
@@ -247,32 +247,9 @@ impl Compositor {
                             }
                         }
 
-                        // Action buttons: token-filled rects at exactly the bounds
-                        // `populate_notification_hit_regions` registers; labels are
-                        // drawn by `collect_text_items`.
-                        if let ZoneContent::Notification(payload) = &record.content {
-                            let n_actions = payload.actions.len().min(MAX_NOTIFICATION_ACTIONS);
-                            let action_tokens = resolve_notification_action_tokens(&self.token_map);
-                            let mut fill = action_tokens.background;
-                            fill.a *= combined_opacity;
-                            for b in notification_action_button_bounds(
-                                x,
-                                slot_y,
-                                w,
-                                effective_slot_h,
-                                n_actions,
-                            ) {
-                                vertices.extend_from_slice(&rect_vertices(
-                                    b.x,
-                                    b.y,
-                                    b.width,
-                                    b.height,
-                                    sw,
-                                    sh,
-                                    self.gpu_color(fill),
-                                ));
-                            }
-                        }
+                        // Action buttons are SDF commands drawn after the backdrop
+                        // (`collect_all_rounded_rect_cmds`): a flat fill here would
+                        // sit under a rounded Chrome-layer backdrop (hud-paslt).
 
                         // Notification icon: emit a textured draw command for the icon
                         // left-aligned inside the slot, vertically centred.
