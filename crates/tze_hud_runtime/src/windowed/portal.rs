@@ -2884,7 +2884,6 @@ mod tests {
         let handle_cy = 300.0_f32;
 
         let mut processor = InputProcessor::new();
-        let epoch_before = scene.geometry_epoch;
 
         // PointerDown.
         let down = PointerEvent {
@@ -2938,11 +2937,9 @@ mod tests {
             tile.bounds.y, 300.0,
             "tile Y must not change after a tap on the drag handle"
         );
+        // The handle's own hover/press feedback repaints (hud-paslt), but a
+        // quick tap never enters drag feedback.
         assert!(!scene.is_drag_active(tile_id));
-        assert_eq!(
-            scene.geometry_epoch, epoch_before,
-            "a quick tap never enters drag feedback"
-        );
         let result_down = processor.process(&down, &mut scene);
         super::apply_drag_handle_pointer_event(
             &mut processor,
@@ -2970,7 +2967,6 @@ mod tests {
             "early movement cancels recognition"
         );
         assert!(!scene.is_drag_active(tile_id));
-        assert_eq!(scene.geometry_epoch, epoch_before);
     }
 
     #[test]

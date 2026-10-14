@@ -229,7 +229,8 @@ async fn test_lifecycle_sentinel_keeps_cached_markdown_render_path() {
 }
 
 /// Notification action buttons are drawn at exactly the bounds the pointer
-/// hit regions register, in token-styled fill, with their labels. Two
+/// hit regions register, as outlined SDF controls in token-styled fill (the
+/// hover/pressed fills when `chrome_states` says so), with their labels. Two
 /// notifications (the older one titled, so slot heights differ) exercise the
 /// shared slot layout. Draw-command level (no pixel readback).
 #[tokio::test]
@@ -292,27 +293,51 @@ async fn notification_actions_layout_matches_hit_regions() {
     }
 
     compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    let region_id = |callback: &str| {
+        scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|r| matches!(&r.kind, tze_hud_scene::types::ZoneInteractionKind::Action { callback_id } if callback_id == callback))
+            .map(|r| r.interaction_id.clone())
+            .unwrap()
+    };
+    let (ship, hold) = (region_id("ship"), region_id("hold"));
+    scene.set_chrome_hovered(&ship, true);
+    scene.set_chrome_pressed(&hold, true);
+
     let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
     compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
+    assert_eq!(
+        vertices.len(),
+        12,
+        "the flat pass draws only the two backdrops; buttons are SDF controls"
+    );
+    let cmds = compositor
+        .collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0)
+        .chrome;
     let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
 
-    let fill = compositor.gpu_color(
-        crate::renderer::token_colors::resolve_notification_action_tokens(&compositor.token_map)
-            .background,
-    );
+    let tokens =
+        crate::renderer::token_colors::resolve_notification_action_tokens(&compositor.token_map);
     let mut checked = 0;
     for region in &scene.overlay.zone_hit_regions {
         let tze_hud_scene::types::ZoneInteractionKind::Action { callback_id } = &region.kind else {
             continue;
         };
         let b = region.bounds;
-        let quad = crate::pipeline::rect_vertices(b.x, b.y, b.width, b.height, 1280.0, 720.0, fill);
+        let fill = match callback_id.as_str() {
+            "ship" => tokens.background_hover,
+            "hold" => tokens.background_pressed,
+            _ => tokens.background,
+        };
         assert!(
-            vertices.windows(6).any(|w| w
-                .iter()
-                .zip(&quad)
-                .all(|(a, b)| a.position == b.position && a.color == b.color)),
-            "no token-filled quad drawn at hit region of {callback_id}: {b:?}"
+            cmds.iter().any(
+                |c| (c.x, c.y, c.width, c.height) == (b.x, b.y, b.width, b.height)
+                    && c.color == compositor.gpu_color(fill)
+                    && c.border.map(|border| border.width) == Some(1.0)
+            ),
+            "no outlined control in the {callback_id} state fill at its hit region: {b:?}"
         );
         let label = callback_id.to_uppercase()[..1].to_string() + &callback_id[1..];
         let item = items
@@ -327,6 +352,82 @@ async fn notification_actions_layout_matches_hit_regions() {
         checked += 1;
     }
     assert_eq!(checked, 3, "all three actions must have hit regions");
+}
+
+/// Pixel check (hud-paslt): on a rounded Chrome-layer card the action button
+/// reads as a button over the card fill rather than vanishing under it, and
+/// hovering it brightens it with no agent round trip.
+#[tokio::test]
+async fn notification_action_button_is_visible_and_hover_brightens_it() {
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut scene = bordered_notification_scene(Some(12.0));
+    scene.zone_registry.active_publishes.clear();
+    scene
+        .publish_to_zone(
+            "notification-area",
+            ZoneContent::Notification(NotificationPayload {
+                text: "Approve the deploy?".to_owned(),
+                icon: String::new(),
+                urgency: 0,
+                ttl_ms: None,
+                title: "Deploy".to_owned(),
+                actions: vec![tze_hud_scene::types::NotificationAction {
+                    label: "Approve".to_owned(),
+                    callback_id: "approve".to_owned(),
+                }],
+            }),
+            "test",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    let button = scene
+        .overlay
+        .zone_hit_regions
+        .iter()
+        .find(|r| {
+            matches!(
+                r.kind,
+                tze_hud_scene::types::ZoneInteractionKind::Action { .. }
+            )
+        })
+        .cloned()
+        .expect("the action has a hit region");
+
+    let render = |compositor: &mut Compositor, scene: &mut SceneGraph| {
+        compositor.prime_markdown_cache(scene);
+        compositor.prime_truncation_cache(scene);
+        compositor.render_frame_headless(scene, &surface);
+        let pixels = surface.read_pixels(&compositor.device);
+        let px = move |x: f32, y: f32| -> [u8; 4] {
+            let i = (y as usize * 1280 + x as usize) * 4;
+            [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+        };
+        // A label-free spot inside the button (left edge, past the outline),
+        // and the card fill in the inset left of the button row.
+        let b = button.bounds;
+        (
+            px(b.x + 3.0, b.y + b.height * 0.5),
+            px(b.x - 5.0, b.y + b.height * 0.5),
+        )
+    };
+    let luma = |p: [u8; 4]| p[0] as u32 + p[1] as u32 + p[2] as u32;
+
+    let (idle, card) = render(&mut compositor, &mut scene);
+    assert!(
+        luma(idle) > luma(card) + 20,
+        "the idle button must stand out from the card fill: button {idle:?}, card {card:?}"
+    );
+
+    scene.set_chrome_hovered(&button.interaction_id, true);
+    let (hovered, _) = render(&mut compositor, &mut scene);
+    assert!(
+        luma(hovered) > luma(idle) + 20,
+        "hover must brighten the button: idle {idle:?}, hovered {hovered:?}"
+    );
 }
 
 /// Notification with opaque backdrop: backdrop_opacity=0.9 overrides

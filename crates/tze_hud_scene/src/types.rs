@@ -2078,9 +2078,10 @@ pub struct DragHandleHitRegion {
     pub is_header_band: bool,
 }
 
-/// Local-first hover/press state for chrome drag handles.
+/// Local-first hover/press state for runtime chrome controls: drag handles
+/// and notification dismiss/action buttons.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct DragHandleLocalState {
+pub struct ChromeLocalState {
     pub hovered: bool,
     pub pressed: bool,
 }

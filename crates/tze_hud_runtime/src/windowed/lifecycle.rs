@@ -2029,12 +2029,22 @@ impl WinitApp {
                                     zone_name: zone_name.clone(),
                                     callback_id: callback_id.clone(),
                                 });
+                                // An activated notification is answered: dismiss
+                                // it locally, as the × does, so the click has an
+                                // immediate visible result and cannot repeat
+                                // (hud-paslt).
+                                let removed = scene.dismiss_notification(
+                                    zone_name,
+                                    published_at_wall_us,
+                                    publisher_namespace,
+                                );
                                 tracing::debug!(
                                     zone = %zone_name,
                                     published_at_wall_us,
                                     publisher = %publisher_namespace,
                                     %callback_id,
-                                    "zone action: callback queued for agent delivery"
+                                    removed,
+                                    "zone action: callback queued for agent delivery, notification dismissed"
                                 );
                             }
                             ZoneInteractionKind::DragHandle { .. } => {
