@@ -315,6 +315,16 @@ down to the lifecycle.
   in-process portal driver. The session server rejects them from agents with
   `INVALID_ARGUMENT`.
 
+## Configuration
+
+The runtime installs its built-in zones independently of configuration. Root
+`[zones]` custom definitions and `[[tabs]].zones` are unsupported, including
+empty tables or arrays: startup rejects them with `ParseError` and a hint to
+remove or correct the field. Remove those obsolete entries rather than
+renaming their zone values. Tabs and their widgets remain configurable;
+`[displays.<NAME>].zones` remains the supported way to assign built-in zones
+to a display.
+
 ## Design tokens and themes
 
 Agents never send styling. Every color, size, radius, font, and timing

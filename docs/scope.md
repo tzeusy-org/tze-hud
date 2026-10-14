@@ -72,10 +72,13 @@ source links when implementation changes the status.
 - **T8 — diet [Observed].** The [local harness](../justfile) includes
   llvmpipe GPU recipes and Nextest; resource acceptance has a compact
   [`store_behavior`](../crates/tze_hud_resource/tests/store_behavior.rs) suite.
-  Obsolete overlay/benchmark harnesses were removed in PR #1457. Remaining
-  pre-reset references are still visible in the projection and protocol crate
-  docs. `hud-bstmy` and its reconciliation work remain open; a passing test
-  inventory alone does not establish that the diet is complete.
+  Obsolete overlay/benchmark harnesses were removed in PR #1457. Unsupported
+  root/tab zone configuration and the unused sealed-image upload workflow are
+  removed; built-in zones, display assignments and offline render-scene and
+  render-widget authoring remain supported. No Criterion benchmark targets
+  are currently declared. Pre-reset references remain in the projection and
+  protocol crate docs. `hud-bstmy` and its reconciliation work remain open;
+  a passing test inventory alone does not establish that the diet is complete.
 - **T9 — monitors [Observed].**
   [`windowed/displays.rs`](../crates/tze_hud_runtime/src/windowed/displays.rs)
   creates per-monitor overlay windows sharing a scene in physical desktop

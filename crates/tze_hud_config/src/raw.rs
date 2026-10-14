@@ -43,14 +43,6 @@ pub struct RawTab {
     #[serde(default)]
     pub default_tab: bool,
 
-    /// Zone types active on this tab.
-    ///
-    /// Each entry must be either a built-in zone type (see
-    /// `zones::BUILTIN_ZONE_TYPES`) or a custom type defined in the
-    /// `[zones]` section.  An unknown name produces `CONFIG_UNKNOWN_ZONE_TYPE`.
-    #[serde(default)]
-    pub zones: Vec<String>,
-
     /// Widget instances declared on this tab.
     ///
     /// Each entry must reference a widget type loaded from a bundle in
@@ -58,19 +50,6 @@ pub struct RawTab {
     /// `CONFIG_UNKNOWN_WIDGET_TYPE`.
     #[serde(default)]
     pub widgets: Vec<RawTabWidget>,
-}
-
-// ─── [zones] ─────────────────────────────────────────────────────────────────
-
-/// `[zones]` table — optional.  Custom zone type definitions.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct RawZones(pub HashMap<String, RawZoneType>);
-
-/// A single custom zone type definition.
-#[derive(Clone, Debug, Default, Deserialize, Serialize)]
-pub struct RawZoneType {
-    pub policy: Option<String>,
-    pub layer: Option<String>,
 }
 
 // ─── [widget_bundles] ────────────────────────────────────────────────────────
@@ -199,7 +178,6 @@ pub struct RawConfig {
     #[serde(default)]
     pub tabs: Vec<RawTab>,
 
-    pub zones: Option<RawZones>,
     /// `[agents]` is rejected: agents live in `agents.toml`. Accepts any
     /// value so presence can be reported with a hint.
     pub agents: Option<AnyValue>,
