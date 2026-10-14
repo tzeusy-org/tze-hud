@@ -1,5 +1,5 @@
 use super::*;
-use crate::surface::{HeadlessSurface, SurfaceAcquireFailure, SurfaceRecoveryOutcome};
+use crate::surface::HeadlessSurface;
 use image_cache::{
     CARET_BLINK_HALF_PERIOD, ComposerLayout, caret_visible_at, composer_scroll_offset,
     composer_vertical_line_offset, composer_visible_line_count,
@@ -104,66 +104,6 @@ fn scene_with_node(node: Node) -> SceneGraph {
         .unwrap();
     scene.set_tile_root(tile_id, node).unwrap();
     scene
-}
-
-/// Build the exact canonical scene accepted by the retained evidence lane and
-/// return the first tile/root pair for a controlled text-only mutation.
-fn canonical_retained_scene() -> (SceneGraph, SceneId, SceneId) {
-    let mut scene = SceneGraph::new(1_000.0, 500.0);
-    let tab_id = scene.create_tab("canonical", 0).expect("canonical tab");
-    let lease_id = scene.grant_lease("canonical-agent", 60_000);
-    let mut first_tile_and_root = None;
-
-    for index in 0..50 {
-        let column = index % 10;
-        let row = index / 10;
-        // Leave gutters so an adjacent tile's idle drag grip cannot cross the
-        // first tile's retained damage boundary.
-        let tile_width = 96.0;
-        let tile_height = 92.0;
-        let tile_id = scene
-            .create_tile(
-                tab_id,
-                "canonical-agent",
-                lease_id,
-                Rect::new(
-                    (column * 100) as f32,
-                    (row * 100) as f32,
-                    tile_width,
-                    tile_height,
-                ),
-                index as u32,
-            )
-            .expect("canonical tile");
-        let root_id = SceneId::new();
-        scene
-            .set_tile_root(
-                tile_id,
-                Node {
-                    id: root_id,
-                    children: vec![],
-                    layout: Default::default(),
-                    data: NodeData::TextMarkdown(TextMarkdownNode {
-                        content: "AB".into(),
-                        bounds: Rect::new(0.0, 0.0, tile_width, tile_height),
-                        font_size_px: 18.0,
-                        font_family: FontFamily::SystemSansSerif,
-                        color: Rgba::WHITE,
-                        background: None,
-                        alignment: TextAlign::Start,
-                        overflow: TextOverflow::Clip,
-                        color_runs: Box::default(),
-                    }),
-                },
-            )
-            .expect("canonical text root");
-        if index == 0 {
-            first_tile_and_root = Some((tile_id, root_id));
-        }
-    }
-
-    let (first_tile_id, first_root_id) = first_tile_and_root.expect("first canonical tile");
-    (scene, first_tile_id, first_root_id)
 }
 
 /// Create a headless compositor and surface pair for testing.

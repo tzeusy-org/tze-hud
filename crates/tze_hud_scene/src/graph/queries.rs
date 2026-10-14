@@ -389,10 +389,9 @@ impl SceneGraph {
     }
 
     /// Apply `update` to one chrome control's local state. Only non-default
-    /// states are stored, so an idle control leaves no entry behind (and
-    /// retained rendering stays eligible). A real change bumps the geometry
-    /// epoch so the idle gate presents exactly one frame for it, without
-    /// invalidating content caches.
+    /// states are stored, so an idle control leaves no entry behind. A real
+    /// change bumps the geometry epoch so the idle gate presents exactly one
+    /// frame for it, without invalidating content caches.
     fn update_chrome_state(
         &mut self,
         interaction_id: &str,
