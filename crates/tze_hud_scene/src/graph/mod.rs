@@ -115,9 +115,9 @@ pub struct SceneGraph {
     #[serde(skip, default)]
     publication_orphans: HashMap<SceneId, u64>,
     /// Notification action presses waiting for their publisher to collect
-    /// them (MCP `hud_input`). Bounded; oldest dropped first.
+    /// them (MCP `hud_input`), FIFO within each publisher namespace.
     #[serde(skip, default)]
-    pub pending_actions: std::collections::VecDeque<PendingAction>,
+    pub pending_actions: HashMap<String, Vec<PendingAction>>,
     /// Map of ResourceIds to their scene-node reference counts.
     ///
     /// A resource is available for use in [`NodeData::StaticImage`] nodes when it
@@ -196,10 +196,6 @@ pub struct PendingAction {
     pub callback_id: String,
 }
 
-/// Cap on queued action presses; a publisher that never collects them can't
-/// grow the queue without bound.
-pub const MAX_PENDING_ACTIONS: usize = 256;
-
 impl SceneGraph {
     // ─── Notification auto-dismiss TTL constants ─────────────────────────
     /// Default auto-dismiss TTL (µs) for low/normal notifications (urgency 0, 1).
@@ -236,7 +232,7 @@ impl SceneGraph {
             sequence_number: 0,
             scheduled_batches: Vec::new(),
             publication_orphans: HashMap::new(),
-            pending_actions: std::collections::VecDeque::new(),
+            pending_actions: HashMap::new(),
             registered_resources: HashMap::new(),
             overlay: RuntimeOverlayState::default(),
         }
@@ -244,20 +240,15 @@ impl SceneGraph {
 
     /// Queue a notification action press for its publisher.
     pub fn push_pending_action(&mut self, action: PendingAction) {
-        if self.pending_actions.len() >= MAX_PENDING_ACTIONS {
-            self.pending_actions.pop_front();
-        }
-        self.pending_actions.push_back(action);
+        self.pending_actions
+            .entry(action.publisher_namespace.clone())
+            .or_default()
+            .push(action);
     }
 
     /// Remove and return the queued action presses for `namespace`, oldest first.
     pub fn take_pending_actions(&mut self, namespace: &str) -> Vec<PendingAction> {
-        let (mine, rest): (Vec<_>, Vec<_>) = self
-            .pending_actions
-            .drain(..)
-            .partition(|a| a.publisher_namespace == namespace);
-        self.pending_actions = rest.into();
-        mine
+        self.pending_actions.remove(namespace).unwrap_or_default()
     }
 
     // ─── Sequence number (RFC 0001 §3.5) ────────────────────────────────

@@ -1143,6 +1143,112 @@ async fn action_presses_are_delivered_until_acked() {
     assert_eq!(again["items"][0]["id"], id, "unacked items are redelivered");
     let acked = call(&server, "hud_input", json!({"ack": [id]})).await;
     assert_eq!(acked, json!({"items": [], "remaining": 0}));
+
+    // Each agent exceeds the former global cap before either polls. Collection
+    // and acknowledgement by one publisher must not evict the other's actions.
+    let (server, _, a, b) = two_agents();
+    let actions_per_agent = 257;
+    {
+        let mut scene = server.scene.lock().await;
+        for index in 0..actions_per_agent {
+            for namespace in ["a", "b"] {
+                scene.push_pending_action(PendingAction {
+                    publisher_namespace: namespace.into(),
+                    zone_name: "subtitle".into(),
+                    callback_id: format!("{namespace}-{index}"),
+                });
+            }
+        }
+    }
+    let (zero, is_error) = call_as(&server, &a, "hud_input", json!({"max_items": 0})).await;
+    assert!(!is_error, "{zero}");
+    assert_eq!(zero, json!({"items": [], "remaining": actions_per_agent}));
+    let (a_page, is_error) = call_as(&server, &a, "hud_input", json!({"max_items": 7})).await;
+    assert!(!is_error, "{a_page}");
+    assert_eq!(a_page["items"].as_array().unwrap().len(), 7);
+    assert_eq!(a_page["remaining"], actions_per_agent - 7);
+    let (b_page, is_error) = call_as(&server, &b, "hud_input", json!({"max_items": 11})).await;
+    assert!(!is_error, "{b_page}");
+    assert_eq!(b_page["items"].as_array().unwrap().len(), 11);
+    assert_eq!(b_page["remaining"], actions_per_agent - 11);
+
+    let (a_again, is_error) = call_as(
+        &server,
+        &a,
+        "hud_input",
+        json!({"max_items": 7, "ack": [b_page["items"][0]["id"], b_page["items"][0]["id"], "unknown-action"]}),
+    )
+    .await;
+    assert!(!is_error, "{a_again}");
+    assert_eq!(a_again, a_page, "foreign and unknown ACKs leave A intact");
+    let (b_again, is_error) = call_as(
+        &server,
+        &b,
+        "hud_input",
+        json!({"max_items": 11, "ack": [a_page["items"][0]["id"], "unknown-action"]}),
+    )
+    .await;
+    assert!(!is_error, "{b_again}");
+    assert_eq!(b_again, b_page, "A's poll and ACKs leave B intact");
+
+    let (a_all, is_error) = call_as(&server, &a, "hud_input", json!({})).await;
+    assert!(!is_error, "{a_all}");
+    let (b_all, is_error) = call_as(&server, &b, "hud_input", json!({})).await;
+    assert!(!is_error, "{b_all}");
+    for (namespace, all) in [("a", &a_all), ("b", &b_all)] {
+        let items = all["items"].as_array().unwrap();
+        assert_eq!(items.len(), actions_per_agent);
+        assert_eq!(all["remaining"], 0);
+        for (index, item) in items.iter().enumerate() {
+            assert_eq!(item["s"], "zone:subtitle");
+            assert_eq!(item["action"], format!("{namespace}-{index}"));
+        }
+    }
+    let a_items = a_all["items"].as_array().unwrap();
+    let b_items = b_all["items"].as_array().unwrap();
+    assert_eq!(a_page["items"], json!(&a_items[..7]));
+    assert_eq!(b_page["items"], json!(&b_items[..11]));
+    let a_ids: std::collections::HashSet<_> = a_items
+        .iter()
+        .map(|item| item["id"].as_str().unwrap())
+        .collect();
+    let b_ids: std::collections::HashSet<_> = b_items
+        .iter()
+        .map(|item| item["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(a_ids.len(), actions_per_agent);
+    assert_eq!(b_ids.len(), actions_per_agent);
+    assert!(a_ids.is_disjoint(&b_ids));
+
+    let mut a_ack: Vec<Value> = a_items[..7].iter().map(|item| item["id"].clone()).collect();
+    a_ack.push(a_ack[0].clone());
+    a_ack.push(b_items[0]["id"].clone());
+    a_ack.push(json!("unknown-action"));
+    let (a_limited, is_error) = call_as(
+        &server,
+        &a,
+        "hud_input",
+        json!({"ack": a_ack, "max_items": 13}),
+    )
+    .await;
+    assert!(!is_error, "{a_limited}");
+    assert_eq!(a_limited["items"], json!(&a_items[7..20]));
+    assert_eq!(a_limited["remaining"], actions_per_agent - 20);
+    let (b_after_a_ack, is_error) = call_as(&server, &b, "hud_input", json!({})).await;
+    assert!(!is_error, "{b_after_a_ack}");
+    assert_eq!(b_after_a_ack, b_all);
+
+    let b_ack: Vec<Value> = b_items.iter().map(|item| item["id"].clone()).collect();
+    let (b_empty, is_error) = call_as(&server, &b, "hud_input", json!({"ack": b_ack})).await;
+    assert!(!is_error, "{b_empty}");
+    assert_eq!(b_empty, json!({"items": [], "remaining": 0}));
+    let (a_retained, is_error) = call_as(&server, &a, "hud_input", json!({})).await;
+    assert!(!is_error, "{a_retained}");
+    assert_eq!(a_retained, json!({"items": &a_items[7..], "remaining": 0}));
+    let a_ack: Vec<Value> = a_items[7..].iter().map(|item| item["id"].clone()).collect();
+    let (a_empty, is_error) = call_as(&server, &a, "hud_input", json!({"ack": a_ack})).await;
+    assert!(!is_error, "{a_empty}");
+    assert_eq!(a_empty, json!({"items": [], "remaining": 0}));
 }
 
 // ── Portal ───────────────────────────────────────────────────────────────────
