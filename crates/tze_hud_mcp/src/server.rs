@@ -137,6 +137,16 @@ impl InputNotifiers {
         })?;
         Ok(Arc::clone(agents.entry(namespace.to_string()).or_default()))
     }
+
+    /// Wait-path acquisition must not block the request's absolute deadline.
+    /// Producers retain for_agent's admission/routing behavior above.
+    pub(crate) fn try_for_agent(&self, namespace: &str) -> Result<Arc<Notify>, McpError> {
+        let mut agents = self.agents.try_lock().map_err(|_| McpError::Tool {
+            code: "INTERNAL",
+            hint: "input readiness unavailable; retry hud_input".to_string(),
+        })?;
+        Ok(Arc::clone(agents.entry(namespace.to_string()).or_default()))
+    }
 }
 
 /// Admission result and queue counts captured together under the portal hub lock.

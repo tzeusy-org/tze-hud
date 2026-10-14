@@ -41,7 +41,6 @@ pub const MAX_DELAY_MS: u64 = 300_000;
 pub const MCP_LEASE_TTL_MS: u64 = 24 * 60 * 60 * 1000;
 /// Longest `wait_ms` long-poll for `hud_input`.
 pub const MAX_WAIT_MS: u64 = 30_000;
-const POLL_INTERVAL_MS: u64 = 150;
 
 /// Build a tool error: a stable code plus a hint for the model.
 pub fn tool_err(code: &'static str, hint: impl Into<String>) -> McpError {
@@ -82,6 +81,17 @@ pub struct McpState {
 }
 
 impl McpState {
+    fn try_with<R>(&self, agent: &str, f: impl FnOnce(&mut AgentState) -> R) -> McpResult<R> {
+        let mut agents = match self.agents.try_lock() {
+            Ok(agents) => agents,
+            Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
+            Err(std::sync::TryLockError::WouldBlock) => {
+                return Err(tool_err("INTERNAL", "input state unavailable; retry hud_input"));
+            }
+        };
+        Ok(f(agents.entry(agent.to_string()).or_default()))
+    }
+
     fn with<R>(&self, agent: &str, f: impl FnOnce(&mut AgentState) -> R) -> R {
         let mut agents = self.agents.lock().unwrap_or_else(|p| p.into_inner());
         f(agents.entry(agent.to_string()).or_default())
@@ -853,6 +863,78 @@ pub struct InputParams {
 
 static NEXT_ACTION_ID: AtomicU64 = AtomicU64::new(1);
 
+/// Own one finite active poll. Drop releases ownership without inventing
+/// activity, including cancellation before the first portal attachment.
+struct InputPollLease {
+    portals: PortalHandle,
+    namespace: String,
+    request: u64,
+    active: Arc<AtomicBool>,
+    wake: RenderWakeNotifier,
+}
+
+impl InputPollLease {
+    fn start(
+        ctx: &ToolCtx<'_>,
+        namespace: &str,
+        deadline: tokio::time::Instant,
+    ) -> McpResult<Option<Self>> {
+        if !portals_enabled(ctx) || tokio::time::Instant::now() >= deadline {
+            return Ok(None);
+        }
+        let portals = ctx.portals.expect("enabled portal handle");
+        let active = Arc::new(AtomicBool::new(true));
+        let (request, changed) = {
+            let mut hub = portals.hub.try_lock().map_err(|_| {
+                tool_err("INTERNAL", "input state unavailable; retry hud_input")
+            })?;
+            let before = hub.next_deadline();
+            let remaining_us = deadline
+                .saturating_duration_since(tokio::time::Instant::now())
+                .as_micros()
+                .min(u64::MAX as u128) as u64;
+            let request = hub
+                .begin_input_poll(namespace, remaining_us, portals.clock.now_us(), Arc::clone(&active))
+                .map_err(|_| tool_err("INTERNAL", "input ownership unavailable; retry hud_input"))?;
+            let changed = !hub.list(namespace).is_empty() && before != hub.next_deadline();
+            (request, changed)
+        };
+        if changed {
+            ctx.portal_wake.notify();
+        }
+        Ok(request.map(|request| Self {
+            portals: portals.clone(),
+            namespace: namespace.to_string(),
+            request,
+            active,
+            wake: ctx.portal_wake.clone(),
+        }))
+    }
+}
+
+impl Drop for InputPollLease {
+    fn drop(&mut self) {
+        let changed = match self.portals.hub.try_lock() {
+            Ok(mut hub) => {
+                let before = hub.next_deadline();
+                self.active.store(false, Ordering::Release);
+                hub.end_input_poll(&self.namespace, self.request);
+                !hub.list(&self.namespace).is_empty() && before != hub.next_deadline()
+            }
+            Err(_) => {
+                // Logical cancellation never waits for the Hub. Its next
+                // deadline/sweep ignores this entry; a single availability
+                // wake re-evaluates any previously deferred idle deadline.
+                self.active.store(false, Ordering::Release);
+                true
+            }
+        };
+        if changed {
+            self.wake.notify();
+        }
+    }
+}
+
 /// Ack earlier items, then return input from every held surface, oldest
 /// first. Unacked items are redelivered.
 pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
@@ -861,13 +943,15 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
 
     // Acks first, so a poll+ack is one round trip.
     ctx.state
-        .with(&ns, |s| s.delivered.retain(|i| !p.ack.contains(&i.id)));
+        .try_with(&ns, |s| s.delivered.retain(|i| !p.ack.contains(&i.id)))?;
     let mut ack = p.ack;
 
     let wait_ms = p.wait_ms.unwrap_or(0).min(MAX_WAIT_MS);
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(wait_ms);
     let max_items = p.max_items.unwrap_or(usize::MAX);
-    let input_ready = ctx.input_notifiers.for_agent(&ns)?;
+    let input_ready = ctx.input_notifiers.try_for_agent(&ns)?;
+    let _active_poll = InputPollLease::start(ctx, &ns, deadline)?;
+    let action_ready = Arc::clone(&input_ready);
     {
         let mut scene = match ctx.scene.try_lock() {
             Ok(scene) => scene,
@@ -880,36 +964,54 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
         };
         scene.register_action_notifier(
             &ns,
-            RenderWakeNotifier::new(move || input_ready.notify_waiters()),
+            RenderWakeNotifier::new(move || action_ready.notify_waiters()),
         );
     }
     loop {
-        let actions = ctx.scene.lock().await.take_pending_actions(&ns);
-        let mut items: Vec<Value> = ctx.state.with(&ns, |s| {
-            for a in actions {
-                s.delivered.push(ActionItem {
-                    id: format!("a{}", NEXT_ACTION_ID.fetch_add(1, Ordering::Relaxed)),
-                    zone: a.zone_name,
-                    action: a.callback_id,
-                });
-            }
-            s.delivered
-                .iter()
-                .take(max_items)
-                .map(|a| json!({ "id": a.id, "s": format!("zone:{}", a.zone), "action": a.action }))
-                .collect()
-        });
-        let mut backlog = ctx.state.with(&ns, |s| s.delivered.len()) - items.len();
+        // Register before both authoritative predicates: a producer between
+        // the check and await then leaves this waiter ready, not a lost wake.
+        let mut notified = std::pin::pin!(input_ready.notified());
+        notified.as_mut().enable();
+        let (mut items, mut backlog) = {
+            let mut scene = match ctx.scene.try_lock() {
+                Ok(scene) => scene,
+                Err(_) => tokio::time::timeout_at(deadline, ctx.scene.lock())
+                    .await
+                    .map_err(|_| tool_err("INTERNAL", "input state busy; retry hud_input"))?,
+            };
+            ctx.state.try_with(&ns, |s| {
+                // Both guards exist before removal. No await occurs between
+                // destructive take and retained-until-ack state commit.
+                for a in scene.take_pending_actions(&ns) {
+                    s.delivered.push(ActionItem {
+                        id: format!("a{}", NEXT_ACTION_ID.fetch_add(1, Ordering::Relaxed)),
+                        zone: a.zone_name,
+                        action: a.callback_id,
+                    });
+                }
+                let items: Vec<Value> = s.delivered.iter().take(max_items)
+                    .map(|a| json!({"id":a.id,"s":format!("zone:{}",a.zone),"action":a.action}))
+                    .collect();
+                let backlog = s.delivered.len() - items.len();
+                (items, backlog)
+            })?
+        };
         if portals_enabled(ctx) {
-            let batch = with_portals(ctx, |hub, now| {
-                let (batch, changed) = hub.poll_input_with_changes(
+            let portals = ctx.portals.expect("enabled portal handle");
+            let (batch, changed) = {
+                let mut hub = portals.hub.try_lock().map_err(|_| {
+                    tool_err("INTERNAL", "input state unavailable; retry hud_input")
+                })?;
+                hub.poll_input_with_changes(
                     &ns,
                     &std::mem::take(&mut ack),
                     Some(max_items - items.len()),
-                    now,
-                );
-                (Ok(batch), changed)
-            })?;
+                    portals.clock.now_us(),
+                )
+            };
+            if changed {
+                ctx.portal_wake.notify();
+            }
             backlog += batch.remaining;
             items.extend(batch.items.into_iter().map(
                 |i| json!({ "id": i.id, "s": format!("portal:{}", i.portal), "text": i.text }),
@@ -919,10 +1021,12 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
         if !items.is_empty() || backlog > 0 || now >= deadline {
             return Ok(json!({ "items": items, "remaining": backlog }));
         }
-        tokio::time::sleep(
-            (deadline - now).min(std::time::Duration::from_millis(POLL_INTERVAL_MS)),
-        )
-        .await;
+        tokio::select! {
+            _ = notified.as_mut() => {},
+            _ = tokio::time::sleep_until(deadline) => {},
+        }
+        // A deadline wake takes one final predicate pass; it never resets the
+        // request deadline or repeatedly touches the Hub while idle.
     }
 }
 

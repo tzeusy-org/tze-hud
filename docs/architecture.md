@@ -80,9 +80,15 @@ The driver stores and clones that complete handle. Composer admission commits
 input and reply history under the hub lock, then signals the owning agent after
 unlock. Notification actions return an agent readiness callback that the pointer
 producer invokes after scene and shared-state unlock; queues remain authoritative.
-Input readiness is separate from render/main-work wake delivery. Registry identity
-and producer wiring alone do not replace `hud_input`'s current timed loop; its
-armed wait and finite liveness ownership are the next source stage.
+Input readiness is separate from render/main-work wake delivery. `hud_input`
+arms the agent Notify before checking retained action and portal queues, releases
+model guards before awaiting, and rechecks once at its unchanged absolute deadline.
+An active finite poll defers only its own agent's idle degradation, including a
+first attachment during that wait. Per-request ownership drops on return or
+cancellation without writing future activity; explicit upstream degradation,
+reclaim, clear and input expiry keep their existing semantics. Zero portals add
+no periodic runtime wake. Same-frame runtime feedback and typed human-X delivery
+remain separate feature work.
 The hub is keyed by authenticated agent and portal id; its time-dependent
 operations take injected time. The driver materializes scene tiles, mirrors
 liveness onto leases, and connects composer submissions back to the hub.

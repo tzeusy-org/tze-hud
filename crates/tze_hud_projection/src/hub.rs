@@ -12,6 +12,8 @@
 //! portal.
 
 use std::collections::{BTreeMap, VecDeque};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 /// A portal's identity: the owning agent and the id after `portal:`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -326,11 +328,20 @@ pub struct Deadline {
     pub kind: DeadlineKind,
 }
 
+#[derive(Debug)]
+struct ActiveInputPoll {
+    expires_us: u64,
+    active: Arc<AtomicBool>,
+}
+
 #[derive(Debug, Default)]
 pub struct PortalHub {
     portals: BTreeMap<PortalKey, Portal>,
     next_incarnation: u64,
     next_input: u64,
+    // Finite request ownership is independent of whether a portal exists yet.
+    active_input_polls: BTreeMap<String, BTreeMap<u64, ActiveInputPoll>>,
+    next_input_poll: u64,
     limits: PortalLimits,
 }
 
@@ -348,12 +359,49 @@ impl PortalHub {
             portals: BTreeMap::new(),
             next_incarnation: 0,
             next_input: 0,
+            active_input_polls: BTreeMap::new(),
+            next_input_poll: 0,
             limits,
         }
     }
 
     pub fn limits(&self) -> &PortalLimits {
         &self.limits
+    }
+
+    /// A finite active poll defers only its agent's idle degradation. It does
+    /// not renew last_seen, extend input expiry or override an upstream loss.
+    pub fn begin_input_poll(
+        &mut self,
+        agent: &str,
+        remaining_us: u64,
+        now_us: u64,
+        active: Arc<AtomicBool>,
+    ) -> Result<Option<u64>, PortalError> {
+        let expires_us = now_us.saturating_add(remaining_us);
+        if remaining_us == 0 || expires_us <= now_us {
+            return Ok(None);
+        }
+        self.next_input_poll = self
+            .next_input_poll
+            .checked_add(1)
+            .ok_or(PortalError::QueueFull)?;
+        let request = self.next_input_poll;
+        self.active_input_polls
+            .entry(agent.to_string())
+            .or_default()
+            .insert(request, ActiveInputPoll { expires_us, active });
+        Ok(Some(request))
+    }
+
+    /// Release just this request. Cancellation is not an agent heartbeat.
+    pub fn end_input_poll(&mut self, agent: &str, request: u64) {
+        if let Some(polls) = self.active_input_polls.get_mut(agent) {
+            polls.remove(&request);
+            if polls.is_empty() {
+                self.active_input_polls.remove(agent);
+            }
+        }
     }
 
     /// A live portal (not reclaimed).
@@ -654,6 +702,10 @@ impl PortalHub {
 
     /// Expire input, degrade idle portals, and reclaim long-degraded ones.
     pub fn sweep(&mut self, now_us: u64) -> Vec<Transition> {
+        self.active_input_polls.retain(|_, polls| {
+            polls.retain(|_, poll| poll.active.load(Ordering::Acquire) && poll.expires_us > now_us);
+            !polls.is_empty()
+        });
         let limits = &self.limits;
         let mut transitions = Vec::new();
         for (key, portal) in self.portals.iter_mut().filter(|(_, p)| p.live()) {
@@ -663,7 +715,14 @@ impl PortalHub {
                 portal.dirty = true;
             }
             match portal.degraded_since_us {
-                None if portal.degrade_at(limits).is_some_and(|at| now_us >= at) => {
+                None
+                    if !self.active_input_polls.get(&key.agent).is_some_and(|polls| {
+                        polls.values().any(|poll| {
+                            poll.active.load(Ordering::Acquire) && poll.expires_us > now_us
+                        })
+                    })
+                        && portal.degrade_at(limits).is_some_and(|at| now_us >= at) =>
+                {
                     portal.degraded_since_us = Some(now_us);
                     portal.status = PortalStatus::Degraded;
                     portal.dirty = true;
@@ -708,9 +767,9 @@ impl PortalHub {
     pub fn next_deadline(&self) -> Option<Deadline> {
         let interval = self.limits.render_interval_us;
         self.portals
-            .values()
-            .filter(|p| p.live())
-            .flat_map(|p| {
+            .iter()
+            .filter(|(_, p)| p.live())
+            .flat_map(|(key, p)| {
                 let render = p.dirty.then(|| Deadline {
                     at_us: if p.local_reply_pending {
                         0
@@ -721,7 +780,15 @@ impl PortalHub {
                 });
                 let liveness = match p.degraded_since_us {
                     Some(since) => Some(since.saturating_add(self.limits.reclaim_after_us)),
-                    None => p.degrade_at(&self.limits),
+                    None => p.degrade_at(&self.limits).map(|at| {
+                        self.active_input_polls
+                            .get(&key.agent)
+                            .and_then(|polls| polls.values()
+                                .filter(|poll| poll.active.load(Ordering::Acquire))
+                                .map(|poll| poll.expires_us)
+                                .max())
+                            .map_or(at, |expires_us| at.max(expires_us))
+                    }),
                 }
                 .map(|at_us| Deadline {
                     at_us,
