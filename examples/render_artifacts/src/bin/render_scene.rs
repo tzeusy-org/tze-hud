@@ -794,11 +794,27 @@ mod tests {
         assert_eq!(settled_manifest["png_sha256"], hash(&settled_bytes));
         assert_eq!(first.dimensions(), (1920, 1080));
         assert_eq!(settled.dimensions(), first.dimensions());
-        for (slot, title) in titles.iter().enumerate() {
-            // Canonical notification area starts at (75%, 2%); Tonal Glass
-            // has four 65.9px two-line slots, newest at the top. These interior
-            // regions exclude borders, dismiss controls and the portal grip.
-            let top = (21.6 + slot as f32 * 65.9) as u32;
+        // Canonical notification area starts at (75%, 2%) and is 30% tall
+        // (21.6..345.6 px). Tonal Glass has 65.9px two-line slots, 8px apart,
+        // newest at the top. The two cards with actions also reserve a 35px
+        // button row (22px buttons, 4px gap, 9px bottom inset). These interior
+        // regions exclude borders, dismiss controls and the portal grip.
+        let slot_heights = [100.9_f32, 100.9, 65.9];
+        let top_of =
+            |slot: usize| (21.6 + slot_heights[..slot].iter().map(|h| h + 8.0).sum::<f32>()) as u32;
+        // The oldest card (Low / Smoke Black) would end at 379.2 px, past the
+        // zone bottom, so it is not shown at all rather than drawn cut off.
+        let zone_bottom = 345_u32;
+        let below_third = (top_of(3)..zone_bottom)
+            .flat_map(|y| (1450..1880).map(move |x| (x, y)))
+            .filter(|&(x, y)| settled.get_pixel(x, y) != first.get_pixel(x, y))
+            .count();
+        assert_eq!(
+            below_third, 0,
+            "a card that does not fit the zone must not be drawn, even clipped"
+        );
+        for (slot, title) in titles[..3].iter().enumerate() {
+            let top = top_of(slot);
             for (line, from, to) in [("title", top + 10, top + 31), ("body", top + 33, top + 52)] {
                 let ink = |pixels: &image::RgbaImage| {
                     (from..to)

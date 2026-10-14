@@ -609,8 +609,14 @@ impl super::Compositor {
                                 let dismiss_reserved_w = if is_alert_banner_zone(zone_name) {
                                     0.0
                                 } else {
+                                    // The × sits NOTIFICATION_ACTION_INSET_PX in
+                                    // from the right edge; text keeps its own
+                                    // right inset_h, so reserve the difference.
                                     NOTIFICATION_DISMISS_BUTTON_SIZE_PX
                                         + NOTIFICATION_DISMISS_GAP_PX
+                                        + (super::token_colors::NOTIFICATION_ACTION_INSET_PX
+                                            - inset_h)
+                                            .max(0.0)
                                 };
                                 // Text x-offset respects icon reservation (from icon texture pipeline).
                                 let text_x = zx + inset_h + icon_width_reserved;
