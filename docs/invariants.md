@@ -41,6 +41,12 @@ point before retained commit. Callback and runtime-authored human-X kinds remain
 distinct; coalesced readiness wakes carry no record ownership. These in-memory
 guarantees do not claim process-crash durability or add a gRPC action transport.
 
+Notification hover/press is ephemeral runtime state: it never enters the
+accepted input FIFO or changes ACK ownership. One matching live activation
+produces one callback; unclicked, foreign, replaced, and stale controls produce
+none. Existing end-to-end coverage:
+[`poc_notification_action_reaches_hud_input`](../tests/integration/poc_acceptance.rs).
+
 - `tze_hud_mcp` [`action_presses_are_delivered_until_acked`](../crates/tze_hud_mcp/src/server/tests.rs)
   (>256 interleaved events, isolation, typed dismiss, stable ACK/max/backlog),
   [`portal_flow_attach_publish_poll_ack_clear`](../crates/tze_hud_mcp/src/server/tests.rs)
@@ -67,6 +73,14 @@ clear do not impersonate a human ×. Accepted portal input and truthful rejectio
 feedback bypass output pacing once in the submitting maintenance turn; ordinary
 agent output retains 100 ms cadence. This is scene readiness, not physical-display
 or Windows-owner acceptance.
+
+Notification feedback clears on leave, release, cancellation or capture loss,
+and cannot outlive clear, expiry, replacement or dismiss. Terminal cleanup
+retries on existing scene availability, never a polling timer; only an actual
+flag change invalidates geometry. Agents cannot hold this chrome state or turn
+cancellation into an action. Existing local owner coverage:
+[`action_button_hover_and_press_are_local_and_frame_only_on_change`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs).
+Windows held-press/release acceptance remains separate.
 
 - `tze_hud_runtime` [`release_activates_only_the_button_the_press_began_on`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs),
   [`authority_attached_submit_snaps_scrolled_back_history_to_tail`](../crates/tze_hud_runtime/src/windowed/portal.rs),
@@ -212,3 +226,17 @@ its tests are deterministic and never sleep.
   attention budget.
 - **Glasses/VR.** A non-goal, but "cheap when idle" (`docs/vision.md`) keeps
   that door open at no cost.
+
+
+Notification capture delivery (source proposal; Windows owner acceptance separate):
+The UI-thread observer retains per-installation/per-press cancellation history
+until the corresponding application edge is delivered. Normal native Up and
+valid synthesized release activate once; cancelled or retired-window edges and
+late Up do not impersonate an action. Callback code borrows no scene/runtime
+owner and forwards native messages; local feedback cleanup uses the existing
+settle and lock-availability continuation, rendering only after actual mutation.
+No new idle poll or timer is introduced. Ambiguous completed/active receipts,
+mismatched history or bounded-admission failure disable notification actions
+until a clean runtime restart. Valid reentrant histories may trigger that
+availability limit; its frequency has not been measured. Unrelated pointer input
+continues, and this source model does not replace held-press/release owner proof.

@@ -845,6 +845,93 @@ async fn poc_notification_action_reaches_hud_input() {
     assert_eq!(ack.body, json!({"items": [], "remaining": 0}));
     // Publish, poll, and ack fit the same per-stage budgets as the portal loop.
     assert!(publish.model_tokens + poll.model_tokens + ack.model_tokens <= PORTAL_FLOW_BUDGET);
+
+    // Each callback is independently republished and clicked through the real
+    // runtime, then polled/ACKed through authenticated MCP. The original Ship
+    // transaction and its budget above remain intact.
+    for callback in ["approve", "reject"] {
+        let foreign = poc
+            .call_as(
+                RESIDENT_PSK,
+                "hud_publish",
+                json!({
+                    "surface": NOTIFICATION,
+                    "content": {"title": "Other", "body": "Unclicked",
+                        "actions": [{"label": "Other", "callback_id": "foreign"}]},
+                }),
+            )
+            .await;
+        assert!(foreign.model_tokens <= ZONE_PUBLISH_BUDGET);
+        let replaced = poc
+            .call(
+                "hud_publish",
+                json!({
+                    "surface": NOTIFICATION,
+                    "content": {"title": "Old", "body": "Unclicked",
+                        "actions": [{"label": "Old", "callback_id": "replaced"}]},
+                }),
+            )
+            .await;
+        assert!(replaced.model_tokens <= ZONE_PUBLISH_BUDGET);
+        // Clear-and-republish is an actual holding replacement, not an edit to
+        // a scene fixture. Clear affects this publisher only, leaving Other.
+        poc.call("hud_clear", json!({"surface": NOTIFICATION}))
+            .await;
+        poc.advance(1).await;
+        let publish = poc
+            .call(
+                "hud_publish",
+                json!({
+                    "surface": NOTIFICATION,
+                    "content": {"title": "Deploy", "body": "Ship v2?",
+                        "actions": [{"label": "Approve", "callback_id": "approve"},
+                                    {"label": "Reject", "callback_id": "reject"}]},
+                }),
+            )
+            .await;
+        assert!(publish.model_tokens <= ZONE_PUBLISH_BUDGET);
+        assert_eq!(
+            poc.shown(NOTIFICATION),
+            2,
+            "foreign holding survives own replacement"
+        );
+        assert!(input_items(&poc.call("hud_input", json!({})).await).is_empty());
+        assert!(input_items(&poc.call_as(RESIDENT_PSK, "hud_input", json!({})).await).is_empty());
+        let (x, y) = poc.hud.notification_action_center(callback).unwrap();
+        poc.hud.click(x, y);
+        poc.settle().await;
+        let poll = poc.call("hud_input", json!({})).await;
+        let items = input_items(&poll);
+        assert_eq!(
+            items.len(),
+            1,
+            "only the intentional {callback}: {}",
+            poll.body
+        );
+        assert_eq!(items[0]["s"], NOTIFICATION);
+        assert_eq!(items[0]["action"], callback);
+        let id = items[0]["id"].clone();
+        let foreign_poll = poc
+            .call_as(RESIDENT_PSK, "hud_input", json!({"ack": [id.clone()]}))
+            .await;
+        assert!(
+            input_items(&foreign_poll).is_empty(),
+            "no foreign action or cross-owner ACK"
+        );
+        let repeated = poc.call("hud_input", json!({})).await;
+        assert_eq!(
+            input_items(&repeated),
+            items,
+            "same retained event and id until ACK"
+        );
+        let ack = poc.call("hud_input", json!({"ack": [id]})).await;
+        assert_eq!(ack.body, json!({"items": [], "remaining": 0}));
+        assert!(input_items(&poc.call("hud_input", json!({})).await).is_empty());
+        assert!(publish.model_tokens + poll.model_tokens + ack.model_tokens <= PORTAL_FLOW_BUDGET);
+        poc.call_as(RESIDENT_PSK, "hud_clear", json!({"surface": NOTIFICATION}))
+            .await;
+        assert_eq!(poc.shown(NOTIFICATION), 0);
+    }
 }
 
 /// docs/scope.md "Tiles": a resident gRPC agent, authenticated as its own
