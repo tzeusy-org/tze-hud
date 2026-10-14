@@ -1549,7 +1549,14 @@ mod tests {
         assert_eq!(hover(&mut harness.app, 900.0, 900.0), None);
         harness.app.state.cursor_left_window = true;
         assert_eq!(hover(&mut harness.app, 300.0, 200.0), None);
-        harness.app.state.cursor_left_window = false;
+        // An OS cursor read (the click-through path) overrides a stale
+        // CursorLeft from the last capture flip.
+        harness.app.apply_os_cursor_position(300.0, 200.0);
+        harness.app.push_tile_close_hover();
+        assert_eq!(
+            *harness.app.state.tile_close_hover_state.lock().unwrap(),
+            Some(tile_id)
+        );
 
         // The compositor registers the button's hit region once the tile is
         // hovered; stand in for it here (the harness has no compositor).
