@@ -17,6 +17,7 @@ use crate::text::TextItem;
 
 use super::icon::parse_notification_icon;
 use super::tile_render::node_uses_display_tile_scroll;
+use super::token_colors::{DISCONNECT_BADGE_LABEL, resolve_disconnect_badge_tokens};
 use super::token_colors::{
     ICON_SIZE_PX, ICON_TEXT_GAP_PX, NOTIFICATION_BODY_SCALE, NOTIFICATION_DISMISS_BUTTON_SIZE_PX,
     NOTIFICATION_DISMISS_FONT_SIZE_PX, NOTIFICATION_DISMISS_FONT_WEIGHT,
@@ -1154,6 +1155,46 @@ impl super::Compositor {
                     items.push(badge);
                 }
             }
+        }
+
+        // ── "Disconnected" label on orphaned tiles (invariant 4) ─────────────
+        // Text for the strip `append_disconnect_badge_vertices` draws along the
+        // tile's bottom edge.
+        let badge = resolve_disconnect_badge_tokens(&self.token_map);
+        for tile in self.policy_visible_tiles(scene) {
+            if tile.visual_hint != tze_hud_scene::lease::TileVisualHint::DisconnectionBadge {
+                continue;
+            }
+            let b = tile.bounds;
+            let strip_h = badge.label_height_px().min(b.height);
+            let strip_y = b.y + b.height - strip_h;
+            let width = (b.width - 2.0 * badge.label_padding_px).max(1.0);
+            let height = (strip_h - 2.0 * badge.label_padding_px).max(1.0);
+            items.push(TextItem {
+                text: Arc::from(DISCONNECT_BADGE_LABEL),
+                pixel_x: b.x + badge.label_padding_px,
+                pixel_y: strip_y + badge.label_padding_px,
+                bounds_width: width,
+                bounds_height: height,
+                clip_pixel_x: b.x,
+                clip_pixel_y: strip_y,
+                clip_bounds_width: b.width,
+                clip_bounds_height: strip_h,
+                font_size_px: badge.label_size_px,
+                font_family: FontFamily::SystemSansSerif,
+                font_weight: 600,
+                color: badge.label_color,
+                alignment: TextAlign::Start,
+                overflow: TextOverflow::Ellipsis,
+                outline_color: None,
+                outline_width: None,
+                opacity: self.tile_effective_opacity(tile, scene),
+                color_runs: Box::new([]),
+                styled_runs: Box::new([]),
+                line_height_multiplier: crate::markdown::MarkdownTokens::default()
+                    .line_height_multiplier,
+                viewport: crate::overflow::TruncationViewport::HeadAnchored,
+            });
         }
 
         // ── Viewer reply echo (hud-nx7yq.3) ──────────────────────────────────

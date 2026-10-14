@@ -868,19 +868,28 @@ impl Compositor {
     ) {
         let badge = resolve_disconnect_badge_tokens(&self.token_map);
         let color = self.gpu_color_raw(badge.color);
-        let inset = badge.size_px * 0.25;
         for tile in self.policy_visible_tiles(scene) {
             if tile.visual_hint != tze_hud_scene::lease::TileVisualHint::DisconnectionBadge {
                 continue;
             }
+            // A full-height bar just outside the left edge (the hover close
+            // button owns the top-right corner, and agent content keeps its
+            // padding), plus a strip along the bottom that says what it means.
             let b = tile.bounds;
-            let rect = Rect::new(
-                b.x + b.width - badge.size_px - inset,
-                b.y + inset,
-                badge.size_px,
-                badge.size_px,
-            );
-            Self::append_clipped_rect_vertices(tile, rect, sw, sh, color, vertices);
+            let bar_x = (b.x - badge.gap_px - badge.width_px).max(0.0);
+            vertices.extend_from_slice(&rect_vertices(
+                bar_x,
+                b.y,
+                badge.width_px,
+                b.height,
+                sw,
+                sh,
+                color,
+            ));
+            let strip_h = badge.label_height_px().min(b.height);
+            let strip = Rect::new(b.x, b.y + b.height - strip_h, b.width, strip_h);
+            let strip_color = self.gpu_color_raw(badge.label_background);
+            Self::append_clipped_rect_vertices(tile, strip, sw, sh, strip_color, vertices);
         }
     }
 

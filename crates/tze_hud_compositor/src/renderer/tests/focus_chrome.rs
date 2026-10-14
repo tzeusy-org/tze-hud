@@ -242,7 +242,7 @@ async fn test_resize_grip_swaps_to_hover_color_for_hovered_tile() {
 }
 
 /// hud-jm8nq.12: an orphaned tile (agent disconnected, within grace) emits a
-/// token-colored disconnection badge quad; resuming the lease clears it.
+/// token-colored accent bar down its left edge; resuming the lease clears it.
 /// Draw-list-level assertion (no pixel readback).
 #[tokio::test]
 async fn orphaned_tile_emits_disconnection_badge_draw_cmd() {
@@ -275,20 +275,67 @@ async fn orphaned_tile_emits_disconnection_badge_draw_cmd() {
 
     scene.disconnect_lease(&lease_id, 1_000).unwrap();
     let verts = badge_verts(&compositor, &scene);
-    assert_eq!(verts.len(), 6, "orphaned tile must emit one badge quad");
+    assert_eq!(
+        verts.len(),
+        12,
+        "orphaned tile must emit a bar and a label strip"
+    );
     let tokens =
         crate::renderer::token_colors::resolve_disconnect_badge_tokens(&compositor.token_map);
+    let ndc_x = |px: f32| px / 400.0 * 2.0 - 1.0;
+    let ndc_y = |px: f32| 1.0 - px / 300.0 * 2.0;
+    let extent = |quad: &[crate::pipeline::RectVertex]| {
+        quad.iter().fold(
+            (f32::MAX, f32::MIN, f32::MAX, f32::MIN),
+            |(x0, x1, y0, y1), v| {
+                (
+                    x0.min(v.position[0]),
+                    x1.max(v.position[0]),
+                    y0.min(v.position[1]),
+                    y1.max(v.position[1]),
+                )
+            },
+        )
+    };
+    let close = |a: f32, b: f32| (a - b).abs() < 1e-4;
+    // Tile at x 50..350, y 40..240. The bar sits outside the left edge, so
+    // agent content keeps its padding, and spans the full height.
+    let (x0, x1, y0, y1) = extent(&verts[..6]);
+    let bar_right = 50.0 - tokens.gap_px;
+    assert!(
+        close(x1, ndc_x(bar_right)),
+        "bar ends a gap left of the tile"
+    );
+    assert!(
+        close(x0, ndc_x(bar_right - tokens.width_px)),
+        "bar is token-wide"
+    );
+    assert!(
+        close(y1, ndc_y(40.0)) && close(y0, ndc_y(240.0)),
+        "bar spans the tile height"
+    );
     let expected = compositor.gpu_color_raw(tokens.color);
     assert!(expected[3] > 0.0, "badge default alpha must be visible");
-    for v in &verts {
+    for v in &verts[..6] {
         assert!(
             v.color
                 .iter()
                 .zip(expected.iter())
                 .all(|(a, b)| (a - b).abs() < 1e-3),
-            "badge must carry the token-driven color"
+            "bar must carry the token-driven color"
         );
     }
+    // The label strip runs along the tile's bottom edge, inside the tile.
+    let (x0, x1, y0, y1) = extent(&verts[6..]);
+    assert!(
+        close(x0, ndc_x(50.0)) && close(x1, ndc_x(350.0)),
+        "strip spans the tile width"
+    );
+    assert!(close(y0, ndc_y(240.0)), "strip sits on the bottom edge");
+    assert!(
+        close(y1, ndc_y(240.0 - tokens.label_height_px())),
+        "strip fits one label line"
+    );
 
     scene.reconnect_lease(&lease_id, 2_000).unwrap();
     assert!(

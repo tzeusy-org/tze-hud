@@ -747,29 +747,81 @@ pub(super) fn resolve_resize_grip_tokens(token_map: &HashMap<String, String>) ->
 #[derive(Clone, Copy, Debug)]
 pub(super) struct DisconnectBadgeTokens {
     pub(super) color: [f32; 4],
-    /// Badge square extent in physical pixels.
-    pub(super) size_px: f32,
+    /// Width of the accent bar outside the tile's left edge, physical pixels.
+    pub(super) width_px: f32,
+    /// Gap between the tile's left edge and the bar.
+    pub(super) gap_px: f32,
+    /// Background of the label strip along the tile's bottom (linear).
+    pub(super) label_background: [f32; 4],
+    /// Label text color: the badge color as sRGB u8.
+    pub(super) label_color: [u8; 4],
+    pub(super) label_size_px: f32,
+    pub(super) label_padding_px: f32,
 }
+
+impl DisconnectBadgeTokens {
+    /// Height of the label strip: one text line plus padding above and below.
+    pub(super) fn label_height_px(&self) -> f32 {
+        self.label_size_px * crate::markdown::MarkdownTokens::default().line_height_multiplier
+            + 2.0 * self.label_padding_px
+    }
+}
+
+/// The label on an orphaned tile's strip.
+pub(super) const DISCONNECT_BADGE_LABEL: &str = "Disconnected";
 
 // Fallbacks MUST stay in sync with `tze_hud_config`'s `CANONICAL_TOKENS`
 // entries `tile.disconnect_badge.*` (the crates are intentionally unlinked).
 const DISCONNECT_BADGE_DEFAULT_COLOR_HEX: &str = "#FFB800";
-const DISCONNECT_BADGE_DEFAULT_SIZE_PX: f32 = 16.0;
+const DISCONNECT_BADGE_DEFAULT_WIDTH_PX: f32 = 4.0;
+const DISCONNECT_BADGE_DEFAULT_GAP_PX: f32 = 3.0;
+const DISCONNECT_BADGE_DEFAULT_LABEL_BACKGROUND_HEX: &str = "#000000B3";
+const DISCONNECT_BADGE_DEFAULT_LABEL_SIZE_PX: f32 = 13.0;
+const DISCONNECT_BADGE_DEFAULT_LABEL_PADDING_PX: f32 = 4.0;
 
-/// Resolve [`DisconnectBadgeTokens`] from `tile.disconnect_badge.{color,size_px}`.
+/// Resolve [`DisconnectBadgeTokens`] from `tile.disconnect_badge.*`.
 pub(super) fn resolve_disconnect_badge_tokens(
     token_map: &HashMap<String, String>,
 ) -> DisconnectBadgeTokens {
     let color = resolve_token_color(token_map, "tile.disconnect_badge.color")
         .or_else(|| parse_hex_color(DISCONNECT_BADGE_DEFAULT_COLOR_HEX))
-        .unwrap_or(Rgba::WHITE)
+        .unwrap_or(Rgba::WHITE);
+    let label_background = resolve_token_color(token_map, "tile.disconnect_badge.label_background")
+        .or_else(|| parse_hex_color(DISCONNECT_BADGE_DEFAULT_LABEL_BACKGROUND_HEX))
+        .unwrap_or(Rgba::BLACK)
         .to_array();
-    let size_px = token_map
-        .get("tile.disconnect_badge.size_px")
-        .and_then(|v| v.parse::<f32>().ok())
-        .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(DISCONNECT_BADGE_DEFAULT_SIZE_PX);
-    DisconnectBadgeTokens { color, size_px }
+    let px = |key: &str, min: f32, default: f32| {
+        token_map
+            .get(key)
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|v| v.is_finite() && *v >= min)
+            .unwrap_or(default)
+    };
+    DisconnectBadgeTokens {
+        color: color.to_array(),
+        width_px: px(
+            "tile.disconnect_badge.width_px",
+            f32::MIN_POSITIVE,
+            DISCONNECT_BADGE_DEFAULT_WIDTH_PX,
+        ),
+        gap_px: px(
+            "tile.disconnect_badge.gap_px",
+            0.0,
+            DISCONNECT_BADGE_DEFAULT_GAP_PX,
+        ),
+        label_background,
+        label_color: crate::text::rgba_to_srgb_u8(color),
+        label_size_px: px(
+            "tile.disconnect_badge.label_size_px",
+            1.0,
+            DISCONNECT_BADGE_DEFAULT_LABEL_SIZE_PX,
+        ),
+        label_padding_px: px(
+            "tile.disconnect_badge.label_padding_px",
+            0.0,
+            DISCONNECT_BADGE_DEFAULT_LABEL_PADDING_PX,
+        ),
+    }
 }
 
 /// Resolved visual tokens for the runtime-authored viewer reply echo
