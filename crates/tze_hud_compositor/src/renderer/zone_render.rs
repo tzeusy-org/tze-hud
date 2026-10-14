@@ -34,8 +34,8 @@ use super::draw_cmds::TexturedDrawCmd;
 use super::token_colors::{
     ICON_SIZE_PX, NOTIFICATION_BACKDROP_OPACITY, NOTIFICATION_BODY_SCALE,
     NOTIFICATION_ICON_SIZE_PX, NOTIFICATION_INTER_LINE_GAP, STATIC_IMAGE_PLACEHOLDER_COLOR,
-    is_alert_banner_zone, sort_alert_banner_indices, urgency_to_notification_color,
-    urgency_to_severity_color,
+    is_alert_banner_zone, notification_action_row_reserve, sort_alert_banner_indices,
+    urgency_to_notification_color, urgency_to_severity_color,
 };
 use crate::pipeline::RectVertex;
 use crate::pipeline::rect_vertices;
@@ -267,8 +267,11 @@ impl Compositor {
                                         .or(policy.margin_px)
                                         .unwrap_or(NOTIFICATION_INSET);
                                     let icon_x = x + inset_h;
+                                    // Centred on the text, above any action row.
+                                    let text_slot_h =
+                                        effective_slot_h - notification_action_row_reserve(payload);
                                     let icon_y = slot_y
-                                        + (effective_slot_h - NOTIFICATION_ICON_SIZE_PX) * 0.5;
+                                        + (text_slot_h - NOTIFICATION_ICON_SIZE_PX).max(0.0) * 0.5;
                                     textured_cmds.push(TexturedDrawCmd {
                                         resource_id: icon_id,
                                         x: icon_x,
@@ -596,8 +599,29 @@ impl Compositor {
     /// `notification_inter_line_gap` from the token map (with appropriate fallbacks) so
     /// that height calculation and rendering use the exact same values.
     ///
-    /// When `payload.title` is empty, falls back to [`Self::stack_slot_height`] (single line).
+    /// When `payload.title` is empty, the text height is [`Self::stack_slot_height`]
+    /// (single line).
+    ///
+    /// Either way, a notification with actions adds
+    /// [`notification_action_row_reserve`] so its button row sits below the
+    /// text instead of over it (hud-mskx5).
     pub(crate) fn notification_slot_height(
+        payload: &NotificationPayload,
+        policy: &RenderingPolicy,
+        notification_body_scale: f32,
+        notification_inter_line_gap: f32,
+    ) -> f32 {
+        notification_action_row_reserve(payload)
+            + Self::notification_text_slot_height(
+                payload,
+                policy,
+                notification_body_scale,
+                notification_inter_line_gap,
+            )
+    }
+
+    /// Slot height for a notification's text alone (title and body).
+    fn notification_text_slot_height(
         payload: &NotificationPayload,
         policy: &RenderingPolicy,
         notification_body_scale: f32,
