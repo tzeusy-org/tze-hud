@@ -15,7 +15,6 @@ use crate::runtime_widget_assets;
 use crate::themes;
 use crate::tokens;
 use crate::widgets;
-use crate::zones;
 
 // ─── Config schema version ───────────────────────────────────────────────────
 
@@ -180,14 +179,6 @@ impl ConfigLoader for TzeHudConfig {
 
         // ── (4) [[tabs]] — at least one, names unique, ≤1 default ────────────
         validate_tabs(&self.raw, &mut errors);
-
-        // ── (4b) Per-tab zone-type reference validation ───────────────────────
-        zones::validate_tab_zone_references(&self.raw, &mut errors);
-
-        // ── (10) Zone registry ────────────────────────────────────────────────
-        if let Some(zone_registry) = &self.raw.zones {
-            zones::validate_zones(zone_registry, &mut errors);
-        }
 
         // ── (11) Agents live in agents.toml, never in the config file ─────────
         if self.raw.agents.is_some() {

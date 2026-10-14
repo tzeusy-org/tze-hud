@@ -517,9 +517,10 @@ async fn test_three_pass_ordering_independent_of_registration_order() {
     );
 
     // Exercise the production builder and the plan the real encoder consumes.
-    // Integer card geometry: (128,72)-(384,104); dismiss: (364,72)-(384,92).
-    // Chrome starts at x=380, covering the right borders but leaving the left
-    // dismiss outline and left card border as independent positive controls.
+    // Integer card geometry: (128,72)-(384,104); dismiss, inset 9 px from the
+    // card's top and right: (355,81)-(375,101). Chrome starts at x=380,
+    // covering the card's right border but leaving the dismiss outline and
+    // left card border as independent positive controls.
     compositor.set_token_map(HashMap::from([
         ("color.border.default".to_owned(), "#00FF00".to_owned()),
         (
@@ -692,7 +693,7 @@ async fn test_three_pass_ordering_independent_of_registration_order() {
             [0u8, 0, 255, 255],
         ),
         (
-            "Chrome covers Content dismiss outline",
+            "Chrome covers Content card right border",
             383,
             80,
             [0, 0, 255, 255],
@@ -720,7 +721,7 @@ async fn test_three_pass_ordering_independent_of_registration_order() {
         border[1] > 150 && border[1].saturating_sub(border[0]) > 60 && border[2] < 60,
         "uncovered Content border must remain green, got {border:?}"
     );
-    let dismiss = pixel(364, 80);
+    let dismiss = pixel(355, 85);
     assert!(
         dismiss[1] > 150 && dismiss[2] > 150 && dismiss[0] < 100,
         "uncovered dismiss outline must remain cyan, got {dismiss:?}"

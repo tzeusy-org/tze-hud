@@ -6,8 +6,8 @@
 //! `ConfigLoader` trait defined in `tze_hud_scene::config`.
 //!
 //! Covers TOML parsing and validation, file resolution, the built-in display
-//! profiles (`full-display`, `headless`), zone and widget registries, design
-//! tokens, and paired agents (`agents.toml`).
+//! profiles (`full-display`, `headless`), display zone assignments, widget
+//! bundles, design tokens, and paired agents (`agents.toml`).
 
 pub mod agents_file;
 pub mod allow;
@@ -25,7 +25,6 @@ pub mod themes;
 pub mod tokens;
 pub mod validate;
 pub mod widgets;
-pub(crate) mod zones;
 
 pub use agents_file::{
     AGENTS_FILE_NAME, AgentRecord, AgentsFile, AgentsFileError, agents_path_for,

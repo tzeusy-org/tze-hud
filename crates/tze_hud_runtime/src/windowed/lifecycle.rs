@@ -1255,6 +1255,95 @@ fn observed_cpu_affinity() -> (u32, String) {
     )
 }
 
+/// Choose two CPUs without broadening the process's existing allowed mask.
+#[cfg(any(target_os = "windows", test))]
+fn quiescent_cpu_mask(allowed: usize) -> Option<usize> {
+    if allowed.count_ones() < 2 {
+        return None;
+    }
+    let first = 1usize << allowed.trailing_zeros();
+    let remaining = allowed & !first;
+    Some(first | (1usize << remaining.trailing_zeros()))
+}
+
+/// Constrain this opt-in measurement before any runtime initialization.
+#[cfg(target_os = "windows")]
+pub(super) fn admit_quiescent_cpu_affinity(emit_path: &std::path::Path) -> std::io::Result<()> {
+    use windows::Win32::System::Threading::{
+        GetCurrentProcess, GetProcessAffinityMask, GetProcessGroupAffinity, SetProcessAffinityMask,
+    };
+
+    // A primary-group mask alone cannot qualify a multi-group process.
+    let mut group_count = 1u16;
+    let mut group = 0u16;
+    let mut process_mask = 0usize;
+    let mut system_mask = 0usize;
+    // SAFETY: all outputs are writable and the group buffer has group_count
+    // entries. The pseudo-handle refers only to this process; no handle is owned.
+    unsafe {
+        GetProcessGroupAffinity(GetCurrentProcess(), &mut group_count, &mut group)
+            .ok()
+            .map_err(|error| {
+                std::io::Error::other(format!("quiescent CPU group query failed: {error}"))
+            })?;
+        if group_count != 1 {
+            return Err(std::io::Error::other(
+                "quiescent measurement requires one CPU group",
+            ));
+        }
+        GetProcessAffinityMask(GetCurrentProcess(), &mut process_mask, &mut system_mask).map_err(
+            |error| std::io::Error::other(format!("quiescent CPU affinity query failed: {error}")),
+        )?;
+    }
+    if process_mask & !system_mask != 0 {
+        return Err(std::io::Error::other(
+            "quiescent process CPU mask is outside the system mask",
+        ));
+    }
+    let selected = quiescent_cpu_mask(process_mask).ok_or_else(|| {
+        std::io::Error::other("quiescent measurement requires at least two already-allowed CPUs")
+    })?;
+    let mut observed = 0usize;
+    // SAFETY: selected is a two-bit subset of the observed process/system mask.
+    // Both read-back pointers are valid; this changes only this process's threads.
+    unsafe {
+        if selected != process_mask {
+            SetProcessAffinityMask(GetCurrentProcess(), selected).map_err(|error| {
+                std::io::Error::other(format!("quiescent CPU affinity setup failed: {error}"))
+            })?;
+        }
+        GetProcessAffinityMask(GetCurrentProcess(), &mut observed, &mut system_mask).map_err(
+            |error| {
+                std::io::Error::other(format!("quiescent CPU affinity read-back failed: {error}"))
+            },
+        )?;
+    }
+    if observed != selected || observed.count_ones() != 2 {
+        return Err(std::io::Error::other(format!(
+            "quiescent CPU affinity read-back mismatch: expected {selected:#x}, got {observed:#x}"
+        )));
+    }
+    tracing::info!(
+        cpu_mask = observed,
+        logical_cpus = observed.count_ones(),
+        "quiescent two-CPU affinity admitted before runtime initialization"
+    );
+    let admission = format!(
+        "quiescent-admission pid={} cpu_mask={observed:#x} logical_cpus={} phase=before_runtime_init",
+        std::process::id(),
+        observed.count_ones()
+    );
+    if let Some(parent) = emit_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)?;
+    }
+    let admission_path = emit_path.with_extension("admission.log");
+    std::fs::write(admission_path, format!("{admission}\n"))?;
+    eprintln!("{admission}");
+    Ok(())
+}
+
 #[cfg(target_os = "windows")]
 fn observed_cpu_affinity() -> (u32, String) {
     use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessAffinityMask};
@@ -2801,6 +2890,23 @@ mod tests {
 
     #[test]
     fn quiescent_measurement_uses_only_the_post_settle_runtime_counter_delta() {
+        for (allowed, expected) in [
+            (0, None),
+            (1, None),
+            (8, None),
+            (3, Some(3)),
+            (0x50, Some(0x50)),
+            (0xf, Some(3)),
+            (usize::MAX, Some(3)),
+        ] {
+            let selected = quiescent_cpu_mask(allowed);
+            assert_eq!(selected, expected);
+            if let Some(mask) = selected {
+                assert_eq!(mask.count_ones(), 2);
+                assert_eq!(mask & !allowed, 0, "admission must never widen affinity");
+            }
+        }
+
         let now = Instant::now();
         let config = WindowedQuiescentEfficiencyConfig {
             emit_path: std::env::temp_dir().join("quiescent-efficiency-test.json"),

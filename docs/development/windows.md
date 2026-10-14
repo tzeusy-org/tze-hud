@@ -279,6 +279,36 @@ python scripts/ci/windows_smoke.py --exe target/release-dev/tze_hud.exe --poc-de
 python scripts/ci/windows_install_smoke.py --exe target/release-dev/tze_hud.exe
 ```
 
+The informational `Quiescent with content` step uses a directly owned fullscreen
+HUD process. Measurement startup narrows its existing allowed affinity to two
+CPUs before runtime/window/compositor initialization and fails closed if that
+cannot be observed; ordinary launches do not change affinity. The script requires
+an observed two-CPU WARP artifact and actual HUD exit0, with bounded owned-PID
+cleanup. It keeps the five-second settle after first present and sixty-second
+observation. `continue-on-error` permits the job to continue after a failed step;
+job success does not qualify an invalid artifact. The canonical performance
+workflow separately runs the constrained WARP **overlay** harness at
+`scripts/ci/windows/run-quiescent-efficiency.ps1` with `/affinity 3`.
+The native step retains the original HUD PID, completed wait and cleanup records,
+plus the observed CPU mask/count, window mode and software-renderer identity.
+The early admission receipt records the runtime's own PID and exact mask/count
+before initialization. Windows measurements synchronously write it beside the
+emit JSON with extension `admission.log`; a directory/write failure stops startup
+before runtime initialization. Stderr remains a secondary channel, retained even
+beyond the native log tail, but GUI launch redirection can leave that stream empty.
+Canonical overlay retains the sidecar in its existing artifact directory and
+prints only its bounded numeric receipt after successful validation. It separately
+logs the synchronous launcher's PID and propagated HUD exit code after waiting;
+the launcher PID is not the HUD PID.
+
+Run only one canonical invocation per owned `OutputDir`. The harness removes only
+its exact prior JSON and receipt before launch and rejects removal failures, stale
+modification times or a missing/malformed receipt. An early clean close without a
+new measurement JSON fails the existing artifact check. Exact-source Windows proof
+must retain fresh output-directory/run provenance, raw JSON/checker results,
+runtime self PID and launch completion. Static contract tests and provider job
+success do not establish those observations or owner physical acceptance.
+
 ## Developing from WSL2
 
 The HUD has to be a native Windows process: a Linux build inside WSL (WSLg)
