@@ -149,6 +149,11 @@ two calls within its [api.md](api.md) token budget:
 
 After the POC passes, use it before planning more.
 
+Adopt windowed damage tracking only if `hud-w2t3x` / `hud-ddm2g`
+publish-to-present measurements identify full re-present as the bottleneck;
+`hud-ko552`'s historical ~5 µs per `collect_text_items` call measures isolated
+text collection, not a frame or present cost.
+
 ## Merge gate and testability
 
 The merge queue is the development loop, so it is held to targets, not just

@@ -153,9 +153,8 @@ pub(crate) enum SurfaceAcquireFailure {
 
 /// Result of one production surface-recovery transition.
 ///
-/// The runtime consumes only the coarse control disposition. This detailed
-/// compositor-private outcome remains available for the retained diagnostics
-/// follow-up without fabricating a parallel test-only event source.
+/// The runtime consumes the coarse control disposition. The detailed outcome
+/// remains compositor-private lifecycle evidence.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum SurfaceRecoveryOutcome {
     /// A lost or outdated surface was successfully reconfigured and needs a
@@ -495,8 +494,8 @@ impl WindowSurface {
     /// Attempt the recovery transition queued by a previous acquire failure.
     ///
     /// This is intentionally `pub(crate)`: the normal `Compositor` owns the
-    /// device needed to call it, while the detailed outcome remains internal to
-    /// the compositor for later retained-diagnostics wiring.
+    /// device needed to call it, while the detailed lifecycle outcome remains
+    /// internal to the compositor.
     ///
     /// Must run on the compositor thread, between frames. That is the same
     /// ownership boundary as [`Self::reconfigure`].

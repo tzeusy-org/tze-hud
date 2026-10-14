@@ -56,60 +56,6 @@ async fn test_static_image_node_renders_placeholder_quad() {
     );
 }
 
-/// A real recovered window-surface lifecycle outcome must invalidate the
-/// compositor-private retained lane: the next frame is a full repaint even
-/// though a scoped one-tile repaint would otherwise qualify.
-#[tokio::test]
-async fn reconfigured_surface_recovery_forces_a_full_repaint() {
-    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1_000, 500).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    let (mut scene, first_tile_id, first_root_id) = canonical_retained_scene();
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-
-    // Seed a genuine retained baseline, then make the one direct text change
-    // that normally qualifies for a proportional retained render.
-    compositor.render_frame_headless(&mut scene, &surface);
-    let baseline_work = compositor
-        .take_work_counts()
-        .expect("baseline frame records work");
-    assert!(baseline_work.full_frame);
-    assert!(baseline_work.layout > 0, "{baseline_work:?}");
-    assert_eq!((baseline_work.raster, baseline_work.upload), (0, 0));
-    assert_eq!(baseline_work.damage_px, 1_000 * 500);
-    let mut changed_text = match &scene.nodes[&first_root_id].data {
-        NodeData::TextMarkdown(text) => text.clone(),
-        other => panic!("expected canonical text root, got {other:?}"),
-    };
-    changed_text.content = "BA".into();
-    scene
-        .update_node_content(
-            first_tile_id,
-            first_root_id,
-            NodeData::TextMarkdown(changed_text),
-        )
-        .expect("controlled canonical text mutation");
-    compositor.prime_markdown_cache(&scene);
-    compositor.prime_truncation_cache(&scene);
-
-    // The compositor-private outcome emitted after a real Lost/Outdated
-    // surface acquire has been reconfigured.
-    compositor.record_surface_recovery_outcome(SurfaceRecoveryOutcome::Reconfigured {
-        trigger: SurfaceAcquireFailure::Lost,
-    });
-    compositor.render_frame_headless(&mut scene, &surface);
-
-    let work = compositor
-        .take_work_counts()
-        .expect("recovered frame records work");
-    assert!(work.full_frame, "{work:?}");
-    assert_eq!(work.pixels_damaged, 1_000 * 500);
-    assert_eq!(work.damage_px, work.pixels_damaged);
-    assert!(work.layout > 0, "{work:?}");
-    assert_eq!((work.raster, work.upload), (0, 0));
-    assert!(compositor.take_work_counts().is_none());
-}
-
 #[tokio::test]
 async fn test_static_image_node_composited_with_other_nodes() {
     // Render a scene with both a SolidColor node and a StaticImage node in adjacent tiles.
