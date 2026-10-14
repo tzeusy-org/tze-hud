@@ -865,10 +865,16 @@ impl SceneGraph {
             }
             // Remove stale hit regions for this publication immediately so
             // pointer/keyboard events can no longer land on them this frame.
-            self.overlay.zone_hit_regions.retain(|r| {
-                !(r.zone_name == zone_name
+            // Their hover/press feedback goes with them.
+            let overlay = &mut self.overlay;
+            overlay.zone_hit_regions.retain(|r| {
+                let stale = r.zone_name == zone_name
                     && r.published_at_wall_us == published_at_wall_us
-                    && r.publisher_namespace == publisher_namespace)
+                    && r.publisher_namespace == publisher_namespace;
+                if stale {
+                    overlay.chrome_states.remove(&r.interaction_id);
+                }
+                !stale
             });
             self.prune_publication_orphans();
             self.version += 1;

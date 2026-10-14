@@ -1297,19 +1297,34 @@ impl WinitApp {
         state.refresh_active_tab_mirror(&scene);
     }
 
-    /// Drop keyboard focus from a tile that lease revocation or expiry removed.
+    /// Drop keyboard focus from a tile that lease revocation, expiry, or a
+    /// portal clear removed. A composer on that tile is blurred and its local
+    /// echo cleared; otherwise the compositor keeps blinking a caret for a
+    /// composer that no longer exists, presenting a frame per blink on an
+    /// otherwise idle HUD (hud-oyo7k).
     /// Non-blocking: skips this frame if the scene lock is busy.
     pub(super) fn clear_focus_on_removed_tile(&mut self) {
-        let Ok(state) = self.state.shared_state.try_lock() else {
-            return;
+        let composer_lost = {
+            let Ok(state) = self.state.shared_state.try_lock() else {
+                return;
+            };
+            let Ok(mut scene) = state.scene.try_lock() else {
+                return;
+            };
+            let Some(tab_id) = scene.active_tab else {
+                return;
+            };
+            let was_active = self.state.input_processor.is_composer_active();
+            self.state.input_processor.clear_focus_on_missing_tile(
+                &mut self.state.focus_manager,
+                &mut scene,
+                tab_id,
+            );
+            was_active && !self.state.input_processor.is_composer_active()
         };
-        let Ok(scene) = state.scene.try_lock() else {
-            return;
-        };
-        if let Some(tab_id) = scene.active_tab {
-            self.state
-                .focus_manager
-                .clear_focus_on_missing_tile(tab_id, &scene);
+        if composer_lost {
+            self.clear_local_composer_echo();
+            self.state.composer_pointer_drag_anchor = None;
         }
     }
 
@@ -1446,17 +1461,65 @@ impl WinitApp {
         }
     }
 
+    /// A winit left-button press or release on `window_id` (`secondary` = the
+    /// secondary overlay index, `None` for the primary).
+    pub(super) fn handle_left_button(
+        &mut self,
+        pressed: bool,
+        window_id: winit::window::WindowId,
+        secondary: Option<usize>,
+    ) {
+        if pressed {
+            if self.state.left_button_down {
+                self.enqueue_pointer_event(PointerEventKind::Up);
+                end_os_mouse_capture();
+            }
+            self.state.left_button_down = true;
+            self.state.press_window = Some(window_id);
+            let window = match secondary {
+                Some(i) => Some(&self.state.secondaries[i].window),
+                None => self.state.window.as_ref(),
+            };
+            if let Some(window) = window {
+                focus_window_for_text_input(window);
+                begin_os_mouse_capture(window);
+            }
+            self.update_overlay_cursor_hittest();
+            self.enqueue_pointer_event(PointerEventKind::Down);
+            return;
+        }
+        // The press already ended: `synthesize_left_release_if_physically_up`
+        // saw the button up before this event arrived and sent the Up. A
+        // second Up would repeat the release (hud-z21e9).
+        if !self.state.left_button_down {
+            return;
+        }
+        // If the context menu is showing, a release on its Reset button
+        // triggers the reset; anywhere else dismisses the menu.
+        self.handle_left_click_with_context_menu();
+        self.enqueue_pointer_event(PointerEventKind::Up);
+        self.state.left_button_down = false;
+        self.state.press_window = None;
+        end_os_mouse_capture();
+        self.update_overlay_cursor_hittest();
+    }
+
     pub(super) fn synthesize_left_release_if_physically_up(&mut self) -> bool {
         if self.state.left_button_down
             && matches!(left_mouse_button_is_physically_down(), Some(false))
         {
-            self.enqueue_pointer_event(PointerEventKind::Up);
-            self.state.left_button_down = false;
-            end_os_mouse_capture();
-            self.update_overlay_cursor_hittest();
+            self.release_left_press();
             return true;
         }
         false
+    }
+
+    /// End the current left press with an Up, as if its release arrived.
+    pub(super) fn release_left_press(&mut self) {
+        self.enqueue_pointer_event(PointerEventKind::Up);
+        self.state.left_button_down = false;
+        end_os_mouse_capture();
+        self.update_overlay_cursor_hittest();
     }
 
     /// Map a composer-node-local pointer position to a draft byte offset
@@ -1919,14 +1982,30 @@ impl WinitApp {
                 //
                 // Action interactions are logged for now; callback delivery to
                 // agents is handled separately (see hud-ltgk.7).
+                //
+                // Button semantics (hud-z21e9): a release activates an
+                // affordance only when the press began on that same
+                // affordance, so a release that lands elsewhere (the cursor
+                // moved, or a press that started off the button) never fires
+                // an action the user did not press.
+                if pointer_event.kind == PointerEventKind::Down {
+                    self.state.zone_press = match &result.hit {
+                        HitResult::ZoneInteraction { interaction_id, .. } => {
+                            Some(interaction_id.clone())
+                        }
+                        _ => None,
+                    };
+                }
                 if pointer_event.kind == PointerEventKind::Up {
+                    let pressed = self.state.zone_press.take();
                     if let HitResult::ZoneInteraction {
                         ref zone_name,
                         published_at_wall_us,
                         ref publisher_namespace,
                         ref kind,
-                        ..
+                        ref interaction_id,
                     } = result.hit
+                        && pressed.as_deref() == Some(interaction_id.as_str())
                     {
                         match kind {
                             ZoneInteractionKind::Dismiss => {
@@ -1950,12 +2029,22 @@ impl WinitApp {
                                     zone_name: zone_name.clone(),
                                     callback_id: callback_id.clone(),
                                 });
+                                // An activated notification is answered: dismiss
+                                // it locally, as the × does, so the click has an
+                                // immediate visible result and cannot repeat
+                                // (hud-paslt).
+                                let removed = scene.dismiss_notification(
+                                    zone_name,
+                                    published_at_wall_us,
+                                    publisher_namespace,
+                                );
                                 tracing::debug!(
                                     zone = %zone_name,
                                     published_at_wall_us,
                                     publisher = %publisher_namespace,
                                     %callback_id,
-                                    "zone action: callback queued for agent delivery"
+                                    removed,
+                                    "zone action: callback queued for agent delivery, notification dismissed"
                                 );
                             }
                             ZoneInteractionKind::DragHandle { .. } => {
@@ -2130,6 +2219,11 @@ impl WinitApp {
         } else {
             drag_released = None;
             portal_resize_outcome = None;
+        }
+
+        // A press the scene lock never saw cannot arm a zone affordance.
+        if !pointer_processed && pointer_event.kind == PointerEventKind::Down {
+            self.state.zone_press = None;
         }
 
         if !pointer_processed

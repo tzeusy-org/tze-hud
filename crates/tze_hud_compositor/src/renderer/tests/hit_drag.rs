@@ -712,7 +712,7 @@ async fn drag_handle_hit_test_wins_on_passthrough_tile() {
     }
 }
 
-/// Stale entries in `drag_handle_states` must be pruned when the
+/// Stale entries in `chrome_states` must be pruned when the
 /// corresponding element is removed from the scene.
 ///
 /// Verifies that the per-frame drag-handle population retains only the keys
@@ -720,7 +720,7 @@ async fn drag_handle_hit_test_wins_on_passthrough_tile() {
 /// the zero-allocation `iter().any()` retain used after [hud-tdtr7] must
 /// have identical semantics to the previous `HashSet`-based approach.
 #[tokio::test]
-async fn drag_handle_states_stale_entries_pruned_on_repopulate() {
+async fn chrome_states_stale_entries_pruned_on_repopulate() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
 
     let mut scene = SceneGraph::new(1920.0, 1080.0);
@@ -747,19 +747,19 @@ async fn drag_handle_states_stale_entries_pruned_on_repopulate() {
         .interaction_id
         .clone();
 
-    // Seed drag_handle_states: one live entry + one stale phantom that
+    // Seed chrome_states: one live entry + one stale phantom that
     // never had a corresponding hit region.
     scene
         .overlay
-        .drag_handle_states
+        .chrome_states
         .entry(live_id.clone())
         .or_default()
         .hovered = true;
-    scene.overlay.drag_handle_states.insert(
+    scene.overlay.chrome_states.insert(
         "drag-handle:tile:ghost-never-existed".to_string(),
         Default::default(),
     );
-    assert_eq!(scene.overlay.drag_handle_states.len(), 2);
+    assert_eq!(scene.overlay.chrome_states.len(), 2);
 
     // Remove the tile so it no longer produces a drag handle.
     scene.delete_tile(tile_id, "agent-a").unwrap();
@@ -772,8 +772,8 @@ async fn drag_handle_states_stale_entries_pruned_on_repopulate() {
         "no hit regions expected after tile removal"
     );
     assert!(
-        scene.overlay.drag_handle_states.is_empty(),
-        "stale drag_handle_states must be pruned by drag-handle repopulation; \
+        scene.overlay.chrome_states.is_empty(),
+        "stale chrome_states must be pruned by drag-handle repopulation; \
              previously-live id={live_id:?} and phantom must both be removed"
     );
 }
@@ -810,7 +810,7 @@ async fn drag_handle_opacity_switches_to_active_on_hover_state() {
 
     scene
         .overlay
-        .drag_handle_states
+        .chrome_states
         .entry(handle.interaction_id.clone())
         .or_default()
         .hovered = true;

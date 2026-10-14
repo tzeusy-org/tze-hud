@@ -326,10 +326,11 @@ pub struct InputProcessor {
     current_hover: Option<(SceneId, SceneId)>, // (tile_id, node_id)
     /// Currently pressed node.
     current_press: Option<(SceneId, SceneId)>, // (tile_id, node_id)
-    /// Currently hovered chrome drag handle interaction id.
-    current_drag_handle_hover: Option<String>,
-    /// Currently pressed chrome drag handle interaction id.
-    current_drag_handle_press: Option<String>,
+    /// Currently hovered chrome control interaction id (drag handle or
+    /// notification dismiss/action button).
+    current_chrome_hover: Option<String>,
+    /// Currently pressed chrome control interaction id.
+    current_chrome_press: Option<String>,
     /// Per-device long-press drag state.
     ///
     /// Keyed by `device_id`.  Each entry is independent so multi-touch devices
@@ -371,8 +372,8 @@ impl InputProcessor {
         Self {
             current_hover: None,
             current_press: None,
-            current_drag_handle_hover: None,
-            current_drag_handle_press: None,
+            current_chrome_hover: None,
+            current_chrome_press: None,
             drag_states: HashMap::new(),
             drag_config: DragConfig::default(),
             rollback_tracker: RollbackTracker::new(),
@@ -992,6 +993,27 @@ impl InputProcessor {
         }
     }
 
+    /// Move focus off a tile that left the scene (lease revocation, expiry, or
+    /// an agent clearing its portal) and deactivate a composer whose node went
+    /// with it, so [`Self::is_composer_active`] turns `false`. The draft is
+    /// dropped: the agent that owned the composer removed it, so there is no
+    /// one to deliver it to.
+    pub fn clear_focus_on_missing_tile(
+        &mut self,
+        focus_manager: &mut FocusManager,
+        scene: &mut SceneGraph,
+        tab_id: SceneId,
+    ) -> FocusTransition {
+        let transition = focus_manager.clear_focus_on_missing_tile(tab_id, scene);
+        self.apply_focus_transition_side_effects(&transition, scene);
+        if let Some(node_id) = self.composer_draft_manager.focused_node()
+            && !scene.nodes.contains_key(&node_id)
+        {
+            let _ = self.composer_draft_manager.on_focus_lost();
+        }
+        transition
+    }
+
     /// Returns `true` when a composer region is currently focused (draft active).
     pub fn is_composer_active(&self) -> bool {
         self.composer_draft_manager.is_active()
@@ -1283,10 +1305,15 @@ impl InputProcessor {
                 (None, None)
             }
         };
-        let hit_drag_handle_id: Option<String> = match &hit {
+        // Runtime chrome controls with local hover/press feedback: drag
+        // handles and notification buttons (hud-paslt).
+        let hit_chrome_id: Option<String> = match &hit {
             HitResult::ZoneInteraction {
                 interaction_id: iid,
-                kind: ZoneInteractionKind::DragHandle { .. },
+                kind:
+                    ZoneInteractionKind::DragHandle { .. }
+                    | ZoneInteractionKind::Dismiss
+                    | ZoneInteractionKind::Action { .. },
                 ..
             } => Some(iid.clone()),
             _ => None,
@@ -1372,23 +1399,23 @@ impl InputProcessor {
             self.current_hover = hit_tile_id.and_then(|t| hit_node_id.map(|n| (t, n)));
         }
 
-        // ── Stage 2: Update chrome drag-handle hover state ───────────────
-        if self.current_drag_handle_hover != hit_drag_handle_id {
-            if let Some(old) = self.current_drag_handle_hover.take() {
-                scene.set_drag_handle_hovered(&old, false);
+        // ── Stage 2: Update chrome control hover state ───────────────
+        if self.current_chrome_hover != hit_chrome_id {
+            if let Some(old) = self.current_chrome_hover.take() {
+                scene.set_chrome_hovered(&old, false);
             }
-            if let Some(new_id) = &hit_drag_handle_id {
-                scene.set_drag_handle_hovered(new_id, true);
+            if let Some(new_id) = &hit_chrome_id {
+                scene.set_chrome_hovered(new_id, true);
             }
-            self.current_drag_handle_hover = hit_drag_handle_id.clone();
+            self.current_chrome_hover = hit_chrome_id.clone();
         }
 
         // ── Stage 2: Handle press/release ─────────────────────────────────
         match event.kind {
             PointerEventKind::Down => {
-                if let Some(ref drag_id) = hit_drag_handle_id {
-                    scene.set_drag_handle_pressed(drag_id, true);
-                    self.current_drag_handle_press = Some(drag_id.clone());
+                if let Some(ref chrome_id) = hit_chrome_id {
+                    scene.set_chrome_pressed(chrome_id, true);
+                    self.current_chrome_press = Some(chrome_id.clone());
                 }
                 if let (Some(tile_id), Some(node_id)) = (hit_tile_id, hit_node_id) {
                     if let Some(state) = scene.hit_region_states.get_mut(&node_id) {
@@ -1451,8 +1478,8 @@ impl InputProcessor {
                 }
             }
             PointerEventKind::Up => {
-                if let Some(drag_id) = self.current_drag_handle_press.take() {
-                    scene.set_drag_handle_pressed(&drag_id, false);
+                if let Some(chrome_id) = self.current_chrome_press.take() {
+                    scene.set_chrome_pressed(&chrome_id, false);
                 }
                 if let Some((pressed_tile_id, pressed_node_id)) = self.current_press.take() {
                     if let Some(state) = scene.hit_region_states.get_mut(&pressed_node_id) {

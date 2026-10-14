@@ -35,12 +35,14 @@ use crate::pipeline::{
 
 use super::LayerPartitionedRoundedRectCmds;
 use super::draw_cmds::TexturedDrawCmd;
+use super::hit_regions::{notification_action_interaction_id, notification_dismiss_interaction_id};
 use super::tile_render::node_uses_display_tile_scroll;
 use super::token_colors::{
     NOTIFICATION_BACKDROP_OPACITY, NOTIFICATION_BORDER_WIDTH_PX, STATIC_IMAGE_PLACEHOLDER_COLOR,
-    is_alert_banner_zone, linear_to_srgb, notification_dismiss_bounds,
-    resolve_border_default_color, resolve_notification_control_color, srgb_to_linear,
-    urgency_to_notification_color, urgency_to_severity_color,
+    is_alert_banner_zone, linear_to_srgb, notification_action_button_bounds,
+    notification_dismiss_bounds, resolve_border_default_color, resolve_notification_action_tokens,
+    resolve_notification_control_color, srgb_to_linear, urgency_to_notification_color,
+    urgency_to_severity_color,
 };
 
 #[inline]
@@ -342,6 +344,10 @@ impl super::Compositor {
     ///   the dismiss control its outline: on the rounded backdrop itself, or as
     ///   a border-only shape over the flat backdrop (no radius, or
     ///   `Simplified` degradation, which draws backdrops square).
+    /// - Notification action buttons (every Stack zone) draw here, after their
+    ///   backdrop, as filled and outlined controls. Action and dismiss buttons
+    ///   take the hover/pressed fill from `scene.overlay.chrome_states`
+    ///   (hud-paslt).
     ///
     /// Mirrors the backdrop-resolution logic in `render_zone_content` so color
     /// derivation (severity tokens, urgency colors, opacity) is consistent.
@@ -358,6 +364,7 @@ impl super::Compositor {
             chrome: Vec::new(),
         };
         let degraded = self.degradation_policy.level >= tze_hud_scene::DegradationLevel::Simplified;
+        let action_tokens = resolve_notification_action_tokens(&self.token_map);
 
         for (zone_name, publishes) in &scene.zone_registry.active_publishes {
             if publishes.is_empty() {
@@ -374,13 +381,13 @@ impl super::Compositor {
                 _ => None,
             };
             let notification_cards = !is_alert_banner_zone(zone_name);
-            // A flat-backdrop zone only needs this pass for notification borders.
-            if sdf_radius.is_none()
-                && !(notification_cards
-                    && publishes
-                        .iter()
-                        .any(|p| matches!(p.content, ZoneContent::Notification(_))))
-            {
+            // A flat-backdrop zone only needs this pass for notification
+            // borders and action buttons.
+            let needs_controls = publishes.iter().any(|p| match &p.content {
+                ZoneContent::Notification(n) => notification_cards || !n.actions.is_empty(),
+                _ => false,
+            });
+            if sdf_radius.is_none() && !needs_controls {
                 continue;
             }
 
@@ -419,20 +426,59 @@ impl super::Compositor {
                             sdf_radius,
                             opacity,
                         );
-                        // Dismiss control outline, as in render_zone_content.
-                        if pushed
-                            && notification_cards
-                            && matches!(record.content, ZoneContent::Notification(_))
-                        {
-                            let mut color =
-                                resolve_notification_control_color(policy, &self.token_map);
-                            color.a *= opacity;
+                        let ZoneContent::Notification(payload) = &record.content else {
+                            continue;
+                        };
+                        let mut outline =
+                            resolve_notification_control_color(policy, &self.token_map);
+                        outline.a *= opacity;
+                        let chrome_state = |id: String| {
+                            scene
+                                .overlay
+                                .chrome_states
+                                .get(&id)
+                                .copied()
+                                .unwrap_or_default()
+                        };
+                        // Dismiss control outline, filled while hovered/pressed.
+                        if pushed && notification_cards {
                             let b = notification_dismiss_bounds(x, slot_y, w, effective_slot_h);
-                            out.push(self.border_only_cmd(
+                            let state = chrome_state(notification_dismiss_interaction_id(
+                                zone_name, record,
+                            ));
+                            out.push(self.control_cmd(
                                 b,
-                                0.0,
-                                NOTIFICATION_BORDER_WIDTH_PX,
-                                color,
+                                action_tokens.state_fill(state, None),
+                                outline,
+                                opacity,
+                            ));
+                        }
+                        // Action buttons: at exactly the bounds
+                        // `populate_notification_hit_regions` registers; labels
+                        // are drawn by `collect_text_items`.
+                        let n_actions = payload.actions.len().min(MAX_NOTIFICATION_ACTIONS);
+                        for (action, b) in
+                            payload
+                                .actions
+                                .iter()
+                                .zip(notification_action_button_bounds(
+                                    x,
+                                    slot_y,
+                                    w,
+                                    effective_slot_h,
+                                    n_actions,
+                                ))
+                        {
+                            let state = chrome_state(notification_action_interaction_id(
+                                zone_name,
+                                record,
+                                &action.callback_id,
+                            ));
+                            out.push(self.control_cmd(
+                                b,
+                                action_tokens.state_fill(state, Some(action_tokens.background)),
+                                outline,
+                                opacity,
                             ));
                         }
                     }
@@ -533,6 +579,24 @@ impl super::Compositor {
             });
         }
         true
+    }
+
+    /// A notification control (dismiss or action button): `fill` (if any)
+    /// under a 1 px `outline`, both already resolved from tokens; `opacity`
+    /// is the slot fade, applied to the fill here (the outline carries it).
+    fn control_cmd(
+        &self,
+        bounds: Rect,
+        fill: Option<Rgba>,
+        outline: Rgba,
+        opacity: f32,
+    ) -> RoundedRectDrawCmd {
+        let mut cmd = self.border_only_cmd(bounds, 0.0, NOTIFICATION_BORDER_WIDTH_PX, outline);
+        if let Some(mut fill) = fill {
+            fill.a *= opacity;
+            cmd.color = self.gpu_color(fill);
+        }
+        cmd
     }
 
     /// A transparent shape with only an inside border of `width` px.

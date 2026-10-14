@@ -151,6 +151,33 @@ publish-to-present measurements identify full re-present as the bottleneck;
 `hud-ko552`'s historical ~5 µs per `collect_text_items` call measures isolated
 text collection, not a frame or present cost.
 
+## Merge gate and testability
+
+The merge queue is the development loop, so it is held to targets, not just
+kept green. Changing a required check updates the `main merge queue` ruleset,
+the [`ci.yml`](../.github/workflows/ci.yml) header and this section together.
+
+- **Fast.** A merge-group run's required checks finish within 6 minutes of the
+  run starting. Suites that cannot fit run in the weekly lanes
+  (`perf-budget.yml`, `perf-assert.yml`) or in `windows.yml`, never in the
+  required set. [Observed 2026-10-14] p50 4.1 min, max 5.2 min.
+- **Repeatable.** A correct change passes on the first attempt. Nextest runs
+  with `retries = 0`; a per-test retry override in
+  [`.config/nextest.toml`](../.config/nextest.toml) names its reason and is
+  tracked debt, not a fix. [Observed 2026-10-14] 25 of 25 merge-group runs
+  green on the first attempt.
+- **Unattended.** No required check waits on a person, the owner's hardware or
+  a live HUD. Pixels are checked by machine on llvmpipe (`just test-gpu`,
+  `just render-scene`); the Windows build and WARP smoke in `windows.yml` are
+  informational. Owner-host checks, including POC acceptance above, are never
+  a merge gate.
+- **Mirrored locally.** `just ci` runs the required gates in CI order;
+  `just pre-push` runs fmt and the exact CI clippy command.
+
+Open work toward these targets: `hud-1dnk5` (`just dev-run`, Windows-first
+quickstart, capture diff) and `hud-51ujj.7` (live smoke against the paired
+HUD).
+
 ## Working rules
 
 - Prefer deleting over generalizing. New abstractions need a current user.
