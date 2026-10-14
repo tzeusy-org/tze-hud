@@ -992,6 +992,27 @@ impl InputProcessor {
         }
     }
 
+    /// Move focus off a tile that left the scene (lease revocation, expiry, or
+    /// an agent clearing its portal) and deactivate a composer whose node went
+    /// with it, so [`Self::is_composer_active`] turns `false`. The draft is
+    /// dropped: the agent that owned the composer removed it, so there is no
+    /// one to deliver it to.
+    pub fn clear_focus_on_missing_tile(
+        &mut self,
+        focus_manager: &mut FocusManager,
+        scene: &mut SceneGraph,
+        tab_id: SceneId,
+    ) -> FocusTransition {
+        let transition = focus_manager.clear_focus_on_missing_tile(tab_id, scene);
+        self.apply_focus_transition_side_effects(&transition, scene);
+        if let Some(node_id) = self.composer_draft_manager.focused_node()
+            && !scene.nodes.contains_key(&node_id)
+        {
+            let _ = self.composer_draft_manager.on_focus_lost();
+        }
+        transition
+    }
+
     /// Returns `true` when a composer region is currently focused (draft active).
     pub fn is_composer_active(&self) -> bool {
         self.composer_draft_manager.is_active()

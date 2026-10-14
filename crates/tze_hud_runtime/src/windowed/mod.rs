@@ -206,8 +206,7 @@ use self::input_dispatch::{
 use self::keyboard::{ComposerDeliveryContext, PendingKeyboardEvent};
 use self::lifecycle::{
     BENCHMARK_NO_PROGRESS_TIMEOUT, PendingInputLatencySamples, WindowedBenchmarkRunState,
-    WindowedQuiescentEfficiencyRunState, begin_os_mouse_capture, drain_windowed_input_latency,
-    end_os_mouse_capture, focus_window_for_text_input, read_windows_clipboard_text,
+    WindowedQuiescentEfficiencyRunState, drain_windowed_input_latency, read_windows_clipboard_text,
     seed_windowed_benchmark_scene, update_surface_repaint_pending, windowed_frame_needs_render,
 };
 pub use self::network::render_attach_info;
@@ -460,6 +459,10 @@ struct WindowedRuntimeState {
     /// Window that received the current left-button press; it keeps
     /// capturing until release.
     press_window: Option<WindowId>,
+    /// Zone affordance (`ZoneHitRegion::interaction_id`) the current press
+    /// began on. A release activates a dismiss/action button only when it
+    /// lands on the same affordance the press started on (hud-z21e9).
+    zone_press: Option<String>,
     /// Original primary drag identity and, only on a missed Up, its terminal event.
     primary_drag_gesture: Option<portal::PrimaryDragGesture>,
     /// Global design token map from scene startup.
@@ -2453,40 +2456,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     self.state.wake.mark_main_work_pending(source);
                 }
                 if button == MouseButton::Left {
-                    let kind = match state {
-                        ElementState::Pressed => PointerEventKind::Down,
-                        ElementState::Released => PointerEventKind::Up,
-                    };
-                    if state == ElementState::Pressed {
-                        if self.state.left_button_down {
-                            self.enqueue_pointer_event(PointerEventKind::Up);
-                            end_os_mouse_capture();
-                        }
-                        self.state.left_button_down = true;
-                        self.state.press_window = Some(window_id);
-                        let window = match secondary {
-                            Some(i) => Some(&self.state.secondaries[i].window),
-                            None => self.state.window.as_ref(),
-                        };
-                        if let Some(window) = window {
-                            focus_window_for_text_input(window);
-                            begin_os_mouse_capture(window);
-                        }
-                        self.update_overlay_cursor_hittest();
-                    }
-                    // If the context menu is showing and this is a left-press,
-                    // check if it lands on the Reset button.  If so, trigger
-                    // the reset; otherwise dismiss the menu (click-outside).
-                    if state == ElementState::Released {
-                        self.handle_left_click_with_context_menu();
-                    }
-                    self.enqueue_pointer_event(kind);
-                    if state == ElementState::Released {
-                        self.state.left_button_down = false;
-                        self.state.press_window = None;
-                        end_os_mouse_capture();
-                        self.update_overlay_cursor_hittest();
-                    }
+                    self.handle_left_button(state == ElementState::Pressed, window_id, secondary);
                 } else if button == MouseButton::Right && state == ElementState::Released {
                     // Right-click: show context menu if cursor is on a drag handle.
                     self.handle_right_click_on_drag_handle();
@@ -3149,6 +3119,7 @@ impl WindowedRuntime {
             secondary_recreates: Default::default(),
             overlay_refits: Default::default(),
             press_window: None,
+            zone_press: None,
             primary_drag_gesture: None,
             global_tokens: startup_compositor_tokens,
             element_repositioned_tx,

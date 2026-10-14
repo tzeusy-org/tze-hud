@@ -2318,6 +2318,7 @@ mod tests {
             secondary_recreates: Default::default(),
             overlay_refits: Default::default(),
             press_window: None,
+            zone_press: None,
             primary_drag_gesture: None,
             global_tokens: std::collections::HashMap::new(),
             element_repositioned_tx: None,
@@ -8461,6 +8462,52 @@ mod tests {
             )
             .unwrap();
         (scene, tab_id)
+    }
+
+    /// Removing the tile that holds a focused composer (agent clears its
+    /// portal, or the lease expires) must blur the composer and clear the
+    /// local echo. Otherwise the compositor keeps a caret blinking for a
+    /// composer that no longer exists and presents a frame per blink on an
+    /// otherwise idle HUD (hud-oyo7k).
+    #[test]
+    fn removing_focused_composer_tile_clears_local_echo() {
+        use tze_hud_input::{FocusManager, InputProcessor};
+
+        let (scene, tab_id) = scene_with_pointer_composer();
+        let tile_id = *scene.tiles.keys().next().unwrap();
+        let mut fm = FocusManager::new();
+        fm.add_tab(tab_id);
+        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+
+        app.state.cursor_x = 200.0;
+        app.state.cursor_y = 50.0;
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        app.enqueue_pointer_event(PointerEventKind::Up);
+        app.state.input_processor.route_character_to_composer("a");
+        app.push_local_composer_echo(std::time::Instant::now());
+        assert!(
+            matches!(
+                *app.state.local_composer_state.lock().unwrap(),
+                Some(Some(_))
+            ),
+            "a focused composer publishes its echo"
+        );
+
+        {
+            let state = app.state.shared_state.try_lock().unwrap();
+            let mut scene = state.scene.try_lock().unwrap();
+            scene.delete_tile(tile_id, "agent").unwrap();
+        }
+        app.clear_focus_on_removed_tile();
+
+        assert!(
+            !app.state.input_processor.is_composer_active(),
+            "the removed tile's composer must be blurred"
+        );
+        assert!(
+            matches!(*app.state.local_composer_state.lock().unwrap(), Some(None)),
+            "the compositor must be told to drop the composer (and its caret blink)"
+        );
     }
 
     /// PointerDown on the focused composer must place the caret via the real
