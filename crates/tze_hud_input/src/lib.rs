@@ -1792,6 +1792,12 @@ impl InputProcessor {
             drag::LONG_PRESS_TOUCH_THRESHOLD_MS
         };
 
+        // A mouse drags any handle on its first move, like a window titlebar:
+        // a grip exists only to be dragged, and a long-press there read as a
+        // dead control on the owner's overlay. Touch keeps the long-press so a
+        // swipe across a grip stays a scroll.
+        let immediate = is_header_band || device_id == 0;
+
         match event.kind {
             PointerEventKind::Down => {
                 // Start accumulating for this device.
@@ -1802,7 +1808,7 @@ impl InputProcessor {
                     event.x,
                     event.y,
                     threshold_ms,
-                    is_header_band,
+                    immediate,
                     now,
                 );
                 self.drag_states.insert(device_id, state);
@@ -4446,19 +4452,21 @@ mod tests {
 
     /// hud-cpjqe: a portal header BAND drags on the first pointer-move with NO
     /// 250 ms long-press hold and NO early-movement cancel (Windows-titlebar) —
-    /// the fix for "clicking top to drag fails half the time". The legacy grip
-    /// keeps the long-press hysteresis (a fast move before the hold cancels).
+    /// the fix for "clicking top to drag fails half the time". A mouse drags a
+    /// grip the same way; touch keeps the long-press hysteresis on a grip (a
+    /// fast swipe before the hold cancels).
     #[test]
-    fn header_band_drag_activates_immediately_grip_still_requires_long_press() {
+    fn mouse_drags_handles_immediately_touch_grip_still_requires_long_press() {
         use tze_hud_scene::{DragHandleElementKind, Rect};
         let eid = SceneId::new();
-        let ev = |x: f32, kind| PointerEvent {
+        let ev_on = |device_id: u32, x: f32, kind| PointerEvent {
             x,
             y: 120.0,
             kind,
-            device_id: 0,
+            device_id,
             timestamp: None,
         };
+        let ev = |x: f32, kind| ev_on(0, x, kind);
 
         // ── BAND: down, then a large move immediately → Activated, then Moved ──
         let mut proc_band = InputProcessor::new();
@@ -4504,32 +4512,35 @@ mod tests {
             "the header band must move once active, got {moved:?}"
         );
 
-        // ── GRIP: same fast move before the hold → Cancelled (unchanged) ──────
-        let mut proc_grip = InputProcessor::new();
+        // ── GRIP: a mouse activates on the same fast first move ──────────────
         let grip_bounds = Rect::new(100.0, 100.0, 24.0, 8.0);
-        proc_grip.process_drag_handle_pointer(
-            &ev(112.0, PointerEventKind::Down),
-            "drag-handle:grip",
-            eid,
-            DragHandleElementKind::Tile,
-            grip_bounds,
-            1920.0,
-            1080.0,
-            false,
+        let grip = |proc: &mut InputProcessor, device: u32, x: f32, kind| {
+            proc.process_drag_handle_pointer(
+                &ev_on(device, x, kind),
+                "drag-handle:grip",
+                eid,
+                DragHandleElementKind::Tile,
+                grip_bounds,
+                1920.0,
+                1080.0,
+                false,
+            )
+        };
+        let mut proc_mouse = InputProcessor::new();
+        grip(&mut proc_mouse, 0, 112.0, PointerEventKind::Down);
+        let activated = grip(&mut proc_mouse, 0, 172.0, PointerEventKind::Move);
+        assert!(
+            matches!(activated, DragEventOutcome::Activated { .. }),
+            "a mouse must drag a grip on the first move, got {activated:?}"
         );
-        let cancelled = proc_grip.process_drag_handle_pointer(
-            &ev(172.0, PointerEventKind::Move),
-            "drag-handle:grip",
-            eid,
-            DragHandleElementKind::Tile,
-            grip_bounds,
-            1920.0,
-            1080.0,
-            false,
-        );
+
+        // ── GRIP: a touch swipe before the hold → Cancelled (unchanged) ──────
+        let mut proc_touch = InputProcessor::new();
+        grip(&mut proc_touch, 1, 112.0, PointerEventKind::Down);
+        let cancelled = grip(&mut proc_touch, 1, 172.0, PointerEventKind::Move);
         assert!(
             matches!(cancelled, DragEventOutcome::Cancelled),
-            "the legacy grip must still cancel a fast move before the long-press, got {cancelled:?}"
+            "a touch grip must still cancel a fast move before the long-press, got {cancelled:?}"
         );
     }
 

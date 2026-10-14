@@ -73,6 +73,13 @@ fn pointer_up(x: f32, y: f32) -> PointerEvent {
     }
 }
 
+/// Touch pointer (device_id != 0): a grip still needs a long press, while a
+/// mouse (device 0) drags a grip on its first move.
+fn touch(mut ev: PointerEvent) -> PointerEvent {
+    ev.device_id = 1;
+    ev
+}
+
 fn element_bounds() -> Rect {
     Rect::new(ELEMENT_X, ELEMENT_Y, ELEMENT_W, ELEMENT_H)
 }
@@ -119,7 +126,7 @@ fn long_press_cancelled_if_pointer_moves_beyond_tolerance() {
     let (cx, cy) = handle_center();
 
     ip.process_drag_handle_pointer(
-        &pointer_down(cx, cy),
+        &touch(pointer_down(cx, cy)),
         "drag-handle:aabb",
         eid,
         DragHandleElementKind::Tile,
@@ -131,7 +138,7 @@ fn long_press_cancelled_if_pointer_moves_beyond_tolerance() {
 
     // Move 15dp beyond tolerance (threshold is 10dp)
     let outcome = ip.process_drag_handle_pointer(
-        &pointer_move(cx + 15.0, cy),
+        &touch(pointer_move(cx + 15.0, cy)),
         "drag-handle:aabb",
         eid,
         DragHandleElementKind::Tile,
@@ -143,7 +150,7 @@ fn long_press_cancelled_if_pointer_moves_beyond_tolerance() {
 
     assert_eq!(outcome, DragEventOutcome::Cancelled);
     assert!(
-        !ip.drag_states.contains_key(&0),
+        !ip.drag_states.contains_key(&1),
         "drag state must be cleared after cancellation"
     );
 }
@@ -155,7 +162,7 @@ fn long_press_not_cancelled_within_movement_tolerance() {
     let (cx, cy) = handle_center();
 
     ip.process_drag_handle_pointer(
-        &pointer_down(cx, cy),
+        &touch(pointer_down(cx, cy)),
         "drag-handle:aabb",
         eid,
         DragHandleElementKind::Tile,
@@ -167,7 +174,7 @@ fn long_press_not_cancelled_within_movement_tolerance() {
 
     // Move 5dp — below 10dp threshold
     let outcome = ip.process_drag_handle_pointer(
-        &pointer_move(cx + 5.0, cy),
+        &touch(pointer_move(cx + 5.0, cy)),
         "drag-handle:aabb",
         eid,
         DragHandleElementKind::Tile,

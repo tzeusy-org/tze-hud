@@ -2869,8 +2869,7 @@ mod tests {
     /// on a drag handle must NOT move the tile — the click-to-focus path must be
     /// unaffected.
     ///
-    /// Hysteresis: the 250 ms threshold ensures taps are recognised as clicks,
-    /// not drags.
+    /// A tap (down then up, no move) is a click, not a drag.
     #[test]
     fn drag_to_move_quick_tap_does_not_move_tile() {
         use tze_hud_input::{InputProcessor, PointerEvent};
@@ -2949,24 +2948,25 @@ mod tests {
             1920.0,
             1080.0,
         );
-        let cancelled_move = PointerEvent {
+        // A mouse drags a grip on its first move, like a window titlebar: no
+        // hold needed (the owner found the long-press grip read as dead).
+        let fast_move = PointerEvent {
             x: handle_cx + 30.0,
             kind: PointerEventKind::Move,
             ..down
         };
         super::apply_drag_handle_pointer_event(
             &mut processor,
-            &cancelled_move,
+            &fast_move,
             &HitResult::Passthrough,
             &mut scene,
             1920.0,
             1080.0,
         );
         assert!(
-            !processor.drag_states.contains_key(&0),
-            "early movement cancels recognition"
+            scene.is_drag_active(tile_id),
+            "a mouse drag starts on the first move"
         );
-        assert!(!scene.is_drag_active(tile_id));
     }
 
     #[test]
