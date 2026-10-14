@@ -169,9 +169,9 @@ the [`ci.yml`](../.github/workflows/ci.yml) header and this section together.
 - **Mirrored locally.** `just ci` runs the required gates in CI order;
   `just pre-push` runs fmt and the exact CI clippy command.
 
-Open work toward these targets: `hud-1dnk5` (cache saves on `main` only,
-`just dev-run`, Windows-first quickstart, capture diff) and `hud-51ujj.7`
-(live smoke against the paired HUD).
+Open work toward these targets: `hud-1dnk5` (`just dev-run`, Windows-first
+quickstart, capture diff) and `hud-51ujj.7` (live smoke against the paired
+HUD).
 
 ## Working rules
 
