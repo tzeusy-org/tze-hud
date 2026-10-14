@@ -22,7 +22,8 @@
 //! - `zone_slot_layout` — authoritative slot-geometry computation (returns
 //!   `ZoneSlotLayout`), shared by `collect_text_items`, `render_zone_content`,
 //!   and `collect_all_rounded_rect_cmds`.
-//! - `slot_offsets` — cumulative y-offsets from per-slot heights.
+//! - `slot_offsets` — cumulative y-offsets from per-slot heights and the
+//!   inter-card gap.
 //! - `resolve_zone_geometry` — converts a `GeometryPolicy` to pixel bounds.
 
 use std::collections::HashMap;
@@ -34,8 +35,8 @@ use super::draw_cmds::TexturedDrawCmd;
 use super::token_colors::{
     ICON_SIZE_PX, NOTIFICATION_BACKDROP_OPACITY, NOTIFICATION_BODY_SCALE,
     NOTIFICATION_ICON_SIZE_PX, NOTIFICATION_INTER_LINE_GAP, STATIC_IMAGE_PLACEHOLDER_COLOR,
-    is_alert_banner_zone, sort_alert_banner_indices, urgency_to_notification_color,
-    urgency_to_severity_color,
+    is_alert_banner_zone, notification_action_row_reserve, notification_stack_gap,
+    sort_alert_banner_indices, urgency_to_notification_color, urgency_to_severity_color,
 };
 use crate::pipeline::RectVertex;
 use crate::pipeline::rect_vertices;
@@ -267,8 +268,11 @@ impl Compositor {
                                         .or(policy.margin_px)
                                         .unwrap_or(NOTIFICATION_INSET);
                                     let icon_x = x + inset_h;
+                                    // Centred on the text, above any action row.
+                                    let text_slot_h =
+                                        effective_slot_h - notification_action_row_reserve(payload);
                                     let icon_y = slot_y
-                                        + (effective_slot_h - NOTIFICATION_ICON_SIZE_PX) * 0.5;
+                                        + (text_slot_h - NOTIFICATION_ICON_SIZE_PX).max(0.0) * 0.5;
                                     textured_cmds.push(TexturedDrawCmd {
                                         resource_id: icon_id,
                                         x: icon_x,
@@ -596,8 +600,29 @@ impl Compositor {
     /// `notification_inter_line_gap` from the token map (with appropriate fallbacks) so
     /// that height calculation and rendering use the exact same values.
     ///
-    /// When `payload.title` is empty, falls back to [`Self::stack_slot_height`] (single line).
+    /// When `payload.title` is empty, the text height is [`Self::stack_slot_height`]
+    /// (single line).
+    ///
+    /// Either way, a notification with actions adds
+    /// [`notification_action_row_reserve`] so its button row sits below the
+    /// text instead of over it (hud-mskx5).
     pub(crate) fn notification_slot_height(
+        payload: &NotificationPayload,
+        policy: &RenderingPolicy,
+        notification_body_scale: f32,
+        notification_inter_line_gap: f32,
+    ) -> f32 {
+        notification_action_row_reserve(payload)
+            + Self::notification_text_slot_height(
+                payload,
+                policy,
+                notification_body_scale,
+                notification_inter_line_gap,
+            )
+    }
+
+    /// Slot height for a notification's text alone (title and body).
+    fn notification_text_slot_height(
         payload: &NotificationPayload,
         policy: &RenderingPolicy,
         notification_body_scale: f32,
@@ -701,13 +726,18 @@ impl Compositor {
             notif_body_scale,
             NOTIFICATION_INTER_LINE_GAP,
         );
-        let slot_offsets = Self::slot_offsets(&slot_heights);
-        let total_slots_h: f32 = slot_heights.iter().sum();
-
-        let effective_h = if is_alert_banner_zone(zone_name) {
-            total_slots_h
+        // Alert banners stack flush as one strip; notification cards are
+        // separated by a token gap so consecutive cards never touch.
+        let (slot_offsets, effective_h) = if is_alert_banner_zone(zone_name) {
+            (
+                Self::slot_offsets(&slot_heights, 0.0),
+                slot_heights.iter().sum(),
+            )
         } else {
-            zh
+            (
+                Self::slot_offsets(&slot_heights, notification_stack_gap(token_map)),
+                zh,
+            )
         };
 
         super::ZoneSlotLayout {
@@ -721,14 +751,14 @@ impl Compositor {
     /// Compute the cumulative slot y-offsets from a list of per-slot heights.
     ///
     /// Returns a `Vec<f32>` of length `heights.len()`, where `offsets[i]` is the
-    /// sum of all `heights[0..i]` (i.e. the y-start of slot `i` relative to the
-    /// zone origin).
-    fn slot_offsets(heights: &[f32]) -> Vec<f32> {
+    /// sum of all `heights[0..i]` plus `gap` between each pair (i.e. the
+    /// y-start of slot `i` relative to the zone origin).
+    fn slot_offsets(heights: &[f32], gap: f32) -> Vec<f32> {
         let mut offsets = Vec::with_capacity(heights.len());
         let mut acc = 0.0_f32;
         for &h in heights {
             offsets.push(acc);
-            acc += h;
+            acc += h + gap;
         }
         offsets
     }

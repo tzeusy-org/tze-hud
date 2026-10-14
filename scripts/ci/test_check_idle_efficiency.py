@@ -138,6 +138,13 @@ class IdleEfficiencyCheckerTests(unittest.TestCase):
 
         self.assertEqual([], failures)
         self.assertEqual("pass", report["status"])
+        artifact["constrained_profile"]["logical_cpu_limit"] = 4
+        artifact["constrained_profile"]["cpu_limit_enforcement"] = "GetProcessAffinityMask:0xf"
+        report, failures = check_idle_efficiency.validate_artifact(
+            artifact, require_constrained=True
+        )
+        self.assertEqual("fail", report["status"])
+        self.assertTrue(any("expected 2, got 4" in failure for failure in failures))
 
     def test_required_overlay_rejects_a_fullscreen_fallback(self) -> None:
         artifact = valid_artifact()

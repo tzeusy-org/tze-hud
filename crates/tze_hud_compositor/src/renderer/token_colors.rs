@@ -943,6 +943,10 @@ pub(super) fn resolve_section_gap_px(token_map: &HashMap<String, String>) -> f32
         .unwrap_or(SECTION_GAP_DEFAULT_PX)
 }
 
+/// Bounds of a notification's dismiss ×: top-right, inset from the card's
+/// top and right edges by `NOTIFICATION_ACTION_INSET_PX` (border plus the
+/// text's padding) so the rounded corner never clips it. The single
+/// geometry source for both drawing and the hit region.
 #[inline]
 pub(super) fn notification_dismiss_bounds(
     x: f32,
@@ -950,11 +954,14 @@ pub(super) fn notification_dismiss_bounds(
     w: f32,
     effective_slot_h: f32,
 ) -> Rect {
+    let top = NOTIFICATION_ACTION_INSET_PX.min((effective_slot_h - 1.0).max(0.0));
     Rect::new(
-        x + w - NOTIFICATION_DISMISS_BUTTON_SIZE_PX,
-        slot_y,
+        x + w - NOTIFICATION_ACTION_INSET_PX - NOTIFICATION_DISMISS_BUTTON_SIZE_PX,
+        slot_y + top,
         NOTIFICATION_DISMISS_BUTTON_SIZE_PX,
-        NOTIFICATION_DISMISS_BUTTON_SIZE_PX.min(effective_slot_h),
+        NOTIFICATION_DISMISS_BUTTON_SIZE_PX
+            .min(effective_slot_h - top)
+            .max(1.0),
     )
 }
 
@@ -965,8 +972,42 @@ pub(super) const NOTIFICATION_BORDER_WIDTH_PX: f32 = 1.0;
 /// Height of the notification action-button row (bottom strip of the slot).
 pub(super) const NOTIFICATION_ACTION_BUTTON_H_PX: f32 = 22.0;
 
-/// Horizontal inset of the action-button row from the slot edges.
+/// Inset of the action-button row from the card's sides and bottom: the
+/// border plus the padding the text uses, so the rounded backdrop fully
+/// contains the buttons.
 pub(super) const NOTIFICATION_ACTION_INSET_PX: f32 = 9.0;
+
+/// Gap between a notification's text and its action-button row.
+pub(super) const NOTIFICATION_ACTION_ROW_GAP_PX: f32 = 4.0;
+
+/// Height a notification slot reserves below its text for the action row,
+/// so the buttons never draw over the body (hud-mskx5): the gap, the
+/// buttons, and the bottom inset that keeps them inside the card. Zero
+/// without actions, so plain notifications keep their height. Slot height
+/// adds it; text bounds subtract it.
+pub(super) fn notification_action_row_reserve(payload: &NotificationPayload) -> f32 {
+    if payload.actions.is_empty() {
+        0.0
+    } else {
+        NOTIFICATION_ACTION_ROW_GAP_PX
+            + NOTIFICATION_ACTION_BUTTON_H_PX
+            + NOTIFICATION_ACTION_INSET_PX
+    }
+}
+
+/// Fallback gap between stacked notification cards when the
+/// `spacing.padding.medium` token is absent or invalid.
+pub(super) const NOTIFICATION_STACK_GAP_DEFAULT_PX: f32 = 8.0;
+
+/// Vertical gap between stacked notification cards, from the
+/// `spacing.padding.medium` token, so consecutive cards never touch.
+pub(super) fn notification_stack_gap(token_map: &HashMap<String, String>) -> f32 {
+    token_map
+        .get("spacing.padding.medium")
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|v| v.is_finite() && *v >= 0.0)
+        .unwrap_or(NOTIFICATION_STACK_GAP_DEFAULT_PX)
+}
 
 /// Bounds of each notification action button, left to right.
 ///
@@ -985,7 +1026,10 @@ pub(super) fn notification_action_button_bounds(
         return Vec::new();
     }
     let btn_w = (zw - NOTIFICATION_ACTION_INSET_PX * 2.0).max(1.0) / n_actions as f32;
-    let action_y = (slot_y + effective_slot_h - NOTIFICATION_ACTION_BUTTON_H_PX).max(slot_y);
+    let action_y = (slot_y + effective_slot_h
+        - NOTIFICATION_ACTION_INSET_PX
+        - NOTIFICATION_ACTION_BUTTON_H_PX)
+        .max(slot_y);
     (0..n_actions)
         .map(|i| {
             Rect::new(

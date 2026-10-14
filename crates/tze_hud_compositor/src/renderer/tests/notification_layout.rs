@@ -111,7 +111,7 @@ async fn test_notification_stack_adds_dismiss_label_and_reserves_text_width() {
         "dismiss label must be centered in its button bounds"
     );
     assert!(
-        dismiss_item.pixel_x >= 300.0,
+        dismiss_item.pixel_x >= 290.0,
         "dismiss label must sit near the right edge, got {}",
         dismiss_item.pixel_x
     );
@@ -1122,7 +1122,8 @@ async fn test_stack_reflow_after_publication_pruned() {
     // Newest (Gamma = agent-c) is at slot 0 (top, pixel_y = 9.0).
     // Oldest remaining (Beta = agent-b) is at slot 1.
     // slot_h = line_height(16*1.4) + 2*margin_v(8) + SLOT_BASELINE_GAP(4) = 42.4px.
-    // Slot 1 starts at y=42.4, text at y=42.4+9=51.4.
+    // Slot 1 starts after slot 0 plus the 8 px stack gap, at y=50.4; text at
+    // y=50.4+9=59.4.
     let gamma_item = items_after.iter().find(|i| &*i.text == "Gamma");
     let beta_item = items_after.iter().find(|i| &*i.text == "Beta");
 
@@ -1135,11 +1136,11 @@ async fn test_stack_reflow_after_publication_pruned() {
         9.0,
         "Gamma (newest) must be at slot 0, pixel_y=9.0"
     );
-    // Beta is oldest remaining → slot 1 → pixel_y = 42.4 + 9 = 51.4.
+    // Beta is oldest remaining → slot 1 → pixel_y = 42.4 + 8 + 9 = 59.4.
     assert_eq!(
         beta_item.unwrap().pixel_y,
-        51.4,
-        "Beta (oldest remaining) must be at slot 1, pixel_y=51.4"
+        59.4,
+        "Beta (oldest remaining) must be at slot 1, pixel_y=59.4"
     );
 }
 

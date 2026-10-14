@@ -3211,7 +3211,7 @@ mod tests {
     /// per-source-line shaping-independence property the fallback relies on.
     #[test]
     fn fallback_visible_window_is_byte_identical_to_full_input() {
-        let text = transcript(2000);
+        let text = transcript(256);
         assert!(text.len() > DEFAULT_MAX_TRUNCATION_INPUT_BYTES);
         let font_size = 14.0_f32;
         let line_h = font_size * 1.4;
