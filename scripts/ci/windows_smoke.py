@@ -453,10 +453,10 @@ def check_delay(smoke: Smoke) -> None:
     width, height, before = baseline
 
     delay_ms = 3_000
-    sent = time.monotonic()
+    sent = time.perf_counter()
     try:
         published = smoke.ok("hud_publish", {"surface": zone, "content": "CI DELAYED CONTENT IS VISIBLE", "delay_ms": delay_ms, "ttl_ms": 20_000})
-        accepted = time.monotonic()
+        accepted = time.perf_counter()
         assert published.get("ok") is True, f"hud_publish {zone} was not accepted"
         assert is_held(surfaces_of(smoke), zone), f"{zone} scheduled publication is not held"
 
@@ -468,7 +468,7 @@ def check_delay(smoke: Smoke) -> None:
         assert early[:2] == (width, height), "screenshot dimensions changed before due"
         assert early[2] == before, f"{zone} rendered content before its {delay_ms} ms delay"
 
-        remaining = latest_due - time.monotonic()
+        remaining = latest_due - time.perf_counter()
         if remaining > 0:
             time.sleep(remaining)
         late, late_started, late_finished = capture_frame(smoke)
@@ -937,15 +937,15 @@ def post_capture_comment(output: Path) -> int:
 
 
 def capture_frame(smoke: Smoke) -> tuple[tuple[int, int, bytes], float, float]:
-    """Decode one own-frame capture, bounded by monotonic request/response times.
+    """Decode one own-frame capture, bounded by high-resolution monotonic times.
 
     The response timestamp precedes PNG decoding: CPU decode time is not part
     of the interval in which the compositor could have captured the frame.
     Capture failures propagate; this helper never retries unavailable evidence.
     """
-    started = time.monotonic()
+    started = time.perf_counter()
     status, ctype, body = smoke.get_bytes("/admin/screenshot")
-    finished = time.monotonic()
+    finished = time.perf_counter()
     assert status == 200 and ctype == "image/png", f"/admin/screenshot: {status} {ctype}"
     return decode_png_rgba(body), started, finished
 
