@@ -139,6 +139,10 @@ two calls within its [api.md](api.md) token budget:
   (local echo, no round trip), and detaches; an abandoned portal is reclaimed.
 - **Zones:** a notification shows for its TTL and disappears unattended;
   `delay_ms` content appears on schedule; a notification action reaches `hud_input`.
+  The [latest-wins count guard](../crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs)
+  checks warm/unchanged/one-zone-update/unchanged shaping work (2/0/1/0).
+  These are frame-path shaping counts, not all CPU layout or presentation costs;
+  zero widget raster/upload work still leaves full-frame rendering and GPU work.
 - **Widgets:** a typed parameter update re-rasterizes only that widget's SVG
   (the frame is still re-presented in full; no damage tracking).
 - **Tiles:** a gRPC agent claims a tile with a placement hint in two round
