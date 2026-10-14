@@ -1771,8 +1771,8 @@ impl InputProcessor {
 
     /// Process a pointer event that hit a chrome drag handle.
     ///
-    /// This implements the compositor-internal long-press drag state machine
-    /// (RFC 0004 §3.0 carve-out). Returns a [`DragEventOutcome`] that the
+    /// This implements immediate mouse/header-band dragging and held touch-grip
+    /// dragging. Returns a [`DragEventOutcome`] that the
     /// caller MUST act on:
     ///
     /// - `Accumulating { progress }` — update visual progress on the handle.
@@ -1784,10 +1784,12 @@ impl InputProcessor {
     /// - `Cancelled` — clear visual feedback.
     /// - `Idle` — no action.
     ///
-    /// ## Touch vs pointer thresholds
+    /// ## Mouse, touch grip and header-band activation
     ///
-    /// `device_id == 0` (primary pointer / mouse) uses the 250 ms threshold.
-    /// Any other `device_id` is treated as a touch contact and uses 1000 ms.
+    /// `device_id == 0` (primary pointer / mouse) activates any handle on its
+    /// first Move. A nonzero device uses a 1000 ms hold and 10 dp movement
+    /// tolerance on a grip. Header bands activate on the first Move for either
+    /// device class. Down/Up without a Move does not activate a drag.
     // All arguments are required: pointer event, hit zone, element identity,
     // element kind, element bounds, and display dimensions.  They cannot be
     // collapsed into fewer parameters without losing information or creating a
@@ -1807,7 +1809,8 @@ impl InputProcessor {
         let now = Instant::now();
         let device_id = event.device_id;
 
-        // Select threshold: primary pointer = 250ms, touch = 1000ms.
+        // Store the legacy 250ms mouse threshold or 1000ms touch threshold;
+        // immediate mouse/header-band activation bypasses the stored hold.
         let threshold_ms = if device_id == 0 {
             drag::LONG_PRESS_POINTER_THRESHOLD_MS
         } else {
@@ -1843,10 +1846,9 @@ impl InputProcessor {
                 match state.phase {
                     DragPhase::Idle => DragEventOutcome::Idle,
                     DragPhase::Accumulating => {
-                        // Immediate (portal header-band / titlebar) handles engage
-                        // on the FIRST move — no long-press hold, no early-movement
-                        // cancel (hud-cpjqe). This is what makes a fast titlebar
-                        // drag reliable; the grip path below keeps the hysteresis.
+                        // Mouse handles and header bands engage on the FIRST move:
+                        // no hold or early-movement cancel. Only nonzero-device
+                        // grips reach the hold/tolerance checks below.
                         if state.immediate {
                             state.phase = DragPhase::Activated;
                             state.grab_offset_x = event.x - element_bounds.x;
