@@ -22,7 +22,7 @@ pub struct WindowedBenchmarkConfig {
 ///
 /// Unlike [`WindowedBenchmarkConfig`], this mode never requests a render
 /// cadence. The runtime first observes a real presentation, settles for the
-/// mandatory five seconds, then measures the untouched overlay for sixty
+/// mandatory five seconds, then measures the untouched windowed scene for sixty
 /// seconds and emits the counter delta at `emit_path`.
 #[derive(Debug, Clone)]
 pub struct WindowedQuiescentEfficiencyConfig {
