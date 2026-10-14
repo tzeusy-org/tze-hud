@@ -142,9 +142,30 @@ mutation batch clears only active publications and never cancels pending ones.
 
 - Returns input from every surface the agent holds, oldest first:
   `{"items":[{"id":"i7","s":"portal:claude-main","text":"yes, ship it"}],"remaining":0}`.
-- Also returns notification action presses (`{"id":…,"s":"zone:notification-area","action":"approve"}`).
-- `ack` confirms earlier items, so polling and acking take one round trip.
-  Unacked items are redelivered.
+- Notification callbacks keep their existing shape:
+  `{"id":…,"s":"zone:notification-area","action":"approve"}`. A validated
+  human notification × uses `{"id":…,"s":"zone:notification-area","action":"dismiss","kind":"dismiss"}`.
+  A publisher callback named `dismiss` has no `kind` field. Callback activation
+  already removes its notification locally; it emits no second human-X event.
+  TTL expiry, `hud_clear` and stale/unmatched releases do not emit human-X input.
+- Accepted notification events are retained in a growable per-publisher FIFO,
+  with stable ids until `ack`; one publisher cannot evict or acknowledge another's
+  records. Retention is in memory, with no crash/disk durability claim. Portal
+  replies keep their existing admission bounds, TTL, clear and reclaim rules.
+- `ack` confirms earlier items once per call; unacked items are redelivered.
+  `max_items` limits the result and `remaining` reports the retained backlog;
+  zero returns the backlog without consuming it. Notification FIFO items precede
+  portal replies in their existing chronological order.
+- `wait_ms` defaults to 0 and caps at 30000. The caller's armed readiness wait
+  wakes on committed input and uses one absolute deadline with a final queue
+  check. It neither polls every 150 ms nor changes the stdio adapter's 60 s cap.
+  A finite active poll protects only its agent from idle degradation, including
+  first attachment; completion/cancellation releases ownership without a future
+  heartbeat. Explicit upstream loss, reclaim, holds and input TTL still apply.
+- An accepted local portal reply is echoed in the submitting scene-maintenance
+  turn, inside the ordinary 100 ms output pacing slot. Refused replies add no
+  accepted input or success echo; their truthful local feedback is also urgent.
+  Scene readiness is separate from physical display presentation.
 
 ### Identity and permissions
 

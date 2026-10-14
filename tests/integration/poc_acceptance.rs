@@ -139,7 +139,9 @@ impl Poc {
         let mut call = tokio::spawn(post(self.hud.mcp_addr(), psk, request));
         let deadline = Instant::now() + WAIT;
         let response = loop {
-            self.hud.tick();
+            if tool != "hud_input" || arguments["wait_ms"].as_u64().unwrap_or(0) > 0 {
+                self.hud.tick();
+            }
             tokio::select! {
                 biased;
                 done = &mut call => break done.expect("MCP call task"),
