@@ -1,9 +1,10 @@
 # tze_hud CI — merge gates.
 #
-# Merge-gate jobs must finish in under ~8 minutes. Anything slower goes in the
-# weekly lanes (perf-budget.yml, perf-assert.yml). Every job has a job-level
-# timeout-minutes and every apt step has its own, so a stalled runner or
-# mirror fails fast instead of timing out the merge queue.
+# Required checks must finish within 6 minutes of a merge-group run starting
+# and pass on the first attempt (docs/scope.md "Merge gate and testability").
+# Anything slower goes in the weekly lanes (perf-budget.yml, perf-assert.yml).
+# Every job has a job-level timeout-minutes and every apt step has its own, so
+# a stalled runner or mirror fails fast instead of timing out the merge queue.
 #
 # Required checks (ruleset "main merge queue"; job `name:`s must not change):
 #   cargo check, cargo fmt, cargo clippy, cargo test (unit),

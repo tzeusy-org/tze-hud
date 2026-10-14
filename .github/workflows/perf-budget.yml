@@ -1,6 +1,6 @@
 # tze_hud — weekly performance-budget lane.
 #
-# These jobs take ~10 minutes each, past the merge-gate target (<8 min), so
+# These jobs take ~10 minutes each, past the 6-minute merge-gate target, so
 # they run weekly, on demand, and on PRs labelled `perf-assert` instead of on
 # every PR. They are not required checks.
 #
