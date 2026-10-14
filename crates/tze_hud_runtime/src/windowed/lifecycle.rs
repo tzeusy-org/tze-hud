@@ -150,7 +150,10 @@ impl ChromeCaptureLedger {
             self.fault();
             return None;
         };
-        let i = self.installs.iter().position(|s| s.nonce == nonce && s.enabled)?;
+        let i = self
+            .installs
+            .iter()
+            .position(|s| s.nonce == nonce && s.enabled)?;
         if down {
             let Some(generation) = self.installs[i].generation.checked_add(1) else {
                 self.fault();
