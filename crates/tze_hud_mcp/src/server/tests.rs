@@ -1867,20 +1867,22 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         .await;
         // Hold the Hub during cancellation: Drop cannot acquire it, but the
         // atomic marker must make the next sweep ignore the cancelled lease.
-        let mut cancellation_guard = live_hub.lock().unwrap();
-        drop(waiting);
-        clock.advance_us(20_000);
         {
-            let hub = &mut cancellation_guard;
-            hub.sweep(start + 60_000);
-            assert_eq!(hub.get(&own).unwrap().last_seen_us, start + 40_000);
-            assert_eq!(
-                hub.get(&own).unwrap().degraded_since_us,
-                Some(start + 60_000),
-                "cancel releases without heartbeat"
-            );
+            let mut cancellation_guard = live_hub.lock().unwrap();
+            drop(waiting);
+            clock.advance_us(20_000);
+            {
+                let hub = &mut cancellation_guard;
+                hub.sweep(start + 60_000);
+                assert_eq!(hub.get(&own).unwrap().last_seen_us, start + 40_000);
+                assert_eq!(
+                    hub.get(&own).unwrap().degraded_since_us,
+                    Some(start + 60_000),
+                    "cancel releases without heartbeat"
+                );
+            }
+            drop(cancellation_guard);
         }
-        drop(cancellation_guard);
         // Normal return touches actual now and releases only that finite request.
         let mut waiting = Box::pin(call(&live, "hud_input", json!({"wait_ms":1000})));
         assert!(waiting.as_mut().poll(&mut cx).is_pending());
@@ -1923,14 +1925,16 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         )
         .await;
         clock.advance_us(20_000);
-        let mut hub = live_hub.lock().unwrap();
-        hub.sweep(start + 2_080_000);
-        assert_eq!(
-            hub.get(&own).unwrap().degraded_since_us,
-            Some(start + 2_080_000),
-            "zero-portal cancellation leaves no hold for first attachment"
-        );
-        drop(hub);
+        {
+            let mut hub = live_hub.lock().unwrap();
+            hub.sweep(start + 2_080_000);
+            assert_eq!(
+                hub.get(&own).unwrap().degraded_since_us,
+                Some(start + 2_080_000),
+                "zero-portal cancellation leaves no hold for first attachment"
+            );
+            drop(hub);
+        }
 
         // These two actual portal-backed requests own distinct liveness tokens.
         // Ending one must not end the other; ending the final one is immediate.
