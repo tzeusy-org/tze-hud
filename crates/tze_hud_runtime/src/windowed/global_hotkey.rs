@@ -7,9 +7,10 @@
 //! process exits.
 
 use crate::operator::status::{HotkeyStatus, report_outcome};
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::UnboundedSender;
 use tze_hud_scene::config::Hotkey;
-use windows::Win32::Foundation::HWND;
+use windows::Win32::Foundation::{ERROR_HOTKEY_ALREADY_REGISTERED, HWND};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     HOT_KEY_MODIFIERS, MOD_NOREPEAT, RegisterHotKey,
 };
@@ -17,11 +18,20 @@ use windows::Win32::UI::WindowsAndMessaging::{GetMessageW, MSG, WM_HOTKEY};
 
 const HOTKEY_ID: i32 = 1;
 
+/// How long to keep retrying a chord that is already registered. A restarted
+/// or updated HUD starts while the previous instance still holds the chord, and
+/// the handoff gives that instance up to 35 s to exit.
+const ALREADY_REGISTERED_RETRY_FOR: Duration = Duration::from_secs(40);
+const ALREADY_REGISTERED_RETRY_EVERY: Duration = Duration::from_millis(250);
+
 /// Register `hotkey` globally, signal `tx` on every press, and return the
 /// registration outcome (waits briefly for the hotkey thread to report).
 ///
-/// A chord another program already owns is left unregistered and reported as
-/// `Failed`; the runtime keeps working without the hotkey.
+/// A chord that is already registered is retried for
+/// [`ALREADY_REGISTERED_RETRY_FOR`] (status `Pending` meanwhile), since a
+/// restart or update starts before the previous instance releases it. A chord
+/// another program keeps is then reported as `Failed`; the runtime keeps
+/// working without the hotkey.
 pub(super) fn spawn_global_hotkey(hotkey: Hotkey, tx: UnboundedSender<()>) -> HotkeyStatus {
     let chord = hotkey.to_string();
     let (status_tx, status_rx) = std::sync::mpsc::channel();
@@ -31,9 +41,19 @@ pub(super) fn spawn_global_hotkey(hotkey: Hotkey, tx: UnboundedSender<()>) -> Ho
             let modifiers = HOT_KEY_MODIFIERS(hotkey.win32_modifiers()) | MOD_NOREPEAT;
             // SAFETY: a null HWND binds the hotkey to this thread's message
             // queue, which this thread pumps below.
-            if let Err(error) =
-                unsafe { RegisterHotKey(HWND::default(), HOTKEY_ID, modifiers, hotkey.win32_vk()) }
+            let register = || unsafe {
+                RegisterHotKey(HWND::default(), HOTKEY_ID, modifiers, hotkey.win32_vk())
+            };
+            let retry_until = Instant::now() + ALREADY_REGISTERED_RETRY_FOR;
+            let mut registered = register();
+            while let Err(error) = &registered
+                && error.code() == ERROR_HOTKEY_ALREADY_REGISTERED.to_hresult()
+                && Instant::now() < retry_until
             {
+                std::thread::sleep(ALREADY_REGISTERED_RETRY_EVERY);
+                registered = register();
+            }
+            if let Err(error) = registered {
                 report_outcome(
                     &status_tx,
                     HotkeyStatus::Failed {
