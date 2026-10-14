@@ -22,8 +22,8 @@ use super::token_colors::{
     NOTIFICATION_DISMISS_FONT_SIZE_PX, NOTIFICATION_DISMISS_FONT_WEIGHT,
     NOTIFICATION_DISMISS_GAP_PX, NOTIFICATION_ICON_GAP_PX, NOTIFICATION_ICON_SIZE_PX,
     NOTIFICATION_INTER_LINE_GAP, NOTIFICATION_TITLE_WEIGHT, is_alert_banner_zone,
-    notification_action_button_bounds, notification_dismiss_bounds,
-    resolve_composer_overlay_tokens, resolve_jump_to_latest_tokens,
+    notification_action_button_bounds, notification_action_row_reserve,
+    notification_dismiss_bounds, resolve_composer_overlay_tokens, resolve_jump_to_latest_tokens,
     resolve_notification_action_tokens, resolve_scroll_indicator_tokens,
     resolve_transcript_max_measure_px, resolve_viewer_echo_tokens,
 };
@@ -621,6 +621,10 @@ impl super::Compositor {
                                     - dismiss_reserved_w)
                                     .max(1.0);
 
+                                // Text stops above the action row (hud-mskx5).
+                                let text_slot_h = (effective_slot_h
+                                    - notification_action_row_reserve(payload))
+                                .max(1.0);
                                 if payload.title.is_empty() {
                                     // ── Single-line rendering (backward-compatible) ──
                                     // Font weight: policy explicit > 400 default
@@ -630,7 +634,7 @@ impl super::Compositor {
                                         text_x,
                                         slot_y + inset_v,
                                         text_w,
-                                        (effective_slot_h - inset_v * 2.0).max(1.0),
+                                        (text_slot_h - inset_v * 2.0).max(1.0),
                                         font_size_px,
                                         font_family,
                                         font_weight,
@@ -673,7 +677,7 @@ impl super::Compositor {
                                         content_top + title_line_h + NOTIFICATION_INTER_LINE_GAP;
                                     // Remaining slot height available for body (down to inset bottom)
                                     let body_bounds_h =
-                                        ((slot_y + effective_slot_h - inset_v) - body_top).max(1.0);
+                                        ((slot_y + text_slot_h - inset_v) - body_top).max(1.0);
                                     items.push(Self::make_zone_text_item(
                                         Arc::from(payload.text.as_str()),
                                         text_x,
