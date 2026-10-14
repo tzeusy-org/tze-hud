@@ -424,9 +424,29 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "#FFB800",
     },
     CanonicalToken {
-        key: "tile.disconnect_badge.size_px",
-        description: "Disconnection badge square extent on orphaned tiles (px)",
-        default_value: "16",
+        key: "tile.disconnect_badge.width_px",
+        description: "Disconnection accent bar width along an orphaned tile's left edge (px)",
+        default_value: "4",
+    },
+    CanonicalToken {
+        key: "tile.disconnect_badge.gap_px",
+        description: "Gap between an orphaned tile's left edge and its accent bar (px)",
+        default_value: "3",
+    },
+    CanonicalToken {
+        key: "tile.disconnect_badge.label_background",
+        description: "Background of the 'Disconnected' strip along an orphaned tile's bottom",
+        default_value: "#000000B3",
+    },
+    CanonicalToken {
+        key: "tile.disconnect_badge.label_size_px",
+        description: "Font size of the 'Disconnected' strip label (px)",
+        default_value: "13",
+    },
+    CanonicalToken {
+        key: "tile.disconnect_badge.label_padding_px",
+        description: "Padding around the 'Disconnected' strip label (px)",
+        default_value: "4",
     },
     // Viewer close button shown on a hovered tile (docs/invariants.md section 3).
     CanonicalToken {
