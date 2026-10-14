@@ -352,9 +352,36 @@ def test_hook_subprocess_replay_prompt_races_and_reaping(tmp_path):
         assert h.received.wait(2)
         ending = h.launch(h.payload("SessionEnd"))
         deadline = time.monotonic() + 0.2
-        while not json.loads(h.marker().read_text())["ended"] and time.monotonic() < deadline:
-            time.sleep(0.001)
+        # Marker replacement precedes marker.lock release. Reopen only after
+        # metadata admission is ready, while the old delivery is still held.
+        marker_lock_path = h.marker().parent / "marker.lock"
+        marker_ready = False
+        with marker_lock_path.open("r+") as marker_lock:
+            lock_identity = os.fstat(marker_lock.fileno())
+            while time.monotonic() < deadline:
+                try:
+                    fcntl.flock(marker_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                except BlockingIOError:
+                    pass
+                else:
+                    try:
+                        current_lock = marker_lock_path.stat()
+                        assert (current_lock.st_dev, current_lock.st_ino) == (
+                            lock_identity.st_dev, lock_identity.st_ino
+                        )
+                        marker_ready = (
+                            json.loads(h.marker().read_text())["ended"]
+                            and time.monotonic() <= deadline
+                        )
+                    finally:
+                        fcntl.flock(marker_lock, fcntl.LOCK_UN)
+                if marker_ready:
+                    break
+                time.sleep(0.001)
+        assert marker_ready, "ended marker and metadata lock were not ready within 0.2s"
         assert json.loads(h.marker().read_text())["ended"]
+        assert ending.poll() is None
+        assert stopping.poll() is None and h.received.is_set() and not h.release.is_set()
         old_generation = json.loads(h.marker().read_text())["generation"]
         clears = sum(r["params"]["name"] == "hud_clear" for r in h.records)
         h.event("SessionStart", source="resume", wait=False)
