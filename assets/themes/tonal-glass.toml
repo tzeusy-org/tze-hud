@@ -124,6 +124,15 @@
 "portal.divider.color"                = "#343B47"   # outline.variant
 "system_card.background"              = "#222833EB" # surface.container.high @ 0.92
 "system_card.accent.color"            = "#8AB4FF"   # primary
+"color.tile.background.text_markdown" = "#222833"   # surface.container.high (as notification cards)
+"color.tile.background.default"       = "#222833"   # surface.container.high
+"color.tile.background.static_image"  = "#1B2028"   # surface.container
+"tile.disconnect_badge.color"            = "#F2C14E" # caution
+"tile.disconnect_badge.label_background" = "#4A3A10" # caution.container
+"tile.disconnect_badge.label_color"      = "#FFE7A8" # on_caution.container
+"tile.disconnect_badge.label_size_px"    = "20"      # type.headline.s
+"tile.disconnect_badge.label_weight"     = "600"
+"tile.disconnect_badge.label_padding_px" = "8"
 
 # Carried over unchanged from the pre-theme production config (restyled in
 # hud-h51u7.4).

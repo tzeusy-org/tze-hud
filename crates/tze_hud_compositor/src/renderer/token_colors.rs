@@ -753,8 +753,9 @@ pub(super) struct DisconnectBadgeTokens {
     pub(super) gap_px: f32,
     /// Background of the label strip along the tile's bottom (linear).
     pub(super) label_background: [f32; 4],
-    /// Label text color: the badge color as sRGB u8.
+    /// Label text color as sRGB u8.
     pub(super) label_color: [u8; 4],
+    pub(super) label_weight: u16,
     pub(super) label_size_px: f32,
     pub(super) label_padding_px: f32,
 }
@@ -776,8 +777,9 @@ const DISCONNECT_BADGE_DEFAULT_COLOR_HEX: &str = "#FFB800";
 const DISCONNECT_BADGE_DEFAULT_WIDTH_PX: f32 = 4.0;
 const DISCONNECT_BADGE_DEFAULT_GAP_PX: f32 = 3.0;
 const DISCONNECT_BADGE_DEFAULT_LABEL_BACKGROUND_HEX: &str = "#000000B3";
-const DISCONNECT_BADGE_DEFAULT_LABEL_SIZE_PX: f32 = 13.0;
-const DISCONNECT_BADGE_DEFAULT_LABEL_PADDING_PX: f32 = 4.0;
+const DISCONNECT_BADGE_DEFAULT_LABEL_SIZE_PX: f32 = 18.0;
+const DISCONNECT_BADGE_DEFAULT_LABEL_WEIGHT: u16 = 600;
+const DISCONNECT_BADGE_DEFAULT_LABEL_PADDING_PX: f32 = 6.0;
 
 /// Resolve [`DisconnectBadgeTokens`] from `tile.disconnect_badge.*`.
 pub(super) fn resolve_disconnect_badge_tokens(
@@ -810,7 +812,14 @@ pub(super) fn resolve_disconnect_badge_tokens(
             DISCONNECT_BADGE_DEFAULT_GAP_PX,
         ),
         label_background,
-        label_color: crate::text::rgba_to_srgb_u8(color),
+        label_color: crate::text::rgba_to_srgb_u8(
+            resolve_token_color(token_map, "tile.disconnect_badge.label_color").unwrap_or(color),
+        ),
+        label_weight: token_map
+            .get("tile.disconnect_badge.label_weight")
+            .and_then(|v| v.parse::<u16>().ok())
+            .filter(|w| (100..=900).contains(w))
+            .unwrap_or(DISCONNECT_BADGE_DEFAULT_LABEL_WEIGHT),
         label_size_px: px(
             "tile.disconnect_badge.label_size_px",
             1.0,

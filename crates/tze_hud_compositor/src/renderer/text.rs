@@ -1182,7 +1182,7 @@ impl super::Compositor {
                 clip_bounds_height: strip_h,
                 font_size_px: badge.label_size_px,
                 font_family: FontFamily::SystemSansSerif,
-                font_weight: 600,
+                font_weight: badge.label_weight,
                 color: badge.label_color,
                 alignment: TextAlign::Start,
                 overflow: TextOverflow::Ellipsis,
