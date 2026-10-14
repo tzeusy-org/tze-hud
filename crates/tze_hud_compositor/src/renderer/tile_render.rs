@@ -856,9 +856,12 @@ impl Compositor {
     }
 
     /// Emit the disconnection badge (invariant 4, "badge shown") for every
-    /// visible tile whose `visual_hint` is `DisconnectionBadge`: a token-colored
-    /// square inset at the tile's top-right corner. Geometry-only, so it is
-    /// redaction-safe; the hint is cleared by the scene on resume.
+    /// visible tile whose `visual_hint` is `DisconnectionBadge`: a full-height,
+    /// token-styled bar outside its left edge (clamped at x = 0) and a
+    /// token-styled label-background strip along its bottom edge.
+    /// The "Disconnected" text is collected separately by `collect_text_items`
+    /// in `renderer/text.rs`. Geometry-only and redaction-safe; the scene clears
+    /// the hint on resume.
     pub(super) fn append_disconnect_badge_vertices(
         &self,
         scene: &SceneGraph,
