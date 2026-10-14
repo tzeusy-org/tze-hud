@@ -155,8 +155,8 @@ pub struct Portal {
     /// Changed since the last render.
     pub dirty: bool,
     pub last_render_us: Option<u64>,
-    /// Accepted local reply feedback bypasses the render interval once.
-    local_reply_pending: bool,
+    /// Accepted reply or truthful rejection feedback bypasses pacing once.
+    local_feedback_pending: bool,
     /// Reclaimed by the runtime (viewer dismiss, idle reclaim): a marker so
     /// `hud_clear` stays an ok no-op and `hud_hold` is `NotHeld`. The next
     /// publish attaches a fresh portal.
@@ -180,7 +180,7 @@ impl Portal {
             degraded_since_us: None,
             dirty: true,
             last_render_us: None,
-            local_reply_pending: false,
+            local_feedback_pending: false,
             reclaimed_by_runtime: false,
             next_seq: 1,
         }
@@ -648,9 +648,23 @@ impl PortalHub {
         });
         let start = newest_fit_start(&portal.replies, limits.visible_bytes);
         portal.replies.drain(..start);
-        portal.local_reply_pending = true;
+        portal.local_feedback_pending = true;
         portal.dirty = true;
         Ok(id)
+    }
+
+    /// Paint local rejection feedback only for the attachment that supplied it.
+    /// This adds no accepted input, transcript unit or agent notification.
+    pub fn mark_local_feedback(&mut self, key: &PortalKey, incarnation: u64) -> bool {
+        let Ok(portal) = self.live_mut(key) else {
+            return false;
+        };
+        if portal.incarnation != incarnation {
+            return false;
+        }
+        portal.local_feedback_pending = true;
+        portal.dirty = true;
+        true
     }
 
     /// Test support: queue input with a fixed id, without an echo.
@@ -747,13 +761,13 @@ impl PortalHub {
             .filter(|(_, p)| {
                 p.live()
                     && p.dirty
-                    && (p.local_reply_pending
+                    && (p.local_feedback_pending
                         || p.last_render_us
                             .is_none_or(|t| now_us >= t.saturating_add(interval)))
             })
             .map(|(key, portal)| {
                 portal.dirty = false;
-                portal.local_reply_pending = false;
+                portal.local_feedback_pending = false;
                 portal.last_render_us = Some(now_us);
                 Due {
                     key: key.clone(),
@@ -771,7 +785,7 @@ impl PortalHub {
             .filter(|(_, p)| p.live())
             .flat_map(|(key, p)| {
                 let render = p.dirty.then(|| Deadline {
-                    at_us: if p.local_reply_pending {
+                    at_us: if p.local_feedback_pending {
                         0
                     } else {
                         p.last_render_us.map_or(0, |t| t.saturating_add(interval))

@@ -1577,8 +1577,8 @@ impl WinitApp {
     /// Route submitted focused-portal composer text into the portal hub
     /// before the legacy namespace broadcast is emitted.
     ///
-    /// Returns `true` when the tile is a hub portal (the hub queued the reply
-    /// and echoed it on its own path), `false`
+    /// Returns `true` for a handled hub submission (accepted echo or truthful
+    /// rejection feedback), so neither case authors a raw-tile success echo; `false`
     /// for a raw-tile pilot portal — the caller uses this to decide whether a
     /// runtime-authored viewer echo is needed (hud-nx7yq.3).
     fn route_portal_composer_batch(
@@ -4810,7 +4810,10 @@ mod tests {
         // so `route_portal_composer_batch` returns true and
         // `append_raw_tile_viewer_echo` never runs — isolating the keyboard
         // submit-terminal reset as the only thing that can pin the tail.
+        let clock = tze_hud_scene::TestClock::from_us(200);
         let mut driver = crate::portal_projection_driver::InProcessPortalDriver::new();
+        driver.set_clock(Arc::new(clock.clone()));
+        let handle = driver.portal_handle();
         driver
             .hub_mut()
             .publish(
@@ -4823,11 +4826,12 @@ mod tests {
             )
             .expect("publish accepted");
 
-        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, Arc::new(clock.clone()));
         let tab_id = scene.create_tab("Main", 0).unwrap();
         let mut processor = InputProcessor::new();
 
         driver.drain(&mut scene, &mut processor, Some(tab_id));
+        assert_eq!(handle.hub.lock().unwrap().get(&tze_hud_projection::hub::PortalKey::new("test-agent", "proj-npcdf")).unwrap().last_render_us, Some(200));
 
         let tile_id = *scene
             .tiles
@@ -4876,7 +4880,7 @@ mod tests {
         // resets to the tail, matching a viewer actively drafting.
         app.dispatch_character_event_inner(
             &RawCharacterEvent {
-                character: "h".to_string(),
+                character: "viewer-reply-same-frame".to_string(),
                 timestamp_mono_us: tze_hud_scene::MonoUs(1),
             },
             Some(tab_id),
@@ -4904,6 +4908,7 @@ mod tests {
 
         // Submit with Enter. The submission routes to the authority (echo path
         // skipped), so only the keyboard submit-terminal reset can pin the tail.
+        clock.advance_us(1);
         app.dispatch_key_down_event_inner(
             &RawKeyDownEvent {
                 key_code: "Enter".to_string(),
@@ -4928,6 +4933,32 @@ mod tests {
             "an authority-attached submission must snap the input-pane history back \
              to the tail on submit (hud-npcdf)"
         );
+        drop(scene);
+        drop(shared);
+        // Execute the actual production settle order: composer flush, deferred
+        // keyboard work, then portal drain in this same Winit maintenance turn.
+        assert!(matches!(app.settle_scene_work(), PortalProjectionDrain::Completed { scene_changed: true }));
+        assert!(app.state.viewer_echo_queue.lock().unwrap().is_empty());
+        {
+            let hub = handle.hub.lock().unwrap();
+            let portal = hub.get(&tze_hud_projection::hub::PortalKey::new("test-agent", "proj-npcdf")).unwrap();
+            assert_eq!(portal.last_render_us, Some(201), "reply paints strictly inside the 100 ms pacing slot");
+            assert_eq!(portal.replies.len(), 1);
+            assert_eq!(portal.inputs.len(), 1);
+            assert_eq!(portal.replies[0].text, "viewer-reply-same-frame");
+        }
+        {
+            let shared = app.state.shared_state.try_lock().unwrap();
+            let scene = shared.scene.try_lock().unwrap();
+            let painted = scene.nodes.values().filter_map(|node| match &node.data {
+                NodeData::TextMarkdown(text) => Some(text.content.as_str()),
+                _ => None,
+            }).collect::<Vec<_>>().join("\n");
+            assert_eq!(painted.matches("viewer-reply-same-frame").count(), 1, "one hub echo in the scene, no raw duplicate: {painted}");
+            assert!(scene.tile_follow_tail_at_tail(tile_id));
+        }
+        app.settle_scene_work();
+        assert_eq!(handle.hub.lock().unwrap().get(&tze_hud_projection::hub::PortalKey::new("test-agent", "proj-npcdf")).unwrap().last_render_us, Some(201), "no perpetual local dirty frame");
     }
 
     #[test]

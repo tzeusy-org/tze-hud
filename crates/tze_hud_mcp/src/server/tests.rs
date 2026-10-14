@@ -3,6 +3,7 @@ use serde_json::{Value, json};
 use std::collections::HashMap;
 use tze_hud_projection::hub::{PortalHub, PortalKey, PortalStatus};
 use tze_hud_scene::config::hash_psk;
+use tze_hud_scene::graph::PendingActionKind;
 use tze_hud_scene::{
     PendingAction, SceneId, TestClock,
     types::{
@@ -1131,7 +1132,7 @@ async fn action_presses_are_delivered_until_acked() {
                 .unwrap()
                 .agent_id,
             zone_name: "notification-area".into(),
-            callback_id: "approve".into(),
+            kind: PendingActionKind::Callback("approve".into()),
         });
     let v = call(&server, "hud_input", json!({})).await;
     let items = v["items"].as_array().unwrap();
@@ -1155,7 +1156,7 @@ async fn action_presses_are_delivered_until_acked() {
                 scene.push_pending_action(PendingAction {
                     publisher_namespace: namespace.into(),
                     zone_name: "subtitle".into(),
-                    callback_id: format!("{namespace}-{index}"),
+                    kind: PendingActionKind::Callback(format!("{namespace}-{index}")),
                 });
             }
         }
@@ -1249,6 +1250,43 @@ async fn action_presses_are_delivered_until_acked() {
     let (a_empty, is_error) = call_as(&server, &a, "hud_input", json!({"ack": a_ack})).await;
     assert!(!is_error, "{a_empty}");
     assert_eq!(a_empty, json!({"items": [], "remaining": 0}));
+    // A callback literally named dismiss is distinct from the runtime's X.
+    {
+        let mut scene = server.scene.lock().await;
+        scene.push_pending_action(PendingAction {
+            publisher_namespace: "a".into(), zone_name: "subtitle".into(),
+            kind: PendingActionKind::Callback("dismiss".into()),
+        });
+        scene.push_pending_action(PendingAction {
+            publisher_namespace: "a".into(), zone_name: "subtitle".into(),
+            kind: PendingActionKind::Dismiss,
+        });
+    }
+    let (callback, error) = call_as(&server, &a, "hud_input", json!({"max_items":1})).await;
+    assert!(!error);
+    assert_eq!(callback["items"].as_array().unwrap().len(), 1);
+    assert_eq!(callback["items"][0]["action"], "dismiss");
+    assert!(callback["items"][0].get("kind").is_none(), "callback JSON stays unchanged");
+    assert_eq!(callback["remaining"], 1);
+    let callback_id = callback["items"][0]["id"].clone();
+    let (dismiss, error) = call_as(&server, &a, "hud_input", json!({"ack":[callback_id],"max_items":1})).await;
+    assert!(!error);
+    let dismiss_id = dismiss["items"][0]["id"].clone();
+    assert_ne!(dismiss_id, callback_id);
+    assert_eq!(dismiss, json!({"items":[{"id":dismiss_id,"s":"zone:subtitle","action":"dismiss","kind":"dismiss"}],"remaining":0}));
+    let (again, error) = call_as(&server, &a, "hud_input", json!({})).await;
+    assert!(!error);
+    assert_eq!(again, dismiss, "typed dismiss retains its stable id until ack");
+    let (foreign, error) = call_as(&server, &b, "hud_input", json!({"ack":[dismiss_id]})).await;
+    assert!(!error);
+    assert_eq!(foreign, json!({"items":[],"remaining":0}));
+    let (zero, error) = call_as(&server, &a, "hud_input", json!({"max_items":0})).await;
+    assert!(!error);
+    assert_eq!(zero, json!({"items":[],"remaining":1}));
+    let (acked, error) = call_as(&server, &a, "hud_input", json!({"ack":[dismiss_id,dismiss_id,"unknown"]})).await;
+    assert!(!error);
+    assert_eq!(acked, json!({"items":[],"remaining":0}));
+
 }
 
 // ── Portal ───────────────────────────────────────────────────────────────────
@@ -1561,7 +1599,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         .push_pending_action(PendingAction {
             publisher_namespace: psk_agent(),
             zone_name: "notification-area".into(),
-            callback_id: "approve".into(),
+            kind: PendingActionKind::Callback("approve".into()),
         });
     let action = call(&server, "hud_input", json!({})).await;
     assert_eq!(action["items"].as_array().unwrap().len(), 1);
@@ -1622,7 +1660,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         let mut waiting = Box::pin(call_as(&isolated, &a, "hud_input", json!({"wait_ms":1000})));
         assert!(waiting.as_mut().poll(&mut cx).is_pending());
         scene.push_pending_action(PendingAction {
-            publisher_namespace: "a".into(), zone_name: "subtitle".into(), callback_id: "before-check".into(),
+            publisher_namespace: "a".into(), zone_name: "subtitle".into(), kind: PendingActionKind::Callback("before-check".into()),
         });
         drop(scene);
         let Poll::Ready((found, false)) = waiting.as_mut().poll(&mut cx) else {
@@ -1641,7 +1679,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         assert!(second.as_mut().poll(&mut cx).is_pending());
         assert!(other.as_mut().poll(&mut cx).is_pending());
         let wake = isolated.scene.lock().await.push_pending_action(PendingAction {
-            publisher_namespace: "a".into(), zone_name: "subtitle".into(), callback_id: "after-check".into(),
+            publisher_namespace: "a".into(), zone_name: "subtitle".into(), kind: PendingActionKind::Callback("after-check".into()),
         });
         wake.notify();
         let Poll::Ready((one, false)) = first.as_mut().poll(&mut cx) else { panic!("first owner wait"); };
@@ -1662,7 +1700,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         let mut waiting = Box::pin(call_as(&isolated, &a, "hud_input", json!({"wait_ms":1000})));
         assert!(waiting.as_mut().poll(&mut cx).is_pending());
         scene.push_pending_action(PendingAction {
-            publisher_namespace: "a".into(), zone_name: "subtitle".into(), callback_id: "cancelled".into(),
+            publisher_namespace: "a".into(), zone_name: "subtitle".into(), kind: PendingActionKind::Callback("cancelled".into()),
         });
         drop(waiting);
         drop(scene);
@@ -1674,7 +1712,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         let (failed, _) = self::server();
         let (mut failed, failed_hub) = hub_portal(failed);
         failed.scene.lock().await.push_pending_action(PendingAction {
-            publisher_namespace: psk_agent(), zone_name: "subtitle".into(), callback_id: "after-error".into(),
+            publisher_namespace: psk_agent(), zone_name: "subtitle".into(), kind: PendingActionKind::Callback("after-error".into()),
         });
         let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _guard = failed_hub.lock().unwrap();
@@ -1909,7 +1947,7 @@ async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
                 .unwrap()
                 .agent_id,
             zone_name: "notification-area".into(),
-            callback_id: "approve".into(),
+            kind: PendingActionKind::Callback("approve".into()),
         });
 
     set_safe_mode(&server, true);

@@ -87,8 +87,12 @@ An active finite poll defers only its own agent's idle degradation, including a
 first attachment during that wait. Per-request ownership drops on return or
 cancellation without writing future activity; explicit upstream degradation,
 reclaim, clear and input expiry keep their existing semantics. Zero portals add
-no periodic runtime wake. Same-frame runtime feedback and typed human-X delivery
-remain separate feature work.
+no periodic runtime wake. Local accepted replies and truthful rejection feedback
+bypass output pacing once; the actual Winit settle order flushes the composer
+before portal drain. Hub reply history owns the echo, so raw-tile echo is skipped.
+Notification input retains Callback versus human-X Dismiss through MCP
+serialization. Only a validated X that removed its exact publication emits the
+runtime kind; callback auto-removal, TTL and clear do not.
 The hub is keyed by authenticated agent and portal id; its time-dependent
 operations take injected time. The driver materializes scene tiles, mirrors
 liveness onto leases, and connects composer submissions back to the hub.

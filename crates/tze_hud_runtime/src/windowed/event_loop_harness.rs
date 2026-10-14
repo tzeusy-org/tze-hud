@@ -932,7 +932,12 @@ mod tests {
         scene
             .take_pending_actions("notif-agent")
             .into_iter()
-            .map(|action| action.callback_id)
+            .map(|action| match action.kind {
+                tze_hud_scene::graph::PendingActionKind::Callback(id) => id,
+                tze_hud_scene::graph::PendingActionKind::Dismiss => {
+                    panic!("expected a publisher callback, received a human X")
+                }
+            })
             .collect()
     }
 
@@ -1106,13 +1111,34 @@ mod tests {
         );
 
         let (x, y) = dismiss_center(&harness);
+        // A mismatched release cannot turn either button into a human X.
+        harness.app.state.cursor_x = x;
+        harness.app.state.cursor_y = y;
+        harness.app.enqueue_pointer_event(PointerEventKind::Down);
+        harness.app.state.cursor_x = approve.0;
+        harness.app.state.cursor_y = approve.1;
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        harness.drain();
+        assert!(take_action_ids(&harness).is_empty());
+        assert_eq!(harness.zone_publication_count("notification-area"), 1);
+
         harness.click(x, y);
         harness.drain();
-        assert!(
-            take_action_ids(&harness).is_empty(),
-            "the dismiss button queues no action"
-        );
+        {
+            let shared = harness.app.state.shared_state.blocking_lock();
+            let mut scene = shared.scene.blocking_lock();
+            let events = scene.take_pending_actions("notif-agent");
+            assert_eq!(events.len(), 1, "one validated removal queues one human X");
+            assert_eq!(events[0].publisher_namespace, "notif-agent");
+            assert_eq!(events[0].zone_name, "notification-area");
+            assert_eq!(events[0].kind, tze_hud_scene::graph::PendingActionKind::Dismiss);
+            assert!(scene.take_pending_actions("another-agent").is_empty());
+        }
         assert_eq!(harness.zone_publication_count("notification-area"), 0);
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        harness.click(x, y);
+        harness.drain();
+        assert!(take_action_ids(&harness).is_empty(), "late/stale releases create no second event");
     }
 
     /// A pointer press on a notification action button, dispatched through the
@@ -1182,7 +1208,7 @@ mod tests {
         let mut scene = shared.scene.blocking_lock();
         let actions = scene.take_pending_actions("notif-agent");
         assert_eq!(actions.len(), 1, "one press queues one action");
-        assert_eq!(actions[0].callback_id, "ship");
+        assert_eq!(actions[0].kind, tze_hud_scene::graph::PendingActionKind::Callback("ship".into()));
         assert_eq!(actions[0].zone_name, "notification-area");
         assert_eq!(
             scene

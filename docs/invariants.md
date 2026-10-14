@@ -35,6 +35,17 @@ state-stream (content updates: reliable, coalesced, latest wins), and
 ephemeral (pointer moves, hover: droppable, latest wins). A transport or API
 change must not give one class another's delivery semantics.
 
+Accepted human notification events use a per-publisher FIFO and retained-until-ACK
+ids without oldest-first eviction. Destructive scene transfer has no cancellation
+point before retained commit. Callback and runtime-authored human-X kinds remain
+distinct; coalesced readiness wakes carry no record ownership. These in-memory
+guarantees do not claim process-crash durability or add a gRPC action transport.
+
+- `tze_hud_mcp` [`action_presses_are_delivered_until_acked`](../crates/tze_hud_mcp/src/server/tests.rs)
+  (>256 interleaved events, isolation, typed dismiss, stable ACK/max/backlog),
+  [`portal_flow_attach_publish_poll_ack_clear`](../crates/tze_hud_mcp/src/server/tests.rs)
+  (real armed wait, cancellation/error retention and finite overlapping polls)
+
 - `tze_hud_mcp` [`test_hud_publish_zone_contention_policy_latest_wins`](../crates/tze_hud_mcp/src/server/tests.rs)
 - `tze_hud_compositor` [`test_latest_wins_zone_renders_only_latest_publication`](../crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs)
 - `tze_hud_input` [`test_pointer_move_coalesced_in_batch`](../crates/tze_hud_input/src/batching.rs), [`test_coalesce_scroll_latest_wins`](../crates/tze_hud_input/src/coalescing.rs)
@@ -49,6 +60,18 @@ publish intentionally attaches fresh after runtime reclaim and reports
 as status labels. Discovery includes caller-owned scheduled zone holdings.
 
 Owner decision (2026-10-07): freeze promise removed; safe mode already pauses agents; updates during a pause are rejected, not buffered.
+
+A matching human notification × removes that exact publication locally and
+queues one typed dismiss for its owner. Callback auto-removal, TTL and explicit
+clear do not impersonate a human ×. Accepted portal input and truthful rejection
+feedback bypass output pacing once in the submitting maintenance turn; ordinary
+agent output retains 100 ms cadence. This is scene readiness, not physical-display
+or Windows-owner acceptance.
+
+- `tze_hud_runtime` [`release_activates_only_the_button_the_press_began_on`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs),
+  [`authority_attached_submit_snaps_scrolled_back_history_to_tail`](../crates/tze_hud_runtime/src/windowed/portal.rs),
+  [`portal_composer_submission_enters_pending_input_queue_and_can_be_acknowledged`](../crates/tze_hud_runtime/src/portal_projection_driver.rs)
+- `tze_hud_projection` [`take_due_paces_renders_at_the_render_interval`](../crates/tze_hud_projection/src/hub.rs)
 
 - `tze_hud_runtime` [`shell::safe_mode`](../crates/tze_hud_runtime/src/shell/safe_mode.rs) [`test_enter_safe_mode_suspends_active_leases`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),
   [`test_mutations_rejected_via_shared_state_flag`](../crates/tze_hud_runtime/src/shell/safe_mode.rs)

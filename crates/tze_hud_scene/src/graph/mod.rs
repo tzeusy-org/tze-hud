@@ -191,13 +191,19 @@ pub mod timed;
 pub use tiles::validate_text_markdown_node_data;
 pub mod zone_ops;
 
-/// A notification action the human pressed, addressed to the agent that
-/// published the notification.
+/// A publisher callback and a runtime-authored human close are distinct.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PendingActionKind {
+    Callback(String),
+    Dismiss,
+}
+
+/// A transactional notification event addressed to its publishing agent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingAction {
     pub publisher_namespace: String,
     pub zone_name: String,
-    pub callback_id: String,
+    pub kind: PendingActionKind,
 }
 
 impl SceneGraph {

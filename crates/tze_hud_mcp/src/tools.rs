@@ -22,7 +22,7 @@ use tze_hud_projection::hub::{PortalError, PortalHub, PortalKey, PortalStatus, P
 use tze_hud_scene::{
     SceneId, ValidationError,
     config::AgentIdentity,
-    graph::SceneGraph,
+    graph::{PendingActionKind, SceneGraph},
     mutation::{MutationBatch, SceneMutation},
     render_wake::RenderWakeNotifier,
     types::{
@@ -63,7 +63,7 @@ fn invalid(hint: impl Into<String>) -> McpError {
 struct ActionItem {
     id: String,
     zone: String,
-    action: String,
+    kind: PendingActionKind,
 }
 
 #[derive(Default, Debug)]
@@ -986,11 +986,18 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
                     s.delivered.push(ActionItem {
                         id: format!("a{}", NEXT_ACTION_ID.fetch_add(1, Ordering::Relaxed)),
                         zone: a.zone_name,
-                        action: a.callback_id,
+                        kind: a.kind,
                     });
                 }
                 let items: Vec<Value> = s.delivered.iter().take(max_items)
-                    .map(|a| json!({"id":a.id,"s":format!("zone:{}",a.zone),"action":a.action}))
+                    .map(|a| match &a.kind {
+                        PendingActionKind::Callback(callback) => {
+                            json!({"id":a.id,"s":format!("zone:{}",a.zone),"action":callback})
+                        }
+                        PendingActionKind::Dismiss => {
+                            json!({"id":a.id,"s":format!("zone:{}",a.zone),"action":"dismiss","kind":"dismiss"})
+                        }
+                    })
                     .collect();
                 let backlog = s.delivered.len() - items.len();
                 (items, backlog)

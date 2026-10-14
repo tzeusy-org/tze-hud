@@ -1981,8 +1981,8 @@ impl WinitApp {
                 // stale affordance disappears before the next rendered frame —
                 // satisfying the "local feedback first" doctrine.
                 //
-                // Action interactions are logged for now; callback delivery to
-                // agents is handled separately (see hud-ltgk.7).
+                // Callback and human-X events enter their publisher's retained
+                // MCP input lane; notification tokens are delivered unlocked.
                 //
                 // Button semantics (hud-z21e9): a release activates an
                 // affordance only when the press began on that same
@@ -2015,6 +2015,15 @@ impl WinitApp {
                                     published_at_wall_us,
                                     publisher_namespace,
                                 );
+                                if removed {
+                                    pending_action_wakes.push(scene.push_pending_action(
+                                        tze_hud_scene::PendingAction {
+                                            publisher_namespace: publisher_namespace.clone(),
+                                            zone_name: zone_name.clone(),
+                                            kind: tze_hud_scene::graph::PendingActionKind::Dismiss,
+                                        },
+                                    ));
+                                }
                                 tracing::debug!(
                                     zone = %zone_name,
                                     published_at_wall_us,
@@ -2029,7 +2038,7 @@ impl WinitApp {
                                     tze_hud_scene::PendingAction {
                                         publisher_namespace: publisher_namespace.clone(),
                                         zone_name: zone_name.clone(),
-                                        callback_id: callback_id.clone(),
+                                        kind: tze_hud_scene::graph::PendingActionKind::Callback(callback_id.clone()),
                                     },
                                 ));
                                 // An activated notification is answered: dismiss

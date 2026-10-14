@@ -559,6 +559,12 @@ impl InProcessPortalDriver {
             },
         };
         self.drive.entry(&key).last_input_feedback = Some(feedback.clone());
+        if feedback.feedback_state == PortalInputFeedbackState::Rejected
+            && let Some(incarnation) = self.drive.entries.get(&key).and_then(|entry| entry.incarnation)
+            && let Some(mut hub) = self.lock_hub()
+        {
+            hub.mark_local_feedback(&key, incarnation);
+        }
         Some(feedback)
     }
 
@@ -1314,6 +1320,17 @@ mod tests {
             .try_lock()
             .expect("rejected submission releases hub");
         assert_eq!(hub.get(&key("p")).unwrap().replies.len(), 1);
+        assert!(hub.get(&key("p")).unwrap().inputs.is_empty());
+        assert!(hub.next_deadline().unwrap().at_us <= 200 + FRAME_US + 1);
+        drop(hub);
+        let rejected_at = 200 + FRAME_US + 1;
+        driver.drain_inner(&mut scene, &mut processor, Some(tab), rejected_at);
+        let content = tile_markdown(&scene, tile_id);
+        assert!(content.contains("not sent") && content.contains("message too long"), "{content}");
+        assert!(!content.contains(&too_large), "a refused reply has no success echo");
+        assert_eq!(handle.hub.lock().unwrap().get(&key("p")).unwrap().last_render_us, Some(rejected_at));
+        driver.drain_inner(&mut scene, &mut processor, Some(tab), rejected_at + 1);
+        assert_eq!(handle.hub.lock().unwrap().get(&key("p")).unwrap().last_render_us, Some(rejected_at), "local feedback urgency is consumed once");
     }
 
     /// The render site wires follow-tail (spec §3.2), the resize snapshot
