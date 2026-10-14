@@ -54,7 +54,6 @@ use common::*;
 // ─── Test-local constants ─────────────────────────────────────────────────────
 
 const TEST_PSK: &str = "multi-agent-test-key";
-const GRPC_PORT: u16 = 50052; // use a different port from vertical_slice to avoid conflicts
 const DISPLAY_W: u32 = 1920;
 const DISPLAY_H: u32 = 1080;
 
@@ -135,10 +134,12 @@ struct FrameRateMeasurements {
 async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>> {
     // ── Phase 0: Start runtime ──────────────────────────────────────────────
 
+    let listener = tokio::net::TcpListener::bind("[::1]:0").await?;
+    let grpc_port = listener.local_addr()?.port();
     let config = HeadlessConfig {
         width: DISPLAY_W,
         height: DISPLAY_H,
-        grpc_port: GRPC_PORT,
+        grpc_port,
         agents: tze_hud_scene::config::AgentDirectory::unrestricted(TEST_PSK),
         config_toml: None,
     };
@@ -156,15 +157,15 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
         scene.zone_registry = ZoneRegistry::with_defaults();
     }
 
-    let _server_handle = runtime.start_grpc_server().await?;
+    let _server_handle = runtime.start_grpc_server_on_listener(listener);
 
     // ── Phase 1: Connect three agents concurrently ──────────────────────────
 
     // All three connect concurrently.
     let (mut agent_a, mut agent_b, mut agent_c) = tokio::try_join!(
-        connect_agent(TEST_PSK, GRPC_PORT, "agent-weather"),
-        connect_agent(TEST_PSK, GRPC_PORT, "agent-notifications"),
-        connect_agent(TEST_PSK, GRPC_PORT, "agent-media"),
+        connect_agent(TEST_PSK, grpc_port, "agent-weather"),
+        connect_agent(TEST_PSK, grpc_port, "agent-notifications"),
+        connect_agent(TEST_PSK, grpc_port, "agent-media"),
     )?;
 
     // Verify all three namespaces are distinct
@@ -730,7 +731,7 @@ async fn test_grpc_and_mcp_share_single_scene_graph() {
     let config = HeadlessConfig {
         width: 800,
         height: 600,
-        grpc_port: 0, // ephemeral port — no real gRPC server needed
+        grpc_port: 0, // configured gRPC server disabled; shared-scene test only
         agents: tze_hud_scene::config::AgentDirectory::unrestricted("coherence-test"),
         config_toml: None,
     };
@@ -1045,11 +1046,12 @@ async fn set_tile_text_via_grpc(
 #[tokio::test]
 async fn test_three_agents_same_anchor_stack_without_overlap_and_update_concurrently()
 -> Result<(), Box<dyn std::error::Error>> {
-    const PORT: u16 = 50055;
+    let listener = tokio::net::TcpListener::bind("[::1]:0").await?;
+    let grpc_port = listener.local_addr()?.port();
     let config = HeadlessConfig {
         width: DISPLAY_W,
         height: DISPLAY_H,
-        grpc_port: PORT,
+        grpc_port,
         agents: tze_hud_scene::config::AgentDirectory::unrestricted(TEST_PSK),
         config_toml: None,
     };
@@ -1060,12 +1062,12 @@ async fn test_three_agents_same_anchor_stack_without_overlap_and_update_concurre
         let tab_id = scene.create_tab("Stack", 0)?;
         scene.active_tab = Some(tab_id);
     }
-    let _server_handle = runtime.start_grpc_server().await?;
+    let _server_handle = runtime.start_grpc_server_on_listener(listener);
 
     let (mut alpha, mut beta, mut gamma) = tokio::try_join!(
-        connect_agent(TEST_PSK, PORT, "agent-alpha"),
-        connect_agent(TEST_PSK, PORT, "agent-beta"),
-        connect_agent(TEST_PSK, PORT, "agent-gamma"),
+        connect_agent(TEST_PSK, grpc_port, "agent-alpha"),
+        connect_agent(TEST_PSK, grpc_port, "agent-beta"),
+        connect_agent(TEST_PSK, grpc_port, "agent-gamma"),
     )?;
     let small = || placement(TileAnchor::BottomLeft, TileSize::Small);
     let (tile_alpha, tile_beta, tile_gamma) = tokio::try_join!(
