@@ -50,7 +50,8 @@ the repository/source fixtures, a clean index matching HEAD and materialized
 content matching its Git objects. It hashes raw tracked bytes, names and modes,
 canonical checkout/common-Git paths, actual HEAD, supported Cargo configuration,
 the selected Rust 1.88 compiler identity and guard code. The four tracked
-`.beads` administration files are not build inputs. All other tracked files are
+`.beads` administration files are not build inputs and cannot be declared as
+build source. All other tracked files are
 included: separate integration tests, build scripts, lockfiles, protos, bundled
 fonts, SVG/TOML bundles, manifests, compile-time docs and test fixtures.
 `CARGO_MANIFEST_DIR` therefore cannot silently refer to another checkout.
@@ -66,6 +67,24 @@ closure; external or ignored inputs require an explicit policy change.
 Native Windows checkouts must materialize their tracked symlinks; Git's plain
 file placeholders for disabled symlinks are outside this supported envelope.
 
+Recognized manifest declarations have a finite path policy: `lib.path`, paths
+in the `bin`/`example`/`test`/`bench` arrays, a string `package.build`, literal
+`workspace.members`/`default-members`, `package.workspace`, and path dependencies
+or manifest patches must name internal files or package manifests. Both the
+normalized declared path and its resolved destination must belong to the
+effective hashed snapshot. This includes ordinary, target-specific and workspace
+dependencies. Omitted build scripts keep Cargo's default discovery, and
+`build = false` remains supported. Recognized tables, arrays and path values
+must have supported types; malformed forms refuse with a fixed diagnostic before
+Cargo. Workspace member globs and deprecated manifest `[replace]` are refused.
+
+Each package must have a validated explicit `package.workspace` or a nearest
+tracked internal `[workspace]` manifest. A standalone package can declare an
+empty `[workspace]` to stop ancestor discovery. An absent internal anchor refuses
+without reading any external ancestor `Cargo.toml`. This is a conservative limit
+of the opt-in policy; ordinary Cargo standalone discovery remains available when
+the guard is unset. The guard does not resolve Cargo's complete membership rules.
+
 The checkout config and source-owned ancestor Cargo configs under HOME are
 fingerprinted. Linked worktrees can inherit the main checkout's tracked
 `.cargo/config.toml`; it is included too. Non-project Cargo config presence is
@@ -76,6 +95,18 @@ are unsupported. An explicit override naming the same canonical target or a
 tracked manifest is supported. The policy trusts provisioned system toolchains, immutable
 host settings and Cargo's registry checksums; it does not inspect credentials or
 system configuration outside HOME.
+
+Cargo config `paths`, `[patch]` and `[source]` overrides are unsupported even
+when they point to tracked internal files. Their config-relative semantics differ
+from manifest paths; the guard refuses the sections without reading replacement
+roots, directory sources or local registries. Other supported tracked target
+configuration, including current rustflags/linker settings, retains its behavior.
+Package/publish metadata such as `readme` and `license-file` is outside this
+declared build-input policy; canonical guarded commands do not package or publish.
+Arbitrary Rust module/include paths, build-script subprocess inputs, plugin or
+generated inputs and runtime data are not discovered by parsing manifests. The
+cooperative contract requires actual build/test inputs to be tracked; this finite
+adapter does not prove closure for every possible TOML or local-file construct.
 
 The receipt prints only HEAD and identity/invocation digests plus child status.
 Application arguments and relevant compilation environment values are hashed,

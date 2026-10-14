@@ -169,34 +169,113 @@ def tracked_snapshot(root: Path) -> tuple[str, dict[str, bytes]]:
 
 
 def input_closure(root: Path, manifests: dict[str, bytes]) -> None:
-    tracked = set(os.fsdecode(p) for p in git("ls-files", "-z", cwd=root).split(b"\0") if p)
+    # Only this set was hashed. Tracked administration exemptions cannot be
+    # repurposed as a target or reached through a declared source symlink.
+    tracked = {Path(name) for name, _, _ in index_entries(root)}
+    documents = {
+        root / name: tomllib.loads(data.decode())
+        for name, data in manifests.items() if name.endswith("Cargo.toml")
+    }
     roots = {"assets", "targets", ".cargo"}
-    for name, data in manifests.items():
-        if not name.endswith("Cargo.toml"):
-            continue
-        document = tomllib.loads(data.decode())
-        parent = (root / name).parent
+
+    def table(value: object) -> dict:
+        if not isinstance(value, dict):
+            raise Refusal("unsupported-manifest-table")
+        return value
+
+    def declared_path(parent: Path, value: object, *, package: bool = False) -> Path:
+        if not isinstance(value, str) or not value:
+            raise Refusal("unsupported-manifest-path")
+        # Normalize native path syntax before resolving or opening anything.
+        # An escaping declaration is refused without visiting its source root.
+        path = Path(os.path.abspath(parent / value))
+        if package:
+            path /= "Cargo.toml"
+        if not inside(path, root):
+            raise Refusal("external-declared-input")
+        if path.relative_to(root) not in tracked:
+            raise Refusal("unhashed-declared-input")
+        resolved = path.resolve(strict=True)
+        if not inside(resolved, root) or resolved.relative_to(root) not in tracked:
+            raise Refusal("unhashed-declared-input")
+        if not resolved.is_file():
+            raise Refusal("unsupported-declared-input")
+        return resolved
+
+    def dependencies(parent: Path, value: object) -> None:
+        for dependency in table(value).values():
+            if isinstance(dependency, str):
+                continue
+            dependency = table(dependency)
+            if "path" in dependency:
+                declared_path(parent, dependency["path"], package=True)
+
+    def dependency_tables(parent: Path, node: dict) -> None:
+        for key in ("dependencies", "dev-dependencies", "build-dependencies"):
+            if key in node:
+                dependencies(parent, node[key])
+
+    for manifest, document in documents.items():
+        parent = manifest.parent
         if parent != root:
             roots.add(parent.relative_to(root).as_posix())
         elif "package" in document:
             roots.update({"src", "tests", "examples", "benches", "build.rs"})
-
-        def dependencies(node: dict) -> None:
-            for key, value in node.items():
-                if not isinstance(value, dict):
+        if "replace" in document:
+            raise Refusal("unsupported-manifest-replace")
+        if "lib" in document:
+            library = table(document["lib"])
+            if "path" in library:
+                declared_path(parent, library["path"])
+        for key in ("bin", "example", "test", "bench"):
+            if key not in document:
+                continue
+            if not isinstance(document[key], list):
+                raise Refusal("unsupported-manifest-targets")
+            for target in document[key]:
+                target = table(target)
+                if "path" in target:
+                    declared_path(parent, target["path"])
+        dependency_tables(parent, document)
+        for target in table(document.get("target", {})).values():
+            dependency_tables(parent, table(target))
+        for patch in table(document.get("patch", {})).values():
+            dependencies(parent, patch)
+        if "workspace" in document:
+            workspace = table(document["workspace"])
+            if "dependencies" in workspace:
+                dependencies(parent, workspace["dependencies"])
+            for key in ("members", "default-members"):
+                if key not in workspace:
                     continue
-                tables = [value] if key.endswith("dependencies") else list(value.values()) if key == "patch" else []
-                for table in tables:
-                    if not isinstance(table, dict):
-                        raise Refusal("unsupported-manifest")
-                    for dependency in table.values():
-                        if isinstance(dependency, dict) and "path" in dependency:
-                            path = (parent / dependency["path"]).resolve()
-                            if not inside(path, root) or (path / "Cargo.toml").relative_to(root).as_posix() not in tracked:
-                                raise Refusal("external-path-dependency")
-                dependencies(value)
-
-        dependencies(document)
+                if not isinstance(workspace[key], list):
+                    raise Refusal("unsupported-workspace-members")
+                for member in workspace[key]:
+                    if isinstance(member, str) and any(c in member for c in "*?[]"):
+                        raise Refusal("unsupported-workspace-glob")
+                    declared_path(parent, member, package=True)
+        if "package" not in document:
+            continue
+        package = table(document["package"])
+        if "build" in package and package["build"] is not False:
+            declared_path(parent, package["build"])
+        if "workspace" in package:
+            anchor = declared_path(parent, package["workspace"], package=True)
+            if "workspace" in document or "workspace" not in documents.get(anchor, {}):
+                raise Refusal("unsupported-workspace-anchor")
+            table(documents[anchor]["workspace"])
+        else:
+            # Cargo config ancestry is separate. Never discover a workspace
+            # from an unhashed ancestor Cargo.toml outside this checkout.
+            directory = parent
+            while inside(directory, root):
+                anchor = documents.get(directory / "Cargo.toml", {})
+                if "workspace" in anchor:
+                    table(anchor["workspace"])
+                    break
+                directory = directory.parent
+            else:
+                raise Refusal("internal-workspace-anchor-required")
     # Enumerate names only. Never open ignored .env/credentials or scan target,
     # worktree, private operations, Python-cache or receipt roots.
     ignored = git("ls-files", "--others", "--ignored", "--exclude-standard", "-z", "--", *sorted(roots), cwd=root)
@@ -241,6 +320,11 @@ def configuration(root: Path, common: Path, manifests: dict[str, bytes]) -> str:
             else:
                 raise Refusal("external-cargo-config")
             document = tomllib.loads(data.decode())
+            # Config paths have a different base from manifest paths. These
+            # unused source overrides are outside the finite guarded envelope,
+            # even when their values point into tracked source.
+            if any(key in document for key in ("paths", "patch", "source")):
+                raise Refusal("unsupported-cargo-source-override")
 
             def supported(node: dict) -> None:
                 for key, value in node.items():

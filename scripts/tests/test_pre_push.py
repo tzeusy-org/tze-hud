@@ -9,6 +9,7 @@ from pathlib import Path
 import subprocess
 import sys
 import tempfile
+import tomllib
 import unittest
 
 
@@ -61,7 +62,7 @@ class PrePushTests(unittest.TestCase):
             git("update-ref", "refs/remotes/origin/main", base)
             docs = commit("README.md", "docs\n")
             rust = commit("lib.rs", "pub fn example() {}\n")
-            cargo = commit("Cargo.toml", '[package]\nname = "fixture"\nversion = "0.1.0"\n')
+            cargo = commit("Cargo.toml", '[package]\nname = "fixture"\nversion = "0.1.0"\n[workspace]\n')
             git("tag", "-a", "rust-tag", "-m", "fixture")
             tag = git("rev-parse", "refs/tags/rust-tag")
             git("checkout", "-qb", "other-rust", base)
@@ -453,6 +454,136 @@ class PrePushTests(unittest.TestCase):
                         git("reset", "--hard", frozen_head)
                         if path.startswith(".cargo/") and (repo / ".cargo").exists():
                             (repo / ".cargo").rmdir()
+
+            # Declared build inputs must be inside frozen tracked source. Each
+            # case is a clean committed fixture and has its own fake target;
+            # the fake child proves admission, not Cargo compilation.
+            package = '[package]\nname = "fixture"\nversion = "0.1.0"\nedition = "2021"\n'
+            member = '[package]\nname = "member"\nversion = "0.1.0"\nedition = "2021"\n'
+            member_files = {
+                "member/Cargo.toml": member,
+                "member/src/lib.rs": "pub fn member() {}\n",
+            }
+            outside = root / "outside"
+            outside.mkdir()
+            (outside / "Cargo.toml").write_text(member)
+            (outside / "source.rs").write_text("fn main() {}\n")
+            declared_cases = []
+            for kind in ("lib", "bin", "example", "test", "bench"):
+                table = "[lib]\n" if kind == "lib" else f'[[{kind}]]\nname = "declared"\n'
+                declared_cases.extend([
+                    (f"external {kind} file", package + table + 'path = "../outside/source.rs"\n', {}, 86),
+                    (f"tracked {kind} file", package + table + 'path = "declared/source.rs"\n',
+                     {"declared/source.rs": "pub fn example() {}\nfn main() {}\n"}, 0),
+                ])
+            declared_cases.extend([
+                ("normalized internal target", package + '[lib]\npath = "src/../declared/source.rs"\n',
+                 {"declared/source.rs": "pub fn example() {}\n"}, 0),
+                ("excluded tracked target", package + '[lib]\npath = ".beads/README.md"\n',
+                 {".beads/README.md": "pub fn example() {}\n"}, 86),
+                ("external custom build", package + 'build = "../outside/source.rs"\n', {}, 86),
+                ("tracked custom build", package + 'build = "tools/build.rs"\n',
+                 {"tools/build.rs": "fn main() {}\n"}, 0),
+                ("disabled build", package + "build = false\n", {}, 0),
+                ("implicit tracked build", package, {"build.rs": "fn main() {}\n"}, 0),
+                ("implicit absent build", package, {}, 0),
+                ("external workspace member", package + '[workspace]\nmembers = ["../outside"]\n', {}, 86),
+                ("external default member", package + '[workspace]\nmembers = ["member"]\ndefault-members = ["../outside"]\n',
+                 member_files, 86),
+                ("unsupported member glob", package + '[workspace]\nmembers = ["member*"]\n', member_files, 86),
+                ("tracked member and default", package + '[workspace]\nmembers = ["member"]\ndefault-members = ["member"]\n',
+                 member_files, 0),
+                ("external package workspace", package + '[workspace]\nmembers = ["member"]\n',
+                 {**member_files, "member/Cargo.toml": member + 'workspace = "../../outside"\n'}, 86),
+                ("tracked package workspace", package + '[workspace]\nmembers = ["member"]\n',
+                 {**member_files, "member/Cargo.toml": member + 'workspace = ".."\n'}, 0),
+                ("tracked dependency", package + '[dependencies]\nmember = { path = "member" }\n', member_files, 0),
+                ("external manifest patch", package + '[patch.crates-io]\nmember = { path = "../outside" }\n', {}, 86),
+                ("tracked manifest patch", package + '[patch.crates-io]\nmember = { path = "member" }\n', member_files, 0),
+                ("external replace", package + '[replace]\n"member:0.1.0" = { path = "../outside" }\n', {}, 86),
+                ("unsupported internal replace", package + '[replace]\n"member:0.1.0" = { path = "member" }\n', member_files, 86),
+            ])
+            for label, content, files in [
+                ("external config paths", 'paths = ["../outside"]\n', {}),
+                ("unsupported internal config paths", 'paths = ["member"]\n', member_files),
+                ("external config patch", '[patch.crates-io]\nmember = { path = "../outside" }\n', {}),
+                ("unsupported internal config patch", '[patch.crates-io]\nmember = { path = "member" }\n', member_files),
+                ("external source directory", '[source.fixture]\ndirectory = "../outside"\n', {}),
+                ("unsupported internal source directory", '[source.fixture]\ndirectory = "member"\n', member_files),
+                ("external local registry", '[source.fixture]\nlocal-registry = "../outside"\n', {}),
+                ("unsupported internal local registry", '[source.fixture]\nlocal-registry = "member"\n', member_files),
+            ]:
+                declared_cases.append((label, package, {**files, ".cargo/config.toml": content}, 86))
+            declared_cases.append((
+                "tracked target configuration", package,
+                {".cargo/config.toml": '[target.x86_64-pc-windows-msvc]\nrustflags = ["-C", "target-feature=+crt-static"]\n'}, 0,
+            ))
+            # Standalone fixtures explicitly stop Cargo workspace discovery.
+            # Existing member fixtures already carry their internal workspace.
+            declared_cases = [
+                (label, manifest if "workspace" in tomllib.loads(manifest) else manifest + "\n[workspace]\n", files, expected)
+                for label, manifest, files, expected in declared_cases
+            ]
+            declared_cases.extend([
+                ("malformed lib table", "lib = []\n" + package + "\n[workspace]\n", {}, 86),
+                ("malformed target array", 'bin = { path = "src/lib.rs" }\n' + package + "\n[workspace]\n", {}, 86),
+                ("malformed target path", package + "[lib]\npath = false\n[workspace]\n", {}, 86),
+                ("malformed build field", package + "build = 17\n[workspace]\n", {}, 86),
+                ("malformed member array", package + '[workspace]\nmembers = "member"\n', member_files, 86),
+                ("malformed package workspace", package + "workspace = []\n[workspace]\n", {}, 86),
+                ("implicit external workspace", package, {}, 86),
+                ("explicit standalone workspace", package + "[workspace]\n", {}, 0),
+            ])
+            parent_workspace = root / "Cargo.toml"
+            parent_workspace.write_text('[workspace]\nmembers = ["repo"]\n')
+            observations = []
+            for number, (label, manifest, files, expected) in enumerate(declared_cases):
+                with self.subTest(declared_input=label):
+                    inputs = {"Cargo.toml": manifest, "src/lib.rs": "pub fn example() {}\n", **files}
+                    directories = set()
+                    for name, content in inputs.items():
+                        path = repo / name
+                        path.parent.mkdir(parents=True, exist_ok=True)
+                        path.write_text(content)
+                        directories.update(p for p in path.parents if p != repo and repo in p.parents)
+                    git("add", "--", *inputs)
+                    git("commit", "-qm", "declared input fixture")
+                    selected = root / f"declared-target-{number}"
+                    try:
+                        clean = git("status", "--porcelain") == ""
+                        result, calls = guarded(selected)
+                        marker_path = selected / ".tze-hud-source-binding.json"
+                        marker_present = marker_path.exists()
+                        marker_valid = None
+                        if marker_present:
+                            try:
+                                value = json.loads(marker_path.read_text())
+                                if isinstance(value, dict) and type(value.get("valid")) is bool:
+                                    marker_valid = value["valid"]
+                            except (OSError, ValueError):
+                                pass
+                        actual = (result.returncode, len(calls), marker_present, marker_valid)
+                        wanted = (0, 1, True, True) if expected == 0 else (86, 0, False, None)
+                        observation = {
+                            "case": label, "fixture_clean": clean, "exit": result.returncode,
+                            "cargo_count": len(calls), "marker_present": marker_present,
+                            "marker_valid": marker_valid, "expected_exit": expected,
+                            "matches": clean and actual == wanted,
+                        }
+                        observations.append(observation)  # Record before any assertion.
+                        self.assertTrue(clean, json.dumps(observation))
+                        self.assertEqual(actual, wanted, json.dumps(observation))
+                        if expected == 0:
+                            self.assertEqual(calls, [["check", "--workspace"]])
+                    finally:
+                        git("reset", "--hard", frozen_head)
+                        for directory in sorted(directories, key=lambda p: len(p.parts), reverse=True):
+                            if directory.exists():
+                                directory.rmdir()
+            parent_workspace.unlink()
+            # Fixed receipt, captured by pytest/JUnit even for passing cases:
+            # no child stderr, paths, source, config or environment values.
+            print("declared-input-observations=" + json.dumps(observations, sort_keys=True))
 
             cargo_home = root / "fixture-cargo-home"
             cargo_home.mkdir()
