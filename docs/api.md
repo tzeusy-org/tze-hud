@@ -66,7 +66,8 @@ otherwise. Scheduled zone publications count as held before presentation;
 - Zone: `content` is a string, or a typed object for structured zones
   (`notification` with optional `title`, `body`, integer `urgency` 0–3
   (default 1), and optional `actions: [{label, callback_id}]`; both action
-  fields are non-empty strings). `type` may be
+  fields are non-empty strings). Activating an action dismisses the
+  notification. `type` may be
   omitted; the runtime infers it from what the zone accepts. `key` is the
   merge key. Supplied notification urgency must be an integer 0–3; only
   omission defaults to 1. `status_bar.entries` must be a non-empty object

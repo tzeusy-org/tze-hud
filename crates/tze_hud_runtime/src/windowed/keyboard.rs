@@ -158,10 +158,10 @@ fn is_bare_tab_chord(key: &str, modifiers: &KeyboardModifiers) -> bool {
     key == "Tab" && !modifiers.ctrl && !modifiers.alt && !modifiers.meta
 }
 
-/// Decode the reserved subset implemented by [`crate::shell::handle_shortcut`].
-/// Safe-mode, Ctrl+Shift+P pairing, and mute chords intentionally return `None`: production
-/// handles those at the earlier winit OS-event stage, while in-process callers
-/// still consume them through [`ShellReservedShortcut`] without agent delivery.
+/// Decode the tab actions implemented by [`crate::shell::handle_shortcut`].
+/// Pairing is handled at the earlier winit OS-event stage. Other reserved
+/// chords, including the Ctrl+Shift+M no-op, return `None` and are consumed by
+/// [`ShellReservedShortcut`] routing without an action or agent delivery.
 fn chrome_shortcut(raw: &RawKeyDownEvent) -> Option<ChromeShortcut> {
     if !raw.modifiers.ctrl || raw.modifiers.alt {
         return None;

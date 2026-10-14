@@ -971,6 +971,117 @@ mod tests {
         assert_eq!(take_action_ids(&harness), ["approve"]);
     }
 
+    fn chrome_state(
+        harness: &HeadlessEventLoopHarness,
+        callback_id: &str,
+    ) -> tze_hud_scene::types::ChromeLocalState {
+        let shared = harness.app.state.shared_state.blocking_lock();
+        let scene = shared.scene.blocking_lock();
+        let id = scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|region| {
+                matches!(&region.kind, ZoneInteractionKind::Action { callback_id: id } if id == callback_id)
+            })
+            .map(|region| region.interaction_id.clone())
+            .expect("the action has a hit region");
+        scene
+            .overlay
+            .chrome_states
+            .get(&id)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    fn geometry_epoch(harness: &HeadlessEventLoopHarness) -> u64 {
+        let shared = harness.app.state.shared_state.blocking_lock();
+        let scene = shared.scene.blocking_lock();
+        scene.geometry_epoch
+    }
+
+    /// Hovering and pressing an action button set its local feedback state
+    /// with no agent round trip, and each change re-arms the idle gate once
+    /// (the geometry epoch) while an unchanged move does not (hud-paslt).
+    #[test]
+    fn action_button_hover_and_press_are_local_and_frame_only_on_change() {
+        let mut harness = approve_reject_notification_harness();
+        let approve = harness.notification_action_center("approve").unwrap();
+        let reject = harness.notification_action_center("reject").unwrap();
+
+        let epoch = geometry_epoch(&harness);
+        harness.app.state.cursor_x = approve.0;
+        harness.app.state.cursor_y = approve.1;
+        harness.app.enqueue_pointer_event(PointerEventKind::Move);
+        let hovered = chrome_state(&harness, "approve");
+        assert!(hovered.hovered && !hovered.pressed);
+        assert!(
+            geometry_epoch(&harness) > epoch,
+            "hover-on requests a frame"
+        );
+
+        let epoch = geometry_epoch(&harness);
+        harness.app.state.cursor_x = approve.0 + 1.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Move);
+        assert_eq!(
+            geometry_epoch(&harness),
+            epoch,
+            "moving within the hovered button requests no frame"
+        );
+
+        harness.app.enqueue_pointer_event(PointerEventKind::Down);
+        assert!(chrome_state(&harness, "approve").pressed);
+        assert!(geometry_epoch(&harness) > epoch, "press requests a frame");
+
+        // Sliding off onto Reject moves the hover; Approve stays pressed
+        // until the release, which then activates nothing.
+        harness.app.state.cursor_x = reject.0;
+        harness.app.state.cursor_y = reject.1;
+        harness.app.enqueue_pointer_event(PointerEventKind::Move);
+        let approve_state = chrome_state(&harness, "approve");
+        assert!(approve_state.pressed && !approve_state.hovered);
+        assert!(chrome_state(&harness, "reject").hovered);
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        assert_eq!(
+            chrome_state(&harness, "approve"),
+            Default::default(),
+            "release clears the press"
+        );
+        harness.drain();
+        assert!(take_action_ids(&harness).is_empty());
+        assert_eq!(harness.zone_publication_count("notification-area"), 1);
+    }
+
+    /// One click on Approve queues exactly one `approve` and dismisses the
+    /// notification, so the click has an immediate visible result and a
+    /// second click has nothing to land on (hud-paslt).
+    #[test]
+    fn action_click_queues_one_action_and_dismisses_the_notification() {
+        let mut harness = approve_reject_notification_harness();
+        let (x, y) = harness.notification_action_center("approve").unwrap();
+        harness.click(x, y);
+        harness.drain();
+        assert_eq!(take_action_ids(&harness), ["approve"]);
+        assert_eq!(harness.zone_publication_count("notification-area"), 0);
+        {
+            let shared = harness.app.state.shared_state.blocking_lock();
+            let scene = shared.scene.blocking_lock();
+            assert!(
+                scene.overlay.zone_hit_regions.is_empty(),
+                "the answered notification leaves no clickable buttons"
+            );
+            assert!(
+                scene.overlay.chrome_states.is_empty(),
+                "the dismissed buttons leave no hover/press state"
+            );
+        }
+
+        // The same spot again: nothing left to activate.
+        harness.click(x, y);
+        harness.drain();
+        assert!(take_action_ids(&harness).is_empty());
+    }
+
     /// A release activates an action only when the press began on that same
     /// button: pressing Approve and releasing over Reject, or pressing the
     /// dismiss button, queues no action the user did not press (hud-z21e9).
@@ -1006,7 +1117,7 @@ mod tests {
 
     /// A pointer press on a notification action button, dispatched through the
     /// real `lifecycle.rs` pointer-up path, queues the action for `hud_input`
-    /// and leaves the notification on screen (only the dismiss button removes it).
+    /// and dismisses the answered notification (hud-paslt).
     #[test]
     fn pointer_up_on_action_enqueues_pending_action() {
         use tze_hud_scene::{
@@ -1078,8 +1189,8 @@ mod tests {
                 .zone_registry
                 .active_for_zone("notification-area")
                 .len(),
-            1,
-            "an action press must not dismiss the notification"
+            0,
+            "an action press dismisses the answered notification"
         );
 
         drop(scene);
@@ -1093,6 +1204,23 @@ mod tests {
         {
             let shared = shared_state.blocking_lock();
             let mut scene = shared.scene.blocking_lock();
+            scene
+                .publish_to_zone(
+                    "notification-area",
+                    ZoneContent::Notification(NotificationPayload {
+                        text: "Dismiss this notification".into(),
+                        icon: String::new(),
+                        urgency: 1,
+                        ttl_ms: None,
+                        title: "Target".into(),
+                        actions: Vec::new(),
+                    }),
+                    "notif-agent",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
             scene
                 .publish_to_zone(
                     "notification-area",
@@ -1839,28 +1967,78 @@ mod tests {
     /// release must not surface as an impossible agent-visible KeyUp after the
     /// shell already intercepted the press.
     #[test]
-    fn matching_ctrl_tab_key_up_never_reaches_agent() {
-        let mut harness = HeadlessEventLoopHarness::new();
-        let (_tile_id, _node_id, mut rx) = install_button(&mut harness, true);
+    fn matching_shell_reserved_key_sequence_never_reaches_agent() {
+        for (key_code, down_key, up_key, shift, repeat) in [
+            ("Tab", "Tab", "Tab", false, false),
+            ("KeyM", "m", "M", true, false),
+            ("KeyM", "M", "m", true, false),
+            ("KeyM", "M", "m", true, true),
+        ] {
+            for modifiers_held in [false, true] {
+                let mut harness = HeadlessEventLoopHarness::new();
+                let (_tile_id, _node_id, mut rx) = install_button(&mut harness, true);
+                let active_tab = *harness.app.state.active_tab_mirror.lock().unwrap();
+                let chrome_tabs = harness.app.state.chrome_state.read().unwrap().tabs.len();
 
-        harness.enqueue(ctrl_key_down("Tab", "Tab", false, 1_000));
-        harness.drain();
-        let _ = received_events(&mut rx);
+                harness.enqueue(ctrl_key_down(key_code, down_key, shift, 1_000));
+                if repeat {
+                    let mut repeated = ctrl_key_down(key_code, down_key, shift, 1_050);
+                    if let PendingKeyboardEvent::KeyDown(raw) = &mut repeated {
+                        raw.repeat = true;
+                    }
+                    harness.enqueue(repeated);
+                }
+                harness.drain();
+                assert_eq!(harness.pending_len(), 0);
+                assert!(
+                    received_events(&mut rx).is_empty(),
+                    "shell-reserved {down_key} KeyDown must never reach an agent"
+                );
+                if key_code == "KeyM" {
+                    let shared = harness.app.state.shared_state.blocking_lock();
+                    assert_eq!(shared.scene.blocking_lock().active_tab, active_tab);
+                    assert_eq!(
+                        *harness.app.state.active_tab_mirror.lock().unwrap(),
+                        active_tab
+                    );
+                    assert_eq!(
+                        harness.app.state.chrome_state.read().unwrap().tabs.len(),
+                        chrome_tabs,
+                        "Ctrl+Shift+M is a no-op, not a tab action"
+                    );
+                }
 
-        harness.enqueue(PendingKeyboardEvent::KeyUp(RawKeyUpEvent {
-            key_code: "Tab".to_string(),
-            key: "Tab".to_string(),
-            // The user may release Ctrl before Tab. The physical identity from
-            // KeyDown, not release-time modifiers, must still own this KeyUp.
-            modifiers: KeyboardModifiers::NONE,
-            timestamp_mono_us: MonoUs(1_100),
-        }));
-        harness.drain();
-
-        assert!(
-            received_events(&mut rx).is_empty(),
-            "a matching shell-reserved KeyUp must never reach an agent"
-        );
+                harness.enqueue(PendingKeyboardEvent::KeyUp(RawKeyUpEvent {
+                    key_code: key_code.to_string(),
+                    key: up_key.to_string(),
+                    // Physical identity owns the release even after Ctrl/Shift
+                    // release changes both modifiers and the logical key case.
+                    modifiers: if modifiers_held {
+                        KeyboardModifiers {
+                            ctrl: true,
+                            shift,
+                            ..KeyboardModifiers::NONE
+                        }
+                    } else {
+                        KeyboardModifiers::NONE
+                    },
+                    timestamp_mono_us: MonoUs(1_100),
+                }));
+                harness.drain();
+                assert_eq!(harness.pending_len(), 0);
+                assert!(
+                    received_events(&mut rx).is_empty(),
+                    "matching {up_key} KeyUp must never reach an agent"
+                );
+                assert!(
+                    harness
+                        .app
+                        .state
+                        .consumed_shell_shortcut_keydowns
+                        .is_empty()
+                );
+            }
+        }
     }
 
     /// Ctrl+Shift+P is consumed one stage earlier by the real winit path,
@@ -1884,26 +2062,40 @@ mod tests {
     /// filter. Ordinary focused-agent shortcuts keep their raw down/up route.
     #[test]
     fn non_reserved_ctrl_key_sequence_still_reaches_focused_agent() {
-        let mut harness = HeadlessEventLoopHarness::new();
-        let (_tile_id, _node_id, mut rx) = install_button(&mut harness, true);
+        for (key_code, key, shift, alt) in [
+            ("KeyA", "a", false, false),
+            ("KeyM", "m", false, false),
+            ("KeyM", "M", true, true),
+        ] {
+            let mut harness = HeadlessEventLoopHarness::new();
+            let (_tile_id, _node_id, mut rx) = install_button(&mut harness, true);
+            let mut down = ctrl_key_down(key_code, key, shift, 1_000);
+            let mut up = ctrl_key_up(key_code, key, shift, 1_100);
+            if let PendingKeyboardEvent::KeyDown(raw) = &mut down {
+                raw.modifiers.alt = alt;
+            }
+            if let PendingKeyboardEvent::KeyUp(raw) = &mut up {
+                raw.modifiers.alt = alt;
+            }
+            harness.enqueue(down);
+            harness.enqueue(up);
+            harness.drain();
+            assert_eq!(harness.pending_len(), 0);
 
-        harness.enqueue(ctrl_key_down("KeyA", "a", false, 1_000));
-        harness.enqueue(ctrl_key_up("KeyA", "a", false, 1_100));
-        harness.drain();
-
-        let events = received_events(&mut rx);
-        assert!(
-            events
-                .iter()
-                .any(|(_, event)| matches!(event, ProtoInputEvent::KeyDown(_))),
-            "non-reserved Ctrl+A KeyDown must retain raw agent routing; got {events:?}"
-        );
-        assert!(
-            events
-                .iter()
-                .any(|(_, event)| matches!(event, ProtoInputEvent::KeyUp(_))),
-            "non-reserved Ctrl+A KeyUp must retain raw agent routing; got {events:?}"
-        );
+            let events = received_events(&mut rx);
+            assert!(
+                events
+                    .iter()
+                    .any(|(_, event)| matches!(event, ProtoInputEvent::KeyDown(_))),
+                "non-reserved {key} KeyDown must retain raw agent routing; got {events:?}"
+            );
+            assert!(
+                events
+                    .iter()
+                    .any(|(_, event)| matches!(event, ProtoInputEvent::KeyUp(_))),
+                "non-reserved {key} KeyUp must retain raw agent routing; got {events:?}"
+            );
+        }
     }
 
     /// RFC 0004 §10 production proof: keyboard is a concrete pointer-free
