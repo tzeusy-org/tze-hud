@@ -1839,28 +1839,78 @@ mod tests {
     /// release must not surface as an impossible agent-visible KeyUp after the
     /// shell already intercepted the press.
     #[test]
-    fn matching_ctrl_tab_key_up_never_reaches_agent() {
-        let mut harness = HeadlessEventLoopHarness::new();
-        let (_tile_id, _node_id, mut rx) = install_button(&mut harness, true);
+    fn matching_shell_reserved_key_sequence_never_reaches_agent() {
+        for (key_code, down_key, up_key, shift, repeat) in [
+            ("Tab", "Tab", "Tab", false, false),
+            ("KeyM", "m", "M", true, false),
+            ("KeyM", "M", "m", true, false),
+            ("KeyM", "M", "m", true, true),
+        ] {
+            for modifiers_held in [false, true] {
+                let mut harness = HeadlessEventLoopHarness::new();
+                let (_tile_id, _node_id, mut rx) = install_button(&mut harness, true);
+                let active_tab = *harness.app.state.active_tab_mirror.lock().unwrap();
+                let chrome_tabs = harness.app.state.chrome_state.read().unwrap().tabs.len();
 
-        harness.enqueue(ctrl_key_down("Tab", "Tab", false, 1_000));
-        harness.drain();
-        let _ = received_events(&mut rx);
+                harness.enqueue(ctrl_key_down(key_code, down_key, shift, 1_000));
+                if repeat {
+                    let mut repeated = ctrl_key_down(key_code, down_key, shift, 1_050);
+                    if let PendingKeyboardEvent::KeyDown(raw) = &mut repeated {
+                        raw.repeat = true;
+                    }
+                    harness.enqueue(repeated);
+                }
+                harness.drain();
+                assert_eq!(harness.pending_len(), 0);
+                assert!(
+                    received_events(&mut rx).is_empty(),
+                    "shell-reserved {down_key} KeyDown must never reach an agent"
+                );
+                if key_code == "KeyM" {
+                    let shared = harness.app.state.shared_state.blocking_lock();
+                    assert_eq!(shared.scene.blocking_lock().active_tab, active_tab);
+                    assert_eq!(
+                        *harness.app.state.active_tab_mirror.lock().unwrap(),
+                        active_tab
+                    );
+                    assert_eq!(
+                        harness.app.state.chrome_state.read().unwrap().tabs.len(),
+                        chrome_tabs,
+                        "Ctrl+Shift+M is a no-op, not a tab action"
+                    );
+                }
 
-        harness.enqueue(PendingKeyboardEvent::KeyUp(RawKeyUpEvent {
-            key_code: "Tab".to_string(),
-            key: "Tab".to_string(),
-            // The user may release Ctrl before Tab. The physical identity from
-            // KeyDown, not release-time modifiers, must still own this KeyUp.
-            modifiers: KeyboardModifiers::NONE,
-            timestamp_mono_us: MonoUs(1_100),
-        }));
-        harness.drain();
-
-        assert!(
-            received_events(&mut rx).is_empty(),
-            "a matching shell-reserved KeyUp must never reach an agent"
-        );
+                harness.enqueue(PendingKeyboardEvent::KeyUp(RawKeyUpEvent {
+                    key_code: key_code.to_string(),
+                    key: up_key.to_string(),
+                    // Physical identity owns the release even after Ctrl/Shift
+                    // release changes both modifiers and the logical key case.
+                    modifiers: if modifiers_held {
+                        KeyboardModifiers {
+                            ctrl: true,
+                            shift,
+                            ..KeyboardModifiers::NONE
+                        }
+                    } else {
+                        KeyboardModifiers::NONE
+                    },
+                    timestamp_mono_us: MonoUs(1_100),
+                }));
+                harness.drain();
+                assert_eq!(harness.pending_len(), 0);
+                assert!(
+                    received_events(&mut rx).is_empty(),
+                    "matching {up_key} KeyUp must never reach an agent"
+                );
+                assert!(
+                    harness
+                        .app
+                        .state
+                        .consumed_shell_shortcut_keydowns
+                        .is_empty()
+                );
+            }
+        }
     }
 
     /// Ctrl+Shift+P is consumed one stage earlier by the real winit path,
@@ -1884,26 +1934,40 @@ mod tests {
     /// filter. Ordinary focused-agent shortcuts keep their raw down/up route.
     #[test]
     fn non_reserved_ctrl_key_sequence_still_reaches_focused_agent() {
-        let mut harness = HeadlessEventLoopHarness::new();
-        let (_tile_id, _node_id, mut rx) = install_button(&mut harness, true);
+        for (key_code, key, shift, alt) in [
+            ("KeyA", "a", false, false),
+            ("KeyM", "m", false, false),
+            ("KeyM", "M", true, true),
+        ] {
+            let mut harness = HeadlessEventLoopHarness::new();
+            let (_tile_id, _node_id, mut rx) = install_button(&mut harness, true);
+            let mut down = ctrl_key_down(key_code, key, shift, 1_000);
+            let mut up = ctrl_key_up(key_code, key, shift, 1_100);
+            if let PendingKeyboardEvent::KeyDown(raw) = &mut down {
+                raw.modifiers.alt = alt;
+            }
+            if let PendingKeyboardEvent::KeyUp(raw) = &mut up {
+                raw.modifiers.alt = alt;
+            }
+            harness.enqueue(down);
+            harness.enqueue(up);
+            harness.drain();
+            assert_eq!(harness.pending_len(), 0);
 
-        harness.enqueue(ctrl_key_down("KeyA", "a", false, 1_000));
-        harness.enqueue(ctrl_key_up("KeyA", "a", false, 1_100));
-        harness.drain();
-
-        let events = received_events(&mut rx);
-        assert!(
-            events
-                .iter()
-                .any(|(_, event)| matches!(event, ProtoInputEvent::KeyDown(_))),
-            "non-reserved Ctrl+A KeyDown must retain raw agent routing; got {events:?}"
-        );
-        assert!(
-            events
-                .iter()
-                .any(|(_, event)| matches!(event, ProtoInputEvent::KeyUp(_))),
-            "non-reserved Ctrl+A KeyUp must retain raw agent routing; got {events:?}"
-        );
+            let events = received_events(&mut rx);
+            assert!(
+                events
+                    .iter()
+                    .any(|(_, event)| matches!(event, ProtoInputEvent::KeyDown(_))),
+                "non-reserved {key} KeyDown must retain raw agent routing; got {events:?}"
+            );
+            assert!(
+                events
+                    .iter()
+                    .any(|(_, event)| matches!(event, ProtoInputEvent::KeyUp(_))),
+                "non-reserved {key} KeyUp must retain raw agent routing; got {events:?}"
+            );
+        }
     }
 
     /// RFC 0004 §10 production proof: keyboard is a concrete pointer-free
