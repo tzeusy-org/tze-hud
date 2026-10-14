@@ -153,6 +153,8 @@ pub struct Portal {
     /// Changed since the last render.
     pub dirty: bool,
     pub last_render_us: Option<u64>,
+    /// Accepted local reply feedback bypasses the render interval once.
+    local_reply_pending: bool,
     /// Reclaimed by the runtime (viewer dismiss, idle reclaim): a marker so
     /// `hud_clear` stays an ok no-op and `hud_hold` is `NotHeld`. The next
     /// publish attaches a fresh portal.
@@ -176,6 +178,7 @@ impl Portal {
             degraded_since_us: None,
             dirty: true,
             last_render_us: None,
+            local_reply_pending: false,
             reclaimed_by_runtime: false,
             next_seq: 1,
         }
@@ -597,6 +600,7 @@ impl PortalHub {
         });
         let start = newest_fit_start(&portal.replies, limits.visible_bytes);
         portal.replies.drain(..start);
+        portal.local_reply_pending = true;
         portal.dirty = true;
         Ok(id)
     }
@@ -675,8 +679,8 @@ impl PortalHub {
         transitions
     }
 
-    /// Portals with changes whose render interval has passed. Clears their
-    /// dirty flag and unread count.
+    /// Portals with changes whose render interval has passed, or an accepted
+    /// local reply to show immediately. Clears dirty, local urgency and unread.
     pub fn take_due(&mut self, now_us: u64) -> Vec<Due> {
         let interval = self.limits.render_interval_us;
         self.portals
@@ -684,11 +688,13 @@ impl PortalHub {
             .filter(|(_, p)| {
                 p.live()
                     && p.dirty
-                    && p.last_render_us
-                        .is_none_or(|t| now_us >= t.saturating_add(interval))
+                    && (p.local_reply_pending
+                        || p.last_render_us
+                            .is_none_or(|t| now_us >= t.saturating_add(interval)))
             })
             .map(|(key, portal)| {
                 portal.dirty = false;
+                portal.local_reply_pending = false;
                 portal.last_render_us = Some(now_us);
                 Due {
                     key: key.clone(),
@@ -706,7 +712,11 @@ impl PortalHub {
             .filter(|p| p.live())
             .flat_map(|p| {
                 let render = p.dirty.then(|| Deadline {
-                    at_us: p.last_render_us.map_or(0, |t| t.saturating_add(interval)),
+                    at_us: if p.local_reply_pending {
+                        0
+                    } else {
+                        p.last_render_us.map_or(0, |t| t.saturating_add(interval))
+                    },
                     kind: DeadlineKind::Render,
                 });
                 let liveness = match p.degraded_since_us {
