@@ -169,7 +169,7 @@ token-footprint:
         --baseline scripts/ci/token_footprint_baseline.json \
         --output test_results/token-footprint/gate-report.json
 
-# vertical_slice production config boot (mirror CI production-boot-vertical-slice job)
+# vertical_slice production config boot (also runs in CI test-unit)
 production-boot:
     if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
     HEADLESS_FORCE_SOFTWARE=1 \
@@ -178,7 +178,7 @@ production-boot:
             --test production_boot \
             -- --nocapture
 
-# Canonical app production config boot (mirror CI canonical-app-production-boot job)
+# Canonical app production config boot (also runs in CI test-unit)
 canonical-app-boot:
     if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
     HEADLESS_FORCE_SOFTWARE=1 \
@@ -255,7 +255,7 @@ build-windows *args:
 # included via `test` (they need Mesa llvmpipe). clippy-windows-gnu and cargo-deny
 # are tool-gated: they print "SKIPPED: <reason>" and pass when their tool
 # (windows-gnu Rust target or cargo-deny) is absent.
-# Excluded by design: the Windows-only jobs (windows.yml), the informational
-# test-gpu-pixel-readback job (covered by `test`), and the weekly perf lanes.
+# Excluded by design: the Windows-only jobs (windows.yml) and weekly perf lanes.
+# Boot and pixel-readback tests run in CI test-unit; focused recipes remain local.
 # Runs in the same logical order as CI: fast-fail gates first, then tests.
 ci: untracked-evidence check fmt clippy clippy-windows-gnu cargo-deny deps-unused dev-mode-guard idle-efficiency-checker test test-integration test-python token-footprint production-boot canonical-app-boot
