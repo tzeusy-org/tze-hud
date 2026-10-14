@@ -361,7 +361,8 @@ async fn notification_actions_layout_matches_hit_regions() {
 #[tokio::test]
 async fn notification_action_row_is_reserved_below_the_text() {
     use crate::renderer::token_colors::{
-        NOTIFICATION_ACTION_BUTTON_H_PX, NOTIFICATION_ACTION_ROW_GAP_PX,
+        NOTIFICATION_ACTION_BUTTON_H_PX, NOTIFICATION_ACTION_INSET_PX,
+        NOTIFICATION_ACTION_ROW_GAP_PX, NOTIFICATION_STACK_GAP_DEFAULT_PX,
     };
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
@@ -401,7 +402,10 @@ async fn notification_action_row_is_reserved_below_the_text() {
         }
         assert_eq!(
             h(&with_actions),
-            h(&plain) + NOTIFICATION_ACTION_BUTTON_H_PX + NOTIFICATION_ACTION_ROW_GAP_PX,
+            h(&plain)
+                + NOTIFICATION_ACTION_ROW_GAP_PX
+                + NOTIFICATION_ACTION_BUTTON_H_PX
+                + NOTIFICATION_ACTION_INSET_PX,
             "title={title:?}: actions reserve the button row"
         );
     }
@@ -483,6 +487,100 @@ async fn notification_action_row_is_reserved_below_the_text() {
             text_bottom(text),
             button_top(callback)
         );
+    }
+
+    // Owner feedback on Windows: buttons must sit inside the card (inset from
+    // its sides and bottom), and stacked cards must not touch.
+    let publishes = scene
+        .zone_registry
+        .active_for_zone("notification-area")
+        .to_vec();
+    // Zone: x = 0.6 * 1280, y = 0, w = 0.35 * 1280, h = 0.8 * 720.
+    let (zx, zy, zw, zh) = (768.0_f32, 0.0_f32, 448.0_f32, 576.0_f32);
+    let layout = compositor.zone_slot_layout("notification-area", &publishes, &policy, zh);
+    let cards: Vec<(usize, f32, f32)> = layout.iter_visible(zy).collect();
+    assert_eq!(cards.len(), 3, "all three cards are visible");
+    for pair in cards.windows(2) {
+        let (_, top_y, top_h) = pair[0];
+        let (_, next_y, _) = pair[1];
+        assert_eq!(
+            next_y - (top_y + top_h),
+            NOTIFICATION_STACK_GAP_DEFAULT_PX,
+            "consecutive cards are separated by the stack gap"
+        );
+    }
+    let action_regions: Vec<_> = scene
+        .overlay
+        .zone_hit_regions
+        .iter()
+        .filter(|r| {
+            matches!(
+                r.kind,
+                tze_hud_scene::types::ZoneInteractionKind::Action { .. }
+            )
+        })
+        .collect();
+    assert_eq!(action_regions.len(), 3, "approve, reject and open");
+    for region in action_regions {
+        let b = region.bounds;
+        let (_, card_y, card_h) = *cards
+            .iter()
+            .find(|(_, y, h)| b.y >= *y && b.y < y + h)
+            .expect("each button lies in a card");
+        let inset = NOTIFICATION_ACTION_INSET_PX;
+        assert!(
+            b.x >= zx + inset - 0.01
+                && b.x + b.width <= zx + zw - inset + 0.01
+                && b.y + b.height <= card_y + card_h - inset + 0.01,
+            "button {b:?} must sit inside card y={card_y} h={card_h} minus the {inset} px inset"
+        );
+    }
+
+    // The dismiss × sits inside each card's top-right padding (so the rounded
+    // corner never clips it) and clear of the card's text.
+    let dismiss_regions: Vec<_> = scene
+        .overlay
+        .zone_hit_regions
+        .iter()
+        .filter(|r| matches!(r.kind, tze_hud_scene::types::ZoneInteractionKind::Dismiss))
+        .map(|r| r.bounds)
+        .collect();
+    assert_eq!(dismiss_regions.len(), 3, "one × per card");
+    let inset = NOTIFICATION_ACTION_INSET_PX;
+    for b in &dismiss_regions {
+        let (_, card_y, card_h) = *cards
+            .iter()
+            .find(|(_, y, h)| b.y >= *y && b.y < y + h)
+            .expect("each × lies in a card");
+        assert!(
+            b.x + b.width <= zx + zw - inset + 0.01
+                && b.y >= card_y + inset - 0.01
+                && b.y + b.height <= card_y + card_h - inset + 0.01,
+            "× {b:?} must sit inside card y={card_y} h={card_h} minus the {inset} px inset"
+        );
+    }
+    let overlaps = |a: tze_hud_scene::types::Rect, x: f32, y: f32, w: f32, h: f32| {
+        a.x < x + w && x < a.x + a.width && a.y < y + h && y < a.y + a.height
+    };
+    // Card text only: skip the × glyph itself.
+    for item in items.iter().filter(|i| &*i.text != "X") {
+        for b in &dismiss_regions {
+            assert!(
+                !overlaps(
+                    *b,
+                    item.pixel_x,
+                    item.pixel_y,
+                    item.bounds_width,
+                    item.bounds_height
+                ),
+                "× {b:?} overlaps text {:?} at ({}, {}, {}x{})",
+                item.text,
+                item.pixel_x,
+                item.pixel_y,
+                item.bounds_width,
+                item.bounds_height
+            );
+        }
     }
 }
 
@@ -992,8 +1090,8 @@ async fn test_notification_card_border_is_an_sdf_border() {
     assert_eq!(dismiss.color, [0.0; 4]);
     assert_eq!(dismiss.border.map(|b| b.width), Some(1.0));
     assert!(
-        (dismiss.x + dismiss.width - (x + w)).abs() < 0.01,
-        "dismiss at the right edge"
+        (dismiss.x + dismiss.width - (x + w - 9.0)).abs() < 0.01,
+        "dismiss inset 9 px from the right edge"
     );
 
     let rounded = bordered_notification_scene(Some(12.0));

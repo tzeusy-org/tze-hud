@@ -732,7 +732,9 @@ pub(crate) struct ZoneSlotLayout {
     /// `stack_slot_height`.
     pub(crate) slot_heights: Vec<f32>,
     /// Cumulative y-offsets from the zone origin, one per slot.
-    /// `slot_offsets[i]` is the y-start of slot `i` relative to `zy`.
+    /// `slot_offsets[i]` is the y-start of slot `i` relative to `zy`;
+    /// notification cards (not alert banners) are separated by
+    /// `notification_stack_gap`.
     pub(crate) slot_offsets: Vec<f32>,
     /// Effective zone height in pixels.
     /// For alert-banner zones this equals `sum(slot_heights)` (dynamic growth).
