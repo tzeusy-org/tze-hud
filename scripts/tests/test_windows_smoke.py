@@ -324,7 +324,7 @@ def test_parse_tile_count_finds_the_line_among_other_output():
             ws.parse_tile_count(bad)
 
 
-def test_quiescent_summary_reports_the_gate_counters(tmp_path, monkeypatch, capsys):
+def test_quiescent_summary_reports_the_gate_counters(tmp_path, monkeypatch, capsys, subtests):
     artifact = {
         "gpu": {"presents": 2, "queue_submissions": 2, "surface_acquisitions": 2},
         "wakeups": {"combined_runtime_driven": 7},
@@ -364,26 +364,34 @@ def test_quiescent_summary_reports_the_gate_counters(tmp_path, monkeypatch, caps
         ws.write_step_summary(line)
     monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary_path))
 
-    # Exercise the real quiescent call order with an emitted fixture artifact:
-    # counters must be appended even when the unchanged checker rejects it.
+    # Exercise the owned HUD path, including strict artifact qualification,
+    # actual child completion and failure cleanup, without launching a process.
     work = tmp_path / "quiescent"
     work.mkdir()
-    (work / "quiescent-efficiency.json").write_text(ws.json.dumps(private_artifact), encoding="utf-8")
+    artifact_path = work / "quiescent-efficiency.json"
     proc_events = []
     publishes = []
+    checked = []
+    spawned = []
 
     class FakeProcess:
         returncode = None
+        exit_code = 0
+        times_out = False
 
         def poll(self):
             return self.returncode
 
         def kill(self):
             proc_events.append("kill")
-            self.returncode = 0
+            self.returncode = -9
 
         def wait(self, timeout):
             proc_events.append(("wait", timeout))
+            if self.times_out and self.returncode is None:
+                raise ws.subprocess.TimeoutExpired("owned-hud", timeout)
+            if self.returncode is None:
+                self.returncode = self.exit_code
             return self.returncode
 
     class FakeSmoke:
@@ -397,31 +405,75 @@ def test_quiescent_summary_reports_the_gate_counters(tmp_path, monkeypatch, caps
             publishes.append(args["surface"])
             return {"ok": True}
 
-    checked = []
-    before = summary_path.read_text(encoding="utf-8")
+    class Checker:
+        failures = []
 
-    class RejectingChecker:
-        def validate_artifact(self, actual, *, require_constrained):
-            assert actual == private_artifact and require_constrained is False
+        def validate_artifact(self, actual, *, require_constrained, required_window_mode=None):
+            assert actual == private_artifact
             saved = summary_path.read_text(encoding="utf-8")
             assert saved.startswith(before) and saved != before
             assert "runtime\\_wakeups=7" in saved[len(before):] and marker not in saved
-            checked.append(True)
-            return {}, ["controlled invalid artifact"]
+            checked.append((require_constrained, required_window_mode))
+            return {}, self.failures
 
     monkeypatch.setattr(ws, "seed_config", lambda config, psk: config)
     monkeypatch.setattr(ws.secrets, "token_hex", lambda count: "synthetic-psk")
     monkeypatch.setattr(ws.tempfile, "mkdtemp", lambda **kwargs: str(work))
-    monkeypatch.setattr(ws.subprocess, "Popen", lambda *args, **kwargs: FakeProcess())
+    monkeypatch.setattr(ws.subprocess, "Popen", lambda argv, **kwargs: spawned.append(argv) or proc)
     monkeypatch.setattr(ws, "Smoke", FakeSmoke)
     monkeypatch.setattr(ws, "wait_for_mcp", lambda *args: None)
-    monkeypatch.setattr(ws, "load_efficiency_checker", lambda: RejectingChecker())
+    monkeypatch.setattr(ws, "load_efficiency_checker", lambda: checker)
     args = ws.argparse.Namespace(exe=tmp_path / "hud.exe", config=tmp_path / "production.toml",
                                  mcp_port=9090, startup_timeout=90, quiescent_timeout=150)
-    assert ws.run_quiescent(args) == 1
-    assert checked == [True]
-    assert publishes == ["zone:notification-area", "widget:main-gauge"]
-    assert proc_events == ["kill", ("wait", 10)]
+    for case, failures, exit_code, times_out, content, expected, events in [
+        ("valid", [], 0, False, "json", 0, [("wait", 10)]),
+        ("runtime_failed", [], 7, False, "json", 1, [("wait", 10)]),
+        ("invalid_cpu4", ["logical_cpu_limit: expected 2, got 4"], 0, False,
+         "json", 1, [("wait", 10)]),
+        ("exit_timeout", [], 0, True, "json", 1, [("wait", 10), "kill", ("wait", 10)]),
+        ("malformed", [], 0, False, "malformed", 1, ["kill", ("wait", 10)]),
+        ("list_shape", [], 0, False, "list", 1, ["kill", ("wait", 10)]),
+        ("gpu_shape", [], 0, False, "gpu_list", 1, ["kill", ("wait", 10)]),
+        ("startup_failed", [], 0, False, "json", 1, ["kill", ("wait", 10)]),
+        ("missing", [], 1, False, "missing", 1, []),
+    ]:
+        with subtests.test(case=case):
+            proc = FakeProcess()
+            proc.exit_code, proc.times_out = exit_code, times_out
+            checker = Checker()
+            checker.failures = failures
+            proc_events.clear()
+            publishes.clear()
+            checked.clear()
+            spawned.clear()
+            before = summary_path.read_text(encoding="utf-8")
+            if case == "startup_failed":
+                monkeypatch.setattr(ws, "wait_for_mcp", lambda *args: ws.wait_until(
+                    lambda: (False, None), what="startup", timeout_s=0,
+                ))
+            else:
+                monkeypatch.setattr(ws, "wait_for_mcp", lambda *args: None)
+            if content == "missing":
+                artifact_path.unlink(missing_ok=True)
+                proc.returncode = exit_code
+            else:
+                payload = {"json": ws.json.dumps(private_artifact), "list": "[]",
+                           "gpu_list": ws.json.dumps({**private_artifact, "gpu": []}), "malformed": "{"}
+                artifact_path.write_text(payload[content], encoding="utf-8")
+            assert ws.run_quiescent(args) == expected
+            assert checked == ([(True, "fullscreen")] if content == "json" and case != "startup_failed" else [])
+            assert spawned[0][0] == str(args.exe)
+            assert publishes == ([] if case == "startup_failed" else ["zone:notification-area", "widget:main-gauge"])
+            assert proc_events == events
+            assert proc.returncode is not None
+            output = capsys.readouterr()
+            assert marker not in output.out + output.err
+            if expected:
+                assert "FAIL " in output.err
+            if content in ("list", "gpu_list"):
+                assert "expected object" in output.err
+            if case == "startup_failed":
+                assert "startup" in output.err
     assert marker not in capsys.readouterr().out
 
 

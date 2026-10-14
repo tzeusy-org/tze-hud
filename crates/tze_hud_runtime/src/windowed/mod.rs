@@ -2713,6 +2713,10 @@ impl WindowedRuntime {
     /// Returns an error if the winit event loop or window creation fails.
     pub fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         let cfg = self.config;
+        #[cfg(target_os = "windows")]
+        if cfg.quiescent_efficiency.is_some() {
+            lifecycle::admit_quiescent_cpu_affinity()?;
+        }
         let runtime_context: SharedRuntimeContext = build_runtime_context(&cfg);
 
         let event_loop = EventLoop::<RuntimeWakeEvent>::with_user_event().build()?;

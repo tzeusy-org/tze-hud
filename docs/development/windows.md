@@ -279,6 +279,17 @@ python scripts/ci/windows_smoke.py --exe target/release-dev/tze_hud.exe --poc-de
 python scripts/ci/windows_install_smoke.py --exe target/release-dev/tze_hud.exe
 ```
 
+The informational `Quiescent with content` step uses a directly owned fullscreen
+HUD process. Measurement startup narrows its existing allowed affinity to two
+CPUs before runtime/window/compositor initialization and fails closed if that
+cannot be observed; ordinary launches do not change affinity. The script requires
+an observed two-CPU WARP artifact and actual HUD exit0, with bounded owned-PID
+cleanup. It keeps the five-second settle after first present and sixty-second
+observation. `continue-on-error` permits the job to continue after a failed step;
+job success does not qualify an invalid artifact. The canonical performance
+workflow separately runs the constrained WARP **overlay** harness at
+`scripts/ci/windows/run-quiescent-efficiency.ps1` with `/affinity 3`.
+
 ## Developing from WSL2
 
 The HUD has to be a native Windows process: a Linux build inside WSL (WSLg)

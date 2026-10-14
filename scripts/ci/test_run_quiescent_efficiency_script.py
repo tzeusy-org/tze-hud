@@ -28,6 +28,20 @@ class QuiescentEfficiencyLaunchContractTests(unittest.TestCase):
         self.assertNotIn("-FilePath $ExePath", self.script)
         self.assertNotIn(".ProcessorAffinity", self.script)
 
+        runtime = (ROOT / "crates/tze_hud_runtime/src/windowed/mod.rs").read_text(
+            encoding="utf-8"
+        )
+        run = runtime.split("pub fn run(self)", 1)[1]
+        admission = (
+            '#[cfg(target_os = "windows")]\n'
+            "        if cfg.quiescent_efficiency.is_some() {\n"
+            "            lifecycle::admit_quiescent_cpu_affinity()?;\n"
+            "        }"
+        )
+        self.assertIn(admission, run)
+        self.assertLess(run.index(admission), run.index("build_runtime_context(&cfg)"))
+        self.assertLess(run.index(admission), run.index("EventLoop::<RuntimeWakeEvent>"))
+
     def test_fast_ci_runs_the_startup_atomicity_contract(self) -> None:
         self.assertIn(
             "python3 scripts/ci/test_run_quiescent_efficiency_script.py",

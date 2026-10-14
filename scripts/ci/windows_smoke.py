@@ -21,8 +21,9 @@ hang guard; none assumes exact timing.
 
 `--quiescent-with-content` instead boots a second HUD under
 `--quiescent-efficiency-emit`, publishes held content inside the settle window,
-and checks that the runtime then presents nothing for the 60 s observation. It
-is informational in CI (see windows.yml).
+and checks that the constrained WARP fullscreen runtime then presents nothing
+for the 60 s observation and exits successfully. It is informational in CI
+(see windows.yml); job success alone does not qualify its artifact.
 
 `--captures DIR` restarts an isolated owned HUD per global theme and captures
 the four exact user-test fixture cells (each status-matrix update separately).
@@ -1123,6 +1124,7 @@ def run_quiescent(args: argparse.Namespace) -> int:
     with open(log_path, "wb") as log:
         proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
     smoke = Smoke(f"http://127.0.0.1:{args.mcp_port}/", psk)
+    result = 1
     try:
         wait_for_mcp(smoke, proc, args.startup_timeout)
         smoke.ok("hud_publish", {"surface": "zone:notification-area", "content": {"title": "CI", "body": "held content"}, "ttl_ms": 0})
@@ -1136,22 +1138,33 @@ def run_quiescent(args: argparse.Namespace) -> int:
         wait_until(written, what="quiescent artifact", timeout_s=args.quiescent_timeout, interval_s=1)
         assert artifact_path.exists(), f"tze_hud exited ({proc.returncode}) without writing {artifact_path.name}"
         artifact = json.loads(artifact_path.read_text(encoding="utf-8"))
+        assert isinstance(artifact, dict), "quiescent artifact: expected object"
+        for field in ("gpu", "wakeups", "renderer"):
+            assert isinstance(artifact.get(field, {}), dict), f"quiescent artifact.{field}: expected object"
         summary = quiescent_summary(artifact)
         print("measured:", summary)
         write_step_summary(summary)
-        _, failures = load_efficiency_checker().validate_artifact(artifact, require_constrained=False)
+        _, failures = load_efficiency_checker().validate_artifact(
+            artifact, require_constrained=True, required_window_mode="fullscreen"
+        )
+        runtime_exit = proc.wait(timeout=10)
+        assert runtime_exit == 0, f"quiescent HUD failed (exit={runtime_exit})"
         assert not failures, "quiescent gate failed: " + "; ".join(failures)
         print("ok  held content on screen, then no presents, submissions, or acquisitions for the interval")
-        return 0
-    except AssertionError as err:
+        result = 0
+    except (AssertionError, OSError, ValueError, subprocess.TimeoutExpired) as err:
         print(f"FAIL {err}", file=sys.stderr)
-        return 1
     finally:
-        if proc.poll() is None:
-            proc.kill()
-            proc.wait(timeout=10)
+        try:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait(timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as err:
+            print(f"FAIL owned HUD cleanup: {err}", file=sys.stderr)
+            result = 1
         print(f"--- HUD log ({log_path}) ---")
         print(log_path.read_text(errors="replace")[-8_000:])
+    return result
 
 
 def main() -> int:
