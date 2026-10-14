@@ -2684,8 +2684,8 @@ impl WindowedRuntime {
     pub fn run(self) -> Result<(), Box<dyn std::error::Error>> {
         let cfg = self.config;
         #[cfg(target_os = "windows")]
-        if cfg.quiescent_efficiency.is_some() {
-            lifecycle::admit_quiescent_cpu_affinity()?;
+        if let Some(measurement) = cfg.quiescent_efficiency.as_ref() {
+            lifecycle::admit_quiescent_cpu_affinity(&measurement.emit_path)?;
         }
         let runtime_context: SharedRuntimeContext = build_runtime_context(&cfg);
 

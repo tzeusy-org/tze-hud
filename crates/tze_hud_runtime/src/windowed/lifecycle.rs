@@ -1268,7 +1268,7 @@ fn quiescent_cpu_mask(allowed: usize) -> Option<usize> {
 
 /// Constrain this opt-in measurement before any runtime initialization.
 #[cfg(target_os = "windows")]
-pub(super) fn admit_quiescent_cpu_affinity() -> std::io::Result<()> {
+pub(super) fn admit_quiescent_cpu_affinity(emit_path: &std::path::Path) -> std::io::Result<()> {
     use windows::Win32::System::Threading::{
         GetCurrentProcess, GetProcessAffinityMask, GetProcessGroupAffinity, SetProcessAffinityMask,
     };
@@ -1328,11 +1328,19 @@ pub(super) fn admit_quiescent_cpu_affinity() -> std::io::Result<()> {
         logical_cpus = observed.count_ones(),
         "quiescent two-CPU affinity admitted before runtime initialization"
     );
-    eprintln!(
+    let admission = format!(
         "quiescent-admission pid={} cpu_mask={observed:#x} logical_cpus={} phase=before_runtime_init",
         std::process::id(),
         observed.count_ones()
     );
+    if let Some(parent) = emit_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)?;
+    }
+    let admission_path = emit_path.with_extension("admission.log");
+    std::fs::write(admission_path, format!("{admission}\n"))?;
+    eprintln!("{admission}");
     Ok(())
 }
 

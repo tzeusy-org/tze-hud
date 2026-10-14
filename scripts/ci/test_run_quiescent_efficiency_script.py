@@ -34,13 +34,22 @@ class QuiescentEfficiencyLaunchContractTests(unittest.TestCase):
         run = runtime.split("pub fn run(self)", 1)[1]
         admission = (
             '#[cfg(target_os = "windows")]\n'
-            "        if cfg.quiescent_efficiency.is_some() {\n"
-            "            lifecycle::admit_quiescent_cpu_affinity()?;\n"
+            "        if let Some(measurement) = cfg.quiescent_efficiency.as_ref() {\n"
+            "            lifecycle::admit_quiescent_cpu_affinity(&measurement.emit_path)?;\n"
             "        }"
         )
         self.assertIn(admission, run)
         self.assertLess(run.index(admission), run.index("build_runtime_context(&cfg)"))
         self.assertLess(run.index(admission), run.index("EventLoop::<RuntimeWakeEvent>"))
+
+        lifecycle = (ROOT / "crates/tze_hud_runtime/src/windowed/lifecycle.rs").read_text(
+            encoding="utf-8"
+        )
+        helper = lifecycle.split("pub(super) fn admit_quiescent_cpu_affinity(", 1)[1]
+        helper = helper.split('\n#[cfg(target_os = "windows")]\nfn observed_cpu_affinity', 1)[0]
+        self.assertRegex(helper, r"std::fs::write\([^;]+\)\?;")
+        self.assertLess(helper.index("if observed != selected"), helper.index("std::fs::write("))
+        self.assertLess(helper.index("std::fs::write("), helper.index("Ok(())"))
 
         completion = (
             'Write-Host ("quiescent-completion launcher_pid={0} propagated_hud_exit={1} '
@@ -49,6 +58,32 @@ class QuiescentEfficiencyLaunchContractTests(unittest.TestCase):
         self.assertIn(completion, self.script)
         self.assertLess(self.script.index("$runtimeExit = $launcher.ExitCode"), self.script.index(completion))
         self.assertLess(self.script.index(completion), self.script.index("if (-not (Test-Path $artifactPath))"))
+
+        prelaunch = self.script.split("$launcher = Start-Process", 1)[0]
+        self.assertIn('$ErrorActionPreference = "Stop"', prelaunch)
+        self.assertIn("foreach ($ownedPath in @($admissionPath, $artifactPath))", prelaunch)
+        self.assertIn("Remove-Item -LiteralPath $ownedPath -Force", prelaunch)
+        self.assertNotIn("-ErrorAction SilentlyContinue", prelaunch)
+        self.assertNotIn("-Recurse", prelaunch)
+
+        validation = self.script.split("if ($checkerExit -ne 0)", 1)[1]
+        self.assertIn("foreach ($currentPath in @($admissionPath, $artifactPath))", validation)
+        self.assertIn("$currentInfo.LastWriteTimeUtc -lt $launchStartedUtc", validation)
+        self.assertIn("$admissionInfo.Length -le 0 -or $admissionInfo.Length -gt 256", validation)
+        receipt_read = "[System.IO.File]::ReadAllText($admissionInfo.FullName)"
+        self.assertIn(receipt_read, validation)
+        self.assertLess(validation.index("$admissionInfo.Length -gt 256"), validation.index(receipt_read))
+        self.assertIn(
+            r"$admissionPattern = '\Aquiescent-admission pid=(?<pid>[1-9][0-9]{0,9}) "
+            r"cpu_mask=0x(?<mask>[0-9a-f]{1,16}) logical_cpus=2 "
+            r"phase=before_runtime_init(?:\r?\n)?\z'",
+            validation,
+        )
+        self.assertRegex(validation, r"if \(-not \$admissionMatch.Success\) \{\s+throw ")
+        receipt_print = 'Write-Host $admissionText.TrimEnd("`r", "`n")'
+        self.assertIn(receipt_print, validation)
+        self.assertLess(validation.index("if (-not $admissionMatch.Success)"), validation.index(receipt_print))
+        self.assertNotIn("Write-Host $admissionText", validation[:validation.index(receipt_print)])
 
     def test_fast_ci_runs_the_startup_atomicity_contract(self) -> None:
         self.assertIn(
