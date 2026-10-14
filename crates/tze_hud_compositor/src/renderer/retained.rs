@@ -530,7 +530,7 @@ fn canonical_snapshot(
         // Idle hit regions are an output of the full baseline frame and do not
         // affect pixels. A local hover/press state does, so retained rendering
         // must decline rather than silently repaint it as idle chrome.
-        || !scene.overlay.drag_handle_states.is_empty()
+        || !scene.overlay.chrome_states.is_empty()
         || !scene.overlay.drag_active_elements.is_empty()
         || scene.overlay.drag_handle_context_menu.is_some()
         || !scene.overlay.portal_surfaces.is_empty()
@@ -889,7 +889,7 @@ mod tests {
         let mut scene = canonical_scene_with_first_content("AB");
         scene
             .overlay
-            .drag_handle_states
+            .chrome_states
             .insert("drag-handle:canonical".into(), Default::default());
 
         assert!(

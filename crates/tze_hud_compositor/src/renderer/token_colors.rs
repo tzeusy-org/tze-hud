@@ -1003,23 +1003,45 @@ pub(super) fn notification_action_button_bounds(
 pub(super) struct NotificationActionTokens {
     /// Button fill (linear-light RGBA, as `parse_hex_color` returns).
     pub(super) background: Rgba,
+    /// Fill of a hovered action or dismiss button.
+    pub(super) background_hover: Rgba,
+    /// Fill of a pressed action or dismiss button.
+    pub(super) background_pressed: Rgba,
     pub(super) font_size_px: f32,
     pub(super) font_weight: u16,
 }
 
+impl NotificationActionTokens {
+    /// Fill for a control in `state`: pressed wins over hovered. `None` for
+    /// an idle dismiss button, which draws only its outline.
+    pub(super) fn state_fill(&self, state: ChromeLocalState, idle: Option<Rgba>) -> Option<Rgba> {
+        if state.pressed {
+            Some(self.background_pressed)
+        } else if state.hovered {
+            Some(self.background_hover)
+        } else {
+            idle
+        }
+    }
+}
+
 // Fallbacks MUST stay in sync with `tze_hud_config`'s `CANONICAL_TOKENS`
-// entries `notification.action.background` and
+// entries `notification.action.background*` and
 // `typography.notification.action.*` (the crates are intentionally unlinked).
 const NOTIFICATION_ACTION_DEFAULT_BACKGROUND_HEX: &str = "#FFFFFF26";
+const NOTIFICATION_ACTION_DEFAULT_BACKGROUND_HOVER_HEX: &str = "#FFFFFF4D";
+const NOTIFICATION_ACTION_DEFAULT_BACKGROUND_PRESSED_HEX: &str = "#FFFFFF80";
 const NOTIFICATION_ACTION_DEFAULT_FONT_SIZE_PX: f32 = 12.0;
 const NOTIFICATION_ACTION_DEFAULT_FONT_WEIGHT: u16 = 600;
 
 pub(super) fn resolve_notification_action_tokens(
     token_map: &HashMap<String, String>,
 ) -> NotificationActionTokens {
-    let background = resolve_token_color(token_map, "notification.action.background")
-        .or_else(|| parse_hex_color(NOTIFICATION_ACTION_DEFAULT_BACKGROUND_HEX))
-        .unwrap_or(Rgba::WHITE);
+    let color = |key: &str, default_hex: &str| {
+        resolve_token_color(token_map, key)
+            .or_else(|| parse_hex_color(default_hex))
+            .unwrap_or(Rgba::WHITE)
+    };
     let font_size_px = token_map
         .get("typography.notification.action.font_size_px")
         .and_then(|v| v.trim_end_matches("px").parse::<f32>().ok())
@@ -1031,7 +1053,18 @@ pub(super) fn resolve_notification_action_tokens(
         .and_then(|v| v.parse::<u16>().ok())
         .unwrap_or(NOTIFICATION_ACTION_DEFAULT_FONT_WEIGHT);
     NotificationActionTokens {
-        background,
+        background: color(
+            "notification.action.background",
+            NOTIFICATION_ACTION_DEFAULT_BACKGROUND_HEX,
+        ),
+        background_hover: color(
+            "notification.action.background_hover",
+            NOTIFICATION_ACTION_DEFAULT_BACKGROUND_HOVER_HEX,
+        ),
+        background_pressed: color(
+            "notification.action.background_pressed",
+            NOTIFICATION_ACTION_DEFAULT_BACKGROUND_PRESSED_HEX,
+        ),
         font_size_px,
         font_weight,
     }

@@ -255,7 +255,7 @@ impl Compositor {
         for entry in handles {
             let local_state = scene
                 .overlay
-                .drag_handle_states
+                .chrome_states
                 .get(&entry.interaction_id)
                 .copied()
                 .unwrap_or_default();
