@@ -418,7 +418,7 @@ pub(crate) struct TextRasterizer {
     /// `shape_until_scroll`; read via [`TextRasterizer::shape_call_count`].
     #[allow(dead_code)] // read only by the hud-991cj scroll-reshape benchmark
     pub(crate) shape_call_count: u64,
-    /// Shaped-buffer reuse cache (hud-991cj): a glyphon `Buffer` keyed by a
+    /// Shaped-buffer reuse cache (hud-991cj): owned glyphon `Buffer`s keyed by a
     /// content-and-geometry `ShapeKey` (BLAKE3 of every input that affects the
     /// shaped glyphs — see [`shape_key_for_item`]). The **scroll offset is
     /// deliberately NOT in the key** — a Clip pane's shaped output is
@@ -428,13 +428,15 @@ pub(crate) struct TextRasterizer {
     ///
     /// Bounded by construction: `prepare_text_items` moves the whole map out at
     /// the top of the frame and rebuilds it from *this frame's* live items, so it
-    /// only ever holds the currently-rendered set (stale keys are dropped, not
-    /// accumulated). Front-runs the Wave-3 "perf-whole-scene-reshape-per-frame"
+    /// retains one owned buffer per item in the latest actually prepared set,
+    /// including duplicate keys. Unused old keys and surplus buffers are dropped.
+    /// A skipped empty layer keeps its last prepared set without drawing it.
+    /// Front-runs the Wave-3 "perf-whole-scene-reshape-per-frame"
     /// shaped-buffer-reuse item.
-    shape_cache: HashMap<[u8; 32], Buffer>,
+    shape_cache: HashMap<[u8; 32], Vec<Buffer>>,
     /// Shaped-buffer cache for the overlay layer, kept apart so a frame that
     /// prepares overlay text does not evict the content layer's buffers.
-    overlay_shape_cache: HashMap<[u8; 32], Buffer>,
+    overlay_shape_cache: HashMap<[u8; 32], Vec<Buffer>>,
 }
 
 /// Which glyphon renderer (and shaped-buffer cache) a prepare call targets.
@@ -1346,9 +1348,9 @@ impl TextRasterizer {
         // output is offset-independent, so a pure scroll hits every key and
         // re-shapes zero buffers (the whole win). A key miss (content / geometry /
         // font / runs changed) re-shapes exactly once. Buffers not reused this
-        // frame are dropped when `old_cache` falls out of scope, so the cache
-        // never accumulates stale entries — it holds only the currently-rendered
-        // set.
+        // frame, including surplus buffers for a still-live key, are dropped
+        // with `old_cache`. Retain only this preparation's per-key multiplicity;
+        // duplicate items each need an owned buffer through glyphon preparation.
         let mut old_cache = std::mem::take(match layer {
             TextLayer::Content => &mut self.shape_cache,
             TextLayer::Overlay => &mut self.overlay_shape_cache,
@@ -1373,7 +1375,7 @@ impl TextRasterizer {
             let key = shape_key_for_item(item, effective_text);
             shape_keys.push(key);
 
-            let buf = if let Some(reused) = old_cache.remove(&key) {
+            let buf = if let Some(reused) = old_cache.get_mut(&key).and_then(Vec::pop) {
                 // Every shape input is unchanged → reuse the shaped buffer with no
                 // re-shape. `shape_call_count` deliberately does NOT advance.
                 reused
@@ -1466,9 +1468,12 @@ impl TextRasterizer {
 
         // Rebuild the shaped-buffer cache from this frame's buffers now that the
         // `TextArea` borrows of `buffers` have ended (prepare consumed them). Only
-        // the currently-rendered set is retained (hud-991cj); on a duplicate key
-        // the later buffer wins, which is harmless (identical shape inputs).
-        let rebuilt = shape_keys.into_iter().zip(buffers).collect();
+        // current per-item buffers are retained, including duplicate keys.
+        // Rebuild on both Ok and Err, preserving the ordinary prepare retry path.
+        let mut rebuilt: HashMap<[u8; 32], Vec<Buffer>> = HashMap::new();
+        for (key, buffer) in shape_keys.into_iter().zip(buffers) {
+            rebuilt.entry(key).or_default().push(buffer);
+        }
         match layer {
             TextLayer::Content => self.shape_cache = rebuilt,
             TextLayer::Overlay => self.overlay_shape_cache = rebuilt,

@@ -682,7 +682,7 @@ async fn load_font_bytes_new_font_resets_truncation_cache_scene_version() {
         FontFamily, NodeData, Rect, TextAlign, TextMarkdownNode, TextOverflow,
     };
 
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(64, 64).await);
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(64, 64).await);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
 
     let node = Node {
@@ -707,7 +707,24 @@ async fn load_font_bytes_new_font_resets_truncation_cache_scene_version() {
         }),
     };
 
-    let scene = scene_with_node(node);
+    let mut duplicate = node.clone();
+    duplicate.id = SceneId::new();
+    if let NodeData::TextMarkdown(text) = &mut duplicate.data {
+        text.bounds.y = 20.0;
+    }
+    let mut scene = scene_with_node(node);
+    let tile_id = *scene.tiles.keys().next().expect("font-test tile");
+    let root_id = scene.tiles[&tile_id].root_node.expect("font-test root");
+    scene
+        .add_node_to_tile(tile_id, Some(root_id), duplicate)
+        .unwrap();
+    let assert_shapes = |work: tze_hud_telemetry::WorkCounts, expected_layout| {
+        assert_eq!(
+            (work.layout, work.raster, work.upload),
+            (expected_layout, 0, 0),
+            "{work:?}"
+        );
+    };
 
     // ── Stage 4: commit-time prime sets sentinel to scene.version ─────────
     compositor.prime_truncation_cache(&scene);
@@ -715,6 +732,24 @@ async fn load_font_bytes_new_font_resets_truncation_cache_scene_version() {
         compositor.truncation_cache_scene_version, scene.version,
         "after commit-time prime, sentinel must equal scene.version"
     );
+
+    compositor.prime_markdown_cache(&scene);
+    compositor.render_frame_headless(&mut scene, &surface);
+    assert_shapes(
+        compositor
+            .take_work_counts()
+            .expect("cold duplicate-font frame"),
+        2,
+    );
+    assert!(compositor.take_work_counts().is_none());
+    compositor.render_frame_headless(&mut scene, &surface);
+    assert_shapes(
+        compositor
+            .take_work_counts()
+            .expect("warm duplicate-font frame"),
+        0,
+    );
+    assert!(compositor.take_work_counts().is_none());
 
     // ── Load a new font: sentinel must be reset to u64::MAX ───────────────
     // Use a minimal valid TTF/OTF-like byte slice.  The font loader may
@@ -745,6 +780,23 @@ async fn load_font_bytes_new_font_resets_truncation_cache_scene_version() {
         "re-prime must restore sentinel to scene.version"
     );
 
+    compositor.render_frame_headless(&mut scene, &surface);
+    assert_shapes(
+        compositor
+            .take_work_counts()
+            .expect("new-id invalidation frame"),
+        2,
+    );
+    assert!(compositor.take_work_counts().is_none());
+    compositor.render_frame_headless(&mut scene, &surface);
+    assert_shapes(
+        compositor
+            .take_work_counts()
+            .expect("post-invalidation warm frame"),
+        0,
+    );
+    assert!(compositor.take_work_counts().is_none());
+
     // Now load the same resource_id again — dedup guard returns early, sentinel
     // must remain at scene.version (not u64::MAX).
     compositor.load_font_bytes(new_resource_id, dummy_font_bytes);
@@ -753,4 +805,33 @@ async fn load_font_bytes_new_font_resets_truncation_cache_scene_version() {
         "load_font_bytes with an already-loaded resource_id must NOT reset the sentinel \
              — dedup guard prevents spurious cache invalidation [hud-v2z6u]"
     );
+    compositor.render_frame_headless(&mut scene, &surface);
+    assert_shapes(
+        compositor
+            .take_work_counts()
+            .expect("duplicate-id no-op frame"),
+        0,
+    );
+    assert!(compositor.take_work_counts().is_none());
+
+    // Preserve invalid-data coverage above, then exercise a real bundled face.
+    let real_font = include_bytes!("../../../fonts/ibm-plex/IBMPlexMono-Regular.ttf");
+    assert!(compositor.load_font_bytes([0xCD; 32], real_font));
+    compositor.prime_truncation_cache(&scene);
+    compositor.render_frame_headless(&mut scene, &surface);
+    assert_shapes(
+        compositor
+            .take_work_counts()
+            .expect("bundled-font invalidation frame"),
+        2,
+    );
+    assert!(compositor.take_work_counts().is_none());
+    compositor.render_frame_headless(&mut scene, &surface);
+    assert_shapes(
+        compositor
+            .take_work_counts()
+            .expect("bundled-font warm frame"),
+        0,
+    );
+    assert!(compositor.take_work_counts().is_none());
 }

@@ -53,6 +53,17 @@ async fn scroll_reshape_bench_hud991cj() {
 
         let mut scene = scene_with_node(make_node(content.clone()));
         let tile_id = *scene.tiles.keys().next().unwrap();
+        // Keep the 64KiB workload single-item; exercise duplicate scroll on the small pane.
+        if repeat == 12 {
+            let root_id = scene.tiles[&tile_id].root_node.expect("transcript root");
+            let mut duplicate = make_node(content.clone());
+            if let NodeData::TextMarkdown(text) = &mut duplicate.data {
+                text.bounds.y = 16.0;
+            }
+            scene
+                .add_node_to_tile(tile_id, Some(root_id), duplicate)
+                .unwrap();
+        }
         scene
             .register_tile_scroll_config(
                 tile_id,
@@ -65,6 +76,15 @@ async fn scroll_reshape_bench_hud991cj() {
 
         // Warm frame establishes the initial shape.
         let _ = compositor.render_frame_headless(&mut scene, &surface);
+        let cold_work = compositor
+            .take_work_counts()
+            .expect("cold transcript frame");
+        assert!(
+            cold_work.layout > 0,
+            "transcript must actually shape: {cold_work:?}"
+        );
+        assert_eq!((cold_work.raster, cold_work.upload), (0, 0));
+        assert!(compositor.take_work_counts().is_none());
 
         // ── REST: re-render the identical scene; shaped buffer is reused. ──
         const REST_FRAMES: u64 = 30;

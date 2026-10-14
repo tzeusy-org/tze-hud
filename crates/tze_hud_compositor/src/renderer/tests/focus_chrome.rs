@@ -569,20 +569,63 @@ async fn system_card_emits_draw_cmds_only_while_set() {
             .expect("controlled text mutation");
     };
 
+    let assert_shapes = |work: tze_hud_telemetry::WorkCounts, expected_layout| {
+        assert_eq!(
+            (work.layout, work.raster, work.upload),
+            (expected_layout, 0, 0),
+            "{work:?}"
+        );
+    };
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
     compositor.render_frame_headless(&mut scene, &surface);
     let card_free_pixels = card_pixels(&surface.read_pixels(&compositor.device));
+    assert_shapes(
+        compositor.take_work_counts().expect("cold content frame"),
+        1,
+    );
+    assert!(compositor.take_work_counts().is_none());
+    compositor.render_frame_headless(&mut scene, &surface);
+    assert_shapes(
+        compositor.take_work_counts().expect("warm content frame"),
+        0,
+    );
+    assert!(compositor.take_work_counts().is_none());
+    assert_eq!(
+        card_pixels(&surface.read_pixels(&compositor.device)),
+        card_free_pixels
+    );
 
     assert!(compositor.set_system_card(Some(display_card)));
+    let overlay_shapes = compositor.system_card_text_items(1_000.0, 500.0).len() as u64;
     change_text(&mut scene, "BA");
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
     compositor.render_frame_headless(&mut scene, &surface);
     let visible_card_pixels = card_pixels(&surface.read_pixels(&compositor.device));
+    assert_shapes(
+        compositor
+            .take_work_counts()
+            .expect("content plus new overlay frame"),
+        1 + overlay_shapes,
+    );
+    assert!(compositor.take_work_counts().is_none());
     assert_ne!(
         visible_card_pixels, card_free_pixels,
         "card backdrop is visible"
+    );
+
+    compositor.render_frame_headless(&mut scene, &surface);
+    assert_shapes(
+        compositor
+            .take_work_counts()
+            .expect("warm content plus overlay frame"),
+        0,
+    );
+    assert!(compositor.take_work_counts().is_none());
+    assert_eq!(
+        card_pixels(&surface.read_pixels(&compositor.device)),
+        visible_card_pixels
     );
 
     // The card stays visible when unrelated text changes again.
@@ -596,8 +639,21 @@ async fn system_card_emits_draw_cmds_only_while_set() {
         "card stays visible outside the changed tile"
     );
 
+    assert_shapes(
+        compositor
+            .take_work_counts()
+            .expect("content change with warm overlay frame"),
+        1,
+    );
+    assert!(compositor.take_work_counts().is_none());
+
     assert!(compositor.set_system_card(None));
     compositor.render_frame_headless(&mut scene, &surface);
+    assert_shapes(
+        compositor.take_work_counts().expect("overlay clear frame"),
+        0,
+    );
+    assert!(compositor.take_work_counts().is_none());
     assert_eq!(
         card_pixels(&surface.read_pixels(&compositor.device)),
         card_free_pixels,
@@ -613,4 +669,19 @@ async fn system_card_emits_draw_cmds_only_while_set() {
         card_free_pixels,
         "a later text update must not restore stale card pixels"
     );
+    assert_shapes(
+        compositor
+            .take_work_counts()
+            .expect("later content-only frame"),
+        1,
+    );
+    assert!(compositor.take_work_counts().is_none());
+    compositor.render_frame_headless(&mut scene, &surface);
+    assert_shapes(
+        compositor
+            .take_work_counts()
+            .expect("later content-only warm frame"),
+        0,
+    );
+    assert!(compositor.take_work_counts().is_none());
 }

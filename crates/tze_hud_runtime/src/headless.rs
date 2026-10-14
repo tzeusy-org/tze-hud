@@ -1183,6 +1183,139 @@ mod tests {
             (0, 1, 0),
             "duplicate text must stay cached, shape only AB -> BA, then stay cached"
         );
+
+        // A nonempty shrink must discard surplus buffers for the still-live AB key.
+        let (removed_tile, removed_node) = {
+            let mut scene = scene_arc.lock().await;
+            let (tile_id, node_id) = tile_nodes[2];
+            let removed = (scene.tiles[&tile_id].clone(), scene.nodes[&node_id].clone());
+            for &(tile_id, _) in &tile_nodes[2..] {
+                scene
+                    .delete_tile(tile_id, "change-efficiency-agent")
+                    .expect("shrink duplicates");
+            }
+            removed
+        };
+        runtime.render_frame().await;
+        let shrink_work = runtime
+            .compositor
+            .take_work_counts()
+            .expect("nonempty shrink frame");
+        assert_eq!(
+            (shrink_work.layout, shrink_work.raster, shrink_work.upload),
+            (0, 0, 0)
+        );
+        assert!(runtime.compositor.take_work_counts().is_none());
+        let reintroduced_tile_id = {
+            let mut scene = scene_arc.lock().await;
+            let tile_id = scene
+                .create_tile(
+                    removed_tile.tab_id,
+                    "change-efficiency-agent",
+                    lease_id,
+                    removed_tile.bounds,
+                    removed_tile.z_order,
+                )
+                .expect("regrow one duplicate tile");
+            scene
+                .set_tile_root(tile_id, removed_node.clone())
+                .expect("restore duplicate root");
+            tile_id
+        };
+        runtime.render_frame().await;
+        let regrow_work = runtime
+            .compositor
+            .take_work_counts()
+            .expect("surplus reintroduction frame");
+        assert_eq!(
+            (regrow_work.layout, regrow_work.raster, regrow_work.upload),
+            (1, 0, 0)
+        );
+        assert!(runtime.compositor.take_work_counts().is_none());
+        runtime.render_frame().await;
+        let regrow_warm_work = runtime
+            .compositor
+            .take_work_counts()
+            .expect("regrown warm frame");
+        assert_eq!(
+            (
+                regrow_warm_work.layout,
+                regrow_warm_work.raster,
+                regrow_warm_work.upload
+            ),
+            (0, 0, 0)
+        );
+        assert!(runtime.compositor.take_work_counts().is_none());
+
+        // Leave only BA so the next nonempty preparation drops the obsolete AB key.
+        {
+            let mut scene = scene_arc.lock().await;
+            for tile_id in [tile_nodes[1].0, reintroduced_tile_id] {
+                scene
+                    .delete_tile(tile_id, "change-efficiency-agent")
+                    .expect("remove AB key");
+            }
+        }
+        runtime.render_frame().await;
+        let replacement_work = runtime
+            .compositor
+            .take_work_counts()
+            .expect("obsolete-key removal frame");
+        assert_eq!(
+            (
+                replacement_work.layout,
+                replacement_work.raster,
+                replacement_work.upload
+            ),
+            (0, 0, 0)
+        );
+        assert!(runtime.compositor.take_work_counts().is_none());
+        {
+            let mut scene = scene_arc.lock().await;
+            let tile_id = scene
+                .create_tile(
+                    removed_tile.tab_id,
+                    "change-efficiency-agent",
+                    lease_id,
+                    removed_tile.bounds,
+                    removed_tile.z_order,
+                )
+                .expect("reintroduce obsolete AB key");
+            scene
+                .set_tile_root(tile_id, removed_node)
+                .expect("restore obsolete-key root");
+        }
+        runtime.render_frame().await;
+        let obsolete_work = runtime
+            .compositor
+            .take_work_counts()
+            .expect("obsolete-key reintroduction frame");
+        assert_eq!(
+            (
+                obsolete_work.layout,
+                obsolete_work.raster,
+                obsolete_work.upload
+            ),
+            (1, 0, 0)
+        );
+        assert!(runtime.compositor.take_work_counts().is_none());
+        runtime.render_frame().await;
+        let obsolete_warm_work = runtime
+            .compositor
+            .take_work_counts()
+            .expect("reintroduced-key warm frame");
+        assert_eq!(
+            (
+                obsolete_warm_work.layout,
+                obsolete_warm_work.raster,
+                obsolete_warm_work.upload
+            ),
+            (0, 0, 0)
+        );
+        assert!(runtime.compositor.take_work_counts().is_none());
+        eprintln!(
+            "hud-b1adb bounds: shrink={shrink_work:?} regrow={regrow_work:?} warm={regrow_warm_work:?} replacement={replacement_work:?} reintroduced={obsolete_work:?} warm={obsolete_warm_work:?}"
+        );
     }
 
     /// Verify that grpc_port = 0 does not start a server by default.
