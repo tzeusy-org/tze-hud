@@ -24,7 +24,7 @@
 //! state instead of propagating into the event loop.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, MutexGuard};
 
 use tze_hud_config::{resolve_portal_tokens, tokens::DesignTokenMap};
 use tze_hud_input::{DraftNotificationBatch, InputProcessor};
@@ -307,13 +307,9 @@ fn portal_state(
 /// Owns the [`PortalHub`] and drives its portals onto the scene. See the
 /// module docs.
 pub struct InProcessPortalDriver {
-    hub: Arc<Mutex<PortalHub>>,
+    /// Authoritative hub, clock and input-readiness identity shared with MCP.
+    portals: PortalHandle,
     drive: InProcessPortalDriveState,
-    /// Wall clock for every hub timestamp: op dispatch, sweeps, and wake
-    /// deadlines (invariant 9). The windowed runtime uses the system clock;
-    /// harnesses share the scene's `TestClock` so portal liveness and lease
-    /// grace advance together.
-    clock: Arc<dyn Clock>,
     /// Test-only observation alias for the most recently granted portal
     /// lease. Production lifecycle decisions use only the owning DriveEntry.
     #[cfg(test)]
@@ -327,23 +323,19 @@ impl InProcessPortalDriver {
 
     pub fn with_portals(portals: PortalHandle) -> Self {
         Self {
-            hub: portals.hub,
+            portals,
             drive: InProcessPortalDriveState::new(),
-            clock: portals.clock,
             #[cfg(test)]
             lease_id: None,
         }
     }
 
     pub fn portal_handle(&self) -> PortalHandle {
-        PortalHandle {
-            hub: Arc::clone(&self.hub),
-            clock: Arc::clone(&self.clock),
-        }
+        self.portals.clone()
     }
 
     fn lock_hub(&self) -> Option<MutexGuard<'_, PortalHub>> {
-        match self.hub.lock() {
+        match self.portals.hub.lock() {
             Ok(hub) => Some(hub),
             Err(_) => {
                 tracing::error!("portal hub poisoned; refusing this driver turn");
@@ -356,7 +348,7 @@ impl InProcessPortalDriver {
     /// portals again: a render, activity-cue quiescence, a liveness
     /// transition, input expiry, or a portal lease's TTL/grace boundary.
     pub(super) fn next_wake_deadline(&self, scene: &SceneGraph) -> Option<PortalWakeDeadline> {
-        if self.hub.is_poisoned() {
+        if self.portals.hub.is_poisoned() {
             return None;
         }
         let now_us = self.now_wall_us();
@@ -474,12 +466,12 @@ impl InProcessPortalDriver {
     /// Replace the driver's wall clock. Harnesses pass the scene's
     /// `TestClock` so portal liveness and lease grace share one time source.
     pub fn set_clock(&mut self, clock: Arc<dyn Clock>) {
-        self.clock = clock;
+        self.portals.clock = clock;
     }
 
     /// Current wall-clock time (µs since the Unix epoch) from the driver's clock.
     pub fn now_wall_us(&self) -> u64 {
-        self.clock.now_us()
+        self.portals.clock.now_us()
     }
 
     /// Record a resize of a portal tile (hotkey or pointer gesture, §6b.4,
@@ -533,13 +525,10 @@ impl InProcessPortalDriver {
         let key = self.drive.key_for_tile(tile_id)?;
         let adapter_batch = adapter_draft_batch_from_runtime(batch);
         let text = adapter_batch.submission.as_ref()?.text.clone();
-        let mut hub = self.lock_hub()?;
-        let result = hub.submit_reply(&key, text, submitted_at_wall_us);
-        let (pending_input_count, pending_input_bytes) = hub
-            .get(&key)
-            .map(|p| (p.inputs.len(), p.input_bytes()))
-            .unwrap_or_default();
-        drop(hub);
+        let submission = self.portals.submit_reply(&key, text, submitted_at_wall_us)?;
+        let result = submission.result;
+        let pending_input_count = submission.pending_input_count;
+        let pending_input_bytes = submission.pending_input_bytes;
         self.drive
             .entry(&key)
             .adapter
@@ -588,7 +577,7 @@ impl InProcessPortalDriver {
 
     #[cfg(test)]
     pub(crate) fn hub_mut(&self) -> MutexGuard<'_, PortalHub> {
-        self.hub.lock().expect("test hub")
+        self.portals.hub.lock().expect("test hub")
     }
 
     /// Sweep the hub and render due portals onto the scene.
@@ -603,7 +592,7 @@ impl InProcessPortalDriver {
         input_processor: &mut InputProcessor,
         tab_id: Option<SceneId>,
     ) {
-        if self.hub.is_poisoned() {
+        if self.portals.hub.is_poisoned() {
             tracing::error!("portal hub poisoned; refusing drain without resetting drive state");
             return;
         }
@@ -623,7 +612,7 @@ impl InProcessPortalDriver {
                 error = %msg,
                 "portal projection driver drain panicked — drive state reset"
             );
-            if !self.hub.is_poisoned() {
+            if !self.portals.hub.is_poisoned() {
                 self.drive = InProcessPortalDriveState::new();
             }
         }
@@ -1250,6 +1239,20 @@ mod tests {
         publish(&mut driver, "p", "assistant is ready", 100);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 200);
         let tile_id = tile(&driver, "p");
+        let handle = driver.portal_handle();
+        let clone = driver.portal_handle();
+        assert!(Arc::ptr_eq(&handle.hub, &clone.hub));
+        assert!(Arc::ptr_eq(&handle.clock, &clone.clock));
+        let ready = handle.input_notify(AGENT).unwrap();
+        assert!(Arc::ptr_eq(&ready, &clone.input_notify(AGENT).unwrap()));
+        let other_ready = handle.input_notify("another-agent").unwrap();
+        assert!(!Arc::ptr_eq(&ready, &other_ready));
+        let mut notified = std::pin::pin!(ready.notified());
+        assert!(!notified.as_mut().enable());
+        let mut other_notified = std::pin::pin!(other_ready.notified());
+        assert!(!other_notified.as_mut().enable());
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        assert!(std::future::Future::poll(notified.as_mut(), &mut context).is_pending());
 
         let feedback = submit(
             &mut driver,
@@ -1259,6 +1262,20 @@ mod tests {
         );
         assert_eq!(feedback.feedback_state, PortalInputFeedbackState::Accepted);
         assert_eq!(feedback.pending_input_count, 1);
+        assert!(std::future::Future::poll(notified.as_mut(), &mut context).is_ready());
+        assert!(std::future::Future::poll(other_notified.as_mut(), &mut context).is_pending());
+        {
+            let hub = handle
+                .hub
+                .try_lock()
+                .expect("notified input can be inspected after submission");
+            let portal = hub.get(&key("p")).unwrap();
+            assert_eq!(portal.inputs.len(), 1);
+            assert_eq!(
+                portal.replies.back().unwrap().text,
+                "please summarize the current diff"
+            );
+        }
 
         let poll = |driver: &mut InProcessPortalDriver, ack: Vec<String>, now_us| {
             driver.hub_mut().poll_input(AGENT, &ack, None, now_us)
@@ -1280,6 +1297,23 @@ mod tests {
             content.contains("please summarize"),
             "the reply is echoed: {content}"
         );
+
+        let mut rejected_notify = std::pin::pin!(ready.notified());
+        assert!(!rejected_notify.as_mut().enable());
+        let too_large = "x".repeat(driver.hub_mut().limits().input_item_bytes + 1);
+        let rejected = submit(&mut driver, tile_id, &too_large, 200 + FRAME_US + 1);
+        assert_eq!(rejected.feedback_state, PortalInputFeedbackState::Rejected);
+        assert_eq!(
+            rejected.error_code,
+            Some(ProjectionErrorCode::ProjectionInputTooLarge)
+        );
+        assert_eq!(rejected.pending_input_count, 0);
+        assert!(std::future::Future::poll(rejected_notify.as_mut(), &mut context).is_pending());
+        let hub = handle
+            .hub
+            .try_lock()
+            .expect("rejected submission releases hub");
+        assert_eq!(hub.get(&key("p")).unwrap().replies.len(), 1);
     }
 
     /// The render site wires follow-tail (spec §3.2), the resize snapshot
@@ -1583,10 +1617,13 @@ mod tests {
         use tze_hud_input::ScrollEvent;
 
         let mut driver = InProcessPortalDriver {
-            hub: Arc::new(Mutex::new(PortalHub::new(PortalLimits {
-                visible_bytes: 30,
-                ..PortalLimits::default()
-            }))),
+            portals: PortalHandle::new(
+                PortalHub::new(PortalLimits {
+                    visible_bytes: 30,
+                    ..PortalLimits::default()
+                }),
+                Arc::new(tze_hud_scene::SystemClock::new()),
+            ),
             ..InProcessPortalDriver::new()
         };
         let (mut scene, tab, mut processor) = scene();

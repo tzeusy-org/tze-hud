@@ -1288,6 +1288,16 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
     let (server, _) = server();
     let (server, hub) = hub_portal(server);
     let key = PortalKey::new(psk_agent(), "main");
+    let handle = server.portals.as_ref().unwrap().clone();
+    assert!(Arc::ptr_eq(
+        &server.input_notifiers.for_agent(&key.agent).unwrap(),
+        &handle.input_notify(&key.agent).unwrap(),
+    ));
+    assert!(Arc::ptr_eq(&hub, &handle.hub));
+    assert!(!Arc::ptr_eq(
+        &handle.input_notify(&key.agent).unwrap(),
+        &handle.input_notify("another-agent").unwrap(),
+    ));
 
     let empty = call(&server, "hud_publish", json!({"surface": "portal:main"})).await;
     assert_eq!(

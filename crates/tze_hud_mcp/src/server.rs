@@ -20,11 +20,12 @@
 //! `{"code":"...","hint":"..."}` (see [`crate::error`]). Only unusable
 //! requests (bad JSON, unknown method or tool, bad auth) are JSON-RPC errors.
 
+use std::collections::HashMap;
 use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex as HubMutex};
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, Notify};
 use tracing::{debug, warn};
-use tze_hud_projection::hub::PortalHub;
+use tze_hud_projection::hub::{PortalError, PortalHub, PortalKey};
 use tze_hud_scene::config::{AgentDirectory, SharedAgents};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::render_wake::RenderWakeNotifier;
@@ -121,11 +122,36 @@ const TOOL_NAMES: &[&str] = &[
 
 // ─── Server ──────────────────────────────────────────────────────────────────
 
-/// The single portal state and wall clock shared by MCP and the winit driver.
+/// Per-agent input readiness shared by MCP callers and the runtime's producers.
+/// Notifications carry no input; each consumer must inspect its retained queues.
+#[derive(Clone, Default)]
+pub struct InputNotifiers {
+    agents: Arc<HubMutex<HashMap<String, Arc<Notify>>>>,
+}
+
+impl InputNotifiers {
+    pub fn for_agent(&self, namespace: &str) -> Result<Arc<Notify>, McpError> {
+        let mut agents = self.agents.lock().map_err(|_| McpError::Tool {
+            code: "INTERNAL",
+            hint: "input readiness unavailable; retry hud_input".to_string(),
+        })?;
+        Ok(Arc::clone(agents.entry(namespace.to_string()).or_default()))
+    }
+}
+
+/// Admission result and queue counts captured together under the portal hub lock.
+pub struct PortalSubmission {
+    pub result: Result<String, PortalError>,
+    pub pending_input_count: usize,
+    pub pending_input_bytes: usize,
+}
+
+/// One hub, wall clock and per-agent input readiness shared by MCP and the driver.
 #[derive(Clone)]
 pub struct PortalHandle {
     pub hub: Arc<HubMutex<PortalHub>>,
     pub clock: Arc<dyn Clock>,
+    input_notifiers: InputNotifiers,
 }
 
 impl PortalHandle {
@@ -133,7 +159,50 @@ impl PortalHandle {
         Self {
             hub: Arc::new(HubMutex::new(hub)),
             clock,
+            input_notifiers: InputNotifiers::default(),
         }
+    }
+
+    pub fn input_notify(&self, namespace: &str) -> Result<Arc<Notify>, McpError> {
+        self.input_notifiers.for_agent(namespace)
+    }
+
+    /// Commit the same input/history admission used by the runtime composer.
+    /// A refusal never signals accepted input; a poisoned owner refuses the turn.
+    pub fn submit_reply(
+        &self,
+        key: &PortalKey,
+        text: String,
+        now_us: u64,
+    ) -> Option<PortalSubmission> {
+        let ready = match self.input_notify(&key.agent) {
+            Ok(ready) => ready,
+            Err(_) => {
+                tracing::error!("input readiness poisoned; refusing portal submission");
+                return None;
+            }
+        };
+        let mut hub = match self.hub.lock() {
+            Ok(hub) => hub,
+            Err(_) => {
+                tracing::error!("portal hub poisoned; refusing portal submission");
+                return None;
+            }
+        };
+        let result = hub.submit_reply(key, text, now_us);
+        let (pending_input_count, pending_input_bytes) = hub
+            .get(key)
+            .map(|portal| (portal.inputs.len(), portal.input_bytes()))
+            .unwrap_or_default();
+        drop(hub);
+        if result.is_ok() {
+            ready.notify_waiters();
+        }
+        Some(PortalSubmission {
+            result,
+            pending_input_count,
+            pending_input_bytes,
+        })
     }
 }
 
@@ -151,6 +220,7 @@ pub struct McpServer {
     /// Shared portal service. `None` means
     /// portal surfaces answer `UNAVAILABLE`.
     portals: Option<PortalHandle>,
+    input_notifiers: InputNotifiers,
     /// Per-agent leases and unacked action presses.
     state: McpState,
     /// Runtime safe-mode flag (shared with gRPC); false when standalone.
@@ -172,6 +242,7 @@ impl McpServer {
             portal_ingress_wake: RenderWakeNotifier::default(),
             config: McpConfig::default(),
             portals: None,
+            input_notifiers: InputNotifiers::default(),
             state: McpState::default(),
             safe_mode: Arc::new(AtomicBool::new(false)),
         }
@@ -197,6 +268,7 @@ impl McpServer {
 
     /// Share the runtime's portal hub; no main-thread round trip is needed.
     pub fn with_portals(mut self, portals: PortalHandle) -> Self {
+        self.input_notifiers = portals.input_notifiers.clone();
         self.portals = Some(portals);
         self
     }
@@ -281,6 +353,7 @@ impl McpServer {
                 let tool_ctx = ToolCtx {
                     scene: &self.scene,
                     portals: self.portals.as_ref(),
+                    input_notifiers: &self.input_notifiers,
                     portal_wake: &self.portal_ingress_wake,
                     state: &self.state,
                     safe_mode: &self.safe_mode,

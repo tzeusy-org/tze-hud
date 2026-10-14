@@ -1699,6 +1699,7 @@ impl WinitApp {
         // Terminal lease transitions from viewer dismisses (hover close button),
         // published to the owning sessions once the scene lock is released.
         let mut viewer_dismiss_expiries: Vec<tze_hud_scene::types::LeaseExpiry> = Vec::new();
+        let mut pending_action_wakes = Vec::new();
         let drag_released: Option<DragReleasedData>;
         let portal_resize_outcome: Option<PortalResizePointerOutcome>;
         // Flag set when a composer focus-lost transition is detected inside the
@@ -2024,11 +2025,13 @@ impl WinitApp {
                             }
                             ZoneInteractionKind::Action { callback_id } => {
                                 // Delivered to the publisher via MCP `hud_input`.
-                                scene.push_pending_action(tze_hud_scene::PendingAction {
-                                    publisher_namespace: publisher_namespace.clone(),
-                                    zone_name: zone_name.clone(),
-                                    callback_id: callback_id.clone(),
-                                });
+                                pending_action_wakes.push(scene.push_pending_action(
+                                    tze_hud_scene::PendingAction {
+                                        publisher_namespace: publisher_namespace.clone(),
+                                        zone_name: zone_name.clone(),
+                                        callback_id: callback_id.clone(),
+                                    },
+                                ));
                                 // An activated notification is answered: dismiss
                                 // it locally, as the × does, so the click has an
                                 // immediate visible result and cannot repeat
@@ -2219,6 +2222,11 @@ impl WinitApp {
         } else {
             drag_released = None;
             portal_resize_outcome = None;
+        }
+
+        // The accepted input is committed and both scene/state guards are gone.
+        for notifier in pending_action_wakes {
+            notifier.notify();
         }
 
         // A press the scene lock never saw cannot arm a zone affordance.

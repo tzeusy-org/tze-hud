@@ -7,7 +7,11 @@
 //! namespace or token. Times are milliseconds. Failures are
 //! [`McpError::Tool`] with a stable code and a hint naming the next call.
 
-use crate::{error::McpError, server::PortalHandle, types::McpResult};
+use crate::{
+    error::McpError,
+    server::{InputNotifiers, PortalHandle},
+    types::McpResult,
+};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use std::collections::HashMap;
@@ -88,6 +92,7 @@ impl McpState {
 pub struct ToolCtx<'a> {
     pub scene: &'a Arc<Mutex<SceneGraph>>,
     pub portals: Option<&'a PortalHandle>,
+    pub input_notifiers: &'a InputNotifiers,
     pub portal_wake: &'a RenderWakeNotifier,
     pub state: &'a McpState,
     /// The runtime's safe-mode flag, shared with gRPC. While set, every
@@ -862,6 +867,22 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     let wait_ms = p.wait_ms.unwrap_or(0).min(MAX_WAIT_MS);
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(wait_ms);
     let max_items = p.max_items.unwrap_or(usize::MAX);
+    let input_ready = ctx.input_notifiers.for_agent(&ns)?;
+    {
+        let mut scene = match ctx.scene.try_lock() {
+            Ok(scene) => scene,
+            Err(_) => tokio::time::timeout_at(deadline, ctx.scene.lock())
+                .await
+                .map_err(|_| McpError::Tool {
+                    code: "INTERNAL",
+                    hint: "input state busy; retry hud_input".to_string(),
+                })?,
+        };
+        scene.register_action_notifier(
+            &ns,
+            RenderWakeNotifier::new(move || input_ready.notify_waiters()),
+        );
+    }
     loop {
         let actions = ctx.scene.lock().await.take_pending_actions(&ns);
         let mut items: Vec<Value> = ctx.state.with(&ns, |s| {

@@ -2,6 +2,7 @@
 //! Pure data — no GPU, no async, no I/O.
 
 use crate::clock::{Clock, SystemClock};
+use crate::render_wake::RenderWakeNotifier;
 use crate::types::*;
 use crate::validation::ValidationError;
 use serde::{Deserialize, Serialize};
@@ -118,6 +119,9 @@ pub struct SceneGraph {
     /// them (MCP `hud_input`), FIFO within each publisher namespace.
     #[serde(skip, default)]
     pub pending_actions: HashMap<String, Vec<PendingAction>>,
+    /// Input readiness callbacks, invoked by the producer only after scene unlock.
+    #[serde(skip, default)]
+    pending_action_notifiers: HashMap<String, RenderWakeNotifier>,
     /// Map of ResourceIds to their scene-node reference counts.
     ///
     /// A resource is available for use in [`NodeData::StaticImage`] nodes when it
@@ -233,17 +237,31 @@ impl SceneGraph {
             scheduled_batches: Vec::new(),
             publication_orphans: HashMap::new(),
             pending_actions: HashMap::new(),
+            pending_action_notifiers: HashMap::new(),
             registered_resources: HashMap::new(),
             overlay: RuntimeOverlayState::default(),
         }
     }
 
-    /// Queue a notification action press for its publisher.
-    pub fn push_pending_action(&mut self, action: PendingAction) {
+    /// Register input readiness for a publisher before checking its pending queue.
+    pub fn register_action_notifier(&mut self, namespace: &str, notifier: RenderWakeNotifier) {
+        self.pending_action_notifiers
+            .insert(namespace.to_string(), notifier);
+    }
+
+    /// Commit a notification action, returning its post-unlock readiness callback.
+    /// The queue remains authoritative when no input waiter has registered yet.
+    pub fn push_pending_action(&mut self, action: PendingAction) -> RenderWakeNotifier {
+        let notifier = self
+            .pending_action_notifiers
+            .get(&action.publisher_namespace)
+            .cloned()
+            .unwrap_or_default();
         self.pending_actions
             .entry(action.publisher_namespace.clone())
             .or_default()
             .push(action);
+        notifier
     }
 
     /// Remove and return the queued action presses for `namespace`, oldest first.
