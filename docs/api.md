@@ -275,7 +275,7 @@ unknown PSK) is a JSON-RPC error.
 |---|---|
 | `INVALID_ARGUMENT` | Unknown field, wrong type, or bad surface string |
 | `NOT_ALLOWED` | The agent's `allow` list doesn't cover the surface |
-| `NOT_HELD` | `hud_hold` with nothing to extend (including a portal the viewer dismissed); `hud_clear` on a portal this agent never attached (a dismissed portal's `hud_clear` is an ok no-op) |
+| `NOT_HELD` | A tile mutation targets an absent tile or one owned by another authenticated namespace; `hud_hold` with nothing to extend (including a portal the viewer dismissed); `hud_clear` on a portal this agent never attached (a dismissed portal's `hud_clear` is an ok no-op) |
 | `ZONE_NOT_FOUND` | No such zone |
 | `WIDGET_NOT_FOUND` | No such widget instance |
 | `WIDGET_PARAMETER_INVALID` | Unknown widget param, or a value of the wrong type or range |
