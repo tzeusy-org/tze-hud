@@ -1031,5 +1031,8 @@ async fn test_latest_wins_zone_renders_only_latest_publication() {
             "changed/unchanged zone work: {work:?}"
         );
     }
-    assert!(compositor.take_work_counts().is_none(), "single-frame drain");
+    assert!(
+        compositor.take_work_counts().is_none(),
+        "single-frame drain"
+    );
 }
