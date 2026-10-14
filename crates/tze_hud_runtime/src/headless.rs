@@ -882,7 +882,7 @@ mod tests {
         .await
         .expect("runtime init");
 
-        let (scene_arc, lease_id, changed_tile_id, changed_node_id) = {
+        let (scene_arc, lease_id, changed_tile_id, changed_node_id, tile_nodes) = {
             let shared_state = runtime.shared_state().lock().await;
             let scene_arc = Arc::clone(&shared_state.scene);
             drop(shared_state);
@@ -900,6 +900,7 @@ mod tests {
                 )
                 .expect("canonical lease creation");
             let mut changed = None;
+            let mut tile_nodes = Vec::with_capacity(50);
             for row in 0..5 {
                 for column in 0..10 {
                     let index = row * 10 + column;
@@ -926,8 +927,8 @@ mod tests {
                         layout: Default::default(),
                         data: NodeData::TextMarkdown(TextMarkdownNode {
                             // Distinct controls give each tile its own cache key;
-                            // this test isolates one changed shape, not duplicate
-                            // key behavior in the existing full-frame cache.
+                            // this first leg isolates one changed shape. The
+                            // duplicate-key leg below reuses the same scene.
                             content: if index == 0 {
                                 "AB".into()
                             } else {
@@ -946,6 +947,7 @@ mod tests {
                     if index == 0 {
                         changed = Some((tile_id, node.id));
                     }
+                    tile_nodes.push((tile_id, node.id));
                     scene
                         .set_tile_root(tile_id, node)
                         .expect("canonical text root");
@@ -953,7 +955,13 @@ mod tests {
             }
             let (changed_tile_id, changed_node_id) = changed.expect("first tile exists");
             drop(scene);
-            (scene_arc, lease_id, changed_tile_id, changed_node_id)
+            (
+                scene_arc,
+                lease_id,
+                changed_tile_id,
+                changed_node_id,
+                tile_nodes,
+            )
         };
 
         // Render the initial text and warm the ordinary shaping cache.
@@ -1004,31 +1012,34 @@ mod tests {
         // Full-frame readback must visibly update the changed text while
         // preserving the unrelated scene pixels.
         // The changed tile is the first tile at the origin.
-        let changed_bounds = (0_u32, 0_u32, 96_u32, 92_u32);
-        let mut changed_pixels_inside_tile = 0_u64;
-        for y in 0..500 {
-            for x in 0..1_000 {
-                let offset = ((y * 1_000 + x) * 4) as usize;
-                let before = &baseline_pixels[offset..offset + 4];
-                let after = &updated_pixels[offset..offset + 4];
-                let inside_changed_tile = x >= changed_bounds.0
-                    && x < changed_bounds.0 + changed_bounds.2
-                    && y >= changed_bounds.1
-                    && y < changed_bounds.1 + changed_bounds.3;
-                if inside_changed_tile {
-                    changed_pixels_inside_tile += u64::from(before != after);
-                } else {
-                    assert_eq!(
-                        before, after,
-                        "text update changed an unrelated pixel at ({x}, {y})"
-                    );
+        let assert_only_first_tile_changed = |before_pixels: &[u8], after_pixels: &[u8]| {
+            let changed_bounds = (0_u32, 0_u32, 96_u32, 92_u32);
+            let mut changed_pixels_inside_tile = 0_u64;
+            for y in 0..500 {
+                for x in 0..1_000 {
+                    let offset = ((y * 1_000 + x) * 4) as usize;
+                    let before = &before_pixels[offset..offset + 4];
+                    let after = &after_pixels[offset..offset + 4];
+                    let inside_changed_tile = x >= changed_bounds.0
+                        && x < changed_bounds.0 + changed_bounds.2
+                        && y >= changed_bounds.1
+                        && y < changed_bounds.1 + changed_bounds.3;
+                    if inside_changed_tile {
+                        changed_pixels_inside_tile += u64::from(before != after);
+                    } else {
+                        assert_eq!(
+                            before, after,
+                            "text update changed an unrelated pixel at ({x}, {y})"
+                        );
+                    }
                 }
             }
-        }
-        assert!(
-            changed_pixels_inside_tile > 0,
-            "text update did not visibly change the tile"
-        );
+            assert!(
+                changed_pixels_inside_tile > 0,
+                "text update did not visibly change the tile"
+            );
+        };
+        assert_only_first_tile_changed(&baseline_pixels, &updated_pixels);
 
         runtime.render_frame().await;
         let unchanged_work = runtime
@@ -1045,6 +1056,266 @@ mod tests {
             "unchanged text remains cached"
         );
         assert_eq!(runtime.read_pixels(), updated_pixels);
+
+        // Reuse this real 50-tile scene for the duplicate-key vector: all AB.
+        {
+            let mut scene = scene_arc.lock().await;
+            let mutations = tile_nodes
+                .iter()
+                .map(|&(tile_id, node_id)| {
+                    let mut text = match &scene.nodes[&node_id].data {
+                        NodeData::TextMarkdown(text) => text.clone(),
+                        other => panic!("expected text root, got {other:?}"),
+                    };
+                    text.content = "AB".into();
+                    SceneMutation::UpdateNodeContent {
+                        tile_id,
+                        node_id,
+                        data: NodeData::TextMarkdown(text),
+                    }
+                })
+                .collect();
+            let result = scene.apply_batch(&MutationBatch {
+                batch_id: SceneId::new(),
+                agent_namespace: "change-efficiency-agent".into(),
+                mutations,
+                timing_hints: None,
+                lease_id: Some(lease_id),
+            });
+            assert!(result.applied, "50 duplicate AB roots apply: {result:#?}");
+        }
+        runtime.render_frame().await;
+        let duplicate_pixels = runtime.read_pixels();
+        let cold_work = runtime
+            .compositor
+            .take_work_counts()
+            .expect("duplicate cold frame");
+        assert!(
+            cold_work.layout > 0,
+            "cold duplicates must actually shape: {cold_work:?}"
+        );
+        assert_eq!((cold_work.raster, cold_work.upload), (0, 0));
+        assert!(runtime.compositor.take_work_counts().is_none());
+        for row in 0..5 {
+            for column in 0..10 {
+                let visible = (row * 100..row * 100 + 92).any(|y| {
+                    (column * 100..column * 100 + 96).any(|x| {
+                        let offset = ((y * 1_000 + x) * 4) as usize;
+                        let pixel = &duplicate_pixels[offset..offset + 4];
+                        pixel[0] > 192 && pixel[1] > 192 && pixel[2] > 192
+                    })
+                });
+                assert!(
+                    visible,
+                    "duplicate AB glyphs missing at tile ({column}, {row})"
+                );
+            }
+        }
+
+        runtime.render_frame().await;
+        let warm_work = runtime
+            .compositor
+            .take_work_counts()
+            .expect("duplicate warm frame");
+        assert_eq!(
+            runtime.read_pixels(),
+            duplicate_pixels,
+            "warm duplicates preserve all pixels"
+        );
+        assert!(runtime.compositor.take_work_counts().is_none());
+
+        // Exercise the named AB -> BA mutation before reporting any count failure.
+        {
+            let mut scene = scene_arc.lock().await;
+            let mut text = match &scene.nodes[&changed_node_id].data {
+                NodeData::TextMarkdown(text) => text.clone(),
+                other => panic!("expected text root, got {other:?}"),
+            };
+            text.content = "BA".into();
+            let result = scene.apply_batch(&MutationBatch {
+                batch_id: SceneId::new(),
+                agent_namespace: "change-efficiency-agent".into(),
+                mutations: vec![SceneMutation::UpdateNodeContent {
+                    tile_id: changed_tile_id,
+                    node_id: changed_node_id,
+                    data: NodeData::TextMarkdown(text),
+                }],
+                timing_hints: None,
+                lease_id: Some(lease_id),
+            });
+            assert!(
+                result.applied,
+                "duplicate-vector AB -> BA applies: {result:#?}"
+            );
+        }
+        runtime.render_frame().await;
+        let duplicate_updated_pixels = runtime.read_pixels();
+        let mutation_work = runtime
+            .compositor
+            .take_work_counts()
+            .expect("duplicate mutation frame");
+        assert_only_first_tile_changed(&duplicate_pixels, &duplicate_updated_pixels);
+        assert!(runtime.compositor.take_work_counts().is_none());
+
+        runtime.render_frame().await;
+        let repeat_work = runtime
+            .compositor
+            .take_work_counts()
+            .expect("duplicate repeat frame");
+        assert_eq!(
+            runtime.read_pixels(),
+            duplicate_updated_pixels,
+            "repeat preserves updated pixels"
+        );
+        assert!(runtime.compositor.take_work_counts().is_none());
+        eprintln!(
+            "hud-b1adb 50 AB: cold={cold_work:?} warm={warm_work:?} AB->BA={mutation_work:?} repeat={repeat_work:?}"
+        );
+        for work in [warm_work, mutation_work, repeat_work] {
+            assert_eq!(
+                (work.raster, work.upload),
+                (0, 0),
+                "no widget work: {work:?}"
+            );
+        }
+        assert_eq!(
+            (warm_work.layout, mutation_work.layout, repeat_work.layout),
+            (0, 1, 0),
+            "duplicate text must stay cached, shape only AB -> BA, then stay cached"
+        );
+
+        // A nonempty shrink must discard surplus buffers for the still-live AB key.
+        let (removed_tile, removed_node) = {
+            let mut scene = scene_arc.lock().await;
+            let (tile_id, node_id) = tile_nodes[2];
+            let removed = (scene.tiles[&tile_id].clone(), scene.nodes[&node_id].clone());
+            for &(tile_id, _) in &tile_nodes[2..] {
+                scene
+                    .delete_tile(tile_id, "change-efficiency-agent")
+                    .expect("shrink duplicates");
+            }
+            removed
+        };
+        runtime.render_frame().await;
+        let shrink_work = runtime
+            .compositor
+            .take_work_counts()
+            .expect("nonempty shrink frame");
+        assert_eq!(
+            (shrink_work.layout, shrink_work.raster, shrink_work.upload),
+            (0, 0, 0)
+        );
+        assert!(runtime.compositor.take_work_counts().is_none());
+        let reintroduced_tile_id = {
+            let mut scene = scene_arc.lock().await;
+            let tile_id = scene
+                .create_tile(
+                    removed_tile.tab_id,
+                    "change-efficiency-agent",
+                    lease_id,
+                    removed_tile.bounds,
+                    removed_tile.z_order,
+                )
+                .expect("regrow one duplicate tile");
+            scene
+                .set_tile_root(tile_id, removed_node.clone())
+                .expect("restore duplicate root");
+            tile_id
+        };
+        runtime.render_frame().await;
+        let regrow_work = runtime
+            .compositor
+            .take_work_counts()
+            .expect("surplus reintroduction frame");
+        assert_eq!(
+            (regrow_work.layout, regrow_work.raster, regrow_work.upload),
+            (1, 0, 0)
+        );
+        assert!(runtime.compositor.take_work_counts().is_none());
+        runtime.render_frame().await;
+        let regrow_warm_work = runtime
+            .compositor
+            .take_work_counts()
+            .expect("regrown warm frame");
+        assert_eq!(
+            (
+                regrow_warm_work.layout,
+                regrow_warm_work.raster,
+                regrow_warm_work.upload
+            ),
+            (0, 0, 0)
+        );
+        assert!(runtime.compositor.take_work_counts().is_none());
+
+        // Leave only BA so the next nonempty preparation drops the obsolete AB key.
+        {
+            let mut scene = scene_arc.lock().await;
+            for tile_id in [tile_nodes[1].0, reintroduced_tile_id] {
+                scene
+                    .delete_tile(tile_id, "change-efficiency-agent")
+                    .expect("remove AB key");
+            }
+        }
+        runtime.render_frame().await;
+        let replacement_work = runtime
+            .compositor
+            .take_work_counts()
+            .expect("obsolete-key removal frame");
+        assert_eq!(
+            (
+                replacement_work.layout,
+                replacement_work.raster,
+                replacement_work.upload
+            ),
+            (0, 0, 0)
+        );
+        assert!(runtime.compositor.take_work_counts().is_none());
+        {
+            let mut scene = scene_arc.lock().await;
+            let tile_id = scene
+                .create_tile(
+                    removed_tile.tab_id,
+                    "change-efficiency-agent",
+                    lease_id,
+                    removed_tile.bounds,
+                    removed_tile.z_order,
+                )
+                .expect("reintroduce obsolete AB key");
+            scene
+                .set_tile_root(tile_id, removed_node)
+                .expect("restore obsolete-key root");
+        }
+        runtime.render_frame().await;
+        let obsolete_work = runtime
+            .compositor
+            .take_work_counts()
+            .expect("obsolete-key reintroduction frame");
+        assert_eq!(
+            (
+                obsolete_work.layout,
+                obsolete_work.raster,
+                obsolete_work.upload
+            ),
+            (1, 0, 0)
+        );
+        assert!(runtime.compositor.take_work_counts().is_none());
+        runtime.render_frame().await;
+        let obsolete_warm_work = runtime
+            .compositor
+            .take_work_counts()
+            .expect("reintroduced-key warm frame");
+        assert_eq!(
+            (
+                obsolete_warm_work.layout,
+                obsolete_warm_work.raster,
+                obsolete_warm_work.upload
+            ),
+            (0, 0, 0)
+        );
+        assert!(runtime.compositor.take_work_counts().is_none());
+        eprintln!(
+            "hud-b1adb bounds: shrink={shrink_work:?} regrow={regrow_work:?} warm={regrow_warm_work:?} replacement={replacement_work:?} reintroduced={obsolete_work:?} warm={obsolete_warm_work:?}"
+        );
     }
 
     /// Verify that grpc_port = 0 does not start a server by default.
