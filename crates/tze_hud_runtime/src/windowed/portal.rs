@@ -4831,7 +4831,19 @@ mod tests {
         let mut processor = InputProcessor::new();
 
         driver.drain(&mut scene, &mut processor, Some(tab_id));
-        assert_eq!(handle.hub.lock().unwrap().get(&tze_hud_projection::hub::PortalKey::new("test-agent", "proj-npcdf")).unwrap().last_render_us, Some(200));
+        assert_eq!(
+            handle
+                .hub
+                .lock()
+                .unwrap()
+                .get(&tze_hud_projection::hub::PortalKey::new(
+                    "test-agent",
+                    "proj-npcdf"
+                ))
+                .unwrap()
+                .last_render_us,
+            Some(200)
+        );
 
         let tile_id = *scene
             .tiles
@@ -4937,12 +4949,26 @@ mod tests {
         drop(shared);
         // Execute the actual production settle order: composer flush, deferred
         // keyboard work, then portal drain in this same Winit maintenance turn.
-        assert!(matches!(app.settle_scene_work(), PortalProjectionDrain::Completed { scene_changed: true }));
+        assert!(matches!(
+            app.settle_scene_work(),
+            PortalProjectionDrain::Completed {
+                scene_changed: true
+            }
+        ));
         assert!(app.state.viewer_echo_queue.lock().unwrap().is_empty());
         {
             let hub = handle.hub.lock().unwrap();
-            let portal = hub.get(&tze_hud_projection::hub::PortalKey::new("test-agent", "proj-npcdf")).unwrap();
-            assert_eq!(portal.last_render_us, Some(201), "reply paints strictly inside the 100 ms pacing slot");
+            let portal = hub
+                .get(&tze_hud_projection::hub::PortalKey::new(
+                    "test-agent",
+                    "proj-npcdf",
+                ))
+                .unwrap();
+            assert_eq!(
+                portal.last_render_us,
+                Some(201),
+                "reply paints strictly inside the 100 ms pacing slot"
+            );
             assert_eq!(portal.replies.len(), 1);
             assert_eq!(portal.inputs.len(), 1);
             assert_eq!(portal.replies[0].text, "viewer-reply-same-frame");
@@ -4950,15 +4976,37 @@ mod tests {
         {
             let shared = app.state.shared_state.try_lock().unwrap();
             let scene = shared.scene.try_lock().unwrap();
-            let painted = scene.nodes.values().filter_map(|node| match &node.data {
-                NodeData::TextMarkdown(text) => Some(text.content.as_str()),
-                _ => None,
-            }).collect::<Vec<_>>().join("\n");
-            assert_eq!(painted.matches("viewer-reply-same-frame").count(), 1, "one hub echo in the scene, no raw duplicate: {painted}");
+            let painted = scene
+                .nodes
+                .values()
+                .filter_map(|node| match &node.data {
+                    NodeData::TextMarkdown(text) => Some(text.content.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert_eq!(
+                painted.matches("viewer-reply-same-frame").count(),
+                1,
+                "one hub echo in the scene, no raw duplicate: {painted}"
+            );
             assert!(scene.tile_follow_tail_at_tail(tile_id));
         }
         app.settle_scene_work();
-        assert_eq!(handle.hub.lock().unwrap().get(&tze_hud_projection::hub::PortalKey::new("test-agent", "proj-npcdf")).unwrap().last_render_us, Some(201), "no perpetual local dirty frame");
+        assert_eq!(
+            handle
+                .hub
+                .lock()
+                .unwrap()
+                .get(&tze_hud_projection::hub::PortalKey::new(
+                    "test-agent",
+                    "proj-npcdf"
+                ))
+                .unwrap()
+                .last_render_us,
+            Some(201),
+            "no perpetual local dirty frame"
+        );
     }
 
     #[test]

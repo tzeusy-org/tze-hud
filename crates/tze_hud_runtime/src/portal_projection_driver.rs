@@ -525,7 +525,9 @@ impl InProcessPortalDriver {
         let key = self.drive.key_for_tile(tile_id)?;
         let adapter_batch = adapter_draft_batch_from_runtime(batch);
         let text = adapter_batch.submission.as_ref()?.text.clone();
-        let submission = self.portals.submit_reply(&key, text, submitted_at_wall_us)?;
+        let submission = self
+            .portals
+            .submit_reply(&key, text, submitted_at_wall_us)?;
         let result = submission.result;
         let pending_input_count = submission.pending_input_count;
         let pending_input_bytes = submission.pending_input_bytes;
@@ -560,7 +562,11 @@ impl InProcessPortalDriver {
         };
         self.drive.entry(&key).last_input_feedback = Some(feedback.clone());
         if feedback.feedback_state == PortalInputFeedbackState::Rejected
-            && let Some(incarnation) = self.drive.entries.get(&key).and_then(|entry| entry.incarnation)
+            && let Some(incarnation) = self
+                .drive
+                .entries
+                .get(&key)
+                .and_then(|entry| entry.incarnation)
             && let Some(mut hub) = self.lock_hub()
         {
             hub.mark_local_feedback(&key, incarnation);
@@ -1326,11 +1332,36 @@ mod tests {
         let rejected_at = 200 + FRAME_US + 1;
         driver.drain_inner(&mut scene, &mut processor, Some(tab), rejected_at);
         let content = tile_markdown(&scene, tile_id);
-        assert!(content.contains("not sent") && content.contains("message too long"), "{content}");
-        assert!(!content.contains(&too_large), "a refused reply has no success echo");
-        assert_eq!(handle.hub.lock().unwrap().get(&key("p")).unwrap().last_render_us, Some(rejected_at));
+        assert!(
+            content.contains("not sent") && content.contains("message too long"),
+            "{content}"
+        );
+        assert!(
+            !content.contains(&too_large),
+            "a refused reply has no success echo"
+        );
+        assert_eq!(
+            handle
+                .hub
+                .lock()
+                .unwrap()
+                .get(&key("p"))
+                .unwrap()
+                .last_render_us,
+            Some(rejected_at)
+        );
         driver.drain_inner(&mut scene, &mut processor, Some(tab), rejected_at + 1);
-        assert_eq!(handle.hub.lock().unwrap().get(&key("p")).unwrap().last_render_us, Some(rejected_at), "local feedback urgency is consumed once");
+        assert_eq!(
+            handle
+                .hub
+                .lock()
+                .unwrap()
+                .get(&key("p"))
+                .unwrap()
+                .last_render_us,
+            Some(rejected_at),
+            "local feedback urgency is consumed once"
+        );
     }
 
     /// The render site wires follow-tail (spec §3.2), the resize snapshot

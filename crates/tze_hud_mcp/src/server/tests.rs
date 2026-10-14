@@ -1254,11 +1254,13 @@ async fn action_presses_are_delivered_until_acked() {
     {
         let mut scene = server.scene.lock().await;
         scene.push_pending_action(PendingAction {
-            publisher_namespace: "a".into(), zone_name: "subtitle".into(),
+            publisher_namespace: "a".into(),
+            zone_name: "subtitle".into(),
             kind: PendingActionKind::Callback("dismiss".into()),
         });
         scene.push_pending_action(PendingAction {
-            publisher_namespace: "a".into(), zone_name: "subtitle".into(),
+            publisher_namespace: "a".into(),
+            zone_name: "subtitle".into(),
             kind: PendingActionKind::Dismiss,
         });
     }
@@ -1266,27 +1268,47 @@ async fn action_presses_are_delivered_until_acked() {
     assert!(!error);
     assert_eq!(callback["items"].as_array().unwrap().len(), 1);
     assert_eq!(callback["items"][0]["action"], "dismiss");
-    assert!(callback["items"][0].get("kind").is_none(), "callback JSON stays unchanged");
+    assert!(
+        callback["items"][0].get("kind").is_none(),
+        "callback JSON stays unchanged"
+    );
     assert_eq!(callback["remaining"], 1);
     let callback_id = callback["items"][0]["id"].clone();
-    let (dismiss, error) = call_as(&server, &a, "hud_input", json!({"ack":[callback_id],"max_items":1})).await;
+    let (dismiss, error) = call_as(
+        &server,
+        &a,
+        "hud_input",
+        json!({"ack":[callback_id],"max_items":1}),
+    )
+    .await;
     assert!(!error);
     let dismiss_id = dismiss["items"][0]["id"].clone();
     assert_ne!(dismiss_id, callback_id);
-    assert_eq!(dismiss, json!({"items":[{"id":dismiss_id,"s":"zone:subtitle","action":"dismiss","kind":"dismiss"}],"remaining":0}));
+    assert_eq!(
+        dismiss,
+        json!({"items":[{"id":dismiss_id,"s":"zone:subtitle","action":"dismiss","kind":"dismiss"}],"remaining":0})
+    );
     let (again, error) = call_as(&server, &a, "hud_input", json!({})).await;
     assert!(!error);
-    assert_eq!(again, dismiss, "typed dismiss retains its stable id until ack");
+    assert_eq!(
+        again, dismiss,
+        "typed dismiss retains its stable id until ack"
+    );
     let (foreign, error) = call_as(&server, &b, "hud_input", json!({"ack":[dismiss_id]})).await;
     assert!(!error);
     assert_eq!(foreign, json!({"items":[],"remaining":0}));
     let (zero, error) = call_as(&server, &a, "hud_input", json!({"max_items":0})).await;
     assert!(!error);
     assert_eq!(zero, json!({"items":[],"remaining":1}));
-    let (acked, error) = call_as(&server, &a, "hud_input", json!({"ack":[dismiss_id,dismiss_id,"unknown"]})).await;
+    let (acked, error) = call_as(
+        &server,
+        &a,
+        "hud_input",
+        json!({"ack":[dismiss_id,dismiss_id,"unknown"]}),
+    )
+    .await;
     assert!(!error);
     assert_eq!(acked, json!({"items":[],"remaining":0}));
-
 }
 
 // ── Portal ───────────────────────────────────────────────────────────────────
@@ -1660,7 +1682,9 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         let mut waiting = Box::pin(call_as(&isolated, &a, "hud_input", json!({"wait_ms":1000})));
         assert!(waiting.as_mut().poll(&mut cx).is_pending());
         scene.push_pending_action(PendingAction {
-            publisher_namespace: "a".into(), zone_name: "subtitle".into(), kind: PendingActionKind::Callback("before-check".into()),
+            publisher_namespace: "a".into(),
+            zone_name: "subtitle".into(),
+            kind: PendingActionKind::Callback("before-check".into()),
         });
         drop(scene);
         let Poll::Ready((found, false)) = waiting.as_mut().poll(&mut cx) else {
@@ -1678,17 +1702,36 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         assert!(first.as_mut().poll(&mut cx).is_pending());
         assert!(second.as_mut().poll(&mut cx).is_pending());
         assert!(other.as_mut().poll(&mut cx).is_pending());
-        let wake = isolated.scene.lock().await.push_pending_action(PendingAction {
-            publisher_namespace: "a".into(), zone_name: "subtitle".into(), kind: PendingActionKind::Callback("after-check".into()),
-        });
+        let wake = isolated
+            .scene
+            .lock()
+            .await
+            .push_pending_action(PendingAction {
+                publisher_namespace: "a".into(),
+                zone_name: "subtitle".into(),
+                kind: PendingActionKind::Callback("after-check".into()),
+            });
         wake.notify();
-        let Poll::Ready((one, false)) = first.as_mut().poll(&mut cx) else { panic!("first owner wait"); };
-        let Poll::Ready((two, false)) = second.as_mut().poll(&mut cx) else { panic!("second owner wait"); };
-        assert_eq!(one, two, "coalesced wakes use retained input, not notification counts");
+        let Poll::Ready((one, false)) = first.as_mut().poll(&mut cx) else {
+            panic!("first owner wait");
+        };
+        let Poll::Ready((two, false)) = second.as_mut().poll(&mut cx) else {
+            panic!("second owner wait");
+        };
+        assert_eq!(
+            one, two,
+            "coalesced wakes use retained input, not notification counts"
+        );
         assert_eq!(one["items"][0]["action"], "after-check");
         assert!(other.as_mut().poll(&mut cx).is_pending());
         drop(other);
-        let (acked, error) = call_as(&isolated, &a, "hud_input", json!({"ack":[one["items"][0]["id"]]})).await;
+        let (acked, error) = call_as(
+            &isolated,
+            &a,
+            "hud_input",
+            json!({"ack":[one["items"][0]["id"]]}),
+        )
+        .await;
         assert!(!error);
         assert_eq!(acked, json!({"items":[],"remaining":0}));
     }
@@ -1700,7 +1743,9 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         let mut waiting = Box::pin(call_as(&isolated, &a, "hud_input", json!({"wait_ms":1000})));
         assert!(waiting.as_mut().poll(&mut cx).is_pending());
         scene.push_pending_action(PendingAction {
-            publisher_namespace: "a".into(), zone_name: "subtitle".into(), kind: PendingActionKind::Callback("cancelled".into()),
+            publisher_namespace: "a".into(),
+            zone_name: "subtitle".into(),
+            kind: PendingActionKind::Callback("cancelled".into()),
         });
         drop(waiting);
         drop(scene);
@@ -1711,29 +1756,46 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
     {
         let (failed, _) = self::server();
         let (mut failed, failed_hub) = hub_portal(failed);
-        failed.scene.lock().await.push_pending_action(PendingAction {
-            publisher_namespace: psk_agent(), zone_name: "subtitle".into(), kind: PendingActionKind::Callback("after-error".into()),
-        });
+        failed
+            .scene
+            .lock()
+            .await
+            .push_pending_action(PendingAction {
+                publisher_namespace: psk_agent(),
+                zone_name: "subtitle".into(),
+                kind: PendingActionKind::Callback("after-error".into()),
+            });
         let poisoned = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             let _guard = failed_hub.lock().unwrap();
             panic!("fixture poison after action admission");
         }));
         assert!(poisoned.is_err());
-        assert_eq!(call_err(&failed, "hud_input", json!({})).await["code"], "INTERNAL");
+        assert_eq!(
+            call_err(&failed, "hud_input", json!({})).await["code"],
+            "INTERNAL"
+        );
         failed.portals = None;
         let found = call(&failed, "hud_input", json!({})).await;
         assert_eq!(found["items"][0]["action"], "after-error");
-        assert_eq!(call(&failed, "hud_input", json!({})).await["items"][0]["id"], found["items"][0]["id"]);
+        assert_eq!(
+            call(&failed, "hud_input", json!({})).await["items"][0]["id"],
+            found["items"][0]["id"]
+        );
     }
 
     // Deterministic model time exercises a real pending call's finite lease.
     // Small fixture limits expose boundaries; production defaults are untouched.
     {
         let (live, clock) = self::server();
-        let portals = PortalHandle::new(PortalHub::new(tze_hud_projection::hub::PortalLimits {
-            degrade_after_us: 10_000, reclaim_after_us: 10_000, input_ttl_us: 5_000,
-            ..Default::default()
-        }), Arc::new(clock.clone()));
+        let portals = PortalHandle::new(
+            PortalHub::new(tze_hud_projection::hub::PortalLimits {
+                degrade_after_us: 10_000,
+                reclaim_after_us: 10_000,
+                input_ttl_us: 5_000,
+                ..Default::default()
+            }),
+            Arc::new(clock.clone()),
+        );
         let live_hub = Arc::clone(&portals.hub);
         let producer = portals.clone();
         let live = live.with_portals(portals);
@@ -1742,23 +1804,48 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         let start = 1_000_000;
         let mut waiting = Box::pin(call(&live, "hud_input", json!({"wait_ms":1000})));
         assert!(waiting.as_mut().poll(&mut cx).is_pending());
-        assert!(live_hub.lock().unwrap().next_deadline().is_none(), "zero portals adds no periodic main wake");
-        call(&live, "hud_publish", json!({"surface":"portal:late", "content":"late attach"})).await;
+        assert!(
+            live_hub.lock().unwrap().next_deadline().is_none(),
+            "zero portals adds no periodic main wake"
+        );
+        call(
+            &live,
+            "hud_publish",
+            json!({"surface":"portal:late", "content":"late attach"}),
+        )
+        .await;
         {
             let mut hub = live_hub.lock().unwrap();
             hub.publish(&outsider, Default::default(), start).unwrap();
             hub.take_due(start);
         }
-        producer.submit_reply(&own, "expires normally".into(), start).unwrap().result.unwrap();
+        producer
+            .submit_reply(&own, "expires normally".into(), start)
+            .unwrap()
+            .result
+            .unwrap();
         clock.advance_us(20_000);
         {
             let mut hub = live_hub.lock().unwrap();
             hub.sweep(start + 20_000);
             assert_eq!(hub.get(&own).unwrap().degraded_since_us, None);
-            assert_eq!(hub.get(&own).unwrap().last_seen_us, start, "lease never fakes a future touch");
-            assert!(hub.get(&own).unwrap().inputs.is_empty(), "input TTL ignores active polls");
-            assert_eq!(hub.get(&outsider).unwrap().degraded_since_us, Some(start + 20_000));
-            assert!(hub.degrade(&own, start + 20_000), "explicit upstream loss ignores active polls");
+            assert_eq!(
+                hub.get(&own).unwrap().last_seen_us,
+                start,
+                "lease never fakes a future touch"
+            );
+            assert!(
+                hub.get(&own).unwrap().inputs.is_empty(),
+                "input TTL ignores active polls"
+            );
+            assert_eq!(
+                hub.get(&outsider).unwrap().degraded_since_us,
+                Some(start + 20_000)
+            );
+            assert!(
+                hub.degrade(&own, start + 20_000),
+                "explicit upstream loss ignores active polls"
+            );
             hub.take_due(start + 20_000);
             assert_eq!(hub.next_deadline().unwrap().at_us, start + 30_000);
         }
@@ -1766,10 +1853,18 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         {
             let mut hub = live_hub.lock().unwrap();
             hub.sweep(start + 40_000);
-            assert!(hub.get(&own).is_none(), "explicit degradation still reclaims on time");
+            assert!(
+                hub.get(&own).is_none(),
+                "explicit degradation still reclaims on time"
+            );
             assert!(hub.get(&outsider).is_none());
         }
-        call(&live, "hud_publish", json!({"surface":"portal:late", "content":"new incarnation"})).await;
+        call(
+            &live,
+            "hud_publish",
+            json!({"surface":"portal:late", "content":"new incarnation"}),
+        )
+        .await;
         // Hold the Hub during cancellation: Drop cannot acquire it, but the
         // atomic marker must make the next sweep ignore the cancelled lease.
         let mut cancellation_guard = live_hub.lock().unwrap();
@@ -1779,17 +1874,30 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
             let hub = &mut cancellation_guard;
             hub.sweep(start + 60_000);
             assert_eq!(hub.get(&own).unwrap().last_seen_us, start + 40_000);
-            assert_eq!(hub.get(&own).unwrap().degraded_since_us, Some(start + 60_000), "cancel releases without heartbeat");
+            assert_eq!(
+                hub.get(&own).unwrap().degraded_since_us,
+                Some(start + 60_000),
+                "cancel releases without heartbeat"
+            );
         }
         drop(cancellation_guard);
         // Normal return touches actual now and releases only that finite request.
         let mut waiting = Box::pin(call(&live, "hud_input", json!({"wait_ms":1000})));
         assert!(waiting.as_mut().poll(&mut cx).is_pending());
-        let id = producer.submit_reply(&own, "ready".into(), start + 60_000).unwrap().result.unwrap();
-        let Poll::Ready(found) = waiting.as_mut().poll(&mut cx) else { panic!("live reply must finish"); };
+        let id = producer
+            .submit_reply(&own, "ready".into(), start + 60_000)
+            .unwrap()
+            .result
+            .unwrap();
+        let Poll::Ready(found) = waiting.as_mut().poll(&mut cx) else {
+            panic!("live reply must finish");
+        };
         assert_eq!(found["items"][0]["id"], id);
         drop(waiting);
-        assert_eq!(live_hub.lock().unwrap().get(&own).unwrap().last_seen_us, start + 60_000);
+        assert_eq!(
+            live_hub.lock().unwrap().get(&own).unwrap().last_seen_us,
+            start + 60_000
+        );
         call(&live, "hud_input", json!({"ack":[id]})).await;
         let mut waiting = Box::pin(call(&live, "hud_input", json!({"wait_ms":1000})));
         assert!(waiting.as_mut().poll(&mut cx).is_pending());
@@ -1797,24 +1905,42 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         {
             let mut hub = live_hub.lock().unwrap();
             hub.sweep(start + 2_060_000);
-            assert_eq!(hub.get(&own).unwrap().degraded_since_us, Some(start + 2_060_000), "finite expiry defeats a stalled owner");
+            assert_eq!(
+                hub.get(&own).unwrap().degraded_since_us,
+                Some(start + 2_060_000),
+                "finite expiry defeats a stalled owner"
+            );
         }
         drop(waiting);
         call(&live, "hud_clear", json!({"surface":"portal:late"})).await;
         let mut zero = Box::pin(call(&live, "hud_input", json!({"wait_ms":1000})));
         assert!(zero.as_mut().poll(&mut cx).is_pending());
         drop(zero);
-        call(&live, "hud_publish", json!({"surface":"portal:late", "content":"after cancelled zero-portal wait"})).await;
+        call(
+            &live,
+            "hud_publish",
+            json!({"surface":"portal:late", "content":"after cancelled zero-portal wait"}),
+        )
+        .await;
         clock.advance_us(20_000);
         let mut hub = live_hub.lock().unwrap();
         hub.sweep(start + 2_080_000);
-        assert_eq!(hub.get(&own).unwrap().degraded_since_us, Some(start + 2_080_000), "zero-portal cancellation leaves no hold for first attachment");
+        assert_eq!(
+            hub.get(&own).unwrap().degraded_since_us,
+            Some(start + 2_080_000),
+            "zero-portal cancellation leaves no hold for first attachment"
+        );
         drop(hub);
 
         // These two actual portal-backed requests own distinct liveness tokens.
         // Ending one must not end the other; ending the final one is immediate.
         call(&live, "hud_clear", json!({"surface":"portal:late"})).await;
-        call(&live, "hud_publish", json!({"surface":"portal:late", "content":"overlap"})).await;
+        call(
+            &live,
+            "hud_publish",
+            json!({"surface":"portal:late", "content":"overlap"}),
+        )
+        .await;
         let overlap_at = start + 2_080_000;
         let mut first = Box::pin(call(&live, "hud_input", json!({"wait_ms":1000})));
         let mut last = Box::pin(call(&live, "hud_input", json!({"wait_ms":1000})));
@@ -1825,7 +1951,10 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
             hub.take_due(overlap_at);
             assert_eq!(hub.get(&own).unwrap().last_seen_us, overlap_at);
             let deadline = hub.next_deadline().unwrap();
-            assert_eq!(deadline.kind, tze_hud_projection::hub::DeadlineKind::Liveness);
+            assert_eq!(
+                deadline.kind,
+                tze_hud_projection::hub::DeadlineKind::Liveness
+            );
             assert!(deadline.at_us > overlap_at + 10_000);
             assert!(deadline.at_us <= overlap_at + 1_000_000);
         }
@@ -1833,19 +1962,40 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         clock.advance_us(20_000);
         let mut hub = live_hub.lock().unwrap();
         hub.sweep(overlap_at + 20_000);
-        assert_eq!(hub.get(&own).unwrap().degraded_since_us, None, "the remaining real request still protects its agent");
-        assert_eq!(hub.get(&own).unwrap().last_seen_us, overlap_at, "ending one request is not a heartbeat");
+        assert_eq!(
+            hub.get(&own).unwrap().degraded_since_us,
+            None,
+            "the remaining real request still protects its agent"
+        );
+        assert_eq!(
+            hub.get(&own).unwrap().last_seen_us,
+            overlap_at,
+            "ending one request is not a heartbeat"
+        );
         assert!(hub.next_deadline().unwrap().at_us > overlap_at + 20_000);
         // Contended final Drop still deactivates atomically before a Hub scan.
         drop(last);
         let deadline = hub.next_deadline().unwrap();
-        assert_eq!(deadline.kind, tze_hud_projection::hub::DeadlineKind::Liveness);
-        assert_eq!(deadline.at_us, overlap_at + 10_000, "final cancellation restores the original idle boundary immediately");
+        assert_eq!(
+            deadline.kind,
+            tze_hud_projection::hub::DeadlineKind::Liveness
+        );
+        assert_eq!(
+            deadline.at_us,
+            overlap_at + 10_000,
+            "final cancellation restores the original idle boundary immediately"
+        );
         hub.sweep(overlap_at + 20_000);
-        assert_eq!(hub.get(&own).unwrap().degraded_since_us, Some(overlap_at + 20_000));
-        assert_eq!(hub.get(&own).unwrap().last_seen_us, overlap_at, "final cancellation adds no heartbeat");
+        assert_eq!(
+            hub.get(&own).unwrap().degraded_since_us,
+            Some(overlap_at + 20_000)
+        );
+        assert_eq!(
+            hub.get(&own).unwrap().last_seen_us,
+            overlap_at,
+            "final cancellation adds no heartbeat"
+        );
     }
-
 }
 
 #[tokio::test]

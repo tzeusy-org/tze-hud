@@ -2127,7 +2127,9 @@ impl WinitApp {
                                     tze_hud_scene::PendingAction {
                                         publisher_namespace: publisher_namespace.clone(),
                                         zone_name: zone_name.clone(),
-                                        kind: tze_hud_scene::graph::PendingActionKind::Callback(callback_id.clone()),
+                                        kind: tze_hud_scene::graph::PendingActionKind::Callback(
+                                            callback_id.clone(),
+                                        ),
                                     },
                                 ));
                                 // An activated notification is answered: dismiss

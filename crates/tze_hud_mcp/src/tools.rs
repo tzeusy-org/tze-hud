@@ -86,7 +86,10 @@ impl McpState {
             Ok(agents) => agents,
             Err(std::sync::TryLockError::Poisoned(poisoned)) => poisoned.into_inner(),
             Err(std::sync::TryLockError::WouldBlock) => {
-                return Err(tool_err("INTERNAL", "input state unavailable; retry hud_input"));
+                return Err(tool_err(
+                    "INTERNAL",
+                    "input state unavailable; retry hud_input",
+                ));
             }
         };
         Ok(f(agents.entry(agent.to_string()).or_default()))
@@ -885,17 +888,25 @@ impl InputPollLease {
         let portals = ctx.portals.expect("enabled portal handle");
         let active = Arc::new(AtomicBool::new(true));
         let (request, changed) = {
-            let mut hub = portals.hub.try_lock().map_err(|_| {
-                tool_err("INTERNAL", "input state unavailable; retry hud_input")
-            })?;
+            let mut hub = portals
+                .hub
+                .try_lock()
+                .map_err(|_| tool_err("INTERNAL", "input state unavailable; retry hud_input"))?;
             let before = hub.next_deadline();
             let remaining_us = deadline
                 .saturating_duration_since(tokio::time::Instant::now())
                 .as_micros()
                 .min(u64::MAX as u128) as u64;
             let request = hub
-                .begin_input_poll(namespace, remaining_us, portals.clock.now_us(), Arc::clone(&active))
-                .map_err(|_| tool_err("INTERNAL", "input ownership unavailable; retry hud_input"))?;
+                .begin_input_poll(
+                    namespace,
+                    remaining_us,
+                    portals.clock.now_us(),
+                    Arc::clone(&active),
+                )
+                .map_err(|_| {
+                    tool_err("INTERNAL", "input ownership unavailable; retry hud_input")
+                })?;
             let changed = !hub.list(namespace).is_empty() && before != hub.next_deadline();
             (request, changed)
         };

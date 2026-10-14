@@ -729,13 +729,15 @@ impl PortalHub {
                 portal.dirty = true;
             }
             match portal.degraded_since_us {
-                None
-                    if !self.active_input_polls.get(&key.agent).is_some_and(|polls| {
+                None if !self
+                    .active_input_polls
+                    .get(&key.agent)
+                    .is_some_and(|polls| {
                         polls.values().any(|poll| {
                             poll.active.load(Ordering::Acquire) && poll.expires_us > now_us
                         })
                     })
-                        && portal.degrade_at(limits).is_some_and(|at| now_us >= at) =>
+                    && portal.degrade_at(limits).is_some_and(|at| now_us >= at) =>
                 {
                     portal.degraded_since_us = Some(now_us);
                     portal.status = PortalStatus::Degraded;
@@ -797,10 +799,13 @@ impl PortalHub {
                     None => p.degrade_at(&self.limits).map(|at| {
                         self.active_input_polls
                             .get(&key.agent)
-                            .and_then(|polls| polls.values()
-                                .filter(|poll| poll.active.load(Ordering::Acquire))
-                                .map(|poll| poll.expires_us)
-                                .max())
+                            .and_then(|polls| {
+                                polls
+                                    .values()
+                                    .filter(|poll| poll.active.load(Ordering::Acquire))
+                                    .map(|poll| poll.expires_us)
+                                    .max()
+                            })
                             .map_or(at, |expires_us| at.max(expires_us))
                     }),
                 }
