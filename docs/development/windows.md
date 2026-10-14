@@ -461,6 +461,14 @@ hooks are shell scripts, and Git for Windows runs them through its bundled
 
 ## Worktrees and agent sessions
 
+Shared local Cargo targets require the opt-in
+[source-binding policy](source-freshness.md) for every cooperating writer. Keep
+the explicit target and guard enabled through canonical gates and ordinary
+pre-push checks; a different frozen source requires a coordinator-selected fresh
+epoch. This source-provenance policy neither grants a build lease nor establishes
+native Windows execution. It does not solve the separate deletion/retention
+investigation below.
+
 Active-build cache preservation is a cleanup recommendation, not an implemented
 control: preserve owned build roots and evidence until gate terminals are consumed;
 record the active lease, cache epoch, canonical root identity and owning PID/start
