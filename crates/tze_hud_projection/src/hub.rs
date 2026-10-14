@@ -1104,5 +1104,43 @@ mod tests {
         );
         assert_eq!(hub.take_due(100_000), [Due { key: k, unread: 2 }]);
         assert_eq!(hub.take_due(300_000), [], "nothing changed");
+
+        // An admitted local reply must render inside the ordinary 100 ms slot.
+        // Timestamps use the Hub's microsecond clock, not elapsed wall time.
+        let mut hub = PortalHub::default();
+        let k = key("a", "reply");
+        hub.publish(&k, text("ready"), 0).unwrap();
+        assert_eq!(
+            hub.take_due(0),
+            [Due {
+                key: k.clone(),
+                unread: 1
+            }]
+        );
+        hub.submit_reply(&k, "please continue".into(), 1).unwrap();
+        let deadline = hub.next_deadline().expect("the reply needs local feedback");
+        assert_eq!(deadline.kind, DeadlineKind::Render);
+        assert!(deadline.at_us <= 1, "an admitted reply is due immediately");
+        assert_eq!(
+            hub.take_due(1),
+            [Due {
+                key: k.clone(),
+                unread: 0
+            }]
+        );
+        assert_eq!(hub.take_due(2), [], "local urgency is consumed once");
+
+        hub.publish(&k, text("later output"), 2).unwrap();
+        assert_eq!(hub.take_due(2), [], "output alone does not become urgent");
+        assert_eq!(hub.take_due(100_000), [], "output keeps the 100 ms pace");
+        assert_eq!(
+            hub.next_deadline(),
+            Some(Deadline {
+                at_us: 100_001,
+                kind: DeadlineKind::Render
+            })
+        );
+        assert_eq!(hub.take_due(100_001), [Due { key: k, unread: 1 }]);
+        assert_eq!(hub.take_due(300_001), [], "no idle feedback frame");
     }
 }
