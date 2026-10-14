@@ -65,6 +65,49 @@ impl ShutdownToken {
     }
 }
 
+// ─── Exit deadline ────────────────────────────────────────────────────────────
+
+/// How long window, GPU and process teardown may take once every runtime
+/// thread has stopped. Well inside the installer's 15 s wait for the old
+/// instance to exit.
+pub const EXIT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// End the process if it is still alive `deadline` from now.
+///
+/// Arm this after the runtime's threads have stopped, when only window, GPU
+/// and process teardown remain. Those run in drivers and Windows itself; on the
+/// owner's host one hung for minutes, holding the single-instance mutex that an
+/// update or installer waits on (hud-gr6jp). Terminating then is safe: no
+/// runtime work is left, and the OS reclaims the windows and GPU resources.
+pub fn arm_exit_deadline(deadline: std::time::Duration) {
+    let spawned = std::thread::Builder::new()
+        .name("tze-exit-deadline".into())
+        .spawn(move || {
+            std::thread::sleep(deadline);
+            let message = format!("process teardown exceeded {deadline:?}; terminating");
+            tracing::error!("{message}");
+            crate::diag::diag_write(&message);
+            terminate_process();
+        });
+    if let Err(error) = spawned {
+        tracing::warn!(%error, "exit deadline unavailable; teardown is unbounded");
+    }
+}
+
+/// Exit without running process teardown again (DLL detach, atexit).
+#[cfg(target_os = "windows")]
+fn terminate_process() -> ! {
+    use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
+    // SAFETY: GetCurrentProcess returns a pseudo-handle for this process.
+    let _ = unsafe { TerminateProcess(GetCurrentProcess(), 1) };
+    std::process::abort()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn terminate_process() -> ! {
+    std::process::abort()
+}
+
 impl Default for ShutdownToken {
     fn default() -> Self {
         Self::new()

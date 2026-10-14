@@ -2822,4 +2822,41 @@ mod tests {
         assert!(!harness.app.state.cursor_entry.tick);
         assert_eq!(harness.app.state.wake.main_work_generation(), before + 1);
     }
+
+    /// A quit must leave winit's loop without another OS message: winit on
+    /// Windows checks `exit()` only after the wait that follows
+    /// `about_to_wait`, so the exit must also stop that wait (hud-gr6jp).
+    #[test]
+    fn shutdown_leaves_the_event_loop_without_waiting_for_a_message() {
+        use std::cell::RefCell;
+        use winit::event_loop::ControlFlow;
+
+        #[derive(Default)]
+        struct Recorder(RefCell<Vec<Option<ControlFlow>>>);
+        impl crate::windowed::LoopExit for Recorder {
+            fn set_control_flow(&self, control_flow: ControlFlow) {
+                self.0.borrow_mut().push(Some(control_flow));
+            }
+            fn exit(&self) {
+                self.0.borrow_mut().push(None);
+            }
+        }
+
+        let harness = HeadlessEventLoopHarness::new();
+        let idle = Recorder::default();
+        assert!(!harness.app.leave_if_shutdown(&idle));
+        assert!(
+            idle.0.borrow().is_empty(),
+            "no shutdown: the loop is untouched"
+        );
+
+        harness
+            .app
+            .state
+            .shutdown
+            .trigger(crate::threads::ShutdownReason::Clean);
+        let quitting = Recorder::default();
+        assert!(harness.app.leave_if_shutdown(&quitting));
+        assert_eq!(*quitting.0.borrow(), [Some(ControlFlow::Poll), None]);
+    }
 }

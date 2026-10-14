@@ -1341,7 +1341,12 @@ set {DEV_ALLOW_INSECURE_STARTUP_ENV}=1 only in debug/dev runs if you need fallba
     };
 
     let runtime = WindowedRuntime::new(config);
-    runtime.run()
+    let result = runtime.run();
+    tracing::info!(
+        ok = result.is_ok(),
+        "windowed runtime returned; exiting process"
+    );
+    result
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
