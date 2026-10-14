@@ -899,6 +899,7 @@ async fn test_status_bar_key_icon_map_produces_per_entry_text_items() {
 #[tokio::test]
 async fn test_latest_wins_zone_renders_only_latest_publication() {
     let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
 
     let mut scene = SceneGraph::new(1280.0, 720.0);
     scene.register_zone(ZoneDefinition {
