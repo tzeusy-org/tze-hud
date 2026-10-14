@@ -151,3 +151,33 @@ To roll back the harness, return to source-isolated targets before disabling the
 opt-in guard. Keep suspect shared epochs protected rather than continuing their
 cross-source reuse. Linux/Windows-GNU build checks do not establish actual native
 Windows execution, owner-visible HUD pixels or a production rendering repair.
+
+## Nextest leak diagnostics
+
+With pinned Nextest 0.9.114 (commit
+`9daab1c50cd0389236508435f71434f01aa2eca1`), `LEAK` means the test process
+exited successfully but its captured output readers had not finished when the
+post-exit leak timer fired. Its
+[bundled default profile](https://github.com/nextest-rs/nextest/blob/9daab1c50cd0389236508435f71434f01aa2eca1/nextest-runner/default-config.toml#L100)
+sets 200 ms with a passing result; this repository does not override it. The
+generic Rust default is 100 ms, so it does not establish the effective profile
+period. The historical effective timer was not separately traced. This diagnostic
+does not establish a memory leak or a failed assertion.
+
+The protected source-bound `7cd38fe0b7fc4f6c8367edfcb521134c258c7f89` full CI
+reported 3,054 passed (one leaky), with all six stages exiting 0. The named case
+`tze_hud_config::loader::unit_tests::test_duplicate_tab_name_produces_error`
+was `LEAK` at 0.935 s; its captured Rust result was one passed, zero failed.
+Preserve the original full-CI log SHA-256
+`b56a8d0b5d20ee1465800e1d313dc42e4ba5650d1b2610c97b598ca004ad17f3`
+and terminal receipt SHA-256
+`7a55c5f5e28bccdb45d572e46b7bf4b08a56ce518b9927e5dc051757459ad7cc`.
+The receipt lacks per-case pipe ownership and timing, so it cannot distinguish
+an inherited writer from delayed output-reader completion. No product defect
+was demonstrated. Adopted raw wait statuses 9/14 remain unattributed.
+
+A causal follow-up needs the actual case PID/start identity, captured pipe
+identities and writer lifetimes around exit. Endpoint child absence or a later
+passing run cannot reconstruct that evidence. Disabling capture changes the
+observed seam. Preserve the original result; do not weaken leak timeouts or
+retry gates to erase the diagnostic.
