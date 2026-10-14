@@ -295,7 +295,10 @@ used. The old instance keeps serving while the new one starts its window and
 GPU. When the new one has submitted its first frame it reports `READY` over the
 loopback socket (the nonce proves it is the child that was started), and the
 old instance shuts down cleanly (exit 0), releasing its ports and the
-single-instance mutex. The new instance then takes the mutex (waiting up to
+single-instance mutex, normally within half a second. Once its threads have
+stopped, the old instance gives window, GPU and process teardown 5 s, then
+terminates itself (exit 1, logged as "process teardown exceeded") so a stuck
+driver cannot hold the mutex. The new instance then takes the mutex (waiting up to
 35 s) and binds the gRPC and MCP ports (retrying up to 10 s). Poll
 `GET /admin/status` until `pid` changes; the same PSK keeps working. The
 overlay is briefly doubled and the ports are briefly unreachable during the
