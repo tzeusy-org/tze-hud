@@ -167,7 +167,7 @@ def test_assert_not_early_allows_slack_but_rejects_an_early_event():
         ws.assert_not_early(1.0, 3.0, "x")
 
 
-def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subtests):
+def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subtests, capsys):
     """Exercise the real smoke/PNG path with one publish and an offline clock."""
     background = b"\x10\x20\x30\xff" * 400
     shown = b"\x90\xa0\xb0\xff" * 200 + background[800:]
@@ -193,6 +193,7 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
             self.clock, self.case = clock, case
             self.held, self.due = True, None  # Earlier screenshot content.
             self.publishes, self.captures, self.clears = [], [], 0
+            self.rpc_s, self.capture_s = (0.001, 0.0005) if case == "coarse monotonic" else (0.05, 0.05)
 
         def urlopen(self, request, timeout):
             if request.get_method() == "GET":
@@ -232,7 +233,7 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                         body = b"x" * (ws.MAX_PNG_BYTES + 1)
                     elif self.case == "transport":
                         raise ws.urllib.error.URLError("synthetic unavailable capture")
-                self.clock.now += 3 if self.case == "cross-due capture" and shot == 3 else 0.05
+                self.clock.now += 3 if self.case == "cross-due capture" and shot == 3 else self.capture_s
                 self.captures.append((started, self.clock()))
                 return Response(body, status, ctype)
 
@@ -255,18 +256,22 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                 assert args == {"surface": "zone:subtitle", "content": "CI DELAYED CONTENT IS VISIBLE", "delay_ms": 3000, "ttl_ms": 20000}
                 self.held, self.due = True, self.clock() + 3
                 sent = self.clock()
-                self.clock.now += 4 if self.case == "slow acknowledgement" else 0.05
+                self.clock.now += 4 if self.case == "slow acknowledgement" else self.rpc_s
                 self.publishes.append((sent, self.clock()))
                 payload = {"ok": self.case != "publish rejected", "expires_in_ms": 23000}
-            self.clock.now += 0.05 if tool != "hud_publish" else 0
+            self.clock.now += self.rpc_s if tool != "hud_publish" else 0
             result = {"content": [{"type": "text", "text": ws.json.dumps(payload)}]}
             return Response(ws.json.dumps({"result": result}).encode())
 
     def run(case, *, success):
         clock = FakeClock()
+        if case == "coarse monotonic":
+            clock.now = 0.010
         endpoint = Endpoint(clock, case)
         with monkeypatch.context() as patch:
-            patch.setattr(ws.time, "monotonic", clock)
+            monotonic = (lambda: int(clock() * 64) / 64) if case == "coarse monotonic" else clock
+            patch.setattr(ws.time, "monotonic", monotonic)
+            patch.setattr(ws.time, "perf_counter", clock)
             patch.setattr(ws.time, "sleep", clock.sleep)
             patch.setattr(ws.urllib.request, "urlopen", endpoint.urlopen)
             if case == "slow decode":
@@ -295,7 +300,11 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                     assert endpoint.clears == (1 if baseline_failed else 2)
                     assert len(endpoint.captures) <= 5  # No retry on invalid evidence.
 
-    run("normal", success=True)  # The unchanged checker rejects correct held=true.
+                output = capsys.readouterr()
+                assert "synthetic-unused-key" not in output.out + output.err
+                assert "CI DELAYED CONTENT IS VISIBLE" not in output.out + output.err
+    run("coarse monotonic", success=True)  # Coarse request bounds can under-sleep the actual acknowledgement.
+    run("normal", success=True)
     run("slow decode", success=True)  # Capture timing ends before PNG CPU work.
     for case in (
         "premature", "missing", "too few pixels", "native observed footprint", "unstable baseline", "not restored",
