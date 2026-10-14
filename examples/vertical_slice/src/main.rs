@@ -75,16 +75,20 @@ fn main() -> Result<(), BoxError> {
         })
 }
 
-/// Boot a headless runtime with the production config and serve gRPC on `port`.
-async fn boot(port: u16) -> Result<HeadlessRuntime, BoxError> {
-    let runtime = HeadlessRuntime::new(HeadlessConfig {
+/// The same production configuration is used by configured boot and test fixtures.
+fn runtime_config(port: u16) -> Result<HeadlessConfig, BoxError> {
+    Ok(HeadlessConfig {
         width: 800,
         height: 600,
         grpc_port: port,
         agents: tze_hud_config::AgentsFile::parse(PRODUCTION_AGENTS)?.directory()?,
         config_toml: Some(PRODUCTION_CONFIG.to_string()),
     })
-    .await?;
+}
+
+/// Boot a headless runtime with the production config and serve gRPC on `port`.
+async fn boot(port: u16) -> Result<HeadlessRuntime, BoxError> {
+    let runtime = HeadlessRuntime::new(runtime_config(port)?).await?;
     runtime.start_grpc_server().await?;
     Ok(runtime)
 }
@@ -287,6 +291,25 @@ fn text_root(text: &str) -> NodeProto {
 #[path = "../../../crates/tze_hud_runtime/src/test_support.rs"]
 mod gpu_init;
 
+/// Keep the fixture endpoint owned throughout runtime initialization.
+#[cfg(test)]
+async fn boot_fixture() -> Result<
+    (
+        HeadlessRuntime,
+        tokio::task::JoinHandle<()>,
+        std::net::SocketAddr,
+    ),
+    BoxError,
+> {
+    let listener = tokio::net::TcpListener::bind("[::1]:0").await?;
+    let addr = listener.local_addr()?;
+    let runtime =
+        gpu_init::serialized_headless_init(HeadlessRuntime::new(runtime_config(addr.port())?))
+            .await?;
+    let server = runtime.start_grpc_server_on_listener(listener);
+    Ok((runtime, server, addr))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -296,11 +319,10 @@ mod tests {
     /// and clearing the tile leaves no tile behind.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn paired_agent_runs_the_full_lifecycle() {
-        let port = free_port();
-        let runtime = gpu_init::serialized_headless_init(boot(port))
+        let (runtime, _server, addr) = boot_fixture().await.expect("runtime boots");
+        let mut agent = Agent::connect(addr.port(), AGENT_PSK)
             .await
-            .expect("runtime boots");
-        let mut agent = Agent::connect(port, AGENT_PSK).await.expect("handshake");
+            .expect("handshake");
         let granted = run_lifecycle(&mut agent, async || {
             let scene = runtime.shared_state().lock().await.scene.clone();
             let scene = scene.lock().await;
@@ -320,22 +342,13 @@ mod tests {
     /// An unpaired PSK never gets a session.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn unpaired_psk_is_rejected() {
-        let port = free_port();
-        let _runtime = gpu_init::serialized_headless_init(boot(port))
+        let (_runtime, _server, addr) = boot_fixture().await.expect("runtime boots");
+        let err = Agent::connect(addr.port(), "not-the-paired-key")
             .await
-            .expect("runtime boots");
-        let err = Agent::connect(port, "not-the-paired-key").await.err();
+            .err();
         assert!(
             err.is_some_and(|e| e.to_string().contains("AUTH_FAILED")),
             "unpaired PSK must fail with AUTH_FAILED"
         );
-    }
-
-    fn free_port() -> u16 {
-        std::net::TcpListener::bind("[::1]:0")
-            .unwrap()
-            .local_addr()
-            .unwrap()
-            .port()
     }
 }

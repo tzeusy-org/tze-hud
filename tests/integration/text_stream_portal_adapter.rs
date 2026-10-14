@@ -818,9 +818,8 @@ fn cooperative_projection_runtime_surface_is_provider_neutral_and_process_agnost
 #[tokio::test]
 async fn tmux_pilot_drives_portal_over_existing_primary_session_stream()
 -> Result<(), Box<dyn std::error::Error>> {
-    let listener = std::net::TcpListener::bind("[::1]:0")?;
+    let listener = tokio::net::TcpListener::bind("[::1]:0").await?;
     let grpc_port = listener.local_addr()?.port();
-    drop(listener);
 
     let config = HeadlessConfig {
         width: DISPLAY_W as u32,
@@ -839,7 +838,7 @@ async fn tmux_pilot_drives_portal_over_existing_primary_session_stream()
         scene.zone_registry = ZoneRegistry::with_defaults();
     }
 
-    let _server = runtime.start_grpc_server().await?;
+    let _server = runtime.start_grpc_server_on_listener(listener);
 
     let mut session = connect_agent("portal-adapter-agent", grpc_port).await?;
 
@@ -912,9 +911,8 @@ async fn tmux_pilot_drives_portal_over_existing_primary_session_stream()
 #[tokio::test]
 async fn non_tmux_adapter_drives_portal_over_existing_primary_session_stream()
 -> Result<(), Box<dyn std::error::Error>> {
-    let listener = std::net::TcpListener::bind("[::1]:0")?;
+    let listener = tokio::net::TcpListener::bind("[::1]:0").await?;
     let grpc_port = listener.local_addr()?.port();
-    drop(listener);
 
     let config = HeadlessConfig {
         width: DISPLAY_W as u32,
@@ -933,7 +931,7 @@ async fn non_tmux_adapter_drives_portal_over_existing_primary_session_stream()
         scene.zone_registry = ZoneRegistry::with_defaults();
     }
 
-    let _server = runtime.start_grpc_server().await?;
+    let _server = runtime.start_grpc_server_on_listener(listener);
 
     let mut session = connect_agent("portal-adapter-non-tmux-agent", grpc_port).await?;
 
