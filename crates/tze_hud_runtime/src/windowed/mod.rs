@@ -757,6 +757,7 @@ impl LoopExit for ActiveEventLoop {
 /// single-instance mutex an update or installer is waiting for (hud-gr6jp).
 /// `Poll` makes that wait return at once.
 fn leave_event_loop(event_loop: &impl LoopExit) {
+    lifecycle::disable_all_chrome_observers();
     event_loop.set_control_flow(ControlFlow::Poll);
     event_loop.exit();
 }
@@ -837,6 +838,18 @@ impl WinitApp {
     /// and drain the portal projection into the scene. Needs no window or
     /// GPU, so the headless harness runs exactly this sequence too.
     fn settle_scene_work(&mut self) -> PortalProjectionDrain {
+        self.drain_chrome_capture_cancellation();
+        // Terminal pointer intent survives lock contention. Keep the ordinary
+        // composer/portal turn running even if this cleanup cannot lock yet.
+        let mut chrome_scene_changed = false;
+        if self.state.input_processor.chrome_feedback_cancel_pending {
+            if let Ok(shared) = self.state.shared_state.try_lock() {
+                if let Ok(mut scene) = shared.scene.try_lock() {
+                    chrome_scene_changed =
+                        self.state.input_processor.clear_chrome_feedback(&mut scene);
+                }
+            }
+        }
         // Flush any coalesced composer draft notifications accumulated during
         // the current event batch.  This is the normal settle point: all key
         // events for this winit iteration have been drained above; flushing here
@@ -880,7 +893,17 @@ impl WinitApp {
         // scene (hud-kgu8u). Uses try_lock; silently deferred if lock is busy.
         let pruned_drag = self.prune_portal_resize_states();
         let settled_drag = self.drain_pending_drag_terminal();
-        let drag_scene_changed = pruned_drag || settled_drag;
+        let drag_scene_changed = pruned_drag || settled_drag || chrome_scene_changed;
+        if self.state.input_processor.chrome_feedback_cancel_pending {
+            // Preserve any mutation already made by the ordinary portal turn;
+            // retry chrome via the existing coalesced scene-availability wake.
+            if drag_scene_changed || portal_drain.scene_changed() {
+                self.state
+                    .wake
+                    .notify_compositor(crate::idle_efficiency::RuntimeWakeupSource::SceneChange);
+            }
+            return PortalProjectionDrain::Deferred;
+        }
         match portal_drain {
             PortalProjectionDrain::Completed { scene_changed } => {
                 PortalProjectionDrain::Completed {
@@ -1221,6 +1244,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             }
         };
 
+        let chrome_observer =
+            lifecycle::ChromeWindowObserver::install(&window, self.state.wake.main_work_notifier());
+
         // In overlay mode, initialise cursor hittest to false so all pointer
         // events pass through to the desktop until the cursor enters a
         // hit-region.  The hittest is toggled per-frame in enqueue_pointer_event()
@@ -1239,6 +1265,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         }
 
         self.state.window = Some(window.clone());
+        chrome_observer.publish();
         self.refresh_widget_hover_tracking();
 
         let cfg = self.state.config.clone();
@@ -2477,6 +2504,15 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 // CursorLeft after the new one's CursorMoved.
                 if self.state.cursor_window.is_none_or(|id| id == window_id) {
                     self.state.cursor_left_window = true;
+                    self.cancel_chrome_feedback();
+                }
+            }
+
+            WindowEvent::Focused(false) => {
+                if self.state.press_window == Some(window_id)
+                    || self.state.cursor_window == Some(window_id)
+                {
+                    self.cancel_chrome_feedback();
                 }
             }
 
@@ -2494,7 +2530,17 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     self.state.wake.mark_main_work_pending(source);
                 }
                 if button == MouseButton::Left {
-                    self.handle_left_button(state == ElementState::Pressed, window_id, secondary);
+                    // Consume pending old loss before binding a newer Down.
+                    self.drain_chrome_capture_cancellation();
+                    let chrome_edge =
+                        lifecycle::ChromeAppEdge::begin(window_id, state == ElementState::Pressed);
+                    if !chrome_edge.retired() {
+                        self.handle_left_button(
+                            state == ElementState::Pressed,
+                            window_id,
+                            secondary,
+                        );
+                    }
                 } else if button == MouseButton::Right && state == ElementState::Released {
                     // Right-click: show context menu if cursor is on a drag handle.
                     self.handle_right_click_on_drag_handle();
@@ -3201,8 +3247,10 @@ impl WindowedRuntime {
 
         // Create winit event loop and run.
         // Per spec §Main Thread Responsibilities: winit event loop MUST run on main thread.
+        let mut chrome_observers = lifecycle::ChromeObserverScope::new();
         event_loop.run_app(&mut app)?;
         tracing::info!("event loop returned");
+        chrome_observers.detach();
 
         // ── Post-event-loop cleanup ───────────────────────────────────────────
 

@@ -121,6 +121,16 @@ For example, publish a notification whose button arrives at `hud_input` as
 {"surface":"zone:notification-area","content":{"body":"Build complete","urgency":1,"actions":[{"label":"Approve","callback_id":"approve"}]},"ttl_ms":10000}
 ```
 
+Notification action buttons use the runtime's shared draw/label/hit geometry
+and design tokens. Hover and press feedback is local and ephemeral (pressed
+wins over hover); it sends no `hud_input` record. Leaving the owning window,
+losing focus/capture, release, clear, expiry, replacement, and dismiss remove
+transient feedback. Only a matching intentional press/release on the same live
+publication activates its callback. The existing
+[`poc_notification_action_reaches_hud_input`](../tests/integration/poc_acceptance.rs)
+checks independent Approve/Reject, repeated polls, ACK, and publisher isolation.
+This source contract is separate from Windows owner acceptance of held feedback.
+
 **`hud_hold`** `{surface*, ttl_ms*}` extends a holding, for any surface type.
 On a zone or widget, `ttl_ms` replaces the expiry with now + `ttl_ms` (not
 the original deadline), and 0 holds until `hud_clear`. A delayed publish
@@ -527,3 +537,17 @@ These four parameters remain because they control behavior in the shipped bundle
 4. **Portal tile mutations are internal.** Accent, unread count, composer
    interaction, and portal surface state stay inside the runtime; agents
    drive the portal through `hud_publish`.
+
+
+Notification capture delivery (source proposal; Windows owner acceptance separate):
+The UI-thread observer retains per-installation/per-press cancellation history
+until the corresponding application edge is delivered. Normal native Up and
+valid synthesized release activate once; cancelled or retired-window edges and
+late Up do not impersonate an action. Callback code borrows no scene/runtime
+owner and forwards native messages; local feedback cleanup uses the existing
+settle and lock-availability continuation, rendering only after actual mutation.
+No new idle poll or timer is introduced. Ambiguous completed/active receipts,
+mismatched history or bounded-admission failure disable notification actions
+until a clean runtime restart. Valid reentrant histories may trigger that
+availability limit; its frequency has not been measured. Unrelated pointer input
+continues, and this source model does not replace held-press/release owner proof.

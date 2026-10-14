@@ -331,6 +331,9 @@ pub struct InputProcessor {
     current_chrome_hover: Option<String>,
     /// Currently pressed chrome control interaction id.
     current_chrome_press: Option<String>,
+    /// A runtime terminal pointer event must clear chrome before the next
+    /// scene turn or pointer event. Retained while the scene lock is busy.
+    pub chrome_feedback_cancel_pending: bool,
     /// Per-device long-press drag state.
     ///
     /// Keyed by `device_id`.  Each entry is independent so multi-touch devices
@@ -374,6 +377,7 @@ impl InputProcessor {
             current_press: None,
             current_chrome_hover: None,
             current_chrome_press: None,
+            chrome_feedback_cancel_pending: false,
             drag_states: HashMap::new(),
             drag_config: DragConfig::default(),
             rollback_tracker: RollbackTracker::new(),
@@ -382,6 +386,21 @@ impl InputProcessor {
             composer_draft_manager: ComposerDraftManager::new(),
             pending_flushed_batch: None,
         }
+    }
+
+    /// Clear runtime chrome feedback without synthesizing input or changing
+    /// agent capture, node focus, composer state, or the action queue.
+    /// Scene setters invalidate geometry only when a visible flag changes.
+    pub fn clear_chrome_feedback(&mut self, scene: &mut SceneGraph) -> bool {
+        let before = scene.geometry_epoch;
+        if let Some(id) = self.current_chrome_hover.take() {
+            scene.set_chrome_hovered(&id, false);
+        }
+        if let Some(id) = self.current_chrome_press.take() {
+            scene.set_chrome_pressed(&id, false);
+        }
+        self.chrome_feedback_cancel_pending = false;
+        scene.geometry_epoch != before
     }
 
     /// Queue an adapter-driven absolute scroll offset request.
@@ -1106,6 +1125,9 @@ impl InputProcessor {
     /// from that device are routed to the capturing node, bypassing normal
     /// hit-testing.  (Spec lines 104-106, 110-111)
     pub fn process(&mut self, event: &PointerEvent, scene: &mut SceneGraph) -> InputResult {
+        if self.chrome_feedback_cancel_pending {
+            self.clear_chrome_feedback(scene);
+        }
         let start = Instant::now();
 
         let device_id = event.device_id;

@@ -1055,6 +1055,277 @@ mod tests {
         harness.drain();
         assert!(take_action_ids(&harness).is_empty());
         assert_eq!(harness.zone_publication_count("notification-area"), 1);
+
+        // The same production terminal operation is called by accepted
+        // CursorLeft, focus loss, and observed loss of an armed native capture.
+        // It retains intent while busy; this headless parent does not claim a
+        // native Windows event/capture or physical-display observation.
+        harness.app.state.cursor_x = approve.0;
+        harness.app.state.cursor_y = approve.1;
+        harness.app.enqueue_pointer_event(PointerEventKind::Move);
+        harness.app.enqueue_pointer_event(PointerEventKind::Down);
+        let epoch = geometry_epoch(&harness);
+        let shared = harness.shared_state();
+        let held = shared.blocking_lock();
+        harness.app.cancel_chrome_feedback();
+        assert!(harness.app.state.zone_press.is_none());
+        assert!(harness.app.settle_scene_work().is_deferred());
+        assert!(
+            harness
+                .app
+                .state
+                .input_processor
+                .chrome_feedback_cancel_pending
+        );
+        drop(held);
+        assert!(harness.tick());
+        assert!(
+            !harness
+                .app
+                .state
+                .input_processor
+                .chrome_feedback_cancel_pending
+        );
+        assert_eq!(chrome_state(&harness, "approve"), Default::default());
+        assert!(
+            geometry_epoch(&harness) > epoch,
+            "terminal cleanup requests a frame"
+        );
+        let epoch = geometry_epoch(&harness);
+        harness.app.cancel_chrome_feedback();
+        assert!(harness.tick());
+        assert_eq!(
+            geometry_epoch(&harness),
+            epoch,
+            "repeated cleanup stays idle"
+        );
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        assert!(
+            take_action_ids(&harness).is_empty(),
+            "cancel is not an activation"
+        );
+        harness.app.enqueue_pointer_event(PointerEventKind::Move);
+        assert!(
+            chrome_state(&harness, "approve").hovered,
+            "return can hover the same control"
+        );
+
+        // Existing lifetime owners remove hit regions and their feedback. The
+        // replacement changes publication identity even when its labels match.
+        for terminal in ["clear", "expiry", "replacement", "dismiss"] {
+            let mut harness = approve_reject_notification_harness();
+            let approve = harness.notification_action_center("approve").unwrap();
+            harness.app.state.cursor_x = approve.0;
+            harness.app.state.cursor_y = approve.1;
+            harness.app.enqueue_pointer_event(PointerEventKind::Move);
+            harness.app.enqueue_pointer_event(PointerEventKind::Down);
+            let old_id = harness.app.state.zone_press.clone().unwrap();
+            {
+                let shared = harness.app.state.shared_state.blocking_lock();
+                let mut scene = shared.scene.blocking_lock();
+                let old = scene.zone_registry.active_for_zone("notification-area")[0].clone();
+                match terminal {
+                    "clear" => scene.clear_zone("notification-area").unwrap(),
+                    "expiry" => {
+                        scene
+                            .zone_registry
+                            .active_publishes
+                            .get_mut("notification-area")
+                            .unwrap()[0]
+                            .expires_at_wall_us = Some(0);
+                    }
+                    "replacement" => {
+                        scene.clear_zone("notification-area").unwrap();
+                        scene
+                            .publish_to_zone(
+                                "notification-area",
+                                old.content,
+                                "notif-agent",
+                                None,
+                                None,
+                                None,
+                            )
+                            .unwrap();
+                        // Keep the identity transition deterministic, independent
+                        // of the real clock's resolution in this existing fixture.
+                        scene
+                            .zone_registry
+                            .active_publishes
+                            .get_mut("notification-area")
+                            .unwrap()[0]
+                            .published_at_wall_us = old.published_at_wall_us + 1;
+                    }
+                    "dismiss" => assert!(scene.dismiss_notification(
+                        "notification-area",
+                        old.published_at_wall_us,
+                        "notif-agent"
+                    )),
+                    _ => unreachable!(),
+                }
+            }
+            assert!(harness.tick());
+            {
+                let shared = harness.app.state.shared_state.blocking_lock();
+                let scene = shared.scene.blocking_lock();
+                assert!(
+                    !scene.overlay.chrome_states.contains_key(&old_id),
+                    "{terminal}"
+                );
+            }
+            harness.app.enqueue_pointer_event(PointerEventKind::Up);
+            assert!(
+                take_action_ids(&harness).is_empty(),
+                "{terminal} cannot activate a stale press"
+            );
+            let epoch = geometry_epoch(&harness);
+            assert!(harness.tick());
+            assert_eq!(geometry_epoch(&harness), epoch, "{terminal} settles idle");
+        }
+
+        // A known terminal cancellation must disarm before the physical-Up
+        // fallback, even if the ordinary late Up follows in the same turn.
+        // This exercises ordering after an observation, not native delivery.
+        let mut harness = approve_reject_notification_harness();
+        let (x, y) = harness.notification_action_center("approve").unwrap();
+        harness.app.state.cursor_x = x;
+        harness.app.state.cursor_y = y;
+        let window = winit::window::WindowId::dummy();
+        harness.app.handle_left_button(true, window, None);
+        harness.app.cancel_chrome_feedback();
+        harness.app.release_left_press();
+        harness.app.handle_left_button(false, window, None);
+        assert!(
+            take_action_ids(&harness).is_empty(),
+            "capture cancellation precedes fallback Up"
+        );
+
+        // Same production receipt domain, deterministic data only: native
+        // callback ordering and physical Windows delivery remain separate.
+        use crate::windowed::lifecycle::ChromeCaptureLedger;
+        let mut receipts = ChromeCaptureLedger::default();
+        let install = receipts.install(window).unwrap();
+        let down = receipts.begin(install, true).unwrap();
+        assert!(receipts.consume(window, true), "direct active Down");
+        receipts.complete(down);
+        let up = receipts.begin(install, false).unwrap();
+        assert!(receipts.consume(window, false), "normal Up activates once");
+        receipts.complete(up);
+        let late = receipts.begin(install, false).unwrap();
+        assert!(
+            !receipts.consume(window, false),
+            "late Up is not another action"
+        );
+        receipts.complete(late);
+
+        let mut receipts = ChromeCaptureLedger::default();
+        let install = receipts.install(window).unwrap();
+        let down = receipts.begin(install, true).unwrap();
+        assert!(receipts.consume(window, true));
+        let up = receipts.begin(install, false).unwrap();
+        receipts.complete(up);
+        assert!(
+            receipts.consume(window, false),
+            "consumed active frame is not ambiguous"
+        );
+        receipts.complete(down);
+
+        let mut receipts = ChromeCaptureLedger::default();
+        let install = receipts.install(window).unwrap();
+        let down = receipts.begin(install, true).unwrap();
+        assert!(receipts.consume(window, true));
+        receipts.complete(down);
+        assert!(receipts.lose(install));
+        assert!(
+            receipts.take_cancel(window),
+            "known direct loss disarms current press"
+        );
+        let up = receipts.begin(install, false).unwrap();
+        assert!(
+            !receipts.consume(window, false),
+            "ordinary Up cannot revive lost capture"
+        );
+        receipts.complete(up);
+
+        let mut receipts = ChromeCaptureLedger::default();
+        let install = receipts.install(window).unwrap();
+        let down = receipts.begin(install, true).unwrap();
+        receipts.complete(down); // borrowed app: retain history before delivery
+        assert!(receipts.lose(install));
+        let up = receipts.begin(install, false).unwrap();
+        receipts.complete(up);
+        let next = receipts.begin(install, true).unwrap();
+        receipts.complete(next);
+        assert!(
+            !receipts.consume(window, true),
+            "buffered loss belongs to old Down"
+        );
+        assert!(!receipts.consume(window, false));
+        assert!(
+            receipts.consume(window, true),
+            "later press keeps its own token"
+        );
+        assert!(
+            !receipts.take_cancel(window),
+            "old cancellation cannot erase new press"
+        );
+        receipts.finish_synthetic(window);
+        let late = receipts.begin(install, false).unwrap();
+        assert!(
+            !receipts.consume(window, false),
+            "synthetic release finishes same token"
+        );
+        receipts.complete(late);
+
+        let mut receipts = ChromeCaptureLedger::default();
+        let old = receipts.install(window).unwrap();
+        let down = receipts.begin(old, true).unwrap();
+        receipts.complete(down);
+        receipts.retire(old);
+        let replacement = receipts.install(window).unwrap();
+        assert!(
+            !receipts.consume(window, true),
+            "retired HWND installation stays inert"
+        );
+        let down = receipts.begin(replacement, true).unwrap();
+        assert!(receipts.consume(window, true));
+        receipts.complete(down);
+        assert!(
+            !receipts.take_cancel(window),
+            "old installation cannot cancel replacement"
+        );
+
+        let mut receipts = ChromeCaptureLedger::default();
+        let install = receipts.install(window).unwrap();
+        let buffered = receipts.begin(install, true).unwrap();
+        receipts.complete(buffered);
+        let active = receipts.begin(install, false).unwrap();
+        assert!(
+            !receipts.consume(window, true),
+            "completed plus active is ambiguous"
+        );
+        receipts.complete(active);
+        assert!(!receipts.permit(window), "ambiguity disables until restart");
+        assert!(receipts.install(window).is_none(), "no automatic rearm");
+
+        let mut receipts = ChromeCaptureLedger::default();
+        let install = receipts.install(window).unwrap();
+        for _ in 0..256 {
+            let edge = receipts.begin(install, true).unwrap();
+            receipts.complete(edge);
+        }
+        assert!(
+            receipts.begin(install, true).is_none(),
+            "bounded receipt admission"
+        );
+        assert!(!receipts.consume(window, true));
+        let mut receipts = ChromeCaptureLedger::default();
+        for _ in 0..64 {
+            assert!(receipts.install(window).is_some());
+        }
+        assert!(
+            receipts.install(window).is_none(),
+            "bounded installation admission"
+        );
     }
 
     /// One click on Approve queues exactly one `approve` and dismisses the
