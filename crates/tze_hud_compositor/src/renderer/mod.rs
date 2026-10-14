@@ -744,9 +744,15 @@ pub(crate) struct ZoneSlotLayout {
 
 impl ZoneSlotLayout {
     /// Iterate `(pub_idx, slot_offset, slot_h)` triples for the slots that
-    /// fall inside the zone.  Slots whose top edge is at or beyond `zy +
-    /// effective_h` are excluded (the iterator stops early).
+    /// fit inside the zone, in stack order.  The iterator stops at the first
+    /// slot whose bottom edge would pass `zy + effective_h`: a card is shown
+    /// whole or not at all, so its buttons and dismiss control are never cut
+    /// off (its publication stays active and appears once space frees up).
+    /// Only the first slot may be clamped, when it alone is taller than the
+    /// zone, so the newest publication is never hidden.
     pub(crate) fn iter_visible(&self, zy: f32) -> impl Iterator<Item = (usize, f32, f32)> + '_ {
+        /// Float slack so a slot ending exactly at the zone bottom still fits.
+        const FIT_EPSILON_PX: f32 = 0.01;
         let zone_bottom = zy + self.effective_h;
         self.ordered_indices
             .iter()
@@ -757,7 +763,12 @@ impl ZoneSlotLayout {
                     .copied()
                     .zip(self.slot_heights.iter().copied()),
             )
-            .take_while(move |(_, (offset, _))| zy + offset < zone_bottom)
+            .enumerate()
+            .take_while(move |(i, (_, (offset, slot_h)))| {
+                let slot_y = zy + offset;
+                slot_y < zone_bottom && (*i == 0 || slot_y + slot_h <= zone_bottom + FIT_EPSILON_PX)
+            })
+            .map(|(_, slot)| slot)
             .map(move |(pub_idx, (offset, slot_h))| {
                 let slot_y = zy + offset;
                 let effective_slot_h = slot_h.min(zone_bottom - slot_y);
