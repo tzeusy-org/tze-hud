@@ -968,6 +968,22 @@ pub(super) const NOTIFICATION_ACTION_BUTTON_H_PX: f32 = 22.0;
 /// Horizontal inset of the action-button row from the slot edges.
 pub(super) const NOTIFICATION_ACTION_INSET_PX: f32 = 9.0;
 
+/// Gap between a notification's text and its action-button row.
+pub(super) const NOTIFICATION_ACTION_ROW_GAP_PX: f32 = 4.0;
+
+/// Height a notification slot reserves below its text for the action row,
+/// so the buttons never draw over the body (hud-mskx5). Zero without
+/// actions, so plain notifications keep their height. Slot height adds it;
+/// text bounds subtract it; the buttons fill its bottom
+/// `NOTIFICATION_ACTION_BUTTON_H_PX`.
+pub(super) fn notification_action_row_reserve(payload: &NotificationPayload) -> f32 {
+    if payload.actions.is_empty() {
+        0.0
+    } else {
+        NOTIFICATION_ACTION_BUTTON_H_PX + NOTIFICATION_ACTION_ROW_GAP_PX
+    }
+}
+
 /// Bounds of each notification action button, left to right.
 ///
 /// The single geometry source for both the drawn buttons and the pointer hit
