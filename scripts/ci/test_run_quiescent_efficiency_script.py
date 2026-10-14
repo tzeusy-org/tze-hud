@@ -42,6 +42,14 @@ class QuiescentEfficiencyLaunchContractTests(unittest.TestCase):
         self.assertLess(run.index(admission), run.index("build_runtime_context(&cfg)"))
         self.assertLess(run.index(admission), run.index("EventLoop::<RuntimeWakeEvent>"))
 
+        completion = (
+            'Write-Host ("quiescent-completion launcher_pid={0} propagated_hud_exit={1} '
+            'synchronous_wait_complete=true" -f $launcher.Id, $runtimeExit)'
+        )
+        self.assertIn(completion, self.script)
+        self.assertLess(self.script.index("$runtimeExit = $launcher.ExitCode"), self.script.index(completion))
+        self.assertLess(self.script.index(completion), self.script.index("if (-not (Test-Path $artifactPath))"))
+
     def test_fast_ci_runs_the_startup_atomicity_contract(self) -> None:
         self.assertIn(
             "python3 scripts/ci/test_run_quiescent_efficiency_script.py",

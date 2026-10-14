@@ -289,6 +289,12 @@ observation. `continue-on-error` permits the job to continue after a failed step
 job success does not qualify an invalid artifact. The canonical performance
 workflow separately runs the constrained WARP **overlay** harness at
 `scripts/ci/windows/run-quiescent-efficiency.ps1` with `/affinity 3`.
+The native step retains the original HUD PID, completed wait and cleanup records,
+plus the observed CPU mask/count, window mode and software-renderer identity.
+The early admission receipt records the runtime's own PID and exact mask/count
+before initialization; it is retained even beyond the native log tail. Canonical
+overlay retains that receipt in `runtime.stderr.log` and separately logs the
+synchronous launcher's PID and propagated HUD exit code after waiting.
 
 ## Developing from WSL2
 

@@ -330,7 +330,12 @@ def test_quiescent_summary_reports_the_gate_counters(tmp_path, monkeypatch, caps
         "wakeups": {"combined_runtime_driven": 7},
         "settling_duration_ms": 5000,
         "interval_duration_ms": 60000,
-        "renderer": {"adapter": "Microsoft Basic Render Driver"},
+        "runtime": {"window_mode": "fullscreen"},
+        "constrained_profile": {
+            "logical_cpu_limit": 2,
+            "cpu_limit_enforcement": "GetProcessAffinityMask:0x3",
+        },
+        "renderer": {"adapter": "Microsoft Basic Render Driver", "software": True, "backend": "DX12"},
     }
     line = ws.quiescent_summary(artifact)
     assert "presents=2" in line and "runtime_wakeups=7" in line and "Basic Render Driver" in line
@@ -373,8 +378,11 @@ def test_quiescent_summary_reports_the_gate_counters(tmp_path, monkeypatch, caps
     publishes = []
     checked = []
     spawned = []
+    admission = "quiescent-admission pid=4242 cpu_mask=0x3 logical_cpus=2 phase=before_runtime_init"
+    runtime_log = f"{admission}\n{admission} private={marker}\n" + "." * 9000
 
     class FakeProcess:
+        pid = 4242
         returncode = None
         exit_code = 0
         times_out = False
@@ -419,7 +427,9 @@ def test_quiescent_summary_reports_the_gate_counters(tmp_path, monkeypatch, caps
     monkeypatch.setattr(ws, "seed_config", lambda config, psk: config)
     monkeypatch.setattr(ws.secrets, "token_hex", lambda count: "synthetic-psk")
     monkeypatch.setattr(ws.tempfile, "mkdtemp", lambda **kwargs: str(work))
-    monkeypatch.setattr(ws.subprocess, "Popen", lambda argv, **kwargs: spawned.append(argv) or proc)
+    monkeypatch.setattr(ws.subprocess, "Popen", lambda argv, **kwargs: (
+        spawned.append(argv), kwargs["stdout"].write(runtime_log.encode()), proc
+    )[-1])
     monkeypatch.setattr(ws, "Smoke", FakeSmoke)
     monkeypatch.setattr(ws, "wait_for_mcp", lambda *args: None)
     monkeypatch.setattr(ws, "load_efficiency_checker", lambda: checker)
@@ -468,12 +478,29 @@ def test_quiescent_summary_reports_the_gate_counters(tmp_path, monkeypatch, caps
             assert proc.returncode is not None
             output = capsys.readouterr()
             assert marker not in output.out + output.err
+            records = [ws.json.loads(line.removeprefix("quiescent-owned-process "))
+                       for line in output.out.splitlines() if line.startswith("quiescent-owned-process ")]
+            assert records, "run_quiescent must retain the original Popen PID and actual completion"
+            waited = case in ("valid", "runtime_failed", "invalid_cpu4")
+            assert records == [
+                {"event": "started", "pid": proc.pid},
+                *([{"event": "waited", "pid": proc.pid, "exit": exit_code, "reaped": True}] if waited else []),
+                {"event": "cleanup", "pid": proc.pid, "kill_requested": "kill" in events,
+                 "wait_completed": bool(events), "exit": proc.returncode, "reaped": bool(events)},
+            ]
+            assert [line for line in output.out.splitlines() if line.startswith("quiescent-admission ")] == [admission]
+            if content == "json" and case != "startup_failed":
+                for field in ("logical_cpus=2", "cpu_mask='GetProcessAffinityMask:0x3'",
+                              "window_mode='fullscreen'", "software=True", "backend='DX12'"):
+                    assert field in output.out
             if expected:
                 assert "FAIL " in output.err
             if content in ("list", "gpu_list"):
                 assert "expected object" in output.err
             if case == "startup_failed":
                 assert "startup" in output.err
+    missing_identity = ws.quiescent_summary({**artifact, "runtime": [], "constrained_profile": []})
+    assert "logical_cpus=None" in missing_identity and "window_mode=None" in missing_identity
     assert marker not in capsys.readouterr().out
 
 

@@ -79,6 +79,7 @@ $launcher = Start-Process `
     -RedirectStandardError $stderrPath
 
 $runtimeExit = $launcher.ExitCode
+Write-Host ("quiescent-completion launcher_pid={0} propagated_hud_exit={1} synchronous_wait_complete=true" -f $launcher.Id, $runtimeExit)
 if (-not (Test-Path $artifactPath)) {
     throw "quiescent runtime did not emit an artifact; exit=$runtimeExit stdout=$stdoutPath stderr=$stderrPath"
 }

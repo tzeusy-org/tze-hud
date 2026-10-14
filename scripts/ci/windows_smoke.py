@@ -175,13 +175,25 @@ def parse_tile_count(output: str) -> int:
 def quiescent_summary(artifact: dict) -> str:
     """One line of the numbers the efficiency gate judges."""
     gpu, wake = artifact.get("gpu", {}), artifact.get("wakeups", {})
+    runtime, constrained = artifact.get("runtime"), artifact.get("constrained_profile")
+    runtime = runtime if isinstance(runtime, dict) else {}
+    constrained = constrained if isinstance(constrained, dict) else {}
+    identity = {
+        "logical_cpus": constrained.get("logical_cpu_limit"),
+        "cpu_mask": constrained.get("cpu_limit_enforcement"),
+        "window_mode": runtime.get("window_mode"),
+        "software": artifact.get("renderer", {}).get("software"),
+        "backend": artifact.get("renderer", {}).get("backend"),
+    }
+    identity = {key: value if isinstance(value, (str, int, bool)) else None for key, value in identity.items()}
     return (
         f"presents={gpu.get('presents')} submissions={gpu.get('queue_submissions')} "
         f"acquisitions={gpu.get('surface_acquisitions')} "
         f"runtime_wakeups={wake.get('combined_runtime_driven')} "
         f"settle_ms={artifact.get('settling_duration_ms')} "
         f"interval_ms={artifact.get('interval_duration_ms')} "
-        f"adapter={artifact.get('renderer', {}).get('adapter')!r}"
+        f"adapter={artifact.get('renderer', {}).get('adapter')!r} "
+        + " ".join(f"{key}={value!r}" for key, value in identity.items())
     )
 
 
@@ -1123,8 +1135,10 @@ def run_quiescent(args: argparse.Namespace) -> int:
     ]
     with open(log_path, "wb") as log:
         proc = subprocess.Popen(cmd, stdout=log, stderr=subprocess.STDOUT)
+    print("quiescent-owned-process", json.dumps({"event": "started", "pid": proc.pid}))
     smoke = Smoke(f"http://127.0.0.1:{args.mcp_port}/", psk)
     result = 1
+    wait_completed = kill_requested = False
     try:
         wait_for_mcp(smoke, proc, args.startup_timeout)
         smoke.ok("hud_publish", {"surface": "zone:notification-area", "content": {"title": "CI", "body": "held content"}, "ttl_ms": 0})
@@ -1148,6 +1162,10 @@ def run_quiescent(args: argparse.Namespace) -> int:
             artifact, require_constrained=True, required_window_mode="fullscreen"
         )
         runtime_exit = proc.wait(timeout=10)
+        wait_completed = True
+        print("quiescent-owned-process", json.dumps({
+            "event": "waited", "pid": proc.pid, "exit": runtime_exit, "reaped": True,
+        }))
         assert runtime_exit == 0, f"quiescent HUD failed (exit={runtime_exit})"
         assert not failures, "quiescent gate failed: " + "; ".join(failures)
         print("ok  held content on screen, then no presents, submissions, or acquisitions for the interval")
@@ -1157,13 +1175,27 @@ def run_quiescent(args: argparse.Namespace) -> int:
     finally:
         try:
             if proc.poll() is None:
+                kill_requested = True
                 proc.kill()
                 proc.wait(timeout=10)
+                wait_completed = True
         except (OSError, subprocess.TimeoutExpired) as err:
             print(f"FAIL owned HUD cleanup: {err}", file=sys.stderr)
             result = 1
+        print("quiescent-owned-process", json.dumps({
+            "event": "cleanup", "pid": proc.pid, "kill_requested": kill_requested,
+            "wait_completed": wait_completed, "exit": proc.returncode, "reaped": wait_completed,
+        }))
         print(f"--- HUD log ({log_path}) ---")
-        print(log_path.read_text(errors="replace")[-8_000:])
+        runtime_log = log_path.read_text(errors="replace")
+        tail = runtime_log[-8_000:]
+        for line in runtime_log.splitlines():
+            if line not in tail and re.fullmatch(
+                r"quiescent-admission pid=[0-9]+ cpu_mask=0x[0-9a-f]+ logical_cpus=[0-9]+ phase=before_runtime_init",
+                line,
+            ):
+                print(line)
+        print(tail)
     return result
 
 

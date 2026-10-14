@@ -1328,6 +1328,11 @@ pub(super) fn admit_quiescent_cpu_affinity() -> std::io::Result<()> {
         logical_cpus = observed.count_ones(),
         "quiescent two-CPU affinity admitted before runtime initialization"
     );
+    eprintln!(
+        "quiescent-admission pid={} cpu_mask={observed:#x} logical_cpus={} phase=before_runtime_init",
+        std::process::id(),
+        observed.count_ones()
+    );
     Ok(())
 }
 
