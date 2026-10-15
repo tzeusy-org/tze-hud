@@ -19,8 +19,7 @@ Usage:
     from hud_grpc_client import HudClient
 
     async with HudClient("windows-host.example:50051",
-                          psk="tze-hud-key",
-                          agent_id="test-agent") as client:
+                          psk=paired_key) as client:
         avatar_png = make_avatar_png((66, 133, 244))
         avatar_resource_id = await client.upload_avatar_png(avatar_png)
         claimed = await client.create_presence_card_tile(
@@ -44,6 +43,9 @@ from dataclasses import dataclass
 from collections.abc import Callable
 from typing import Any, Optional
 
+# WSL/Tailscale names resolve through the host resolver, not c-ares. This must
+# precede grpc initialization; an explicit operator override still wins.
+os.environ.setdefault("GRPC_DNS_RESOLVER", "native")
 import grpc
 
 # Proto stubs are in proto_gen/ relative to this file.
@@ -385,19 +387,26 @@ def build_presence_card_dismiss_hit_region_node() -> types_pb2.NodeProto:
     )
 
 
-def build_presence_card_add_node_mutations(
-    tile_id: bytes,
+PRESENCE_CARD_ROLES = (
+    "root", "sheen", "accent", "avatar_plate", "avatar", "eyebrow", "name",
+    "body", "chip_bg", "chip_text", "dismiss_bg", "dismiss_text", "dismiss_hit",
+)
+
+
+def build_presence_card_tree(
     resource_id: Any,
     agent_name: str,
     last_active_label: str = "now",
     accent_rgba: tuple[float, float, float, float] = (66 / 255.0, 133 / 255.0, 244 / 255.0, 1.0),
-    card_width: float = 320.0,
-    card_height: float = 112.0,
-) -> tuple[types_pb2.NodeProto, list[types_pb2.NodeProto], list[types_pb2.MutationProto]]:
-    """Build the glass Presence Card tree and its AddNode mutations."""
-    root = build_presence_card_root_node(width=card_width, height=card_height)
-    child_nodes = [
-        build_presence_card_sheen_node(width=card_width),
+) -> types_pb2.NodeProto:
+    """Build the canonical inline tree, in ``PRESENCE_CARD_ROLES`` pre-order.
+
+    Empty node ids request runtime assignment. Only acknowledged ids are used
+    later as mutation references; NodeProto.id has a different byte order.
+    """
+    root = build_presence_card_root_node()
+    root.children.extend([
+        build_presence_card_sheen_node(),
         build_presence_card_accent_node(accent_rgba),
         build_presence_card_avatar_plate_node(accent_rgba),
         build_presence_card_avatar_node(resource_id),
@@ -409,47 +418,24 @@ def build_presence_card_add_node_mutations(
         build_presence_card_dismiss_bg_node(),
         build_presence_card_dismiss_text_node(),
         build_presence_card_dismiss_hit_region_node(),
-    ]
-    mutations = [
-        types_pb2.MutationProto(
-            set_tile_root=types_pb2.SetTileRootMutation(
-                tile_id=tile_id,
-                node=root,
-            )
-        )
-    ]
-    mutations.extend(
-        types_pb2.MutationProto(
-            add_node=types_pb2.AddNodeMutation(
-                tile_id=tile_id,
-                parent_id=root.id,
-                node=node,
-            )
-        )
-        for node in child_nodes
-    )
-    return root, child_nodes, mutations
+    ])
+    root.id = b""
+    for child in root.children:
+        child.id = b""
+    return root
 
 
-def build_presence_card_tree_mutations(
-    tile_id: bytes,
-    resource_id: Any,
-    agent_name: str,
-    last_active_label: str = "now",
-    accent_rgba: tuple[float, float, float, float] = (66 / 255.0, 133 / 255.0, 244 / 255.0, 1.0),
-    card_width: float = 320.0,
-    card_height: float = 112.0,
-) -> tuple[types_pb2.NodeProto, list[types_pb2.NodeProto], list[types_pb2.MutationProto]]:
-    """Alias for build_presence_card_add_node_mutations()."""
-    return build_presence_card_add_node_mutations(
-        tile_id=tile_id,
-        resource_id=resource_id,
-        agent_name=agent_name,
-        last_active_label=last_active_label,
-        accent_rgba=accent_rgba,
-        card_width=card_width,
-        card_height=card_height,
-    )
+def _node_count(node: types_pb2.NodeProto) -> int:
+    return 1 + sum(_node_count(child) for child in node.children)
+
+
+def _validated_ids(ids: Any, count: int, what: str) -> list[bytes]:
+    result = [bytes(node_id) for node_id in ids]
+    if len(result) != count or any(len(node_id) != 16 or not any(node_id) for node_id in result):
+        raise RuntimeError(f"{what}: malformed acknowledged IDs; expected {count} nonzero 16-byte IDs")
+    if len(set(result)) != len(result):
+        raise RuntimeError(f"{what}: duplicate acknowledged IDs")
+    return result
 
 
 def _make_node(data: dict) -> types_pb2.NodeProto:
@@ -540,7 +526,7 @@ class HudClient:
         self,
         target: str,
         psk: str,
-        agent_id: str = "user-test-agent",
+        agent_id: str = "",
         initial_subscriptions: Optional[list[str]] = None,
     ):
         self.target = target
@@ -702,9 +688,9 @@ class HudClient:
                     await self._response_queue.put(msg)
         except grpc.aio.AioRpcError as e:
             if e.code() != grpc.StatusCode.CANCELLED:
-                print(f"  [grpc] Stream error: {e}", flush=True)
+                print(f"  [grpc] Stream failed: {e.code().name}", flush=True)
         except Exception as e:
-            print(f"  [grpc] Reader error: {e}", flush=True)
+            print(f"  [grpc] Reader failed: {type(e).__name__}", flush=True)
 
     async def _wait_for(
         self,
@@ -909,7 +895,9 @@ class HudClient:
         result = await self._request(claim_tile=claim)
         _raise_unless_ok("ClaimTile", result)
         self.last_granted_lease_ttl_ms = result.ttl_ms
-        tile_id = result.ids[0]
+        ids = _validated_ids(result.ids, 1 + (_node_count(claim.root) if root is not None else 0), "ClaimTile")
+        _validated_ids([result.lease_id], 1, "ClaimTile lease")
+        tile_id = ids[0]
         print(
             f"  [grpc] Tile claimed: {tile_id.hex()[:16]}... ttl={result.ttl_ms}ms",
             flush=True,
@@ -917,7 +905,7 @@ class HudClient:
         return ClaimedTile(
             lease_id=result.lease_id,
             tile_id=tile_id,
-            node_ids=list(result.ids[1:]),
+            node_ids=ids[1:],
         )
 
     async def hold_tile(self, tile_id: bytes, ttl_ms: int = 0) -> int:
@@ -1253,10 +1241,10 @@ class HudClient:
         lease_id: bytes,
         tile_id: bytes,
         node_spec: Any,
-    ):
-        """Set a tile's root node from a dict spec or NodeProto."""
+    ) -> bytes:
+        """Set the root and return its acknowledged big-endian scene id."""
         node = node_spec if isinstance(node_spec, types_pb2.NodeProto) else _make_node(node_spec)
-        await self.submit_mutation_batch(
+        result = await self.submit_mutation_batch(
             lease_id,
             [
                 types_pb2.MutationProto(
@@ -1266,8 +1254,11 @@ class HudClient:
                     )
                 )
             ],
+            retries=0,
         )
+        root_id = _validated_ids(result.ids, _node_count(node), "SetTileRoot")[0]
         print("  [grpc] Tile root set", flush=True)
+        return root_id
 
     async def add_node(
         self,
@@ -1289,8 +1280,9 @@ class HudClient:
                     )
                 )
             ],
+            retries=0,
         )
-        node_id = mr.ids[0]
+        node_id = _validated_ids(mr.ids, _node_count(node), "AddNode")[0]
         print(f"  [grpc] Node added: {node_id.hex()[:16]}...", flush=True)
         return node_id
 
@@ -1300,8 +1292,8 @@ class HudClient:
         tile_id: bytes,
         node_id: bytes,
         node_spec: Any,
-    ) -> None:
-        """Replace a node's content in place."""
+    ) -> session_pb2.RequestResult:
+        """Replace a node's content in place and return the acknowledgement."""
         node = node_spec if isinstance(node_spec, types_pb2.NodeProto) else _make_node(node_spec)
         mutation = types_pb2.UpdateNodeContentMutation(tile_id=tile_id, node_id=node_id)
         if node.HasField("solid_color"):
@@ -1312,9 +1304,10 @@ class HudClient:
             mutation.hit_region.CopyFrom(node.hit_region)
         elif node.HasField("static_image"):
             mutation.static_image.CopyFrom(node.static_image)
-        await self.submit_mutation_batch(
+        return await self.submit_mutation_batch(
             lease_id,
             [types_pb2.MutationProto(update_node_content=mutation)],
+            retries=0,
         )
 
     async def create_presence_card_tile(
@@ -1326,25 +1319,23 @@ class HudClient:
         anchor: int = session_pb2.TILE_ANCHOR_BOTTOM_LEFT,
         ttl_ms: int = 60000,
     ) -> ClaimedTile:
-        """Claim a medium tile and fill it with a full Presence Card."""
+        """Claim a filled card atomically; node_ids follow PRESENCE_CARD_ROLES."""
+        root = build_presence_card_tree(avatar_resource_id, agent_name, accent_rgba=accent_rgba)
         claimed = await self.claim_tile(
-            anchor=anchor, size=session_pb2.TILE_SIZE_MEDIUM, ttl_ms=ttl_ms
+            anchor=anchor, size=session_pb2.TILE_SIZE_MEDIUM, ttl_ms=ttl_ms, root=root,
         )
-        lease_id, tile_id = claimed.lease_id, claimed.tile_id
-        await self.update_tile_input_mode(
-            lease_id,
-            tile_id,
-            types_pb2.TILE_INPUT_MODE_CAPTURE,
-        )
-        root, children, _ = build_presence_card_add_node_mutations(
-            tile_id=tile_id,
-            resource_id=avatar_resource_id,
-            agent_name=agent_name,
-            accent_rgba=accent_rgba,
-        )
-        await self.set_tile_root(lease_id, tile_id, root)
-        for node in children:
-            await self.add_node(lease_id, tile_id, node, parent_id=root.id)
+        try:
+            await self.update_tile_input_mode(
+                claimed.lease_id, claimed.tile_id, types_pb2.TILE_INPUT_MODE_CAPTURE,
+            )
+        except BaseException:
+            # Preserve the original failure. Clear only this known tile if setup
+            # fails after its successful claim, before the caller owns the result.
+            try:
+                await self.release_tile(claimed.tile_id)
+            except Exception:
+                pass
+            raise
         return claimed
 
     async def send_heartbeat(self):
@@ -1374,10 +1365,11 @@ class HudClient:
 # ---------------------------------------------------------------------------
 
 async def _self_test():
-    """Connect, create a Presence Card tile, hold for 5s, close."""
+    """Connect as the paired identity, create a card, wait 10s, then clear it."""
     import argparse
     parser = argparse.ArgumentParser(description="gRPC client self-test")
     parser.add_argument("--target", help="gRPC host:port (default: HUD_HOST:50051)")
+    parser.add_argument("--agent", default="", help="Optional paired agent identity assertion; default derives it from the PSK")
     args = parser.parse_args()
     import hud_env
 
@@ -1385,16 +1377,16 @@ async def _self_test():
     psk = hud_env.load_psk(args.target)
 
     print(f"Connecting to {target}...", flush=True)
-    async with HudClient(target, psk=psk, agent_id="grpc-self-test") as client:
+    async with HudClient(target, psk=psk, agent_id=args.agent) as client:
         avatar_png = make_avatar_png((255, 0, 0))
         avatar_resource_id = await client.upload_avatar_png(avatar_png)
         claimed = await client.create_presence_card_tile(
-            agent_name="grpc-self-test",
+            agent_name=client.namespace,
             avatar_resource_id=avatar_resource_id,
             ttl_ms=30000,
         )
         print(
-            f"  Presence card tile {claimed.tile_id.hex()[:16]}... visible for 10 seconds...",
+            f"  Presence card tile {claimed.tile_id.hex()[:16]}... acknowledged; observe for 10 seconds...",
             flush=True,
         )
         await asyncio.sleep(10)

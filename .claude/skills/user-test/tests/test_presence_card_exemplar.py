@@ -1,199 +1,180 @@
 from __future__ import annotations
 
+import asyncio
+import contextlib
+import io
+import json
 import sys
+import tempfile
 import unittest
 import uuid
 from pathlib import Path
-
+from unittest.mock import patch
 
 SCRIPT_DIR = Path(__file__).resolve().parents[1] / "scripts"
 sys.path.insert(0, str(SCRIPT_DIR))
 
-import presence_card_exemplar  # noqa: E402
-from proto_gen import types_pb2  # noqa: E402
+import presence_card_exemplar as exemplar  # noqa: E402
+from hud_grpc_client import HudClient  # noqa: E402
+from proto_gen import session_pb2  # noqa: E402
 
 
-class PresenceCardExemplarTests(unittest.TestCase):
+class FakePairedClient(HudClient):
+    """In-memory paired stream; real claim/card/update helpers build the wire."""
+
+    instances: list[FakePairedClient] = []
+    fail_phase = ""
+    key = "private-fixture-key"
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.index = len(self.instances)
+        self.instances.append(self)
+        self.closed = False
+        self.dropped = False
+        self.released = []
+        self.release_attempts = []
+        self.mutations = []
+        self.heartbeats = 0
+        self.tile_id = uuid.UUID(int=1000 + self.index).bytes
+
+    async def connect(self):
+        if self.agent_id not in ("", "paired-agent") or (self.fail_phase == "auth" and self.index == 1):
+            raise RuntimeError(f"AUTH_FAILED: identity mismatch {self.key}")
+        self.namespace = "paired-agent"
+        self.heartbeat_interval_ms = 5000
+        self.scene_display_area = (2560.0, 1440.0)
+
+    async def upload_avatar_png(self, png):
+        return b"a" * 32
+
+    async def _request(self, **payload):
+        self.claim = payload["claim_tile"]
+        return session_pb2.RequestResult(
+            ok=True, lease_id=uuid.UUID(int=2000 + self.index).bytes,
+            ids=[self.tile_id, *[uuid.UUID(int=10000 + self.index * 100 + n).bytes for n in range(13)]],
+            ttl_ms=120000,
+        )
+
+    async def submit_mutation_batch(self, lease_id, mutations, **kwargs):
+        self.mutations.extend(mutations)
+        if mutations[0].WhichOneof("mutation") == "update_node_content":
+            if self.fail_phase == "update":
+                raise RuntimeError(f"NOT_ALLOWED: rejected body update {self.key}")
+            if self.fail_phase == "interrupt":
+                raise asyncio.CancelledError
+            assert kwargs["retries"] == 0
+        return session_pb2.RequestResult(ok=True, code="", hint="")
+
+    async def send_heartbeat(self):
+        self.heartbeats += 1
+
+    async def wait_for_click(self, *args, **kwargs):
+        await asyncio.Event().wait()
+
+    async def release_tile(self, tile_id):
+        self.release_attempts.append(tile_id)
+        if self.fail_phase == "clear_denied":
+            raise RuntimeError(f"NOT_ALLOWED: scoped Clear denied {self.key}")
+        if self.fail_phase == "clear_timeout":
+            raise TimeoutError("scoped Clear acknowledgement timed out")
+        self.released.append(tile_id)
+
+    async def close(self, **kwargs):
+        self.closed = True
+
+    async def drop_connection(self):
+        self.dropped = True
+
+
+class PresenceCardExemplarTests(unittest.IsolatedAsyncioTestCase):
     def test_format_last_active_humanizes_elapsed_time(self) -> None:
-        self.assertEqual(presence_card_exemplar.format_last_active(0), "now")
-        self.assertEqual(presence_card_exemplar.format_last_active(29), "29s ago")
-        self.assertEqual(presence_card_exemplar.format_last_active(30), "30s ago")
-        self.assertEqual(presence_card_exemplar.format_last_active(60), "1m ago")
-        self.assertEqual(presence_card_exemplar.format_last_active(125), "2m ago")
+        for seconds, label in ((0, "now"), (29, "29s ago"), (30, "30s ago"), (60, "1m ago"), (125, "2m ago")):
+            with self.subTest(seconds=seconds):
+                self.assertEqual(exemplar.format_last_active(seconds), label)
 
-    def test_build_presence_card_mutations_include_tile_setup_and_dismiss_control(self) -> None:
-        tile_id = uuid.uuid4().bytes
-        root_uuid = uuid.UUID("11111111-2222-7333-8444-555555555555")
-        avatar_resource_id = uuid.UUID("22222222-3333-7444-8555-666666666666").bytes
+    async def run_fixture(self, *, agent="", fail_phase=""):
+        FakePairedClient.instances = []
+        FakePairedClient.fail_phase = fail_phase
+        async def no_wait(delay):
+            # Exercise survivor liveness after the hard drop without real waits.
+            for client in FakePairedClient.instances:
+                if not client.closed and not client.dropped:
+                    await client.send_heartbeat()
+        async def heartbeat(client, interval):
+            await client.send_heartbeat()
+            await asyncio.Event().wait()
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory) / "receipt.json"
+            args = exemplar.parse_args(["--host", "paired.invalid", "--agent", agent,
+                                        "--transcript-out", str(output)])
+            stdout = io.StringIO()
+            with patch.object(exemplar, "HudClient", FakePairedClient), \
+                    patch.object(exemplar.hud_env, "load_psk", return_value=FakePairedClient.key), \
+                    patch.object(exemplar.asyncio, "sleep", side_effect=no_wait), \
+                    patch.object(exemplar, "heartbeat_loop", side_effect=heartbeat), \
+                    contextlib.redirect_stdout(stdout):
+                code = await exemplar.run_scenario(args)
+            raw = output.read_text()
+            self.assertNotIn(FakePairedClient.key, raw + stdout.getvalue())
+            return code, json.loads(raw), FakePairedClient.instances
 
-        mutations = presence_card_exemplar.build_presence_card_mutations(
-            tile_id=tile_id,
-            agent_name="agent-alpha",
-            avatar_resource_id=avatar_resource_id,
-            avatar_rgba=(66 / 255.0, 133 / 255.0, 244 / 255.0, 1.0),
-            elapsed_seconds=0,
-            include_tile_setup=True,
-            root_uuid=root_uuid,
-        )
+    async def test_build_step_plan_tracks_create_update_disconnect_cleanup(self) -> None:
+        code, receipt, clients = await self.run_fixture()
+        self.assertEqual(code, 0)
+        self.assertEqual(len(clients), 3)
+        self.assertEqual([client.agent_id for client in clients], [""] * 3)
+        self.assertTrue(all(client.namespace == "paired-agent" for client in clients))
+        self.assertTrue(clients[-1].dropped)
+        self.assertFalse(clients[-1].closed)
+        self.assertEqual(clients[-1].released, [])
+        for client in clients[:-1]:
+            self.assertTrue(client.closed)
+            self.assertEqual(client.released, [client.tile_id])
+            self.assertGreater(client.heartbeats, 0)
+        acknowledged = [step for step in receipt["steps"] if step["code"] == "create" and step["status"] == "acknowledged"]
+        self.assertEqual(len(acknowledged), 3)
+        self.assertEqual(acknowledged[0]["display_area"], [2560.0, 1440.0])
+        for client, step in zip(clients, acknowledged, strict=True):
+            mutations = [m.update_node_content for m in client.mutations if m.WhichOneof("mutation") == "update_node_content"]
+            self.assertEqual(mutations[0].node_id, uuid.UUID(step["node_ids"]["body"]).bytes)
+            self.assertIn("30s ago", mutations[0].text_markdown.content)
+        self.assertTrue(all(step["visual_observation"] == "unverified" for step in receipt["steps"]))
+        final = next(step for step in receipt["steps"] if step["status"] == "protocol_complete")
+        self.assertEqual(final["orphan_reclaim_observation"], "unverified")
 
-        self.assertEqual(len(mutations), 13)
-        self.assertAlmostEqual(mutations[0].update_tile_opacity.opacity, 1.0)
-        self.assertEqual(
-            mutations[1].update_tile_input_mode.input_mode,
-            types_pb2.TILE_INPUT_MODE_CAPTURE,
-        )
-        self.assertEqual(mutations[2].WhichOneof("mutation"), "set_tile_root")
-        self.assertAlmostEqual(
-            mutations[2].set_tile_root.node.solid_color.radius,
-            presence_card_exemplar.CARD_RADIUS,
-        )
-        for mutation in mutations[3:]:
-            self.assertEqual(mutation.WhichOneof("mutation"), "add_node")
-            self.assertEqual(mutation.add_node.parent_id, root_uuid.bytes_le)
-        self.assertEqual(
-            mutations[7].add_node.node.text_markdown.content,
-            "RESIDENT AGENT",
-        )
-        self.assertEqual(
-            mutations[6].add_node.node.static_image.resource_id,
-            avatar_resource_id,
-        )
-        self.assertEqual(
-            mutations[8].add_node.node.text_markdown.content,
-            "**agent-alpha**",
-        )
-        self.assertEqual(
-            mutations[9].add_node.node.text_markdown.content,
-            "Connected • last active now",
-        )
-        self.assertEqual(
-            mutations[11].add_node.node.text_markdown.content,
-            "X",
-        )
-        self.assertEqual(
-            mutations[12].add_node.node.hit_region.interaction_id,
-            "dismiss-card",
-        )
+    async def test_paired_assertion_and_partial_setup_failure(self) -> None:
+        for agent, fail_phase, expected_count in (("paired-agent", "", 3), ("wrong-agent", "", 1), ("", "auth", 2)):
+            with self.subTest(agent=agent, fail_phase=fail_phase):
+                code, receipt, clients = await self.run_fixture(agent=agent, fail_phase=fail_phase)
+                self.assertEqual(len(clients), expected_count)
+                self.assertEqual(code, 0 if not fail_phase and agent == "paired-agent" else 1)
+                if code:
+                    self.assertTrue(all(client.closed for client in clients))
+                    self.assertFalse(any(step["status"] == "protocol_complete" for step in receipt["steps"]))
+                    failed = next(step for step in receipt["steps"] if step["status"] == "failed")
+                    self.assertIn("AUTH_FAILED", failed["detail"])
+                    self.assertFalse(any(m.WhichOneof("mutation") == "update_node_content" for c in clients for m in c.mutations))
 
-    def test_build_presence_card_mutations_for_update_rebuilds_full_tree(self) -> None:
-        tile_id = uuid.uuid4().bytes
-        root_uuid = uuid.UUID("aaaaaaaa-bbbb-7ccc-8ddd-eeeeeeeeeeee")
-        avatar_resource_id = uuid.UUID("bbbbbbbb-cccc-7ddd-8eee-ffffffffffff").bytes
-
-        mutations = presence_card_exemplar.build_presence_card_mutations(
-            tile_id=tile_id,
-            agent_name="agent-gamma",
-            avatar_resource_id=avatar_resource_id,
-            avatar_rgba=(251 / 255.0, 188 / 255.0, 4 / 255.0, 1.0),
-            elapsed_seconds=90,
-            include_tile_setup=False,
-            root_uuid=root_uuid,
-        )
-
-        self.assertEqual(len(mutations), 11)
-        self.assertEqual(mutations[0].WhichOneof("mutation"), "set_tile_root")
-        for mutation in mutations[1:]:
-            self.assertEqual(mutation.WhichOneof("mutation"), "add_node")
-        self.assertEqual(
-            mutations[4].add_node.node.static_image.resource_id,
-            avatar_resource_id,
-        )
-        self.assertEqual(
-            mutations[7].add_node.node.text_markdown.content,
-            "Connected • last active 1m ago",
-        )
-        self.assertEqual(
-            mutations[9].add_node.node.text_markdown.content,
-            "X",
-        )
-        self.assertEqual(
-            mutations[10].add_node.node.hit_region.interaction_id,
-            "dismiss-card",
-        )
-
-    def test_avatar_square_has_even_inset_within_plate(self) -> None:
-        plate_center_x = (
-            presence_card_exemplar.AVATAR_PLATE_X
-            + presence_card_exemplar.AVATAR_PLATE_W / 2.0
-        )
-        plate_center_y = (
-            presence_card_exemplar.AVATAR_PLATE_Y
-            + presence_card_exemplar.AVATAR_PLATE_H / 2.0
-        )
-        avatar_center_x = (
-            presence_card_exemplar.AVATAR_X
-            + presence_card_exemplar.AVATAR_W / 2.0
-        )
-        avatar_center_y = (
-            presence_card_exemplar.AVATAR_Y
-            + presence_card_exemplar.AVATAR_H / 2.0
-        )
-
-        self.assertEqual(plate_center_x, avatar_center_x)
-        self.assertEqual(plate_center_y, avatar_center_y)
-        self.assertEqual(
-            presence_card_exemplar.AVATAR_X - presence_card_exemplar.AVATAR_PLATE_X,
-            presence_card_exemplar.AVATAR_PLATE_W
-            - presence_card_exemplar.AVATAR_W
-            - (presence_card_exemplar.AVATAR_X - presence_card_exemplar.AVATAR_PLATE_X),
-        )
-        self.assertEqual(
-            presence_card_exemplar.AVATAR_Y - presence_card_exemplar.AVATAR_PLATE_Y,
-            presence_card_exemplar.AVATAR_PLATE_H
-            - presence_card_exemplar.AVATAR_H
-            - (presence_card_exemplar.AVATAR_Y - presence_card_exemplar.AVATAR_PLATE_Y),
-        )
-        self.assertEqual(
-            presence_card_exemplar.AVATAR_X - presence_card_exemplar.AVATAR_PLATE_X,
-            presence_card_exemplar.AVATAR_INSET,
-        )
-        self.assertEqual(
-            presence_card_exemplar.AVATAR_Y - presence_card_exemplar.AVATAR_PLATE_Y,
-            presence_card_exemplar.AVATAR_INSET,
-        )
-
-    def test_presence_card_has_single_top_right_control(self) -> None:
-        self.assertGreaterEqual(
-            presence_card_exemplar.DISMISS_BG_X,
-            presence_card_exemplar.NAME_X + presence_card_exemplar.NAME_W,
-        )
-        self.assertLess(
-            presence_card_exemplar.DISMISS_BG_X,
-            presence_card_exemplar.CARD_W - presence_card_exemplar.DISMISS_BG_W,
-        )
-        self.assertAlmostEqual(
-            presence_card_exemplar.DISMISS_BG_RADIUS,
-            9.0,
-        )
-
-    def test_sheen_is_inset_so_rounded_card_corners_stay_visible(self) -> None:
-        self.assertGreater(presence_card_exemplar.SHEEN_X, 0.0)
-        self.assertAlmostEqual(
-            presence_card_exemplar.SHEEN_X * 2.0 + presence_card_exemplar.SHEEN_W,
-            presence_card_exemplar.CARD_W,
-        )
-
-    def test_build_step_plan_tracks_create_update_disconnect_cleanup(self) -> None:
-        steps = presence_card_exemplar.build_step_plan(
-            update_wait_s=30,
-            heartbeat_timeout_s=15,
-            orphan_grace_s=30,
-            disconnect_agent_name="agent-gamma",
-        )
-
-        self.assertEqual([step["code"] for step in steps], [
-            "create",
-            "update_wait",
-            "disconnect",
-            "orphan_observe",
-            "cleanup_wait",
-            "final_state",
-        ])
-        self.assertIn("3 stacked cards", steps[0]["expected_visual"])
-        self.assertIn("30s ago", steps[1]["expected_visual"])
-        self.assertIn("agent-gamma", steps[2]["action"])
-        self.assertIn("disconnection badge", steps[3]["expected_visual"])
-        self.assertIn("2 remaining cards", steps[5]["expected_visual"])
+    async def test_rejected_update_and_interrupt_leave_failed_receipt_and_cleanup(self) -> None:
+        for failure, exit_code in (("update", 1), ("interrupt", 130), ("clear_denied", 1), ("clear_timeout", 1)):
+            with self.subTest(failure=failure):
+                code, receipt, clients = await self.run_fixture(fail_phase=failure)
+                self.assertEqual(code, exit_code)
+                if failure.startswith("clear_"):
+                    self.assertTrue(all(client.closed for client in clients[:-1]))
+                    self.assertTrue(all(client.release_attempts == [client.tile_id] for client in clients[:-1]))
+                    self.assertTrue(all(client.released == [] for client in clients))
+                    self.assertTrue(clients[-1].dropped)
+                    self.assertEqual(clients[-1].release_attempts, [])
+                    expected_failures = ["cleanup", "cleanup"]
+                else:
+                    self.assertTrue(all(client.closed for client in clients))
+                    self.assertTrue(all(client.released == [client.tile_id] for client in clients))
+                    expected_failures = ["update"]
+                self.assertEqual([step["code"] for step in receipt["steps"] if step["status"] == "failed"], expected_failures)
+                self.assertEqual(receipt["steps"][-1]["status"], "failed")
+                self.assertFalse(any(step["status"] == "protocol_complete" for step in receipt["steps"]))
 
 
 if __name__ == "__main__":
