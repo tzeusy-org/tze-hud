@@ -73,7 +73,11 @@ Network, Diagnostics and System cards go through
 [`RuntimeControl`](../crates/tze_hud_runtime/src/shell/control_panel/runtime.rs),
 which saves `[runtime]` with `tze_hud_config::set_runtime`, sets live values
 in [`LiveSettings`](../crates/tze_hud_runtime/src/launch.rs) (read by the
-compositor loop only when they change), and names each value's source. MCP and
+compositor loop only when they change), and names each value's source. The
+Layout card edits widget instances in the scene and their `[[tabs.widgets]]`
+entries (`tze_hud_config::set_widget`); the Input card's chord changes go
+through [`ChordControl`](../crates/tze_hud_runtime/src/shell/control_panel/chords.rs)
+to the Windows hotkey thread. MCP and
 gRPC share [`SharedAgents`](../crates/tze_hud_scene/src/config/agents.rs).
 Network listeners bind loopback and local Tailscale-interface addresses
 ([`net_addrs`](../crates/tze_hud_runtime/src/net_addrs.rs)).

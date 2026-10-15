@@ -36,6 +36,7 @@
 //! changes).
 
 pub(crate) mod agents;
+pub(crate) mod chords;
 pub(crate) mod connect;
 mod pause;
 pub(crate) mod row;
@@ -270,7 +271,7 @@ pub(crate) struct ControlPanelDeps {
     pub pause: PauseControl,
     /// The scene, for the visibility rows (its runtime-only overlay state).
     pub scene: Arc<tokio::sync::Mutex<tze_hud_scene::graph::SceneGraph>>,
-    pub chords: HudChords,
+    pub chords: chords::ChordControl,
     /// Shows the pairing card (`None` when the MCP port is disabled).
     pub pairing: Option<Arc<crate::pairing::Pairing>>,
     /// The Agents section's roster and actions (`None`: pause only).
@@ -298,9 +299,22 @@ pub(crate) fn default_sections(deps: &ControlPanelDeps) -> Vec<Box<dyn Section>>
             Arc::clone(&deps.scene),
             deps.render_wake.clone(),
         )),
+        Box::new(sections::LayoutSection::new(
+            Arc::clone(&deps.scene),
+            deps.render_wake.clone(),
+            deps.runtime.as_ref().and_then(|r| r.write_widget.clone()),
+            deps.runtime
+                .as_ref()
+                .map(|r| r.displays.clone())
+                .unwrap_or_default(),
+        )),
         Box::new(sections::InputSection::new(
-            deps.chords,
+            deps.chords.clone(),
             deps.pairing.is_some(),
+            deps.runtime
+                .as_ref()
+                .filter(|r| r.config_path.is_some())
+                .map(|r| r.write.clone()),
         )),
     ];
     if let Some(runtime) = &deps.runtime {
@@ -656,7 +670,7 @@ impl PanelTask {
                 }
                 let ctx = ViewContext {
                     paused: self.deps.pause.is_paused(),
-                    pause_chord: self.deps.chords.pause.to_string(),
+                    pause_chord: self.deps.chords.get().pause.to_string(),
                     connect: open
                         .connect
                         .as_ref()
@@ -707,7 +721,7 @@ impl PanelTask {
         let panel_chord = crate::operator::status::hotkey(ChordRole::Panel);
         Some(PanelNotice {
             text: parts.join(" · "),
-            key: reopen_chord(&panel_chord, &self.deps.chords).to_string(),
+            key: reopen_chord(&panel_chord, &self.deps.chords.get()).to_string(),
         })
     }
 }

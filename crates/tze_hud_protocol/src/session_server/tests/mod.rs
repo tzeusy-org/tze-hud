@@ -283,6 +283,7 @@ async fn setup_widget_service() -> HudSessionImpl {
             contention_override: None,
             instance_name: "gauge".to_string(),
             current_params: std::collections::HashMap::new(),
+            auto_clear_ms: None,
         });
     }
     service

@@ -22,6 +22,9 @@ pub(crate) type RemoteFirewall =
     Arc<dyn Fn(RemoteAction, [u16; 2]) -> Result<String, String> + Send + Sync>;
 /// Reads (`None`) or sets (`Some`) start-at-sign-in; returns the state after.
 pub(crate) type Autostart = Arc<dyn Fn(Option<bool>) -> Result<bool, String> + Send + Sync>;
+/// Saves one `[[tabs.widgets]]` entry: (tab, instance, change).
+pub(crate) type WidgetWriter =
+    Arc<dyn Fn(&str, &str, &tze_hud_config::WidgetUpdate) -> Result<(), String> + Send + Sync>;
 /// Sets the log file's level.
 pub(crate) type LevelSetter = Arc<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
 /// The log file's level: read (`None`: no log file) and set.
@@ -53,6 +56,10 @@ pub(crate) struct RuntimeControl {
     pub saved: Arc<Mutex<Ports>>,
     pub live: Arc<LiveSettings>,
     pub write: ConfigWriter,
+    /// `None` when there is no config file to save widgets to.
+    pub write_widget: Option<WidgetWriter>,
+    /// `[displays.<NAME>]` zone lists, sorted by display.
+    pub displays: Vec<(String, Vec<String>)>,
     pub restart: Option<RestartHandle>,
     pub update: Option<UpdateHandle>,
     /// The channel Install update pulls from.
@@ -122,8 +129,28 @@ impl RuntimeControl {
                 crate::operator::install::autostart_enabled().map_err(|e| e.to_string())
             }) as Autostart
         });
+        let write_widget = config_path.clone().map(|path| {
+            Arc::new(
+                move |tab: &str, instance: &str, update: &tze_hud_config::WidgetUpdate| {
+                    tze_hud_config::set_widget(&path, tab, instance, update)
+                        .map_err(|e| e.to_string())
+                },
+            ) as WidgetWriter
+        });
+        let mut displays: Vec<(String, Vec<String>)> = cfg
+            .config_toml
+            .as_deref()
+            .and_then(|src| toml::from_str::<tze_hud_config::raw::RawConfig>(src).ok())
+            .and_then(|raw| raw.displays)
+            .into_iter()
+            .flatten()
+            .map(|(name, table)| (name, table.zones))
+            .collect();
+        displays.sort();
         Self {
             config_path,
+            write_widget,
+            displays,
             sources: Arc::new(Mutex::new(sources)),
             running,
             saved: Arc::new(Mutex::new(saved)),

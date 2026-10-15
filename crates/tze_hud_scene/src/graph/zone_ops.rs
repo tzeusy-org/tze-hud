@@ -1110,12 +1110,56 @@ impl SceneGraph {
             .active_publishes
             .values()
             .flatten()
-            .filter_map(|record| record.expires_at_wall_us)
+            .filter_map(|record| self.widget_expiry(record))
             .min();
         zone_expiry.into_iter().chain(widget_expiry).min()
     }
 
     // ─── Widget publication expiry ───────────────────────────────────────
+
+    /// When `record` clears: its own expiry or its widget's auto-clear limit,
+    /// whichever comes first. The owner's limit wins over an agent's hold, so
+    /// this, not `expires_at_wall_us`, is what agents are told.
+    pub fn widget_expiry(&self, record: &WidgetPublishRecord) -> Option<u64> {
+        let auto_clear = self
+            .widget_registry
+            .instances
+            .get(&record.widget_name)
+            .and_then(|i| i.auto_clear_ms);
+        effective_expiry(record, auto_clear)
+    }
+
+    /// Move or resize a widget instance (the owner's layout). `false` when
+    /// there is no such instance.
+    pub fn set_widget_geometry(&mut self, instance_name: &str, geometry: GeometryPolicy) -> bool {
+        let Some(instance) = self.widget_registry.instances.get_mut(instance_name) else {
+            return false;
+        };
+        if instance.geometry_override != Some(geometry) {
+            instance.geometry_override = Some(geometry);
+            self.version += 1;
+        }
+        true
+    }
+
+    /// Set how long a widget's publications stay up (`None`: until the agent
+    /// clears them). Applies to what is showing now. `false` when there is no
+    /// such instance.
+    pub fn set_widget_auto_clear(
+        &mut self,
+        instance_name: &str,
+        auto_clear_ms: Option<u64>,
+    ) -> bool {
+        let Some(instance) = self.widget_registry.instances.get_mut(instance_name) else {
+            return false;
+        };
+        if instance.auto_clear_ms != auto_clear_ms {
+            instance.auto_clear_ms = auto_clear_ms;
+            // The next expiry may have moved: the scheduler re-reads it.
+            self.version += 1;
+        }
+        true
+    }
 
     /// Remove widget publications whose `expires_at_wall_us` has passed.
     ///
@@ -1133,12 +1177,11 @@ impl SceneGraph {
         let mut total_removed = 0usize;
         let mut touched_widgets = Vec::new();
 
+        let instances = &self.widget_registry.instances;
         for (widget_name, publishes) in self.widget_registry.active_publishes.iter_mut() {
             let before = publishes.len();
-            publishes.retain(|r| match r.expires_at_wall_us {
-                Some(exp) => exp > now_us,
-                None => true,
-            });
+            let auto_clear = instances.get(widget_name).and_then(|i| i.auto_clear_ms);
+            publishes.retain(|r| effective_expiry(r, auto_clear).is_none_or(|exp| exp > now_us));
             let removed = before - publishes.len();
             if removed > 0 {
                 total_removed += removed;
@@ -1159,5 +1202,18 @@ impl SceneGraph {
         }
 
         total_removed
+    }
+}
+
+/// When `record` clears, given its widget's auto-clear limit.
+fn effective_expiry(record: &WidgetPublishRecord, auto_clear_ms: Option<u64>) -> Option<u64> {
+    let limit = auto_clear_ms.map(|ms| {
+        record
+            .published_at_wall_us
+            .saturating_add(ms.saturating_mul(1000))
+    });
+    match (record.expires_at_wall_us, limit) {
+        (Some(a), Some(b)) => Some(a.min(b)),
+        (a, b) => a.or(b),
     }
 }

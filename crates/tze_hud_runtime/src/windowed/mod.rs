@@ -174,6 +174,8 @@ mod displays;
 #[cfg(target_os = "windows")]
 mod global_hotkey;
 mod hittest;
+#[cfg(any(target_os = "windows", test))]
+mod hotkey_bindings;
 mod input_dispatch;
 mod keyboard;
 mod lifecycle;
@@ -3198,6 +3200,22 @@ impl WindowedRuntime {
         // `/admin/status`, so they start before the banner prints. The
         // unfocused click-through overlay never receives the chords itself.
         // Without a network runtime there is nothing to pause.
+        // The hotkey thread starts after the panel; the panel's rebinds reach
+        // it once it has.
+        #[cfg(target_os = "windows")]
+        let hotkey_thread: Arc<std::sync::OnceLock<global_hotkey::HotkeyThread>> = Arc::default();
+        #[cfg(target_os = "windows")]
+        let rebind: Option<crate::shell::control_panel::chords::Rebinder> = {
+            let thread = Arc::clone(&hotkey_thread);
+            Some(Arc::new(move |role, hotkey| {
+                thread
+                    .get()
+                    .ok_or("Global chords are not registered")?
+                    .rebind(role, hotkey)
+            }))
+        };
+        #[cfg(not(target_os = "windows"))]
+        let rebind = None;
         let control_panel = network_rt.as_ref().map(|rt| {
             let deps = crate::shell::control_panel::ControlPanelDeps {
                 scene: Arc::clone(&shared_scene),
@@ -3207,7 +3225,10 @@ impl WindowedRuntime {
                     Arc::clone(&safe_mode_atomic),
                     render_wake.clone(),
                 ),
-                chords: runtime_context.chords,
+                chords: crate::shell::control_panel::chords::ChordControl::new(
+                    runtime_context.chords,
+                    rebind,
+                ),
                 pairing: pairing.clone(),
                 connect: pairing.clone().map(|pairing| {
                     crate::shell::control_panel::ConnectControl {
@@ -3256,12 +3277,15 @@ impl WindowedRuntime {
                     pairing.is_some() || *role != tze_hud_scene::config::ChordRole::Pairing
                 })
                 .collect();
-            let outcomes =
+            let (outcomes, thread) =
                 global_hotkey::spawn_global_hotkeys(runtime_context.chords, roles, move |role| {
                     panel.send(crate::shell::control_panel::PanelEvent::Chord(role))
                 });
             for (role, status) in outcomes {
                 crate::operator::status::set_hotkey(role, status);
+            }
+            if let Some(thread) = thread {
+                let _ = hotkey_thread.set(thread);
             }
         }
 

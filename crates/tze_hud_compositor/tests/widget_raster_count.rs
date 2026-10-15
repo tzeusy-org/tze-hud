@@ -166,6 +166,7 @@ async fn widget_param_update_rasterizes_only_that_instance() {
             contention_override: None,
             instance_name: instance.to_string(),
             current_params: HashMap::new(),
+            auto_clear_ms: None,
         });
     }
 
@@ -295,6 +296,7 @@ async fn widget_param_update_rasterizes_only_that_instance() {
             contention_override: None,
             instance_name: "status-matrix".into(),
             current_params: HashMap::new(),
+            auto_clear_ms: None,
         });
     let GeometryPolicy::Relative {
         x_pct,
@@ -636,6 +638,7 @@ async fn hidden_widgets_do_no_raster_work_and_draw_nothing() {
         contention_override: None,
         instance_name: "main-gauge".to_string(),
         current_params: HashMap::new(),
+        auto_clear_ms: None,
     });
     let count = |c: &Compositor| c.widget_renderer().unwrap().raster_count("main-gauge");
     // The frame with no published widget: what "nothing drawn" looks like.
@@ -693,4 +696,77 @@ async fn hidden_widgets_do_no_raster_work_and_draw_nothing() {
         max_step <= 2,
         "drawn again at the newest value (max channel step {max_step})"
     );
+}
+
+/// The owner resizes a widget (control panel layout): it re-rasters once at
+/// the new size; moving it without resizing re-rasters nothing.
+#[tokio::test]
+async fn resizing_a_widget_rerasters_it_and_moving_does_not() {
+    if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
+        return;
+    }
+    let mut compositor = match Compositor::new_headless(512, 256).await {
+        Ok(c) => c,
+        Err(CompositorError::NoAdapter) => {
+            assert!(
+                !std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1"),
+                "TZE_HUD_REQUIRE_GPU=1 but no adapter"
+            );
+            return;
+        }
+        Err(e) => panic!("unexpected compositor error: {e}"),
+    };
+    let mut surface = HeadlessSurface::new(&compositor.device, 512, 256);
+    compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut scene = SceneGraph::new(512.0, 256.0);
+    let tab = scene.create_tab("Main", 0).unwrap();
+    let BundleScanResult::Ok(b) = bundle!("gauge", ["background.svg", "fill.svg"]) else {
+        panic!("built-in gauge bundle failed to load");
+    };
+    let type_name = b.definition.id.clone();
+    for (file, bytes) in b.svg_contents {
+        compositor
+            .widget_renderer_mut()
+            .unwrap()
+            .register_svg(&type_name, &file, bytes);
+    }
+    scene.widget_registry.register_definition(b.definition);
+    let at = |x_pct, width_pct| GeometryPolicy::Relative {
+        x_pct,
+        y_pct: 0.1,
+        width_pct,
+        height_pct: 0.5,
+    };
+    scene.widget_registry.register_instance(WidgetInstance {
+        id: SceneId::new(),
+        widget_type_name: type_name,
+        tab_id: tab,
+        geometry_override: Some(at(0.1, 0.25)),
+        contention_override: None,
+        instance_name: "g".to_string(),
+        current_params: HashMap::new(),
+        auto_clear_ms: None,
+    });
+    publish(&mut scene, "g", "level", 0.5);
+    let count = |c: &Compositor| c.widget_renderer().unwrap().raster_count("g");
+    let size = |c: &Compositor| {
+        let e = c.widget_renderer().unwrap().texture_entry("g").unwrap();
+        (e.width, e.height)
+    };
+    render(&mut compositor, &mut scene, &mut surface);
+    assert_eq!((count(&compositor), size(&compositor)), (1, (128, 128)));
+
+    assert!(scene.set_widget_geometry("g", at(0.5, 0.25)));
+    let moved = render(&mut compositor, &mut scene, &mut surface);
+    assert!(
+        moved.widget_rasterized.is_empty(),
+        "a move keeps the raster"
+    );
+    assert_eq!(count(&compositor), 1);
+
+    assert!(scene.set_widget_geometry("g", at(0.5, 0.5)));
+    let resized = render(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(resized.widget_rasterized, ["g"]);
+    assert_eq!((count(&compositor), size(&compositor)), (2, (256, 128)));
+    assert!(!scene.set_widget_geometry("missing", at(0.0, 0.1)));
 }

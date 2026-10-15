@@ -167,9 +167,15 @@ impl super::Compositor {
                 .map(|e| e.last_rendered_params != effective_params)
                 .unwrap_or(false);
 
+            // The owner moved or resized it (control panel layout).
+            let resized = wr
+                .texture_entry(&instance_name)
+                .is_some_and(|e| (e.width, e.height) != (pw, ph));
+
             let dirty = needs_initial
                 || still_animating
                 || params_changed
+                || resized
                 || wr
                     .texture_entry(&instance_name)
                     .map(|e| e.dirty)

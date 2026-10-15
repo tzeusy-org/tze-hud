@@ -790,6 +790,7 @@ mod tests {
                 contention_override: None,
                 instance_name: "main-status".to_string(),
                 current_params: std::collections::HashMap::new(),
+                auto_clear_ms: None,
             });
 
         let trackers =
