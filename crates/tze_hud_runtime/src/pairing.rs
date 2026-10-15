@@ -10,7 +10,7 @@
 //! ```
 //!
 //! Pairing is open at startup while no agent exists, and again after the owner
-//! asks for it (`tze_hud --pair`, Ctrl+Shift+P). A code is single use and
+//! asks for it (`tze_hud --pair`, the pairing chord). A code is single use and
 //! valid for [`CODE_TTL`]. After [`MAX_BAD_ATTEMPTS`] wrong guesses it is
 //! replaced by a new one; the [`MAX_REGENERATIONS`]th such replacement closes
 //! pairing for [`COOLDOWN`] instead. Only the SHA-256 of the PSK is stored
@@ -276,7 +276,7 @@ fn rfc3339_utc(wall_us: u64) -> String {
 }
 
 /// The pairing service behind `POST /pair`, the system card, and the owner's
-/// triggers (`--pair`, Ctrl+Shift+P).
+/// triggers (`--pair`, the pairing chord).
 pub struct Pairing {
     state: Mutex<PairingState>,
     agents: SharedAgents,
@@ -435,7 +435,7 @@ impl Pairing {
     }
 
     /// Open pairing and show the code. Called at startup with no agents, and
-    /// when the owner asks (`--pair`, Ctrl+Shift+P).
+    /// when the owner asks (`--pair`, the pairing chord).
     pub fn open(&self) {
         match self.lock().open_at(self.clock.now()) {
             Opened::Code(issued) => {
@@ -469,7 +469,7 @@ impl Pairing {
                 403,
                 &OperatorError::new(
                     OperatorCode::PairingClosed,
-                    "press Ctrl+Shift+P on the HUD or run tze_hud --pair, then retry with the new code",
+                    "press the HUD's pairing chord (default Ctrl+Shift+F10) or run tze_hud --pair, then retry with the new code",
                 ),
             ),
             Attempt::Wrong { next } => {

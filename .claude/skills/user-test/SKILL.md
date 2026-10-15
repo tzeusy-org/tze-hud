@@ -61,7 +61,7 @@ and never automatically replayed.
    `--admin` is needed for steps 3, 5, and 6. Pairing the same agent again
    rotates its key. `PAIR_CODE_INVALID`: wrong code, ask the owner for the
    current one. `PAIRING_CLOSED`: the code is spent, expired, or cooling down
-   (60 s); the owner runs `tze_hud.exe --pair` or presses Ctrl+Shift+P.
+   (60 s); the owner runs `tze_hud.exe --pair` or presses Ctrl+Shift+F10.
 3. **Update to the dev build:**
    `python3 .claude/skills/user-test/scripts/hud_admin.py update --channel dev`.
    `up_to_date` means nothing to do; otherwise the HUD installs the signed

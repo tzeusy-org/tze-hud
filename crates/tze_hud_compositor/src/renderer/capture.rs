@@ -133,7 +133,7 @@ impl Compositor {
             view_formats: &[],
         });
         let view = target.create_view(&wgpu::TextureViewDescriptor::default());
-        let (mut encoder, _) = self.encode_windowed_passes(build, frame_target, &view);
+        let (mut encoder, _) = self.encode_windowed_passes(build, frame_target, &view, false);
 
         let bytes_per_row = (width * 4).div_ceil(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
             * wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;

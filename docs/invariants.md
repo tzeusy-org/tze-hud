@@ -89,10 +89,16 @@ Windows held-press/release acceptance remains separate.
 
 - `tze_hud_runtime` [`shell::safe_mode`](../crates/tze_hud_runtime/src/shell/safe_mode.rs) [`test_enter_safe_mode_suspends_active_leases`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),
   [`test_mutations_rejected_via_shared_state_flag`](../crates/tze_hud_runtime/src/shell/safe_mode.rs)
-- `tze_hud_runtime` `windowed::safe_mode_toggle`
-  [`hotkey_event_enters_safe_mode_and_suspends_leases`](../crates/tze_hud_runtime/src/windowed/safe_mode_toggle.rs) (global hotkey, default
-  Ctrl+Shift+F12, `[runtime].safe_mode_hotkey`)
-- `tze_hud_config` [`safe_mode_hotkey_defaults_overrides_and_rejects_garbage`](../crates/tze_hud_config/src/tests.rs)
+- `tze_hud_runtime` control panel (global pause chord, default
+  Ctrl+Shift+F12, `[runtime].safe_mode_hotkey`, handled on the network
+  runtime, never the winit loop or an agent)
+  [`pause_chord_pauses_opens_and_second_press_resumes_and_closes`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
+  [`panel_chord_opens_running_and_escape_closes_and_resumes`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
+  [`winit_routing_keys_and_pointer_reach_the_open_panel_only`](../crates/tze_hud_runtime/src/windowed/panel_input.rs);
+  agents never see the panel:
+  `tze_hud_compositor` [`panel_draws_over_the_frame_and_capture_leaves_it_out`](../crates/tze_hud_compositor/src/renderer/tests/control_panel.rs)
+- `tze_hud_config` [`safe_mode_hotkey_defaults_overrides_and_rejects_garbage`](../crates/tze_hud_config/src/tests.rs),
+  [`hud_chords_must_be_distinct`](../crates/tze_hud_config/src/tests.rs)
 - `integration` [`shell_dismiss_override_removes_portal_tile`](../tests/integration/text_stream_portal_governance.rs),
   [`shell_status_snapshot_exposes_no_portal_identity_or_transcript`](../tests/integration/text_stream_portal_governance.rs)
 - viewer dismiss (hover close button): `tze_hud_scene`
@@ -155,7 +161,7 @@ the TTL clock and preserves lease identity; resuming continues it.
 
 - `tze_hud_runtime` [`test_ttl_excluded_during_suspension`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),
   [`test_lease_identity_preserved_across_suspend_resume`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),
-  [`hotkey_event_enters_safe_mode_and_suspends_leases`](../crates/tze_hud_runtime/src/windowed/safe_mode_toggle.rs)
+  [`pause_chord_pauses_opens_and_second_press_resumes_and_closes`](../crates/tze_hud_runtime/src/windowed/panel_input.rs)
 - `tze_hud_scene` [`test_lease_suspend_from_active`](../crates/tze_hud_scene/src/graph/tests.rs), [`test_lease_resume_from_suspended`](../crates/tze_hud_scene/src/graph/tests.rs)
 - `tze_hud_mcp` [`safe_mode_does_not_regrant_suspended_mcp_lease`](../crates/tze_hud_mcp/src/server/tests.rs),
   [`resume_restores_mcp_publishing`](../crates/tze_hud_mcp/src/server/tests.rs)

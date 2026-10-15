@@ -51,6 +51,7 @@ impl Default for CompositorDegradationPolicy {
 
 pub(crate) mod animation;
 pub(crate) mod capture;
+mod control_panel;
 pub(crate) mod draw_cmds;
 pub(crate) mod easing;
 pub(crate) mod encode_pass;
@@ -77,6 +78,11 @@ use draw_cmds::*;
 use icon::*;
 // Re-export the externally consumed shared state; renderer-only helpers stay
 // in private imports.
+pub use control_panel::{
+    ControlPanelGeometry, ControlPanelModel, PanelBadge, PanelBody, PanelChip, PanelControl,
+    PanelFocus, PanelHit, PanelHitTarget, PanelItem, PanelPart, PanelRect, PanelSection, PanelSpan,
+    PanelTone, estimate_control_panel_geometry,
+};
 pub use focus_ring::{FocusRingOwner, FocusRingOwnerHandle};
 pub use system_card::{SystemCardKind, SystemCardModel};
 
@@ -213,6 +219,15 @@ pub struct Compositor {
     safe_mode_overlay: bool,
     /// Runtime system card / toast (see [`Compositor::set_system_card`]).
     system_card: Option<SystemCardModel>,
+    /// Runtime control panel (see [`Compositor::set_control_panel`]); while
+    /// open it replaces the system card in the final chrome pass.
+    control_panel: Option<ControlPanelModel>,
+    /// Last panel layout, keyed by surface size; cleared on model or token
+    /// change.
+    control_panel_layout: Option<((u32, u32), control_panel::ControlPanelLayout)>,
+    /// Bumped on every panel re-layout so the runtime can skip unchanged
+    /// geometry.
+    control_panel_layout_generation: u64,
     /// When true, render all zone boundaries with colored tints even when
     /// zones have no active content. Controlled by `TZE_HUD_DEBUG_ZONES=1`.
     pub debug_zone_tints: bool,
@@ -900,6 +915,9 @@ impl Compositor {
             overlay_mode: false,
             safe_mode_overlay: false,
             system_card: None,
+            control_panel: None,
+            control_panel_layout: None,
+            control_panel_layout_generation: 0,
             debug_zone_tints: std::env::var("TZE_HUD_DEBUG_ZONES").is_ok_and(|v| v == "1"),
             degradation_level: DegradationLevel::Nominal,
             degradation_policy: CompositorDegradationPolicy::default(),
@@ -1238,6 +1256,9 @@ impl Compositor {
             overlay_mode: false,
             safe_mode_overlay: false,
             system_card: None,
+            control_panel: None,
+            control_panel_layout: None,
+            control_panel_layout_generation: 0,
             debug_zone_tints: std::env::var("TZE_HUD_DEBUG_ZONES").is_ok_and(|v| v == "1"),
             degradation_level: DegradationLevel::Nominal,
             degradation_policy: CompositorDegradationPolicy::default(),
@@ -1680,6 +1701,8 @@ impl Compositor {
         self.truncation_cache_scene_instance = None;
 
         self.token_map = map;
+        // The panel is token-styled: re-lay it out on the next frame.
+        self.control_panel_layout = None;
         // Token-substitution failures in ensure_icon_texture are tied to the
         // token map state, not to the SVG file on disk.  Clearing the negative
         // cache here lets icons that previously failed due to a missing token
@@ -2388,7 +2411,7 @@ impl Compositor {
             vec![]
         };
         let card_items = if has_text_rasterizer {
-            self.system_card_text_items(sw, sh)
+            self.final_chrome_text_items(sw, sh)
         } else {
             vec![]
         };
@@ -2664,18 +2687,24 @@ impl Compositor {
         (encoder, encode_us)
     }
 
-    /// Final pass of every frame: the system card backdrop, then its text, above
-    /// all other content including the safe-mode overlay (hud-w5zon), so the
-    /// pairing code stays readable. Draws nothing, and costs nothing, when no
-    /// card is set (`card_vertices` is empty and `render_card_text` is false).
+    /// Final pass of every frame: the system card (or, while open, the control
+    /// panel) backdrop and shapes, then its text, above all other content
+    /// including the safe-mode overlay (hud-w5zon), so the pairing code stays
+    /// readable. Draws nothing, and costs nothing, when neither is showing
+    /// (`card_vertices` and `card_rounded_rects` are empty and
+    /// `render_card_text` is false).
+    #[allow(clippy::too_many_arguments)]
     pub(super) fn encode_system_card_pass(
         &self,
         encoder: &mut wgpu::CommandEncoder,
         frame_view: &wgpu::TextureView,
         card_vertices: &[RectVertex],
+        card_rounded_rects: &[crate::pipeline::RoundedRectDrawCmd],
         inputs: &EncodeInputs,
+        (sw, sh): (f32, f32),
     ) {
         self.encode_drag_handle_pass(encoder, frame_view, card_vertices);
+        self.encode_rounded_rect_pass(encoder, frame_view, card_rounded_rects, sw, sh);
         if !inputs.render_card_text {
             return;
         }

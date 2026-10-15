@@ -22,6 +22,7 @@ struct TargetView<'a> {
     context_menu_vertices: Cow<'a, [RectVertex]>,
     safe_mode_vertices: Cow<'a, [RectVertex]>,
     system_card_vertices: &'a [RectVertex],
+    system_card_rounded_rects: &'a [RoundedRectDrawCmd],
     widget_quads: &'a [crate::widget::WidgetDrawQuad],
 }
 
@@ -93,9 +94,16 @@ pub struct WindowedFrameBuild {
     context_menu_vertices: Vec<RectVertex>,
     /// Safe-mode overlay quads (empty unless safe mode is active).
     safe_mode_vertices: Vec<RectVertex>,
-    /// System card backdrop quads (empty unless a card is set); the very last
-    /// pass, above the safe-mode overlay.
+    /// System card backdrop quads (empty unless a card is set), or the control
+    /// panel scrim while the panel is open; the very last pass, above the
+    /// safe-mode overlay.
     system_card_vertices: Vec<RectVertex>,
+    /// The control panel's rounded shapes (empty while it is closed), drawn in
+    /// the same final pass.
+    system_card_rounded_rects: Vec<RoundedRectDrawCmd>,
+    /// True while the control panel is open: `/admin/screenshot` then leaves
+    /// the final chrome pass out (docs/invariants.md §3).
+    control_panel_open: bool,
     /// Precomputed per-instance widget draw quads.
     widget_quads: Vec<crate::widget::WidgetDrawQuad>,
     /// Wall-clock start of the frame, for the total frame-time telemetry.
@@ -682,8 +690,16 @@ impl Compositor {
 
         // ── Chrome context menu (hud-zc7f) ─────────────────────────────────
         let context_menu_vertices = self.collect_context_menu_vertices(scene, sw, sh);
-        let safe_mode_vertices = self.safe_mode_overlay_vertices(sw, sh);
-        let system_card_vertices = self.system_card_vertices(sw, sh);
+        // The open panel shows the paused state itself; its scrim replaces the
+        // safe-mode dim on the primary display (other displays keep it).
+        let control_panel_open = self.control_panel_open();
+        let safe_mode_vertices = if control_panel_open {
+            Vec::new()
+        } else {
+            self.safe_mode_overlay_vertices(sw, sh)
+        };
+        let system_card_vertices = self.final_chrome_vertices(sw, sh);
+        let system_card_rounded_rects = self.final_chrome_rounded_rects(sw, sh);
 
         // Populate drag-handle hit regions from the geometry we are about to
         // present so the next input snapshot matches this frame (see the method
@@ -705,6 +721,8 @@ impl Compositor {
             context_menu_vertices,
             safe_mode_vertices,
             system_card_vertices,
+            system_card_rounded_rects,
+            control_panel_open,
             widget_quads,
             frame_start,
         }
@@ -769,7 +787,7 @@ impl Compositor {
         };
         let surface_acquired = frame.acquisition.is_fresh();
 
-        let (encoder, encode_us) = self.encode_windowed_passes(build, target, &frame.view);
+        let (encoder, encode_us) = self.encode_windowed_passes(build, target, &frame.view, true);
         let frame_start = build.frame_start;
         let mut telemetry = build.telemetry.clone();
         telemetry.stage6_render_encode_us = encode_us;
@@ -827,13 +845,25 @@ impl Compositor {
     /// Encode every pass of a built frame into `view`, in draw order, and
     /// return the encoder plus the encode time. Shared by the swapchain present
     /// path and the offscreen admin capture so both draw identical pixels.
+    ///
+    /// `include_panel: false` (the admin capture) leaves an open control panel
+    /// out, so no image of it can leave the HUD (docs/invariants.md §3).
     pub(super) fn encode_windowed_passes(
         &mut self,
         build: &WindowedFrameBuild,
         target: &FrameTarget,
         view: &wgpu::TextureView,
+        include_panel: bool,
     ) -> (wgpu::CommandEncoder, u64) {
-        let tv = self.target_view(build, target);
+        let mut tv = self.target_view(build, target);
+        if build.control_panel_open && !include_panel {
+            tv.card_items = &[];
+            tv.system_card_vertices = &[];
+            tv.system_card_rounded_rects = &[];
+            // Without the panel's scrim, show the paused state the usual way.
+            tv.safe_mode_vertices =
+                Cow::Owned(self.safe_mode_overlay_vertices(tv.width as f32, tv.height as f32));
+        }
         let sw = tv.width as f32;
         let sh = tv.height as f32;
 
@@ -888,7 +918,14 @@ impl Compositor {
 
         // ── System card (hud-w5zon): the last pass, above the safe-mode overlay,
         // so the pairing code can never be covered.
-        self.encode_system_card_pass(&mut encoder, view, tv.system_card_vertices, &inputs);
+        self.encode_system_card_pass(
+            &mut encoder,
+            view,
+            tv.system_card_vertices,
+            tv.system_card_rounded_rects,
+            &inputs,
+            (sw, sh),
+        );
 
         (encoder, encode_us)
     }
@@ -920,6 +957,7 @@ impl Compositor {
                 context_menu_vertices: Cow::Borrowed(&build.context_menu_vertices),
                 safe_mode_vertices: Cow::Borrowed(&build.safe_mode_vertices),
                 system_card_vertices: &build.system_card_vertices,
+                system_card_rounded_rects: &build.system_card_rounded_rects,
                 widget_quads: &build.widget_quads,
             };
         }
@@ -1002,6 +1040,11 @@ impl Compositor {
             context_menu_vertices: Cow::Owned(map(&build.context_menu_vertices)),
             safe_mode_vertices: Cow::Owned(self.safe_mode_overlay_vertices(tw as f32, th as f32)),
             system_card_vertices: primary_only(&build.system_card_vertices),
+            system_card_rounded_rects: if target.primary {
+                &build.system_card_rounded_rects
+            } else {
+                &[]
+            },
             widget_quads: if target.primary {
                 &build.widget_quads
             } else {
@@ -1298,12 +1341,15 @@ impl Compositor {
         }
 
         // System card last, above everything (hud-w5zon).
-        let system_card_vertices = self.system_card_vertices(sw, sh);
+        let system_card_vertices = self.final_chrome_vertices(sw, sh);
+        let system_card_rounded_rects = self.final_chrome_rounded_rects(sw, sh);
         self.encode_system_card_pass(
             &mut encoder,
             &frame.view,
             &system_card_vertices,
+            &system_card_rounded_rects,
             &encode_inputs,
+            (sw, sh),
         );
 
         // Headless-specific: copy rendered texture to readback buffer.

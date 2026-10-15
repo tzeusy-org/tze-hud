@@ -142,6 +142,7 @@ const VIEWER_ECHO_COLOR: [u8; 4] = [0x8A, 0xB4, 0xF8, 0xFF];
 
 mod alert_banner;
 mod composer;
+mod control_panel;
 mod focus_chrome;
 mod hit_drag;
 mod idle_gate;

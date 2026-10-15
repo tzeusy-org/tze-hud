@@ -31,7 +31,7 @@
 use std::sync::Arc;
 
 use tze_hud_config::TzeHudConfig;
-use tze_hud_scene::config::{ConfigLoader, DisplayProfile, Hotkey, ResolvedConfig};
+use tze_hud_scene::config::{ConfigLoader, DisplayProfile, HudChords, ResolvedConfig};
 use tze_hud_scene::types::ResourceBudget;
 
 use crate::mutation_budget_bridge::DEFAULT_MAX_GUEST_SESSIONS;
@@ -119,8 +119,8 @@ pub struct RuntimeContext {
     /// Resolved display profile with budget values.
     pub profile: DisplayProfile,
 
-    /// Global chord that toggles safe mode.
-    pub safe_mode_hotkey: Hotkey,
+    /// Global chords: pause (safe mode), control panel and pairing.
+    pub chords: HudChords,
 
     /// Profile-derived operational limits, constructed once at startup.
     pub operational_envelope: OperationalRuntimeEnvelope,
@@ -137,7 +137,7 @@ impl RuntimeContext {
         let operational_envelope = OperationalRuntimeEnvelope::from_profile(&config.profile);
         let resident_ledger = resident_ledger_for(&operational_envelope);
         Self {
-            safe_mode_hotkey: config.safe_mode_hotkey,
+            chords: config.chords,
             profile: config.profile,
             operational_envelope,
             resident_ledger,
@@ -201,7 +201,7 @@ impl RuntimeContext {
         let resident_ledger = resident_ledger_for(&operational_envelope);
         Self {
             profile,
-            safe_mode_hotkey: Hotkey::DEFAULT_SAFE_MODE,
+            chords: HudChords::default(),
             operational_envelope,
             resident_ledger,
         }
@@ -322,7 +322,7 @@ mod tests {
         ResolvedConfig {
             profile: DisplayProfile::headless(),
             tab_names: vec!["main".to_string()],
-            safe_mode_hotkey: Hotkey::DEFAULT_SAFE_MODE,
+            chords: HudChords::default(),
             source_path: None,
         }
     }

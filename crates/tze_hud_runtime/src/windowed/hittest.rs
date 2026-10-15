@@ -242,9 +242,14 @@ impl WinitApp {
                 .tiles
                 .iter()
                 .any(|tile| tile.has_scroll_config || tile.dismissible);
+        let panel_open = self
+            .state
+            .control_panel
+            .as_ref()
+            .is_some_and(|panel| panel.is_open());
         wake::cursor_entry_armed(
             self.state.effective_mode == WindowMode::Overlay,
-            interactive,
+            interactive || panel_open,
             !self.state.overlay_capturing,
         )
     }
@@ -306,7 +311,8 @@ impl WinitApp {
                 x,
                 y,
                 &self.state.hit_regions,
-            ) || self.cursor_over_focused_portal_affordance(),
+            ) || self.cursor_over_focused_portal_affordance()
+                || self.panel_captures_cursor(),
             grip: self.resize_grip_hover_target(),
             close_target: self.close_hover_target(),
             widget_regions: self
@@ -358,7 +364,8 @@ impl WinitApp {
             self.state.cursor_y,
             &self.state.hit_regions,
         ) || self.state.left_button_down
-            || self.cursor_over_focused_portal_affordance();
+            || self.cursor_over_focused_portal_affordance()
+            || self.panel_captures_cursor();
         self.state.overlay_capturing = should_capture;
         self.apply_overlay_hittest(should_capture);
     }

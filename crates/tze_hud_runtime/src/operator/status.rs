@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use tze_hud_scene::config::SharedAgents;
+use tze_hud_scene::config::{ChordRole, SharedAgents};
 
 use crate::idle_efficiency::IdleEfficiencyCounters;
 
@@ -20,7 +20,7 @@ pub struct BuildInfo {
     pub channel: String,
 }
 
-/// Outcome of registering the human safe-mode override chord.
+/// Outcome of registering one global HUD chord ([`ChordRole`]).
 ///
 /// Platform-neutral so the banner, `/admin/status`, and tests need no Windows
 /// types. Only the Windows hotkey thread produces `Registered` / `Failed`.
@@ -35,8 +35,8 @@ pub enum HotkeyStatus {
     Pending {
         chord: String,
     },
-    /// The chord could not be registered (typically another program owns it),
-    /// so the human override is unavailable.
+    /// The chord could not be registered (typically another program owns it);
+    /// for the pause chord the human override is then unavailable.
     Failed {
         chord: String,
         reason: String,
@@ -44,21 +44,26 @@ pub enum HotkeyStatus {
 }
 
 impl HotkeyStatus {
-    /// One banner line, or `None` when there is nothing to say.
-    pub fn banner_line(&self) -> Option<String> {
+    /// One banner line for `role`'s chord, or `None` when there is nothing to say.
+    pub fn banner_line(&self, role: ChordRole) -> Option<String> {
+        let (label, does, lost) = match role {
+            ChordRole::Pause => ("safe", "pauses agents", "no human safe-mode override"),
+            ChordRole::Panel => ("panel", "opens the control panel", "use the pause chord"),
+            ChordRole::Pairing => ("pair", "opens pairing", "use the control panel"),
+        };
         match self {
             Self::NotApplicable => None,
-            Self::Registered { chord } => Some(format!("   safe   : {chord} toggles safe mode")),
+            Self::Registered { chord } => Some(format!("   {label:<7}: {chord} {does}")),
             Self::Pending { chord } => Some(format!(
-                "   safe   : hotkey {chord} registration pending (see /admin/status)"
+                "   {label:<7}: hotkey {chord} registration pending (see /admin/status)"
             )),
             Self::Failed { chord, reason } => Some(format!(
-                "   safe   : WARNING hotkey {chord} NOT registered ({reason}); no human safe-mode override"
+                "   {label:<7}: WARNING hotkey {chord} NOT registered ({reason}); {lost}"
             )),
         }
     }
 
-    /// The `safe_mode_hotkey` value for `/admin/status`: `null` when not applicable.
+    /// A `*_hotkey` value for `/admin/status`: `null` when not applicable.
     pub fn to_json(&self) -> Value {
         match self {
             Self::NotApplicable => Value::Null,
@@ -75,14 +80,28 @@ impl HotkeyStatus {
     }
 }
 
-static SAFE_MODE_HOTKEY: Mutex<HotkeyStatus> = Mutex::new(HotkeyStatus::NotApplicable);
+static HOTKEYS: Mutex<[HotkeyStatus; 3]> = Mutex::new([
+    HotkeyStatus::NotApplicable,
+    HotkeyStatus::NotApplicable,
+    HotkeyStatus::NotApplicable,
+]);
 
-/// Record the hotkey outcome and log it. Updateable: the hotkey thread may
-/// report after the starter gave up waiting. A failure is logged at error
-/// level because the human has no other override. A `Pending` never replaces
-/// a definitive outcome (the thread can win the race against the starter).
-pub fn set_safe_mode_hotkey(status: HotkeyStatus) -> HotkeyStatus {
-    let mut cur = SAFE_MODE_HOTKEY.lock().unwrap_or_else(|e| e.into_inner());
+fn slot(role: ChordRole) -> usize {
+    match role {
+        ChordRole::Pause => 0,
+        ChordRole::Panel => 1,
+        ChordRole::Pairing => 2,
+    }
+}
+
+/// Record `role`'s registration outcome and log it. Updateable: the hotkey
+/// thread may report after the starter gave up waiting. A pause-chord failure
+/// is logged at error level because the human has no other override. A
+/// `Pending` never replaces a definitive outcome (the thread can win the race
+/// against the starter).
+pub fn set_hotkey(role: ChordRole, status: HotkeyStatus) -> HotkeyStatus {
+    let mut all = HOTKEYS.lock().unwrap_or_else(|e| e.into_inner());
+    let cur = &mut all[slot(role)];
     if matches!(status, HotkeyStatus::Pending { .. })
         && matches!(
             *cur,
@@ -91,15 +110,19 @@ pub fn set_safe_mode_hotkey(status: HotkeyStatus) -> HotkeyStatus {
     {
         return cur.clone();
     }
+    let key = role.config_key();
     match &status {
+        HotkeyStatus::Failed { chord, reason } if role == ChordRole::Pause => {
+            tracing::error!(%chord, %reason, key, "safe-mode hotkey NOT registered: no human safe-mode override");
+        }
         HotkeyStatus::Failed { chord, reason } => {
-            tracing::error!(%chord, %reason, "safe-mode hotkey NOT registered: no human safe-mode override");
+            tracing::warn!(%chord, %reason, key, "global hotkey NOT registered");
         }
         HotkeyStatus::Pending { chord } => {
-            tracing::warn!(%chord, "safe-mode hotkey registration pending");
+            tracing::warn!(%chord, key, "global hotkey registration pending");
         }
         HotkeyStatus::Registered { chord } => {
-            tracing::info!(%chord, "safe-mode global hotkey registered");
+            tracing::info!(%chord, key, "global hotkey registered");
         }
         HotkeyStatus::NotApplicable => {}
     }
@@ -107,12 +130,16 @@ pub fn set_safe_mode_hotkey(status: HotkeyStatus) -> HotkeyStatus {
     status
 }
 
-/// Hand a hotkey outcome to the starter waiting on `tx`. If the starter has
+/// Hand `role`'s outcome to the starter waiting on `tx`. If the starter has
 /// already stopped waiting (timed out with `Pending`), record it directly so
 /// the late result supersedes `Pending`.
-pub fn report_outcome(tx: &std::sync::mpsc::Sender<HotkeyStatus>, status: HotkeyStatus) {
-    if let Err(std::sync::mpsc::SendError(status)) = tx.send(status) {
-        set_safe_mode_hotkey(status);
+pub fn report_outcome(
+    tx: &std::sync::mpsc::Sender<(ChordRole, HotkeyStatus)>,
+    role: ChordRole,
+    status: HotkeyStatus,
+) {
+    if let Err(std::sync::mpsc::SendError((role, status))) = tx.send((role, status)) {
+        set_hotkey(role, status);
     }
 }
 
@@ -175,12 +202,9 @@ fn displays_json() -> (Value, Value) {
     (json!(guard.0), json!(guard.1))
 }
 
-/// The recorded hotkey outcome, `NotApplicable` until one is set.
-pub fn safe_mode_hotkey() -> HotkeyStatus {
-    SAFE_MODE_HOTKEY
-        .lock()
-        .unwrap_or_else(|e| e.into_inner())
-        .clone()
+/// `role`'s recorded outcome, `NotApplicable` until one is set.
+pub fn hotkey(role: ChordRole) -> HotkeyStatus {
+    HOTKEYS.lock().unwrap_or_else(|e| e.into_inner())[slot(role)].clone()
 }
 
 static BUILD_INFO: OnceLock<BuildInfo> = OnceLock::new();
@@ -346,7 +370,9 @@ impl StatusSource {
             "tailnet_inbound": tailnet_inbound.to_json(),
             "agents": agents,
             "safe_mode": self.safe_mode.load(Ordering::Relaxed),
-            "safe_mode_hotkey": safe_mode_hotkey().to_json(),
+            "safe_mode_hotkey": hotkey(ChordRole::Pause).to_json(),
+            "panel_hotkey": hotkey(ChordRole::Panel).to_json(),
+            "pairing_hotkey": hotkey(ChordRole::Pairing).to_json(),
             "displays": displays,
             "unplaced_zones": unplaced_zones,
             "frames_presented": self.presents.as_ref().map(|c| c.snapshot().presents),
@@ -399,10 +425,23 @@ mod tests {
             pending.to_json(),
             json!({"chord": "Ctrl+Shift+F12", "registered": null, "error": null})
         );
-        assert!(pending.banner_line().unwrap().contains("pending"));
-        assert!(HotkeyStatus::NotApplicable.banner_line().is_none());
-        assert!(ok.banner_line().unwrap().contains("Ctrl+Shift+F12 toggles"));
-        let line = failed().banner_line().unwrap();
+        assert!(
+            pending
+                .banner_line(ChordRole::Pause)
+                .unwrap()
+                .contains("pending")
+        );
+        assert!(
+            HotkeyStatus::NotApplicable
+                .banner_line(ChordRole::Pause)
+                .is_none()
+        );
+        assert!(
+            ok.banner_line(ChordRole::Pause)
+                .unwrap()
+                .contains("Ctrl+Shift+F12 pauses agents")
+        );
+        let line = failed().banner_line(ChordRole::Pause).unwrap();
         assert!(line.contains("NOT registered") && line.contains("already in use"));
     }
 
@@ -412,27 +451,30 @@ mod tests {
         let pending = HotkeyStatus::Pending { chord: chord() };
         let ok = HotkeyStatus::Registered { chord: chord() };
         // Single test owns the global to avoid cross-test races.
-        set_safe_mode_hotkey(pending.clone());
-        assert_eq!(safe_mode_hotkey(), pending);
-        set_safe_mode_hotkey(ok.clone());
-        assert_eq!(safe_mode_hotkey(), ok);
+        let pause = ChordRole::Pause;
+        set_hotkey(pause, pending.clone());
+        assert_eq!(hotkey(pause), pending);
+        set_hotkey(pause, ok.clone());
+        assert_eq!(hotkey(pause), ok);
+        // Roles are independent slots.
+        assert_eq!(hotkey(ChordRole::Panel), HotkeyStatus::NotApplicable);
         // Late report: the starter's receiver is gone, so the thread records it.
-        set_safe_mode_hotkey(pending.clone());
+        set_hotkey(pause, pending.clone());
         let (tx, rx) = std::sync::mpsc::channel();
         drop(rx);
-        report_outcome(&tx, failed());
-        assert_eq!(safe_mode_hotkey(), failed());
+        report_outcome(&tx, pause, failed());
+        assert_eq!(hotkey(pause), failed());
         // Receiver alive: the outcome is delivered, not recorded.
         let (tx, rx) = std::sync::mpsc::channel();
-        report_outcome(&tx, ok.clone());
-        assert_eq!(rx.recv().unwrap(), ok);
-        assert_eq!(safe_mode_hotkey(), failed());
-        set_safe_mode_hotkey(ok.clone());
+        report_outcome(&tx, pause, ok.clone());
+        assert_eq!(rx.recv().unwrap(), (pause, ok.clone()));
+        assert_eq!(hotkey(pause), failed());
+        set_hotkey(pause, ok.clone());
         // A late Pending never downgrades a definitive outcome.
-        set_safe_mode_hotkey(pending.clone());
-        assert_eq!(safe_mode_hotkey(), ok);
-        set_safe_mode_hotkey(failed());
-        assert_eq!(safe_mode_hotkey(), failed());
-        set_safe_mode_hotkey(HotkeyStatus::NotApplicable);
+        set_hotkey(pause, pending.clone());
+        assert_eq!(hotkey(pause), ok);
+        set_hotkey(pause, failed());
+        assert_eq!(hotkey(pause), failed());
+        set_hotkey(pause, HotkeyStatus::NotApplicable);
     }
 }

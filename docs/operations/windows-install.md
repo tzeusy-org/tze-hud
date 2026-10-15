@@ -98,7 +98,7 @@ The reply carries the PSK (once), the MCP URL, and the gRPC address. The HUD
 stores only the PSK's SHA-256 in `%APPDATA%\tze_hud\agents.toml`. Add
 `"admin": true` to the request to let that agent use `/admin/*`. To pair another
 agent, or re-pair one (which rotates its key), run `tze_hud.exe --pair` or press
-Ctrl+Shift+P with the HUD focused. A code works once and expires after 5
+Ctrl+Shift+F10 (the pairing chord; no need to focus the HUD). A code works once and expires after 5
 minutes; five wrong codes replace it, and repeated failures pause pairing for
 60 seconds.
 
@@ -265,7 +265,7 @@ to do.
 |---|---|---|
 | `UNAUTHENTICATED` | 401 | no valid PSK bearer on an `/admin/*` call |
 | `NOT_ADMIN` | 403 | the agent's `allow` in `agents.toml` lacks `admin` (`*` does not grant it) |
-| `PAIRING_CLOSED` | 403 | no open code: press Ctrl+Shift+P on the HUD or run `tze_hud.exe --pair`, then retry |
+| `PAIRING_CLOSED` | 403 | no open code: press Ctrl+Shift+F10 or run `tze_hud.exe --pair`, then retry |
 | `PAIR_CODE_INVALID` | 403 | wrong code; read the current one off the HUD |
 | `BAD_REQUEST` | 400 | `/pair` body is not `{"agent","code"[,"admin"]}` JSON, or the agent id is not 1-32 characters of `a-z`, `0-9`, `-` |
 | `NOT_INSTALLED` | 409 | `/admin/update` on a copy that is not the installed one |

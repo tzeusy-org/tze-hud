@@ -150,8 +150,8 @@ only PSK SHA-256 digests. With the repo config, that file is
 `app\tze_hud_app\config\agents.toml`. Git does not ignore it, so add it
 to `.git/info/exclude` to keep it from being committed. To pair an agent:
 
-- With no agents paired, the HUD shows a code. Otherwise press Ctrl+Shift+P on
-  the HUD, or run `tze_hud.exe --pair`.
+- With no agents paired, the HUD shows a code. Otherwise press the pairing chord
+  (Ctrl+Shift+F10, works without focusing the HUD), or run `tze_hud.exe --pair`.
 - The agent trades the code for its PSK with `POST /pair`. See
   [Pair an agent](../operations/windows-install.md#pair-an-agent).
 
@@ -209,7 +209,9 @@ prints redacted discovery information without launching another window.
   fighting it, logged as a warning). Explicit `--width`/`--height` gives a
   single window on the primary. Screenshot one monitor with
   `hud_admin.py screenshot --display N` (or `--all`).
-- **Window hotkeys.** With the HUD focused, Ctrl+Shift+P shows a pairing code.
+- **Global chords.** Ctrl+Shift+F12 pauses agents and opens the control panel,
+  Ctrl+Shift+F11 opens it with agents running, Ctrl+Shift+F10 shows a pairing
+  code. They work without focusing the HUD; see `docs/api.md`.
 - **Frame pacing** raises the timer resolution to 1 ms
   (`timeBeginPeriod`) while the compositor runs. This is expected.
 - **Config changes need a restart.** Restart the process, or use

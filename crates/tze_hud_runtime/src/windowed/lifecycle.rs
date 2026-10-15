@@ -1021,6 +1021,54 @@ fn set_foreground_lock_timeout(timeout: u32) -> bool {
     }
 }
 
+/// Whether `window` has keyboard focus now. On Windows this asks the OS
+/// directly (winit's focus flag lags `SetForegroundWindow`).
+pub(super) fn window_is_foreground(window: &Window) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+        // SAFETY: GetForegroundWindow takes no arguments and only reads.
+        let foreground = unsafe { GetForegroundWindow() };
+        hwnd_for_window(window).is_some_and(|hwnd| hwnd == foreground)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        window.has_focus()
+    }
+}
+
+/// The current foreground window, so focus can be handed back later.
+#[cfg(target_os = "windows")]
+pub(super) fn foreground_window() -> Option<isize> {
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    // SAFETY: GetForegroundWindow takes no arguments and only reads.
+    let foreground = unsafe { GetForegroundWindow() };
+    (!foreground.0.is_null()).then_some(foreground.0 as isize)
+}
+
+/// Hand keyboard focus back to `previous` (a window from
+/// [`foreground_window`]) unless it is `ours`. Allowed because this process
+/// holds the foreground; a window that has since closed is ignored by the OS.
+#[cfg(target_os = "windows")]
+pub(super) fn restore_foreground(previous: isize, ours: Option<&Window>) {
+    use std::ffi::c_void;
+    use windows::Win32::Foundation::HWND;
+    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, SetForegroundWindow};
+    let previous = HWND(previous as *mut c_void);
+    let Some(ours) = ours.and_then(hwnd_for_window) else {
+        return;
+    };
+    // Only hand back focus the panel still holds: if the user has since
+    // clicked into another app, leave them there.
+    // SAFETY: GetForegroundWindow has no preconditions.
+    if ours == previous || unsafe { GetForegroundWindow() } != ours {
+        return;
+    }
+    // SAFETY: SetForegroundWindow accepts any HWND; a stale handle fails
+    // harmlessly.
+    let _ = unsafe { SetForegroundWindow(previous) };
+}
+
 pub(super) fn focus_window_for_text_input(window: &Window) {
     window.focus_window();
     window.set_ime_allowed(true);

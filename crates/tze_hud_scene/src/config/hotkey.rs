@@ -35,6 +35,26 @@ impl Hotkey {
         key: HotkeyKey::Function(12),
     };
 
+    /// Default chord that opens the control panel without pausing agents.
+    pub const DEFAULT_PANEL: Hotkey = Hotkey {
+        ctrl: true,
+        shift: true,
+        alt: false,
+        win: false,
+        key: HotkeyKey::Function(11),
+    };
+
+    /// Default chord that opens pairing. An F-key like its siblings: a
+    /// global letter chord (Ctrl+Shift+P) would take the command palette
+    /// away from every editor and terminal while the HUD runs.
+    pub const DEFAULT_PAIRING: Hotkey = Hotkey {
+        ctrl: true,
+        shift: true,
+        alt: false,
+        win: false,
+        key: HotkeyKey::Function(10),
+    };
+
     /// Parse a chord such as `"Ctrl+Shift+F12"` (case-insensitive, `+`-separated,
     /// modifiers `Ctrl|Shift|Alt|Win`, any order).
     pub fn parse(s: &str) -> Result<Hotkey, HotkeyParseError> {
@@ -131,6 +151,72 @@ impl fmt::Display for Hotkey {
     }
 }
 
+/// What a HUD chord does. Every chord is a global `RegisterHotKey` chord, so
+/// it works while the overlay is unfocused and click-through.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum ChordRole {
+    /// Pause agents and open the control panel (`[runtime].safe_mode_hotkey`).
+    Pause,
+    /// Open the control panel without pausing (`[runtime].panel_hotkey`).
+    Panel,
+    /// Open pairing (`[runtime].pairing_hotkey`).
+    Pairing,
+}
+
+impl ChordRole {
+    pub const ALL: [ChordRole; 3] = [ChordRole::Pause, ChordRole::Panel, ChordRole::Pairing];
+
+    /// The `[runtime]` key that configures this chord.
+    pub fn config_key(self) -> &'static str {
+        match self {
+            ChordRole::Pause => "safe_mode_hotkey",
+            ChordRole::Panel => "panel_hotkey",
+            ChordRole::Pairing => "pairing_hotkey",
+        }
+    }
+
+    pub fn default_chord(self) -> Hotkey {
+        match self {
+            ChordRole::Pause => Hotkey::DEFAULT_SAFE_MODE,
+            ChordRole::Panel => Hotkey::DEFAULT_PANEL,
+            ChordRole::Pairing => Hotkey::DEFAULT_PAIRING,
+        }
+    }
+}
+
+/// The HUD's global chords, one per [`ChordRole`], all distinct.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HudChords {
+    pub pause: Hotkey,
+    pub panel: Hotkey,
+    pub pairing: Hotkey,
+}
+
+impl Default for HudChords {
+    fn default() -> Self {
+        Self {
+            pause: Hotkey::DEFAULT_SAFE_MODE,
+            panel: Hotkey::DEFAULT_PANEL,
+            pairing: Hotkey::DEFAULT_PAIRING,
+        }
+    }
+}
+
+impl HudChords {
+    pub fn get(&self, role: ChordRole) -> Hotkey {
+        match role {
+            ChordRole::Pause => self.pause,
+            ChordRole::Panel => self.panel,
+            ChordRole::Pairing => self.pairing,
+        }
+    }
+
+    /// The role whose chord is `hotkey`, if any.
+    pub fn role_of(&self, hotkey: &Hotkey) -> Option<ChordRole> {
+        ChordRole::ALL.into_iter().find(|r| self.get(*r) == *hotkey)
+    }
+}
+
 /// Why a chord string was rejected.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct HotkeyParseError(pub String);
@@ -155,6 +241,16 @@ mod tests {
         assert_eq!(h.to_string(), "Ctrl+Shift+F12");
         let h = Hotkey::parse("Alt+Win+q").unwrap();
         assert_eq!((h.win32_modifiers(), h.win32_vk()), (0x9, u32::from('Q')));
+    }
+
+    #[test]
+    fn default_chords_are_distinct_and_named() {
+        let chords = HudChords::default();
+        assert_eq!(chords.panel.to_string(), "Ctrl+Shift+F11");
+        assert_eq!(chords.pairing.to_string(), "Ctrl+Shift+F10");
+        for role in ChordRole::ALL {
+            assert_eq!(chords.role_of(&chords.get(role)), Some(role));
+        }
     }
 
     #[test]

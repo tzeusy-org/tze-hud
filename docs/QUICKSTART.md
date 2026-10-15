@@ -72,7 +72,7 @@ python3 .claude/skills/user-test/scripts/hud_pair.py \
 ```
 
 The code expires after five minutes and works once. To obtain another code,
-focus the HUD and press Ctrl+Shift+P, or use `tze_hud.exe --pair` on Windows.
+press Ctrl+Shift+F10 (the pairing chord), or use `tze_hud.exe --pair` on Windows.
 
 The helper saves the PSK privately in `~/.config/tze-hud/<host>.psk` and stores
 nonsecret endpoint metadata for the actual MCP port. It never prints the key.

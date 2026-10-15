@@ -156,7 +156,7 @@ OPTIONS:
                            %LOCALAPPDATA%\tze_hud (config, agents, logs)
     --pair                 Ask the running instance to show a pairing code on the
                            HUD, then exit. An agent trades the code for its key
-                           with POST /pair (Ctrl+Shift+P on the HUD does the same).
+                           with POST /pair (the HUD's pairing chord, default Ctrl+Shift+F10, does the same).
     --handoff              Wait up to 35 s for a previous instance to exit instead
                            of exiting 0 because one is already running
     --handoff <ip:port:nonce>

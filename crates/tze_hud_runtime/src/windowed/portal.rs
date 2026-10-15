@@ -2274,6 +2274,7 @@ mod tests {
             chrome_state: Arc::new(std::sync::RwLock::new(crate::shell::ChromeState::new())),
             system_card: crate::shell::system_card::SystemCardHandle::default(),
             pairing: None,
+            control_panel: None,
             input_ring: Arc::new(std::sync::Mutex::new(
                 std::collections::VecDeque::with_capacity(INPUT_EVENT_CAPACITY),
             )),
@@ -2328,6 +2329,7 @@ mod tests {
             portal_resize_states: std::collections::HashMap::new(),
             consumed_portal_resize_keydowns: std::collections::HashSet::new(),
             consumed_shell_shortcut_keydowns: std::collections::HashSet::new(),
+            panel_input: crate::windowed::panel_input::PanelInputState::default(),
             keyboard_activation_nodes: std::collections::HashMap::new(),
             consumed_command_keydowns: std::collections::HashSet::new(),
             local_composer_state: Arc::new(StdMutex::new(None)),
