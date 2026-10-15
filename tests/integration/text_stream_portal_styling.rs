@@ -62,7 +62,7 @@ fn build_expanded_state(hub: &mut PortalHub, portal_id: &str) -> PortalView {
         lifecycle_state: Some(ProjectionLifecycleState::Active),
         status_text: Some("styling test active".to_string()),
         visible_transcript: portal
-            .visible_transcript(hub.limits.visible_bytes)
+            .visible_transcript(hub.limits().visible_bytes)
             .map(|u| TranscriptUnit {
                 sequence: u.seq,
                 output_text: u.text.clone(),
