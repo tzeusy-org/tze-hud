@@ -750,7 +750,7 @@ mod tests {
                 .is_err()
         );
         // A background or portal grip cannot establish that the full-gamut
-        // payloads rendered. Pin all four cards' title/body regions at the
+        // payloads rendered. Pin the visible cards' title/body regions at the
         // canonical 1920x1080 layout, without a font or antialiasing golden.
         let fixture = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../.claude/skills/user-test/scripts/notification-full-gamut.json");
@@ -795,27 +795,30 @@ mod tests {
         assert_eq!(first.dimensions(), (1920, 1080));
         assert_eq!(settled.dimensions(), first.dimensions());
         // Canonical notification area starts at (75%, 2%) and is 30% tall
-        // (21.6..345.6 px). Tonal Glass has 65.9px two-line slots, 8px apart,
-        // newest at the top. The two cards with actions also reserve a 35px
-        // button row (22px buttons, 4px gap, 9px bottom inset). These interior
-        // regions exclude borders, dismiss controls and the portal grip.
-        let slot_heights = [100.9_f32, 100.9, 65.9];
-        let top_of =
-            |slot: usize| (21.6 + slot_heights[..slot].iter().map(|h| h + 8.0).sum::<f32>()) as u32;
-        // The oldest card (Low / Smoke Black) would end at 379.2 px, past the
-        // zone bottom, so it is not shown at all rather than drawn cut off.
+        // (21.6..345.6 px). Tonal Glass two-line slots are 79.2px (20px body
+        // text) plus a 35px button row on cards with actions (22px buttons,
+        // 4px gap, 9px bottom inset), 10px apart, newest at the top. These
+        // interior regions exclude borders, dismiss controls and the portal
+        // grip.
+        let slot_heights = [114.2_f32, 114.2];
+        let top_of = |slot: usize| {
+            (21.6 + slot_heights[..slot].iter().map(|h| h + 10.0).sum::<f32>()) as u32
+        };
+        // The third card (Normal / Blue-Black) would end at 349.2 px, past the
+        // zone bottom, so it and the oldest are not shown at all rather than
+        // drawn cut off.
         let zone_bottom = 345_u32;
-        let below_third = (top_of(3)..zone_bottom)
+        let below_second = (top_of(2)..zone_bottom)
             .flat_map(|y| (1450..1880).map(move |x| (x, y)))
             .filter(|&(x, y)| settled.get_pixel(x, y) != first.get_pixel(x, y))
             .count();
         assert_eq!(
-            below_third, 0,
+            below_second, 0,
             "a card that does not fit the zone must not be drawn, even clipped"
         );
-        for (slot, title) in titles[..3].iter().enumerate() {
+        for (slot, title) in titles[..2].iter().enumerate() {
             let top = top_of(slot);
-            for (line, from, to) in [("title", top + 10, top + 31), ("body", top + 33, top + 52)] {
+            for (line, from, to) in [("title", top + 10, top + 38), ("body", top + 40, top + 63)] {
                 let ink = |pixels: &image::RgbaImage| {
                     (from..to)
                         .flat_map(|y| (1450..1800).map(move |x| pixels.get_pixel(x, y)))

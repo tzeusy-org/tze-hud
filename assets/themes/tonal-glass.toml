@@ -146,9 +146,14 @@
 "tile.close_button.size_px"  = "32"
 "tile.close_button.margin_px" = "8"
 
+# Notification and status-bar text, about 1.3x the pre-theme production
+# config for the 4K/150% panel (the compositor draws physical px).
+"typography.body.size"                 = "20"
+"typography.notification.action.font_size_px"  = "16"
+"typography.notification.dismiss.font_size_px" = "16"
+
 # Carried over unchanged from the pre-theme production config (restyled in
 # hud-h51u7.4).
-"typography.body.size"                 = "15"
 "typography.body.weight"               = "500"
 "spacing.padding.medium"               = "10"
 "typography.notification.body.scale"   = "0.90"
