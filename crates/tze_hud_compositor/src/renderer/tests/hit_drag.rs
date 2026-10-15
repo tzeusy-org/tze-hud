@@ -1124,6 +1124,13 @@ async fn tile_close_button_draw_and_hit_region_share_token_geometry() {
     // No hover: nothing drawn, nothing to hit.
     let mut resting: Vec<crate::pipeline::RectVertex> = Vec::new();
     compositor.append_tile_close_button_vertices(&scene, &mut resting, 1280.0, 720.0);
+    assert!(
+        !compositor
+            .collect_text_items(&scene, 1280.0, 720.0)
+            .iter()
+            .any(|item| &*item.text == crate::renderer::token_colors::TILE_CLOSE_GLYPH),
+        "no x mark without hover"
+    );
     compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
     assert!(resting.is_empty());
     assert!(scene.overlay.zone_hit_regions.is_empty());
@@ -1154,6 +1161,20 @@ async fn tile_close_button_draw_and_hit_region_share_token_geometry() {
             .zip(&quad)
             .all(|(a, q)| a.position == q.position && a.color == q.color)),
         "token-filled quad must be drawn at the hit region bounds"
+    );
+    let glyph = compositor
+        .collect_text_items(&scene, 1280.0, 720.0)
+        .into_iter()
+        .find(|item| &*item.text == crate::renderer::token_colors::TILE_CLOSE_GLYPH)
+        .expect("hovered tile's close button draws its x mark as text");
+    assert_eq!(
+        (
+            glyph.clip_pixel_x,
+            glyph.clip_pixel_y,
+            glyph.clip_bounds_width
+        ),
+        (b.x, b.y, b.width),
+        "x mark is clipped to the button"
     );
 
     let hit = scene.hit_test(b.x + b.width / 2.0, b.y + b.height / 2.0);

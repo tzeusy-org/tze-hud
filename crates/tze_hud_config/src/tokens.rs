@@ -417,6 +417,23 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Claimed tile height, tall size class (px)",
         default_value: "520",
     },
+    // Agent tile backdrop by root node kind (defaults match the compositor
+    // fallbacks).
+    CanonicalToken {
+        key: "color.tile.background.text_markdown",
+        description: "Agent tile backdrop behind a text root",
+        default_value: "#6C6C88",
+    },
+    CanonicalToken {
+        key: "color.tile.background.static_image",
+        description: "Agent tile backdrop behind an image root",
+        default_value: "#373737",
+    },
+    CanonicalToken {
+        key: "color.tile.background.default",
+        description: "Agent tile backdrop behind any other root",
+        default_value: "#505073",
+    },
     // Orphaned-tile disconnection badge (docs/invariants.md section 4).
     CanonicalToken {
         key: "tile.disconnect_badge.color",
@@ -439,14 +456,24 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "#000000B3",
     },
     CanonicalToken {
+        key: "tile.disconnect_badge.label_color",
+        description: "Text color of the 'Disconnected' strip label",
+        default_value: "#FFB800",
+    },
+    CanonicalToken {
+        key: "tile.disconnect_badge.label_weight",
+        description: "Font weight of the 'Disconnected' strip label (CSS numeric)",
+        default_value: "600",
+    },
+    CanonicalToken {
         key: "tile.disconnect_badge.label_size_px",
         description: "Font size of the 'Disconnected' strip label (px)",
-        default_value: "13",
+        default_value: "18",
     },
     CanonicalToken {
         key: "tile.disconnect_badge.label_padding_px",
         description: "Padding around the 'Disconnected' strip label (px)",
-        default_value: "4",
+        default_value: "6",
     },
     // Viewer close button shown on a hovered tile (docs/invariants.md section 3).
     CanonicalToken {
@@ -468,11 +495,6 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         key: "tile.close_button.glyph_color",
         description: "Color of the hover close button's x mark (RGBA hex)",
         default_value: "#FFFFFF",
-    },
-    CanonicalToken {
-        key: "tile.close_button.glyph_stroke_px",
-        description: "Stroke thickness of the hover close button's x mark (px)",
-        default_value: "2",
     },
     // Safe-mode overlay (docs/invariants.md section 5), drawn by the compositor.
     CanonicalToken {

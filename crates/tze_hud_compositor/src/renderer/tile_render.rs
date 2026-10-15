@@ -48,7 +48,7 @@ use super::token_colors::{
     resolve_disconnect_badge_tokens, resolve_focus_ring_tokens, resolve_resize_grip_tokens,
     resolve_section_gap_px, resolve_tile_bg_token, resolve_tile_close_tokens,
     resolve_tile_spacing_tokens, resolve_viewer_echo_tokens, srgb_to_linear,
-    tile_close_button_bounds, tile_close_glyph_rects,
+    tile_close_button_bounds,
 };
 use super::{Compositor, CompositorDegradationPolicy};
 
@@ -906,8 +906,8 @@ impl Compositor {
             .find(|t| t.id == id && t.z_order < ZONE_TILE_Z_MIN)
     }
 
-    /// Emit the viewer close button (token-styled fill and x mark) on the
-    /// hovered tile. Geometry comes from `tile_close_button_bounds`, the same
+    /// Emit the viewer close button's token-styled fill on the hovered tile
+    /// (its x mark is a text item, `TILE_CLOSE_GLYPH`). Geometry comes from `tile_close_button_bounds`, the same
     /// function the hit region uses. Draws nothing unless a tile is hovered, so
     /// an idle HUD pays nothing.
     pub(super) fn append_tile_close_button_vertices(
@@ -931,18 +931,6 @@ impl Compositor {
             sh,
             self.gpu_color(tokens.background),
         ));
-        let glyph = self.gpu_color(tokens.glyph_color);
-        for rect in tile_close_glyph_rects(button, &tokens) {
-            vertices.extend_from_slice(&rect_vertices(
-                rect.x,
-                rect.y,
-                rect.width,
-                rect.height,
-                sw,
-                sh,
-                glyph,
-            ));
-        }
     }
 
     fn clipped_textured_rect(
