@@ -10,9 +10,11 @@ declared source. The complete Cargo-internal cause remains unproved.
 
 Use the repository's opt-in source-binding policy for shared worker targets.
 The coordinator first grants the exclusive Cargo/GPU lease and explicitly
-selects a **new empty target under HOME** for a frozen, committed checkout.
-It retains old targets and source fixtures. The guard chooses no target names,
-changes no source mtimes, redirects no artifacts and deletes no caches.
+selects **one target under HOME per checkout** (worktree), empty when first
+bound. Successive commits in that checkout reuse it warm; the guard refuses it
+to any other checkout. The guard chooses no target names, changes no source
+mtimes, redirects no artifacts and deletes no caches; the coordinator deletes
+targets under the [retention rule](#retention).
 
 ```sh
 # TARGET_EPOCH is an explicit new path supplied by the resource coordinator.
@@ -120,8 +122,10 @@ not implement Cargo's general configuration fingerprinting.
 
 One bounded versioned marker and one nonblocking OS lock belong to each explicit
 target. The marker contains hashes, HEAD and validity only. An existing nonempty
-unbound target, foreign binding, malformed marker, symlink state or contention
-refuses before Cargo; there is no adoption, reset, cleanup or rebind option.
+unbound target, a binding from another checkout or compiler, a malformed or
+older-schema marker, symlink state or contention refuses before Cargo. A new
+commit, source bytes or config in the bound checkout rebinds the target; Cargo
+fingerprints rebuild what changed, as in any single-checkout build.
 The guard marks the binding invalid before starting its owned Cargo child and
 holds the target lock through the terminal result and source/config postcheck.
 An interrupted, abnormally terminated or changed-source run cannot leave a
@@ -132,25 +136,44 @@ These snapshots detect observed changes within the cooperative frozen-source
 contract; they do not prove prevention of arbitrary concurrent edits, an ABA
 change restored between observations, or artifact tampering by another writer.
 
-For a different checkout, commit, materialized bytes, source-owned config or
-compiler identity, the coordinator must select a fresh empty epoch under its
-lease. Old artifacts and source evidence remain protected. The deliberate costs
-are conservative source hashing and cold compilation for each new frozen source;
-same-source gates and pushes reuse their warm epoch. No epoch is allocated per
-command and no retention journal accumulates. Source-mutating `fmt-fix`, host
+For a different checkout or compiler identity, the coordinator selects a
+fresh empty target under its lease. The deliberate cost is conservative source
+hashing per command; review fixups in one worktree stay warm. No target is
+allocated per command or per commit. Source-mutating `fmt-fix`, host
 `bootstrap`/install and `dead-code`'s temporary-source compile refuse in guarded
 mode; run those separately with source-isolated resources.
 
-Preserve the first failed receipt and its source/target identity. A passing test
-count or a later successful run does not diagnose the historical failure. Source
-freshness and the separate unknown cache-deletion investigation are distinct.
-Cleanup eligibility and retention still require an operator-owned policy;
-mtime, a closed bead or this marker grants no deletion permission.
+Preserve the first failed receipt (logs, exit code, HEAD and the guard's
+admitted identity line) beside the bead's evidence, not inside the target. A
+passing test count or a later successful run does not diagnose the historical
+failure. Source freshness and the separate unknown cache-deletion
+investigation are distinct.
 
 To roll back the harness, return to source-isolated targets before disabling the
-opt-in guard. Keep suspect shared epochs protected rather than continuing their
-cross-source reuse. Linux/Windows-GNU build checks do not establish actual native
-Windows execution, owner-visible HUD pixels or a production rendering repair.
+opt-in guard. Do not continue cross-checkout reuse of a suspect target.
+Linux/Windows-GNU build checks do not establish actual native Windows
+execution, owner-visible HUD pixels or a production rendering repair.
+
+## Retention
+
+Owner-approved 2026-10-15. Build targets are disposable; receipts are evidence.
+
+- A bead owns at most one target, tied to its worktree. The coordinator
+  deletes it when the bead's PR merges or closes, or when the bead is closed
+  without a PR, in the same step that removes the worktree.
+- Receipts (gate logs, exit codes, screenshots, small evidence files) move to
+  the bead's evidence directory first and are kept; Cargo `target/` trees,
+  `retained-artifacts` copies of build outputs and baseline/candidate targets
+  are not receipts.
+- A comparison run (baseline vs candidate) deletes both targets once its
+  numbers are recorded.
+- Disk pressure is never an operator blocker while targets of merged, closed
+  or abandoned beads remain: delete those first. Only an unexplained shortfall
+  after that is escalated.
+- A target is kept while its bead has an open PR, or no PR and is not closed.
+- Artifact roots are `~/.tmp` and `~/.local/share/tze-hud-agent-tools`; name
+  each directory `<bead-id>-…` with the exact bead id (`hud-ximtf.8-…`, not
+  `hud-ximtf8-…`) so the beads cleanup scan can attribute it.
 
 ## Nextest leak diagnostics
 
