@@ -128,6 +128,15 @@ impl AgentDirectory {
         );
     }
 
+    /// This directory's dev PSK with `paired`'s agents: what the runtime
+    /// authenticates against after `agents.toml` changes.
+    pub fn with_agents_of(&self, paired: AgentDirectory) -> Self {
+        Self {
+            agents: paired.agents,
+            dev_psk: self.dev_psk.clone(),
+        }
+    }
+
     /// Each paired agent's id and whether it holds `admin`, sorted by id.
     /// Never includes credentials.
     pub fn summaries(&self) -> Vec<(String, bool)> {

@@ -190,8 +190,14 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
 ```
 
 - The runtime loads `agents.toml` at startup and shares it live between MCP
-  and gRPC, so pairing adds an agent without a restart. Hand edits to `agents.toml`
-  need a restart. `[agents]` in the config file is a config error.
+  and gRPC, so pairing and the control panel's Agents card (unpair, allow
+  list) change agents without a restart. Each such change re-reads the file
+  and edits it in place, keeping comments and other agents' tables, so a hand
+  edit made while the HUD runs is kept. A hand edit takes effect with the
+  next change, the open control panel's next refresh (once a second), or a
+  restart; one that does not load is logged and the last good file stays in
+  force. A hand-removed agent's connected gRPC sessions keep running until
+  they reconnect; the panel's Unpair ends them at once. `[agents]` in the config file is a config error.
 - **Pairing** (`POST /pair` on the MCP port, no bearer). While no agent exists,
   and after `tze_hud --pair` or the pairing chord (see
   [Human chords and the control panel](#human-chords-and-the-control-panel)), the HUD shows a 6-digit one-time
@@ -389,6 +395,27 @@ or focus; agents keep their leases and publications and are not told. While
 anything is hidden and the panel is closed, a pill at the bottom right of the
 primary display says what is hidden and which chord opens the panel (the
 pause chord when Windows refused the panel chord). A restart shows everything.
+
+The Agents card lists every paired agent, and any other agent that is
+connected or shows something, with a status dot and what it holds (portals,
+zones, widgets, tiles); the list follows agents as they come and go while the
+panel is open. Opening an agent's row shows:
+
+- **Clear** (asks first): removes everything the agent shows now, as a viewer
+  dismiss would, without waiting on it. A connected gRPC agent gets
+  `Reclaimed{OVERRIDE}` per lease. Clear is not a block: the agent's next
+  publish is served, and a portal publish reports `reattached: true`.
+- **Unpair** (asks first): removes the agent from `agents.toml`, so its PSK
+  stops authenticating at once (a handshake already under way is refused);
+  ends its gRPC sessions, even a hung one; and then clears its content.
+  Unpairing the last agent reopens pairing.
+- **Zones, Widgets, Portal, Tiles, Admin**: grant or withdraw a whole class
+  (`zone:*`, `widget:*`, `portal`, `tiles`, `admin`) in the allow list as it
+  stands in the file. Withdrawing applies at once; granting asks first. A `*` entry is rewritten as the classes that
+  remain when one is withdrawn; single-surface entries (`zone:subtitle`) are
+  kept. MCP requests use the new list from the next call; a connected gRPC
+  session keeps the grants it connected with until it reconnects (Unpair cuts
+  it off at once).
 
 Agents never see the panel: it is not in the scene, in MCP or gRPC results,
 or in `/admin/screenshot`. An idle open panel draws no frames. Its layout

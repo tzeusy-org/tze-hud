@@ -27,9 +27,10 @@ pub mod validate;
 pub mod widgets;
 
 pub use agents_file::{
-    AGENTS_FILE_NAME, AgentRecord, AgentsFile, AgentsFileError, agents_path_for,
+    AGENTS_FILE_NAME, AgentChange, AgentRecord, AgentsFile, AgentsFileError, Edited,
+    agents_path_for,
 };
-pub use allow::{allow_to_permissions, validate_allow_entry};
+pub use allow::{Grant, allow_to_permissions, validate_allow_entry, with_grant};
 pub use config_write::{ConfigWriteError, TokenUpdate, set_design_tokens};
 pub use loader::TzeHudConfig;
 pub use policy_builder::{

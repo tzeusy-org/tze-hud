@@ -1033,7 +1033,7 @@ impl SceneGraph {
         Ok(())
     }
 
-    fn refresh_widget_current_params(&mut self, widget_name: &str) {
+    pub(crate) fn refresh_widget_current_params(&mut self, widget_name: &str) {
         let tab_id = match self.widget_registry.instances.get(widget_name) {
             Some(instance) => instance.tab_id,
             None => return,

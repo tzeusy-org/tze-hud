@@ -101,6 +101,9 @@ pub struct PanelItem {
     /// `Caution` marks a suppressing state (agents paused, content hidden);
     /// `Danger` a destructive action or a pending confirmation.
     pub emphasis: PanelTone,
+    /// A status dot before the label: `Success` filled (e.g. connected),
+    /// `Muted` an outline (offline). `None`: no dot.
+    pub status: Option<PanelTone>,
 }
 
 /// The control drawn at the right of an item.
@@ -901,7 +904,28 @@ impl Painter<'_, '_> {
             );
             right = x;
         }
-        let label_x = rect.x + pad;
+        let mut label_x = rect.x + pad;
+        if let Some(tone) = item.status {
+            let d = s.label.line / 2.0;
+            let dot = PanelRect {
+                x: label_x,
+                y: cy - d / 2.0,
+                w: d,
+                h: d,
+            };
+            let color = self.tone_color(tone);
+            match tone {
+                PanelTone::Muted => self.shape(
+                    dot,
+                    d / 2.0,
+                    with_alpha(color, 0.0),
+                    Some((1.0, color)),
+                    clip,
+                ),
+                _ => self.shape(dot, d / 2.0, color, None, clip),
+            }
+            label_x += d + s.space_xs;
+        }
         let label_w = (right - s.space_m - label_x).max(1.0);
         let label_color = match (item.emphasis, &item.control) {
             (PanelTone::Danger, _) => s.error,
@@ -1847,6 +1871,7 @@ mod tests {
             badge: None,
             shortcut: None,
             emphasis: PanelTone::Normal,
+            status: None,
         }
     }
 
@@ -1875,6 +1900,7 @@ mod tests {
             tiles: vec![
                 PanelItem {
                     emphasis: PanelTone::Caution,
+                    status: None,
                     ..item("agents.pause", "Agents paused", PanelControl::Toggle(true))
                 },
                 item(

@@ -262,7 +262,7 @@ fn publish_degradation_transition(
 /// `SceneGraph::expire_leases()` performs the authoritative transition and
 /// cleanup. This bridge only hands its immutable results to session handlers,
 /// which own the transactional wire responses for connected agents.
-fn publish_lease_expiries(
+pub(crate) fn publish_lease_expiries(
     lease_expirations: Option<&tze_hud_protocol::session_server::LeaseExpirySender>,
     expiries: Vec<tze_hud_scene::types::LeaseExpiry>,
 ) {
@@ -2947,12 +2947,15 @@ impl WindowedRuntime {
         let chrome_state = Arc::new(std::sync::RwLock::new(crate::shell::ChromeState::new()));
         let system_card = crate::shell::system_card::SystemCardHandle::new(render_wake.clone());
         let cfg_agents_empty = cfg.agents.load().is_empty();
+        let agent_store = Arc::new(crate::agent_store::AgentStore::open(
+            tze_hud_config::agents_path_for(
+                cfg.config_file_path.as_deref().map(std::path::Path::new),
+            ),
+            Arc::clone(&cfg.agents),
+        ));
         let pairing = (cfg.mcp_port > 0).then(|| {
             Arc::new(crate::pairing::Pairing::system(
-                Arc::clone(&cfg.agents),
-                tze_hud_config::agents_path_for(
-                    cfg.config_file_path.as_deref().map(std::path::Path::new),
-                ),
+                Arc::clone(&agent_store),
                 system_card.clone(),
                 cfg.grpc_port,
             ))
@@ -3190,6 +3193,16 @@ impl WindowedRuntime {
                 ),
                 chords: runtime_context.chords,
                 pairing: pairing.clone(),
+                agents: Some(crate::shell::control_panel::AgentControl {
+                    store: Arc::clone(&agent_store),
+                    shared: Arc::clone(&shared_state),
+                    scene: Arc::clone(&shared_scene),
+                    portals: Some(portals.clone()),
+                    lease_expirations: lease_expirations.clone(),
+                    pairing: pairing.clone(),
+                    render_wake: render_wake.clone(),
+                    main_wake: wake.main_work_notifier(),
+                }),
                 render_wake: render_wake.clone(),
                 main_wake: wake.main_work_notifier(),
             };

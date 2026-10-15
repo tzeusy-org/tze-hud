@@ -35,6 +35,7 @@
 //! open and idle nothing redraws (the model is republished only when it
 //! changes).
 
+pub(crate) mod agents;
 mod pause;
 pub(crate) mod row;
 mod search;
@@ -49,6 +50,7 @@ use tze_hud_compositor::{ControlPanelGeometry, ControlPanelModel, PanelHitTarget
 use tze_hud_scene::config::{ChordRole, HudChords};
 use tze_hud_scene::render_wake::RenderWakeNotifier;
 
+pub(crate) use agents::AgentControl;
 pub(crate) use pause::PauseControl;
 pub(crate) use row::Section;
 pub(crate) use state::PanelKey;
@@ -76,6 +78,9 @@ pub(crate) enum PanelEvent {
     Scroll(f32),
     /// The panel window gained (`true`) or lost keyboard focus.
     WindowFocus(bool),
+    /// Re-read the sections (sent once a second while open, so facts that
+    /// change outside the panel, like an agent connecting, show up).
+    Refresh,
 }
 
 struct Shared {
@@ -212,7 +217,7 @@ impl ControlPanelHandle {
     }
 
     /// The model last published (`None`: closed).
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-harness"))]
     pub(crate) fn current_model(&self) -> Option<ControlPanelModel> {
         self.shared
             .model
@@ -250,6 +255,8 @@ pub(crate) struct ControlPanelDeps {
     pub chords: HudChords,
     /// Shows the pairing card (`None` when the MCP port is disabled).
     pub pairing: Option<Arc<crate::pairing::Pairing>>,
+    /// The Agents section's roster and actions (`None`: pause only).
+    pub agents: Option<AgentControl>,
     /// Wakes the compositor (and the winit loop) after a publish.
     pub render_wake: RenderWakeNotifier,
     /// Wakes only the winit loop (new geometry changes pointer capture).
@@ -259,7 +266,10 @@ pub(crate) struct ControlPanelDeps {
 /// The sections every HUD shows, in display order.
 pub(crate) fn default_sections(deps: &ControlPanelDeps) -> Vec<Box<dyn Section>> {
     vec![
-        Box::new(sections::AgentsSection::new(deps.pause.clone())),
+        Box::new(sections::AgentsSection::new(
+            deps.pause.clone(),
+            deps.agents.clone(),
+        )),
         Box::new(sections::VisibilitySection::new(
             Arc::clone(&deps.scene),
             deps.render_wake.clone(),
@@ -311,9 +321,12 @@ pub(crate) fn spawn_control_panel(
         }
     };
     let recover = handle.clone();
+    let open = handle.clone();
     runtime.spawn(async move {
         let mut shutdown_rx = shutdown.subscribe();
         let mut task = Some(fresh());
+        let mut refresh = tokio::time::interval(REFRESH_INTERVAL);
+        refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
             tokio::select! {
                 event = rx.recv() => {
@@ -338,12 +351,20 @@ pub(crate) fn spawn_control_panel(
                         }
                     };
                 }
+                // While open only: a closed panel costs nothing.
+                _ = refresh.tick(), if open.is_open() => {
+                    open.send(PanelEvent::Refresh);
+                }
                 _ = shutdown_rx.recv() => break,
             }
         }
     });
     handle
 }
+
+/// How often an open panel re-reads its sections. The model is republished
+/// (and redrawn) only when something changed.
+const REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
 struct PanelTask {
     handle: ControlPanelHandle,
@@ -386,6 +407,10 @@ impl PanelTask {
                         open.focus_refused = !focused;
                         Vec::new()
                     }
+                    PanelEvent::Refresh => {
+                        self.refresh().await;
+                        Vec::new()
+                    }
                     PanelEvent::Chord(_) => Vec::new(),
                 }
             }
@@ -407,7 +432,10 @@ impl PanelTask {
             self.deps.pause.set(pause).await;
         }
         match outcome.panel {
-            PanelChange::Open(by) => self.open = Some(Open::new(by)),
+            PanelChange::Open(by) => {
+                self.open = Some(Open::new(by));
+                self.refresh().await;
+            }
             PanelChange::Close => self.open = None,
             PanelChange::Keep => {}
         }
@@ -445,6 +473,17 @@ impl PanelTask {
                 if let Some(open) = self.open.as_mut() {
                     open.error = Some((row.to_owned(), message));
                 }
+            }
+        }
+    }
+
+    /// Let every section re-read its outside state.
+    async fn refresh(&self) {
+        for (index, section) in self.sections.iter().enumerate() {
+            // Isolated, like `rebuild`: a failed refresh keeps the last rows.
+            let sections = Arc::clone(&self.sections);
+            if let Err(error) = tokio::spawn(async move { sections[index].refresh().await }).await {
+                tracing::error!(section = section.id(), %error, "control panel: section refresh failed");
             }
         }
     }

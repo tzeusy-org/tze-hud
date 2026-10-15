@@ -48,7 +48,7 @@ crates, the canonical app, five examples and a separate integration package.
 |---|---|
 | `app/tze_hud_app` | Canonical binary, CLI, config selection and operator startup actions: [main.rs](../app/tze_hud_app/src/main.rs) |
 | `tze_hud_runtime` | Window/event-loop lifecycle, protocol wiring, portal driver, shell (including the [control panel](../crates/tze_hud_runtime/src/shell/control_panel/mod.rs) model and its sections), deadlines and operator services: [lib.rs](../crates/tze_hud_runtime/src/lib.rs), [windowed](../crates/tze_hud_runtime/src/windowed/mod.rs) |
-| `tze_hud_scene` | Shared scene graph, tiles/nodes/zones, leases, agent identity and the owner's visibility set: [SceneGraph](../crates/tze_hud_scene/src/graph/mod.rs), [visibility](../crates/tze_hud_scene/src/graph/visibility.rs), [lease](../crates/tze_hud_scene/src/lease/), [config](../crates/tze_hud_scene/src/config/) |
+| `tze_hud_scene` | Shared scene graph, tiles/nodes/zones, leases, agent identity, the owner's visibility set and per-agent holdings and Clear: [SceneGraph](../crates/tze_hud_scene/src/graph/mod.rs), [visibility](../crates/tze_hud_scene/src/graph/visibility.rs), [agents](../crates/tze_hud_scene/src/graph/agents.rs), [lease](../crates/tze_hud_scene/src/lease/), [config](../crates/tze_hud_scene/src/config/) |
 | `tze_hud_mcp` | Discover, publish, clear, hold and input tools, with caller-scoped authorization and shared errors: [tools.rs](../crates/tze_hud_mcp/src/tools.rs) |
 | `tze_hud_protocol` | Protobuf schemas, resident session lifecycle, atomic mutations, resume and event delivery: [proto](../crates/tze_hud_protocol/proto/), [session_server](../crates/tze_hud_protocol/src/session_server/mod.rs) |
 | `tze_hud_projection` | `PortalHub` state and transitional resident rendering code: [hub.rs](../crates/tze_hud_projection/src/hub.rs), [lib.rs](../crates/tze_hud_projection/src/lib.rs) |
@@ -63,8 +63,10 @@ crates, the canonical app, five examples and a separate integration package.
 ## Boundaries that matter
 
 **Identity and deployment [Observed].** The app loads `agents.toml` beside
-its config; pairing adds an agent with a hashed PSK. MCP and gRPC share
-[`SharedAgents`](../crates/tze_hud_scene/src/config/agents.rs).
+its config; pairing adds an agent with a hashed PSK, and the control panel
+unpairs agents and edits allow lists, both through one
+[`AgentStore`](../crates/tze_hud_runtime/src/agent_store.rs) writer. MCP and
+gRPC share [`SharedAgents`](../crates/tze_hud_scene/src/config/agents.rs).
 Network listeners bind loopback and local Tailscale-interface addresses
 ([`net_addrs`](../crates/tze_hud_runtime/src/net_addrs.rs)).
 [`http::route`](../crates/tze_hud_runtime/src/http.rs) keeps `/pair` and

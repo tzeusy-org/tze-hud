@@ -235,7 +235,11 @@ fn item_for(row: &Row, open: &Open, context: Option<&str>) -> PanelItem {
             text: text.clone(),
             mono: *mono,
         },
-        Control::Toggle(on) => PanelControl::Toggle(*on),
+        Control::Toggle(on) | Control::Grant { on, .. } => PanelControl::Toggle(*on),
+        Control::Disclosure { text, .. } => PanelControl::Value {
+            text: text.clone(),
+            mono: false,
+        },
         Control::Choice { options, selected } => {
             PanelControl::Choice(options.get(*selected).cloned().unwrap_or_default())
         }
@@ -256,6 +260,7 @@ fn item_for(row: &Row, open: &Open, context: Option<&str>) -> PanelItem {
         } else {
             PanelTone::Normal
         },
+        status: row.status,
     };
     if let Some((id, message)) = &open.error
         && *id == row.id
@@ -264,11 +269,9 @@ fn item_for(row: &Row, open: &Open, context: Option<&str>) -> PanelItem {
         item.detail_tone = PanelTone::Danger;
     }
     if open.confirming.as_deref() == Some(&row.id)
-        && let Control::Action {
-            confirm: Some(question),
-        } = &row.control
+        && let Some(question) = pending_question(&row.control)
     {
-        item.detail = Some(question.clone());
+        item.detail = Some(question.to_owned());
         item.detail_tone = PanelTone::Danger;
         item.emphasis = PanelTone::Danger;
         item.badge = Some(PanelBadge {
@@ -277,6 +280,14 @@ fn item_for(row: &Row, open: &Open, context: Option<&str>) -> PanelItem {
         });
     }
     item
+}
+
+/// The question a row awaiting confirmation shows: what its confirmed edit
+/// (activate, or switch on) would ask.
+fn pending_question(control: &Control) -> Option<&str> {
+    [Edit::Activate, Edit::Set(true)]
+        .into_iter()
+        .find_map(|edit| control.confirm_for(edit))
 }
 
 /// Rows matching `query`, best first (ties keep panel order).
@@ -493,9 +504,18 @@ fn gesture_for(part: PanelPart) -> Gesture {
 /// The edit a gesture makes to a control, if any.
 fn edit_for(control: &Control, gesture: Gesture) -> Option<Edit> {
     match (control, gesture) {
-        (Control::Toggle(on), Gesture::Activate) => Some(Edit::Set(!on)),
-        (Control::Toggle(_), Gesture::Left) => Some(Edit::Set(false)),
-        (Control::Toggle(_), Gesture::Right) => Some(Edit::Set(true)),
+        (
+            Control::Toggle(on) | Control::Grant { on, .. } | Control::Disclosure { open: on, .. },
+            Gesture::Activate,
+        ) => Some(Edit::Set(!on)),
+        (
+            Control::Toggle(_) | Control::Grant { .. } | Control::Disclosure { .. },
+            Gesture::Left,
+        ) => Some(Edit::Set(false)),
+        (
+            Control::Toggle(_) | Control::Grant { .. } | Control::Disclosure { .. },
+            Gesture::Right,
+        ) => Some(Edit::Set(true)),
         (Control::Choice { options, selected }, gesture) if !options.is_empty() => {
             let n = options.len();
             Some(Edit::Choose(match gesture {
@@ -518,9 +538,7 @@ fn act(open: &mut Open, nav: &Nav, id: &str, gesture: Gesture) -> Vec<Effect> {
     let Some(edit) = edit_for(control, gesture) else {
         return Vec::new();
     };
-    if let Control::Action { confirm: Some(_) } = control
-        && open.confirming.as_deref() != Some(id)
-    {
+    if control.confirm_for(edit).is_some() && open.confirming.as_deref() != Some(id) {
         open.confirming = Some(id.to_owned());
         return Vec::new();
     }

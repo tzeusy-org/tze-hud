@@ -143,13 +143,17 @@ fn apply(src: &str, updates: &[(&str, TokenUpdate)]) -> Result<String, ConfigWri
             }
         }
     }
-    let mut out = doc.to_string();
-    // New lines toml_edit adds are LF; keep a CRLF file CRLF. A file with mixed
-    // endings is left as edited.
+    Ok(keep_line_endings(src, doc.to_string()))
+}
+
+/// New lines `toml_edit` adds are LF; keep a CRLF file CRLF. A file with mixed
+/// endings is left as edited.
+pub(crate) fn keep_line_endings(src: &str, out: String) -> String {
     if src.contains("\r\n") && !src.replace("\r\n", "").contains('\n') {
-        out = out.replace("\r\n", "\n").replace('\n', "\r\n");
+        out.replace("\r\n", "\n").replace('\n', "\r\n")
+    } else {
+        out
     }
-    Ok(out)
 }
 
 static TMP_SEQ: AtomicU64 = AtomicU64::new(0);

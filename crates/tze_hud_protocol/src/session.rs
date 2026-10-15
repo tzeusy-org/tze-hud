@@ -161,6 +161,67 @@ pub struct AgentSession {
     /// Registered by the session handler when the stream is established.
     /// These messages are transactional (never dropped) — per RFC 0005 §3.1.
     pub server_message_tx: Option<mpsc::Sender<Result<ServerMessage, Status>>>,
+    /// Ends the session from the runtime side (the owner unpaired the agent).
+    pub closer: SessionCloser,
+}
+
+/// The runtime's handle to end one session task, and to learn that it has.
+#[derive(Clone, Debug)]
+pub struct SessionCloser {
+    close: Arc<tokio::sync::Notify>,
+    ended: tokio::sync::watch::Receiver<()>,
+}
+
+/// The session task's half of a [`SessionCloser`]: the task drops its handler
+/// when [`Self::closed`] fires, and dropping this tells the closer it ended.
+pub struct SessionCloseSignal {
+    close: Arc<tokio::sync::Notify>,
+    _ended: tokio::sync::watch::Sender<()>,
+}
+
+impl SessionCloser {
+    pub fn pair() -> (Self, SessionCloseSignal) {
+        let close = Arc::new(tokio::sync::Notify::new());
+        let (ended_tx, ended) = tokio::sync::watch::channel(());
+        (
+            Self {
+                close: Arc::clone(&close),
+                ended,
+            },
+            SessionCloseSignal {
+                close,
+                _ended: ended_tx,
+            },
+        )
+    }
+
+    /// Ask the task to end. A stored permit: a task not waiting yet still
+    /// sees it.
+    pub fn close(&self) {
+        self.close.notify_one();
+    }
+
+    /// Resolves once the task has dropped its [`SessionCloseSignal`].
+    pub async fn ended(mut self) {
+        while self.ended.changed().await.is_ok() {}
+    }
+}
+
+impl Default for SessionCloser {
+    /// A closer for no task: already ended.
+    fn default() -> Self {
+        Self::pair().0
+    }
+}
+
+impl SessionCloseSignal {
+    pub async fn closed(&self) {
+        self.close.notified().await;
+    }
+
+    fn is_for(&self, closer: &SessionCloser) -> bool {
+        Arc::ptr_eq(&self.close, &closer.close)
+    }
 }
 
 impl Clone for AgentSession {
@@ -174,6 +235,7 @@ impl Clone for AgentSession {
             lease_ids: self.lease_ids.clone(),
             event_subscribed: self.event_subscribed,
             server_message_tx: None,
+            closer: self.closer.clone(),
         }
     }
 }
@@ -197,8 +259,15 @@ impl SessionRegistry {
         Self::default()
     }
 
-    /// Register a session for an authenticated agent.
-    pub fn register(&mut self, agent_name: &str, capabilities: &[String]) -> AgentSession {
+    /// Register a session for an authenticated agent. `closer` is what
+    /// [`Self::close_namespace`] uses to end it; it is attached here, at
+    /// registration, so no unpair can fall between the two.
+    pub fn register(
+        &mut self,
+        agent_name: &str,
+        capabilities: &[String],
+        closer: SessionCloser,
+    ) -> AgentSession {
         let session_id = uuid::Uuid::now_v7().to_string();
         let session = AgentSession {
             session_id: session_id.clone(),
@@ -208,6 +277,7 @@ impl SessionRegistry {
             lease_ids: Vec::new(),
             event_subscribed: false,
             server_message_tx: None,
+            closer,
         };
         self.sessions.insert(session_id, session.clone());
         session
@@ -303,6 +373,43 @@ impl SessionRegistry {
             }
         }
         sent
+    }
+
+    /// The namespaces with at least one connected session.
+    pub fn namespaces(&self) -> impl Iterator<Item = String> + '_ {
+        self.sessions.values().map(|s| s.namespace.clone())
+    }
+
+    /// Connected sessions in `namespace`.
+    pub fn connected(&self, namespace: &str) -> usize {
+        self.sessions
+            .values()
+            .filter(|s| s.namespace == namespace)
+            .count()
+    }
+
+    /// End every session in `namespace` (the owner unpaired the agent), even
+    /// one whose agent is hung: its task drops the handler wherever it is
+    /// waiting and the stream ends. Returns the closers, to await each
+    /// task's end.
+    pub fn close_namespace(&self, namespace: &str) -> Vec<SessionCloser> {
+        self.sessions
+            .values()
+            .filter(|s| s.namespace == namespace)
+            .map(|s| {
+                s.closer.close();
+                s.closer.clone()
+            })
+            .collect()
+    }
+
+    /// Remove the session `signal` closes, wherever its task stopped: a task
+    /// closed mid-handshake has registered but holds no cleanup guard yet.
+    /// Returns how many entries went.
+    pub fn remove_closed(&mut self, signal: &SessionCloseSignal) -> usize {
+        let before = self.sessions.len();
+        self.sessions.retain(|_, s| !signal.is_for(&s.closer));
+        before - self.sessions.len()
     }
 
     /// Register the `ServerMessage` sender for an existing session.

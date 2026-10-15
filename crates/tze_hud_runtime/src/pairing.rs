@@ -21,14 +21,14 @@
 //! to the agent store, the system card, and the HTTP route.
 
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 use subtle::ConstantTimeEq;
-use tze_hud_config::agents_file::{self, AgentRecord};
-use tze_hud_scene::config::SharedAgents;
+use tze_hud_config::agents_file::{self, AgentChange, AgentRecord};
+
+use crate::agent_store::AgentStore;
 
 use crate::http::{OperatorCode, OperatorError, Response};
 use crate::shell::system_card::{SystemCard, SystemCardHandle};
@@ -279,8 +279,7 @@ fn rfc3339_utc(wall_us: u64) -> String {
 /// triggers (`--pair`, the pairing chord).
 pub struct Pairing {
     state: Mutex<PairingState>,
-    agents: SharedAgents,
-    agents_path: Option<PathBuf>,
+    agents: Arc<AgentStore>,
     card: SystemCardHandle,
     grpc_port: u16,
     clock: Arc<dyn PairClock>,
@@ -321,8 +320,7 @@ impl Pairing {
     pub(crate) fn new(
         state: PairingState,
         clock: Arc<dyn PairClock>,
-        agents: SharedAgents,
-        agents_path: Option<PathBuf>,
+        agents: Arc<AgentStore>,
         card: SystemCardHandle,
         grpc_port: u16,
     ) -> Self {
@@ -330,7 +328,6 @@ impl Pairing {
         Self {
             state: Mutex::new(state),
             agents,
-            agents_path,
             card,
             grpc_port,
             clock,
@@ -346,17 +343,11 @@ impl Pairing {
         Arc::clone(&self.firewall)
     }
 
-    pub(crate) fn system(
-        agents: SharedAgents,
-        agents_path: Option<PathBuf>,
-        card: SystemCardHandle,
-        grpc_port: u16,
-    ) -> Self {
+    pub(crate) fn system(agents: Arc<AgentStore>, card: SystemCardHandle, grpc_port: u16) -> Self {
         Self::new(
             PairingState::system(),
             Arc::new(SystemPairClock),
             agents,
-            agents_path,
             card,
             grpc_port,
         )
@@ -449,6 +440,12 @@ impl Pairing {
         }
     }
 
+    /// Whether a code can be redeemed now.
+    #[cfg(any(test, feature = "test-harness"))]
+    pub(crate) fn is_open(&self) -> bool {
+        self.lock().is_open_at(self.clock.now())
+    }
+
     /// Serve `POST /pair`.
     pub fn pair(&self, body: &[u8]) -> Response {
         let bad_request = |hint: &str| {
@@ -521,24 +518,19 @@ impl Pairing {
 
     /// Persist the new agent (hash only), then swap the live directory.
     fn redeem(&self, req: &PairRequest) -> Result<String, String> {
-        let path = self.agents_path.as_ref().ok_or("no agents.toml location")?;
-        let mut file = agents_file::load(path).map_err(|e| e.to_string())?;
         let psk = new_psk();
         let mut allow = vec!["*".to_owned()];
         if req.admin {
             allow.push("admin".to_owned());
         }
-        file.agents.insert(
-            req.agent.clone(),
-            AgentRecord {
+        self.agents.apply(&AgentChange::Pair {
+            agent: req.agent.clone(),
+            record: AgentRecord {
                 psk_sha256: agents_file::hash_psk_hex(&psk),
                 allow,
                 paired_at: Some(rfc3339_utc(self.clock.wall_us())),
             },
-        );
-        let directory = file.directory().map_err(|e| e.to_string())?;
-        agents_file::save_atomic(path, &file).map_err(|e| e.to_string())?;
-        self.agents.store(Arc::new(directory));
+        })?;
         Ok(psk)
     }
 
@@ -562,8 +554,10 @@ impl Pairing {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
     use tze_hud_compositor::SystemCardKind;
+    use tze_hud_scene::config::SharedAgents;
 
     /// A clock the test advances by hand.
     struct TestClock {
@@ -735,8 +729,7 @@ mod tests {
         let pairing = Pairing::new(
             PairingState::new(counting_words()),
             clock.clone(),
-            agents.clone(),
-            Some(path.clone()),
+            Arc::new(AgentStore::open(Some(path.clone()), agents.clone())),
             card.clone(),
             50051,
         );

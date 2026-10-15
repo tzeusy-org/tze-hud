@@ -15,6 +15,7 @@ fn item(id: &str, label: &str, control: PanelControl) -> PanelItem {
         badge: None,
         shortcut: None,
         emphasis: PanelTone::Normal,
+        status: None,
     }
 }
 
@@ -304,4 +305,57 @@ async fn hidden_content_is_not_drawn_and_the_closed_notice_is() {
         "uploaded again"
     );
     assert!(zone_vertices(&compositor, &scene) > 0);
+}
+
+/// A row's status dot (CP-8: an agent's connection) draws before its label:
+/// a filled dot for a live agent and an outline for an idle one, each unlike
+/// the row without one.
+#[tokio::test]
+async fn status_dots_draw_filled_or_outlined_before_the_label() {
+    let (w, h) = (640_u32, 400_u32);
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(w, h).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut scene = SceneGraph::new(w as f32, h as f32);
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    let id = "agents.manage:claude";
+    let mut render = |status: Option<PanelTone>| {
+        let mut m = panel();
+        let mut row = item(id, "claude", PanelControl::Action);
+        row.status = status;
+        m.body = PanelBody::Sections(vec![PanelSection {
+            id: "agents".into(),
+            title: "Agents".into(),
+            key: None,
+            items: vec![row],
+        }]);
+        compositor.set_control_panel(Some(m));
+        let rect = compositor
+            .control_panel_geometry(w as f32, h as f32)
+            .unwrap()
+            .1
+            .hits
+            .iter()
+            .find(|hit| matches!(&hit.target, crate::PanelHitTarget::Row(row, _) if row == id))
+            .expect("the row is hit-testable")
+            .rect;
+        compositor.render_frame_headless(&mut scene, &surface);
+        let px = surface.read_pixels(&compositor.device);
+        // The row's leading strip, where the dot sits.
+        let strip: Vec<[u8; 4]> = (rect.y as u32..(rect.y + rect.h) as u32)
+            .flat_map(|y| (rect.x as u32..rect.x as u32 + 32).map(move |x| (x, y)))
+            .map(|(x, y)| crate::test_pixels::pixel_at(&px, w, x, y))
+            .collect();
+        strip
+    };
+    let none = render(None);
+    let live = render(Some(PanelTone::Success));
+    let idle = render(Some(PanelTone::Muted));
+    let differs = |a: &[[u8; 4]], b: &[[u8; 4]]| a.iter().zip(b).filter(|(p, q)| p != q).count();
+    assert!(differs(&none, &live) > 0, "a live dot draws");
+    assert!(differs(&none, &idle) > 0, "an idle dot draws");
+    assert!(
+        differs(&live, &idle) > 0,
+        "filled and outlined dots look different"
+    );
 }

@@ -138,6 +138,8 @@ prost = { workspace = true }
 tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0", features = ["test-support"] }
 tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0", features = ["dev-mode", "test-harness"] }
 tze_hud_protocol = { path = "../../crates/tze_hud_protocol", version = "0.1.0", features = ["dev-mode"] }
+# poc_acceptance's control-panel agent tests write a scratch agents.toml.
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

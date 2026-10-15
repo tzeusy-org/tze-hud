@@ -5,9 +5,12 @@ async fn test_initial_handshake_failures_carry_recovery_hints() {
     let service = HudSessionImpl::new(SceneGraph::new(800.0, 600.0), "test-key");
     let agents = tze_hud_scene::config::AgentDirectory::unrestricted("test-key");
     let budget = ResourceBudget::default();
+    let (live_agents, closer) = (agents.clone().shared(), Default::default());
     let ctx = HandshakeCtx {
         state: &service.state,
         agents: &agents,
+        live_agents: &live_agents,
+        closer: &closer,
         resource_budget: &budget,
         budget_enforcer: None,
         peer_ip: None,
@@ -129,9 +132,12 @@ async fn test_session_registration_rejections_carry_recovery_hints() {
                 ..Default::default()
             })
         };
+        let (live_agents, closer) = (agents.clone().shared(), Default::default());
         let ctx = HandshakeCtx {
             state: &service.state,
             agents: &agents,
+            live_agents: &live_agents,
+            closer: &closer,
             resource_budget: &budget,
             budget_enforcer: Some(&enforcer),
             peer_ip: None,
@@ -1114,9 +1120,12 @@ async fn test_handle_session_init_local_socket_non_loopback_auth_failed() {
 
     let agents = tze_hud_scene::config::AgentDirectory::unrestricted("test-key");
     let budget = ResourceBudget::default();
+    let (live_agents, closer) = (agents.clone().shared(), Default::default());
     let ctx = HandshakeCtx {
         state: &state,
         agents: &agents,
+        live_agents: &live_agents,
+        closer: &closer,
         resource_budget: &budget,
         budget_enforcer: None,
         peer_ip: Some(non_loopback_ip),
@@ -1198,9 +1207,12 @@ async fn test_handle_session_resume_local_socket_non_loopback_auth_failed() {
 
     let agents = tze_hud_scene::config::AgentDirectory::unrestricted("test-key");
     let budget = ResourceBudget::default();
+    let (live_agents, closer) = (agents.clone().shared(), Default::default());
     let ctx = HandshakeCtx {
         state: &state,
         agents: &agents,
+        live_agents: &live_agents,
+        closer: &closer,
         resource_budget: &budget,
         budget_enforcer: None,
         peer_ip: Some(non_loopback_ip),
@@ -1591,4 +1603,74 @@ async fn degradation_notice_send_failure_unregisters_session() {
     assert!(st.sessions.session_for_namespace("healthy").is_some());
     drop(st);
     server.abort();
+}
+
+/// A handshake that read the directory before the owner unpaired its agent is
+/// refused at registration, so Unpair's close cannot miss it (hud-vniri.6).
+#[tokio::test]
+async fn test_handshake_unpaired_mid_flight_is_refused_at_registration() {
+    let service = HudSessionImpl::new(SceneGraph::new(800.0, 600.0), "test-key");
+    let agents = tze_hud_scene::config::AgentDirectory::unrestricted("test-key");
+    // The live directory no longer knows the key: the agent was unpaired
+    // after this handshake loaded `agents`.
+    let live_agents = tze_hud_scene::config::AgentDirectory::default().shared();
+    let (closer, close) = crate::session::SessionCloser::pair();
+    let budget = ResourceBudget::default();
+    let ctx = HandshakeCtx {
+        state: &service.state,
+        agents: &agents,
+        live_agents: &live_agents,
+        closer: &closer,
+        resource_budget: &budget,
+        budget_enforcer: None,
+        peer_ip: None,
+    };
+    let (tx, mut rx) = tokio::sync::mpsc::channel(16);
+    let init = SessionInit {
+        agent_id: "late".to_string(),
+        auth_credential: Some(crate::auth::psk_credential("test-key")),
+        ..Default::default()
+    };
+    assert!(handle_session_init(ctx, &tx, &init).await.is_none());
+    let status = rx.recv().await.unwrap().expect_err("the stream ends");
+    assert_eq!(status.code(), tonic::Code::Unauthenticated);
+    assert!(status.message().contains("unpaired"));
+    assert_eq!(service.state.lock().await.sessions.connected("late"), 0);
+
+    // With the agent still paired, the same handshake registers with the
+    // close signal Unpair fires.
+    let live_agents = agents.clone().shared();
+    let ctx = HandshakeCtx {
+        state: &service.state,
+        agents: &agents,
+        live_agents: &live_agents,
+        closer: &closer,
+        resource_budget: &budget,
+        budget_enforcer: None,
+        peer_ip: None,
+    };
+    assert!(handle_session_init(ctx, &tx, &init).await.is_some());
+    let st = service.state.lock().await;
+    assert_eq!(st.sessions.connected("late"), 1);
+    let closing = st.sessions.close_namespace("late");
+    drop(st);
+    assert_eq!(closing.len(), 1);
+    tokio::time::timeout(std::time::Duration::from_secs(1), close.closed())
+        .await
+        .expect("Unpair's close reaches the registered signal");
+    // Closed before its handler armed a registry guard, the task's close
+    // branch still unregisters exactly this session.
+    let mut st = service.state.lock().await;
+    let (other, _other_signal) = crate::session::SessionCloser::pair();
+    st.sessions.register("late", &[], other);
+    assert_eq!(st.sessions.remove_closed(&close), 1);
+    assert_eq!(st.sessions.connected("late"), 1, "another session stays");
+    drop(st);
+    drop(close);
+    tokio::time::timeout(
+        std::time::Duration::from_secs(1),
+        closing.into_iter().next().unwrap().ended(),
+    )
+    .await
+    .expect("the closer learns the task ended");
 }

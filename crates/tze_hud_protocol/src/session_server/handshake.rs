@@ -10,12 +10,12 @@ use crate::dedup::DedupWindow;
 use crate::lease::{DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY, LeaseCorrelationCache};
 use crate::proto::session::server_message::Payload as ServerPayload;
 use crate::proto::session::*;
-use crate::session::SharedState;
+use crate::session::{SessionCloser, SharedState};
 use crate::subscriptions;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tonic::Status;
-use tze_hud_scene::config::{AgentDirectory, AuthRejection};
+use tze_hud_scene::config::{AgentDirectory, AgentIdentity, AuthRejection, SharedAgents};
 use tze_hud_scene::types::ResourceBudget;
 
 use super::freeze_queue::{FREEZE_QUEUE_CAPACITY, SessionFreezeQueue};
@@ -113,12 +113,54 @@ async fn send_auth_failed(
         .await;
 }
 
+/// Register the session, with its close signal, unless its credential stopped
+/// authenticating since the handshake read the directory.
+///
+/// The owner's Unpair swaps the live directory, then closes the agent's
+/// registered sessions under the state lock this runs under. So a handshake
+/// either registers first, and is closed, or sees the swapped directory here
+/// and is refused: none slips between the two (hud-vniri.6).
+fn register_if_paired(
+    st: &mut SharedState,
+    namespace: &str,
+    capabilities: &[String],
+    closer: &SessionCloser,
+    recheck: impl FnOnce() -> Result<AgentIdentity, AuthRejection>,
+) -> Option<crate::session::AgentSession> {
+    match recheck() {
+        Ok(identity) if identity.agent_id == namespace => Some(st.sessions.register(
+            namespace,
+            capabilities,
+            closer.clone(),
+        )),
+        _ => {
+            tracing::info!(
+                namespace,
+                "handshake refused: the agent was unpaired meanwhile"
+            );
+            None
+        }
+    }
+}
+
+async fn send_unpaired(tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, Status>>) {
+    let _ = tx
+        .send(Err(Status::unauthenticated(
+            "this agent was unpaired; pair again to reconnect",
+        )))
+        .await;
+}
+
 /// What the handshake handlers read from the service, borrowed per stream.
 #[derive(Clone, Copy)]
 pub(super) struct HandshakeCtx<'a> {
     pub state: &'a Arc<Mutex<SharedState>>,
     /// The agent directory as of this handshake.
     pub agents: &'a AgentDirectory,
+    /// The live directory, re-checked at registration (see [`register_if_paired`]).
+    pub live_agents: &'a SharedAgents,
+    /// Ends this session when the owner unpairs its agent.
+    pub closer: &'a SessionCloser,
     pub resource_budget: &'a ResourceBudget,
     pub budget_enforcer: Option<&'a super::SharedMutationBudgetEnforcer>,
     /// Peer address, for loopback gating of local-socket credentials.
@@ -134,6 +176,8 @@ pub(super) async fn handle_session_init(
     let HandshakeCtx {
         state,
         agents,
+        live_agents,
+        closer,
         resource_budget,
         budget_enforcer,
         peer_ip,
@@ -228,7 +272,22 @@ pub(super) async fn handle_session_init(
     // Register session in the session registry and capture upload rate config.
     let (session_id, upload_rate_limit_bytes_per_sec) = {
         let mut st = state.lock().await;
-        let registered = st.sessions.register(&namespace, &granted_capabilities);
+        let recheck = || {
+            identify_session(
+                &live_agents.load(),
+                init.auth_credential.as_ref(),
+                "",
+                &init.agent_id,
+                peer_ip,
+            )
+        };
+        let Some(registered) =
+            register_if_paired(&mut st, &namespace, &granted_capabilities, closer, recheck)
+        else {
+            drop(st);
+            send_unpaired(tx).await;
+            return None;
+        };
         #[cfg(test)]
         st.sessions
             .bind_cleanup_session(&registered.session_id, scene_session_id);
@@ -314,6 +373,8 @@ pub(super) async fn handle_session_resume(
     let HandshakeCtx {
         state,
         agents,
+        live_agents,
+        closer,
         resource_budget,
         budget_enforcer,
         peer_ip,
@@ -441,7 +502,22 @@ pub(super) async fn handle_session_resume(
     // current upload-rate configuration for this session.
     let (session_id, upload_rate_limit_bytes_per_sec) = {
         let mut st = state.lock().await;
-        let registered = st.sessions.register(&namespace, &identity.permissions);
+        let recheck = || {
+            identify_session(
+                &live_agents.load(),
+                resume.auth_credential.as_ref(),
+                &resume.pre_shared_key,
+                &resume.agent_id,
+                peer_ip,
+            )
+        };
+        let Some(registered) =
+            register_if_paired(&mut st, &namespace, &identity.permissions, closer, recheck)
+        else {
+            drop(st);
+            send_unpaired(tx).await;
+            return None;
+        };
         #[cfg(test)]
         st.sessions
             .bind_cleanup_session(&registered.session_id, scene_session_id);

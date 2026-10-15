@@ -9,7 +9,7 @@
 use std::future::Future;
 use std::pin::Pin;
 
-use tze_hud_compositor::PanelBadge;
+use tze_hud_compositor::{PanelBadge, PanelTone};
 
 pub(crate) type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;
 
@@ -31,6 +31,8 @@ pub(crate) struct Row {
     /// A suppressing state is on (agents paused, content hidden): drawn in the
     /// caution palette, also on its quick tile.
     pub caution: bool,
+    /// A status dot before the label (e.g. an agent's connection).
+    pub status: Option<PanelTone>,
 }
 
 impl Row {
@@ -43,6 +45,7 @@ impl Row {
             control,
             badge: None,
             caution: false,
+            status: None,
         }
     }
 
@@ -65,6 +68,11 @@ impl Row {
         self.caution = caution;
         self
     }
+
+    pub(crate) fn status(mut self, status: PanelTone) -> Self {
+        self.status = Some(status);
+        self
+    }
 }
 
 /// How a row's value is shown and changed.
@@ -74,6 +82,12 @@ pub(crate) enum Control {
     ReadOnly { text: String, mono: bool },
     /// On/off: Enter or click flips it, Left/Right set off/on.
     Toggle(bool),
+    /// A toggle that widens trust when switched on: on asks `confirm` once
+    /// first; off applies at once.
+    Grant { on: bool, confirm: String },
+    /// Shows or hides the rows under this one (`text` says what is there).
+    /// Enter or click flips it, Left/Right close/open.
+    Disclosure { open: bool, text: String },
     /// One of `options`: Left/Right or click cycles.
     #[cfg_attr(
         not(test),
@@ -88,11 +102,19 @@ pub(crate) enum Control {
     Stepper { text: String },
     /// A button. `confirm` asks once before acting (destructive or
     /// trust-widening actions).
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "first rows: connect, clear, unpair, hud-vniri.6")
-    )]
     Action { confirm: Option<String> },
+}
+
+impl Control {
+    /// The question asked before `edit` applies, if it needs one.
+    pub(crate) fn confirm_for(&self, edit: Edit) -> Option<&str> {
+        match (self, edit) {
+            (Control::Action { confirm }, Edit::Activate) => confirm.as_deref(),
+            // Only granting asks, and only when it changes something.
+            (Control::Grant { on: false, confirm }, Edit::Set(true)) => Some(confirm),
+            _ => None,
+        }
+    }
 }
 
 /// A change the panel asks a section to make to one of its rows.
@@ -111,13 +133,15 @@ pub(crate) enum Edit {
 /// One card of the panel: a group of rows over one area of the HUD.
 ///
 /// `rows` runs whenever the panel rebuilds (each interaction or refresh), so
-/// it reads current facts and stays cheap; `apply` performs the edit and
+/// it stays cheap (costly outside state is cached by `refresh`); `apply` performs the edit and
 /// returns a message the row shows when it fails. Both run on the panel task
 /// on the network runtime, never on the winit loop or an agent's task.
 pub(crate) trait Section: Send + Sync {
     /// Stable id; prefixes every row id.
     fn id(&self) -> &'static str;
     fn title(&self) -> &'static str;
+    /// The rows, from state the section holds or reads cheaply: called on
+    /// every input while the panel is open.
     fn rows(&self) -> BoxFuture<'_, Vec<Row>>;
     fn apply<'a>(&'a self, row: &'a str, edit: Edit) -> BoxFuture<'a, Result<(), String>>;
 
@@ -128,5 +152,12 @@ pub(crate) trait Section: Send + Sync {
     /// notice that tracks outside state needs a way to wake the panel task.
     fn closed_notice(&self) -> BoxFuture<'_, Option<String>> {
         Box::pin(async { None })
+    }
+
+    /// Re-read outside state that is costly to read (locks other services
+    /// take), for [`Self::rows`] to show. Called when the panel opens and
+    /// once a second while it is open.
+    fn refresh(&self) -> BoxFuture<'_, ()> {
+        Box::pin(async {})
     }
 }
