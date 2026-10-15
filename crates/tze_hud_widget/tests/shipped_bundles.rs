@@ -22,19 +22,32 @@ fn shipped_path(name: &str) -> PathBuf {
         .join(name)
 }
 
-/// Every token the shipped SVGs reference.
+/// Every token the shipped SVGs and manifests reference (Tonal Glass values).
 fn shipped_tokens() -> HashMap<String, String> {
     [
-        ("color.backdrop.default", "#000000"),
-        ("color.border.default", "#333333"),
-        ("color.outline.default", "#000000"),
-        ("color.severity.info", "#4A9EFF"),
-        ("color.text.accent", "#4A9EFF"),
-        ("color.text.primary", "#FFFFFF"),
-        ("color.text.secondary", "#B0B0B0"),
-        ("border.radius.medium", "8"),
-        ("border.radius.large", "16"),
+        ("color.surface.container.high", "#222833"),
+        ("color.surface.container.highest", "#2A313D"),
+        ("color.on_surface", "#E8EBF0"),
+        ("color.on_surface.variant", "#A9B1BE"),
+        ("color.outline", "#5A6475"),
+        ("color.outline.variant", "#343B47"),
+        ("color.primary", "#8AB4FF"),
+        ("color.success", "#7BD88F"),
+        ("color.caution", "#F2C14E"),
+        ("color.error", "#FF8A80"),
+        ("opacity.surface", "0.92"),
+        ("state.hover.opacity", "0.08"),
         ("stroke.border.width", "1"),
+        ("shape.s", "8"),
+        ("shape.m", "12"),
+        ("type.title.m.family", "IBM Plex Sans"),
+        ("type.title.m.size", "16"),
+        ("type.title.m.weight", "600"),
+        ("type.body.m.family", "IBM Plex Sans"),
+        ("type.body.m.size", "14"),
+        ("type.readout.family", "IBM Plex Mono"),
+        ("type.readout.size", "14"),
+        ("type.readout.weight", "500"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -156,18 +169,21 @@ fn shipped_bundles_load_and_bind() {
                 ("level", "bar", "height"),
                 ("fill_color", "bar", "fill"),
                 ("label", "label-text", "text-content"),
-                ("severity", "indicator", "fill"),
+                ("severity", "indicator", "stroke"),
+                ("tooltip_visible", "tooltip-group", "opacity"),
                 ("readout", "tooltip-readout", "text-content"),
             ],
         ),
         (
             "progress-bar",
-            &["progress", "label", "fill_color"],
+            &["progress", "label", "fill_color", "tooltip_visible"],
             &["track.svg", "fill.svg"],
             &[
                 ("progress", "fill-bar", "width"),
+                ("progress", "readout-value", "text-content"),
                 ("fill_color", "fill-bar", "fill"),
                 ("label", "label-text", "text-content"),
+                ("tooltip_visible", "tooltip-group", "opacity"),
             ],
         ),
         (
@@ -177,8 +193,9 @@ fn shipped_bundles_load_and_bind() {
             &[
                 ("status", "system-fill", "fill"),
                 ("theme", "system-group", "opacity"),
-                ("label", "label-text", "text-content"),
+                ("label", "tooltip-label", "text-content"),
                 ("reason", "tooltip-reason", "text-content"),
+                ("tooltip_visible", "tooltip-group", "opacity"),
             ],
         ),
     ];
@@ -225,6 +242,75 @@ fn shipped_bundles_need_their_tokens() {
     }
 }
 
+/// The hover tooltips all reveal after the same short delay.
+#[test]
+fn shipped_hover_tooltips_share_the_gauge_delay() {
+    for name in ["gauge", "progress-bar", "status-indicator"] {
+        let hover = load_shipped(name)
+            .definition
+            .hover_behavior
+            .unwrap_or_else(|| panic!("{name}: no hover behavior"));
+        assert_eq!(hover.delay_ms, 180, "{name}");
+        assert_eq!(hover.visibility_param, "tooltip_visible", "{name}");
+    }
+}
+
+/// Manifest color values name design tokens: discrete value maps and color
+/// defaults resolve against the token map at load.
+#[test]
+fn shipped_manifest_colors_resolve_from_tokens() {
+    let tokens = shipped_tokens();
+    let gauge = load_shipped("gauge").definition;
+    let severity = gauge
+        .layers
+        .iter()
+        .flat_map(|l| &l.bindings)
+        .find(|b| b.param == "severity")
+        .unwrap();
+    let WidgetBindingMapping::Discrete { value_map } = &severity.mapping else {
+        panic!("severity must be a discrete binding");
+    };
+    assert_eq!(value_map["info"], tokens["color.outline.variant"]);
+    assert_eq!(value_map["warning"], tokens["color.caution"]);
+    assert_eq!(value_map["error"], tokens["color.error"]);
+
+    for name in ["gauge", "progress-bar"] {
+        let fill = load_shipped(name)
+            .definition
+            .parameter_schema
+            .into_iter()
+            .find(|p| p.name == "fill_color")
+            .unwrap();
+        assert_eq!(
+            fill.default_value,
+            WidgetParameterValue::Color(tze_hud_scene::Rgba::new(
+                138.0 / 255.0,
+                180.0 / 255.0,
+                1.0,
+                1.0
+            )),
+            "{name}: fill_color defaults to color.primary"
+        );
+    }
+
+    let mut other = tokens.clone();
+    other.insert("color.primary".into(), "#00FF0080".into());
+    let BundleScanResult::Ok(bundle) = load_bundle_dir_with_tokens(&shipped_path("gauge"), &other)
+    else {
+        panic!("gauge failed to load with another primary");
+    };
+    let fill = bundle
+        .definition
+        .parameter_schema
+        .into_iter()
+        .find(|p| p.name == "fill_color")
+        .unwrap();
+    assert_eq!(
+        fill.default_value,
+        WidgetParameterValue::Color(tze_hud_scene::Rgba::new(0.0, 1.0, 0.0, 128.0 / 255.0))
+    );
+}
+
 #[test]
 fn status_indicator_status_maps_each_value_to_its_color() {
     let def = load_shipped("status-indicator").definition;
@@ -238,10 +324,10 @@ fn status_indicator_status_maps_each_value_to_its_color() {
         panic!("status must be a discrete binding");
     };
     let want: std::collections::BTreeMap<String, String> = [
-        ("online", "#4FB543"),
-        ("away", "#D97706"),
-        ("busy", "#DC2626"),
-        ("offline", "#6B7280"),
+        ("online", "#7BD88F"),
+        ("away", "#F2C14E"),
+        ("busy", "#FF8A80"),
+        ("offline", "#5A6475"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -249,18 +335,20 @@ fn status_indicator_status_maps_each_value_to_its_color() {
     assert_eq!(value_map, &want);
 }
 
-/// Shipped gauge and progress-bar SVGs take every color from design tokens.
-/// status-indicator/indicator.svg is exempt: its status/theme glyph colors are
-/// intentional literals.
+/// Shipped SVGs and manifests take every color from design tokens.
 #[test]
-fn gauge_and_progress_bar_svgs_have_no_hardcoded_hex_colors() {
+fn shipped_bundles_have_no_hardcoded_hex_colors() {
     for (bundle, files) in [
-        ("gauge", ["background.svg", "fill.svg"]),
-        ("progress-bar", ["track.svg", "fill.svg"]),
+        ("gauge", &["background.svg", "fill.svg", "widget.toml"][..]),
+        (
+            "progress-bar",
+            &["track.svg", "fill.svg", "widget.toml"][..],
+        ),
+        ("status-indicator", &["indicator.svg", "widget.toml"][..]),
     ] {
         for file in files {
             let raw = std::fs::read_to_string(shipped_path(bundle).join(file)).unwrap();
-            // Drop XML comments; they may mention colors in prose.
+            // Drop XML and TOML comments; they may mention colors in prose.
             let mut text = String::new();
             let mut rest = raw.as_str();
             while let Some(i) = rest.find("<!--") {
@@ -268,6 +356,13 @@ fn gauge_and_progress_bar_svgs_have_no_hardcoded_hex_colors() {
                 rest = rest[i..].split_once("-->").map_or("", |(_, r)| r);
             }
             text.push_str(rest);
+            if file.ends_with(".toml") {
+                text = text
+                    .lines()
+                    .filter(|line| !line.trim_start().starts_with('#'))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+            }
             for (i, _) in text.match_indices('#') {
                 let digits = text[i + 1..]
                     .chars()
@@ -330,12 +425,12 @@ fn shipped_widgets_reject_out_of_range_f32() {
         assert_eq!(
             color,
             WidgetParameterValue::Color(tze_hud_scene::Rgba::new(
-                74.0 / 255.0,
-                158.0 / 255.0,
+                138.0 / 255.0,
+                180.0 / 255.0,
                 1.0,
                 1.0
             )),
-            "config byte-array default must be normalized"
+            "token color default must be normalized"
         );
         publish(&mut scene, widget, &[("fill_color", color.clone())]).unwrap();
         assert_eq!(
@@ -591,4 +686,41 @@ fn wire_code_unresolved_token() {
         matches!(&err, BundleError::UnresolvedToken { token_key, .. } if token_key == "color.x")
     );
     assert_eq!(err.wire_code(), "WIDGET_BUNDLE_UNRESOLVED_TOKEN");
+
+    // Manifest placeholders (a color default, a discrete value) fail the same way.
+    let color_default = manifest(
+        "t",
+        "[[parameter_schema]]\nname = \"c\"\ntype = \"color\"\ndefault = \"{{token.color.y}}\"\n\
+         [[layers]]\nsvg_file = \"fill.svg\"\n",
+    );
+    let value_map = manifest(
+        "t",
+        "[[parameter_schema]]\nname = \"sev\"\ntype = \"enum\"\ndefault = \"info\"\n\
+         [parameter_schema.constraints]\nenum_allowed_values = [\"info\"]\n\n\
+         [[layers]]\nsvg_file = \"fill.svg\"\n\n[[layers.bindings]]\nparam = \"sev\"\n\
+         target_element = \"bar\"\ntarget_attribute = \"fill\"\nmapping = \"discrete\"\n\n\
+         [layers.bindings.value_map]\ninfo = \"{{token.color.y}}\"\n",
+    );
+    for m in [color_default, value_map] {
+        let err = expect_err(load_files(
+            &[("widget.toml", &m), ("fill.svg", SVG)],
+            &HashMap::new(),
+        ));
+        assert!(
+            matches!(&err, BundleError::UnresolvedToken { token_key, svg_file, .. }
+                if token_key == "color.y" && svg_file == "widget.toml"),
+            "{err:?}"
+        );
+    }
+    // A color default that resolves to something other than #RRGGBB[AA].
+    let not_a_color = manifest(
+        "t",
+        "[[parameter_schema]]\nname = \"c\"\ntype = \"color\"\ndefault = \"blue\"\n\
+         [[layers]]\nsvg_file = \"fill.svg\"\n",
+    );
+    let err = expect_err(load_files(
+        &[("widget.toml", &not_a_color), ("fill.svg", SVG)],
+        &HashMap::new(),
+    ));
+    assert_eq!(err.wire_code(), "WIDGET_BUNDLE_INVALID_MANIFEST");
 }

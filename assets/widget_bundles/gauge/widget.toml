@@ -1,33 +1,32 @@
-# Production gauge widget bundle — token-driven exemplar.
+# Production gauge widget bundle.
 #
-# This is the canonical production-quality gauge widget, demonstrating:
-# - All four binding types: linear (level→height/y, tooltip_visible→opacity),
-#   direct (fill_color→fill, label/readout→text-content), discrete
-#   (severity→fill indicator)
-# - All colors via {{token.key}} placeholders — zero hardcoded hex values
-# - data-role attributes for DualLayer readability profile compatibility
-# - 100x240 viewBox providing extra clearance for the label below the track
+# Visual contract (shared with progress-bar and status-indicator):
+# - A tonal card like the notification cards: surface.container.high at
+#   opacity.surface, shape.m corners; a vertical primary-colored bar on an
+#   outline.variant track, label in type.title.m below
+# - Severity colors the card edge: outline.variant (info), caution, error
+# - Hover (runtime-driven `tooltip_visible`) lays a state layer over the card
+#   and shows the `readout` chip
+# - Every color, size and font comes from {{token.key}} placeholders (in the
+#   SVGs and in this manifest), resolved at bundle load time. viewBox units
+#   are logical px; geometry sets the scale
 #
 # Registered as "gauge" in the WidgetRegistry when loaded from assets/widget_bundles/.
 #
 # IMPORTANT: Do NOT confuse with crates/tze_hud_widget/tests/fixtures/gauge/
-# which is the unit-test fixture (hardcoded colors, 100x220 viewBox). This
-# bundle is the production exemplar with canonical token placeholders.
+# which is the unit-test fixture (hardcoded colors, 100x220 viewBox).
 #
 # Parameters:
 #   level      - Fill level (f32, 0.0-1.0); drives bar height via linear mapping
-#   label      - Display label below the gauge track (string)
-#   fill_color - Override fill color for the bar (color param)
-#   severity   - Severity indicator state; drives indicator color (enum)
+#   label      - Label below the bar (string)
+#   fill_color - Bar color; defaults to the theme's primary
+#   severity   - info / warning / error; colors the card edge (enum)
 #   tooltip_visible - Runtime hover visibility toggle for the tooltip (f32 0..1)
 #   readout    - Tooltip readout text (e.g. "42/100 (42%)")
-#
-# Token placeholders ({{token.key}}) in layer SVGs are resolved against the
-# global token map at bundle load time — never at render time.
 
 name        = "gauge"
-version     = "1.0.0"
-description = "Vertical fill gauge: instrument-style HUD meter with severity pod and label"
+version     = "1.1.0"
+description = "Vertical fill gauge card with severity edge, label and hover readout"
 
 [[parameter_schema]]
 name    = "level"
@@ -46,7 +45,7 @@ default = ""
 [[parameter_schema]]
 name    = "fill_color"
 type    = "color"
-default = [74, 158, 255, 255]
+default = "{{token.color.primary}}"
 
 [[parameter_schema]]
 name    = "severity"
@@ -83,15 +82,14 @@ visible_value = 1.0
 x_pct = 0.0
 y_pct = 0.0
 width_pct = 1.0
-height_pct = 0.88
+height_pct = 1.0
 
-# Background layer: static SVG frame with inner track. Zero bindings.
+# Background layer: static card and empty track. Zero bindings.
 # Must appear first (painter's model) so fill layer renders on top.
 [[layers]]
 svg_file = "background.svg"
 
-# Fill layer: dynamic bar, label text, and severity indicator.
-# Four bindings drive all visual state from widget parameters.
+# Fill layer: severity edge, bar, label and hover readout.
 [[layers]]
 svg_file = "fill.svg"
 
@@ -101,15 +99,15 @@ target_element   = "bar"
 target_attribute = "height"
 mapping          = "linear"
 attr_min         = 0.0
-attr_max         = 200.0
+attr_max         = 168.0
 
 [[layers.bindings]]
 param            = "level"
 target_element   = "bar"
 target_attribute = "y"
 mapping          = "linear"
-attr_min         = 210.0
-attr_max         = 10.0
+attr_min         = 184.0
+attr_max         = 16.0
 
 [[layers.bindings]]
 param            = "fill_color"
@@ -126,13 +124,13 @@ mapping          = "direct"
 [[layers.bindings]]
 param            = "severity"
 target_element   = "indicator"
-target_attribute = "fill"
+target_attribute = "stroke"
 mapping          = "discrete"
 
 [layers.bindings.value_map]
-info    = "#4A9EFF"
-warning = "#FFB800"
-error   = "#FF4444"
+info    = "{{token.color.outline.variant}}"
+warning = "{{token.color.caution}}"
+error   = "{{token.color.error}}"
 
 [[layers.bindings]]
 param            = "tooltip_visible"

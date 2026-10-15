@@ -1,66 +1,66 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Fill layer (modern clean, ultra-minimal). -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 240" width="100" height="240">
-  <defs>
-    <clipPath id="track-clip">
-      <rect x="31" y="10" width="38" height="200" rx="{{token.border.radius.large}}" ry="{{token.border.radius.large}}"/>
-    </clipPath>
-  </defs>
+<!-- Bound layer: severity edge, level bar, label, and the hover readout.
 
-  <!-- Bound fill element -->
+     Element IDs referenced by widget.toml bindings:
+       "indicator"       stroke <- severity (outline.variant / caution / error)
+       "bar"             height, y <- level; fill <- fill_color
+       "label-text"      text-content <- label
+       "tooltip-group"   opacity <- tooltip_visible (runtime hover)
+       "tooltip-readout" text-content <- readout
+
+     The bar fills the track drawn by background.svg (x=28, y=16, 16x168). -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 224" width="72" height="224">
+  <rect
+    id="indicator"
+    x="0.75" y="0.75"
+    width="70.5" height="222.5"
+    rx="{{token.shape.m}}" ry="{{token.shape.m}}"
+    fill="none"
+    stroke="{{token.color.outline.variant}}"
+    stroke-width="1.5"/>
+
   <rect
     id="bar"
-    x="32" y="210"
-    width="36" height="0"
-    rx="{{token.border.radius.medium}}"
-    ry="{{token.border.radius.medium}}"
-    fill="{{token.color.text.accent}}"
-    clip-path="url(#track-clip)"/>
+    x="28" y="184"
+    width="16" height="0"
+    rx="{{token.shape.s}}" ry="{{token.shape.s}}"
+    fill="{{token.color.primary}}"/>
 
-  <!-- Bound severity indicator -->
-  <circle
-    id="indicator"
-    cx="90" cy="18"
-    r="3.5"
-    fill="{{token.color.severity.info}}"
-    stroke="{{token.color.outline.default}}"
-    stroke-opacity="0.22"
-    stroke-width="{{token.stroke.border.width}}"/>
+  <text
+    id="label-text"
+    data-role="text"
+    x="36" y="208"
+    text-anchor="middle"
+    font-family="{{token.type.title.m.family}}, sans-serif"
+    font-size="{{token.type.title.m.size}}"
+    font-weight="{{token.type.title.m.weight}}"
+    fill="{{token.color.on_surface}}"></text>
 
-  <!-- Hover tooltip (driven by tooltip_visible + label/readout bindings). -->
+  <!-- Hover: a state layer over the card and a readout chip. -->
   <g id="tooltip-group" opacity="0">
     <rect
+      id="hover-layer"
+      x="0.75" y="0.75"
+      width="70.5" height="222.5"
+      rx="{{token.shape.m}}" ry="{{token.shape.m}}"
+      fill="{{token.color.on_surface}}"
+      fill-opacity="{{token.state.hover.opacity}}"/>
+    <rect
       id="tooltip-panel"
-      x="6" y="6"
-      width="82" height="34"
-      rx="{{token.border.radius.medium}}"
-      ry="{{token.border.radius.medium}}"
-      fill="{{token.color.backdrop.default}}"
-      fill-opacity="0.92"
-      stroke="{{token.color.border.default}}"
-      stroke-opacity="0.75"
+      x="4" y="4"
+      width="64" height="30"
+      rx="{{token.shape.s}}" ry="{{token.shape.s}}"
+      fill="{{token.color.surface.container.highest}}"
+      stroke="{{token.color.outline}}"
       stroke-width="{{token.stroke.border.width}}"/>
-    <text
-      id="label-text"
-      data-role="text"
-      x="47"
-      y="18"
-      text-anchor="middle"
-      dominant-baseline="middle"
-      font-family="system-ui, sans-serif"
-      font-size="9.2"
-      letter-spacing="0.25"
-      fill="{{token.color.text.primary}}"></text>
     <text
       id="tooltip-readout"
       data-role="text"
-      x="47"
-      y="29"
+      x="36" y="24"
       text-anchor="middle"
-      dominant-baseline="middle"
-      font-family="system-ui, sans-serif"
-      font-size="8.2"
-      letter-spacing="0.2"
-      fill="{{token.color.text.secondary}}"></text>
+      font-family="{{token.type.body.m.family}}, sans-serif"
+      font-size="{{token.type.body.m.size}}"
+      font-weight="{{token.type.title.m.weight}}"
+      fill="{{token.color.on_surface}}"></text>
   </g>
 </svg>

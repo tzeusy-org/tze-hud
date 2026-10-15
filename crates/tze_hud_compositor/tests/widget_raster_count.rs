@@ -29,23 +29,16 @@ macro_rules! bundle {
     };
 }
 
-/// The design tokens the built-in gauge and progress-bar SVGs reference.
+/// The canonical design tokens the built-in bundles resolve against.
 fn tokens() -> HashMap<String, String> {
-    [
-        ("border.radius.large", "8"),
-        ("border.radius.medium", "4"),
-        ("color.backdrop.default", "#101018"),
-        ("color.border.default", "#4A4A6A"),
-        ("color.outline.default", "#000000"),
-        ("color.severity.info", "#4A9EFF"),
-        ("color.text.accent", "#4A9EFF"),
-        ("color.text.primary", "#FFFFFF"),
-        ("color.text.secondary", "#CCCCCC"),
-        ("stroke.border.width", "1"),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_string(), v.to_string()))
-    .collect()
+    tze_hud_config::tokens::resolve_tokens(&Default::default(), &Default::default())
+}
+
+/// `#RRGGBB` token value as bytes.
+fn token_rgb(key: &str) -> [u8; 3] {
+    let value = &tokens()[key];
+    let hex = value.strip_prefix('#').expect("hex color token");
+    std::array::from_fn(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap())
 }
 
 fn render(c: &mut Compositor, scene: &mut SceneGraph, s: &mut HeadlessSurface) -> FrameTelemetry {
@@ -77,10 +70,11 @@ fn widget_region(
         .collect()
 }
 
-/// Independent color arithmetic: the shipped opaque fill is premultiplied by
-/// its group's opacity in an RGBA8 sRGB raster, then blended over the clean
-/// frame in linear light. No widget renderer or SVG rasterizer is an oracle.
-fn expected_badge_pixel(fill: [u8; 3], opacity: f64, background: [u8; 4]) -> [u8; 4] {
+/// Independent color arithmetic: each shipped layer (fill, opacity), lowest
+/// first, is composited source-over into a premultiplied RGBA8 sRGB raster,
+/// which is then blended over the clean frame in linear light. No widget
+/// renderer or SVG rasterizer is an oracle.
+fn expected_badge_pixel(layers: &[([u8; 3], f64)], background: [u8; 4]) -> [u8; 4] {
     let decode = |v: f64| {
         if v <= 0.04045 {
             v / 12.92
@@ -95,10 +89,19 @@ fn expected_badge_pixel(fill: [u8; 3], opacity: f64, background: [u8; 4]) -> [u8
             1.055 * v.powf(1.0 / 2.4) - 0.055
         }
     };
-    let alpha = (opacity * 255.0).round() / 255.0;
+    let mut premultiplied = [0.0f64; 3];
+    let mut alpha = 0.0f64;
+    for (fill, opacity) in layers {
+        let a = (opacity * 255.0).round() / 255.0;
+        for channel in 0..3 {
+            premultiplied[channel] =
+                (f64::from(fill[channel]) * a + premultiplied[channel] * (1.0 - a)).round();
+        }
+        alpha = a + alpha * (1.0 - a);
+    }
     let mut expected = [0, 0, 0, 255];
     for channel in 0..3 {
-        let source = (f64::from(fill[channel]) * alpha).round() / 255.0;
+        let source = premultiplied[channel] / 255.0;
         let base = f64::from(background[channel]) / 255.0;
         expected[channel] =
             (encode(decode(source) + decode(base) * (1.0 - alpha)) * 255.0).round() as u8;
@@ -286,8 +289,8 @@ async fn widget_param_update_rasterizes_only_that_instance() {
             geometry_override: Some(GeometryPolicy::Relative {
                 x_pct: 32.0 / 512.0,
                 y_pct: 32.0 / 256.0,
-                width_pct: 252.0 / 512.0,
-                height_pct: 96.0 / 256.0,
+                width_pct: 320.0 / 512.0,
+                height_pct: 124.0 / 256.0,
             }),
             contention_override: None,
             instance_name: "status-matrix".into(),
@@ -310,7 +313,7 @@ async fn widget_param_update_rasterizes_only_that_instance() {
             compositor.width as f32 * width_pct,
             compositor.height as f32 * height_pct
         ),
-        (252.0, 96.0)
+        (320.0, 124.0)
     );
     let origin = (
         (compositor.width as f32 * x_pct) as u32,
@@ -350,46 +353,30 @@ async fn widget_param_update_rasterizes_only_that_instance() {
             )
             .unwrap();
     };
-    // Contract literals come from the shipped TOML, not the rasterizer. This
-    // badge interior is above/left of the glyphs and inside every fill shape.
-    let badge_roi = (228, 7, 1, 1);
-    let panel_roi = (24, 32, 180, 3);
-    let label_roi = (58, 34, 152, 14);
-    let reason_roi = (18, 53, 204, 14);
+    // Contract literals come from the shipped SVG/TOML, not the rasterizer.
+    // Badge tile: x 280..320, y 0..40, surface.container.high at
+    // opacity.surface. The minimal dot (r=7) is centred at (300, 20); the
+    // system/friendly tonal disc (r=13, fill-opacity 0.22) is sampled above
+    // its glyph.
+    let tile = (token_rgb("color.surface.container.high"), 0.92);
+    let panel_roi = (24, 52, 260, 3);
+    let label_roi = (32, 63, 200, 18);
+    let reason_roi = (16, 92, 280, 16);
     let statuses = ["online", "away", "busy", "offline"];
-    let mut previous_badge = None;
-    for (theme, opacity, fills) in [
-        (
-            "minimal",
-            0.8,
-            [
-                [0x22, 0xC5, 0x5E],
-                [0xA3, 0xA3, 0xA3],
-                [0xF5, 0x9E, 0x0B],
-                [0x6B, 0x72, 0x80],
-            ],
-        ),
-        (
-            "system",
-            0.82,
-            [
-                [0x4F, 0xB5, 0x43],
-                [0xD9, 0x77, 0x06],
-                [0xDC, 0x26, 0x26],
-                [0x6B, 0x72, 0x80],
-            ],
-        ),
-        (
-            "friendly",
-            0.82,
-            [
-                [0x7D, 0xD3, 0xA7],
-                [0xC4, 0xB5, 0xFD],
-                [0xEA, 0x58, 0x0C],
-                [0x94, 0xA3, 0xB8],
-            ],
-        ),
+    // status -> color role, from the shipped value maps.
+    let fills = [
+        "color.success",
+        "color.caution",
+        "color.error",
+        "color.outline",
+    ]
+    .map(token_rgb);
+    for (theme, badge_roi, fill_opacity) in [
+        ("minimal", (300, 20, 1, 1), 1.0),
+        ("system", (300, 10, 1, 1), 0.22),
+        ("friendly", (300, 10, 1, 1), 0.22),
     ] {
+        let mut previous_badge = None;
         for (status, fill) in statuses.into_iter().zip(fills) {
             let before = count(&compositor, "status-matrix");
             set_status(
@@ -412,7 +399,7 @@ async fn widget_param_update_rasterizes_only_that_instance() {
             let badge = region(&pixels, badge_roi);
             let background = region(&baseline, badge_roi)[0];
             assert_eq!(background[3], 255);
-            let expected = expected_badge_pixel(fill, opacity, background);
+            let expected = expected_badge_pixel(&[tile, (fill, fill_opacity)], background);
             assert!(badge[0] != background, "invisible {theme}/{status} badge");
             assert_eq!(badge[0][3], 255, "opaque readback is not group opacity");
             for channel in 0..3 {
@@ -458,6 +445,7 @@ async fn widget_param_update_rasterizes_only_that_instance() {
     }
 
     let hidden = surface.read_pixels(&compositor.device);
+    let badge_roi = (280, 0, 40, 40);
     let mut tooltip_frames = Vec::new();
     for (label, reason, visible) in [
         ("READY", "ALL SYSTEMS GO", 1.0),
@@ -529,10 +517,12 @@ async fn widget_param_update_rasterizes_only_that_instance() {
             let channel_max: [u8; 3] = std::array::from_fn(|channel| {
                 roi_pixels.iter().map(|p| p[channel]).max().unwrap_or(0)
             });
-            // Independent shipped friendly-panel literal; all shown cases bind
-            // tooltip_visible=1, so its opaque interior has no text coverage.
-            let expected_panel =
-                expected_badge_pixel([0x12, 0x20, 0x18], 1.0, region(&baseline, roi)[0]);
+            // The shipped opaque panel color; all shown cases bind
+            // tooltip_visible=1, so its interior has no text coverage.
+            let expected_panel = expected_badge_pixel(
+                &[(token_rgb("color.surface.container.highest"), 1.0)],
+                region(&baseline, roi)[0],
+            );
             let maximum_panel_contrast = roi_pixels
                 .iter()
                 .map(|p| {

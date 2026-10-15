@@ -359,10 +359,20 @@ to a display.
 
 Agents never send styling. Every color, size, radius, font, and timing
 the runtime draws with is a design token in the config file, resolved
-once at startup and applied through `RenderingPolicy`, widget SVG
+once at startup and applied through `RenderingPolicy`, widget
 `{{token.key}}` placeholders, and the compositor token map. The
 canonical keys, their descriptions, and their defaults are in
 `CANONICAL_TOKENS` (`crates/tze_hud_config/src/tokens.rs`).
+
+Widget bundles resolve placeholders at load in their SVG layers and in
+two `widget.toml` places: discrete `value_map` values (e.g. a status
+color) and string color defaults (`default = "{{token.color.primary}}"`;
+a literal `#RRGGBB[AA]` also works). The built-in gauge, progress-bar and
+status-indicator draw tonal cards from the semantic roles
+(`color.surface.container.high`, `color.outline.variant`, `color.primary`,
+status roles) and the `type.*` scale. Their SVG viewBox units are
+logical px; instance geometry sets the scale, and `production.toml`
+sizes them at 1.5x the viewBox on a 3840x2160 panel.
 
 **A theme is a named set of token values, with no layout logic.** The
 built-in themes are `assets/themes/<name>.toml`, compiled into the exe:
@@ -526,13 +536,15 @@ These four parameters remain because they control behavior in the shipped bundle
 - `status-indicator.theme` selects the widget's minimal, system, or friendly
   appearance independently of the global `[design_tokens].theme`; publishers
   need that choice when selecting a status presentation.
-- `status-indicator.tooltip_visible` is a declared `f32` parameter used by the
-  delayed runtime-local hover path to reveal the tooltip. The loader validates
-  that hover target and its SVG bindings against the parameter schema.
-- `gauge.label` supplies publisher-chosen metric identification inside the hover
-  tooltip, so a gauge can explain which quantity its value represents.
-- `progress-bar.label` supplies publisher-chosen task or progress text centered
-  on the bar, bounded to 32 bytes by its schema.
+- `tooltip_visible` (status-indicator, gauge, progress-bar) is a declared
+  `f32` parameter that the runtime-local hover path drives after 180 ms to
+  reveal the tooltip or readout. The loader validates that hover target and
+  its SVG bindings against the parameter schema.
+- `gauge.label` names the metric under the bar, so a gauge can explain which
+  quantity its value represents.
+- `progress-bar.label` supplies publisher-chosen task text above the bar,
+  bounded to 32 bytes by its schema; hover shows the percent derived from
+  `progress`.
 
 ## Design decisions (T5, 2026-10-02)
 

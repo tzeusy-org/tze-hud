@@ -55,43 +55,48 @@ default_tab = true
 # MCP widget_name: "main-gauge"
 # Parameters: level (f32 0–1), label (string), fill_color (color), severity (enum)
 # Position: left edge, vertically centered; narrow vertical meter clear of subtitles.
+# Widget sizes are fractions of the display: the compositor draws physical px,
+# so on the owner's 3840x2160 panel each widget is 1.5x its SVG viewBox
+# (matching tonal-glass's 1.5x tile classes). Gauge: 72x224 -> 108x336.
 [[tabs.widgets]]
 widget_type = "gauge"
 instance_id  = "main-gauge"
 
 [tabs.widgets.geometry]
-x      = 40
-y      = 420
-width  = 100
-height = 240
+x_pct      = 0.0125
+y_pct      = 0.4222222
+width_pct  = 0.028125
+height_pct = 0.1555556
 
 # ── Progress-bar widget instance ──────────────────────────────────────────────
 # MCP widget_name: "main-progress"
 # Parameters: progress (f32 0–1), label (string), fill_color (color)
-# Position: lower-left, lifted for clear manual visibility.
+# Position: bottom centre, above the subtitle zone. 360x52 -> 540x78 at 4K.
 [[tabs.widgets]]
 widget_type = "progress-bar"
 instance_id  = "main-progress"
 
 [tabs.widgets.geometry]
-x_pct      = 0.421875
-y_pct      = 0.9074074
-width_pct  = 0.15625
-height_pct = 0.0185185
+x_pct      = 0.4296875
+y_pct      = 0.83
+width_pct  = 0.140625
+height_pct = 0.0361111
 
 # ── Status-indicator widget instance ─────────────────────────────────────────
 # MCP widget_name: "main-status"
 # Parameters: status (enum), label (string), reason (string)
-# Position: top-right corner; icon is small, tooltip expands leftward inside widget bounds.
+# Position: top right, just left of the notification zone (x >= 75%) so the
+# badge never sits under a notification card; the tooltip opens down-left
+# inside the widget bounds. 320x124 -> 480x186 at 4K.
 [[tabs.widgets]]
 widget_type = "status-indicator"
 instance_id  = "main-status"
 
 [tabs.widgets.geometry]
-x      = 1660
-y      = 40
-width  = 252
-height = 96
+x_pct      = 0.62
+y_pct      = 0.02
+width_pct  = 0.125
+height_pct = 0.0861111
 
 # ── Agents ────────────────────────────────────────────────────────────────────
 # Agents are not configured here. Pairing adds each agent's PSK SHA-256 and

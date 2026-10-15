@@ -351,7 +351,7 @@ mod tests {
             if *file == "widget.toml" {
                 let text = String::from_utf8(bytes).unwrap();
                 bytes = text
-                    .replace("Vertical fill gauge:", "OVERRIDDEN gauge:")
+                    .replace("Vertical fill gauge", "OVERRIDDEN gauge")
                     .into_bytes();
             }
             std::fs::write(bundle.join(file), bytes).unwrap();

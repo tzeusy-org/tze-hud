@@ -1,17 +1,19 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Background layer (ultra-minimal, single-track). -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 240" width="100" height="240">
-  <!-- Single track only: no outer wrapper, no ladder ticks. -->
+<!-- Static layer: the tonal card and the empty vertical track. No bindings.
+     The card's edge is drawn by fill.svg's severity-bound "indicator". -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 224" width="72" height="224">
+  <rect
+    id="card"
+    data-role="backdrop"
+    x="0.75" y="0.75"
+    width="70.5" height="222.5"
+    rx="{{token.shape.m}}" ry="{{token.shape.m}}"
+    fill="{{token.color.surface.container.high}}"
+    fill-opacity="{{token.opacity.surface}}"/>
   <rect
     id="track"
-    data-role="backdrop"
-    x="31" y="10"
-    width="38" height="200"
-    rx="{{token.border.radius.large}}"
-    ry="{{token.border.radius.large}}"
-    fill="{{token.color.backdrop.default}}"
-    fill-opacity="0.30"
-    stroke="{{token.color.border.default}}"
-    stroke-opacity="0.70"
-    stroke-width="{{token.stroke.border.width}}"/>
+    x="28" y="16"
+    width="16" height="168"
+    rx="{{token.shape.s}}" ry="{{token.shape.s}}"
+    fill="{{token.color.outline.variant}}"/>
 </svg>

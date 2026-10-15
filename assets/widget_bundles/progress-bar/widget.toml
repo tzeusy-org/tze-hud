@@ -1,26 +1,27 @@
-# Production progress-bar widget bundle — token-driven exemplar.
+# Production progress-bar widget bundle.
 #
-# This is the canonical production-quality progress-bar widget, demonstrating:
-# - Three binding types: linear (progress→width), direct (fill_color→fill),
-#   text-content (label→text-content)
-# - All colors via {{token.key}} placeholders — zero hardcoded hex values
-# - Horizontal pill-shaped bar at 300x20 default geometry
-# - 2px inset fill bar sits visually inside the track
+# Visual contract (shared with gauge and status-indicator):
+# - A tonal card like the notification cards: surface.container.high at
+#   opacity.surface, outline.variant edge, shape.m corners
+# - Label in type.title.m above a slim primary-colored bar
+# - Hover (runtime-driven `tooltip_visible`) lays a state layer over the card
+#   and reveals the exact percent, derived from `progress`; agents send nothing
+#   extra
+# - Every color, size and font comes from {{token.key}} placeholders, resolved
+#   at bundle load time. viewBox units are logical px; geometry sets the scale
 #
 # Registered as "progress-bar" in the WidgetRegistry when loaded from
 # assets/widget_bundles/.
 #
 # Parameters:
-#   progress   - Fill level (f32, 0.0-1.0); drives bar width via linear mapping
-#   label      - Display label centered on the bar (string, max 32 bytes)
-#   fill_color - Override fill color for the bar (color param)
-#
-# Token placeholders ({{token.key}}) in layer SVGs are resolved against the
-# global token map at bundle load time — never at render time.
+#   progress        - Fill level (f32, 0.0-1.0); drives bar width and readout
+#   label           - Label above the bar (string, max 32 bytes)
+#   fill_color      - Bar color; defaults to the theme's primary
+#   tooltip_visible - Runtime hover visibility (f32 0..1); not for agents
 
 name        = "progress-bar"
-version     = "1.0.0"
-description = "Horizontal progress bar with configurable fill and label"
+version     = "1.1.0"
+description = "Horizontal progress bar with label and hover percent readout"
 
 [[parameter_schema]]
 name    = "progress"
@@ -42,15 +43,35 @@ string_max_bytes = 32
 [[parameter_schema]]
 name    = "fill_color"
 type    = "color"
-default = [74, 158, 255, 255]
+default = "{{token.color.primary}}"
 
-# Track layer: static SVG background track. Zero bindings.
-# Must appear first (painter's model) so fill layer renders on top.
+[[parameter_schema]]
+name    = "tooltip_visible"
+type    = "f32"
+default = 0.0
+
+[parameter_schema.constraints]
+f32_min = 0.0
+f32_max = 1.0
+
+[hover_behavior]
+delay_ms = 180
+visibility_param = "tooltip_visible"
+hidden_value = 0.0
+visible_value = 1.0
+
+[hover_behavior.trigger_rect]
+x_pct = 0.0
+y_pct = 0.0
+width_pct = 1.0
+height_pct = 1.0
+
+# Track layer: static card and empty track. Zero bindings.
+# Must appear first (painter's model) so the fill layer renders on top.
 [[layers]]
 svg_file = "track.svg"
 
-# Fill layer: dynamic fill bar and centered label text.
-# Three bindings drive all visual state from widget parameters.
+# Fill layer: bar, label and hover readout.
 [[layers]]
 svg_file = "fill.svg"
 
@@ -60,7 +81,7 @@ target_element   = "fill-bar"
 target_attribute = "width"
 mapping          = "linear"
 attr_min         = 0.0
-attr_max         = 296.0
+attr_max         = 328.0
 
 [[layers.bindings]]
 param            = "fill_color"
@@ -73,3 +94,20 @@ param            = "label"
 target_element   = "label-text"
 target_attribute = "text-content"
 mapping          = "direct"
+
+[[layers.bindings]]
+param            = "tooltip_visible"
+target_element   = "tooltip-group"
+target_attribute = "opacity"
+mapping          = "linear"
+attr_min         = 0.0
+attr_max         = 1.0
+
+# A linear binding onto text-content renders a whole number.
+[[layers.bindings]]
+param            = "progress"
+target_element   = "readout-value"
+target_attribute = "text-content"
+mapping          = "linear"
+attr_min         = 0.0
+attr_max         = 100.0

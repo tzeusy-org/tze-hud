@@ -28,23 +28,9 @@ macro_rules! bundle {
     };
 }
 
-/// The design tokens the built-in gauge and progress-bar SVGs reference.
+/// The canonical design tokens the built-in bundles resolve against.
 fn tokens() -> HashMap<String, String> {
-    [
-        ("border.radius.large", "8"),
-        ("border.radius.medium", "4"),
-        ("color.backdrop.default", "#101018"),
-        ("color.border.default", "#4A4A6A"),
-        ("color.outline.default", "#000000"),
-        ("color.severity.info", "#4A9EFF"),
-        ("color.text.accent", "#4A9EFF"),
-        ("color.text.primary", "#FFFFFF"),
-        ("color.text.secondary", "#CCCCCC"),
-        ("stroke.border.width", "1"),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_string(), v.to_string()))
-    .collect()
+    tze_hud_config::tokens::resolve_tokens(&Default::default(), &Default::default())
 }
 
 const GAUGE: &str = "gauge-1";
