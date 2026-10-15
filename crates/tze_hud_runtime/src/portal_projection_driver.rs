@@ -259,8 +259,19 @@ fn apply_render(
             || old.display_state != surface.display_state
     });
     if redeclare {
-        scene.set_portal_surface(tile_id, surface.clone(), ns)?;
-        binding.declared_surface = Some(surface);
+        match scene.set_portal_surface(tile_id, surface.clone(), ns) {
+            Ok(()) => binding.declared_surface = Some(surface),
+            // The old renderer also painted content when this optional descriptor
+            // exceeded its identity limit. Hub keys can legally exceed that limit
+            // once the driver adds its URI prefix. Keep those accepted portals visible.
+            Err(error @ tze_hud_scene::ValidationError::InvalidPortalSurface { .. }) => {
+                tracing::warn!(
+                    ?error,
+                    "portal descriptor rejected; retaining native tile content"
+                );
+            }
+            Err(error) => return Err(error),
+        }
     } else {
         scene.update_portal_surface_state(
             tile_id,
@@ -1492,6 +1503,14 @@ mod tests {
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + FRAME_US);
         assert!(tile_markdown(&scene, tile_id).contains("SECOND-TRANSCRIPT-MARKER-99"));
         assert_eq!(scene.tile_count(), 1);
+
+        // Both names are valid Hub inputs, even when their prefixed descriptor
+        // identity exceeds the scene's separate 256-byte limit.
+        let long_key = PortalKey::new("a".repeat(128), "p".repeat(128));
+        publish_for(&driver, &long_key, "LONG-IDENTITY-TRANSCRIPT", 300);
+        driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + 2 * FRAME_US);
+        let long_tile = driver.drive.entries[&long_key].tile_scene_id.unwrap();
+        assert!(tile_markdown(&scene, long_tile).contains("LONG-IDENTITY-TRANSCRIPT"));
     }
 
     #[test]

@@ -553,7 +553,14 @@ fn collapsed_markdown(state: &PortalView) -> String {
         .map(|u| u.output_text.as_str())
         .unwrap_or("compact projection affordance");
     push_line(&mut result, &clamp_one_line(preview, 160));
+    let tail_start = result.len();
     push_input_status_lines(&mut result, state);
+    if result.len() > MAX_PORTAL_MARKDOWN_BYTES {
+        let tail = result.split_off(tail_start);
+        let head_budget = MAX_PORTAL_MARKDOWN_BYTES.saturating_sub(tail.len());
+        result.truncate(clamp_utf8(&result, head_budget).len());
+        result.push_str(&tail);
+    }
     result
 }
 fn composer_line(state: &PortalView) -> String {
