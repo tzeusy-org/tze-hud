@@ -3094,8 +3094,6 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use tokio::sync::Mutex;
-    use tze_hud_scene::NodeData;
-    use tze_hud_scene::graph::SceneGraph;
 
     use super::*;
 
