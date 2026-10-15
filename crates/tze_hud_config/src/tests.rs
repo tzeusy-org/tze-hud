@@ -615,7 +615,6 @@ name = "Main"
 /// configured THEN it overrides; WHEN it is malformed THEN validation names the field.
 #[test]
 fn safe_mode_hotkey_defaults_overrides_and_rejects_garbage() {
-    use tze_hud_scene::config::Hotkey;
     let cfg = |runtime_extra: &str| {
         format!(
             "[runtime]\nprofile = \"full-display\"\n{runtime_extra}\n[[tabs]]\nname = \"Main\"\n"
@@ -623,12 +622,12 @@ fn safe_mode_hotkey_defaults_overrides_and_rejects_garbage() {
     };
 
     let default = parse_ok(&cfg("")).freeze().expect("freeze");
-    assert_eq!(default.safe_mode_hotkey, Hotkey::DEFAULT_SAFE_MODE);
+    assert_eq!(default.chords, tze_hud_scene::config::HudChords::default());
 
     let custom = parse_ok(&cfg("safe_mode_hotkey = \"Ctrl+Alt+F11\""))
         .freeze()
         .expect("freeze");
-    assert_eq!(custom.safe_mode_hotkey.to_string(), "Ctrl+Alt+F11");
+    assert_eq!(custom.chords.pause.to_string(), "Ctrl+Alt+F11");
 
     let errors = parse_ok(&cfg("safe_mode_hotkey = \"F12\""))
         .freeze()
@@ -637,5 +636,36 @@ fn safe_mode_hotkey_defaults_overrides_and_rejects_garbage() {
         errors
             .iter()
             .any(|e| e.field_path == "runtime.safe_mode_hotkey")
+    );
+
+    let custom = parse_ok(&cfg(
+        "panel_hotkey = \"Ctrl+Alt+F10\"\npairing_hotkey = \"Ctrl+Alt+9\"",
+    ))
+    .freeze()
+    .expect("freeze");
+    assert_eq!(custom.chords.panel.to_string(), "Ctrl+Alt+F10");
+    assert_eq!(custom.chords.pairing.to_string(), "Ctrl+Alt+9");
+}
+
+/// WHEN two HUD chords are the same (explicitly or against a default) THEN
+/// validation names the later key and the key that already uses the chord.
+#[test]
+fn hud_chords_must_be_distinct() {
+    let cfg = |runtime_extra: &str| {
+        format!(
+            "[runtime]\nprofile = \"full-display\"\n{runtime_extra}\n[[tabs]]\nname = \"Main\"\n"
+        )
+    };
+    let errors = parse_ok(&cfg("panel_hotkey = \"Ctrl+Shift+F12\""))
+        .freeze()
+        .expect_err("panel chord equal to the default pause chord");
+    let dup = errors
+        .iter()
+        .find(|e| e.field_path == "runtime.panel_hotkey")
+        .expect("duplicate is reported on the panel key");
+    assert!(
+        dup.hint.contains("runtime.safe_mode_hotkey"),
+        "{}",
+        dup.hint
     );
 }

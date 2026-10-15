@@ -6,7 +6,8 @@
 use std::collections::HashMap;
 
 use tze_hud_scene::config::{
-    ConfigError, ConfigErrorCode, ConfigLoader, DisplayProfile, Hotkey, ParseError, ResolvedConfig,
+    ChordRole, ConfigError, ConfigErrorCode, ConfigLoader, DisplayProfile, Hotkey, HudChords,
+    ParseError, ResolvedConfig,
 };
 
 use crate::raw::RawConfig;
@@ -147,21 +148,37 @@ impl ConfigLoader for TzeHudConfig {
             validate_profile(p, &mut errors);
         }
 
-        // ── (2b) [runtime].safe_mode_hotkey parses as a chord ─────────────────
-        if let Some(chord) = self
-            .raw
-            .runtime
-            .as_ref()
-            .and_then(|r| r.safe_mode_hotkey.as_deref())
-            && let Err(e) = Hotkey::parse(chord)
-        {
-            errors.push(ConfigError {
-                code: ConfigErrorCode::Other("CONFIG_INVALID_HOTKEY".into()),
-                field_path: "runtime.safe_mode_hotkey".into(),
-                expected: "chord like \"Ctrl+Shift+F12\" (modifiers Ctrl/Shift/Alt/Win + F1-F24, letter or digit)".into(),
-                got: format!("{chord:?}"),
-                hint: e.to_string(),
-            });
+        // ── (2b) [runtime].*_hotkey parse as chords and are distinct ─────────
+        let mut seen: Vec<(Hotkey, ChordRole)> = Vec::new();
+        for role in ChordRole::ALL {
+            let Some(chord) = self.raw.runtime.as_ref().and_then(|r| raw_chord(r, role)) else {
+                seen.push((role.default_chord(), role));
+                continue;
+            };
+            match Hotkey::parse(chord) {
+                Err(e) => errors.push(ConfigError {
+                    code: ConfigErrorCode::Other("CONFIG_INVALID_HOTKEY".into()),
+                    field_path: format!("runtime.{}", role.config_key()),
+                    expected: "chord like \"Ctrl+Shift+F12\" (modifiers Ctrl/Shift/Alt/Win + F1-F24, letter or digit)".into(),
+                    got: format!("{chord:?}"),
+                    hint: e.to_string(),
+                }),
+                Ok(hotkey) => seen.push((hotkey, role)),
+            }
+        }
+        for (i, (hotkey, role)) in seen.iter().enumerate() {
+            if let Some((_, other)) = seen[..i].iter().find(|(h, _)| h == hotkey) {
+                errors.push(ConfigError {
+                    code: ConfigErrorCode::Other("CONFIG_DUPLICATE_HOTKEY".into()),
+                    field_path: format!("runtime.{}", role.config_key()),
+                    expected: "a chord no other HUD chord uses".into(),
+                    got: format!("{hotkey}"),
+                    hint: format!(
+                        "runtime.{} already uses {hotkey}; pick another chord",
+                        other.config_key()
+                    ),
+                });
+            }
         }
 
         // ── (3) [display_profile] is rejected; the built-in profiles are fixed ──
@@ -251,20 +268,26 @@ impl ConfigLoader for TzeHudConfig {
             .filter_map(|t| t.name.clone())
             .collect();
 
-        let safe_mode_hotkey = self
-            .raw
-            .runtime
-            .as_ref()
-            .and_then(|r| r.safe_mode_hotkey.as_deref())
-            .map(|c| Hotkey::parse(c).expect("validated chord parses"))
-            .unwrap_or(Hotkey::DEFAULT_SAFE_MODE);
+        let chord = |role: ChordRole| {
+            self.raw
+                .runtime
+                .as_ref()
+                .and_then(|r| raw_chord(r, role))
+                .map(|c| Hotkey::parse(c).expect("validated chord parses"))
+                .unwrap_or(role.default_chord())
+        };
+        let chords = HudChords {
+            pause: chord(ChordRole::Pause),
+            panel: chord(ChordRole::Panel),
+            pairing: chord(ChordRole::Pairing),
+        };
 
         let source_path = None; // Set by caller after file load.
 
         Ok(ResolvedConfig {
             profile,
             tab_names,
-            safe_mode_hotkey,
+            chords,
             source_path,
         })
     }
@@ -391,6 +414,15 @@ fn validate_tabs(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
 }
 
 // ─── Unit tests ───────────────────────────────────────────────────────────────
+
+/// The configured chord string for `role`, if set.
+fn raw_chord(runtime: &crate::raw::RawRuntime, role: ChordRole) -> Option<&str> {
+    match role {
+        ChordRole::Pause => runtime.safe_mode_hotkey.as_deref(),
+        ChordRole::Panel => runtime.panel_hotkey.as_deref(),
+        ChordRole::Pairing => runtime.pairing_hotkey.as_deref(),
+    }
+}
 
 #[cfg(test)]
 mod unit_tests {

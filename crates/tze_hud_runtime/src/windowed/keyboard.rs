@@ -101,7 +101,7 @@ fn keyboard_kind_preview(kind: &tze_hud_input::KeyboardDispatchKind) -> String {
 /// Prefer the physical `key_code` (layout- and modifier-independent: `Equal`,
 /// `Minus`, `NumpadAdd`, …); fall back to the logical `key` only when the OS
 /// did not supply a code.
-fn keyboard_key_identity(raw_key_code: &str, raw_key: &str) -> String {
+pub(super) fn keyboard_key_identity(raw_key_code: &str, raw_key: &str) -> String {
     if raw_key_code.is_empty() {
         raw_key.to_string()
     } else {
@@ -421,8 +421,8 @@ impl WinitApp {
     /// event at FIFO front rather than leaking it through the agent path.
     fn handle_shell_reserved_shortcut(&mut self, raw: &RawKeyDownEvent) -> ShellShortcutOutcome {
         let Some(shortcut) = chrome_shortcut(raw) else {
-            // Ctrl+Shift+P is handled at the OS event stage.
-            // Synthetic/in-process entry still consumes it.
+            // A reserved chord with no chrome action (Ctrl+Shift+M,
+            // Ctrl+Shift+Escape) is consumed without one.
             return ShellShortcutOutcome::Consumed;
         };
 
@@ -589,10 +589,9 @@ impl WinitApp {
         // Shell-reserved shortcuts (Ctrl+Tab, Ctrl+1..9, Ctrl+Shift+M, etc.)
         // MUST win over portal resize hotkeys and MUST never reach agents.
         //
-        // Note: Ctrl+Shift+P (pairing) is handled even earlier —
-        // in the OS event path (Stage 1, `WindowEvent::KeyboardInput`) — so it
-        // never reaches this function at all.  The `is_reserved` check below
-        // handles the remaining reserved set that does reach here.
+        // The HUD's global chords (pause, panel, pairing) are OS hotkeys and
+        // never reach the window; while the control panel is open it takes
+        // every key before this router.
         if ShellReservedShortcut::is_reserved(
             &raw.key,
             raw.modifiers.ctrl,

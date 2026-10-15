@@ -22,9 +22,11 @@ pub use markdown::{MarkdownCache, MarkdownTokens, ParsedMarkdown};
 pub use renderer::capture::{CaptureError, CapturedFrame};
 pub use renderer::{
     ComposerVisualLayoutHandle, Compositor, CompositorAdapterInfo, CompositorDegradationPolicy,
-    CompositorError, FocusRingOwner, FocusRingOwnerHandle, LocalComposerState,
-    LocalComposerStateHandle, PortalViewerEchoQueue, ResizeGripHoverHandle, SystemCardKind,
-    SystemCardModel, TileCloseHoverHandle, ViewerEchoAppend,
+    CompositorError, ControlPanelGeometry, ControlPanelModel, FocusRingOwner, FocusRingOwnerHandle,
+    LocalComposerState, LocalComposerStateHandle, PanelBadge, PanelBody, PanelChip, PanelControl,
+    PanelFocus, PanelHit, PanelHitTarget, PanelItem, PanelPart, PanelRect, PanelSection, PanelSpan,
+    PanelTone, PortalViewerEchoQueue, ResizeGripHoverHandle, SystemCardKind, SystemCardModel,
+    TileCloseHoverHandle, ViewerEchoAppend, estimate_control_panel_geometry,
 };
 pub use surface::{CompositorSurface, HeadlessSurface, SurfaceFactory, WindowSurface};
 pub use text::TextItem;

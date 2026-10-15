@@ -179,8 +179,8 @@ mod keyboard;
 mod lifecycle;
 mod monitor_identity;
 mod network;
+mod panel_input;
 mod portal;
-mod safe_mode_toggle;
 mod wake;
 mod widgets;
 
@@ -213,6 +213,7 @@ pub use self::network::render_attach_info;
 use self::network::{
     build_runtime_context, render_startup_banner, start_network_services_with_render_wake,
 };
+use self::panel_input::PanelInputState;
 use self::portal::PortalProjectionDrain;
 use self::wake::{
     CursorEntryTurn, Deadline, RuntimeWakeEvent, WindowedWake, control_flow_for_deadlines,
@@ -327,9 +328,14 @@ struct WindowedRuntimeState {
     /// Runtime system card / toast slot. Runtime-owned and never in the scene
     /// graph, so agents cannot observe it; setting it wakes the render loop.
     system_card: crate::shell::system_card::SystemCardHandle,
-    /// First-run pairing (`None` when the MCP port is disabled); Ctrl+Shift+P
-    /// and `--pair` open it.
+    /// First-run pairing (`None` when the MCP port is disabled); the pairing
+    /// chord and `--pair` open it.
     pairing: Option<Arc<crate::pairing::Pairing>>,
+    /// The control panel (`None` without a network runtime).
+    control_panel: Option<crate::shell::control_panel::ControlPanelHandle>,
+    /// Main-thread bookkeeping for the open panel: focus handoff, the
+    /// pressed and hovered targets.
+    panel_input: PanelInputState,
     /// Input channel (ring buffer) — main thread writes, compositor thread reads.
     input_ring: Arc<std::sync::Mutex<std::collections::VecDeque<InputEvent>>>,
     /// Pending Stage 1/2 input latency samples for the next compositor frame.
@@ -985,6 +991,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         if self.leave_if_shutdown(event_loop) {
             return;
         }
+        self.sync_panel_focus();
         if displays::take_dirty(&self.state.displays_dirty) {
             self.sync_displays(event_loop);
         }
@@ -1504,6 +1511,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         let compositor_wake = self.state.wake.clone();
         let safe_mode_for_compositor = Arc::clone(&self.state.safe_mode_atomic);
         let system_card_for_compositor = self.state.system_card.clone();
+        let control_panel_for_compositor = self.state.control_panel.clone();
+        let mut control_panel_seen = 0u64;
         let capture_inbox = self.state.capture_inbox.clone();
         let display_targets = Arc::clone(&self.state.display_targets);
         let displays_dirty = Arc::clone(&self.state.displays_dirty);
@@ -1792,11 +1801,18 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             .as_micros() as u64,
                     );
                     let card_changed = compositor.set_system_card(card_frame.model);
+                    // The control panel too: its task republishes only on a real
+                    // change, so an open idle panel draws nothing.
+                    let panel_changed = control_panel_for_compositor
+                        .as_ref()
+                        .and_then(|panel| panel.model_if_changed(&mut control_panel_seen))
+                        .is_some_and(|model| compositor.set_control_panel(model));
                     surface_repaint_pending = update_surface_repaint_pending(
                         surface_repaint_pending,
                         surface_recovery.reconfigured_surface()
                             || safe_mode_flipped
                             || card_changed
+                            || panel_changed
                             || displays_need_frame,
                         false,
                     );
@@ -2023,6 +2039,14 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             // vsync while the lock is held.
                             let (surf_w, surf_h) = surface_for_compositor.size();
                             let build = compositor.build_windowed_frame(&mut scene, surf_w, surf_h);
+                            // Hand the panel the geometry this frame draws, so a
+                            // click hits what is on screen.
+                            if let Some(panel) = &control_panel_for_compositor
+                                && let Some((generation, geometry)) =
+                                    compositor.control_panel_geometry(surf_w as f32, surf_h as f32)
+                            {
+                                panel.set_geometry(generation, || geometry.clone());
+                            }
                             // Hit-region refresh + hit-test snapshot are still
                             // computed under the lock, from the geometry we are
                             // about to present (build already populated the
@@ -2504,6 +2528,10 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 self.state.cursor_y = y;
                 self.state.cursor_window = Some(window_id);
                 self.state.cursor_left_window = false;
+                if self.panel_pointer_moved(secondary.is_none()) {
+                    self.update_overlay_cursor_hittest();
+                    return;
+                }
 
                 if self.synthesize_left_release_if_physically_up() {
                     return;
@@ -2524,7 +2552,14 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 }
             }
 
+            WindowEvent::Focused(true) if secondary.is_none() => {
+                self.panel_window_focus(true);
+            }
+
             WindowEvent::Focused(false) => {
+                if secondary.is_none() {
+                    self.panel_window_focus(false);
+                }
                 if self.state.press_window == Some(window_id)
                     || self.state.cursor_window == Some(window_id)
                 {
@@ -2544,6 +2579,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 );
                 if let Some(source) = wake_source {
                     self.state.wake.mark_main_work_pending(source);
+                }
+                if button == MouseButton::Left
+                    && self.panel_left_button(state == ElementState::Pressed, secondary.is_none())
+                {
+                    return;
                 }
                 if button == MouseButton::Left {
                     // Consume pending old loss before binding a newer Down.
@@ -2569,6 +2609,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     self.state.wake.mark_main_work_pending(source);
                 }
                 let (delta_x, delta_y) = normalize_mouse_wheel_delta(&delta);
+                if self.panel_wheel(delta_y, secondary.is_none()) {
+                    return;
+                }
                 self.enqueue_scroll_event(delta_x, delta_y);
             }
 
@@ -2581,23 +2624,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             // Stage 1: Drain keyboard events into the input ring buffer.
             // Map winit keyboard events to InputEventKind::KeyPress / KeyRelease.
             WindowEvent::KeyboardInput { event, .. } => {
-                // ── Shell shortcut: Ctrl+Shift+P opens pairing
-                if event.state == ElementState::Pressed && !event.repeat {
-                    use winit::keyboard::{KeyCode, PhysicalKey};
-                    let mods = self.state.modifiers;
-                    let ctrl_shift = mods.control_key()
-                        && mods.shift_key()
-                        && !mods.alt_key()
-                        && !mods.super_key();
-                    if ctrl_shift && event.physical_key == PhysicalKey::Code(KeyCode::KeyP) {
-                        if let Some(pairing) = &self.state.pairing {
-                            pairing.open();
-                        }
-                        self.state
-                            .consumed_shell_shortcut_keydowns
-                            .insert(physical_key_to_key_code_str(&event.physical_key));
-                        return;
-                    }
+                // ── Control panel: owns the keyboard while open ─────────────
+                // Chords (pause, panel, pairing) are global hotkeys and never
+                // arrive here.
+                if self.panel_key_event(&event) {
+                    return;
                 }
 
                 let matching_shell_release_is_consumed = event.state == ElementState::Released
@@ -2695,6 +2726,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             //
             // Preedit events (Ime::Preedit) are v1-reserved and not forwarded.
             WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
+                if self.panel_text(&text) {
+                    return;
+                }
                 if let Some(source) = wake_source {
                     self.state.wake.mark_main_work_pending(source);
                 }
@@ -3130,24 +3164,53 @@ impl WindowedRuntime {
             crate::operator::install::spawn_pair_listener(move || pairing.open());
         }
 
-        // ── Safe-mode global hotkey (hud-jm8nq.10) ─────────────────────────────
-        // A dedicated Windows thread owns the RegisterHotKey registration and
-        // signals the bridge task; its outcome feeds the banner and
-        // `/admin/status`, so it starts before the banner prints. The unfocused
-        // click-through overlay never receives the keystroke itself. Needs the network runtime (the bridge
-        // is async); without one there is nothing to suspend anyway.
-        #[cfg(target_os = "windows")]
-        if let Some(ref rt) = network_rt {
-            let toggle_tx = safe_mode_toggle::spawn_safe_mode_toggle_bridge(
+        // ── Control panel and global chords (hud-jm8nq.10, hud-vniri.2) ─────
+        // The panel task owns pause/resume and the panel's open state on the
+        // network runtime, so a chord never waits on the winit loop or an
+        // agent. A dedicated Windows thread owns the RegisterHotKey
+        // registrations and feeds it; the outcomes feed the banner and
+        // `/admin/status`, so they start before the banner prints. The
+        // unfocused click-through overlay never receives the chords itself.
+        // Without a network runtime there is nothing to pause.
+        let control_panel = network_rt.as_ref().map(|rt| {
+            let deps = crate::shell::control_panel::ControlPanelDeps {
+                pause: crate::shell::control_panel::PauseControl::new(
+                    Arc::clone(&shared_state),
+                    Arc::clone(&chrome_state),
+                    Arc::clone(&safe_mode_atomic),
+                    render_wake.clone(),
+                ),
+                chords: runtime_context.chords,
+                pairing: pairing.clone(),
+                render_wake: render_wake.clone(),
+                main_wake: wake.main_work_notifier(),
+            };
+            let sections = crate::shell::control_panel::default_sections(&deps);
+            crate::shell::control_panel::spawn_control_panel(
                 rt.rt.handle(),
-                Arc::clone(&shared_state),
-                Arc::clone(&chrome_state),
-                render_wake.clone(),
+                deps,
+                sections,
                 shutdown.clone(),
-            );
-            let status =
-                global_hotkey::spawn_global_hotkey(runtime_context.safe_mode_hotkey, toggle_tx);
-            crate::operator::status::set_safe_mode_hotkey(status);
+            )
+        });
+        #[cfg(target_os = "windows")]
+        if let Some(panel) = &control_panel {
+            let panel = panel.clone();
+            // Without pairing (MCP disabled) its chord would only take the
+            // key from other apps.
+            let roles = tze_hud_scene::config::ChordRole::ALL
+                .into_iter()
+                .filter(|role| {
+                    pairing.is_some() || *role != tze_hud_scene::config::ChordRole::Pairing
+                })
+                .collect();
+            let outcomes =
+                global_hotkey::spawn_global_hotkeys(runtime_context.chords, roles, move |role| {
+                    panel.send(crate::shell::control_panel::PanelEvent::Chord(role))
+                });
+            for (role, status) in outcomes {
+                crate::operator::status::set_hotkey(role, status);
+            }
         }
 
         // ── Non-secret startup banner (hud-ylwqc) ──────────────────────────────
@@ -3167,12 +3230,14 @@ impl WindowedRuntime {
             render_startup_banner(
                 &grpc_bound_addrs,
                 &mcp_bound_addrs,
-                &crate::operator::status::safe_mode_hotkey()
+                &tze_hud_scene::config::ChordRole::ALL
+                    .map(|role| (role, crate::operator::status::hotkey(role)))
             )
         );
 
         let app_state = WindowedRuntimeState {
             pairing,
+            control_panel,
             config: cfg,
             wake,
             scheduled_main_deadline: None,
@@ -3239,6 +3304,7 @@ impl WindowedRuntime {
             portal_resize_states: std::collections::HashMap::new(),
             consumed_portal_resize_keydowns: std::collections::HashSet::new(),
             consumed_shell_shortcut_keydowns: std::collections::HashSet::new(),
+            panel_input: PanelInputState::default(),
             keyboard_activation_nodes: std::collections::HashMap::new(),
             consumed_command_keydowns: std::collections::HashSet::new(),
             // Placeholder; replaced in resumed() with the Arc cloned from the

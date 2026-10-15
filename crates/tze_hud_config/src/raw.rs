@@ -26,8 +26,14 @@ pub struct AnyValue(pub toml::Value);
 pub struct RawRuntime {
     /// Display profile name.  Must be present.
     pub profile: Option<String>,
-    /// Global safe-mode chord, e.g. `"Ctrl+Shift+F12"` (the default).
+    /// Global chord that pauses agents and opens the control panel, e.g.
+    /// `"Ctrl+Shift+F12"` (the default).
     pub safe_mode_hotkey: Option<String>,
+    /// Global chord that opens the control panel without pausing
+    /// (default `"Ctrl+Shift+F11"`).
+    pub panel_hotkey: Option<String>,
+    /// Global chord that opens pairing (default `"Ctrl+Shift+F10"`).
+    pub pairing_hotkey: Option<String>,
 }
 
 // ─── [[tabs]] ────────────────────────────────────────────────────────────────

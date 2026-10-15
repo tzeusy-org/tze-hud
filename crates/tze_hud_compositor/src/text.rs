@@ -496,6 +496,29 @@ pub(crate) fn composer_wrap_line_widths(
     buf.layout_runs().map(|run| run.line_w).collect()
 }
 
+/// Advance width (px) of `text` shaped on one unwrapped line, as the overlay
+/// text layer draws it. Runtime chrome (the control panel) uses it to size
+/// pills and right-aligned values exactly.
+pub(crate) fn single_line_width(
+    font_system: &mut FontSystem,
+    text: &str,
+    font_size_px: f32,
+    font_family: FontFamily,
+    font_weight: u16,
+) -> f32 {
+    let mut buf = Buffer::new(font_system, Metrics::new(font_size_px, font_size_px * 1.4));
+    buf.set_size(font_system, None, None);
+    let family = match font_family {
+        FontFamily::SystemSansSerif => Family::SansSerif,
+        FontFamily::SystemMonospace => Family::Monospace,
+        FontFamily::SystemSerif => Family::Serif,
+    };
+    let attrs = Attrs::new().family(family).weight(Weight(font_weight));
+    buf.set_text(font_system, text, attrs, Shaping::Advanced);
+    buf.shape_until_scroll(font_system, false);
+    buf.layout_runs().map(|run| run.line_w).fold(0.0, f32::max)
+}
+
 /// The tile-local text content-box margins `(margin_x, margin_y)` the render path
 /// insets a `TextMarkdownNode` by, for a node of the given bounds and
 /// `line_height`: a horizontal margin scaled from width and a vertical margin
@@ -1060,6 +1083,23 @@ impl TextRasterizer {
     /// system, keeping "measured == painted" true for uploaded fonts too.
     pub(crate) fn font_system_mut(&mut self) -> &mut FontSystem {
         &mut self.font_system
+    }
+
+    /// See [`single_line_width`].
+    pub(crate) fn measure_single_line(
+        &mut self,
+        text: &str,
+        font_size_px: f32,
+        font_family: FontFamily,
+        font_weight: u16,
+    ) -> f32 {
+        single_line_width(
+            &mut self.font_system,
+            text,
+            font_size_px,
+            font_family,
+            font_weight,
+        )
     }
 
     pub(crate) fn measure_wrapped_line_count(

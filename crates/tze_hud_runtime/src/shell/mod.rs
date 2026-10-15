@@ -7,11 +7,13 @@
 //! - `safe_mode.rs`: suspend/resume every agent's leases.
 //! - `freeze.rs`: freeze queue semantics.
 //! - `system_card.rs`: the runtime's own toast/status card.
+//! - `control_panel/`: the HUD control panel (chords, pause, every setting).
 //!
 //! The safe-mode overlay and other chrome pixels are drawn by the compositor's
 //! windowed frame, never by this module.
 
 pub(crate) mod chrome;
+pub(crate) mod control_panel;
 // Freeze is unwired in production; hud-bstmy.5.6 decides delete-or-wire. Drop
 // this expectation (and the dead items) with that decision.
 #[expect(dead_code, reason = "freeze is never activated; see hud-bstmy.5.6")]

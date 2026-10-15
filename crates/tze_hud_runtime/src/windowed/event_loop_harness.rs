@@ -41,7 +41,7 @@
 //! config with the production MCP HTTP server on a loopback ephemeral port and
 //! the MCP → event-loop portal-op channel, plus the gRPC session server on
 //! another (all over one `SharedState`), all reading one injected clock. The
-//! safe-mode hotkey bridge runs too ([`HeadlessEventLoopHarness::press_safe_mode_hotkey`]).
+//! control panel task runs too ([`HeadlessEventLoopHarness::press_chord`]).
 //! [`HeadlessEventLoopHarness::tick`] runs one event-loop turn: the main-thread
 //! settle sequence `about_to_wait` runs, then the compositor's Stage 4
 //! timed-content sweep and notification hit-region refresh, minus the GPU.
@@ -122,6 +122,7 @@ impl WindowedRuntimeState {
             chrome_state: Arc::new(std::sync::RwLock::new(crate::shell::ChromeState::new())),
             system_card: crate::shell::system_card::SystemCardHandle::default(),
             pairing: None,
+            control_panel: None,
             input_ring: Arc::new(StdMutex::new(VecDeque::new())),
             pending_input_latency: Arc::new(StdMutex::new(VecDeque::new())),
             frame_ready_rx,
@@ -174,6 +175,7 @@ impl WindowedRuntimeState {
             portal_resize_states: HashMap::new(),
             consumed_portal_resize_keydowns: HashSet::new(),
             consumed_shell_shortcut_keydowns: HashSet::new(),
+            panel_input: crate::windowed::panel_input::PanelInputState::default(),
             keyboard_activation_nodes: HashMap::new(),
             consumed_command_keydowns: HashSet::new(),
             local_composer_state: Arc::new(StdMutex::new(None)),
@@ -240,9 +242,6 @@ pub struct HeadlessEventLoopHarness {
     app: WinitApp,
     mcp_addr: Option<SocketAddr>,
     grpc_addr: Option<SocketAddr>,
-    /// The safe-mode hotkey bridge's signal channel (what the Windows hotkey
-    /// thread sends on).
-    safe_mode_hotkey: Option<tokio::sync::mpsc::UnboundedSender<()>>,
 }
 
 impl HeadlessEventLoopHarness {
@@ -348,13 +347,26 @@ impl HeadlessEventLoopHarness {
                 )),
         );
 
-        let safe_mode_hotkey = super::safe_mode_toggle::spawn_safe_mode_toggle_bridge(
+        let render_wake = state.wake.render_notifier();
+        let deps = crate::shell::control_panel::ControlPanelDeps {
+            pause: crate::shell::control_panel::PauseControl::new(
+                Arc::clone(&state.shared_state),
+                Arc::clone(&state.chrome_state),
+                Arc::clone(&state.safe_mode_atomic),
+                render_wake.clone(),
+            ),
+            chords: runtime_context.chords,
+            pairing: None,
+            render_wake,
+            main_wake: state.wake.main_work_notifier(),
+        };
+        let sections = crate::shell::control_panel::default_sections(&deps);
+        state.control_panel = Some(crate::shell::control_panel::spawn_control_panel(
             &tokio::runtime::Handle::current(),
-            Arc::clone(&state.shared_state),
-            Arc::clone(&state.chrome_state),
-            state.wake.render_notifier(),
+            deps,
+            sections,
             state.shutdown.clone(),
-        );
+        ));
 
         let driver = crate::portal_projection_driver::InProcessPortalDriver::with_portals(portals);
         state.portal_projection_driver = driver;
@@ -365,7 +377,6 @@ impl HeadlessEventLoopHarness {
             app: WinitApp { state },
             mcp_addr: Some(mcp_addr),
             grpc_addr: Some(grpc_addr),
-            safe_mode_hotkey: Some(safe_mode_hotkey),
         })
     }
 
@@ -407,15 +418,34 @@ impl HeadlessEventLoopHarness {
             .expect("harness was built without with_network")
     }
 
-    /// Press the human safe-mode chord: the signal the Windows hotkey thread
-    /// sends the toggle bridge. The bridge flips safe mode on the network
-    /// runtime; [`Self::safe_mode_active`] shows when it has.
+    /// Press the human pause chord: the event the Windows hotkey thread sends
+    /// the control panel. The panel task pauses (or resumes) agents on the
+    /// network runtime; [`Self::safe_mode_active`] shows when it has.
     pub fn press_safe_mode_hotkey(&self) {
-        self.safe_mode_hotkey
+        self.press_chord(tze_hud_scene::config::ChordRole::Pause);
+    }
+
+    /// Press one of the HUD's global chords.
+    pub fn press_chord(&self, role: tze_hud_scene::config::ChordRole) {
+        let panel = self
+            .app
+            .state
+            .control_panel
             .as_ref()
-            .expect("harness was built without with_network")
-            .send(())
-            .expect("safe-mode toggle bridge is running");
+            .expect("harness was built without with_network");
+        assert!(
+            panel.send(crate::shell::control_panel::PanelEvent::Chord(role)),
+            "control panel task is running"
+        );
+    }
+
+    /// Whether the control panel is open.
+    pub fn control_panel_open(&self) -> bool {
+        self.app
+            .state
+            .control_panel
+            .as_ref()
+            .is_some_and(|panel| panel.is_open())
     }
 
     /// Whether safe mode is on (agents paused).
@@ -653,7 +683,6 @@ impl HeadlessEventLoopHarness {
             },
             mcp_addr: None,
             grpc_addr: None,
-            safe_mode_hotkey: None,
         }
     }
 
@@ -2352,23 +2381,6 @@ mod tests {
                 );
             }
         }
-    }
-
-    /// Ctrl+Shift+P is consumed one stage earlier by the real winit path,
-    /// so the Stage-2 router can observe only their release. The complete
-    /// reserved set remains shell-owned even for that release-only route.
-    #[test]
-    fn os_stage_shell_shortcut_release_never_reaches_agent() {
-        let mut harness = HeadlessEventLoopHarness::new();
-        let (_tile_id, _node_id, mut rx) = install_button(&mut harness, true);
-
-        harness.enqueue(ctrl_key_up("KeyP", "P", true, 1_100));
-        harness.drain();
-
-        assert!(
-            received_events(&mut rx).is_empty(),
-            "the pairing KeyUp must remain shell-owned after Stage 1 consumed its KeyDown"
-        );
     }
 
     /// The shell intercept is an exact reserved-set match, not a blanket Ctrl

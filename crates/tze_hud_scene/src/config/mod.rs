@@ -11,7 +11,7 @@ pub use agents::{
     AgentDirectory, AgentIdentity, AuthRejection, DEFAULT_MCP_AGENT_ID, OPERATOR_ADMIN, PskDigest,
     SharedAgents, hash_psk,
 };
-pub use hotkey::{Hotkey, HotkeyKey, HotkeyParseError};
+pub use hotkey::{ChordRole, Hotkey, HotkeyKey, HotkeyParseError, HudChords};
 
 // ─── Error Codes ─────────────────────────────────────────────────────────────
 
@@ -187,8 +187,8 @@ impl DisplayProfile {
 pub struct ResolvedConfig {
     pub profile: DisplayProfile,
     pub tab_names: Vec<String>,
-    /// Global chord that toggles safe mode (`[runtime].safe_mode_hotkey`).
-    pub safe_mode_hotkey: Hotkey,
+    /// Global chords: pause, panel and pairing (`[runtime].*_hotkey`).
+    pub chords: HudChords,
     /// Sourced TOML file path.
     pub source_path: Option<String>,
 }

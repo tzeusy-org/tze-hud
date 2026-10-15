@@ -32,6 +32,7 @@
 "color.caution"                   = "#FBB360"   # orange5
 "color.caution.container"         = "#77450D"   # orange1
 "color.on_caution.container"      = "#F6F7F9"   # light-gray5
+"color.caution.outline"           = "#935610"   # orange2
 "color.error"                     = "#FA999C"   # red5
 "color.error.container"           = "#8E292C"   # red1
 "color.on_error.container"        = "#F6F7F9"   # light-gray5

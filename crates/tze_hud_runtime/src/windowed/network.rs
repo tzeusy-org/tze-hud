@@ -358,7 +358,10 @@ async fn accept_into(
 pub(super) fn render_startup_banner(
     grpc_addrs: &[std::net::SocketAddr],
     mcp_addrs: &[std::net::SocketAddr],
-    hotkey: &crate::operator::status::HotkeyStatus,
+    hotkeys: &[(
+        tze_hud_scene::config::ChordRole,
+        crate::operator::status::HotkeyStatus,
+    )],
 ) -> String {
     const RULE: &str = "────────────────────────────────────────────────────────────────────";
     let mut lines: Vec<String> = Vec::with_capacity(7);
@@ -379,7 +382,11 @@ pub(super) fn render_startup_banner(
             mcp_endpoint_url(*addr)
         ));
     }
-    lines.extend(hotkey.banner_line());
+    lines.extend(
+        hotkeys
+            .iter()
+            .filter_map(|(role, status)| status.banner_line(*role)),
+    );
     lines.push("   attach : invoke the `hud-projection` skill in an LLM session".to_string());
     lines.push("            see docs/QUICKSTART.md".to_string());
     lines.push(RULE.to_string());
@@ -501,6 +508,7 @@ mod tests {
     use super::super::test_support::make_shared_state;
     use super::*;
     use crate::operator::status::HotkeyStatus;
+    use tze_hud_scene::config::ChordRole;
 
     #[test]
     fn startup_banner_states_hotkey_failure() {
@@ -508,11 +516,19 @@ mod tests {
             chord: "Ctrl+Shift+F12".into(),
             reason: "in use".into(),
         };
-        let banner = render_startup_banner(&[], &[], &failed);
-        assert!(banner.contains("NOT registered") && banner.contains("Ctrl+Shift+F12"));
-        assert!(
-            !render_startup_banner(&[], &[], &HotkeyStatus::NotApplicable).contains("safe   :")
+        let ok = HotkeyStatus::Registered {
+            chord: "Ctrl+Shift+F11".into(),
+        };
+        let banner = render_startup_banner(
+            &[],
+            &[],
+            &[(ChordRole::Pause, failed), (ChordRole::Panel, ok)],
         );
+        assert!(banner.contains("NOT registered") && banner.contains("Ctrl+Shift+F12"));
+        assert!(banner.contains("panel  : Ctrl+Shift+F11 opens the control panel"));
+        let none =
+            render_startup_banner(&[], &[], &[(ChordRole::Pause, HotkeyStatus::NotApplicable)]);
+        assert!(!none.contains("safe   :"));
     }
 
     /// The banner must never contain the PSK, even when one is configured.
@@ -525,7 +541,7 @@ mod tests {
         // Simulate a fully-configured runtime with a PSK set in the environment.
         let grpc: std::net::SocketAddr = "127.0.0.1:50051".parse().unwrap();
         let mcp: std::net::SocketAddr = "127.0.0.1:9090".parse().unwrap();
-        let banner = render_startup_banner(&[grpc], &[mcp], &HotkeyStatus::NotApplicable);
+        let banner = render_startup_banner(&[grpc], &[mcp], &[]);
         assert!(
             !banner.contains(psk),
             "startup banner must not leak the PSK; banner was:\n{banner}"

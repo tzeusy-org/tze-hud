@@ -189,7 +189,8 @@ pub struct CanonicalToken {
 /// component-shape-language/spec.md`, §Requirement: Canonical Token Schema).
 ///
 /// Token groups: color, opacity, typography, spacing, stroke, border.radius,
-/// portal divider, and claimed-tile placement (`tile.*`).
+/// portal divider, claimed-tile placement (`tile.*`) and the control panel
+/// layout (`control_panel.*`).
 pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
     // Color — text
     CanonicalToken {
@@ -697,6 +698,11 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "#FFE7A8",
     },
     CanonicalToken {
+        key: "color.caution.outline",
+        description: "Outline of a caution container (e.g. a paused control)",
+        default_value: "#6B5518",
+    },
+    CanonicalToken {
         key: "color.error",
         description: "Error/critical status",
         default_value: "#FF8A80",
@@ -819,6 +825,17 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         key: "space.xxl",
         description: "Double-extra-large spacing",
         default_value: "32",
+    },
+    // Control panel layout
+    CanonicalToken {
+        key: "control_panel.inset",
+        description: "Gap between the control panel and each display edge (px)",
+        default_value: "32",
+    },
+    CanonicalToken {
+        key: "control_panel.column.min_width",
+        description: "Narrowest control panel section column; as many as fit are used (px)",
+        default_value: "360",
     },
     // Type scale (family / size / line height / weight)
     CanonicalToken {

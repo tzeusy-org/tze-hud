@@ -193,7 +193,8 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
   and gRPC, so pairing adds an agent without a restart. Hand edits to `agents.toml`
   need a restart. `[agents]` in the config file is a config error.
 - **Pairing** (`POST /pair` on the MCP port, no bearer). While no agent exists,
-  and after `tze_hud --pair` or Ctrl+Shift+P, the HUD shows a 6-digit one-time
+  and after `tze_hud --pair` or the pairing chord (see
+  [Human chords and the control panel](#human-chords-and-the-control-panel)), the HUD shows a 6-digit one-time
   code and its address on the system card. The agent trades it for a key:
 
   ```
@@ -214,9 +215,9 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
   negotiation and no resident principal.
 - `admin` is an operator entry, outside the model surface: it opens
   `GET /admin/status`, `GET /admin/logs`, and `GET /admin/screenshot` on the
-  MCP port, and `*` does not grant it. `/admin/status` includes `tailnet_inbound` (`state`: `allowed`, `blocked`, `unknown`, `not_applicable`; `reason`, `rule` and `fix` when `blocked`; `error` when `unknown`): whether Windows Firewall lets remote agents reach the tailnet bind, and `safe_mode_hotkey`
-  (`chord`, `registered`, `error`; `null` when no hotkey is active; `registered: null` while pending): `registered: false`
-  means the human safe-mode chord is owned by another program. The blocked
+  MCP port, and `*` does not grant it. `/admin/status` includes `tailnet_inbound` (`state`: `allowed`, `blocked`, `unknown`, `not_applicable`; `reason`, `rule` and `fix` when `blocked`; `error` when `unknown`): whether Windows Firewall lets remote agents reach the tailnet bind, and `safe_mode_hotkey`, `panel_hotkey` and `pairing_hotkey`
+  (each `chord`, `registered`, `error`; `null` when no hotkey is active; `registered: null` while pending): `registered: false`
+  means another program owns that chord; for `safe_mode_hotkey` the human pause override is then lost. The blocked
   firewall `fix` names `tze_hud.exe --allow-remote` with the same listen-port
   overrides as startup; see [the reversible Windows helper](operations/windows-install.md#remote-agents).
   This policy-derived result is cached for five seconds, not a network probe.
@@ -354,6 +355,37 @@ remove or correct the field. Remove those obsolete entries rather than
 renaming their zone values. Tabs and their widgets remain configurable;
 `[displays.<NAME>].zones` remains the supported way to assign built-in zones
 to a display.
+
+## Human chords and the control panel
+
+Three global chords work while the overlay is unfocused and click-through
+(Windows; each is set in `[runtime]` as modifiers Ctrl/Shift/Alt/Win plus
+F1-F24, a letter or a digit, and the three must differ):
+
+| Chord (default) | Key | Effect |
+|---|---|---|
+| Ctrl+Shift+F12 | `safe_mode_hotkey` | Pause agents and open the control panel; pressed again, resume and close |
+| Ctrl+Shift+F11 | `panel_hotkey` | Open or close the control panel with agents running |
+| Ctrl+Shift+F10 | `pairing_hotkey` | Show the pairing code (closing an open panel, which resumes agents) |
+
+A global chord takes its keys from every other app while the HUD runs, so the
+defaults are F-key chords; rebind one that clashes (Ctrl+Shift+F10 is also
+JetBrains IDEs' "Run"). The pairing chord is not registered when the MCP port
+is disabled.
+
+The control panel is a full-width pane over the primary display: a search
+field, quick-action tiles, and section cards of settings that scroll
+vertically. It takes keyboard focus when it opens (if Windows refuses, the
+header says to click it) and returns focus on close. Typing searches every
+row; arrows, Tab, Enter and Space move and act; Esc clears the search, then
+closes. Clicks outside the panel pass through to the desktop. Closing the
+panel always resumes agents. While paused, the pause tile and row turn
+caution-colored.
+
+Agents never see the panel: it is not in the scene, in MCP or gRPC results,
+or in `/admin/screenshot`. An idle open panel draws no frames. Its layout
+reads `control_panel.inset` and `control_panel.column.min_width` and the
+semantic tokens of the active theme.
 
 ## Design tokens and themes
 

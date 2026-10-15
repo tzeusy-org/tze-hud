@@ -39,6 +39,7 @@
 "color.caution" = "#FFCA66"
 "color.caution.container" = "#2A1E08"
 "color.on_caution.container" = "#FFF0CA"
+"color.caution.outline" = "#6B4F1A"
 "color.error" = "#FF8392"
 "color.error.container" = "#450612"
 "color.on_error.container" = "#FFE3E8"
