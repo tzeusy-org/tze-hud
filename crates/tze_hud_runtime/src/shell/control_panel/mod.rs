@@ -45,7 +45,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use tokio::sync::mpsc;
-use tze_hud_compositor::{ControlPanelGeometry, ControlPanelModel, PanelHitTarget};
+use tze_hud_compositor::{ControlPanelGeometry, ControlPanelModel, PanelHitTarget, PanelNotice};
 use tze_hud_scene::config::{ChordRole, HudChords};
 use tze_hud_scene::render_wake::RenderWakeNotifier;
 
@@ -84,7 +84,7 @@ struct Shared {
     model: RwLock<(u64, Option<ControlPanelModel>)>,
     /// The notice the compositor draws while the panel is closed, versioned
     /// like `model`.
-    closed_notice: RwLock<(u64, Option<String>)>,
+    closed_notice: RwLock<(u64, Option<PanelNotice>)>,
     open: AtomicBool,
     /// The geometry the compositor last drew, with its layout generation.
     geometry: RwLock<Option<(u64, ControlPanelGeometry)>>,
@@ -125,7 +125,7 @@ impl ControlPanelHandle {
 
     /// For the compositor thread: the closed-panel notice when it changed since
     /// `seen` (updating `seen`), else `None`.
-    pub(crate) fn closed_notice_if_changed(&self, seen: &mut u64) -> Option<Option<String>> {
+    pub(crate) fn closed_notice_if_changed(&self, seen: &mut u64) -> Option<Option<PanelNotice>> {
         let guard = self
             .shared
             .closed_notice
@@ -140,7 +140,7 @@ impl ControlPanelHandle {
 
     /// The closed-panel notice last published.
     #[cfg(test)]
-    pub(crate) fn current_closed_notice(&self) -> Option<String> {
+    pub(crate) fn current_closed_notice(&self) -> Option<PanelNotice> {
         self.shared
             .closed_notice
             .read()
@@ -149,7 +149,7 @@ impl ControlPanelHandle {
             .clone()
     }
 
-    fn publish_closed_notice(&self, notice: Option<String>) {
+    fn publish_closed_notice(&self, notice: Option<PanelNotice>) {
         {
             let mut guard = self
                 .shared
@@ -505,9 +505,9 @@ impl PanelTask {
         }
     }
 
-    /// The sections' notices joined, plus how to reopen the panel; `None`
-    /// when no section has one.
-    async fn closed_notice(&self) -> Option<String> {
+    /// The sections' notices joined, with the chord that reopens the panel;
+    /// `None` when no section has one.
+    async fn closed_notice(&self) -> Option<PanelNotice> {
         let mut parts = Vec::new();
         for index in 0..self.sections.len() {
             let sections = Arc::clone(&self.sections);
@@ -525,11 +525,10 @@ impl PanelTask {
             return None;
         }
         let panel_chord = crate::operator::status::hotkey(ChordRole::Panel);
-        parts.push(format!(
-            "open with {}",
-            reopen_chord(&panel_chord, &self.deps.chords)
-        ));
-        Some(parts.join(" · "))
+        Some(PanelNotice {
+            text: parts.join(" · "),
+            key: reopen_chord(&panel_chord, &self.deps.chords).to_string(),
+        })
     }
 }
 

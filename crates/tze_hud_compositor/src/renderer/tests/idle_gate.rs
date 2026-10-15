@@ -803,3 +803,43 @@ async fn hidden_content_animations_schedule_no_frames() {
         "a hidden zone's fade schedules no frames"
     );
 }
+
+/// Owner hiding (CP-6): a notification counting down to its fade in a hidden
+/// zone sets no wake deadline once a frame has been built with zones hidden;
+/// the deadline returns with the first frame built after they are shown.
+#[tokio::test]
+async fn hidden_notification_sets_no_fade_deadline() {
+    use std::sync::Arc;
+    use tze_hud_scene::clock::TestClock;
+    use tze_hud_scene::graph::SurfaceClasses;
+
+    let now = std::time::Instant::now();
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
+    let clock = Arc::new(TestClock::new(1_000));
+    let mut scene =
+        countdown_notification_scene_on(SceneGraph::new_with_clock(1280.0, 720.0, clock));
+    let build = |c: &mut Compositor, scene: &mut SceneGraph| {
+        c.prime_markdown_cache(scene);
+        c.prime_truncation_cache(scene);
+        c.build_windowed_frame(scene, 320, 200);
+    };
+    build(&mut compositor, &mut scene);
+    compositor.update_publication_animations_at(&scene, now);
+    assert!(compositor.next_animation_deadline_at(now).is_some());
+
+    scene.set_owner_hidden(SurfaceClasses {
+        zones: true,
+        ..SurfaceClasses::NONE
+    });
+    build(&mut compositor, &mut scene);
+    compositor.update_publication_animations_at(&scene, now);
+    assert_eq!(
+        compositor.next_animation_deadline_at(now),
+        None,
+        "a hidden notification's fade wakes nothing"
+    );
+
+    scene.set_owner_hidden(SurfaceClasses::NONE);
+    build(&mut compositor, &mut scene);
+    assert!(compositor.next_animation_deadline_at(now).is_some());
+}

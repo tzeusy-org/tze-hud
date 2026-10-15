@@ -122,8 +122,8 @@ pub(crate) trait Section: Send + Sync {
     fn apply<'a>(&'a self, row: &'a str, edit: Edit) -> BoxFuture<'a, Result<(), String>>;
 
     /// A short line to keep on screen while the panel is closed, for state the
-    /// owner set here that changes what the HUD shows (e.g. hidden content).
-    /// The panel adds how to reopen it. Read when the panel closes and on
+    /// owner set here that changes what the HUD shows (e.g. "Widgets
+    /// hidden"). The panel adds the chord that reopens it. Read when the panel closes and on
     /// each chord while closed, so it suits state only the panel changes; a
     /// notice that tracks outside state needs a way to wake the panel task.
     fn closed_notice(&self) -> BoxFuture<'_, Option<String>> {

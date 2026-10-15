@@ -386,9 +386,9 @@ The Visibility card hides portals, zones, widgets or other agent tiles for
 the session; the Hide all tile (Alt+H) hides all of them and, when everything
 is hidden, shows it all again. Hidden content is not drawn and takes no input
 or focus; agents keep their leases and publications and are not told. While
-anything is hidden and the panel is closed, a pill at the top of the primary
-display says what is hidden and which chord opens the panel (the pause chord
-when Windows refused the panel chord). A restart shows everything.
+anything is hidden and the panel is closed, a pill at the bottom right of the
+primary display says what is hidden and which chord opens the panel (the
+pause chord when Windows refused the panel chord). A restart shows everything.
 
 Agents never see the panel: it is not in the scene, in MCP or gRPC results,
 or in `/admin/screenshot`. An idle open panel draws no frames. Its layout

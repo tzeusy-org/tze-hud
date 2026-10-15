@@ -1570,14 +1570,23 @@ pub(super) fn control_panel_layout(
     }
 }
 
-/// The panel's notice while it is closed (e.g. "Hidden: portals · open with
-/// Ctrl+Shift+F11"): one caution pill centred at the top of a `sw`-wide
-/// surface, styled like a caution badge at the base scale. Text too wide for
-/// the surface ends in an ellipsis.
+/// What the panel keeps on screen while it is closed (e.g. "Widgets hidden"),
+/// and the chord that opens it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PanelNotice {
+    pub text: String,
+    /// The chord, drawn in the monospace role after the text.
+    pub key: String,
+}
+
+/// The closed panel's notice: one pill at the bottom right of a `sw` x `sh`
+/// surface, on the panel's input-field surface. Text too wide for the
+/// surface ends in an ellipsis; the chord keeps its width.
 pub(super) fn closed_notice_layout(
     tokens: &HashMap<String, String>,
-    text: &str,
+    notice: &PanelNotice,
     sw: f32,
+    sh: f32,
     measure: &mut Measure<'_>,
 ) -> (Vec<PanelShape>, Vec<TextItem>) {
     let style = PanelStyle::resolve(tokens, 1.0);
@@ -1589,32 +1598,45 @@ pub(super) fn closed_notice_layout(
         texts: Vec::new(),
         hits: Vec::new(),
     };
-    let ty = s.label;
+    let (text_ty, key_ty) = (s.label, s.label_s);
+    // Clear of the rounded ends: half the pill height on each side.
+    let h = text_ty.line + s.space_s;
+    let pad = h / 2.0;
+    let gap = s.space_xs * 2.0 / 3.0;
+    let key_w = p.width(&notice.key, key_ty, true);
     let max_w = (sw - s.space_m * 2.0).max(1.0);
-    let w = (p.width(text, ty, false) + s.space_m * 2.0).min(max_w);
-    let h = ty.line + s.space_s;
+    let text_w = p
+        .width(&notice.text, text_ty, false)
+        .min((max_w - key_w - gap - pad * 2.0).max(1.0));
+    let w = (text_w + gap + key_w + pad * 2.0).min(max_w);
     let rect = PanelRect {
-        x: (sw - w) / 2.0,
-        y: s.space_m,
+        x: (sw - s.space_m - w).max(0.0),
+        y: (sh - s.space_m - h).max(0.0),
         w,
         h,
     };
-    p.shape(
-        rect,
-        h / 2.0,
-        s.caution_container,
-        Some((1.0, s.caution_outline)),
+    let cy = rect.y + h / 2.0;
+    p.shape(rect, h / 2.0, s.field, Some((1.0, s.outline_variant)), None);
+    p.text(
+        &notice.text,
+        rect.x + pad,
+        cy,
+        text_w,
+        text_ty,
+        s.on_surface,
+        false,
+        Align::Start,
         None,
     );
     p.text(
-        text,
-        rect.x + s.space_s,
-        rect.y + h / 2.0,
-        (w - s.space_s * 2.0).max(1.0),
-        ty,
-        s.on_caution_container,
-        false,
-        Align::Center,
+        &notice.key,
+        rect.x + pad + text_w + gap,
+        cy,
+        key_w,
+        key_ty,
+        s.on_surface_variant,
+        true,
+        Align::Start,
         None,
     );
     (p.shapes, p.texts)
@@ -1658,7 +1680,7 @@ impl Compositor {
 
     /// Mirror the panel's notice for while it is closed (`None`: no notice);
     /// returns true when it changed (the caller must then repaint once).
-    pub fn set_closed_notice(&mut self, notice: Option<String>) -> bool {
+    pub fn set_closed_notice(&mut self, notice: Option<PanelNotice>) -> bool {
         if self.closed_notice == notice {
             return false;
         }
@@ -1666,28 +1688,32 @@ impl Compositor {
         true
     }
 
-    /// The notice pill on a `sw`-wide surface; empty while the panel is open
-    /// (it shows the same state itself) or without a notice.
-    fn closed_notice_draw(&mut self, sw: f32) -> (Vec<PanelShape>, Vec<TextItem>) {
-        let Some(text) = self
+    /// The notice pill on a `sw` x `sh` surface; empty while the panel is
+    /// open (it shows the same state itself) or without a notice.
+    fn closed_notice_draw(&mut self, sw: f32, sh: f32) -> (Vec<PanelShape>, Vec<TextItem>) {
+        let Some(notice) = self
             .closed_notice
-            .as_deref()
+            .as_ref()
             .filter(|_| self.control_panel.is_none())
         else {
             return Default::default();
         };
         match self.text_rasterizer.as_mut() {
-            Some(tr) => {
-                closed_notice_layout(&self.token_map, text, sw, &mut |t, size, weight, mono| {
+            Some(tr) => closed_notice_layout(
+                &self.token_map,
+                notice,
+                sw,
+                sh,
+                &mut |t, size, weight, mono| {
                     let family = if mono {
                         FontFamily::SystemMonospace
                     } else {
                         FontFamily::SystemSansSerif
                     };
                     tr.measure_single_line(t, size, family, weight)
-                })
-            }
-            None => closed_notice_layout(&self.token_map, text, sw, &mut estimate_width),
+                },
+            ),
+            None => closed_notice_layout(&self.token_map, notice, sw, sh, &mut estimate_width),
         }
     }
 
@@ -1767,7 +1793,7 @@ impl Compositor {
     ) -> Vec<RoundedRectDrawCmd> {
         let shapes = match self.ensure_control_panel_layout(sw, sh) {
             Some(layout) => layout.shapes.clone(),
-            None => self.closed_notice_draw(sw).0,
+            None => self.closed_notice_draw(sw, sh).0,
         };
         shapes
             .iter()
@@ -1796,7 +1822,7 @@ impl Compositor {
     /// panel notice's and the system card's.
     pub(super) fn final_chrome_text_items(&mut self, sw: f32, sh: f32) -> Vec<TextItem> {
         if self.control_panel.is_none() {
-            let mut items = self.closed_notice_draw(sw).1;
+            let mut items = self.closed_notice_draw(sw, sh).1;
             items.extend(self.system_card_text_items(sw, sh));
             return items;
         }

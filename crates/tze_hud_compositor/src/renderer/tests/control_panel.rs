@@ -187,7 +187,7 @@ async fn panel_layout_is_reused_until_the_model_or_size_changes() {
 
 /// Owner hiding (CP-6): a hidden tile and a hidden zone draw nothing, showing
 /// them again draws the current content, and while anything is hidden the
-/// closed panel's notice pill sits at the top centre.
+/// closed panel's notice pill sits at the bottom right.
 #[tokio::test]
 async fn hidden_content_is_not_drawn_and_the_closed_notice_is() {
     use tze_hud_scene::graph::SurfaceClasses;
@@ -244,7 +244,8 @@ async fn hidden_content_is_not_drawn_and_the_closed_notice_is() {
         vertices.len() + textured.len()
     };
     let center = |px: &[u8]| crate::test_pixels::pixel_at(px, w, w / 2, h / 2);
-    let notice_at = |px: &[u8]| crate::test_pixels::pixel_at(px, w, w / 2, 34);
+    // The pill sits at the bottom right: sample its middle-right part.
+    let notice_at = |px: &[u8]| crate::test_pixels::pixel_at(px, w, w - 30, h - 24);
     assert!(zone_vertices(&compositor, &scene) > 0);
 
     scene.set_owner_hidden(SurfaceClasses::ALL);
@@ -270,19 +271,21 @@ async fn hidden_content_is_not_drawn_and_the_closed_notice_is() {
         "a hidden zone's image survives eviction, to draw when shown"
     );
 
+    let notice = crate::PanelNotice {
+        text: "Everything hidden".into(),
+        key: "Ctrl+Shift+F11".into(),
+    };
+    assert!(compositor.set_closed_notice(Some(notice.clone())));
     assert!(
-        compositor.set_closed_notice(Some("Hidden: everything · open with Ctrl+Shift+F11".into()))
-    );
-    assert!(
-        !compositor.set_closed_notice(Some("Hidden: everything · open with Ctrl+Shift+F11".into())),
+        !compositor.set_closed_notice(Some(notice)),
         "same notice: no repaint"
     );
     compositor.render_frame_headless(&mut scene, &surface);
     let noticed = surface.read_pixels(&compositor.device);
     assert_ne!(notice_at(&noticed), bare, "the notice pill is drawn");
     assert_eq!(
-        crate::test_pixels::pixel_at(&noticed, w, w / 2, h - 4),
-        crate::test_pixels::pixel_at(&hidden, w, w / 2, h - 4),
+        crate::test_pixels::pixel_at(&noticed, w, w / 2, h / 2),
+        crate::test_pixels::pixel_at(&hidden, w, w / 2, h / 2),
         "the notice is a pill, not a full-screen layer"
     );
 

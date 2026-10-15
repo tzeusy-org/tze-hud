@@ -80,8 +80,8 @@ use icon::*;
 // in private imports.
 pub use control_panel::{
     ControlPanelGeometry, ControlPanelModel, PanelBadge, PanelBody, PanelChip, PanelControl,
-    PanelFocus, PanelHit, PanelHitTarget, PanelItem, PanelPart, PanelRect, PanelSection, PanelSpan,
-    PanelTone, estimate_control_panel_geometry,
+    PanelFocus, PanelHit, PanelHitTarget, PanelItem, PanelNotice, PanelPart, PanelRect,
+    PanelSection, PanelSpan, PanelTone, estimate_control_panel_geometry,
 };
 pub use focus_ring::{FocusRingOwner, FocusRingOwnerHandle};
 pub use system_card::{SystemCardKind, SystemCardModel};
@@ -230,7 +230,7 @@ pub struct Compositor {
     control_panel_layout_generation: u64,
     /// The panel's notice while it is closed (see
     /// [`Compositor::set_closed_notice`]).
-    closed_notice: Option<String>,
+    closed_notice: Option<PanelNotice>,
     /// The owner's hidden classes as of the last built frame. Animations on
     /// hidden content keep their state but schedule no frames
     /// ([`Compositor::next_animation_deadline`]).

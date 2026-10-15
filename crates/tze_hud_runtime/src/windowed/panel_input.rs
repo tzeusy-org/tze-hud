@@ -586,8 +586,11 @@ mod panel_task_tests {
         })
         .await;
         assert_eq!(
-            f.panel.current_closed_notice().as_deref(),
-            Some("Hidden: zones, widgets, tiles · open with Ctrl+Shift+F11")
+            f.panel.current_closed_notice(),
+            Some(tze_hud_compositor::PanelNotice {
+                text: "Zones, widgets and tiles hidden".into(),
+                key: "Ctrl+Shift+F11".into(),
+            })
         );
 
         // Hide all off (it is not all hidden, so the toggle first hides all).

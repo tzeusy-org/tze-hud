@@ -69,17 +69,29 @@ fn class_mut<'a>(set: &'a mut SurfaceClasses, row: &str) -> Option<&'a mut bool>
     })
 }
 
-/// The hidden classes as a lowercase list ("portals, widgets"), or "everything".
+/// What is hidden, as a sentence fragment: "Widgets", "Portals and zones",
+/// "Portals, zones and widgets", or "Everything".
 pub(crate) fn hidden_names(hidden: SurfaceClasses) -> String {
     if hidden.all() {
-        return "everything".to_owned();
+        return "Everything".to_owned();
     }
-    CLASSES
+    let names: Vec<String> = CLASSES
         .iter()
         .filter(|(row, ..)| class_hidden(hidden, row))
-        .map(|(_, label, ..)| label.to_lowercase())
-        .collect::<Vec<_>>()
-        .join(", ")
+        .enumerate()
+        .map(|(i, (_, label, ..))| {
+            if i == 0 {
+                (*label).to_owned()
+            } else {
+                label.to_lowercase()
+            }
+        })
+        .collect();
+    match names.as_slice() {
+        [] => String::new(),
+        [one] => one.clone(),
+        [rest @ .., last] => format!("{} and {last}", rest.join(", ")),
+    }
 }
 
 impl VisibilitySection {
@@ -112,10 +124,8 @@ impl Section for VisibilitySection {
             let hidden = self.hidden().await;
             let mut rows = vec![
                 Row::new(Self::HIDE_ALL, "Hide all", Control::Toggle(hidden.all()))
-                    .detail(if hidden.all() {
-                        "Everything hidden · agents keep running".to_owned()
-                    } else if hidden.any() {
-                        format!("Hidden: {}", hidden_names(hidden))
+                    .detail(if hidden.any() {
+                        format!("{} hidden · agents keep running", hidden_names(hidden))
                     } else {
                         "Hides every agent surface; agents keep running".to_owned()
                     })
@@ -177,7 +187,38 @@ impl Section for VisibilitySection {
             let hidden = self.hidden().await;
             hidden
                 .any()
-                .then(|| format!("Hidden: {}", hidden_names(hidden)))
+                .then(|| format!("{} hidden", hidden_names(hidden)))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn hidden_names_read_as_a_phrase() {
+        let only = |f: fn(&mut SurfaceClasses)| {
+            let mut set = SurfaceClasses::NONE;
+            f(&mut set);
+            hidden_names(set)
+        };
+        assert_eq!(only(|s| s.widgets = true), "Widgets");
+        assert_eq!(
+            only(|s| {
+                s.portals = true;
+                s.zones = true;
+            }),
+            "Portals and zones"
+        );
+        assert_eq!(
+            only(|s| {
+                s.portals = true;
+                s.zones = true;
+                s.tiles = true;
+            }),
+            "Portals, zones and tiles"
+        );
+        assert_eq!(hidden_names(SurfaceClasses::ALL), "Everything");
     }
 }

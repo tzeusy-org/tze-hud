@@ -234,8 +234,10 @@ Leases, publications and agents are untouched and nothing tells an agent:
 publishes keep landing and draw, as they are now, when shown again. The set is
 runtime-only overlay state beside the scene model, never serialized and never
 in `CompositorDegradationPolicy` (§6); a restart shows everything. While
-anything is hidden and the panel is closed, a caution pill at the top of the
-primary display names what is hidden and the chord that opens the panel.
+anything is hidden and the panel is closed, a pill at the bottom right of the
+primary display names what is hidden and the chord that opens the panel. A
+word-by-word reveal under way when its zone was hidden finishes after the
+zone is shown again.
 
 - `tze_hud_scene` [`classes_hide_their_own_tiles_only`](../crates/tze_hud_scene/src/graph/visibility.rs), [`hidden_tiles_pass_pointer_input_through`](../crates/tze_hud_scene/src/graph/visibility.rs),
   [`a_change_bumps_the_version_once_and_keeps_content`](../crates/tze_hud_scene/src/graph/visibility.rs)
@@ -243,10 +245,12 @@ primary display names what is hidden and the chord that opens the panel.
 - `tze_hud_runtime` [`hiding_focused_composer_tile_blurs_it_and_passes_clicks_through`](../crates/tze_hud_runtime/src/windowed/portal.rs),
   [`hidden_tile_does_not_register_capture_region`](../crates/tze_hud_runtime/src/windowed/hittest.rs),
   [`hide_all_class_rows_and_the_closed_notice`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
-  [`reopen_chord_falls_back_to_the_pause_chord`](../crates/tze_hud_runtime/src/shell/control_panel/mod.rs)
+  [`reopen_chord_falls_back_to_the_pause_chord`](../crates/tze_hud_runtime/src/shell/control_panel/mod.rs),
+  [`hidden_names_read_as_a_phrase`](../crates/tze_hud_runtime/src/shell/control_panel/sections/visibility.rs)
 - `tze_hud_compositor` [`hidden_content_is_not_drawn_and_the_closed_notice_is`](../crates/tze_hud_compositor/src/renderer/tests/control_panel.rs),
   [`hidden_widgets_do_no_raster_work_and_draw_nothing`](../crates/tze_hud_compositor/tests/widget_raster_count.rs),
-  [`hidden_content_animations_schedule_no_frames`](../crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs)
+  [`hidden_content_animations_schedule_no_frames`](../crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs),
+  [`hidden_notification_sets_no_fade_deadline`](../crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs)
 
 ## Deferred ideas (notes, not code)
 
