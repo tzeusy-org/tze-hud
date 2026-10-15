@@ -51,6 +51,884 @@ fn hwnd_for_window(window: &Window) -> Option<windows::Win32::Foundation::HWND> 
     Some(HWND(handle.hwnd.get() as *mut c_void))
 }
 
+// Native capture history is retained until its matching application edge is
+// delivered. This domain is UI-thread-only; no app/scene pointer crosses FFI.
+#[cfg(any(target_os = "windows", test))]
+#[derive(Default)]
+pub(super) struct ChromeCaptureLedger {
+    faulted: bool,
+    next_install: u64,
+    next_frame: u64,
+    app_armed: Option<(u64, std::rc::Rc<ChromeCapturePress>)>,
+    last_retired: bool,
+    installs: Vec<ChromeCaptureInstall>,
+    active: Vec<ChromeCaptureReceipt>,
+    completed: std::collections::VecDeque<ChromeCaptureReceipt>,
+}
+
+#[cfg(any(target_os = "windows", test))]
+struct ChromeCaptureInstall {
+    nonce: u64,
+    window: winit::window::WindowId,
+    enabled: bool,
+    generation: u64,
+    native: Option<std::rc::Rc<ChromeCapturePress>>,
+    app: Option<std::rc::Rc<ChromeCapturePress>>,
+    permit: bool,
+}
+
+#[cfg(any(target_os = "windows", test))]
+struct ChromeCapturePress {
+    generation: u64,
+    cancelled: std::cell::Cell<bool>,
+    finished: std::cell::Cell<bool>,
+}
+
+#[cfg(any(target_os = "windows", test))]
+#[derive(Clone)]
+struct ChromeCaptureReceipt {
+    frame: u64,
+    nonce: u64,
+    window: winit::window::WindowId,
+    down: bool,
+    token: Option<std::rc::Rc<ChromeCapturePress>>,
+    consumed: bool,
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl ChromeCaptureLedger {
+    const MAX_INSTALLATIONS: usize = 64;
+    const MAX_RECEIPTS: usize = 256;
+
+    pub(super) fn fault(&mut self) {
+        self.faulted = true;
+        for install in &mut self.installs {
+            install.permit = false;
+            for token in install.native.iter().chain(install.app.iter()) {
+                token.cancelled.set(true);
+            }
+        }
+        for receipt in self.active.iter().chain(self.completed.iter()) {
+            if let Some(token) = &receipt.token {
+                token.cancelled.set(true);
+            }
+        }
+    }
+
+    pub(super) fn install(&mut self, window: winit::window::WindowId) -> Option<u64> {
+        self.prune();
+        if self.faulted || self.installs.len() == Self::MAX_INSTALLATIONS {
+            self.fault();
+            return None;
+        }
+        let Some(nonce) = self.next_install.checked_add(1) else {
+            self.fault();
+            return None;
+        };
+        self.next_install = nonce;
+        self.installs.push(ChromeCaptureInstall {
+            nonce,
+            window,
+            enabled: true,
+            generation: 0,
+            native: None,
+            app: None,
+            permit: false,
+        });
+        Some(nonce)
+    }
+
+    pub(super) fn begin(&mut self, nonce: u64, down: bool) -> Option<u64> {
+        if self.faulted {
+            return None;
+        }
+        if self.active.len() + self.completed.len() >= Self::MAX_RECEIPTS {
+            self.fault();
+            return None;
+        }
+        let Some(frame) = self.next_frame.checked_add(1) else {
+            self.fault();
+            return None;
+        };
+        let i = self
+            .installs
+            .iter()
+            .position(|s| s.nonce == nonce && s.enabled)?;
+        if down {
+            let Some(generation) = self.installs[i].generation.checked_add(1) else {
+                self.fault();
+                return None;
+            };
+            let install = &mut self.installs[i];
+            if let Some(previous) = &install.native {
+                if !previous.finished.get() {
+                    previous.cancelled.set(true);
+                }
+            }
+            install.generation = generation;
+            install.native = Some(std::rc::Rc::new(ChromeCapturePress {
+                generation,
+                cancelled: std::cell::Cell::new(false),
+                finished: std::cell::Cell::new(false),
+            }));
+        }
+        self.next_frame = frame;
+        let install = &self.installs[i];
+        self.active.push(ChromeCaptureReceipt {
+            frame,
+            nonce,
+            window: install.window,
+            down,
+            token: install.native.clone(),
+            consumed: false,
+        });
+        Some(frame)
+    }
+
+    pub(super) fn complete(&mut self, frame: u64) {
+        let Some(i) = self.active.iter().position(|r| r.frame == frame) else {
+            self.fault();
+            return;
+        };
+        let receipt = self.active.remove(i);
+        if !receipt.consumed {
+            self.completed.push_back(receipt);
+        }
+        self.prune();
+    }
+
+    pub(super) fn consume(&mut self, window: winit::window::WindowId, down: bool) -> bool {
+        self.last_retired = false;
+        if self.faulted {
+            return false;
+        }
+        let pending = self.completed.iter().position(|r| r.window == window);
+        let active = self
+            .active
+            .iter()
+            .rposition(|r| r.window == window && !r.consumed);
+        if pending.is_some() && active.is_some() {
+            self.fault();
+            return false;
+        }
+        let receipt = if let Some(i) = pending {
+            self.completed.remove(i).expect("selected receipt exists")
+        } else if let Some(i) = active {
+            self.active[i].consumed = true;
+            self.active[i].clone()
+        } else {
+            self.fault();
+            return false;
+        };
+        if receipt.down != down {
+            self.fault();
+            return false;
+        }
+        let Some(i) = self.installs.iter().position(|s| s.nonce == receipt.nonce) else {
+            self.fault();
+            return false;
+        };
+        if !self.installs[i].enabled {
+            self.last_retired = true;
+            self.prune();
+            return false;
+        }
+        self.installs[i].permit = false;
+        let Some(token) = receipt.token else {
+            return false;
+        };
+        if token.cancelled.get() || token.finished.get() {
+            return false;
+        }
+        if down {
+            // Only one physical left press is application-armed. Old tokens
+            // retain their history, but cannot later clear the newer press.
+            for install in &mut self.installs {
+                install.app = None;
+            }
+            self.installs[i].app = Some(token.clone());
+            self.app_armed = Some((receipt.nonce, token));
+            self.installs[i].permit = true;
+        } else if self.app_armed.as_ref().is_some_and(|(nonce, armed)| {
+            *nonce == receipt.nonce
+                && std::rc::Rc::ptr_eq(armed, &token)
+                && armed.generation == token.generation
+        }) {
+            token.finished.set(true);
+            self.installs[i].app = None;
+            self.app_armed = None;
+            self.installs[i].permit = true;
+        }
+        self.installs[i].permit
+    }
+
+    pub(super) fn lose(&mut self, nonce: u64) -> bool {
+        let Some(install) = self.installs.iter_mut().find(|s| s.nonce == nonce) else {
+            return false;
+        };
+        let Some(token) = &install.native else {
+            return false;
+        };
+        if token.finished.get() || token.cancelled.replace(true) {
+            return false;
+        }
+        install.permit = false;
+        true
+    }
+
+    pub(super) fn permit(&self, window: winit::window::WindowId) -> bool {
+        !self.faulted
+            && self
+                .installs
+                .iter()
+                .rev()
+                .find(|s| s.window == window && s.enabled)
+                .is_some_and(|s| s.permit && s.app.as_ref().is_none_or(|t| !t.cancelled.get()))
+    }
+
+    pub(super) fn take_cancel(&mut self, window: winit::window::WindowId) -> bool {
+        let Some((nonce, token)) = &self.app_armed else {
+            return false;
+        };
+        if !self
+            .installs
+            .iter()
+            .any(|s| s.nonce == *nonce && s.window == window)
+            || (!self.faulted && !token.cancelled.get())
+        {
+            return false;
+        }
+        let nonce = *nonce;
+        self.app_armed = None;
+        if let Some(install) = self.installs.iter_mut().find(|s| s.nonce == nonce) {
+            install.app = None;
+            install.permit = false;
+        }
+        self.prune();
+        true
+    }
+
+    pub(super) fn finish_synthetic(&mut self, window: winit::window::WindowId) {
+        let Some((nonce, token)) = &self.app_armed else {
+            return;
+        };
+        if !self
+            .installs
+            .iter()
+            .any(|s| s.nonce == *nonce && s.window == window)
+        {
+            return;
+        }
+        token.finished.set(true);
+        let nonce = *nonce;
+        self.app_armed = None;
+        if let Some(install) = self.installs.iter_mut().find(|s| s.nonce == nonce) {
+            install.app = None;
+        }
+    }
+
+    pub(super) fn retire(&mut self, nonce: u64) {
+        if let Some(install) = self.installs.iter_mut().find(|s| s.nonce == nonce) {
+            install.enabled = false;
+            install.permit = false;
+            for token in install.native.iter().chain(install.app.iter()) {
+                token.cancelled.set(true);
+            }
+        }
+        for receipt in self
+            .active
+            .iter()
+            .chain(self.completed.iter())
+            .filter(|r| r.nonce == nonce)
+        {
+            if let Some(token) = &receipt.token {
+                token.cancelled.set(true);
+            }
+        }
+        self.prune();
+    }
+
+    fn prune(&mut self) {
+        self.installs.retain(|s| {
+            s.enabled
+                || s.app.is_some()
+                || self.active.iter().any(|r| r.nonce == s.nonce)
+                || self.completed.iter().any(|r| r.nonce == s.nonce)
+        });
+    }
+}
+
+#[cfg(target_os = "windows")]
+std::thread_local! {
+    static CHROME_NATIVE_OWNER: std::cell::RefCell<ChromeNativeOwner> =
+        std::cell::RefCell::new(ChromeNativeOwner::default());
+    static CHROME_NATIVE_FAULT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    static CHROME_NATIVE_FAULT_NOTIFIED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(target_os = "windows")]
+#[derive(Default)]
+struct ChromeNativeOwner {
+    ledger: ChromeCaptureLedger,
+    app_edge: Option<bool>,
+    fault_delivered: bool,
+    registrations: Vec<std::rc::Weak<ChromeNativeRegistration>>,
+}
+
+// Exactly one raw Rc reference belongs to a successful native registration.
+// This object deliberately stores no Arc<Window> or pointer to runtime state.
+#[cfg(target_os = "windows")]
+struct ChromeNativeRegistration {
+    hwnd: windows::Win32::Foundation::HWND,
+    nonce: u64,
+    installed: std::cell::Cell<bool>,
+    remove_attempted: std::cell::Cell<bool>,
+    expected_normal_release: std::cell::Cell<bool>,
+    wake: tze_hud_scene::render_wake::RenderWakeNotifier,
+}
+
+#[cfg(target_os = "windows")]
+const CHROME_CAPTURE_SUBCLASS_ID: usize = 0x545a4348;
+
+#[cfg(target_os = "windows")]
+fn chrome_native_fault() {
+    let first = CHROME_NATIVE_FAULT.with(|fault| !fault.replace(true));
+    let wakes = CHROME_NATIVE_OWNER.with(|owner| {
+        let Ok(mut owner) = owner.try_borrow_mut() else {
+            return Vec::new();
+        };
+        owner.ledger.fault();
+        owner
+            .registrations
+            .iter()
+            .filter_map(std::rc::Weak::upgrade)
+            .map(|registration| registration.wake.clone())
+            .collect::<Vec<_>>()
+    });
+    if first {
+        tracing::error!(
+            "notification capture history unavailable; notification actions disabled until restart"
+        );
+    }
+    if !wakes.is_empty() && CHROME_NATIVE_FAULT_NOTIFIED.with(|notified| !notified.replace(true)) {
+        for wake in wakes {
+            wake.notify();
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn chrome_native_update<T>(update: impl FnOnce(&mut ChromeCaptureLedger) -> T) -> Option<T> {
+    let result = CHROME_NATIVE_OWNER.with(|owner| {
+        let Ok(mut owner) = owner.try_borrow_mut() else {
+            return None;
+        };
+        if CHROME_NATIVE_FAULT.with(std::cell::Cell::get) {
+            owner.ledger.fault();
+        }
+        let result = update(&mut owner.ledger);
+        Some((result, owner.ledger.faulted))
+    });
+    match result {
+        Some((result, faulted)) => {
+            if faulted {
+                chrome_native_fault();
+            }
+            Some(result)
+        }
+        None => {
+            chrome_native_fault();
+            None
+        }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn chrome_native_loss(registration: &ChromeNativeRegistration) {
+    if chrome_native_update(|ledger| ledger.lose(registration.nonce)).unwrap_or(false) {
+        registration.wake.notify();
+    }
+}
+
+#[cfg(target_os = "windows")]
+unsafe extern "system" fn chrome_capture_subclass(
+    hwnd: windows::Win32::Foundation::HWND,
+    message: u32,
+    wparam: windows::Win32::Foundation::WPARAM,
+    lparam: windows::Win32::Foundation::LPARAM,
+    _subclass_id: usize,
+    ref_data: usize,
+) -> windows::Win32::Foundation::LRESULT {
+    use windows::Win32::UI::Shell::{DefSubclassProc, RemoveWindowSubclass};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        WM_CANCELMODE, WM_CAPTURECHANGED, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_NCDESTROY,
+    };
+    let ptr = ref_data as *const ChromeNativeRegistration;
+    // SAFETY: successful SetWindowSubclass owns a raw strong reference until
+    // confirmed detach or WM_NCDESTROY. A callback retains its own reference
+    // across DefSubclassProc, including nested destruction/removal.
+    let registration = unsafe {
+        std::rc::Rc::increment_strong_count(ptr);
+        std::rc::Rc::from_raw(ptr)
+    };
+    let edge = match message {
+        WM_LBUTTONDOWN => Some(true),
+        WM_LBUTTONUP => Some(false),
+        _ => None,
+    };
+    let frame = edge.and_then(|down| {
+        chrome_native_update(|ledger| ledger.begin(registration.nonce, down)).flatten()
+    });
+    let normal_up = message == WM_LBUTTONUP
+        && unsafe { windows::Win32::UI::Input::KeyboardAndMouse::GetCapture() } == hwnd
+        && chrome_native_update(|ledger| {
+            ledger
+                .installs
+                .iter()
+                .find(|s| s.nonce == registration.nonce && s.enabled)
+                .and_then(|s| s.native.as_ref())
+                .is_some_and(|token| !token.cancelled.get() && !token.finished.get())
+        })
+        .unwrap_or(false);
+    // This saved value scopes nested Up forwarding independently. No mutable
+    // registry/RefCell borrow is held while calling winit's native procedure.
+    let previous_expected = if message == WM_LBUTTONUP {
+        Some(registration.expected_normal_release.replace(normal_up))
+    } else {
+        None
+    };
+    if message == WM_CAPTURECHANGED && lparam.0 != hwnd.0 as isize {
+        let expected = lparam.0 == 0 && registration.expected_normal_release.replace(false);
+        if !expected {
+            chrome_native_loss(&registration);
+        }
+    } else if message == WM_CANCELMODE {
+        chrome_native_loss(&registration);
+    }
+    if message == WM_NCDESTROY {
+        let _ = chrome_native_update(|ledger| ledger.retire(registration.nonce));
+        if registration.installed.replace(false) {
+            if !registration.remove_attempted.replace(true) {
+                // Destruction is terminal even if this final removal refuses.
+                unsafe {
+                    let _ = RemoveWindowSubclass(
+                        hwnd,
+                        Some(chrome_capture_subclass),
+                        CHROME_CAPTURE_SUBCLASS_ID,
+                    );
+                }
+            }
+            // SAFETY: release only the installed ownership reference. The
+            // callback's temporary strong reference remains live below.
+            unsafe {
+                drop(std::rc::Rc::from_raw(ptr));
+            }
+        }
+    }
+    if CHROME_NATIVE_FAULT.with(std::cell::Cell::get)
+        && CHROME_NATIVE_FAULT_NOTIFIED.with(|notified| !notified.replace(true))
+    {
+        // A reentrant borrow refusal may not have obtained the owner list.
+        // The callback's retained registration still provides a safe wake.
+        registration.wake.notify();
+    }
+    // SAFETY: pass the original message unchanged to the next native owner.
+    let result = unsafe { DefSubclassProc(hwnd, message, wparam, lparam) };
+    if let Some(previous) = previous_expected {
+        registration.expected_normal_release.set(previous);
+    }
+    if let Some(frame) = frame {
+        let _ = chrome_native_update(|ledger| ledger.complete(frame));
+    }
+    result
+}
+
+#[cfg(target_os = "windows")]
+fn remove_chrome_registration(registration: &std::rc::Rc<ChromeNativeRegistration>) {
+    use windows::Win32::UI::Shell::{GetWindowSubclass, RemoveWindowSubclass};
+    let _ = chrome_native_update(|ledger| ledger.retire(registration.nonce));
+    if !registration.installed.get() || registration.remove_attempted.replace(true) {
+        return;
+    }
+    // HWND can be reused. Never remove a replacement installation merely
+    // because the numeric handle and subclass id happen to match.
+    let mut current_data = 0usize;
+    let same_registration = unsafe {
+        GetWindowSubclass(
+            registration.hwnd,
+            Some(chrome_capture_subclass),
+            CHROME_CAPTURE_SUBCLASS_ID,
+            Some(&mut current_data),
+        )
+    }
+    .as_bool()
+        && current_data == std::rc::Rc::as_ptr(registration) as usize;
+    if !same_registration {
+        chrome_native_fault();
+        return; // Keep the disabled raw owner valid; replaced refdata may retain it until process exit.
+    }
+    // SAFETY: all callers run on the window-owning winit UI thread, with a
+    // retained registration reference and confirmed original native identity.
+    let removed = unsafe {
+        RemoveWindowSubclass(
+            registration.hwnd,
+            Some(chrome_capture_subclass),
+            CHROME_CAPTURE_SUBCLASS_ID,
+        )
+    }
+    .as_bool();
+    if removed {
+        if registration.installed.replace(false) {
+            // SAFETY: confirmed removal ends the single raw installed owner.
+            unsafe {
+                drop(std::rc::Rc::from_raw(std::rc::Rc::as_ptr(registration)));
+            }
+        }
+    } else {
+        // Keep the disabled raw owner valid until its destruction callback or process exit. No retry
+        // from scope Drop, no free while native code can still call refdata.
+        tracing::error!(
+            "notification capture observer detach refused; disabled state retained until window destruction"
+        );
+    }
+}
+
+/// Application delivery scope; native callbacks may update tokens, but never
+/// borrow the application's state. Retired-window edges do not release a newer
+/// HUD press. Faulted current edges still forward unrelated pointer input.
+pub(super) struct ChromeAppEdge {
+    retired: bool,
+    #[cfg(target_os = "windows")]
+    previous: Option<bool>,
+}
+
+impl ChromeAppEdge {
+    pub(super) fn begin(window: winit::window::WindowId, down: bool) -> Self {
+        #[cfg(target_os = "windows")]
+        {
+            let result = CHROME_NATIVE_OWNER.with(|owner| {
+                let Ok(mut owner) = owner.try_borrow_mut() else {
+                    return None;
+                };
+                if CHROME_NATIVE_FAULT.with(std::cell::Cell::get) {
+                    owner.ledger.fault();
+                }
+                let permit = owner.ledger.consume(window, down);
+                let retired = owner.ledger.last_retired;
+                let previous = owner.app_edge.replace(permit);
+                Some((retired, previous, owner.ledger.faulted))
+            });
+            if let Some((retired, previous, faulted)) = result {
+                if faulted {
+                    chrome_native_fault();
+                }
+                Self { retired, previous }
+            } else {
+                chrome_native_fault();
+                Self {
+                    retired: false,
+                    previous: None,
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (window, down);
+            Self { retired: false }
+        }
+    }
+
+    pub(super) fn retired(&self) -> bool {
+        self.retired
+    }
+}
+
+impl Drop for ChromeAppEdge {
+    fn drop(&mut self) {
+        #[cfg(target_os = "windows")]
+        CHROME_NATIVE_OWNER.with(|owner| {
+            if let Ok(mut owner) = owner.try_borrow_mut() {
+                owner.app_edge = self.previous;
+            } else {
+                CHROME_NATIVE_FAULT.with(|fault| fault.set(true));
+            }
+        });
+    }
+}
+
+fn native_chrome_permits(window: Option<winit::window::WindowId>) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        if CHROME_NATIVE_FAULT.with(std::cell::Cell::get) {
+            return false;
+        }
+        CHROME_NATIVE_OWNER.with(|owner| {
+            owner.try_borrow().ok().is_some_and(|owner| {
+                owner
+                    .app_edge
+                    .unwrap_or_else(|| window.is_some_and(|window| owner.ledger.permit(window)))
+            })
+        })
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
+        true
+    }
+}
+
+fn native_chrome_take_cancel(window: Option<winit::window::WindowId>) -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let result = CHROME_NATIVE_OWNER.with(|owner| {
+            let Ok(mut owner) = owner.try_borrow_mut() else {
+                return None;
+            };
+            let faulted = CHROME_NATIVE_FAULT.with(std::cell::Cell::get);
+            let fault = faulted && !owner.fault_delivered;
+            owner.fault_delivered |= faulted;
+            Some(window.is_some_and(|window| owner.ledger.take_cancel(window)) || fault)
+        });
+        result.unwrap_or_else(|| {
+            chrome_native_fault();
+            true
+        })
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        let _ = window;
+        false
+    }
+}
+
+fn native_chrome_finish_synthetic(window: Option<winit::window::WindowId>) {
+    #[cfg(target_os = "windows")]
+    if let Some(window) = window {
+        let _ = chrome_native_update(|ledger| ledger.finish_synthetic(window));
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = window;
+}
+
+/// A temporary construction owner; it contains no Window reference/cycle.
+/// Successful publication hands native lifetime to the outer runtime scope.
+pub(super) struct ChromeWindowObserver {
+    #[cfg(target_os = "windows")]
+    registration: Option<std::rc::Rc<ChromeNativeRegistration>>,
+    published: bool,
+}
+
+impl ChromeWindowObserver {
+    pub(super) fn install(
+        window: &Window,
+        wake: tze_hud_scene::render_wake::RenderWakeNotifier,
+    ) -> Self {
+        #[cfg(target_os = "windows")]
+        {
+            use windows::Win32::UI::Shell::SetWindowSubclass;
+            let Some(hwnd) = hwnd_for_window(window) else {
+                chrome_native_fault();
+                return Self {
+                    registration: None,
+                    published: false,
+                };
+            };
+            // Failed native removals retain their installed raw owners even
+            // after ledger debt is empty. Bound those registrations as well.
+            let admitted = CHROME_NATIVE_OWNER.with(|owner| {
+                let Ok(mut owner) = owner.try_borrow_mut() else {
+                    return false;
+                };
+                owner.registrations.retain(|r| r.strong_count() > 0);
+                owner.registrations.len() < ChromeCaptureLedger::MAX_INSTALLATIONS
+            });
+            if !admitted {
+                chrome_native_fault();
+                return Self {
+                    registration: None,
+                    published: false,
+                };
+            }
+            let Some(nonce) = chrome_native_update(|ledger| ledger.install(window.id())).flatten()
+            else {
+                return Self {
+                    registration: None,
+                    published: false,
+                };
+            };
+            let registration = std::rc::Rc::new(ChromeNativeRegistration {
+                hwnd,
+                nonce,
+                installed: std::cell::Cell::new(false),
+                remove_attempted: std::cell::Cell::new(false),
+                expected_normal_release: std::cell::Cell::new(false),
+                wake,
+            });
+            let raw = std::rc::Rc::into_raw(registration.clone());
+            // SAFETY: this UI-thread-created window is live, and raw owns one
+            // stable strong reference for the installed callback's refdata.
+            let installed = unsafe {
+                SetWindowSubclass(
+                    hwnd,
+                    Some(chrome_capture_subclass),
+                    CHROME_CAPTURE_SUBCLASS_ID,
+                    raw as usize,
+                )
+            }
+            .as_bool();
+            if !installed {
+                unsafe {
+                    drop(std::rc::Rc::from_raw(raw));
+                }
+                let _ = chrome_native_update(|ledger| ledger.retire(nonce));
+                chrome_native_fault();
+                return Self {
+                    registration: None,
+                    published: false,
+                };
+            }
+            registration.installed.set(true);
+            let registered = CHROME_NATIVE_OWNER.with(|owner| {
+                if let Ok(mut owner) = owner.try_borrow_mut() {
+                    owner
+                        .registrations
+                        .push(std::rc::Rc::downgrade(&registration));
+                    true
+                } else {
+                    false
+                }
+            });
+            if !registered {
+                chrome_native_fault();
+                remove_chrome_registration(&registration);
+                return Self {
+                    registration: None,
+                    published: false,
+                };
+            }
+            Self {
+                registration: Some(registration),
+                published: false,
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            let _ = (window, wake);
+            Self { published: false }
+        }
+    }
+
+    pub(super) fn publish(mut self) {
+        self.published = true;
+    }
+}
+
+impl Drop for ChromeWindowObserver {
+    fn drop(&mut self) {
+        if !self.published {
+            #[cfg(target_os = "windows")]
+            if let Some(registration) = &self.registration {
+                remove_chrome_registration(registration);
+            }
+        }
+    }
+}
+
+pub(super) fn remove_chrome_observer(window: &Window) {
+    #[cfg(target_os = "windows")]
+    {
+        let hwnd = hwnd_for_window(window);
+        let registrations = CHROME_NATIVE_OWNER.with(|owner| {
+            owner.try_borrow().ok().map(|owner| {
+                owner
+                    .registrations
+                    .iter()
+                    .filter_map(std::rc::Weak::upgrade)
+                    .filter(|registration| Some(registration.hwnd) == hwnd)
+                    .collect::<Vec<_>>()
+            })
+        });
+        if let Some(registrations) = registrations {
+            for registration in registrations {
+                remove_chrome_registration(&registration);
+            }
+        } else {
+            chrome_native_fault();
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    let _ = window;
+}
+
+pub(super) fn disable_all_chrome_observers() {
+    #[cfg(target_os = "windows")]
+    {
+        let registrations = CHROME_NATIVE_OWNER.with(|owner| {
+            owner.try_borrow().ok().map(|owner| {
+                owner
+                    .registrations
+                    .iter()
+                    .filter_map(std::rc::Weak::upgrade)
+                    .collect::<Vec<_>>()
+            })
+        });
+        if let Some(registrations) = registrations {
+            for registration in registrations {
+                let _ = chrome_native_update(|ledger| ledger.retire(registration.nonce));
+            }
+        } else {
+            chrome_native_fault();
+        }
+    }
+}
+
+/// Declared after WinitApp and before run_app: Drop runs before app/window
+/// fields on an EventLoopError or startup unwind. Normal return detaches early.
+pub(super) struct ChromeObserverScope {
+    detached: bool,
+    _ui_thread: std::marker::PhantomData<std::rc::Rc<()>>,
+}
+
+impl ChromeObserverScope {
+    pub(super) fn new() -> Self {
+        Self {
+            detached: false,
+            _ui_thread: std::marker::PhantomData,
+        }
+    }
+    pub(super) fn detach(&mut self) {
+        if self.detached {
+            return;
+        }
+        self.detached = true;
+        #[cfg(target_os = "windows")]
+        {
+            let registrations = CHROME_NATIVE_OWNER.with(|owner| {
+                owner.try_borrow().ok().map(|owner| {
+                    owner
+                        .registrations
+                        .iter()
+                        .filter_map(std::rc::Weak::upgrade)
+                        .collect::<Vec<_>>()
+                })
+            });
+            if let Some(registrations) = registrations {
+                for registration in registrations {
+                    remove_chrome_registration(&registration);
+                }
+            } else {
+                chrome_native_fault();
+            }
+        }
+    }
+}
+
+impl Drop for ChromeObserverScope {
+    fn drop(&mut self) {
+        self.detach();
+    }
+}
+
 #[cfg(any(target_os = "windows", test))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct ForegroundLockTimeoutAttempt {
@@ -1255,6 +2133,95 @@ fn observed_cpu_affinity() -> (u32, String) {
     )
 }
 
+/// Choose two CPUs without broadening the process's existing allowed mask.
+#[cfg(any(target_os = "windows", test))]
+fn quiescent_cpu_mask(allowed: usize) -> Option<usize> {
+    if allowed.count_ones() < 2 {
+        return None;
+    }
+    let first = 1usize << allowed.trailing_zeros();
+    let remaining = allowed & !first;
+    Some(first | (1usize << remaining.trailing_zeros()))
+}
+
+/// Constrain this opt-in measurement before any runtime initialization.
+#[cfg(target_os = "windows")]
+pub(super) fn admit_quiescent_cpu_affinity(emit_path: &std::path::Path) -> std::io::Result<()> {
+    use windows::Win32::System::Threading::{
+        GetCurrentProcess, GetProcessAffinityMask, GetProcessGroupAffinity, SetProcessAffinityMask,
+    };
+
+    // A primary-group mask alone cannot qualify a multi-group process.
+    let mut group_count = 1u16;
+    let mut group = 0u16;
+    let mut process_mask = 0usize;
+    let mut system_mask = 0usize;
+    // SAFETY: all outputs are writable and the group buffer has group_count
+    // entries. The pseudo-handle refers only to this process; no handle is owned.
+    unsafe {
+        GetProcessGroupAffinity(GetCurrentProcess(), &mut group_count, &mut group)
+            .ok()
+            .map_err(|error| {
+                std::io::Error::other(format!("quiescent CPU group query failed: {error}"))
+            })?;
+        if group_count != 1 {
+            return Err(std::io::Error::other(
+                "quiescent measurement requires one CPU group",
+            ));
+        }
+        GetProcessAffinityMask(GetCurrentProcess(), &mut process_mask, &mut system_mask).map_err(
+            |error| std::io::Error::other(format!("quiescent CPU affinity query failed: {error}")),
+        )?;
+    }
+    if process_mask & !system_mask != 0 {
+        return Err(std::io::Error::other(
+            "quiescent process CPU mask is outside the system mask",
+        ));
+    }
+    let selected = quiescent_cpu_mask(process_mask).ok_or_else(|| {
+        std::io::Error::other("quiescent measurement requires at least two already-allowed CPUs")
+    })?;
+    let mut observed = 0usize;
+    // SAFETY: selected is a two-bit subset of the observed process/system mask.
+    // Both read-back pointers are valid; this changes only this process's threads.
+    unsafe {
+        if selected != process_mask {
+            SetProcessAffinityMask(GetCurrentProcess(), selected).map_err(|error| {
+                std::io::Error::other(format!("quiescent CPU affinity setup failed: {error}"))
+            })?;
+        }
+        GetProcessAffinityMask(GetCurrentProcess(), &mut observed, &mut system_mask).map_err(
+            |error| {
+                std::io::Error::other(format!("quiescent CPU affinity read-back failed: {error}"))
+            },
+        )?;
+    }
+    if observed != selected || observed.count_ones() != 2 {
+        return Err(std::io::Error::other(format!(
+            "quiescent CPU affinity read-back mismatch: expected {selected:#x}, got {observed:#x}"
+        )));
+    }
+    tracing::info!(
+        cpu_mask = observed,
+        logical_cpus = observed.count_ones(),
+        "quiescent two-CPU affinity admitted before runtime initialization"
+    );
+    let admission = format!(
+        "quiescent-admission pid={} cpu_mask={observed:#x} logical_cpus={} phase=before_runtime_init",
+        std::process::id(),
+        observed.count_ones()
+    );
+    if let Some(parent) = emit_path.parent()
+        && !parent.as_os_str().is_empty()
+    {
+        std::fs::create_dir_all(parent)?;
+    }
+    let admission_path = emit_path.with_extension("admission.log");
+    std::fs::write(admission_path, format!("{admission}\n"))?;
+    eprintln!("{admission}");
+    Ok(())
+}
+
 #[cfg(target_os = "windows")]
 fn observed_cpu_affinity() -> (u32, String) {
     use windows::Win32::System::Threading::{GetCurrentProcess, GetProcessAffinityMask};
@@ -1297,19 +2264,34 @@ impl WinitApp {
         state.refresh_active_tab_mirror(&scene);
     }
 
-    /// Drop keyboard focus from a tile that lease revocation or expiry removed.
+    /// Drop keyboard focus from a tile that lease revocation, expiry, or a
+    /// portal clear removed. A composer on that tile is blurred and its local
+    /// echo cleared; otherwise the compositor keeps blinking a caret for a
+    /// composer that no longer exists, presenting a frame per blink on an
+    /// otherwise idle HUD (hud-oyo7k).
     /// Non-blocking: skips this frame if the scene lock is busy.
     pub(super) fn clear_focus_on_removed_tile(&mut self) {
-        let Ok(state) = self.state.shared_state.try_lock() else {
-            return;
+        let composer_lost = {
+            let Ok(state) = self.state.shared_state.try_lock() else {
+                return;
+            };
+            let Ok(mut scene) = state.scene.try_lock() else {
+                return;
+            };
+            let Some(tab_id) = scene.active_tab else {
+                return;
+            };
+            let was_active = self.state.input_processor.is_composer_active();
+            self.state.input_processor.clear_focus_on_missing_tile(
+                &mut self.state.focus_manager,
+                &mut scene,
+                tab_id,
+            );
+            was_active && !self.state.input_processor.is_composer_active()
         };
-        let Ok(scene) = state.scene.try_lock() else {
-            return;
-        };
-        if let Some(tab_id) = scene.active_tab {
-            self.state
-                .focus_manager
-                .clear_focus_on_missing_tile(tab_id, &scene);
+        if composer_lost {
+            self.clear_local_composer_echo();
+            self.state.composer_pointer_drag_anchor = None;
         }
     }
 
@@ -1446,17 +2428,82 @@ impl WinitApp {
         }
     }
 
+    /// A winit left-button press or release on `window_id` (`secondary` = the
+    /// secondary overlay index, `None` for the primary).
+    pub(super) fn handle_left_button(
+        &mut self,
+        pressed: bool,
+        window_id: winit::window::WindowId,
+        secondary: Option<usize>,
+    ) {
+        if pressed {
+            if self.state.left_button_down {
+                self.enqueue_pointer_event(PointerEventKind::Up);
+                end_os_mouse_capture();
+            }
+            self.state.left_button_down = true;
+            self.state.press_window = Some(window_id);
+            let window = match secondary {
+                Some(i) => Some(&self.state.secondaries[i].window),
+                None => self.state.window.as_ref(),
+            };
+            if let Some(window) = window {
+                focus_window_for_text_input(window);
+                begin_os_mouse_capture(window);
+            }
+            self.update_overlay_cursor_hittest();
+            self.enqueue_pointer_event(PointerEventKind::Down);
+            return;
+        }
+        // The press already ended: `synthesize_left_release_if_physically_up`
+        // saw the button up before this event arrived and sent the Up. A
+        // second Up would repeat the release (hud-z21e9).
+        if !self.state.left_button_down {
+            return;
+        }
+        // If the context menu is showing, a release on its Reset button
+        // triggers the reset; anywhere else dismisses the menu.
+        self.handle_left_click_with_context_menu();
+        self.enqueue_pointer_event(PointerEventKind::Up);
+        self.state.left_button_down = false;
+        self.state.press_window = None;
+        end_os_mouse_capture();
+        self.update_overlay_cursor_hittest();
+    }
+
+    /// Disarm only runtime chrome. This is not an Up and cannot activate a
+    /// callback or human X; ordinary button/capture ownership remains intact.
+    pub(super) fn cancel_chrome_feedback(&mut self) {
+        self.state.zone_press = None;
+        self.state.input_processor.chrome_feedback_cancel_pending = true;
+    }
+
+    pub(super) fn drain_chrome_capture_cancellation(&mut self) {
+        if native_chrome_take_cancel(self.state.press_window) {
+            self.cancel_chrome_feedback();
+        }
+    }
+
     pub(super) fn synthesize_left_release_if_physically_up(&mut self) -> bool {
+        self.drain_chrome_capture_cancellation();
         if self.state.left_button_down
             && matches!(left_mouse_button_is_physically_down(), Some(false))
         {
-            self.enqueue_pointer_event(PointerEventKind::Up);
-            self.state.left_button_down = false;
-            end_os_mouse_capture();
-            self.update_overlay_cursor_hittest();
+            self.release_left_press();
             return true;
         }
         false
+    }
+
+    /// End the current left press with an Up, as if its release arrived.
+    pub(super) fn release_left_press(&mut self) {
+        self.drain_chrome_capture_cancellation();
+        self.enqueue_pointer_event(PointerEventKind::Up);
+        native_chrome_finish_synthetic(self.state.press_window);
+        self.state.left_button_down = false;
+        self.state.press_window = None;
+        end_os_mouse_capture();
+        self.update_overlay_cursor_hittest();
     }
 
     /// Map a composer-node-local pointer position to a draft byte offset
@@ -1636,6 +2683,7 @@ impl WinitApp {
         // Terminal lease transitions from viewer dismisses (hover close button),
         // published to the owning sessions once the scene lock is released.
         let mut viewer_dismiss_expiries: Vec<tze_hud_scene::types::LeaseExpiry> = Vec::new();
+        let mut pending_action_wakes = Vec::new();
         let drag_released: Option<DragReleasedData>;
         let portal_resize_outcome: Option<PortalResizePointerOutcome>;
         // Flag set when a composer focus-lost transition is detected inside the
@@ -1917,16 +2965,47 @@ impl WinitApp {
                 // stale affordance disappears before the next rendered frame —
                 // satisfying the "local feedback first" doctrine.
                 //
-                // Action interactions are logged for now; callback delivery to
-                // agents is handled separately (see hud-ltgk.7).
+                // Callback and human-X events enter their publisher's retained
+                // MCP input lane; notification tokens are delivered unlocked.
+                //
+                // Button semantics (hud-z21e9): a release activates an
+                // affordance only when the press began on that same
+                // affordance, so a release that lands elsewhere (the cursor
+                // moved, or a press that started off the button) never fires
+                // an action the user did not press.
+                if pointer_event.kind == PointerEventKind::Down {
+                    self.state.zone_press = match &result.hit {
+                        HitResult::ZoneInteraction {
+                            interaction_id,
+                            kind,
+                            ..
+                        } => {
+                            let notification = matches!(
+                                kind,
+                                ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
+                            );
+                            let allowed = self.state.window.is_none()
+                                || native_chrome_permits(self.state.press_window);
+                            (!notification || allowed).then(|| interaction_id.clone())
+                        }
+                        _ => None,
+                    };
+                }
                 if pointer_event.kind == PointerEventKind::Up {
+                    let pressed = self.state.zone_press.take();
                     if let HitResult::ZoneInteraction {
                         ref zone_name,
                         published_at_wall_us,
                         ref publisher_namespace,
                         ref kind,
-                        ..
+                        ref interaction_id,
                     } = result.hit
+                        && pressed.as_deref() == Some(interaction_id.as_str())
+                        && (!matches!(
+                            kind,
+                            ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
+                        ) || self.state.window.is_none()
+                            || native_chrome_permits(self.state.press_window))
                     {
                         match kind {
                             ZoneInteractionKind::Dismiss => {
@@ -1935,6 +3014,15 @@ impl WinitApp {
                                     published_at_wall_us,
                                     publisher_namespace,
                                 );
+                                if removed {
+                                    pending_action_wakes.push(scene.push_pending_action(
+                                        tze_hud_scene::PendingAction {
+                                            publisher_namespace: publisher_namespace.clone(),
+                                            zone_name: zone_name.clone(),
+                                            kind: tze_hud_scene::graph::PendingActionKind::Dismiss,
+                                        },
+                                    ));
+                                }
                                 tracing::debug!(
                                     zone = %zone_name,
                                     published_at_wall_us,
@@ -1945,17 +3033,31 @@ impl WinitApp {
                             }
                             ZoneInteractionKind::Action { callback_id } => {
                                 // Delivered to the publisher via MCP `hud_input`.
-                                scene.push_pending_action(tze_hud_scene::PendingAction {
-                                    publisher_namespace: publisher_namespace.clone(),
-                                    zone_name: zone_name.clone(),
-                                    callback_id: callback_id.clone(),
-                                });
+                                pending_action_wakes.push(scene.push_pending_action(
+                                    tze_hud_scene::PendingAction {
+                                        publisher_namespace: publisher_namespace.clone(),
+                                        zone_name: zone_name.clone(),
+                                        kind: tze_hud_scene::graph::PendingActionKind::Callback(
+                                            callback_id.clone(),
+                                        ),
+                                    },
+                                ));
+                                // An activated notification is answered: dismiss
+                                // it locally, as the × does, so the click has an
+                                // immediate visible result and cannot repeat
+                                // (hud-paslt).
+                                let removed = scene.dismiss_notification(
+                                    zone_name,
+                                    published_at_wall_us,
+                                    publisher_namespace,
+                                );
                                 tracing::debug!(
                                     zone = %zone_name,
                                     published_at_wall_us,
                                     publisher = %publisher_namespace,
                                     %callback_id,
-                                    "zone action: callback queued for agent delivery"
+                                    removed,
+                                    "zone action: callback queued for agent delivery, notification dismissed"
                                 );
                             }
                             ZoneInteractionKind::DragHandle { .. } => {
@@ -2130,6 +3232,16 @@ impl WinitApp {
         } else {
             drag_released = None;
             portal_resize_outcome = None;
+        }
+
+        // The accepted input is committed and both scene/state guards are gone.
+        for notifier in pending_action_wakes {
+            notifier.notify();
+        }
+
+        // A press the scene lock never saw cannot arm a zone affordance.
+        if !pointer_processed && pointer_event.kind == PointerEventKind::Down {
+            self.state.zone_press = None;
         }
 
         if !pointer_processed
@@ -2690,6 +3802,23 @@ mod tests {
 
     #[test]
     fn quiescent_measurement_uses_only_the_post_settle_runtime_counter_delta() {
+        for (allowed, expected) in [
+            (0, None),
+            (1, None),
+            (8, None),
+            (3, Some(3)),
+            (0x50, Some(0x50)),
+            (0xf, Some(3)),
+            (usize::MAX, Some(3)),
+        ] {
+            let selected = quiescent_cpu_mask(allowed);
+            assert_eq!(selected, expected);
+            if let Some(mask) = selected {
+                assert_eq!(mask.count_ones(), 2);
+                assert_eq!(mask & !allowed, 0, "admission must never widen affinity");
+            }
+        }
+
         let now = Instant::now();
         let config = WindowedQuiescentEfficiencyConfig {
             emit_path: std::env::temp_dir().join("quiescent-efficiency-test.json"),

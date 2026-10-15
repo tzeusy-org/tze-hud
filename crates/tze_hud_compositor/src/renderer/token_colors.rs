@@ -747,29 +747,90 @@ pub(super) fn resolve_resize_grip_tokens(token_map: &HashMap<String, String>) ->
 #[derive(Clone, Copy, Debug)]
 pub(super) struct DisconnectBadgeTokens {
     pub(super) color: [f32; 4],
-    /// Badge square extent in physical pixels.
-    pub(super) size_px: f32,
+    /// Width of the accent bar outside the tile's left edge, physical pixels.
+    pub(super) width_px: f32,
+    /// Gap between the tile's left edge and the bar.
+    pub(super) gap_px: f32,
+    /// Background of the label strip along the tile's bottom (linear).
+    pub(super) label_background: [f32; 4],
+    /// Label text color as sRGB u8.
+    pub(super) label_color: [u8; 4],
+    pub(super) label_weight: u16,
+    pub(super) label_size_px: f32,
+    pub(super) label_padding_px: f32,
 }
+
+impl DisconnectBadgeTokens {
+    /// Height of the label strip: one text line plus padding above and below.
+    pub(super) fn label_height_px(&self) -> f32 {
+        self.label_size_px * crate::markdown::MarkdownTokens::default().line_height_multiplier
+            + 2.0 * self.label_padding_px
+    }
+}
+
+/// The label on an orphaned tile's strip.
+pub(super) const DISCONNECT_BADGE_LABEL: &str = "Disconnected";
 
 // Fallbacks MUST stay in sync with `tze_hud_config`'s `CANONICAL_TOKENS`
 // entries `tile.disconnect_badge.*` (the crates are intentionally unlinked).
 const DISCONNECT_BADGE_DEFAULT_COLOR_HEX: &str = "#FFB800";
-const DISCONNECT_BADGE_DEFAULT_SIZE_PX: f32 = 16.0;
+const DISCONNECT_BADGE_DEFAULT_WIDTH_PX: f32 = 4.0;
+const DISCONNECT_BADGE_DEFAULT_GAP_PX: f32 = 3.0;
+const DISCONNECT_BADGE_DEFAULT_LABEL_BACKGROUND_HEX: &str = "#000000B3";
+const DISCONNECT_BADGE_DEFAULT_LABEL_SIZE_PX: f32 = 18.0;
+const DISCONNECT_BADGE_DEFAULT_LABEL_WEIGHT: u16 = 600;
+const DISCONNECT_BADGE_DEFAULT_LABEL_PADDING_PX: f32 = 6.0;
 
-/// Resolve [`DisconnectBadgeTokens`] from `tile.disconnect_badge.{color,size_px}`.
+/// Resolve [`DisconnectBadgeTokens`] from `tile.disconnect_badge.*`.
 pub(super) fn resolve_disconnect_badge_tokens(
     token_map: &HashMap<String, String>,
 ) -> DisconnectBadgeTokens {
     let color = resolve_token_color(token_map, "tile.disconnect_badge.color")
         .or_else(|| parse_hex_color(DISCONNECT_BADGE_DEFAULT_COLOR_HEX))
-        .unwrap_or(Rgba::WHITE)
+        .unwrap_or(Rgba::WHITE);
+    let label_background = resolve_token_color(token_map, "tile.disconnect_badge.label_background")
+        .or_else(|| parse_hex_color(DISCONNECT_BADGE_DEFAULT_LABEL_BACKGROUND_HEX))
+        .unwrap_or(Rgba::BLACK)
         .to_array();
-    let size_px = token_map
-        .get("tile.disconnect_badge.size_px")
-        .and_then(|v| v.parse::<f32>().ok())
-        .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(DISCONNECT_BADGE_DEFAULT_SIZE_PX);
-    DisconnectBadgeTokens { color, size_px }
+    let px = |key: &str, min: f32, default: f32| {
+        token_map
+            .get(key)
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|v| v.is_finite() && *v >= min)
+            .unwrap_or(default)
+    };
+    DisconnectBadgeTokens {
+        color: color.to_array(),
+        width_px: px(
+            "tile.disconnect_badge.width_px",
+            f32::MIN_POSITIVE,
+            DISCONNECT_BADGE_DEFAULT_WIDTH_PX,
+        ),
+        gap_px: px(
+            "tile.disconnect_badge.gap_px",
+            0.0,
+            DISCONNECT_BADGE_DEFAULT_GAP_PX,
+        ),
+        label_background,
+        label_color: crate::text::rgba_to_srgb_u8(
+            resolve_token_color(token_map, "tile.disconnect_badge.label_color").unwrap_or(color),
+        ),
+        label_weight: token_map
+            .get("tile.disconnect_badge.label_weight")
+            .and_then(|v| v.parse::<u16>().ok())
+            .filter(|w| (100..=900).contains(w))
+            .unwrap_or(DISCONNECT_BADGE_DEFAULT_LABEL_WEIGHT),
+        label_size_px: px(
+            "tile.disconnect_badge.label_size_px",
+            1.0,
+            DISCONNECT_BADGE_DEFAULT_LABEL_SIZE_PX,
+        ),
+        label_padding_px: px(
+            "tile.disconnect_badge.label_padding_px",
+            0.0,
+            DISCONNECT_BADGE_DEFAULT_LABEL_PADDING_PX,
+        ),
+    }
 }
 
 /// Resolved visual tokens for the runtime-authored viewer reply echo
@@ -943,6 +1004,10 @@ pub(super) fn resolve_section_gap_px(token_map: &HashMap<String, String>) -> f32
         .unwrap_or(SECTION_GAP_DEFAULT_PX)
 }
 
+/// Bounds of a notification's dismiss ×: top-right, inset from the card's
+/// top and right edges by `NOTIFICATION_ACTION_INSET_PX` (border plus the
+/// text's padding) so the rounded corner never clips it. The single
+/// geometry source for both drawing and the hit region.
 #[inline]
 pub(super) fn notification_dismiss_bounds(
     x: f32,
@@ -950,11 +1015,14 @@ pub(super) fn notification_dismiss_bounds(
     w: f32,
     effective_slot_h: f32,
 ) -> Rect {
+    let top = NOTIFICATION_ACTION_INSET_PX.min((effective_slot_h - 1.0).max(0.0));
     Rect::new(
-        x + w - NOTIFICATION_DISMISS_BUTTON_SIZE_PX,
-        slot_y,
+        x + w - NOTIFICATION_ACTION_INSET_PX - NOTIFICATION_DISMISS_BUTTON_SIZE_PX,
+        slot_y + top,
         NOTIFICATION_DISMISS_BUTTON_SIZE_PX,
-        NOTIFICATION_DISMISS_BUTTON_SIZE_PX.min(effective_slot_h),
+        NOTIFICATION_DISMISS_BUTTON_SIZE_PX
+            .min(effective_slot_h - top)
+            .max(1.0),
     )
 }
 
@@ -965,8 +1033,42 @@ pub(super) const NOTIFICATION_BORDER_WIDTH_PX: f32 = 1.0;
 /// Height of the notification action-button row (bottom strip of the slot).
 pub(super) const NOTIFICATION_ACTION_BUTTON_H_PX: f32 = 22.0;
 
-/// Horizontal inset of the action-button row from the slot edges.
+/// Inset of the action-button row from the card's sides and bottom: the
+/// border plus the padding the text uses, so the rounded backdrop fully
+/// contains the buttons.
 pub(super) const NOTIFICATION_ACTION_INSET_PX: f32 = 9.0;
+
+/// Gap between a notification's text and its action-button row.
+pub(super) const NOTIFICATION_ACTION_ROW_GAP_PX: f32 = 4.0;
+
+/// Height a notification slot reserves below its text for the action row,
+/// so the buttons never draw over the body (hud-mskx5): the gap, the
+/// buttons, and the bottom inset that keeps them inside the card. Zero
+/// without actions, so plain notifications keep their height. Slot height
+/// adds it; text bounds subtract it.
+pub(super) fn notification_action_row_reserve(payload: &NotificationPayload) -> f32 {
+    if payload.actions.is_empty() {
+        0.0
+    } else {
+        NOTIFICATION_ACTION_ROW_GAP_PX
+            + NOTIFICATION_ACTION_BUTTON_H_PX
+            + NOTIFICATION_ACTION_INSET_PX
+    }
+}
+
+/// Fallback gap between stacked notification cards when the
+/// `spacing.padding.medium` token is absent or invalid.
+pub(super) const NOTIFICATION_STACK_GAP_DEFAULT_PX: f32 = 8.0;
+
+/// Vertical gap between stacked notification cards, from the
+/// `spacing.padding.medium` token, so consecutive cards never touch.
+pub(super) fn notification_stack_gap(token_map: &HashMap<String, String>) -> f32 {
+    token_map
+        .get("spacing.padding.medium")
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|v| v.is_finite() && *v >= 0.0)
+        .unwrap_or(NOTIFICATION_STACK_GAP_DEFAULT_PX)
+}
 
 /// Bounds of each notification action button, left to right.
 ///
@@ -985,7 +1087,10 @@ pub(super) fn notification_action_button_bounds(
         return Vec::new();
     }
     let btn_w = (zw - NOTIFICATION_ACTION_INSET_PX * 2.0).max(1.0) / n_actions as f32;
-    let action_y = (slot_y + effective_slot_h - NOTIFICATION_ACTION_BUTTON_H_PX).max(slot_y);
+    let action_y = (slot_y + effective_slot_h
+        - NOTIFICATION_ACTION_INSET_PX
+        - NOTIFICATION_ACTION_BUTTON_H_PX)
+        .max(slot_y);
     (0..n_actions)
         .map(|i| {
             Rect::new(
@@ -1003,23 +1108,45 @@ pub(super) fn notification_action_button_bounds(
 pub(super) struct NotificationActionTokens {
     /// Button fill (linear-light RGBA, as `parse_hex_color` returns).
     pub(super) background: Rgba,
+    /// Fill of a hovered action or dismiss button.
+    pub(super) background_hover: Rgba,
+    /// Fill of a pressed action or dismiss button.
+    pub(super) background_pressed: Rgba,
     pub(super) font_size_px: f32,
     pub(super) font_weight: u16,
 }
 
+impl NotificationActionTokens {
+    /// Fill for a control in `state`: pressed wins over hovered. `None` for
+    /// an idle dismiss button, which draws only its outline.
+    pub(super) fn state_fill(&self, state: ChromeLocalState, idle: Option<Rgba>) -> Option<Rgba> {
+        if state.pressed {
+            Some(self.background_pressed)
+        } else if state.hovered {
+            Some(self.background_hover)
+        } else {
+            idle
+        }
+    }
+}
+
 // Fallbacks MUST stay in sync with `tze_hud_config`'s `CANONICAL_TOKENS`
-// entries `notification.action.background` and
+// entries `notification.action.background*` and
 // `typography.notification.action.*` (the crates are intentionally unlinked).
 const NOTIFICATION_ACTION_DEFAULT_BACKGROUND_HEX: &str = "#FFFFFF26";
+const NOTIFICATION_ACTION_DEFAULT_BACKGROUND_HOVER_HEX: &str = "#FFFFFF4D";
+const NOTIFICATION_ACTION_DEFAULT_BACKGROUND_PRESSED_HEX: &str = "#FFFFFF80";
 const NOTIFICATION_ACTION_DEFAULT_FONT_SIZE_PX: f32 = 12.0;
 const NOTIFICATION_ACTION_DEFAULT_FONT_WEIGHT: u16 = 600;
 
 pub(super) fn resolve_notification_action_tokens(
     token_map: &HashMap<String, String>,
 ) -> NotificationActionTokens {
-    let background = resolve_token_color(token_map, "notification.action.background")
-        .or_else(|| parse_hex_color(NOTIFICATION_ACTION_DEFAULT_BACKGROUND_HEX))
-        .unwrap_or(Rgba::WHITE);
+    let color = |key: &str, default_hex: &str| {
+        resolve_token_color(token_map, key)
+            .or_else(|| parse_hex_color(default_hex))
+            .unwrap_or(Rgba::WHITE)
+    };
     let font_size_px = token_map
         .get("typography.notification.action.font_size_px")
         .and_then(|v| v.trim_end_matches("px").parse::<f32>().ok())
@@ -1031,7 +1158,18 @@ pub(super) fn resolve_notification_action_tokens(
         .and_then(|v| v.parse::<u16>().ok())
         .unwrap_or(NOTIFICATION_ACTION_DEFAULT_FONT_WEIGHT);
     NotificationActionTokens {
-        background,
+        background: color(
+            "notification.action.background",
+            NOTIFICATION_ACTION_DEFAULT_BACKGROUND_HEX,
+        ),
+        background_hover: color(
+            "notification.action.background_hover",
+            NOTIFICATION_ACTION_DEFAULT_BACKGROUND_HOVER_HEX,
+        ),
+        background_pressed: color(
+            "notification.action.background_pressed",
+            NOTIFICATION_ACTION_DEFAULT_BACKGROUND_PRESSED_HEX,
+        ),
         font_size_px,
         font_weight,
     }
@@ -1046,7 +1184,6 @@ pub(super) struct TileCloseTokens {
     pub(super) background: Rgba,
     /// Color of the x mark (linear-light RGBA).
     pub(super) glyph_color: Rgba,
-    pub(super) glyph_stroke_px: f32,
 }
 
 // Fallbacks MUST stay in sync with `tze_hud_config`'s `CANONICAL_TOKENS`
@@ -1055,7 +1192,6 @@ const TILE_CLOSE_DEFAULT_SIZE_PX: f32 = 22.0;
 const TILE_CLOSE_DEFAULT_MARGIN_PX: f32 = 6.0;
 const TILE_CLOSE_DEFAULT_BACKGROUND_HEX: &str = "#000000B3";
 const TILE_CLOSE_DEFAULT_GLYPH_HEX: &str = "#FFFFFF";
-const TILE_CLOSE_DEFAULT_GLYPH_STROKE_PX: f32 = 2.0;
 
 pub(super) fn resolve_tile_close_tokens(token_map: &HashMap<String, String>) -> TileCloseTokens {
     let px = |key: &str, default: f32, min: f32| {
@@ -1078,11 +1214,6 @@ pub(super) fn resolve_tile_close_tokens(token_map: &HashMap<String, String>) -> 
         glyph_color: resolve_token_color(token_map, "tile.close_button.glyph_color")
             .or_else(|| parse_hex_color(TILE_CLOSE_DEFAULT_GLYPH_HEX))
             .unwrap_or(Rgba::WHITE),
-        glyph_stroke_px: px(
-            "tile.close_button.glyph_stroke_px",
-            TILE_CLOSE_DEFAULT_GLYPH_STROKE_PX,
-            0.5,
-        ),
     }
 }
 
@@ -1106,33 +1237,9 @@ pub(super) fn tile_close_button_bounds(tile: Rect, tokens: &TileCloseTokens) -> 
     )
 }
 
-/// Squares forming the x mark centered in `button`: two diagonals of
-/// stroke-sized squares spanning the central 40% of the button.
-pub(super) fn tile_close_glyph_rects(button: Rect, tokens: &TileCloseTokens) -> Vec<Rect> {
-    let stroke = tokens.glyph_stroke_px.min(button.width).max(0.5);
-    let span = (button.width * 0.4).max(stroke);
-    let steps = ((span / stroke).round() as usize).max(2);
-    let origin_x = button.x + (button.width - span) / 2.0;
-    let origin_y = button.y + (button.height - span) / 2.0;
-    let mut rects = Vec::with_capacity(steps * 2);
-    for i in 0..steps {
-        let t = i as f32 / (steps - 1) as f32;
-        let along = t * (span - stroke);
-        rects.push(Rect::new(
-            origin_x + along,
-            origin_y + along,
-            stroke,
-            stroke,
-        ));
-        rects.push(Rect::new(
-            origin_x + along,
-            origin_y + (span - stroke) - along,
-            stroke,
-            stroke,
-        ));
-    }
-    rects
-}
+/// The close button's x mark, drawn as text so the diagonals are
+/// antialiased like the label glyphs.
+pub(super) const TILE_CLOSE_GLYPH: &str = "\u{d7}";
 
 /// Resolved visual tokens for the local composer echo overlay.
 ///

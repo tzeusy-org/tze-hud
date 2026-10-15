@@ -18,12 +18,16 @@ use crate::text::TextItem;
 use super::icon::parse_notification_icon;
 use super::tile_render::node_uses_display_tile_scroll;
 use super::token_colors::{
+    DISCONNECT_BADGE_LABEL, TILE_CLOSE_GLYPH, resolve_disconnect_badge_tokens,
+    resolve_tile_close_tokens, tile_close_button_bounds,
+};
+use super::token_colors::{
     ICON_SIZE_PX, ICON_TEXT_GAP_PX, NOTIFICATION_BODY_SCALE, NOTIFICATION_DISMISS_BUTTON_SIZE_PX,
     NOTIFICATION_DISMISS_FONT_SIZE_PX, NOTIFICATION_DISMISS_FONT_WEIGHT,
     NOTIFICATION_DISMISS_GAP_PX, NOTIFICATION_ICON_GAP_PX, NOTIFICATION_ICON_SIZE_PX,
     NOTIFICATION_INTER_LINE_GAP, NOTIFICATION_TITLE_WEIGHT, is_alert_banner_zone,
-    notification_action_button_bounds, notification_dismiss_bounds,
-    resolve_composer_overlay_tokens, resolve_jump_to_latest_tokens,
+    notification_action_button_bounds, notification_action_row_reserve,
+    notification_dismiss_bounds, resolve_composer_overlay_tokens, resolve_jump_to_latest_tokens,
     resolve_notification_action_tokens, resolve_scroll_indicator_tokens,
     resolve_transcript_max_measure_px, resolve_viewer_echo_tokens,
 };
@@ -43,6 +47,10 @@ const DEFAULT_LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
 /// screen (hud-dat3x).  Chosen well below one 8-bit alpha step (1/255 ≈ 0.0039)
 /// so any perceptible fraction still blends.
 const TILE_TEXT_OPACITY_EPSILON: f32 = 1e-4;
+
+/// Font size of the close button's x mark relative to the button: a `×` fills
+/// about half its em, so the mark spans roughly 40% of the button.
+const TILE_CLOSE_GLYPH_SCALE: f32 = 0.9;
 
 // ─── Text-collection impl block ───────────────────────────────────────────────
 
@@ -609,8 +617,14 @@ impl super::Compositor {
                                 let dismiss_reserved_w = if is_alert_banner_zone(zone_name) {
                                     0.0
                                 } else {
+                                    // The × sits NOTIFICATION_ACTION_INSET_PX in
+                                    // from the right edge; text keeps its own
+                                    // right inset_h, so reserve the difference.
                                     NOTIFICATION_DISMISS_BUTTON_SIZE_PX
                                         + NOTIFICATION_DISMISS_GAP_PX
+                                        + (super::token_colors::NOTIFICATION_ACTION_INSET_PX
+                                            - inset_h)
+                                            .max(0.0)
                                 };
                                 // Text x-offset respects icon reservation (from icon texture pipeline).
                                 let text_x = zx + inset_h + icon_width_reserved;
@@ -621,6 +635,10 @@ impl super::Compositor {
                                     - dismiss_reserved_w)
                                     .max(1.0);
 
+                                // Text stops above the action row (hud-mskx5).
+                                let text_slot_h = (effective_slot_h
+                                    - notification_action_row_reserve(payload))
+                                .max(1.0);
                                 if payload.title.is_empty() {
                                     // ── Single-line rendering (backward-compatible) ──
                                     // Font weight: policy explicit > 400 default
@@ -630,7 +648,7 @@ impl super::Compositor {
                                         text_x,
                                         slot_y + inset_v,
                                         text_w,
-                                        (effective_slot_h - inset_v * 2.0).max(1.0),
+                                        (text_slot_h - inset_v * 2.0).max(1.0),
                                         font_size_px,
                                         font_family,
                                         font_weight,
@@ -673,7 +691,7 @@ impl super::Compositor {
                                         content_top + title_line_h + NOTIFICATION_INTER_LINE_GAP;
                                     // Remaining slot height available for body (down to inset bottom)
                                     let body_bounds_h =
-                                        ((slot_y + effective_slot_h - inset_v) - body_top).max(1.0);
+                                        ((slot_y + text_slot_h - inset_v) - body_top).max(1.0);
                                     items.push(Self::make_zone_text_item(
                                         Arc::from(payload.text.as_str()),
                                         text_x,
@@ -1144,6 +1162,79 @@ impl super::Compositor {
                     items.push(badge);
                 }
             }
+        }
+
+        // ── "Disconnected" label on orphaned tiles (invariant 4) ─────────────
+        // Text for the strip `append_disconnect_badge_vertices` draws along the
+        // tile's bottom edge.
+        let badge = resolve_disconnect_badge_tokens(&self.token_map);
+        for tile in self.policy_visible_tiles(scene) {
+            if tile.visual_hint != tze_hud_scene::lease::TileVisualHint::DisconnectionBadge {
+                continue;
+            }
+            let b = tile.bounds;
+            let strip_h = badge.label_height_px().min(b.height);
+            let strip_y = b.y + b.height - strip_h;
+            let width = (b.width - 2.0 * badge.label_padding_px).max(1.0);
+            let height = (strip_h - 2.0 * badge.label_padding_px).max(1.0);
+            items.push(TextItem {
+                text: Arc::from(DISCONNECT_BADGE_LABEL),
+                pixel_x: b.x + badge.label_padding_px,
+                pixel_y: strip_y + badge.label_padding_px,
+                bounds_width: width,
+                bounds_height: height,
+                clip_pixel_x: b.x,
+                clip_pixel_y: strip_y,
+                clip_bounds_width: b.width,
+                clip_bounds_height: strip_h,
+                font_size_px: badge.label_size_px,
+                font_family: FontFamily::SystemSansSerif,
+                font_weight: badge.label_weight,
+                color: badge.label_color,
+                alignment: TextAlign::Start,
+                overflow: TextOverflow::Ellipsis,
+                outline_color: None,
+                outline_width: None,
+                opacity: self.tile_effective_opacity(tile, scene),
+                color_runs: Box::new([]),
+                styled_runs: Box::new([]),
+                line_height_multiplier: crate::markdown::MarkdownTokens::default()
+                    .line_height_multiplier,
+                viewport: crate::overflow::TruncationViewport::HeadAnchored,
+            });
+        }
+
+        // ── Close button x mark on the hovered tile ──────────────────────────
+        // Text over the fill `append_tile_close_button_vertices` draws, so the
+        // diagonals are antialiased.
+        if let Some(tile) = self.tile_close_target(scene) {
+            let tokens = resolve_tile_close_tokens(&self.token_map);
+            let button = tile_close_button_bounds(tile.bounds, &tokens);
+            let font_size_px = button.height * TILE_CLOSE_GLYPH_SCALE;
+            items.push(TextItem {
+                text: Arc::from(TILE_CLOSE_GLYPH),
+                pixel_x: button.x,
+                pixel_y: button.y + (button.height - font_size_px) / 2.0,
+                bounds_width: button.width,
+                bounds_height: font_size_px,
+                clip_pixel_x: button.x,
+                clip_pixel_y: button.y,
+                clip_bounds_width: button.width,
+                clip_bounds_height: button.height,
+                font_size_px,
+                font_family: FontFamily::SystemSansSerif,
+                font_weight: 400,
+                color: crate::text::rgba_to_srgb_u8(tokens.glyph_color),
+                alignment: TextAlign::Center,
+                overflow: TextOverflow::Clip,
+                outline_color: None,
+                outline_width: None,
+                opacity: self.tile_effective_opacity(tile, scene),
+                color_runs: Box::new([]),
+                styled_runs: Box::new([]),
+                line_height_multiplier: 1.0,
+                viewport: crate::overflow::TruncationViewport::HeadAnchored,
+            });
         }
 
         // ── Viewer reply echo (hud-nx7yq.3) ──────────────────────────────────

@@ -714,6 +714,7 @@ impl super::WinitApp {
                 // Already closed (unplugged, or reported twice).
                 continue;
             };
+            super::lifecycle::remove_chrome_observer(&self.state.secondaries[i].window);
             self.state.secondaries.remove(i);
             lost_any = true;
             let attempts = self
@@ -752,6 +753,7 @@ impl super::WinitApp {
             return;
         }
         for i in remove {
+            super::lifecycle::remove_chrome_observer(&self.state.secondaries[i].window);
             let gone = self.state.secondaries.remove(i);
             tracing::info!(display = %gone.spec.name, "closing secondary overlay");
         }
@@ -915,6 +917,10 @@ impl super::WinitApp {
             .ok_or("no surface factory (compositor not windowed)")?;
         let attrs = overlay_window_attributes(self.state.config.window.title.clone(), &spec);
         let window = Arc::new(event_loop.create_window(attrs).map_err(|e| e.to_string())?);
+        let chrome_observer = super::lifecycle::ChromeWindowObserver::install(
+            &window,
+            self.state.wake.main_work_notifier(),
+        );
         if let Err(error) = window.set_cursor_hittest(false) {
             tracing::warn!(%error, "secondary overlay: set_cursor_hittest(false) failed");
         }
@@ -925,6 +931,7 @@ impl super::WinitApp {
             (spec.width, spec.height)
         };
         let surface = factory.create(Arc::clone(&window), width, height)?;
+        chrome_observer.publish();
         Ok(SecondaryDisplay {
             spec,
             window,

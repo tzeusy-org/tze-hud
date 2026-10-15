@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bind an explicitly guarded Cargo target to one frozen materialized checkout.
+"""Bind an explicitly guarded Cargo target to one checkout and its current frozen source.
 
 This is a cooperative source policy, not a replacement for Cargo fingerprints
 or the caller's Cargo/GPU resource lease. See docs/development/source-freshness.md.
@@ -26,7 +26,7 @@ CONTROL = "TZE_HUD_SHARED_TARGET_GUARD"
 REFUSED = 86
 MARKER = ".tze-hud-source-binding.json"
 LOCK = ".tze-hud-source-binding.lock"
-SCHEMA = 1
+SCHEMA = 2
 BEADS_ADMIN = {
     ".beads/.gitignore", ".beads/README.md", ".beads/config.yaml",
     ".beads/metadata.json",
@@ -365,10 +365,13 @@ def snapshot(root: Path, common: Path, compiler_identity: str) -> dict[str, str]
     config = configuration(root, common, manifests)
     if git("rev-parse", "--verify", "HEAD^{commit}", cwd=root).decode().strip() != head:
         raise Refusal("head-changed-during-snapshot")
+    guard = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
     return {
         "head": head,
-        "identity": digest([str(root), str(common), head, source, config, compiler_identity,
-                            hashlib.sha256(Path(__file__).read_bytes()).hexdigest()]),
+        "identity": digest([str(root), str(common), head, source, config, compiler_identity, guard]),
+        # One target per checkout: Cargo fingerprints are sound for successive
+        # sources in one path; cross-checkout reuse is what this guard refuses.
+        "checkout": digest([str(root), str(common), compiler_identity, guard]),
     }
 
 
@@ -428,12 +431,13 @@ def read_binding(target: Path) -> dict | None:
         if len(raw) > 4096:
             raise Refusal("invalid-binding")
         value = json.loads(raw)
-        if (not isinstance(value, dict) or set(value) != {"schema", "head", "identity", "valid"}
+        if (not isinstance(value, dict) or set(value) != {"schema", "head", "identity", "checkout", "valid"}
                 or type(value["schema"]) is not int or value["schema"] != SCHEMA
                 or not isinstance(value["valid"], bool) or not isinstance(value["head"], str)
-                or not isinstance(value["identity"], str)
+                or not isinstance(value["identity"], str) or not isinstance(value["checkout"], str)
                 or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", value["head"])
-                or not re.fullmatch(r"[0-9a-f]{64}", value["identity"])):
+                or not re.fullmatch(r"[0-9a-f]{64}", value["identity"])
+                or not re.fullmatch(r"[0-9a-f]{64}", value["checkout"])):
             raise Refusal("invalid-binding")
         return value
     if target.exists() and any(target.iterdir()):
@@ -532,14 +536,14 @@ def main() -> int:
         if snapshot(root, common, compiler_identity) != source:
             raise Refusal("input-changed-during-snapshot")
         binding = read_binding(target)
-        if binding and (not binding["valid"] or any(binding[k] != source[k] for k in source)):
-            raise Refusal("target-source-mismatch")
+        if binding and binding["checkout"] != source["checkout"]:
+            raise Refusal("foreign-checkout-target")
         # Unknown nonempty targets were refused before any local metadata write.
         target.mkdir(parents=True, exist_ok=True)
         with target_lock(target):
             binding = read_binding(target) if binding is not None else None
-            if binding and (not binding["valid"] or any(binding[k] != source[k] for k in source)):
-                raise Refusal("target-source-mismatch")
+            if binding and binding["checkout"] != source["checkout"]:
+                raise Refusal("foreign-checkout-target")
             if binding is None and any(p.name != LOCK for p in target.iterdir()):
                 raise Refusal("unbound-nonempty-target")
             # Invalid before spawn: termination cannot leave a certified target.

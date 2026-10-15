@@ -139,18 +139,18 @@ async fn zone_hit_dismiss_region_at_top_right_of_slot() {
     );
     let region = &scene.overlay.zone_hit_regions[0];
 
-    // Dismiss should be at the top-right of the slot.
+    // Dismiss should be at the top-right of the slot, inset 9 px.
     // Zone geometry: zx = 1920*0.75 = 1440, zw = 1920*0.24 = 460.8.
-    // Dismiss x = zx + zw - 20 = 1880.8.
-    let expected_x = sw * 0.75 + sw * 0.24 - 20.0;
+    // Dismiss x = zx + zw - 9 - 20 = 1871.8.
+    let expected_x = sw * 0.75 + sw * 0.24 - 9.0 - 20.0;
     assert!(
         (region.bounds.x - expected_x).abs() < 1.0,
         "dismiss x must be at top-right (expected≈{expected_x:.1}, got {:.1})",
         region.bounds.x
     );
     assert!(
-        region.bounds.y < 1.0,
-        "dismiss y must be near top of slot (expected≈0, got {:.1})",
+        (region.bounds.y - 9.0).abs() < 1.0,
+        "dismiss y must be inset from the slot top (expected≈9, got {:.1})",
         region.bounds.y
     );
 }
@@ -712,7 +712,7 @@ async fn drag_handle_hit_test_wins_on_passthrough_tile() {
     }
 }
 
-/// Stale entries in `drag_handle_states` must be pruned when the
+/// Stale entries in `chrome_states` must be pruned when the
 /// corresponding element is removed from the scene.
 ///
 /// Verifies that the per-frame drag-handle population retains only the keys
@@ -720,7 +720,7 @@ async fn drag_handle_hit_test_wins_on_passthrough_tile() {
 /// the zero-allocation `iter().any()` retain used after [hud-tdtr7] must
 /// have identical semantics to the previous `HashSet`-based approach.
 #[tokio::test]
-async fn drag_handle_states_stale_entries_pruned_on_repopulate() {
+async fn chrome_states_stale_entries_pruned_on_repopulate() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
 
     let mut scene = SceneGraph::new(1920.0, 1080.0);
@@ -747,19 +747,19 @@ async fn drag_handle_states_stale_entries_pruned_on_repopulate() {
         .interaction_id
         .clone();
 
-    // Seed drag_handle_states: one live entry + one stale phantom that
+    // Seed chrome_states: one live entry + one stale phantom that
     // never had a corresponding hit region.
     scene
         .overlay
-        .drag_handle_states
+        .chrome_states
         .entry(live_id.clone())
         .or_default()
         .hovered = true;
-    scene.overlay.drag_handle_states.insert(
+    scene.overlay.chrome_states.insert(
         "drag-handle:tile:ghost-never-existed".to_string(),
         Default::default(),
     );
-    assert_eq!(scene.overlay.drag_handle_states.len(), 2);
+    assert_eq!(scene.overlay.chrome_states.len(), 2);
 
     // Remove the tile so it no longer produces a drag handle.
     scene.delete_tile(tile_id, "agent-a").unwrap();
@@ -772,8 +772,8 @@ async fn drag_handle_states_stale_entries_pruned_on_repopulate() {
         "no hit regions expected after tile removal"
     );
     assert!(
-        scene.overlay.drag_handle_states.is_empty(),
-        "stale drag_handle_states must be pruned by drag-handle repopulation; \
+        scene.overlay.chrome_states.is_empty(),
+        "stale chrome_states must be pruned by drag-handle repopulation; \
              previously-live id={live_id:?} and phantom must both be removed"
     );
 }
@@ -810,7 +810,7 @@ async fn drag_handle_opacity_switches_to_active_on_hover_state() {
 
     scene
         .overlay
-        .drag_handle_states
+        .chrome_states
         .entry(handle.interaction_id.clone())
         .or_default()
         .hovered = true;
@@ -1124,6 +1124,13 @@ async fn tile_close_button_draw_and_hit_region_share_token_geometry() {
     // No hover: nothing drawn, nothing to hit.
     let mut resting: Vec<crate::pipeline::RectVertex> = Vec::new();
     compositor.append_tile_close_button_vertices(&scene, &mut resting, 1280.0, 720.0);
+    assert!(
+        !compositor
+            .collect_text_items(&scene, 1280.0, 720.0)
+            .iter()
+            .any(|item| &*item.text == crate::renderer::token_colors::TILE_CLOSE_GLYPH),
+        "no x mark without hover"
+    );
     compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
     assert!(resting.is_empty());
     assert!(scene.overlay.zone_hit_regions.is_empty());
@@ -1154,6 +1161,20 @@ async fn tile_close_button_draw_and_hit_region_share_token_geometry() {
             .zip(&quad)
             .all(|(a, q)| a.position == q.position && a.color == q.color)),
         "token-filled quad must be drawn at the hit region bounds"
+    );
+    let glyph = compositor
+        .collect_text_items(&scene, 1280.0, 720.0)
+        .into_iter()
+        .find(|item| &*item.text == crate::renderer::token_colors::TILE_CLOSE_GLYPH)
+        .expect("hovered tile's close button draws its x mark as text");
+    assert_eq!(
+        (
+            glyph.clip_pixel_x,
+            glyph.clip_pixel_y,
+            glyph.clip_bounds_width
+        ),
+        (b.x, b.y, b.width),
+        "x mark is clipped to the button"
     );
 
     let hit = scene.hit_test(b.x + b.width / 2.0, b.y + b.height / 2.0);

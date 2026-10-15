@@ -19,8 +19,9 @@ tonic = { workspace = true }
 
 [dev-dependencies]
 # dev-mode: tests/budget_assertions.rs boots with config_toml: None (unrestricted
-# agents). The released binary does not carry it.
-tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0", features = ["dev-mode"] }
+# agents). test-harness lets unit fixtures adopt continuously owned listeners.
+# The released binary carries neither feature.
+tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0", features = ["dev-mode", "test-harness"] }
 tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0", features = ["test-support"] }
 tze_hud_compositor = { path = "../../crates/tze_hud_compositor", version = "0.1.0" }
 tze_hud_input = { path = "../../crates/tze_hud_input", version = "0.1.0" }

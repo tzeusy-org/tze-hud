@@ -35,11 +35,13 @@ pub struct RuntimeOverlayState {
     /// and are never serialized or exposed over agent-facing scene mutations.
     #[serde(skip, default)]
     pub drag_handle_hit_regions: Vec<DragHandleHitRegion>,
-    /// Local-first hover/press state keyed by drag-handle interaction id.
+    /// Local-first hover/press state keyed by chrome interaction id (drag
+    /// handles and notification dismiss/action buttons). Holds only
+    /// non-default states; the compositor prunes ids whose region is gone.
     ///
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
-    pub drag_handle_states: HashMap<String, DragHandleLocalState>,
+    pub chrome_states: HashMap<String, ChromeLocalState>,
     /// Set of element_ids that are currently being actively dragged.
     ///
     /// Written by the input processor on DragActivated and cleared on

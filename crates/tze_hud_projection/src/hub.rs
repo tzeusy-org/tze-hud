@@ -12,6 +12,8 @@
 //! portal.
 
 use std::collections::{BTreeMap, VecDeque};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::{Deserialize, Serialize};
 
@@ -473,6 +475,8 @@ pub struct Portal {
     /// Changed since the last render.
     pub dirty: bool,
     pub last_render_us: Option<u64>,
+    /// Accepted reply or truthful rejection feedback bypasses pacing once.
+    local_feedback_pending: bool,
     /// Reclaimed by the runtime (viewer dismiss, idle reclaim): a marker so
     /// `hud_clear` stays an ok no-op and `hud_hold` is `NotHeld`. The next
     /// publish attaches a fresh portal.
@@ -496,6 +500,7 @@ impl Portal {
             degraded_since_us: None,
             dirty: true,
             last_render_us: None,
+            local_feedback_pending: false,
             reclaimed_by_runtime: false,
             next_seq: 1,
         }
@@ -643,11 +648,20 @@ pub struct Deadline {
     pub kind: DeadlineKind,
 }
 
+#[derive(Debug)]
+struct ActiveInputPoll {
+    expires_us: u64,
+    active: Arc<AtomicBool>,
+}
+
 #[derive(Debug, Default)]
 pub struct PortalHub {
     portals: BTreeMap<PortalKey, Portal>,
     next_incarnation: u64,
     next_input: u64,
+    // Finite request ownership is independent of whether a portal exists yet.
+    active_input_polls: BTreeMap<String, BTreeMap<u64, ActiveInputPoll>>,
+    next_input_poll: u64,
     limits: PortalLimits,
 }
 
@@ -665,12 +679,49 @@ impl PortalHub {
             portals: BTreeMap::new(),
             next_incarnation: 0,
             next_input: 0,
+            active_input_polls: BTreeMap::new(),
+            next_input_poll: 0,
             limits,
         }
     }
 
     pub fn limits(&self) -> &PortalLimits {
         &self.limits
+    }
+
+    /// A finite active poll defers only its agent's idle degradation. It does
+    /// not renew last_seen, extend input expiry or override an upstream loss.
+    pub fn begin_input_poll(
+        &mut self,
+        agent: &str,
+        remaining_us: u64,
+        now_us: u64,
+        active: Arc<AtomicBool>,
+    ) -> Result<Option<u64>, PortalError> {
+        let expires_us = now_us.saturating_add(remaining_us);
+        if remaining_us == 0 || expires_us <= now_us {
+            return Ok(None);
+        }
+        self.next_input_poll = self
+            .next_input_poll
+            .checked_add(1)
+            .ok_or(PortalError::QueueFull)?;
+        let request = self.next_input_poll;
+        self.active_input_polls
+            .entry(agent.to_string())
+            .or_default()
+            .insert(request, ActiveInputPoll { expires_us, active });
+        Ok(Some(request))
+    }
+
+    /// Release just this request. Cancellation is not an agent heartbeat.
+    pub fn end_input_poll(&mut self, agent: &str, request: u64) {
+        if let Some(polls) = self.active_input_polls.get_mut(agent) {
+            polls.remove(&request);
+            if polls.is_empty() {
+                self.active_input_polls.remove(agent);
+            }
+        }
     }
 
     /// A live portal (not reclaimed).
@@ -917,8 +968,23 @@ impl PortalHub {
         });
         let start = newest_fit_start(&portal.replies, limits.visible_bytes);
         portal.replies.drain(..start);
+        portal.local_feedback_pending = true;
         portal.dirty = true;
         Ok(id)
+    }
+
+    /// Paint local rejection feedback only for the attachment that supplied it.
+    /// This adds no accepted input, transcript unit or agent notification.
+    pub fn mark_local_feedback(&mut self, key: &PortalKey, incarnation: u64) -> bool {
+        let Ok(portal) = self.live_mut(key) else {
+            return false;
+        };
+        if portal.incarnation != incarnation {
+            return false;
+        }
+        portal.local_feedback_pending = true;
+        portal.dirty = true;
+        true
     }
 
     /// Test support: queue input with a fixed id, without an echo.
@@ -970,6 +1036,10 @@ impl PortalHub {
 
     /// Expire input, degrade idle portals, and reclaim long-degraded ones.
     pub fn sweep(&mut self, now_us: u64) -> Vec<Transition> {
+        self.active_input_polls.retain(|_, polls| {
+            polls.retain(|_, poll| poll.active.load(Ordering::Acquire) && poll.expires_us > now_us);
+            !polls.is_empty()
+        });
         let limits = &self.limits;
         let mut transitions = Vec::new();
         for (key, portal) in self.portals.iter_mut().filter(|(_, p)| p.live()) {
@@ -979,7 +1049,16 @@ impl PortalHub {
                 portal.dirty = true;
             }
             match portal.degraded_since_us {
-                None if portal.degrade_at(limits).is_some_and(|at| now_us >= at) => {
+                None if !self
+                    .active_input_polls
+                    .get(&key.agent)
+                    .is_some_and(|polls| {
+                        polls.values().any(|poll| {
+                            poll.active.load(Ordering::Acquire) && poll.expires_us > now_us
+                        })
+                    })
+                    && portal.degrade_at(limits).is_some_and(|at| now_us >= at) =>
+                {
                     portal.degraded_since_us = Some(now_us);
                     portal.status = PortalStatus::Degraded;
                     portal.dirty = true;
@@ -995,8 +1074,8 @@ impl PortalHub {
         transitions
     }
 
-    /// Portals with changes whose render interval has passed. Clears their
-    /// dirty flag and unread count.
+    /// Portals with changes whose render interval has passed, or an accepted
+    /// local reply to show immediately. Clears dirty, local urgency and unread.
     pub fn take_due(&mut self, now_us: u64) -> Vec<Due> {
         let interval = self.limits.render_interval_us;
         self.portals
@@ -1004,11 +1083,13 @@ impl PortalHub {
             .filter(|(_, p)| {
                 p.live()
                     && p.dirty
-                    && p.last_render_us
-                        .is_none_or(|t| now_us >= t.saturating_add(interval))
+                    && (p.local_feedback_pending
+                        || p.last_render_us
+                            .is_none_or(|t| now_us >= t.saturating_add(interval)))
             })
             .map(|(key, portal)| {
                 portal.dirty = false;
+                portal.local_feedback_pending = false;
                 portal.last_render_us = Some(now_us);
                 Due {
                     key: key.clone(),
@@ -1022,16 +1103,31 @@ impl PortalHub {
     pub fn next_deadline(&self) -> Option<Deadline> {
         let interval = self.limits.render_interval_us;
         self.portals
-            .values()
-            .filter(|p| p.live())
-            .flat_map(|p| {
+            .iter()
+            .filter(|(_, p)| p.live())
+            .flat_map(|(key, p)| {
                 let render = p.dirty.then(|| Deadline {
-                    at_us: p.last_render_us.map_or(0, |t| t.saturating_add(interval)),
+                    at_us: if p.local_feedback_pending {
+                        0
+                    } else {
+                        p.last_render_us.map_or(0, |t| t.saturating_add(interval))
+                    },
                     kind: DeadlineKind::Render,
                 });
                 let liveness = match p.degraded_since_us {
                     Some(since) => Some(since.saturating_add(self.limits.reclaim_after_us)),
-                    None => p.degrade_at(&self.limits),
+                    None => p.degrade_at(&self.limits).map(|at| {
+                        self.active_input_polls
+                            .get(&key.agent)
+                            .and_then(|polls| {
+                                polls
+                                    .values()
+                                    .filter(|poll| poll.active.load(Ordering::Acquire))
+                                    .map(|poll| poll.expires_us)
+                                    .max()
+                            })
+                            .map_or(at, |expires_us| at.max(expires_us))
+                    }),
                 }
                 .map(|at_us| Deadline {
                     at_us,
@@ -1504,6 +1600,44 @@ mod tests {
         );
         assert_eq!(texts(&hub, &other), ["other agent"]);
         assert!(hub.take_due(300_002).is_empty());
+
+        // An admitted local reply must render inside the ordinary 100 ms slot.
+        // Timestamps use the Hub's microsecond clock, not elapsed wall time.
+        let mut hub = PortalHub::default();
+        let k = key("a", "reply");
+        hub.publish(&k, text("ready"), 0).unwrap();
+        assert_eq!(
+            hub.take_due(0),
+            [Due {
+                key: k.clone(),
+                unread: 1
+            }]
+        );
+        hub.submit_reply(&k, "please continue".into(), 1).unwrap();
+        let deadline = hub.next_deadline().expect("the reply needs local feedback");
+        assert_eq!(deadline.kind, DeadlineKind::Render);
+        assert!(deadline.at_us <= 1, "an admitted reply is due immediately");
+        assert_eq!(
+            hub.take_due(1),
+            [Due {
+                key: k.clone(),
+                unread: 0
+            }]
+        );
+        assert_eq!(hub.take_due(2), [], "local urgency is consumed once");
+
+        hub.publish(&k, text("later output"), 2).unwrap();
+        assert_eq!(hub.take_due(2), [], "output alone does not become urgent");
+        assert_eq!(hub.take_due(100_000), [], "output keeps the 100 ms pace");
+        assert_eq!(
+            hub.next_deadline(),
+            Some(Deadline {
+                at_us: 100_001,
+                kind: DeadlineKind::Render
+            })
+        );
+        assert_eq!(hub.take_due(100_001), [Due { key: k, unread: 1 }]);
+        assert_eq!(hub.take_due(300_001), [], "no idle feedback frame");
     }
 
     // Relocated from the existing cooperative adapter flow. Hub publishing is

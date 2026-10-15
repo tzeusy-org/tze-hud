@@ -326,10 +326,14 @@ pub struct InputProcessor {
     current_hover: Option<(SceneId, SceneId)>, // (tile_id, node_id)
     /// Currently pressed node.
     current_press: Option<(SceneId, SceneId)>, // (tile_id, node_id)
-    /// Currently hovered chrome drag handle interaction id.
-    current_drag_handle_hover: Option<String>,
-    /// Currently pressed chrome drag handle interaction id.
-    current_drag_handle_press: Option<String>,
+    /// Currently hovered chrome control interaction id (drag handle or
+    /// notification dismiss/action button).
+    current_chrome_hover: Option<String>,
+    /// Currently pressed chrome control interaction id.
+    current_chrome_press: Option<String>,
+    /// A runtime terminal pointer event must clear chrome before the next
+    /// scene turn or pointer event. Retained while the scene lock is busy.
+    pub chrome_feedback_cancel_pending: bool,
     /// Per-device long-press drag state.
     ///
     /// Keyed by `device_id`.  Each entry is independent so multi-touch devices
@@ -371,8 +375,9 @@ impl InputProcessor {
         Self {
             current_hover: None,
             current_press: None,
-            current_drag_handle_hover: None,
-            current_drag_handle_press: None,
+            current_chrome_hover: None,
+            current_chrome_press: None,
+            chrome_feedback_cancel_pending: false,
             drag_states: HashMap::new(),
             drag_config: DragConfig::default(),
             rollback_tracker: RollbackTracker::new(),
@@ -381,6 +386,21 @@ impl InputProcessor {
             composer_draft_manager: ComposerDraftManager::new(),
             pending_flushed_batch: None,
         }
+    }
+
+    /// Clear runtime chrome feedback without synthesizing input or changing
+    /// agent capture, node focus, composer state, or the action queue.
+    /// Scene setters invalidate geometry only when a visible flag changes.
+    pub fn clear_chrome_feedback(&mut self, scene: &mut SceneGraph) -> bool {
+        let before = scene.geometry_epoch;
+        if let Some(id) = self.current_chrome_hover.take() {
+            scene.set_chrome_hovered(&id, false);
+        }
+        if let Some(id) = self.current_chrome_press.take() {
+            scene.set_chrome_pressed(&id, false);
+        }
+        self.chrome_feedback_cancel_pending = false;
+        scene.geometry_epoch != before
     }
 
     /// Queue an adapter-driven absolute scroll offset request.
@@ -992,6 +1012,27 @@ impl InputProcessor {
         }
     }
 
+    /// Move focus off a tile that left the scene (lease revocation, expiry, or
+    /// an agent clearing its portal) and deactivate a composer whose node went
+    /// with it, so [`Self::is_composer_active`] turns `false`. The draft is
+    /// dropped: the agent that owned the composer removed it, so there is no
+    /// one to deliver it to.
+    pub fn clear_focus_on_missing_tile(
+        &mut self,
+        focus_manager: &mut FocusManager,
+        scene: &mut SceneGraph,
+        tab_id: SceneId,
+    ) -> FocusTransition {
+        let transition = focus_manager.clear_focus_on_missing_tile(tab_id, scene);
+        self.apply_focus_transition_side_effects(&transition, scene);
+        if let Some(node_id) = self.composer_draft_manager.focused_node()
+            && !scene.nodes.contains_key(&node_id)
+        {
+            let _ = self.composer_draft_manager.on_focus_lost();
+        }
+        transition
+    }
+
     /// Returns `true` when a composer region is currently focused (draft active).
     pub fn is_composer_active(&self) -> bool {
         self.composer_draft_manager.is_active()
@@ -1084,6 +1125,9 @@ impl InputProcessor {
     /// from that device are routed to the capturing node, bypassing normal
     /// hit-testing.  (Spec lines 104-106, 110-111)
     pub fn process(&mut self, event: &PointerEvent, scene: &mut SceneGraph) -> InputResult {
+        if self.chrome_feedback_cancel_pending {
+            self.clear_chrome_feedback(scene);
+        }
         let start = Instant::now();
 
         let device_id = event.device_id;
@@ -1283,10 +1327,15 @@ impl InputProcessor {
                 (None, None)
             }
         };
-        let hit_drag_handle_id: Option<String> = match &hit {
+        // Runtime chrome controls with local hover/press feedback: drag
+        // handles and notification buttons (hud-paslt).
+        let hit_chrome_id: Option<String> = match &hit {
             HitResult::ZoneInteraction {
                 interaction_id: iid,
-                kind: ZoneInteractionKind::DragHandle { .. },
+                kind:
+                    ZoneInteractionKind::DragHandle { .. }
+                    | ZoneInteractionKind::Dismiss
+                    | ZoneInteractionKind::Action { .. },
                 ..
             } => Some(iid.clone()),
             _ => None,
@@ -1372,23 +1421,23 @@ impl InputProcessor {
             self.current_hover = hit_tile_id.and_then(|t| hit_node_id.map(|n| (t, n)));
         }
 
-        // ── Stage 2: Update chrome drag-handle hover state ───────────────
-        if self.current_drag_handle_hover != hit_drag_handle_id {
-            if let Some(old) = self.current_drag_handle_hover.take() {
-                scene.set_drag_handle_hovered(&old, false);
+        // ── Stage 2: Update chrome control hover state ───────────────
+        if self.current_chrome_hover != hit_chrome_id {
+            if let Some(old) = self.current_chrome_hover.take() {
+                scene.set_chrome_hovered(&old, false);
             }
-            if let Some(new_id) = &hit_drag_handle_id {
-                scene.set_drag_handle_hovered(new_id, true);
+            if let Some(new_id) = &hit_chrome_id {
+                scene.set_chrome_hovered(new_id, true);
             }
-            self.current_drag_handle_hover = hit_drag_handle_id.clone();
+            self.current_chrome_hover = hit_chrome_id.clone();
         }
 
         // ── Stage 2: Handle press/release ─────────────────────────────────
         match event.kind {
             PointerEventKind::Down => {
-                if let Some(ref drag_id) = hit_drag_handle_id {
-                    scene.set_drag_handle_pressed(drag_id, true);
-                    self.current_drag_handle_press = Some(drag_id.clone());
+                if let Some(ref chrome_id) = hit_chrome_id {
+                    scene.set_chrome_pressed(chrome_id, true);
+                    self.current_chrome_press = Some(chrome_id.clone());
                 }
                 if let (Some(tile_id), Some(node_id)) = (hit_tile_id, hit_node_id) {
                     if let Some(state) = scene.hit_region_states.get_mut(&node_id) {
@@ -1451,8 +1500,8 @@ impl InputProcessor {
                 }
             }
             PointerEventKind::Up => {
-                if let Some(drag_id) = self.current_drag_handle_press.take() {
-                    scene.set_drag_handle_pressed(&drag_id, false);
+                if let Some(chrome_id) = self.current_chrome_press.take() {
+                    scene.set_chrome_pressed(&chrome_id, false);
                 }
                 if let Some((pressed_tile_id, pressed_node_id)) = self.current_press.take() {
                     if let Some(state) = scene.hit_region_states.get_mut(&pressed_node_id) {
@@ -1765,6 +1814,12 @@ impl InputProcessor {
             drag::LONG_PRESS_TOUCH_THRESHOLD_MS
         };
 
+        // A mouse drags any handle on its first move, like a window titlebar:
+        // a grip exists only to be dragged, and a long-press there read as a
+        // dead control on the owner's overlay. Touch keeps the long-press so a
+        // swipe across a grip stays a scroll.
+        let immediate = is_header_band || device_id == 0;
+
         match event.kind {
             PointerEventKind::Down => {
                 // Start accumulating for this device.
@@ -1775,7 +1830,7 @@ impl InputProcessor {
                     event.x,
                     event.y,
                     threshold_ms,
-                    is_header_band,
+                    immediate,
                     now,
                 );
                 self.drag_states.insert(device_id, state);
@@ -4419,19 +4474,21 @@ mod tests {
 
     /// hud-cpjqe: a portal header BAND drags on the first pointer-move with NO
     /// 250 ms long-press hold and NO early-movement cancel (Windows-titlebar) —
-    /// the fix for "clicking top to drag fails half the time". The legacy grip
-    /// keeps the long-press hysteresis (a fast move before the hold cancels).
+    /// the fix for "clicking top to drag fails half the time". A mouse drags a
+    /// grip the same way; touch keeps the long-press hysteresis on a grip (a
+    /// fast swipe before the hold cancels).
     #[test]
-    fn header_band_drag_activates_immediately_grip_still_requires_long_press() {
+    fn mouse_drags_handles_immediately_touch_grip_still_requires_long_press() {
         use tze_hud_scene::{DragHandleElementKind, Rect};
         let eid = SceneId::new();
-        let ev = |x: f32, kind| PointerEvent {
+        let ev_on = |device_id: u32, x: f32, kind| PointerEvent {
             x,
             y: 120.0,
             kind,
-            device_id: 0,
+            device_id,
             timestamp: None,
         };
+        let ev = |x: f32, kind| ev_on(0, x, kind);
 
         // ── BAND: down, then a large move immediately → Activated, then Moved ──
         let mut proc_band = InputProcessor::new();
@@ -4477,32 +4534,35 @@ mod tests {
             "the header band must move once active, got {moved:?}"
         );
 
-        // ── GRIP: same fast move before the hold → Cancelled (unchanged) ──────
-        let mut proc_grip = InputProcessor::new();
+        // ── GRIP: a mouse activates on the same fast first move ──────────────
         let grip_bounds = Rect::new(100.0, 100.0, 24.0, 8.0);
-        proc_grip.process_drag_handle_pointer(
-            &ev(112.0, PointerEventKind::Down),
-            "drag-handle:grip",
-            eid,
-            DragHandleElementKind::Tile,
-            grip_bounds,
-            1920.0,
-            1080.0,
-            false,
+        let grip = |proc: &mut InputProcessor, device: u32, x: f32, kind| {
+            proc.process_drag_handle_pointer(
+                &ev_on(device, x, kind),
+                "drag-handle:grip",
+                eid,
+                DragHandleElementKind::Tile,
+                grip_bounds,
+                1920.0,
+                1080.0,
+                false,
+            )
+        };
+        let mut proc_mouse = InputProcessor::new();
+        grip(&mut proc_mouse, 0, 112.0, PointerEventKind::Down);
+        let activated = grip(&mut proc_mouse, 0, 172.0, PointerEventKind::Move);
+        assert!(
+            matches!(activated, DragEventOutcome::Activated { .. }),
+            "a mouse must drag a grip on the first move, got {activated:?}"
         );
-        let cancelled = proc_grip.process_drag_handle_pointer(
-            &ev(172.0, PointerEventKind::Move),
-            "drag-handle:grip",
-            eid,
-            DragHandleElementKind::Tile,
-            grip_bounds,
-            1920.0,
-            1080.0,
-            false,
-        );
+
+        // ── GRIP: a touch swipe before the hold → Cancelled (unchanged) ──────
+        let mut proc_touch = InputProcessor::new();
+        grip(&mut proc_touch, 1, 112.0, PointerEventKind::Down);
+        let cancelled = grip(&mut proc_touch, 1, 172.0, PointerEventKind::Move);
         assert!(
             matches!(cancelled, DragEventOutcome::Cancelled),
-            "the legacy grip must still cancel a fast move before the long-press, got {cancelled:?}"
+            "a touch grip must still cancel a fast move before the long-press, got {cancelled:?}"
         );
     }
 

@@ -72,10 +72,13 @@ source links when implementation changes the status.
 - **T8 — diet [Observed].** The [local harness](../justfile) includes
   llvmpipe GPU recipes and Nextest; resource acceptance has a compact
   [`store_behavior`](../crates/tze_hud_resource/tests/store_behavior.rs) suite.
-  Obsolete overlay/benchmark harnesses were removed in PR #1457. Remaining
-  pre-reset references are still visible in the projection and protocol crate
-  docs. `hud-bstmy` and its reconciliation work remain open; a passing test
-  inventory alone does not establish that the diet is complete.
+  Obsolete overlay/benchmark harnesses were removed in PR #1457. Unsupported
+  root/tab zone configuration and the unused sealed-image upload workflow are
+  removed; built-in zones, display assignments and offline render-scene and
+  render-widget authoring remain supported. No Criterion benchmark targets
+  are currently declared. Pre-reset references remain in the projection and
+  protocol crate docs. `hud-bstmy` and its reconciliation work remain open;
+  a passing test inventory alone does not establish that the diet is complete.
 - **T9 — monitors [Observed].**
   [`windowed/displays.rs`](../crates/tze_hud_runtime/src/windowed/displays.rs)
   creates per-monitor overlay windows sharing a scene in physical desktop
@@ -136,6 +139,10 @@ two calls within its [api.md](api.md) token budget:
   (local echo, no round trip), and detaches; an abandoned portal is reclaimed.
 - **Zones:** a notification shows for its TTL and disappears unattended;
   `delay_ms` content appears on schedule; a notification action reaches `hud_input`.
+  The [latest-wins count guard](../crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs)
+  checks warm/unchanged/one-zone-update/unchanged shaping work (2/0/1/0).
+  These are frame-path shaping counts, not all CPU layout or presentation costs;
+  zero widget raster/upload work still leaves full-frame rendering and GPU work.
 - **Widgets:** a typed parameter update re-rasterizes only that widget's SVG
   (the frame is still re-presented in full; no damage tracking).
 - **Tiles:** a gRPC agent claims a tile with a placement hint in two round
@@ -145,6 +152,38 @@ two calls within its [api.md](api.md) token budget:
 - **Idle:** an idle HUD with content on screen uses ~0% CPU and redraws nothing.
 
 After the POC passes, use it before planning more.
+
+Adopt windowed damage tracking only if `hud-w2t3x` / `hud-ddm2g`
+publish-to-present measurements identify full re-present as the bottleneck;
+`hud-ko552`'s historical ~5 µs per `collect_text_items` call measures isolated
+text collection, not a frame or present cost.
+
+## Merge gate and testability
+
+The merge queue is the development loop, so it is held to targets, not just
+kept green. Changing a required check updates the `main merge queue` ruleset,
+the [`ci.yml`](../.github/workflows/ci.yml) header and this section together.
+
+- **Fast.** A merge-group run's required checks finish within 6 minutes of the
+  run starting. Suites that cannot fit run in the weekly lanes
+  (`perf-budget.yml`, `perf-assert.yml`) or in `windows.yml`, never in the
+  required set. [Observed 2026-10-14] p50 4.1 min, max 5.2 min.
+- **Repeatable.** A correct change passes on the first attempt. Nextest runs
+  with `retries = 0`; a per-test retry override in
+  [`.config/nextest.toml`](../.config/nextest.toml) names its reason and is
+  tracked debt, not a fix. [Observed 2026-10-14] 25 of 25 merge-group runs
+  green on the first attempt.
+- **Unattended.** No required check waits on a person, the owner's hardware or
+  a live HUD. Pixels are checked by machine on llvmpipe (`just test-gpu`,
+  `just render-scene`); the Windows build and WARP smoke in `windows.yml` are
+  informational. Owner-host checks, including POC acceptance above, are never
+  a merge gate.
+- **Mirrored locally.** `just ci` runs the required gates in CI order;
+  `just pre-push` runs fmt and the exact CI clippy command.
+
+Open work toward these targets: `hud-1dnk5` (`just dev-run`, Windows-first
+quickstart, capture diff) and `hud-51ujj.7` (live smoke against the paired
+HUD).
 
 ## Working rules
 

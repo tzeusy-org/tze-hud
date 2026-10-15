@@ -7,6 +7,15 @@
 
   <description>tze_hud — agent-native presence engine overlay</description>
 
+  <!-- Common Controls v6 provides the window subclass APIs. -->
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity type="win32" name="Microsoft.Windows.Common-Controls"
+                        version="6.0.0.0" processorArchitecture="*"
+                        publicKeyToken="6595b64144ccf1df" language="*"/>
+    </dependentAssembly>
+  </dependency>
+
   <!-- DPI awareness: Per-Monitor V2 (requires Windows 10 1703+).
        This declaration is processed by the OS loader BEFORE any code runs,
        including the task scheduler's DPI context. It ensures that:

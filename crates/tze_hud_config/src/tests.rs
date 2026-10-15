@@ -408,6 +408,26 @@ name = "Main"
             "tab_switch_on_event = \"input\"",
         ),
         ("tabs", "layout", "[tabs.layout]\nwidth_fraction = 1.0"),
+        ("", "zones", "[zones]"),
+        (
+            "",
+            "zones",
+            "[zones.news_ticker]\npolicy = \"latest_wins\"\nlayer = \"content\"",
+        ),
+        ("", "zones", "[zones.subtitle]"),
+        ("tabs", "zones", "zones = []"),
+        ("tabs", "zones", "zones = [\"subtitle\"]"),
+        ("tabs", "zones", "zones = [\"notification-area\"]"),
+        (
+            "tabs",
+            "zones",
+            "zones = [\"subtitle\", \"notification-area\"]",
+        ),
+        (
+            "tabs",
+            "zones",
+            "[[tabs]]\nname = \"Other\"\nzones = [\"notification-area\"]",
+        ),
         ("", "unknown_setting", "unknown_setting = true"),
         ("runtime", "unknown_setting", "unknown_setting = true"),
         ("tabs", "unknown_setting", "unknown_setting = true"),
@@ -510,146 +530,6 @@ profile = "full-display"
     let loader = parse_ok(toml);
     let result = loader.freeze();
     assert!(result.is_err(), "freeze should fail when there are no tabs");
-}
-
-// ── Spec §Zone Registry — per-tab zone-type reference validation ──────────────
-
-/// WHEN tab references a built-in zone type THEN no error.
-#[test]
-fn spec_builtin_zone_type_accepted() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-zones = ["subtitle", "notification", "status_bar", "pip", "ambient_background", "alert_banner"]
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let zone_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| matches!(e.code, ConfigErrorCode::UnknownZoneType))
-        .collect();
-    assert!(
-        zone_errors.is_empty(),
-        "all built-in zone types should be accepted, got errors: {zone_errors:?}"
-    );
-}
-
-/// WHEN tab references a custom zone type defined in [zones] THEN no error.
-#[test]
-fn spec_custom_zone_type_defined_in_zones_accepted() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-zones = ["news_ticker"]
-
-[zones.news_ticker]
-policy = "latest_wins"
-layer = "content"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let zone_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| matches!(e.code, ConfigErrorCode::UnknownZoneType))
-        .collect();
-    assert!(
-        zone_errors.is_empty(),
-        "custom zone type defined in [zones] should be accepted, got errors: {zone_errors:?}"
-    );
-}
-
-/// WHEN tab references a zone type not in [zones] and not built-in THEN CONFIG_UNKNOWN_ZONE_TYPE.
-#[test]
-fn spec_unknown_zone_type_rejected() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-zones = ["news_ticker"]
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::UnknownZoneType)),
-        "unknown zone type should produce CONFIG_UNKNOWN_ZONE_TYPE, got: {:?}",
-        errors.iter().map(|e| &e.code).collect::<Vec<_>>()
-    );
-    // Error should reference the offending zone name.
-    let zone_error = errors
-        .iter()
-        .find(|e| matches!(e.code, ConfigErrorCode::UnknownZoneType))
-        .unwrap();
-    assert!(
-        zone_error.got.contains("news_ticker"),
-        "error should identify the unknown zone type, got: {:?}",
-        zone_error.got
-    );
-}
-
-/// WHEN tab has no zones field THEN no zone validation errors.
-#[test]
-fn spec_tab_without_zones_field_no_error() {
-    let toml = r#"
-[runtime]
-profile = "full-display"
-
-[[tabs]]
-name = "Main"
-"#;
-    let loader = parse_ok(toml);
-    let errors = loader.validate();
-    let zone_errors: Vec<_> = errors
-        .iter()
-        .filter(|e| matches!(e.code, ConfigErrorCode::UnknownZoneType))
-        .collect();
-    assert!(
-        zone_errors.is_empty(),
-        "tab with no zones field should produce no zone errors, got: {zone_errors:?}"
-    );
-}
-
-// ── Spec §Zone Registry Configuration (rig-mop4) ─────────────────────────────
-
-/// WHEN a tab references zone type "news_ticker" not defined in [zones] and not built-in
-/// THEN CONFIG_UNKNOWN_ZONE_TYPE.
-///
-/// This is tested at the zones module level since tab zone references are
-/// validated by the zones module directly.
-#[test]
-fn spec_unknown_zone_type_produces_error() {
-    use crate::zones::validate_zone_type_ref;
-
-    let mut errors = Vec::new();
-    validate_zone_type_ref("news_ticker", "tabs[0].zones.news_ticker", &[], &mut errors);
-    assert!(
-        errors
-            .iter()
-            .any(|e| matches!(e.code, ConfigErrorCode::UnknownZoneType)),
-        "unknown zone type should produce CONFIG_UNKNOWN_ZONE_TYPE"
-    );
-}
-
-/// WHEN a tab defines subtitle = { ... } without custom [zones.subtitle] THEN built-in used.
-#[test]
-fn spec_builtin_zone_type_subtitle_accepted() {
-    use crate::zones::validate_zone_type_ref;
-
-    let mut errors = Vec::new();
-    validate_zone_type_ref("subtitle", "tabs[0].zones.subtitle", &[], &mut errors);
-    assert!(
-        errors.is_empty(),
-        "built-in subtitle zone type should be accepted without custom definition"
-    );
 }
 
 // ── Spec §Config Schema Version and Compatibility Policy ──────────────────────

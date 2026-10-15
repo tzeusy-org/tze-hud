@@ -1222,15 +1222,6 @@ impl Compositor {
             self.prime_truncation_cache(scene);
         }
 
-        // The retained validation lane is intentionally narrower than normal
-        // rendering: only its exact fifty-tile, direct-text scenario may retain
-        // the previously submitted surface. Every other scene falls through to
-        // the established full-frame path below.
-        if let Some(retained_telemetry) = self.try_render_retained_headless(scene, surface) {
-            // The retained delegate returns Some only after its real queue submission.
-            return (retained_telemetry, true);
-        }
-
         // Build the shared per-frame geometry (Background → tiles → Content →
         // Chrome zones) via the single source of truth shared with the windowed
         // and chrome render paths. Uses surface.size() — not self.width/height —
@@ -1337,11 +1328,8 @@ impl Compositor {
         // Reuse the pre-computed drag_handles list rather than collecting again.
         self.populate_drag_handle_hit_regions_from(scene, drag_handles);
 
-        // Seed the private retained snapshot only after this real full frame
-        // completed its submit/readback tail. Structured fallback diagnostics
-        // (resize and modeled device recovery) are captured here as non-passing
-        // evidence.
-        self.observe_full_headless_frame(scene, surface);
+        #[cfg(any(test, feature = "dev-mode"))]
+        self.record_headless_work();
 
         (telemetry, true)
     }

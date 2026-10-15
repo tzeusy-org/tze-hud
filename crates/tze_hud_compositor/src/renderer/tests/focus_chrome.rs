@@ -242,7 +242,7 @@ async fn test_resize_grip_swaps_to_hover_color_for_hovered_tile() {
 }
 
 /// hud-jm8nq.12: an orphaned tile (agent disconnected, within grace) emits a
-/// token-colored disconnection badge quad; resuming the lease clears it.
+/// token-colored accent bar down its left edge; resuming the lease clears it.
 /// Draw-list-level assertion (no pixel readback).
 #[tokio::test]
 async fn orphaned_tile_emits_disconnection_badge_draw_cmd() {
@@ -275,20 +275,67 @@ async fn orphaned_tile_emits_disconnection_badge_draw_cmd() {
 
     scene.disconnect_lease(&lease_id, 1_000).unwrap();
     let verts = badge_verts(&compositor, &scene);
-    assert_eq!(verts.len(), 6, "orphaned tile must emit one badge quad");
+    assert_eq!(
+        verts.len(),
+        12,
+        "orphaned tile must emit a bar and a label strip"
+    );
     let tokens =
         crate::renderer::token_colors::resolve_disconnect_badge_tokens(&compositor.token_map);
+    let ndc_x = |px: f32| px / 400.0 * 2.0 - 1.0;
+    let ndc_y = |px: f32| 1.0 - px / 300.0 * 2.0;
+    let extent = |quad: &[crate::pipeline::RectVertex]| {
+        quad.iter().fold(
+            (f32::MAX, f32::MIN, f32::MAX, f32::MIN),
+            |(x0, x1, y0, y1), v| {
+                (
+                    x0.min(v.position[0]),
+                    x1.max(v.position[0]),
+                    y0.min(v.position[1]),
+                    y1.max(v.position[1]),
+                )
+            },
+        )
+    };
+    let close = |a: f32, b: f32| (a - b).abs() < 1e-4;
+    // Tile at x 50..350, y 40..240. The bar sits outside the left edge, so
+    // agent content keeps its padding, and spans the full height.
+    let (x0, x1, y0, y1) = extent(&verts[..6]);
+    let bar_right = 50.0 - tokens.gap_px;
+    assert!(
+        close(x1, ndc_x(bar_right)),
+        "bar ends a gap left of the tile"
+    );
+    assert!(
+        close(x0, ndc_x(bar_right - tokens.width_px)),
+        "bar is token-wide"
+    );
+    assert!(
+        close(y1, ndc_y(40.0)) && close(y0, ndc_y(240.0)),
+        "bar spans the tile height"
+    );
     let expected = compositor.gpu_color_raw(tokens.color);
     assert!(expected[3] > 0.0, "badge default alpha must be visible");
-    for v in &verts {
+    for v in &verts[..6] {
         assert!(
             v.color
                 .iter()
                 .zip(expected.iter())
                 .all(|(a, b)| (a - b).abs() < 1e-3),
-            "badge must carry the token-driven color"
+            "bar must carry the token-driven color"
         );
     }
+    // The label strip runs along the tile's bottom edge, inside the tile.
+    let (x0, x1, y0, y1) = extent(&verts[6..]);
+    assert!(
+        close(x0, ndc_x(50.0)) && close(x1, ndc_x(350.0)),
+        "strip spans the tile width"
+    );
+    assert!(close(y0, ndc_y(240.0)), "strip sits on the bottom edge");
+    assert!(
+        close(y1, ndc_y(240.0 - tokens.label_height_px())),
+        "strip fits one label line"
+    );
 
     scene.reconnect_lease(&lease_id, 2_000).unwrap();
     assert!(
@@ -445,7 +492,7 @@ async fn system_card_emits_draw_cmds_only_while_set() {
         title: "Pair an agent".into(),
         lines: vec!["482913".into()],
     };
-    let retained_card = card.clone();
+    let display_card = card.clone();
 
     assert!(compositor.system_card_vertices(800.0, 600.0).is_empty());
     assert!(
@@ -470,13 +517,29 @@ async fn system_card_emits_draw_cmds_only_while_set() {
     assert!(compositor.system_card_vertices(800.0, 600.0).is_empty());
     assert!(compositor.system_card_text_items(800.0, 600.0).is_empty());
 
-    // Seed the actual retained baseline without a card, then sample a small
-    // backdrop region outside the changed tile and away from card glyphs.
+    // Render text without a card, then sample its backdrop away from glyphs.
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    let (mut scene, first_tile_id, first_root_id) = canonical_retained_scene();
+    let first_root_id = SceneId::new();
+    let mut scene = scene_with_node(Node {
+        id: first_root_id,
+        children: vec![],
+        layout: Default::default(),
+        data: NodeData::TextMarkdown(TextMarkdownNode {
+            content: "AB".into(),
+            bounds: Rect::new(0.0, 0.0, 96.0, 92.0),
+            font_size_px: 18.0,
+            font_family: FontFamily::SystemSansSerif,
+            color: Rgba::WHITE,
+            background: None,
+            alignment: TextAlign::Start,
+            overflow: TextOverflow::Clip,
+            color_runs: Box::default(),
+        }),
+    });
+    let first_tile_id = *scene.tiles.keys().next().expect("text tile");
     let backdrop = crate::renderer::system_card::system_card_layout(
         &compositor.token_map,
-        &retained_card,
+        &display_card,
         1_000.0,
         500.0,
     )
@@ -498,56 +561,99 @@ async fn system_card_emits_draw_cmds_only_while_set() {
     let change_text = |scene: &mut SceneGraph, content: &str| {
         let mut text = match &scene.nodes[&first_root_id].data {
             NodeData::TextMarkdown(text) => text.clone(),
-            other => panic!("expected canonical text root, got {other:?}"),
+            other => panic!("expected text root, got {other:?}"),
         };
         text.content = content.into();
         scene
             .update_node_content(first_tile_id, first_root_id, NodeData::TextMarkdown(text))
-            .expect("controlled canonical text mutation");
+            .expect("controlled text mutation");
     };
 
+    let assert_shapes = |work: tze_hud_telemetry::WorkCounts, expected_layout| {
+        assert_eq!(
+            (work.layout, work.raster, work.upload),
+            (expected_layout, 0, 0),
+            "{work:?}"
+        );
+    };
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
     compositor.render_frame_headless(&mut scene, &surface);
-    let baseline_work = compositor.take_work_counts().expect("card-free baseline");
-    assert!(baseline_work.full_frame, "{baseline_work:?}");
-    assert_eq!(baseline_work.damage_px, 1_000 * 500);
     let card_free_pixels = card_pixels(&surface.read_pixels(&compositor.device));
+    assert_shapes(
+        compositor.take_work_counts().expect("cold content frame"),
+        1,
+    );
+    assert!(compositor.take_work_counts().is_none());
+    compositor.render_frame_headless(&mut scene, &surface);
+    assert_shapes(
+        compositor.take_work_counts().expect("warm content frame"),
+        0,
+    );
+    assert!(compositor.take_work_counts().is_none());
+    assert_eq!(
+        card_pixels(&surface.read_pixels(&compositor.device)),
+        card_free_pixels
+    );
 
-    assert!(compositor.set_system_card(Some(retained_card)));
+    assert!(compositor.set_system_card(Some(display_card)));
+    let overlay_shapes = compositor.system_card_text_items(1_000.0, 500.0).len() as u64;
     change_text(&mut scene, "BA");
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
     compositor.render_frame_headless(&mut scene, &surface);
-    let first_card_work = compositor.take_work_counts().expect("first card frame");
-    assert!(first_card_work.full_frame, "{first_card_work:?}");
-    assert_eq!(first_card_work.damage_px, 1_000 * 500);
     let visible_card_pixels = card_pixels(&surface.read_pixels(&compositor.device));
+    assert_shapes(
+        compositor
+            .take_work_counts()
+            .expect("content plus new overlay frame"),
+        1 + overlay_shapes,
+    );
+    assert!(compositor.take_work_counts().is_none());
     assert_ne!(
         visible_card_pixels, card_free_pixels,
         "card backdrop is visible"
     );
 
-    // A second eligible text change must still use the full card pass; the
-    // preceding card frame must not have become a retained baseline.
+    compositor.render_frame_headless(&mut scene, &surface);
+    assert_shapes(
+        compositor
+            .take_work_counts()
+            .expect("warm content plus overlay frame"),
+        0,
+    );
+    assert!(compositor.take_work_counts().is_none());
+    assert_eq!(
+        card_pixels(&surface.read_pixels(&compositor.device)),
+        visible_card_pixels
+    );
+
+    // The card stays visible when unrelated text changes again.
     change_text(&mut scene, "AB");
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
     compositor.render_frame_headless(&mut scene, &surface);
-    let second_card_work = compositor.take_work_counts().expect("second card frame");
-    assert!(second_card_work.full_frame, "{second_card_work:?}");
-    assert_eq!(second_card_work.damage_px, 1_000 * 500);
     assert_eq!(
         card_pixels(&surface.read_pixels(&compositor.device)),
         visible_card_pixels,
         "card stays visible outside the changed tile"
     );
 
+    assert_shapes(
+        compositor
+            .take_work_counts()
+            .expect("content change with warm overlay frame"),
+        1,
+    );
+    assert!(compositor.take_work_counts().is_none());
+
     assert!(compositor.set_system_card(None));
     compositor.render_frame_headless(&mut scene, &surface);
-    let clear_work = compositor.take_work_counts().expect("clean card removal");
-    assert!(clear_work.full_frame, "{clear_work:?}");
-    assert_eq!(clear_work.damage_px, 1_000 * 500);
+    assert_shapes(
+        compositor.take_work_counts().expect("overlay clear frame"),
+        0,
+    );
+    assert!(compositor.take_work_counts().is_none());
     assert_eq!(
         card_pixels(&surface.read_pixels(&compositor.device)),
         card_free_pixels,
@@ -558,14 +664,24 @@ async fn system_card_emits_draw_cmds_only_while_set() {
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
     compositor.render_frame_headless(&mut scene, &surface);
-    let resumed_work = compositor
-        .take_work_counts()
-        .expect("resumed retained frame");
-    assert!(!resumed_work.full_frame, "{resumed_work:?}");
-    assert!(resumed_work.damage_px < 1_000 * 500, "{resumed_work:?}");
     assert_eq!(
         card_pixels(&surface.read_pixels(&compositor.device)),
         card_free_pixels,
-        "retained update must not restore stale card pixels"
+        "a later text update must not restore stale card pixels"
     );
+    assert_shapes(
+        compositor
+            .take_work_counts()
+            .expect("later content-only frame"),
+        1,
+    );
+    assert!(compositor.take_work_counts().is_none());
+    compositor.render_frame_headless(&mut scene, &surface);
+    assert_shapes(
+        compositor
+            .take_work_counts()
+            .expect("later content-only warm frame"),
+        0,
+    );
+    assert!(compositor.take_work_counts().is_none());
 }

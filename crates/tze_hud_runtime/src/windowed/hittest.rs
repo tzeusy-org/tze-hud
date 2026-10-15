@@ -207,8 +207,7 @@ impl WinitApp {
                         winit::dpi::PhysicalPosition::new(pt.x, pt.y),
                         window_pos,
                     ) {
-                        self.state.cursor_x = cursor_x;
-                        self.state.cursor_y = cursor_y;
+                        self.apply_os_cursor_position(cursor_x, cursor_y);
                     } else {
                         tracing::trace!(
                             "overlay: skipped OS cursor refresh because window origin is unavailable"
@@ -217,6 +216,20 @@ impl WinitApp {
                 }
             }
         }
+    }
+
+    /// Take the cursor position read from the OS.
+    ///
+    /// The OS position is authoritative, so it also clears a `CursorLeft`. That
+    /// event fires whenever the overlay flips from capturing back to
+    /// click-through (the cursor crossed a drag handle or button), and in
+    /// click-through no `CursorMoved` follows to clear it, so the hover close
+    /// button stayed hidden until the next capture.
+    #[cfg(any(target_os = "windows", test))]
+    pub(super) fn apply_os_cursor_position(&mut self, x: f32, y: f32) {
+        self.state.cursor_x = x;
+        self.state.cursor_y = y;
+        self.state.cursor_left_window = false;
     }
 
     /// True while raw mouse input must wake the loop, because passthrough could

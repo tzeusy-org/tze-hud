@@ -10,9 +10,11 @@ declared source. The complete Cargo-internal cause remains unproved.
 
 Use the repository's opt-in source-binding policy for shared worker targets.
 The coordinator first grants the exclusive Cargo/GPU lease and explicitly
-selects a **new empty target under HOME** for a frozen, committed checkout.
-It retains old targets and source fixtures. The guard chooses no target names,
-changes no source mtimes, redirects no artifacts and deletes no caches.
+selects **one target under HOME per checkout** (worktree), empty when first
+bound. Successive commits in that checkout reuse it warm; the guard refuses it
+to any other checkout. The guard chooses no target names, changes no source
+mtimes, redirects no artifacts and deletes no caches; the coordinator deletes
+targets under the [retention rule](#retention).
 
 ```sh
 # TARGET_EPOCH is an explicit new path supplied by the resource coordinator.
@@ -120,8 +122,10 @@ not implement Cargo's general configuration fingerprinting.
 
 One bounded versioned marker and one nonblocking OS lock belong to each explicit
 target. The marker contains hashes, HEAD and validity only. An existing nonempty
-unbound target, foreign binding, malformed marker, symlink state or contention
-refuses before Cargo; there is no adoption, reset, cleanup or rebind option.
+unbound target, a binding from another checkout or compiler, a malformed or
+older-schema marker, symlink state or contention refuses before Cargo. A new
+commit, source bytes or config in the bound checkout rebinds the target; Cargo
+fingerprints rebuild what changed, as in any single-checkout build.
 The guard marks the binding invalid before starting its owned Cargo child and
 holds the target lock through the terminal result and source/config postcheck.
 An interrupted, abnormally terminated or changed-source run cannot leave a
@@ -132,22 +136,71 @@ These snapshots detect observed changes within the cooperative frozen-source
 contract; they do not prove prevention of arbitrary concurrent edits, an ABA
 change restored between observations, or artifact tampering by another writer.
 
-For a different checkout, commit, materialized bytes, source-owned config or
-compiler identity, the coordinator must select a fresh empty epoch under its
-lease. Old artifacts and source evidence remain protected. The deliberate costs
-are conservative source hashing and cold compilation for each new frozen source;
-same-source gates and pushes reuse their warm epoch. No epoch is allocated per
-command and no retention journal accumulates. Source-mutating `fmt-fix`, host
+For a different checkout or compiler identity, the coordinator selects a
+fresh empty target under its lease. The deliberate cost is conservative source
+hashing per command; review fixups in one worktree stay warm. No target is
+allocated per command or per commit. Source-mutating `fmt-fix`, host
 `bootstrap`/install and `dead-code`'s temporary-source compile refuse in guarded
 mode; run those separately with source-isolated resources.
 
-Preserve the first failed receipt and its source/target identity. A passing test
-count or a later successful run does not diagnose the historical failure. Source
-freshness and the separate unknown cache-deletion investigation are distinct.
-Cleanup eligibility and retention still require an operator-owned policy;
-mtime, a closed bead or this marker grants no deletion permission.
+Preserve the first failed receipt (logs, exit code, HEAD and the guard's
+admitted identity line) beside the bead's evidence, not inside the target. A
+passing test count or a later successful run does not diagnose the historical
+failure. Source freshness and the separate unknown cache-deletion
+investigation are distinct.
 
 To roll back the harness, return to source-isolated targets before disabling the
-opt-in guard. Keep suspect shared epochs protected rather than continuing their
-cross-source reuse. Linux/Windows-GNU build checks do not establish actual native
-Windows execution, owner-visible HUD pixels or a production rendering repair.
+opt-in guard. Do not continue cross-checkout reuse of a suspect target.
+Linux/Windows-GNU build checks do not establish actual native Windows
+execution, owner-visible HUD pixels or a production rendering repair.
+
+## Retention
+
+Owner-approved 2026-10-15. Build targets are disposable; receipts are evidence.
+
+- A bead owns at most one target, tied to its worktree. The coordinator
+  deletes it when the bead's PR merges or closes, or when the bead is closed
+  without a PR, in the same step that removes the worktree.
+- Receipts (gate logs, exit codes, screenshots, small evidence files) move to
+  the bead's evidence directory first and are kept; Cargo `target/` trees,
+  `retained-artifacts` copies of build outputs and baseline/candidate targets
+  are not receipts.
+- A comparison run (baseline vs candidate) deletes both targets once its
+  numbers are recorded.
+- Disk pressure is never an operator blocker while targets of merged, closed
+  or abandoned beads remain: delete those first. Only an unexplained shortfall
+  after that is escalated.
+- A target is kept while its bead has an open PR, or no PR and is not closed.
+- Artifact roots are `~/.tmp` and `~/.local/share/tze-hud-agent-tools`; name
+  each directory `<bead-id>-…` with the exact bead id (`hud-ximtf.8-…`, not
+  `hud-ximtf8-…`) so the beads cleanup scan can attribute it.
+
+## Nextest leak diagnostics
+
+With pinned Nextest 0.9.114 (commit
+`9daab1c50cd0389236508435f71434f01aa2eca1`), `LEAK` means the test process
+exited successfully but its captured output readers had not finished when the
+post-exit leak timer fired. Its
+[bundled default profile](https://github.com/nextest-rs/nextest/blob/9daab1c50cd0389236508435f71434f01aa2eca1/nextest-runner/default-config.toml#L100)
+sets 200 ms with a passing result; this repository does not override it. The
+generic Rust default is 100 ms, so it does not establish the effective profile
+period. The historical effective timer was not separately traced. This diagnostic
+does not establish a memory leak or a failed assertion.
+
+The protected source-bound `7cd38fe0b7fc4f6c8367edfcb521134c258c7f89` full CI
+reported 3,054 passed (one leaky), with all six stages exiting 0. The named case
+`tze_hud_config::loader::unit_tests::test_duplicate_tab_name_produces_error`
+was `LEAK` at 0.935 s; its captured Rust result was one passed, zero failed.
+Preserve the original full-CI log SHA-256
+`b56a8d0b5d20ee1465800e1d313dc42e4ba5650d1b2610c97b598ca004ad17f3`
+and terminal receipt SHA-256
+`7a55c5f5e28bccdb45d572e46b7bf4b08a56ce518b9927e5dc051757459ad7cc`.
+The receipt lacks per-case pipe ownership and timing, so it cannot distinguish
+an inherited writer from delayed output-reader completion. No product defect
+was demonstrated. Adopted raw wait statuses 9/14 remain unattributed.
+
+A causal follow-up needs the actual case PID/start identity, captured pipe
+identities and writer lifetimes around exit. Endpoint child absence or a later
+passing run cannot reconstruct that evidence. Disabling capture changes the
+observed seam. Preserve the original result; do not weaken leak timeouts or
+retry gates to erase the diagnostic.

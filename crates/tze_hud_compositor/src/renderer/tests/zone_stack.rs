@@ -401,9 +401,9 @@ async fn test_stack_slot_sixth_notification_evicts_oldest() {
     );
 }
 
-/// Stack notifications clip at zone boundary: slots whose top-left y is at or
-/// beyond zone_bottom are fully clipped and produce no TextItem. Partial slots
-/// (y < zone_bottom but y+slot_h > zone_bottom) are emitted with clamped height.
+/// Stack notifications stop at the zone boundary: a card is shown whole or not
+/// at all, so a slot that would extend past zone_bottom (and every slot after
+/// it) produces no TextItem.
 #[tokio::test]
 async fn test_stack_slot_clips_at_zone_boundary() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
@@ -413,9 +413,8 @@ async fn test_stack_slot_clips_at_zone_boundary() {
     // font_size_px=16, line_height = 16*1.4 = 22.4, margin_v=8, SLOT_BASELINE_GAP=4
     // → slot_h = 22.4 + 2*8 + 4 = 42.4px.
     // slot 0 at y=0  (fits: 0+42.4=42.4 ≤ 72 → emitted).
-    // slot 1 at y=42.4 (fits: 42.4+42.4=84.8 > 72 but y < 72 → emitted).
-    // slot 2 at y=84.8 → y ≥ zone_bottom(72) → loop breaks.
-    // Exactly 2 items (slots 0, 1) are emitted.
+    // slot 1 at y=50.4 (42.4 + 8 px stack gap; 50.4+42.4 > 72 → not shown).
+    // Exactly 1 item (slot 0) is emitted.
     scene.register_zone(ZoneDefinition {
         id: SceneId::new(),
         name: "notification-area".to_owned(),
@@ -440,7 +439,7 @@ async fn test_stack_slot_clips_at_zone_boundary() {
         layer_attachment: LayerAttachment::Chrome,
     });
 
-    // Publish 4 notifications; only the 2 newest should be visible (newest-first).
+    // Publish 4 notifications; only the newest fits (newest-first).
     for i in 1..=4 {
         scene
             .publish_to_zone(
@@ -464,14 +463,12 @@ async fn test_stack_slot_clips_at_zone_boundary() {
     let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
 
     // slot_h = line_height(16*1.4) + 2*margin_v(8) + SLOT_BASELINE_GAP(4) = 42.4px.
-    // slot 0 at y=0:    0 < 72 → emitted.
-    // slot 1 at y=42.4: 42.4 < 72 → emitted.
-    // slot 2 at y=84.8: 84.8 ≥ 72 → loop breaks.
-    // Exactly 2 items (slots 0, 1) are emitted.
+    // slot 0 at y=0 ends at 42.4 ≤ 72 → emitted.
+    // slot 1 at y=50.4 would end at 92.8 > 72 → not shown, nor anything after.
     assert_eq!(
         items.len(),
-        2,
-        "with 72px zone and 42.4px slots, exactly 2 items should be emitted; got {}",
+        1,
+        "with 72px zone and 42.4px slots 8px apart, only the newest card fits; got {}",
         items.len()
     );
 
@@ -487,8 +484,9 @@ async fn test_stack_slot_clips_at_zone_boundary() {
     );
 }
 
-/// ZoneSlotLayout::iter_visible: slots whose top-left y is at or beyond
-/// zone_bottom are excluded; partial slots are emitted with clamped height.
+/// ZoneSlotLayout::iter_visible: only slots that fit wholly inside the zone are
+/// emitted, stopping at the first that doesn't; only a first slot taller than
+/// the zone is clamped.
 ///
 /// This is a GPU-free unit test pinning the shared slot-geometry computation
 /// introduced in hud-qlerb. Geometry correctness is guaranteed by
@@ -499,10 +497,9 @@ fn test_zone_slot_layout_iter_visible_clips_and_clamps() {
     // Three equal-height slots of 30px each (offsets: 0, 30, 60).
     // Zone origin zy = 10.0; effective_h = 70.0 → zone_bottom = 80.0.
     //
-    // slot 0: slot_y = 10+0  = 10  < 80 → emitted (effective_slot_h = min(30, 70) = 30)
-    // slot 1: slot_y = 10+30 = 40  < 80 → emitted (effective_slot_h = min(30, 40) = 30)
-    // slot 2: slot_y = 10+60 = 70  < 80 → emitted (effective_slot_h = min(30, 10) = 10)
-    // slot 3 would be at 100 ≥ 80 → excluded (not in this layout, but cull verified)
+    // slot 0: 10..40 fits → emitted
+    // slot 1: 40..70 fits → emitted
+    // slot 2: 70..100 passes zone_bottom 80 → not shown
     let layout = ZoneSlotLayout {
         ordered_indices: vec![0, 1, 2],
         slot_heights: vec![30.0, 30.0, 30.0],
@@ -514,22 +511,31 @@ fn test_zone_slot_layout_iter_visible_clips_and_clamps() {
     let visible: Vec<(usize, f32, f32)> = layout.iter_visible(zy).collect();
 
     assert_eq!(
-        visible.len(),
-        3,
-        "all 3 slots start before zone_bottom → all emitted"
+        visible,
+        vec![(0, 10.0, 30.0), (1, 40.0, 30.0)],
+        "only the two slots that fit wholly are emitted, at full height"
     );
 
-    // slot 0: full slot
-    assert_eq!(visible[0], (0, 10.0, 30.0), "slot 0: full height");
-    // slot 1: full slot
-    assert_eq!(visible[1], (1, 40.0, 30.0), "slot 1: full height");
-    // slot 2: clamped to remaining zone height (80 - 70 = 10)
-    assert!(
-        (visible[2].0 == 2)
-            && (visible[2].1 - 70.0).abs() < 0.01
-            && (visible[2].2 - 10.0).abs() < 0.01,
-        "slot 2: clamped to 10px; got {:?}",
-        visible[2]
+    // A slot ending exactly at the zone bottom fits.
+    let exact = ZoneSlotLayout {
+        ordered_indices: vec![0, 1],
+        slot_heights: vec![30.0, 40.0],
+        slot_offsets: vec![0.0, 30.0],
+        effective_h: 70.0,
+    };
+    assert_eq!(exact.iter_visible(10.0).count(), 2, "flush slot fits");
+
+    // A first slot taller than the zone is clamped, never hidden.
+    let tall = ZoneSlotLayout {
+        ordered_indices: vec![0, 1],
+        slot_heights: vec![100.0, 10.0],
+        slot_offsets: vec![0.0, 100.0],
+        effective_h: 70.0,
+    };
+    assert_eq!(
+        tall.iter_visible(10.0).collect::<Vec<_>>(),
+        vec![(0, 10.0, 70.0)],
+        "an oversized newest card is clamped to the zone"
     );
 
     // Verify that a slot starting exactly at zone_bottom is excluded.
@@ -892,7 +898,8 @@ async fn test_status_bar_key_icon_map_produces_per_entry_text_items() {
 /// publications are present (regression guard).
 #[tokio::test]
 async fn test_latest_wins_zone_renders_only_latest_publication() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
 
     let mut scene = SceneGraph::new(1280.0, 720.0);
     scene.register_zone(ZoneDefinition {
@@ -956,5 +963,77 @@ async fn test_latest_wins_zone_renders_only_latest_publication() {
         items[0].text.contains("New content"),
         "LatestWins must render latest publish; got: {}",
         items[0].text
+    );
+
+    // Distinct text keeps the two zones' shaping-cache controls independent.
+    scene.register_zone(ZoneDefinition {
+        id: SceneId::new(),
+        name: "secondary".to_owned(),
+        description: "unchanged shaping control".to_owned(),
+        geometry_policy: GeometryPolicy::EdgeAnchored {
+            edge: DisplayEdge::Top,
+            height_pct: 0.10,
+            width_pct: 0.80,
+            margin_px: 16.0,
+        },
+        accepted_media_types: vec![ZoneMediaType::StreamText],
+        rendering_policy: RenderingPolicy {
+            backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 0.7)),
+            text_color: Some(Rgba::WHITE),
+            ..Default::default()
+        },
+        contention_policy: ContentionPolicy::LatestWins,
+        max_publishers: 1,
+        auto_clear_ms: None,
+        ephemeral: false,
+        layer_attachment: LayerAttachment::Content,
+    });
+    scene
+        .publish_to_zone(
+            "secondary",
+            ZoneContent::StreamText("Secondary control".to_owned()),
+            "agent",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+
+    // Both zones shape once, then the real unchanged frame reuses both buffers.
+    for expected_layout in [2, 0] {
+        compositor.prime_markdown_cache(&scene);
+        compositor.render_frame_headless(&mut scene, &surface);
+        let work = compositor.take_work_counts().expect("completed zone frame");
+        assert_eq!(
+            (work.layout, work.raster, work.upload),
+            (expected_layout, 0, 0),
+            "warm/unchanged zone work: {work:?}"
+        );
+    }
+
+    scene
+        .publish_to_zone(
+            "subtitle",
+            ZoneContent::StreamText("Changed content".to_owned()),
+            "agent",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    // Only changed text shapes. Zero widget work does not mean no GPU submit.
+    for expected_layout in [1, 0] {
+        compositor.prime_markdown_cache(&scene);
+        compositor.render_frame_headless(&mut scene, &surface);
+        let work = compositor.take_work_counts().expect("completed zone frame");
+        assert_eq!(
+            (work.layout, work.raster, work.upload),
+            (expected_layout, 0, 0),
+            "changed/unchanged zone work: {work:?}"
+        );
+    }
+    assert!(
+        compositor.take_work_counts().is_none(),
+        "single-frame drain"
     );
 }

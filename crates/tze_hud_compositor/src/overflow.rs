@@ -155,7 +155,8 @@ pub const TRUNCATION_OVERSCAN_LINES: usize = 8;
 ///
 /// # Window selection
 ///
-/// `max_lines = floor(bounds_height / line_height)` whole lines are visible.
+/// `max_lines = max(1, floor(bounds_height / line_height))` whole lines are
+/// visible.
 /// Each source line yields **at least one** layout line, so `max_lines` source
 /// lines always cover the visible layout window; an overscan margin of
 /// `overscan_lines` (clamped to `>= 1`) whole lines is added so the window still
@@ -831,13 +832,17 @@ fn try_horizontal_truncate<'a>(
 /// Compute the maximum number of whole lines that fit in `bounds_height`
 /// given `line_height`.
 ///
-/// Returns at least 0.  A line_height ≤ 0 returns 0.
+/// A positive box shorter than one line still gets one line (hud-pcscu): the
+/// line height includes leading, so a single-line label in a box sized to its
+/// glyphs (e.g. 20 px text in a 26 px box at the 1.4 multiplier) would
+/// otherwise truncate to nothing. The renderer clips that line to the box, as
+/// `TextOverflow::Clip` does. A height or line height ≤ 0 returns 0.
 #[inline]
 fn max_whole_lines(bounds_height: f32, line_height: f32) -> usize {
-    if line_height <= 0.0 {
+    if line_height <= 0.0 || bounds_height <= 0.0 {
         return 0;
     }
-    (bounds_height / line_height).floor() as usize
+    ((bounds_height / line_height).floor() as usize).max(1)
 }
 
 /// Measure the advance width of `text` when shaped as a single line with the
@@ -1338,7 +1343,7 @@ mod tests {
             ("partial line excluded", 65.0, 20.0, 3),
             ("zero height", 0.0, 20.0, 0),
             ("zero line height", 100.0, 0.0, 0),
-            ("smaller than one line", 10.0, 20.0, 0),
+            ("smaller than one line still shows one", 10.0, 20.0, 1),
         ];
         for (name, h, lh, expected) in cases {
             assert_eq!(max_whole_lines(h, lh), expected, "case: {name}");
@@ -3206,7 +3211,7 @@ mod tests {
     /// per-source-line shaping-independence property the fallback relies on.
     #[test]
     fn fallback_visible_window_is_byte_identical_to_full_input() {
-        let text = transcript(2000);
+        let text = transcript(256);
         assert!(text.len() > DEFAULT_MAX_TRUNCATION_INPUT_BYTES);
         let font_size = 14.0_f32;
         let line_h = font_size * 1.4;

@@ -73,8 +73,26 @@ restart and signed-update semantics belong in the
 [Windows runbook](operations/windows-install.md), not in agent payloads.
 
 **Portal state [Observed].**
-[`PortalHandle`](../crates/tze_hud_mcp/src/server.rs) shares the hub between MCP
-and [`PortalProjectionDriver`](../crates/tze_hud_runtime/src/portal_projection_driver.rs).
+[`PortalHandle`](../crates/tze_hud_mcp/src/server.rs) shares one hub, clock
+and per-agent input Notify registry between MCP and
+[`PortalProjectionDriver`](../crates/tze_hud_runtime/src/portal_projection_driver.rs).
+The driver stores and clones that complete handle. Composer admission commits
+input and reply history under the hub lock, then signals the owning agent after
+unlock. Notification actions return an agent readiness callback that the pointer
+producer invokes after scene and shared-state unlock; queues remain authoritative.
+Input readiness is separate from render/main-work wake delivery. `hud_input`
+arms the agent Notify before checking retained action and portal queues, releases
+model guards before awaiting, and rechecks once at its unchanged absolute deadline.
+An active finite poll defers only its own agent's idle degradation, including a
+first attachment during that wait. Per-request ownership drops on return or
+cancellation without writing future activity; explicit upstream degradation,
+reclaim, clear and input expiry keep their existing semantics. Zero portals add
+no periodic runtime wake. Local accepted replies and truthful rejection feedback
+bypass output pacing once; the actual Winit settle order flushes the composer
+before portal drain. Hub reply history owns the echo, so raw-tile echo is skipped.
+Notification input retains Callback versus human-X Dismiss through MCP
+serialization. Only a validated X that removed its exact publication emits the
+runtime kind; callback auto-removal, TTL and clear do not.
 The hub is keyed by authenticated agent and portal id; its time-dependent
 operations take injected time. The driver materializes scene tiles, mirrors
 liveness onto leases, and connects composer submissions back to the hub.

@@ -48,7 +48,7 @@ use super::token_colors::{
     resolve_disconnect_badge_tokens, resolve_focus_ring_tokens, resolve_resize_grip_tokens,
     resolve_section_gap_px, resolve_tile_bg_token, resolve_tile_close_tokens,
     resolve_tile_spacing_tokens, resolve_viewer_echo_tokens, srgb_to_linear,
-    tile_close_button_bounds, tile_close_glyph_rects,
+    tile_close_button_bounds,
 };
 use super::{Compositor, CompositorDegradationPolicy};
 
@@ -856,9 +856,12 @@ impl Compositor {
     }
 
     /// Emit the disconnection badge (invariant 4, "badge shown") for every
-    /// visible tile whose `visual_hint` is `DisconnectionBadge`: a token-colored
-    /// square inset at the tile's top-right corner. Geometry-only, so it is
-    /// redaction-safe; the hint is cleared by the scene on resume.
+    /// visible tile whose `visual_hint` is `DisconnectionBadge`: a full-height,
+    /// token-styled bar outside its left edge (clamped at x = 0) and a
+    /// token-styled label-background strip along its bottom edge.
+    /// The "Disconnected" text is collected separately by `collect_text_items`
+    /// in `renderer/text.rs`. Geometry-only and redaction-safe; the scene clears
+    /// the hint on resume.
     pub(super) fn append_disconnect_badge_vertices(
         &self,
         scene: &SceneGraph,
@@ -868,19 +871,28 @@ impl Compositor {
     ) {
         let badge = resolve_disconnect_badge_tokens(&self.token_map);
         let color = self.gpu_color_raw(badge.color);
-        let inset = badge.size_px * 0.25;
         for tile in self.policy_visible_tiles(scene) {
             if tile.visual_hint != tze_hud_scene::lease::TileVisualHint::DisconnectionBadge {
                 continue;
             }
+            // A full-height bar just outside the left edge (the hover close
+            // button owns the top-right corner, and agent content keeps its
+            // padding), plus a strip along the bottom that says what it means.
             let b = tile.bounds;
-            let rect = Rect::new(
-                b.x + b.width - badge.size_px - inset,
-                b.y + inset,
-                badge.size_px,
-                badge.size_px,
-            );
-            Self::append_clipped_rect_vertices(tile, rect, sw, sh, color, vertices);
+            let bar_x = (b.x - badge.gap_px - badge.width_px).max(0.0);
+            vertices.extend_from_slice(&rect_vertices(
+                bar_x,
+                b.y,
+                badge.width_px,
+                b.height,
+                sw,
+                sh,
+                color,
+            ));
+            let strip_h = badge.label_height_px().min(b.height);
+            let strip = Rect::new(b.x, b.y + b.height - strip_h, b.width, strip_h);
+            let strip_color = self.gpu_color_raw(badge.label_background);
+            Self::append_clipped_rect_vertices(tile, strip, sw, sh, strip_color, vertices);
         }
     }
 
@@ -897,8 +909,8 @@ impl Compositor {
             .find(|t| t.id == id && t.z_order < ZONE_TILE_Z_MIN)
     }
 
-    /// Emit the viewer close button (token-styled fill and x mark) on the
-    /// hovered tile. Geometry comes from `tile_close_button_bounds`, the same
+    /// Emit the viewer close button's token-styled fill on the hovered tile
+    /// (its x mark is a text item, `TILE_CLOSE_GLYPH`). Geometry comes from `tile_close_button_bounds`, the same
     /// function the hit region uses. Draws nothing unless a tile is hovered, so
     /// an idle HUD pays nothing.
     pub(super) fn append_tile_close_button_vertices(
@@ -922,18 +934,6 @@ impl Compositor {
             sh,
             self.gpu_color(tokens.background),
         ));
-        let glyph = self.gpu_color(tokens.glyph_color);
-        for rect in tile_close_glyph_rects(button, &tokens) {
-            vertices.extend_from_slice(&rect_vertices(
-                rect.x,
-                rect.y,
-                rect.width,
-                rect.height,
-                sw,
-                sh,
-                glyph,
-            ));
-        }
     }
 
     fn clipped_textured_rect(

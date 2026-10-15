@@ -2,6 +2,7 @@
 //! Pure data — no GPU, no async, no I/O.
 
 use crate::clock::{Clock, SystemClock};
+use crate::render_wake::RenderWakeNotifier;
 use crate::types::*;
 use crate::validation::ValidationError;
 use serde::{Deserialize, Serialize};
@@ -115,9 +116,12 @@ pub struct SceneGraph {
     #[serde(skip, default)]
     publication_orphans: HashMap<SceneId, u64>,
     /// Notification action presses waiting for their publisher to collect
-    /// them (MCP `hud_input`). Bounded; oldest dropped first.
+    /// them (MCP `hud_input`), FIFO within each publisher namespace.
     #[serde(skip, default)]
-    pub pending_actions: std::collections::VecDeque<PendingAction>,
+    pub pending_actions: HashMap<String, Vec<PendingAction>>,
+    /// Input readiness callbacks, invoked by the producer only after scene unlock.
+    #[serde(skip, default)]
+    pending_action_notifiers: HashMap<String, RenderWakeNotifier>,
     /// Map of ResourceIds to their scene-node reference counts.
     ///
     /// A resource is available for use in [`NodeData::StaticImage`] nodes when it
@@ -187,18 +191,20 @@ pub mod timed;
 pub use tiles::validate_text_markdown_node_data;
 pub mod zone_ops;
 
-/// A notification action the human pressed, addressed to the agent that
-/// published the notification.
+/// A publisher callback and a runtime-authored human close are distinct.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum PendingActionKind {
+    Callback(String),
+    Dismiss,
+}
+
+/// A transactional notification event addressed to its publishing agent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingAction {
     pub publisher_namespace: String,
     pub zone_name: String,
-    pub callback_id: String,
+    pub kind: PendingActionKind,
 }
-
-/// Cap on queued action presses; a publisher that never collects them can't
-/// grow the queue without bound.
-pub const MAX_PENDING_ACTIONS: usize = 256;
 
 impl SceneGraph {
     // ─── Notification auto-dismiss TTL constants ─────────────────────────
@@ -236,28 +242,37 @@ impl SceneGraph {
             sequence_number: 0,
             scheduled_batches: Vec::new(),
             publication_orphans: HashMap::new(),
-            pending_actions: std::collections::VecDeque::new(),
+            pending_actions: HashMap::new(),
+            pending_action_notifiers: HashMap::new(),
             registered_resources: HashMap::new(),
             overlay: RuntimeOverlayState::default(),
         }
     }
 
-    /// Queue a notification action press for its publisher.
-    pub fn push_pending_action(&mut self, action: PendingAction) {
-        if self.pending_actions.len() >= MAX_PENDING_ACTIONS {
-            self.pending_actions.pop_front();
-        }
-        self.pending_actions.push_back(action);
+    /// Register input readiness for a publisher before checking its pending queue.
+    pub fn register_action_notifier(&mut self, namespace: &str, notifier: RenderWakeNotifier) {
+        self.pending_action_notifiers
+            .insert(namespace.to_string(), notifier);
+    }
+
+    /// Commit a notification action, returning its post-unlock readiness callback.
+    /// The queue remains authoritative when no input waiter has registered yet.
+    pub fn push_pending_action(&mut self, action: PendingAction) -> RenderWakeNotifier {
+        let notifier = self
+            .pending_action_notifiers
+            .get(&action.publisher_namespace)
+            .cloned()
+            .unwrap_or_default();
+        self.pending_actions
+            .entry(action.publisher_namespace.clone())
+            .or_default()
+            .push(action);
+        notifier
     }
 
     /// Remove and return the queued action presses for `namespace`, oldest first.
     pub fn take_pending_actions(&mut self, namespace: &str) -> Vec<PendingAction> {
-        let (mine, rest): (Vec<_>, Vec<_>) = self
-            .pending_actions
-            .drain(..)
-            .partition(|a| a.publisher_namespace == namespace);
-        self.pending_actions = rest.into();
-        mine
+        self.pending_actions.remove(namespace).unwrap_or_default()
     }
 
     // ─── Sequence number (RFC 0001 §3.5) ────────────────────────────────

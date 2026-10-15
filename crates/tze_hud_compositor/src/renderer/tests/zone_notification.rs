@@ -229,7 +229,8 @@ async fn test_lifecycle_sentinel_keeps_cached_markdown_render_path() {
 }
 
 /// Notification action buttons are drawn at exactly the bounds the pointer
-/// hit regions register, in token-styled fill, with their labels. Two
+/// hit regions register, as outlined SDF controls in token-styled fill (the
+/// hover/pressed fills when `chrome_states` says so), with their labels. Two
 /// notifications (the older one titled, so slot heights differ) exercise the
 /// shared slot layout. Draw-command level (no pixel readback).
 #[tokio::test]
@@ -292,27 +293,51 @@ async fn notification_actions_layout_matches_hit_regions() {
     }
 
     compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    let region_id = |callback: &str| {
+        scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|r| matches!(&r.kind, tze_hud_scene::types::ZoneInteractionKind::Action { callback_id } if callback_id == callback))
+            .map(|r| r.interaction_id.clone())
+            .unwrap()
+    };
+    let (ship, hold) = (region_id("ship"), region_id("hold"));
+    scene.set_chrome_hovered(&ship, true);
+    scene.set_chrome_pressed(&hold, true);
+
     let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
     compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
+    assert_eq!(
+        vertices.len(),
+        12,
+        "the flat pass draws only the two backdrops; buttons are SDF controls"
+    );
+    let cmds = compositor
+        .collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0)
+        .chrome;
     let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
 
-    let fill = compositor.gpu_color(
-        crate::renderer::token_colors::resolve_notification_action_tokens(&compositor.token_map)
-            .background,
-    );
+    let tokens =
+        crate::renderer::token_colors::resolve_notification_action_tokens(&compositor.token_map);
     let mut checked = 0;
     for region in &scene.overlay.zone_hit_regions {
         let tze_hud_scene::types::ZoneInteractionKind::Action { callback_id } = &region.kind else {
             continue;
         };
         let b = region.bounds;
-        let quad = crate::pipeline::rect_vertices(b.x, b.y, b.width, b.height, 1280.0, 720.0, fill);
+        let fill = match callback_id.as_str() {
+            "ship" => tokens.background_hover,
+            "hold" => tokens.background_pressed,
+            _ => tokens.background,
+        };
         assert!(
-            vertices.windows(6).any(|w| w
-                .iter()
-                .zip(&quad)
-                .all(|(a, b)| a.position == b.position && a.color == b.color)),
-            "no token-filled quad drawn at hit region of {callback_id}: {b:?}"
+            cmds.iter().any(
+                |c| (c.x, c.y, c.width, c.height) == (b.x, b.y, b.width, b.height)
+                    && c.color == compositor.gpu_color(fill)
+                    && c.border.map(|border| border.width) == Some(1.0)
+            ),
+            "no outlined control in the {callback_id} state fill at its hit region: {b:?}"
         );
         let label = callback_id.to_uppercase()[..1].to_string() + &callback_id[1..];
         let item = items
@@ -327,6 +352,312 @@ async fn notification_actions_layout_matches_hit_regions() {
         checked += 1;
     }
     assert_eq!(checked, 3, "all three actions must have hit regions");
+}
+
+/// hud-mskx5: a notification with actions reserves its button row in the
+/// slot height, so stacked one- and two-line notifications draw their text
+/// strictly above their buttons; a notification without actions keeps its
+/// text-only height.
+#[tokio::test]
+async fn notification_action_row_is_reserved_below_the_text() {
+    use crate::renderer::token_colors::{
+        NOTIFICATION_ACTION_BUTTON_H_PX, NOTIFICATION_ACTION_INSET_PX,
+        NOTIFICATION_ACTION_ROW_GAP_PX, NOTIFICATION_STACK_GAP_DEFAULT_PX,
+    };
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+
+    let policy = RenderingPolicy {
+        font_size_px: Some(16.0),
+        backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 1.0)),
+        ..Default::default()
+    };
+    let action = |label: &str| tze_hud_scene::types::NotificationAction {
+        label: label.to_owned(),
+        callback_id: label.to_lowercase(),
+    };
+    let payload = |title: &str, text: &str, labels: &[&str]| NotificationPayload {
+        text: text.to_owned(),
+        icon: String::new(),
+        urgency: 1,
+        ttl_ms: None,
+        title: title.to_owned(),
+        actions: labels.iter().map(|l| action(l)).collect(),
+    };
+
+    // Slot height: actions add exactly the reserved row; no actions add nothing.
+    for title in ["", "Title"] {
+        let plain = payload(title, "body", &[]);
+        let with_actions = payload(title, "body", &["Approve", "Reject"]);
+        let h = |p: &NotificationPayload| {
+            Compositor::notification_slot_height(
+                p,
+                &policy,
+                NOTIFICATION_BODY_SCALE,
+                NOTIFICATION_INTER_LINE_GAP,
+            )
+        };
+        if title.is_empty() {
+            assert_eq!(h(&plain), Compositor::stack_slot_height(&policy));
+        }
+        assert_eq!(
+            h(&with_actions),
+            h(&plain)
+                + NOTIFICATION_ACTION_ROW_GAP_PX
+                + NOTIFICATION_ACTION_BUTTON_H_PX
+                + NOTIFICATION_ACTION_INSET_PX,
+            "title={title:?}: actions reserve the button row"
+        );
+    }
+
+    let mut scene = SceneGraph::new(1280.0, 720.0);
+    scene.create_tab("Main", 0).unwrap();
+    scene.register_zone(ZoneDefinition {
+        id: SceneId::new(),
+        name: "notification-area".to_owned(),
+        description: "notification area zone".to_owned(),
+        geometry_policy: GeometryPolicy::Relative {
+            x_pct: 0.6,
+            y_pct: 0.0,
+            width_pct: 0.35,
+            height_pct: 0.8,
+        },
+        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
+        rendering_policy: policy.clone(),
+        contention_policy: ContentionPolicy::Stack { max_depth: 8 },
+        max_publishers: 4,
+        auto_clear_ms: None,
+        ephemeral: false,
+        layer_attachment: LayerAttachment::Chrome,
+    });
+    // The owner's Windows case (title + one-line body), a body-only card, and
+    // a card without actions, stacked.
+    for (ns, p) in [
+        (
+            "a",
+            payload(
+                "Click test 2",
+                "Hover each button, then click Approve once.",
+                &["Approve", "Reject"],
+            ),
+        ),
+        ("b", payload("", "Body only", &["Open"])),
+        ("c", payload("Plain", "No actions here", &[])),
+    ] {
+        scene
+            .publish_to_zone(
+                "notification-area",
+                ZoneContent::Notification(p),
+                ns,
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+    }
+
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    let text_bottom = |text: &str| {
+        let i = items
+            .iter()
+            .find(|i| &*i.text == text)
+            .unwrap_or_else(|| panic!("no text item {text:?}"));
+        i.pixel_y + i.bounds_height
+    };
+    let button_top = |callback: &str| {
+        scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|r| matches!(&r.kind, tze_hud_scene::types::ZoneInteractionKind::Action { callback_id } if callback_id == callback))
+            .unwrap_or_else(|| panic!("no hit region for {callback}"))
+            .bounds
+            .y
+    };
+    for (text, callback) in [
+        ("Hover each button, then click Approve once.", "approve"),
+        ("Hover each button, then click Approve once.", "reject"),
+        ("Click test 2", "approve"),
+        ("Body only", "open"),
+    ] {
+        assert!(
+            text_bottom(text) <= button_top(callback),
+            "{text:?} bounds end at {} but the {callback} button starts at {}",
+            text_bottom(text),
+            button_top(callback)
+        );
+    }
+
+    // Owner feedback on Windows: buttons must sit inside the card (inset from
+    // its sides and bottom), and stacked cards must not touch.
+    let publishes = scene
+        .zone_registry
+        .active_for_zone("notification-area")
+        .to_vec();
+    // Zone: x = 0.6 * 1280, y = 0, w = 0.35 * 1280, h = 0.8 * 720.
+    let (zx, zy, zw, zh) = (768.0_f32, 0.0_f32, 448.0_f32, 576.0_f32);
+    let layout = compositor.zone_slot_layout("notification-area", &publishes, &policy, zh);
+    let cards: Vec<(usize, f32, f32)> = layout.iter_visible(zy).collect();
+    assert_eq!(cards.len(), 3, "all three cards are visible");
+    for pair in cards.windows(2) {
+        let (_, top_y, top_h) = pair[0];
+        let (_, next_y, _) = pair[1];
+        assert_eq!(
+            next_y - (top_y + top_h),
+            NOTIFICATION_STACK_GAP_DEFAULT_PX,
+            "consecutive cards are separated by the stack gap"
+        );
+    }
+    let action_regions: Vec<_> = scene
+        .overlay
+        .zone_hit_regions
+        .iter()
+        .filter(|r| {
+            matches!(
+                r.kind,
+                tze_hud_scene::types::ZoneInteractionKind::Action { .. }
+            )
+        })
+        .collect();
+    assert_eq!(action_regions.len(), 3, "approve, reject and open");
+    for region in action_regions {
+        let b = region.bounds;
+        let (_, card_y, card_h) = *cards
+            .iter()
+            .find(|(_, y, h)| b.y >= *y && b.y < y + h)
+            .expect("each button lies in a card");
+        let inset = NOTIFICATION_ACTION_INSET_PX;
+        assert!(
+            b.x >= zx + inset - 0.01
+                && b.x + b.width <= zx + zw - inset + 0.01
+                && b.y + b.height <= card_y + card_h - inset + 0.01,
+            "button {b:?} must sit inside card y={card_y} h={card_h} minus the {inset} px inset"
+        );
+    }
+
+    // The dismiss × sits inside each card's top-right padding (so the rounded
+    // corner never clips it) and clear of the card's text.
+    let dismiss_regions: Vec<_> = scene
+        .overlay
+        .zone_hit_regions
+        .iter()
+        .filter(|r| matches!(r.kind, tze_hud_scene::types::ZoneInteractionKind::Dismiss))
+        .map(|r| r.bounds)
+        .collect();
+    assert_eq!(dismiss_regions.len(), 3, "one × per card");
+    let inset = NOTIFICATION_ACTION_INSET_PX;
+    for b in &dismiss_regions {
+        let (_, card_y, card_h) = *cards
+            .iter()
+            .find(|(_, y, h)| b.y >= *y && b.y < y + h)
+            .expect("each × lies in a card");
+        assert!(
+            b.x + b.width <= zx + zw - inset + 0.01
+                && b.y >= card_y + inset - 0.01
+                && b.y + b.height <= card_y + card_h - inset + 0.01,
+            "× {b:?} must sit inside card y={card_y} h={card_h} minus the {inset} px inset"
+        );
+    }
+    let overlaps = |a: tze_hud_scene::types::Rect, x: f32, y: f32, w: f32, h: f32| {
+        a.x < x + w && x < a.x + a.width && a.y < y + h && y < a.y + a.height
+    };
+    // Card text only: skip the × glyph itself.
+    for item in items.iter().filter(|i| &*i.text != "X") {
+        for b in &dismiss_regions {
+            assert!(
+                !overlaps(
+                    *b,
+                    item.pixel_x,
+                    item.pixel_y,
+                    item.bounds_width,
+                    item.bounds_height
+                ),
+                "× {b:?} overlaps text {:?} at ({}, {}, {}x{})",
+                item.text,
+                item.pixel_x,
+                item.pixel_y,
+                item.bounds_width,
+                item.bounds_height
+            );
+        }
+    }
+}
+
+/// Pixel check (hud-paslt): on a rounded Chrome-layer card the action button
+/// reads as a button over the card fill rather than vanishing under it, and
+/// hovering it brightens it with no agent round trip.
+#[tokio::test]
+async fn notification_action_button_is_visible_and_hover_brightens_it() {
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut scene = bordered_notification_scene(Some(12.0));
+    scene.zone_registry.active_publishes.clear();
+    scene
+        .publish_to_zone(
+            "notification-area",
+            ZoneContent::Notification(NotificationPayload {
+                text: "Approve the deploy?".to_owned(),
+                icon: String::new(),
+                urgency: 0,
+                ttl_ms: None,
+                title: "Deploy".to_owned(),
+                actions: vec![tze_hud_scene::types::NotificationAction {
+                    label: "Approve".to_owned(),
+                    callback_id: "approve".to_owned(),
+                }],
+            }),
+            "test",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    let button = scene
+        .overlay
+        .zone_hit_regions
+        .iter()
+        .find(|r| {
+            matches!(
+                r.kind,
+                tze_hud_scene::types::ZoneInteractionKind::Action { .. }
+            )
+        })
+        .cloned()
+        .expect("the action has a hit region");
+
+    let render = |compositor: &mut Compositor, scene: &mut SceneGraph| {
+        compositor.prime_markdown_cache(scene);
+        compositor.prime_truncation_cache(scene);
+        compositor.render_frame_headless(scene, &surface);
+        let pixels = surface.read_pixels(&compositor.device);
+        let px = move |x: f32, y: f32| -> [u8; 4] {
+            let i = (y as usize * 1280 + x as usize) * 4;
+            [pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]]
+        };
+        // A label-free spot inside the button (left edge, past the outline),
+        // and the card fill in the inset left of the button row.
+        let b = button.bounds;
+        (
+            px(b.x + 3.0, b.y + b.height * 0.5),
+            px(b.x - 5.0, b.y + b.height * 0.5),
+        )
+    };
+    let luma = |p: [u8; 4]| p[0] as u32 + p[1] as u32 + p[2] as u32;
+
+    let (idle, card) = render(&mut compositor, &mut scene);
+    assert!(
+        luma(idle) > luma(card) + 20,
+        "the idle button must stand out from the card fill: button {idle:?}, card {card:?}"
+    );
+
+    scene.set_chrome_hovered(&button.interaction_id, true);
+    let (hovered, _) = render(&mut compositor, &mut scene);
+    assert!(
+        luma(hovered) > luma(idle) + 20,
+        "hover must brighten the button: idle {idle:?}, hovered {hovered:?}"
+    );
 }
 
 /// Notification with opaque backdrop: backdrop_opacity=0.9 overrides
@@ -759,8 +1090,8 @@ async fn test_notification_card_border_is_an_sdf_border() {
     assert_eq!(dismiss.color, [0.0; 4]);
     assert_eq!(dismiss.border.map(|b| b.width), Some(1.0));
     assert!(
-        (dismiss.x + dismiss.width - (x + w)).abs() < 0.01,
-        "dismiss at the right edge"
+        (dismiss.x + dismiss.width - (x + w - 9.0)).abs() < 0.01,
+        "dismiss inset 9 px from the right edge"
     );
 
     let rounded = bordered_notification_scene(Some(12.0));

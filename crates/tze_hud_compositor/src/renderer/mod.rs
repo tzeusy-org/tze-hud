@@ -59,7 +59,6 @@ pub mod frame;
 pub mod hit_regions;
 pub(crate) mod icon;
 pub(crate) mod image_cache;
-mod retained;
 mod safe_mode_overlay;
 mod system_card;
 pub(crate) mod text;
@@ -68,6 +67,8 @@ pub(crate) mod token_colors;
 pub(crate) mod viewer_echo;
 pub(crate) mod widget_geometry;
 pub(crate) mod widgets;
+#[cfg(any(test, feature = "dev-mode"))]
+mod work_observation;
 pub(crate) mod zone_render;
 
 // Re-export submodule items into this module's namespace so all existing code
@@ -200,12 +201,10 @@ pub struct Compositor {
     pub width: u32,
     pub height: u32,
     frame_number: u64,
-    /// Retained snapshot and work counts for the narrowly-scoped canonical
-    /// headless retained-render path.
-    retained_render_state: retained::RetainedRenderState,
-    /// Latest real window-surface lifecycle outcome. Successful recovery also
-    /// invalidates the compositor-private retained lane at this same
-    /// production fan-out point.
+    /// Opt-in work counts for the most recent completed headless frame.
+    #[cfg(any(test, feature = "dev-mode"))]
+    work_observation: work_observation::WorkObservation,
+    /// Latest real window-surface lifecycle outcome.
     latest_surface_recovery: Option<SurfaceRecoveryOutcome>,
     /// When true, the clear color uses alpha=0 for transparent overlay mode.
     pub overlay_mode: bool,
@@ -732,7 +731,9 @@ pub(crate) struct ZoneSlotLayout {
     /// `stack_slot_height`.
     pub(crate) slot_heights: Vec<f32>,
     /// Cumulative y-offsets from the zone origin, one per slot.
-    /// `slot_offsets[i]` is the y-start of slot `i` relative to `zy`.
+    /// `slot_offsets[i]` is the y-start of slot `i` relative to `zy`;
+    /// notification cards (not alert banners) are separated by
+    /// `notification_stack_gap`.
     pub(crate) slot_offsets: Vec<f32>,
     /// Effective zone height in pixels.
     /// For alert-banner zones this equals `sum(slot_heights)` (dynamic growth).
@@ -742,9 +743,15 @@ pub(crate) struct ZoneSlotLayout {
 
 impl ZoneSlotLayout {
     /// Iterate `(pub_idx, slot_offset, slot_h)` triples for the slots that
-    /// fall inside the zone.  Slots whose top edge is at or beyond `zy +
-    /// effective_h` are excluded (the iterator stops early).
+    /// fit inside the zone, in stack order.  The iterator stops at the first
+    /// slot whose bottom edge would pass `zy + effective_h`: a card is shown
+    /// whole or not at all, so its buttons and dismiss control are never cut
+    /// off (its publication stays active and appears once space frees up).
+    /// Only the first slot may be clamped, when it alone is taller than the
+    /// zone, so the newest publication is never hidden.
     pub(crate) fn iter_visible(&self, zy: f32) -> impl Iterator<Item = (usize, f32, f32)> + '_ {
+        /// Float slack so a slot ending exactly at the zone bottom still fits.
+        const FIT_EPSILON_PX: f32 = 0.01;
         let zone_bottom = zy + self.effective_h;
         self.ordered_indices
             .iter()
@@ -755,7 +762,12 @@ impl ZoneSlotLayout {
                     .copied()
                     .zip(self.slot_heights.iter().copied()),
             )
-            .take_while(move |(_, (offset, _))| zy + offset < zone_bottom)
+            .enumerate()
+            .take_while(move |(i, (_, (offset, slot_h)))| {
+                let slot_y = zy + offset;
+                slot_y < zone_bottom && (*i == 0 || slot_y + slot_h <= zone_bottom + FIT_EPSILON_PX)
+            })
+            .map(|(_, slot)| slot)
             .map(move |(pub_idx, (offset, slot_h))| {
                 let slot_y = zy + offset;
                 let effective_slot_h = slot_h.min(zone_bottom - slot_y);
@@ -882,7 +894,8 @@ impl Compositor {
             width,
             height,
             frame_number: 0,
-            retained_render_state: retained::RetainedRenderState::default(),
+            #[cfg(any(test, feature = "dev-mode"))]
+            work_observation: work_observation::WorkObservation::default(),
             latest_surface_recovery: None,
             overlay_mode: false,
             safe_mode_overlay: false,
@@ -1219,7 +1232,8 @@ impl Compositor {
             width: clamped_width,
             height: clamped_height,
             frame_number: 0,
-            retained_render_state: retained::RetainedRenderState::default(),
+            #[cfg(any(test, feature = "dev-mode"))]
+            work_observation: work_observation::WorkObservation::default(),
             latest_surface_recovery: None,
             overlay_mode: false,
             safe_mode_overlay: false,
@@ -1317,22 +1331,9 @@ impl Compositor {
         zone_geometry_in(&self.display_layout, zone_name, policy, sw, sh)
     }
 
-    /// Fan out an actual window-surface lifecycle outcome without widening any
+    /// Record an actual window-surface lifecycle outcome without widening any
     /// scene, protocol, or agent-visible contract.
-    ///
-    /// A successfully reconfigured surface no longer has a trustworthy
-    /// retained contents baseline. The next canonical headless observation is
-    /// therefore forced through its structured full-surface diagnostic path;
-    /// terminal outcomes retain the existing shutdown behavior and only remain
-    /// available as compositor-private lifecycle evidence.
     pub(super) fn record_surface_recovery_outcome(&mut self, outcome: SurfaceRecoveryOutcome) {
-        if let SurfaceRecoveryOutcome::Reconfigured { trigger } = outcome {
-            tracing::debug!(
-                ?trigger,
-                "reconfigured window surface invalidated retained validation state"
-            );
-            self.retained_render_state.note_device_recovery();
-        }
         self.latest_surface_recovery = Some(outcome);
     }
 
@@ -1378,9 +1379,8 @@ impl Compositor {
 
     /// Drain the detailed outcome from a real surface recovery transition.
     ///
-    /// Retained diagnostics receive successful reconfiguration at the same
-    /// private fan-out point. Draining this lifecycle evidence still avoids
-    /// widening WAL, protobuf, or agent-visible APIs.
+    /// Draining this compositor-private lifecycle evidence does not widen
+    /// WAL, protobuf, or agent-visible APIs.
     #[allow(dead_code)] // Available for compositor-private lifecycle inspection.
     pub(crate) fn take_latest_surface_recovery(&mut self) -> Option<SurfaceRecoveryOutcome> {
         self.latest_surface_recovery.take()

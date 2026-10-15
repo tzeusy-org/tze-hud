@@ -66,7 +66,8 @@ otherwise. Scheduled zone publications count as held before presentation;
 - Zone: `content` is a string, or a typed object for structured zones
   (`notification` with optional `title`, `body`, integer `urgency` 0–3
   (default 1), and optional `actions: [{label, callback_id}]`; both action
-  fields are non-empty strings). `type` may be
+  fields are non-empty strings). Activating an action dismisses the
+  notification. `type` may be
   omitted; the runtime infers it from what the zone accepts. `key` is the
   merge key. Supplied notification urgency must be an integer 0–3; only
   omission defaults to 1. `status_bar.entries` must be a non-empty object
@@ -120,6 +121,16 @@ For example, publish a notification whose button arrives at `hud_input` as
 {"surface":"zone:notification-area","content":{"body":"Build complete","urgency":1,"actions":[{"label":"Approve","callback_id":"approve"}]},"ttl_ms":10000}
 ```
 
+Notification action buttons use the runtime's shared draw/label/hit geometry
+and design tokens. Hover and press feedback is local and ephemeral (pressed
+wins over hover); it sends no `hud_input` record. Leaving the owning window,
+losing focus/capture, release, clear, expiry, replacement, and dismiss remove
+transient feedback. Only a matching intentional press/release on the same live
+publication activates its callback. The existing
+[`poc_notification_action_reaches_hud_input`](../tests/integration/poc_acceptance.rs)
+checks independent Approve/Reject, repeated polls, ACK, and publisher isolation.
+This source contract is separate from Windows owner acceptance of held feedback.
+
 **`hud_hold`** `{surface*, ttl_ms*}` extends a holding, for any surface type.
 On a zone or widget, `ttl_ms` replaces the expiry with now + `ttl_ms` (not
 the original deadline), and 0 holds until `hud_clear`. A delayed publish
@@ -141,9 +152,30 @@ mutation batch clears only active publications and never cancels pending ones.
 
 - Returns input from every surface the agent holds, oldest first:
   `{"items":[{"id":"i7","s":"portal:claude-main","text":"yes, ship it"}],"remaining":0}`.
-- Also returns notification action presses (`{"id":…,"s":"zone:notification-area","action":"approve"}`).
-- `ack` confirms earlier items, so polling and acking take one round trip.
-  Unacked items are redelivered.
+- Notification callbacks keep their existing shape:
+  `{"id":…,"s":"zone:notification-area","action":"approve"}`. A validated
+  human notification × uses `{"id":…,"s":"zone:notification-area","action":"dismiss","kind":"dismiss"}`.
+  A publisher callback named `dismiss` has no `kind` field. Callback activation
+  already removes its notification locally; it emits no second human-X event.
+  TTL expiry, `hud_clear` and stale/unmatched releases do not emit human-X input.
+- Accepted notification events are retained in a growable per-publisher FIFO,
+  with stable ids until `ack`; one publisher cannot evict or acknowledge another's
+  records. Retention is in memory, with no crash/disk durability claim. Portal
+  replies keep their existing admission bounds, TTL, clear and reclaim rules.
+- `ack` confirms earlier items once per call; unacked items are redelivered.
+  `max_items` limits the result and `remaining` reports the retained backlog;
+  zero returns the backlog without consuming it. Notification FIFO items precede
+  portal replies in their existing chronological order.
+- `wait_ms` defaults to 0 and caps at 30000. The caller's armed readiness wait
+  wakes on committed input and uses one absolute deadline with a final queue
+  check. It neither polls every 150 ms nor changes the stdio adapter's 60 s cap.
+  A finite active poll protects only its agent from idle degradation, including
+  first attachment; completion/cancellation releases ownership without a future
+  heartbeat. Explicit upstream loss, reclaim, holds and input TTL still apply.
+- An accepted local portal reply is echoed in the submitting scene-maintenance
+  turn, inside the ordinary 100 ms output pacing slot. Refused replies add no
+  accepted input or success echo; their truthful local feedback is also urgent.
+  Scene readiness is separate from physical display presentation.
 
 ### Identity and permissions
 
@@ -313,6 +345,16 @@ down to the lifecycle.
   portal mutations (`MutationProto` 13–17) are applied only by the runtime's
   in-process portal driver. The session server rejects them from agents with
   `INVALID_ARGUMENT`.
+
+## Configuration
+
+The runtime installs its built-in zones independently of configuration. Root
+`[zones]` custom definitions and `[[tabs]].zones` are unsupported, including
+empty tables or arrays: startup rejects them with `ParseError` and a hint to
+remove or correct the field. Remove those obsolete entries rather than
+renaming their zone values. Tabs and their widgets remain configurable;
+`[displays.<NAME>].zones` remains the supported way to assign built-in zones
+to a display.
 
 ## Design tokens and themes
 
@@ -495,3 +537,17 @@ These four parameters remain because they control behavior in the shipped bundle
 4. **Portal tile mutations are internal.** Accent, unread count, composer
    interaction, and portal surface state stay inside the runtime; agents
    drive the portal through `hud_publish`.
+
+
+Notification capture delivery (source proposal; Windows owner acceptance separate):
+The UI-thread observer retains per-installation/per-press cancellation history
+until the corresponding application edge is delivered. Normal native Up and
+valid synthesized release activate once; cancelled or retired-window edges and
+late Up do not impersonate an action. Callback code borrows no scene/runtime
+owner and forwards native messages; local feedback cleanup uses the existing
+settle and lock-availability continuation, rendering only after actual mutation.
+No new idle poll or timer is introduced. Ambiguous completed/active receipts,
+mismatched history or bounded-admission failure disable notification actions
+until a clean runtime restart. Valid reentrant histories may trigger that
+availability limit; its frequency has not been measured. Unrelated pointer input
+continues, and this source model does not replace held-press/release owner proof.

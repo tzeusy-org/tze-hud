@@ -109,8 +109,9 @@ jobs:
         run: python scripts/ci/windows_smoke.py --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --poc-demo "target/$env:HUD_BUILD_PROFILE/poc_demo.exe" --config app/tze_hud_app/config/production.toml
 
       # Informational, not a gate: boots a second HUD under the runtime's own
-      # idle measurement (5 s settle + 60 s), with held content on screen, and
-      # checks it presents nothing for the interval. continue-on-error keeps a
+      # constrained WARP fullscreen measurement (5 s settle + 60 s), with held
+      # content on screen. Its artifact and actual HUD exit must both qualify;
+      # job success alone is not artifact validity. continue-on-error keeps a
       # WARP timing flake from failing the build until the owner decides to
       # require it (see the PR that added it for the stability record).
       - name: Quiescent with content (informational)
