@@ -74,10 +74,8 @@ pub fn render(
         .map(|color| LifecycleAccent { color, width_px });
     let composer = view.interaction_enabled.then(|| HitRegionNode {
         bounds: match view.presentation {
-            ProjectedPortalPresentation::Expanded => {
-                renderer.expanded_portal_geometry(view).input_pane
-            }
-            ProjectedPortalPresentation::Collapsed => renderer.local_bounds_for_state(view),
+            ProjectedPortalPresentation::Expanded => renderer.geometry().input_pane,
+            ProjectedPortalPresentation::Collapsed => renderer.bounds(),
         },
         interaction_id: format!("{}-composer", view.portal_id),
         accepts_focus: true,
@@ -112,11 +110,11 @@ struct ExpandedPortalGeometry {
 }
 
 impl Renderer<'_> {
-    fn local_bounds_for_state(&self, _state: &PortalView) -> Rect {
+    fn bounds(&self) -> Rect {
         Rect::new(0.0, 0.0, self.viewport.width, self.viewport.height)
     }
     fn surface(&self, state: &PortalView) -> PortalSurface {
-        let full = self.local_bounds_for_state(state);
+        let full = self.bounds();
         let part = |kind, bounds| PortalPart {
             kind,
             bounds,
@@ -128,7 +126,7 @@ impl Renderer<'_> {
                 parts.push(part(PortalPartKind::CollapsedCard, full))
             }
             ProjectedPortalPresentation::Expanded => {
-                let g = self.expanded_portal_geometry(state);
+                let g = self.geometry();
                 parts.extend([
                     part(PortalPartKind::Header, g.header),
                     part(PortalPartKind::Transcript, g.output_pane),
@@ -192,8 +190,8 @@ impl Renderer<'_> {
             }),
         }
     }
-    fn expanded_portal_geometry(&self, state: &PortalView) -> ExpandedPortalGeometry {
-        let full = self.local_bounds_for_state(state);
+    fn geometry(&self) -> ExpandedPortalGeometry {
+        let full = self.bounds();
         let header_h = self.tokens.header_height_px.max(0.0).min(full.height);
         let divider_w = self.tokens.section_gap_px.max(1.0).min(full.width);
         let pane_width = ((full.width - divider_w).max(0.0) * 0.5).max(0.0);
@@ -271,7 +269,7 @@ impl Renderer<'_> {
             );
         }
 
-        let geometry = self.expanded_portal_geometry(state);
+        let geometry = self.geometry();
         let mut transcript = self.portal_text_node(state, SceneId::new(), now_wall_us);
         if let NodeData::TextMarkdown(text) = &mut transcript.data {
             text.bounds = geometry.output_content;
@@ -464,7 +462,7 @@ impl Renderer<'_> {
             layout: Default::default(),
             data: NodeData::TextMarkdown(TextMarkdownNode {
                 content,
-                bounds: self.local_bounds_for_state(state),
+                bounds: self.bounds(),
                 font_size_px,
                 font_family: Default::default(),
                 alignment: Default::default(),
