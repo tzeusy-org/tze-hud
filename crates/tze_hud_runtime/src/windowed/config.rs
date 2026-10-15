@@ -2,27 +2,12 @@ use std::path::PathBuf;
 
 use crate::window::WindowConfig;
 
-/// Bounded benchmark configuration for the real windowed compositor.
-///
-/// When present, the windowed runtime seeds a deterministic scene, records frame
-/// telemetry after `warmup_frames`, writes a JSON artifact at `emit_path`, and
-/// exits after `frames` measured frames.
-#[derive(Debug, Clone)]
-pub struct WindowedBenchmarkConfig {
-    /// Number of warmup frames to render before recording measurements.
-    pub warmup_frames: u64,
-    /// Number of measured frames to include in the emitted artifact.
-    pub frames: u64,
-    /// Path to the per-mode benchmark JSON artifact.
-    pub emit_path: PathBuf,
-}
-
 /// Bounded, event-driven quiescent-efficiency measurement for the real
 /// windowed compositor.
 ///
-/// Unlike [`WindowedBenchmarkConfig`], this mode never requests a render
-/// cadence. The runtime first observes a real presentation, settles for the
-/// mandatory five seconds, then measures the untouched windowed scene for sixty
+/// This mode never requests a render cadence. The runtime first observes a
+/// real presentation, settles for the mandatory five seconds, then measures
+/// the untouched windowed scene for sixty
 /// seconds and emits the counter delta at `emit_path`.
 #[derive(Debug, Clone)]
 pub struct WindowedQuiescentEfficiencyConfig {
@@ -114,8 +99,6 @@ pub struct WindowedConfig {
     pub config_file_path: Option<String>,
     /// Render zone boundaries with colored debug tints.  Default: `false`.
     pub debug_zones: bool,
-    /// Optional bounded benchmark run for the windowed compositor.
-    pub benchmark: Option<WindowedBenchmarkConfig>,
     /// Optional bounded, event-driven quiescent-efficiency measurement.
     pub quiescent_efficiency: Option<WindowedQuiescentEfficiencyConfig>,
     /// Enables `POST /admin/restart`. `None`: the endpoint answers 503.
@@ -143,7 +126,6 @@ impl Default for WindowedConfig {
             config_toml: None,
             config_file_path: None,
             debug_zones: false,
-            benchmark: None,
             quiescent_efficiency: None,
             relaunch: None,
             updated_from: None,

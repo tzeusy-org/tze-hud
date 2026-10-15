@@ -580,7 +580,7 @@ mod tests {
     }
 
     #[test]
-    fn benchmark_cadence_rearms_with_successive_wait_until_deadlines() {
+    fn animation_cadence_rearms_with_successive_wait_until_deadlines() {
         let start = Instant::now();
         let interval = Duration::from_millis(16);
         for frame in 1..=4 {

@@ -193,9 +193,7 @@ mod test_support;
 #[cfg_attr(not(feature = "test-harness"), allow(dead_code))]
 mod event_loop_harness;
 
-pub use self::config::{
-    Relaunch, WindowedBenchmarkConfig, WindowedConfig, WindowedQuiescentEfficiencyConfig,
-};
+pub use self::config::{Relaunch, WindowedConfig, WindowedQuiescentEfficiencyConfig};
 #[cfg(feature = "test-harness")]
 pub use self::event_loop_harness::HeadlessEventLoopHarness;
 use self::hittest::{refresh_interaction_hit_regions_after_render, sync_scene_display_area};
@@ -205,9 +203,8 @@ use self::input_dispatch::{
 };
 use self::keyboard::{ComposerDeliveryContext, PendingKeyboardEvent};
 use self::lifecycle::{
-    BENCHMARK_NO_PROGRESS_TIMEOUT, PendingInputLatencySamples, WindowedBenchmarkRunState,
-    WindowedQuiescentEfficiencyRunState, drain_windowed_input_latency, read_windows_clipboard_text,
-    seed_windowed_benchmark_scene, update_surface_repaint_pending, windowed_frame_needs_render,
+    PendingInputLatencySamples, WindowedQuiescentEfficiencyRunState, drain_windowed_input_latency,
+    read_windows_clipboard_text, update_surface_repaint_pending, windowed_frame_needs_render,
 };
 pub use self::network::render_attach_info;
 use self::network::{
@@ -390,8 +387,8 @@ struct WindowedRuntimeState {
     pipeline: FramePipeline,
     /// Shutdown token.
     shutdown: ShutdownToken,
-    /// Set when benchmark output failed after the event loop was already running.
-    benchmark_failed: Arc<std::sync::atomic::AtomicBool>,
+    /// Set when quiescent artifact output or validation failed.
+    quiescent_failed: Arc<std::sync::atomic::AtomicBool>,
     /// Set by the compositor thread when a queued surface recovery cannot
     /// resume. `WindowedRuntime::run` maps this to a non-zero process result
     /// after the existing orderly event-loop cleanup completes.
@@ -1013,7 +1010,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         // is a cheap watch-channel poll that presents only when the compositor
         // signalled a new frame — with the compositor render gate that now
         // happens only when the scene changed or an animation is in flight.
-        self.inject_windowed_benchmark_input_probe();
         self.tick_widget_hover_tracking();
         // Auto-dismiss the drag-handle context menu after 3 seconds.
         self.tick_context_menu_auto_dismiss();
@@ -1041,7 +1037,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     "failed to write quiescent-efficiency runtime artifact"
                 );
                 self.state
-                    .benchmark_failed
+                    .quiescent_failed
                     .store(true, std::sync::atomic::Ordering::Release);
             } else if completion.validation.passed {
                 tracing::info!(
@@ -1056,7 +1052,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     "quiescent-efficiency runtime artifact failed validation"
                 );
                 self.state
-                    .benchmark_failed
+                    .quiescent_failed
                     .store(true, std::sync::atomic::Ordering::Release);
             }
             self.state
@@ -1337,9 +1333,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             if let Ok(state) = self.state.shared_state.try_lock() {
                 if let Ok(mut scene) = state.scene.try_lock() {
                     sync_scene_display_area(&mut scene, surface_width, surface_height);
-                    if self.state.config.benchmark.is_some() {
-                        seed_windowed_benchmark_scene(&mut scene, surface_width, surface_height);
-                    }
                 }
             }
         }
@@ -1508,7 +1501,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         let (frame_presented_tx, degradation_notices, lease_expirations) =
             self.state.compositor_runtime_senders();
         let shutdown = self.state.shutdown.clone();
-        let benchmark_failed = self.state.benchmark_failed.clone();
         let terminal_surface_recovery_failed = self.state.terminal_surface_recovery_failed.clone();
         let compositor_wake = self.state.wake.clone();
         let safe_mode_for_compositor = Arc::clone(&self.state.safe_mode_atomic);
@@ -1525,17 +1517,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         let handoff_child = cfg.handoff.clone();
         let telemetry_collector = TelemetryCollector::new();
         let surface_for_compositor = window_surface.clone();
-        let mut benchmark_state = cfg.benchmark.clone().map(|benchmark| {
-            WindowedBenchmarkRunState::new(
-                benchmark,
-                cfg.window.mode,
-                self.state.effective_mode,
-                surface_width,
-                surface_height,
-                cfg.target_fps,
-            )
-        });
-
         let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
 
         let compositor_handle = spawn_compositor_thread(
@@ -1592,13 +1573,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 // lock is briefly unavailable in the recovery iteration. Keep
                 // this debt until a frame actually submits.
                 let mut surface_repaint_pending = false;
-                // Benchmark progress is acknowledged by the main thread after
-                // `SurfaceTexture::present()`, not by a compositor-side attempt.
-                // Keep only the latest telemetry for the currently pending
-                // swapchain texture because `FrameReadySignal` is latest-wins.
-                let mut benchmark_present_count_seen =
-                    surface_for_compositor.presented_frame_count();
-                let mut pending_benchmark_sample = None;
                 // Secondary display windows (hud-1pt5h), re-read from the main
                 // thread's `display_targets` whenever its generation moves.
                 let mut secondaries: Vec<displays::SecondaryTarget> = Vec::new();
@@ -1620,7 +1594,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     // advances the generation and prevents the final wait from
                     // parking on stale observations.
                     let wake_checkpoint = compositor_wake.compositor().checkpoint();
-                    let mut continue_at_cadence = benchmark_state.is_some();
+                    let mut continue_at_cadence = false;
                     let mut timed_deadline: Option<Deadline> = None;
                     // Check for shutdown.
                     match shutdown_rx.try_recv() {
@@ -1636,47 +1610,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     }
                     if shutdown_tok.is_triggered() {
                         break;
-                    }
-
-                    let presented_count = surface_for_compositor.presented_frame_count();
-                    if presented_count > benchmark_present_count_seen {
-                        benchmark_present_count_seen = presented_count;
-                        if let Some(sample) = pending_benchmark_sample.take()
-                            && let Some(state) = benchmark_state.as_mut()
-                            && state.record(&sample)
-                        {
-                            let finished = benchmark_state
-                                .take()
-                                .expect("benchmark_state must still exist when record completes");
-                            let emit_path = finished.config.emit_path.clone();
-                            match finished.finish() {
-                                Ok(()) => {
-                                    tracing::info!(
-                                        path = %emit_path.display(),
-                                        "windowed benchmark artifact written; shutting down"
-                                    );
-                                    shutdown_tok.trigger(crate::threads::ShutdownReason::Clean);
-                                    compositor_wake.notify_main(
-                                        crate::idle_efficiency::RuntimeWakeupSource::Shutdown,
-                                    );
-                                    break;
-                                }
-                                Err(err) => {
-                                    tracing::error!(
-                                        error = %err,
-                                        path = %emit_path.display(),
-                                        "failed to write windowed benchmark artifact"
-                                    );
-                                    benchmark_failed
-                                        .store(true, std::sync::atomic::Ordering::Release);
-                                    shutdown_tok.trigger(crate::threads::ShutdownReason::Clean);
-                                    compositor_wake.notify_main(
-                                        crate::idle_efficiency::RuntimeWakeupSource::Shutdown,
-                                    );
-                                    break;
-                                }
-                            }
-                        }
                     }
 
                     let frame_start = Instant::now();
@@ -1913,16 +1846,12 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         // tick, prune, cache primes) ALWAYS run, so a fade-out
                         // start or expiry still bumps scene.version and re-arms the
                         // gate; an in-flight eased transition / TTL fade / reveal /
-                        // smooth-scroll forces a render so it never freezes. An
-                        // explicitly configured benchmark is active fixed-cadence
-                        // work and presents every requested sample without changing
-                        // the normal runtime idle contract.
+                        // smooth-scroll forces a render so it never freezes.
                         let needs_render = windowed_frame_needs_render(
                             scene.version != last_rendered_scene_version,
                             scene.geometry_epoch != last_rendered_geometry_epoch,
                             compositor.has_inflight_animation(&scene),
                             composer_needs_render,
-                            benchmark_state.is_some(),
                             surface_repaint_pending,
                         );
                         let plan = displays::frame_plan(
@@ -2239,10 +2168,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                     degradation_notices.as_ref(),
                                 );
                             }
-
-                            if frame_submitted && benchmark_state.is_some() {
-                                pending_benchmark_sample = telemetry.records().last().cloned();
-                            }
                         }
 
                         // ── Admin screenshot (render half) ────────────────
@@ -2287,40 +2212,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         compositor_wake.schedule_compositor_after_availability(move || {
                             drop(availability_scene.blocking_lock());
                         });
-                    }
-
-                    // Benchmark no-progress watchdog (hud-gcn01): if the benchmark
-                    // is active and no frame has been rendered within the timeout,
-                    // emit a partial/diagnostic artifact and exit non-zero.  This
-                    // catches the Windows fullscreen hang where redraw callbacks
-                    // never fire for a non-foreground window, preventing a silent
-                    // infinite spin that never reaches --benchmark-frames.
-                    let benchmark_stalled = benchmark_state
-                        .as_ref()
-                        .is_some_and(|s| s.is_stalled(BENCHMARK_NO_PROGRESS_TIMEOUT));
-                    if benchmark_stalled {
-                        let finished = benchmark_state
-                            .take()
-                            .expect("stalled implies benchmark_state is Some");
-                        let emit_path = finished.config.emit_path.clone();
-                        match finished.emit_watchdog_abort("no-progress timeout") {
-                            Ok(()) => tracing::warn!(
-                                path = %emit_path.display(),
-                                timeout_secs = BENCHMARK_NO_PROGRESS_TIMEOUT.as_secs(),
-                                "benchmark watchdog: no-progress timeout — \
-                                 partial result emitted; exiting non-zero"
-                            ),
-                            Err(err) => tracing::error!(
-                                error = %err,
-                                path = %emit_path.display(),
-                                "benchmark watchdog: failed to emit partial result"
-                            ),
-                        }
-                        benchmark_failed.store(true, std::sync::atomic::Ordering::Release);
-                        shutdown_tok.trigger(crate::threads::ShutdownReason::Clean);
-                        compositor_wake
-                            .notify_main(crate::idle_efficiency::RuntimeWakeupSource::Shutdown);
-                        break;
                     }
 
                     let cadence_deadline = continue_at_cadence.then(|| {
@@ -3322,7 +3213,7 @@ impl WindowedRuntime {
             telemetry: TelemetryCollector::new(),
             pipeline: FramePipeline::new(),
             shutdown,
-            benchmark_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            quiescent_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             terminal_surface_recovery_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             quiescent_efficiency: None,
             cursor_x: 0.0,
@@ -3444,9 +3335,9 @@ impl WindowedRuntime {
             .state
             .terminal_surface_recovery_failed
             .load(std::sync::atomic::Ordering::Acquire);
-        let benchmark_failed = app
+        let quiescent_failed = app
             .state
-            .benchmark_failed
+            .quiescent_failed
             .load(std::sync::atomic::Ordering::Acquire);
         // Every runtime thread has stopped; bound what teardown remains.
         crate::threads::arm_exit_deadline(crate::threads::EXIT_DEADLINE);
@@ -3457,8 +3348,8 @@ impl WindowedRuntime {
         if terminal_surface_recovery_failed {
             return Err("windowed surface recovery failed terminally".into());
         }
-        if benchmark_failed {
-            return Err("windowed benchmark artifact write failed".into());
+        if quiescent_failed {
+            return Err("windowed quiescent-efficiency artifact write or validation failed".into());
         }
 
         Ok(())

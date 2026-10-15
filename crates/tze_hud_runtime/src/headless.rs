@@ -369,7 +369,7 @@ impl HeadlessRuntime {
     /// in headless mode). Per-stage telemetry is recorded in the returned
     /// `FrameTelemetry`.
     /// Same-frame widget raster observations from the compositor are preserved
-    /// in both this return value and the telemetry collector.
+    /// in this return value; the collector retains only bounded session aggregates.
     ///
     /// The compositor renders the current scene to the headless surface via
     /// `render_frame_headless()`, which includes the `copy_to_buffer` step so

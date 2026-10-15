@@ -145,7 +145,7 @@ impl WindowedRuntimeState {
             telemetry: tze_hud_telemetry::TelemetryCollector::new(),
             pipeline: crate::pipeline::FramePipeline::new(),
             shutdown: crate::threads::ShutdownToken::new(),
-            benchmark_failed: Arc::new(AtomicBool::new(false)),
+            quiescent_failed: Arc::new(AtomicBool::new(false)),
             terminal_surface_recovery_failed: Arc::new(AtomicBool::new(false)),
             quiescent_efficiency: None,
             cursor_x: 0.0,

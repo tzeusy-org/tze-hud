@@ -31,6 +31,10 @@ flowchart TD
     HUB -->|"hud_input replies"| MCP
 ```
 
+The runtime returns per-frame telemetry to its caller and records cumulative
+session totals with bounded recent latency samples; the collector retains no
+frame history. Headless benchmarks own their artifact samples separately.
+
 These are ownership/data-flow arrows, not Cargo dependencies. Startup and
 network wiring live in the [app](../app/tze_hud_app/src/main.rs),
 [windowed runtime](../crates/tze_hud_runtime/src/windowed/mod.rs), and its

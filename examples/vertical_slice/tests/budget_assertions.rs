@@ -383,16 +383,6 @@ async fn test_input_to_scene_commit_p99_within_budget() {
         assert!(telemetry.input_to_scene_commit_us > 0);
         assert!(telemetry.input_to_scene_commit_us >= telemetry.input_to_local_ack_us);
         assert!(telemetry.input_to_next_present_us >= telemetry.input_to_scene_commit_us);
-        let recorded = runtime.telemetry.records().last().unwrap();
-        assert_eq!(recorded.frame_number, telemetry.frame_number);
-        assert_eq!(
-            recorded.input_to_scene_commit_us,
-            telemetry.input_to_scene_commit_us
-        );
-        assert_eq!(
-            recorded.input_to_next_present_us,
-            telemetry.input_to_next_present_us
-        );
         let expected = if index % 2 == 0 {
             [255, 0, 0, 255]
         } else {
@@ -569,16 +559,6 @@ async fn test_input_to_next_present_p99_within_budget() {
         assert!(telemetry.input_to_next_present_us > 0);
         assert!(telemetry.input_to_scene_commit_us >= telemetry.input_to_local_ack_us);
         assert!(telemetry.input_to_next_present_us >= telemetry.input_to_scene_commit_us);
-        let recorded = runtime.telemetry.records().last().unwrap();
-        assert_eq!(recorded.frame_number, telemetry.frame_number);
-        assert_eq!(
-            recorded.input_to_scene_commit_us,
-            telemetry.input_to_scene_commit_us
-        );
-        assert_eq!(
-            recorded.input_to_next_present_us,
-            telemetry.input_to_next_present_us
-        );
         let expected = if index % 2 == 0 {
             [255, 0, 0, 255]
         } else {
