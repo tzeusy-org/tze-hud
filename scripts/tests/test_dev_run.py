@@ -157,6 +157,8 @@ class Operations:
         return self.receipt_value
 
     def write_receipt(self, state):
+        # Finalization gets a fresh budget, not the observation remainder.
+        assert self.deadline - self.now == 30
         self.native_mutations.append("write_receipt")
         self.receipt_value = json.loads(json.dumps(state))
 
@@ -305,3 +307,9 @@ def test_dev_run_production_refusal_transaction_and_bounded_restart(tmp_path):
         {"case": "owned-old-remove-timeout", "lock_retained": True,
          "native_mutations": ["lock", "remove"]},
     ]
+
+
+def test_dev_run_pairing_errors_are_cli_errors(monkeypatch):
+    monkeypatch.setattr(dr.shutil, "which", lambda name: "/fixture/" + name)
+    with pytest.raises(dr.DevRunError, match="invalid HUD endpoint"):
+        dr.NativeOps(Path(__file__).resolve().parents[2], r"C:\dev", "bad host!")

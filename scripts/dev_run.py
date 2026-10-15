@@ -262,6 +262,8 @@ def deploy(ops) -> dict:
                     and ops.file("exe") == transaction.state["new_file"]
                     and observed["sha"] == build["sha"]):
                 ops.accept_process(child)
+                # Finalize under its own budget, not the observation remainder.
+                ops.deadline = ops.clock() + 30
                 transaction.complete()
                 return {"sha": observed["sha"], "channel": observed["channel"],
                         "cpu_pct_2s": observed.get("cpu_pct_2s"), "pid": child["pid"],
@@ -455,13 +457,17 @@ class NativeOps:
         spec = importlib.util.spec_from_file_location("dev_run_hud_env", helper)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
-        if host:
-            # Existing strict explicit resolver, without persistent HUD_HOST.
-            selected_host, url = module._adapter_url(host)
-            endpoint = {"host": selected_host, "url": url, "explicit": True}
-        else:
-            endpoint = module.adapter_endpoint()
-        self.key = module.adapter_key(endpoint)
+        try:
+            if host:
+                # Existing strict explicit resolver, without persistent HUD_HOST.
+                selected_host, url = module._adapter_url(host)
+                endpoint = {"host": selected_host, "url": url, "explicit": True}
+            else:
+                endpoint = module.adapter_endpoint()
+            self.key = module.adapter_key(endpoint)
+        except module.HudEnvError as error:
+            # Its messages never contain a PSK; nothing has been mutated yet.
+            raise DevRunError(str(error)) from None
         self.origin = endpoint["url"].removesuffix("/mcp")
         parsed = urllib.parse.urlsplit(self.origin)
         self.host, self.port = parsed.hostname, parsed.port
