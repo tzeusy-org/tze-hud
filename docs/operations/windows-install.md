@@ -227,6 +227,35 @@ The same calls are wrapped by `python3 .claude/skills/user-test/scripts/hud_admi
 Without a valid PSK the answer is 401; with one lacking `admin`, 403
 `{"code":"NOT_ADMIN","hint":...}`.
 
+For read-only agent-host diagnosis, run `hud_admin.py doctor` with `HUD_HOST`
+or `--host <host:port>`. It checks DNS, TCP, authenticated status, the reported
+tailnet inbound policy and the running build **commit** against the resolved
+rolling `dev` release tag, in that order. It emits only a first-failure
+classification and owner action. `blocked`, `unknown`, `not_applicable`, an
+unknown build, unavailable release metadata and a commit mismatch fail;
+`target_commitish: main` or an executable SHA-256 is not commit provenance.
+An independent parent enforces each network layer's five-second deadline,
+including blocked C resolver/HTTP calls in its owned local probe child. The
+parent signals only that helper's pidfd, escalates TERM to KILL and reaps it;
+termination waits add at most 0.4 seconds, and an unconfirmed exit reports
+`cleanup_failed`. This agent-host command requires Linux/WSL pidfd and
+parent-death support; other hosts fail with `deadline_unavailable`. No
+automatic pairing, privilege change, repair, restart or update occurs. A
+401/403 remains an owner pairing problem, not permission to gain admin.
+
+With explicit authorization for **mutating** live publications,
+`python3 scripts/ci/windows_smoke.py --url http://<host>:9090/mcp` reuses the
+network smoke checks through the selected private pairing. Use an idle
+dedicated paired agent with no concurrent or pending publications. The
+driver refuses existing holdings/portals and clears only tracked test
+surfaces; clears are agent-and-surface scoped, so concurrent use of that same
+pairing is unsupported. It never spawns or kills a borrowed HUD or rewrites
+its configuration. Owned startup/config/WARP, pair reopening/wrong-code,
+executable restart/health, local quiescent-efficiency emission, resident
+POC/orphan reclamation and theme/fixture captures are individually
+`UNEXECUTED owner-only` in URL mode, and stay in the owned CI `--exe` route. A source fixture
+or CI pass does not establish the original owner-host live acceptance.
+
 ### Operator error codes
 
 `/pair` and `/admin/*` errors are JSON `{"code","hint"}`; the `hint` says what

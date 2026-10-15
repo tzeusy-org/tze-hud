@@ -250,6 +250,9 @@ class Smoke:
         else:
             print(f"request end {label} elapsed_s={time.monotonic() - started:.3f}", flush=True)
 
+    def _open(self, request: urllib.request.Request, timeout_s: float):
+        return urllib.request.urlopen(request, timeout=timeout_s)
+
     @staticmethod
     def _operator_label(method: str, path: str) -> str:
         safe_method = method if method in {"GET", "POST"} else "other"
@@ -278,7 +281,7 @@ class Smoke:
                     "Authorization": f"Bearer {self.psk}",
                 },
             )
-            with urllib.request.urlopen(req, timeout=timeout_s) as resp:
+            with self._open(req, timeout_s) as resp:
                 reply = json.load(resp)
             if "error" in reply:
                 raise AssertionError("JSON-RPC error response")
@@ -295,7 +298,7 @@ class Smoke:
                 headers={"Authorization": f"Bearer {self.psk}"},
             )
             try:
-                with urllib.request.urlopen(req, timeout=15) as resp:
+                with self._open(req, 15) as resp:
                     return resp.status, resp.headers.get("Content-Type", ""), resp.read()
             except urllib.error.HTTPError as err:
                 return err.code, err.headers.get("Content-Type", ""), err.read()
@@ -323,6 +326,99 @@ class Smoke:
         if is_error:
             raise AssertionError(f"{tool if tool in TOOLS else 'other'}: tool error response")
         return payload
+
+
+class BorrowedSmoke(Smoke):
+    """Track this smoke's surfaces on an idle, exclusively used paired agent.
+
+    MCP Clear is agent+surface scoped, not an atomic per-invocation token.
+    Refuse pre-existing holdings; a concurrently publishing same agent is
+    unsupported. Other agents' publications are untouched by Clear.
+    """
+
+    def __init__(self, url: str, psk: str) -> None:
+        super().__init__(url, psk)
+        self.touched: set[str] = set()
+        self.portal = "portal:live-smoke-" + secrets.token_hex(8)
+
+    def _open(self, request: urllib.request.Request, timeout_s: float):
+        # No redirect can forward the private bearer to another endpoint.
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+
+        return urllib.request.build_opener(NoRedirect()).open(request, timeout=timeout_s)
+
+    def call(self, tool: str, args: dict | None = None, *, timeout_s: float = 10) -> tuple[bool, dict]:
+        args = dict(args or {})
+        surface = args.get("surface")
+        if tool == "hud_publish" and surface != "zone:no-such-zone":
+            if surface not in self.touched:
+                entries = super().ok("hud_surfaces")["surfaces"]
+                if any(e.get("s") == surface and (e.get("held") is True or surface.startswith("portal:")) for e in entries):
+                    raise AssertionError("borrowed publication collision")
+            # Record before sending: a lost reply does not prove no mutation.
+            self.touched.add(surface)
+        if tool == "hud_clear" and surface not in self.touched:
+            raise AssertionError("refusing to clear an untracked borrowed surface")
+        result = super().call(tool, args, timeout_s=timeout_s)
+        if tool == "hud_clear" and not result[0]:
+            self.touched.discard(surface)
+        return result
+
+    def request(self, method: str, path: str) -> tuple[int, str, bytes]:
+        if method != "GET":
+            raise AssertionError("borrowed operator requests must be read-only")
+        status, ctype, body = super().request(method, path)
+        return (status, ctype, body) if status < 300 else (status, "", b"")  # Never expose a raw admin error body.
+
+    def cleanup(self) -> None:
+        failed = False
+        for surface in sorted(self.touched):
+            try:
+                self.ok("hud_clear", {"surface": surface})
+            except Exception:
+                failed = True  # Never print arbitrary response/credential context.
+        if failed:
+            raise AssertionError("borrowed test-publication cleanup incomplete")
+
+
+def run_borrowed(url: str, settle_s: float) -> int:
+    """Authorized MUTATING smoke, without any executable ownership."""
+    scripts = Path(__file__).resolve().parents[2] / ".claude/skills/user-test/scripts"
+    sys.path.insert(0, str(scripts))
+    import hud_env
+
+    smoke = None
+    result = 1
+    try:
+        _, endpoint = hud_env._adapter_url(url)
+        smoke = BorrowedSmoke(endpoint, hud_env.load_psk(url))
+        smoke.rpc("initialize", {"protocolVersion": "2025-06-18", "capabilities": {}})
+        entries = smoke.ok("hud_surfaces")["surfaces"]
+        if any(e.get("held") is True or e.get("s", "").startswith("portal:") for e in entries):
+            raise AssertionError("paired agent has existing holdings or portals")
+        run_checks(smoke)
+        time.sleep(settle_s)
+        check_admin(smoke)
+        check_widget(smoke)
+        check_notification_ttl(smoke)
+        check_delay(smoke)
+        result = 0
+    except Exception as error:
+        print(f"FAIL borrowed smoke ({type(error).__name__}); no process/settings repair performed", file=sys.stderr)
+    finally:
+        if smoke is not None:
+            try:
+                smoke.cleanup()
+            except AssertionError:
+                print("FAIL borrowed test-publication cleanup incomplete", file=sys.stderr)
+                result = 1
+        for leg in ("owned startup/config/WARP", "pair reopening/wrong-code", "executable restart/health",
+                    "local quiescent-efficiency emit", "resident poc_demo spawn/orphan reclaim",
+                    "owned theme/fixture captures"):
+            print(f"UNEXECUTED owner-only: {leg}")
+    return result
 
 
 def wait_for_mcp(
@@ -396,7 +492,7 @@ def run_checks(smoke: Smoke) -> None:
     assert published.get("ok") is True, f"hud_publish {zone}: {published}"
     print(f"ok  hud_publish {zone}")
 
-    portal = "portal:ci-smoke"
+    portal = smoke.portal if isinstance(smoke, BorrowedSmoke) else "portal:ci-smoke"
     smoke.ok("hud_publish", {"surface": portal, "content": "hello from CI", "display_name": "CI"})
     listed = {s["s"] for s in smoke.ok("hud_surfaces")["surfaces"]}
     assert portal in listed, f"{portal} not listed after attach: {sorted(listed)}"
@@ -1199,9 +1295,11 @@ def run_quiescent(args: argparse.Namespace) -> int:
     return result
 
 
-def main() -> int:
+def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--exe", type=Path)
+    mode = ap.add_mutually_exclusive_group()
+    mode.add_argument("--exe", type=Path)
+    mode.add_argument("--url", help="authorized MUTATING smoke on an idle dedicated paired HUD agent; no process ownership")
     ap.add_argument("--config", type=Path)
     ap.add_argument("--captures", type=Path, help="owned WARP theme/fixture frames and informational main diff")
     ap.add_argument("--capture-comment", type=Path, help="comment on changed captures after successful artifact upload")
@@ -1211,11 +1309,15 @@ def main() -> int:
     ap.add_argument("--mcp-port", type=int, default=9090)
     ap.add_argument("--startup-timeout", type=float, default=90)
     ap.add_argument("--settle-s", type=float, default=3, help="seconds the HUD must stay up after checks")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     if args.capture_comment is not None:
-        if args.exe or args.config or args.captures or args.quiescent_with_content:
+        if args.exe or args.url or args.config or args.captures or args.quiescent_with_content:
             ap.error("--capture-comment cannot launch or attach to a HUD")
         return post_capture_comment(args.capture_comment)
+    if args.url:
+        if args.config is not None or args.poc_demo is not None or args.captures or args.quiescent_with_content:
+            ap.error("--url cannot use owned --config, --poc-demo, --captures or --quiescent-with-content")
+        return run_borrowed(args.url, args.settle_s)
     if args.exe is None or args.config is None:
         ap.error("--exe and --config are required for owned smoke/captures")
     if args.captures is not None:

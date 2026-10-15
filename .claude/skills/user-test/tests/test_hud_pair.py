@@ -451,7 +451,7 @@ def test_hud_env_derives_urls_and_reads_the_file(hud, monkeypatch):
     endpoint_file(home).chmod(0o600)
 
 
-def test_admin_sends_the_paired_psk_as_bearer(hud):
+def test_admin_sends_the_paired_psk_as_bearer(hud, monkeypatch, capsys):
     host, home = hud
     pair(host, home)
     env = {**os.environ, "HOME": str(home), "HUD_HOST": host}
@@ -461,6 +461,190 @@ def test_admin_sends_the_paired_psk_as_bearer(hud):
     )
     assert result.returncode == 0, result.stderr
     assert json.loads(result.stdout) == {"path": "/admin/logs?tail=5"}
+
+    monkeypatch.syspath_prepend(str(SCRIPTS))
+    monkeypatch.setenv("HOME", str(home))
+    import hud_admin as admin
+
+    if (sys.platform != "linux" or not hasattr(os, "fork") or
+            not hasattr(os, "pidfd_open") or not hasattr(signal, "pidfd_send_signal")):
+        monkeypatch.setattr(admin, "doctor_probe", lambda *_: pytest.fail("unsupported host performed a probe"))
+        assert admin.main(["--host", host, "doctor"]) == 1
+        unsupported = json.loads(capsys.readouterr().out)
+        assert unsupported["reason"] == "deadline_unavailable"
+        assert unsupported["action"] == admin.DOCTOR_HOST_ACTION
+        return  # The original logs/bearer control above still ran.
+
+    sha, marker = "a" * 40, "synthetic-private-doctor-detail"
+    outcome = {}
+    trace_path = home / "doctor-trace"
+    trace_path.write_text("")
+    births, signals = [], []
+    fork, send_signal = admin.os.fork, admin.signal.pidfd_send_signal
+
+    def record(value):
+        with trace_path.open("a") as handle:
+            handle.write(value + "\n")
+
+    def fork_owned():
+        pid = fork()
+        if pid:
+            births.append(pid)  # Startup gate keeps this child live until admitted.
+        return pid
+
+    def signal_owned(pidfd, sig):
+        signals.append(sig)
+        return send_signal(pidfd, sig)
+
+    def blocked_c_call():
+        # libc sleep does not execute Python handlers; force the KILL fallback.
+        admin.signal.pthread_sigmask(admin.signal.SIG_BLOCK, {admin.signal.SIGTERM})
+        admin.ctypes.CDLL(None).sleep(2)
+
+    monkeypatch.setattr(admin.os, "fork", fork_owned)
+    monkeypatch.setattr(admin.signal, "pidfd_send_signal", signal_owned)
+
+    def resolve(*args, **kwargs):
+        record("dns")
+        if outcome.get("block_dns"):
+            blocked_c_call()
+        if outcome.get("dns"):
+            raise outcome["dns"]
+        return [(admin.socket.AF_INET, admin.socket.SOCK_STREAM, 0, "", ("127.0.0.1", 9090))]
+
+    class Connection:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def settimeout(self, seconds):
+            assert seconds == admin.DOCTOR_LAYER_SECONDS
+
+        def connect(self, address):
+            record("tcp")
+            assert address == ("127.0.0.1", 9090)
+            if outcome.get("tcp"):
+                raise outcome["tcp"]
+
+    class Response:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_):
+            return False
+
+        def read(self, limit):
+            assert limit == 131073
+            if outcome.get("block_read"):
+                blocked_c_call()
+            return json.dumps(self.payload).encode()
+
+    class Opener:
+        def open(self, request, timeout):
+            assert request.get_method() == "GET" and request.data is None
+            assert timeout == admin.DOCTOR_LAYER_SECONDS
+            if request.full_url.endswith("/admin/status"):
+                record("auth")
+                assert request.full_url == f"http://{host}/admin/status"
+                assert request.get_header("Authorization") == f"Bearer {FakeHud.last_psk}"
+                if outcome.get("block_http"):
+                    blocked_c_call()
+                if outcome.get("auth"):
+                    raise admin.urllib.error.HTTPError(request.full_url, outcome["auth"], marker, {}, None)
+                return Response({"sha": outcome.get("sha", sha), "agents": marker,
+                                 "tailnet_inbound": {"state": outcome.get("firewall", "allowed"), "error": marker}})
+            assert request.get_header("Authorization") is None
+            record("release")
+            if outcome.get("release"):
+                raise admin.urllib.error.HTTPError(request.full_url, outcome["release"], marker, {}, None)
+            if request.full_url.endswith("/releases/tags/dev"):
+                return Response({"tag_name": "dev", "draft": False, "target_commitish": "main", "assets": marker})
+            if request.full_url.endswith("/git/ref/tags/dev"):
+                return Response({"object": {"type": "tag", "sha": "b" * 40}})
+            assert request.full_url == admin.DEV_API + "/git/tags/" + "b" * 40
+            return Response({"object": {"type": "commit", "sha": outcome.get("latest", sha)}})
+
+    monkeypatch.setattr(admin.socket, "getaddrinfo", resolve)
+    monkeypatch.setattr(admin.socket, "socket", lambda *_: Connection())
+    monkeypatch.setattr(admin.urllib.request, "build_opener", lambda handler: Opener())
+    cases = [
+        ({}, 0, "dev_commit", None, ["dns", "tcp", "auth", "release", "release", "release"]),
+        ({"dns": admin.socket.gaierror(marker)}, 1, "dns", "resolution_failed", ["dns"]),
+        ({"tcp": ConnectionRefusedError(marker)}, 1, "tcp", "connection_refused", ["dns", "tcp"]),
+        ({"tcp": TimeoutError(marker)}, 1, "tcp", "deadline_exceeded", ["dns", "tcp"]),
+        *[({"auth": code}, 1, "auth", reason, ["dns", "tcp", "auth"])
+          for code, reason in [(401, "unauthenticated"), (403, "not_admin"), (500, "http_error")]],
+        *[({"firewall": state}, 1, "firewall", state, ["dns", "tcp", "auth"])
+          for state in ["blocked", "unknown", "not_applicable"]],
+        ({"sha": "unknown"}, 1, "build", "unknown", ["dns", "tcp", "auth"]),
+        ({"release": 403}, 1, "release", "http_error", ["dns", "tcp", "auth", "release"]),
+        ({"latest": "main"}, 1, "release", "unknown", ["dns", "tcp", "auth", "release", "release", "release"]),
+        ({"latest": "c" * 40}, 1, "build", "sha_mismatch", ["dns", "tcp", "auth", "release", "release", "release"]),
+    ]
+    for configured, code, layer, reason, expected in cases:
+        outcome.clear()
+        outcome.update(configured)
+        trace_path.write_text("")
+        assert admin.main(["--host", host, "doctor"]) == code
+        captured = capsys.readouterr()
+        observed = json.loads(captured.out)
+        assert observed["layer"] == layer and observed.get("reason") == reason
+        assert trace_path.read_text().splitlines() == expected and not captured.err
+        assert marker not in captured.out and FakeHud.last_psk not in captured.out
+        if code:
+            assert observed["action"]
+
+    # Real C blocking cannot defer the parent's deadline. Prove no later layer,
+    # TERM/KILL fallback and actual child reaping for DNS and HTTP open/read.
+    monkeypatch.setattr(admin, "DOCTOR_LAYER_SECONDS", 0.03)
+    for fault, layer, expected in [("block_dns", "dns", ["dns"]),
+                                   ("block_http", "auth", ["dns", "tcp", "auth"]),
+                                   ("block_read", "auth", ["dns", "tcp", "auth"])]:
+        outcome.clear()
+        outcome[fault] = True
+        trace_path.write_text("")
+        signals.clear()
+        started = time.monotonic()
+        assert admin.main(["--host", host, "doctor"]) == 1
+        assert time.monotonic() - started < 1.5  # The child C sleep is two seconds.
+        observed = json.loads(capsys.readouterr().out)
+        assert observed["layer"] == layer and observed["reason"] == "deadline_exceeded"
+        assert trace_path.read_text().splitlines() == expected
+        assert signals == [signal.SIGTERM, signal.SIGKILL]
+    for pid in births:
+        with pytest.raises(ChildProcessError):
+            os.waitpid(pid, os.WNOHANG)  # Already reaped, never left as a zombie.
+
+    # An unavailable kernel API must never admit the child to key/network work.
+    trace_path.write_text("")
+    signals.clear()
+    open_pidfd = admin.os.pidfd_open
+
+    def unavailable_pidfd(_):
+        raise OSError("synthetic unavailable pidfd")
+
+    monkeypatch.setattr(admin.os, "pidfd_open", unavailable_pidfd)
+    assert admin.main(["--host", host, "doctor"]) == 1
+    unavailable = json.loads(capsys.readouterr().out)
+    assert unavailable["reason"] == "deadline_unavailable"
+    assert not trace_path.read_text() and not signals
+    with pytest.raises(ChildProcessError):
+        os.waitpid(births[-1], os.WNOHANG)
+    monkeypatch.setattr(admin.os, "pidfd_open", open_pidfd)
+
+    trace_path.write_text("")
+    before = len(births)
+    monkeypatch.delattr(admin.os, "pidfd_open")
+    assert admin.main(["--host", host, "doctor"]) == 1
+    unsupported = json.loads(capsys.readouterr().out)
+    assert unsupported["reason"] == "deadline_unavailable"
+    assert unsupported["action"] == "Run doctor from a Linux/WSL agent host with owned-process deadline support; no network probe was performed."
+    assert len(births) == before and not trace_path.read_text()
 
 
 def test_pair_creates_a_private_dir_and_ignores_planted_files(hud):
