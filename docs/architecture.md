@@ -128,6 +128,12 @@ The driver applies them through checked scene calls; it no longer builds or
 decodes protobuf render batches. The hub owns cue-expiry repaints and retained
 unread counts. Composer drafts, selections and carets remain in the runtime
 input manager; only submissions enter the hub.
+The full `(agent, portal id)` key remains authoritative for routing and input
+ACKs. Scene and composer metadata preserve `text-stream://portal/{agent}/{id}`
+when the agent has no slash and the result fits the scene's 256-byte limit;
+otherwise they use `text-stream://portal-tile/{tile UUID}` for that live tile.
+This internal alias adds no limit to configured agent ids and does not change
+the hub's 128-byte portal-id limit or pairing validation.
 
 **Input and reclaim [Observed].** Local input is handled by the
 [windowed keyboard](../crates/tze_hud_runtime/src/windowed/keyboard.rs) and

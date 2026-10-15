@@ -190,10 +190,23 @@ impl InProcessPortalDriveState {
     }
 }
 
+/// Scene/composer metadata is bounded, while the full key remains the routing
+/// identity. A slash in the agent also makes the legacy delimiter ambiguous.
+fn portal_scene_identity(key: &PortalKey, tile_id: SceneId) -> String {
+    let legacy = format!("text-stream://portal/{}/{}", key.agent, key.id);
+    if !key.agent.contains('/') && legacy.len() <= tze_hud_scene::types::PORTAL_SESSION_ID_MAX_BYTES
+    {
+        legacy
+    } else {
+        format!("text-stream://portal-tile/{tile_id}")
+    }
+}
+
 /// The renderer's view of a hub portal (one step until the renderer reads
 /// the hub directly).
 fn portal_state(
     key: &PortalKey,
+    tile_id: SceneId,
     portal: &Portal,
     entry: &DriveEntry,
     visible_bytes: usize,
@@ -211,7 +224,7 @@ fn portal_state(
         .collect();
     let degraded = portal.degraded_since_us.is_some();
     PortalView {
-        portal_id: format!("text-stream://portal/{}/{}", key.agent, key.id),
+        portal_id: portal_scene_identity(key, tile_id),
         presentation: ProjectedPortalPresentation::Expanded,
         connection_degraded: degraded,
         // The portal exists because its agent published: it is connected.
@@ -745,6 +758,9 @@ impl InProcessPortalDriver {
         if created && !self.create_tile(key, scene, tab_id) {
             return;
         }
+        let Some(tile_id) = self.drive.entries[key].tile_scene_id else {
+            return;
+        };
         let state = {
             let Some(hub) = self.lock_hub() else {
                 return;
@@ -757,6 +773,7 @@ impl InProcessPortalDriver {
             let portal = hub.get(key).expect("incarnation checked above");
             portal_state(
                 key,
+                tile_id,
                 portal,
                 &self.drive.entries[key],
                 hub.limits().visible_bytes,
@@ -767,9 +784,6 @@ impl InProcessPortalDriver {
             .entries
             .get_mut(key)
             .expect("entry ensured above");
-        let Some(tile_id) = entry.tile_scene_id else {
-            return;
-        };
         entry.pending_geometry = None;
         let viewport = entry
             .latest_geometry
@@ -1047,7 +1061,7 @@ impl Default for InProcessPortalDriver {
 mod tests {
     use super::*;
     use tze_hud_input::{DraftSubmission, GeometrySnapshot, PortalRect};
-    use tze_hud_projection::hub::{PortalError, PortalLimits};
+    use tze_hud_projection::hub::{PortalError, PortalLimits, Publish};
     use tze_hud_scene::{NodeData, TestClock};
 
     /// The header marker line the scene renderer paints while the agent is
@@ -1323,6 +1337,178 @@ mod tests {
             Some(rejected_at),
             "local feedback urgency is consumed once"
         );
+
+        // Nearby keys must retain independent tile routing and public input
+        // identities through updates, ACKs, selective clear and reconnect.
+        let pairs = [
+            [
+                PortalKey::new(format!("{}x", "a".repeat(256)), "p".repeat(128)),
+                PortalKey::new(format!("{}y", "a".repeat(256)), "p".repeat(128)),
+            ],
+            [
+                PortalKey::new("a".repeat(128), format!("{}x", "p".repeat(127))),
+                PortalKey::new("a".repeat(128), format!("{}y", "p".repeat(127))),
+            ],
+            [PortalKey::new("a/b", "c"), PortalKey::new("a", "b/c")],
+        ];
+        for keys in pairs {
+            let (mut driver, mut scene, tab, mut processor, _clock) = clocked();
+            for (i, key) in keys.iter().enumerate() {
+                publish_for(&driver, key, &format!("initial-{i}"), 100);
+            }
+            driver.drain_inner(&mut scene, &mut processor, Some(tab), 200);
+            let tiles: [_; 2] =
+                std::array::from_fn(|i| driver.drive.entries[&keys[i]].tile_scene_id.unwrap());
+            let identities: [_; 2] = std::array::from_fn(|i| {
+                scene
+                    .portal_surface(tiles[i])
+                    .unwrap()
+                    .identity
+                    .session_id
+                    .clone()
+            });
+            let cleared_lease = driver.drive.entries[&keys[0]].scene_lease_id.unwrap();
+            let original_incarnation = driver.hub_mut().incarnation(&keys[0]);
+            assert_ne!(tiles[0], tiles[1]);
+            assert_ne!(identities[0], identities[1]);
+            for (i, key) in keys.iter().enumerate() {
+                publish_for(&driver, key, &format!("updated-{i}"), 300);
+            }
+            driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + FRAME_US);
+            let mut input_ids = Vec::new();
+            for (i, key) in keys.iter().enumerate() {
+                assert_eq!(driver.drive.entries[key].tile_scene_id, Some(tiles[i]));
+                assert_eq!(
+                    scene.portal_surface(tiles[i]).unwrap().identity.session_id,
+                    identities[i]
+                );
+                let content = tile_markdown(&scene, tiles[i]);
+                assert!(content.contains(&format!("updated-{i}")));
+                assert!(!content.contains(&format!("updated-{}", 1 - i)));
+                let feedback = submit(
+                    &mut driver,
+                    tiles[i],
+                    &format!("reply-{i}"),
+                    200 + FRAME_US + 1,
+                );
+                assert_eq!(feedback.feedback_state, PortalInputFeedbackState::Accepted);
+                assert_eq!(feedback.projection_id, key.id);
+                input_ids.push(feedback.input_id);
+            }
+            assert_ne!(input_ids[0], input_ids[1]);
+            for (i, key) in keys.iter().enumerate() {
+                let foreign_ack = if key.agent != keys[1 - i].agent {
+                    vec![input_ids[1 - i].clone()]
+                } else {
+                    Vec::new()
+                };
+                let batch =
+                    driver
+                        .hub_mut()
+                        .poll_input(&key.agent, &foreign_ack, None, 200 + FRAME_US + 2);
+                assert_eq!(
+                    batch.items.len(),
+                    keys.iter().filter(|k| k.agent == key.agent).count()
+                );
+                for item in batch.items {
+                    let owner = keys
+                        .iter()
+                        .position(|k| k.agent == key.agent && k.id == item.portal)
+                        .expect("poll returns the full public portal id for this agent");
+                    assert_eq!(item.text, format!("reply-{owner}"));
+                    assert_eq!(item.id, input_ids[owner]);
+                }
+            }
+            assert!(
+                driver
+                    .hub_mut()
+                    .poll_input("unrelated-agent", &input_ids, None, 200 + FRAME_US + 3)
+                    .items
+                    .is_empty()
+            );
+            driver
+                .hub_mut()
+                .poll_input(&keys[0].agent, &input_ids[..1], None, 200 + FRAME_US + 4);
+            {
+                let hub = driver.hub_mut();
+                assert!(hub.get(&keys[0]).unwrap().inputs.is_empty());
+                assert_eq!(hub.get(&keys[1]).unwrap().inputs.len(), 1);
+            }
+
+            driver.hub_mut().clear(&keys[0]).unwrap();
+            driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + 2 * FRAME_US);
+            assert!(!driver.drive.entries.contains_key(&keys[0]));
+            assert!(!scene.tiles.contains_key(&tiles[0]));
+            assert!(scene.portal_surface(tiles[0]).is_none());
+            assert!(!scene.lease_is_active(&cleared_lease));
+            assert_eq!(driver.drive.entries[&keys[1]].tile_scene_id, Some(tiles[1]));
+            assert_eq!(
+                scene.portal_surface(tiles[1]).unwrap().identity.session_id,
+                identities[1]
+            );
+            let peer_content = tile_markdown(&scene, tiles[1]);
+            assert!(peer_content.contains("updated-1"));
+            assert!(peer_content.contains("reply-1"));
+            assert!(!peer_content.contains("reply-0"));
+            assert_eq!(driver.hub_mut().get(&keys[1]).unwrap().inputs.len(), 1);
+
+            // A reconnect inside grace retains its existing tile and alias.
+            assert!(driver.hub_mut().degrade(&keys[1], 200 + 2 * FRAME_US + 1));
+            driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + 3 * FRAME_US);
+            assert_eq!(
+                scene.portal_surface(tiles[1]).unwrap().identity.session_id,
+                identities[1]
+            );
+            publish_for(&driver, &keys[1], "reconnected", 200 + 3 * FRAME_US + 1);
+            driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + 4 * FRAME_US);
+            assert_eq!(driver.drive.entries[&keys[1]].tile_scene_id, Some(tiles[1]));
+            assert_eq!(
+                scene.portal_surface(tiles[1]).unwrap().identity.session_id,
+                identities[1]
+            );
+            assert!(tile_markdown(&scene, tiles[1]).contains("reconnected"));
+            let pending =
+                driver
+                    .hub_mut()
+                    .poll_input(&keys[1].agent, &[], None, 200 + 4 * FRAME_US + 1);
+            assert_eq!(pending.items.len(), 1);
+            assert_eq!(pending.items[0].portal, keys[1].id);
+            assert_eq!(pending.items[0].text, "reply-1");
+            assert!(
+                driver
+                    .hub_mut()
+                    .poll_input(
+                        &keys[1].agent,
+                        &input_ids[1..],
+                        None,
+                        200 + 4 * FRAME_US + 2
+                    )
+                    .items
+                    .is_empty()
+            );
+
+            publish_for(
+                &driver,
+                &keys[0],
+                "fresh-attachment",
+                200 + 4 * FRAME_US + 3,
+            );
+            driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + 5 * FRAME_US);
+            let fresh_tile = driver.drive.entries[&keys[0]].tile_scene_id.unwrap();
+            assert_ne!(fresh_tile, tiles[0]);
+            assert_ne!(driver.hub_mut().incarnation(&keys[0]), original_incarnation);
+            let fresh_surface = scene.portal_surface(fresh_tile).unwrap();
+            fresh_surface.validate_structure().unwrap();
+            assert_ne!(fresh_surface.identity.session_id, identities[0]);
+            assert!(tile_markdown(&scene, fresh_tile).contains("fresh-attachment"));
+            assert!(!tile_markdown(&scene, fresh_tile).contains("updated-0"));
+            assert!(driver.hub_mut().get(&keys[0]).unwrap().inputs.is_empty());
+            assert!(driver.drive.key_for_tile(tiles[0]).is_none());
+            assert_eq!(
+                scene.portal_surface(tiles[1]).unwrap().identity.session_id,
+                identities[1]
+            );
+        }
     }
 
     /// The render site wires follow-tail (spec §3.2), the resize snapshot
@@ -1528,59 +1714,118 @@ mod tests {
     fn drain_declares_first_class_portal_surface_on_tile() {
         use tze_hud_scene::types::{PortalDisplayState, PortalPartKind};
 
-        let mut driver = InProcessPortalDriver::new();
-        let (mut scene, tab, mut processor) = scene();
-        publish(&mut driver, "p", "hello surface", 100);
-        driver.drain_inner(&mut scene, &mut processor, Some(tab), 200);
-        let tile_id = tile(&driver, "p");
+        // Byte boundaries, configured agents (which have no pairing-name cap),
+        // and the formerly ambiguous delimiter pair all use the real drain.
+        let cases = [
+            (key("p"), false),
+            (PortalKey::new("a".repeat(106), "p".repeat(128)), false),
+            (PortalKey::new("a".repeat(107), "p".repeat(128)), true),
+            (PortalKey::new("a".repeat(128), "p".repeat(128)), true),
+            (
+                PortalKey::new("é".repeat(64), format!("{}é", "界".repeat(42))),
+                true,
+            ),
+            (PortalKey::new("configured-agent".repeat(32), "p"), true),
+            (PortalKey::new("a/b", "c"), true),
+            (PortalKey::new("a", "b/c"), false),
+        ];
+        let mut identities = std::collections::HashSet::new();
+        for (portal_key, alias) in cases {
+            let mut driver = InProcessPortalDriver::new();
+            let (mut scene, tab, mut processor) = scene();
+            publish_for(&driver, &portal_key, "hello surface", 100);
+            driver.drain_inner(&mut scene, &mut processor, Some(tab), 200);
+            let tile_id = driver.drive.entries[&portal_key].tile_scene_id.unwrap();
 
-        let surface = scene
-            .portal_surface(tile_id)
-            .expect("drain must declare a first-class portal surface on the tile");
-        for expected in [
-            PortalPartKind::Frame,
-            PortalPartKind::Header,
-            PortalPartKind::Composer,
-            PortalPartKind::Transcript,
-            PortalPartKind::Divider,
-        ] {
+            let surface = scene
+                .portal_surface(tile_id)
+                .expect("drain must declare a first-class portal surface on the tile");
+            surface
+                .validate_structure()
+                .expect("bounded identity is a valid surface");
+            let legacy = format!(
+                "text-stream://portal/{}/{}",
+                portal_key.agent, portal_key.id
+            );
+            let expected_identity = if alias {
+                format!("text-stream://portal-tile/{tile_id}")
+            } else {
+                legacy
+            };
+            assert_eq!(surface.identity.session_id, expected_identity);
+            assert_eq!(surface.identity.display_name, portal_key.id);
+            assert!(surface.identity.session_id.len() <= 256);
+            assert!(identities.insert(surface.identity.session_id.clone()));
+            for expected in [
+                PortalPartKind::Frame,
+                PortalPartKind::Header,
+                PortalPartKind::Composer,
+                PortalPartKind::Transcript,
+                PortalPartKind::Divider,
+            ] {
+                assert!(
+                    surface.parts.iter().any(|part| part.kind == expected),
+                    "native expanded surface must declare {expected:?}"
+                );
+            }
+            assert_eq!(surface.display_state, PortalDisplayState::Expanded);
+
+            let root_id = scene.tiles[&tile_id].root_node.expect("root painted");
+            let root = &scene.nodes[&root_id];
             assert!(
-                surface.parts.iter().any(|part| part.kind == expected),
-                "native expanded surface must declare {expected:?}"
+                matches!(root.data, NodeData::SolidColor(_)),
+                "production drain must materialize the native frame root"
+            );
+            let child_text: Vec<&str> = root
+                .children
+                .iter()
+                .filter_map(|id| match &scene.nodes.get(id)?.data {
+                    NodeData::TextMarkdown(text) => Some(text.content.as_str()),
+                    _ => None,
+                })
+                .collect();
+            assert!(child_text.contains(&"INPUT"));
+            assert!(child_text.contains(&"OUTPUT"));
+            assert!(child_text.iter().any(|text| text.contains("hello surface")));
+            let composer = root
+                .children
+                .iter()
+                .find_map(|id| match &scene.nodes[id].data {
+                    NodeData::HitRegion(region) if region.accepts_composer_input => {
+                        Some((*id, region))
+                    }
+                    _ => None,
+                })
+                .expect("native composer hit region is attached to the root");
+            assert!(composer.1.accepts_focus && composer.1.accepts_pointer);
+            assert_eq!(
+                composer.1.interaction_id,
+                format!("{expected_identity}-composer")
+            );
+            let bounds = composer.1.bounds;
+            assert!(
+                matches!(scene.hit_test(bounds.x + 1.0, bounds.y + 1.0), tze_hud_scene::HitResult::NodeHit { node_id, .. } if node_id == composer.0)
             );
         }
-        assert_eq!(surface.display_state, PortalDisplayState::Expanded);
 
-        let root_id = scene.tiles[&tile_id].root_node.expect("root painted");
-        let root = &scene.nodes[&root_id];
-        assert!(
-            matches!(root.data, NodeData::SolidColor(_)),
-            "production drain must materialize the native frame root"
-        );
-        let child_text: Vec<&str> = root
-            .children
-            .iter()
-            .filter_map(|id| match &scene.nodes.get(id)?.data {
-                NodeData::TextMarkdown(text) => Some(text.content.as_str()),
-                _ => None,
-            })
-            .collect();
-        assert!(child_text.contains(&"INPUT"));
-        assert!(child_text.contains(&"OUTPUT"));
-        assert!(child_text.iter().any(|text| text.contains("hello surface")));
-        let composer = root
-            .children
-            .iter()
-            .find_map(|id| match &scene.nodes[id].data {
-                NodeData::HitRegion(region) if region.accepts_composer_input => Some((*id, region)),
-                _ => None,
-            })
-            .expect("native composer hit region is attached to the root");
-        assert!(composer.1.accepts_focus && composer.1.accepts_pointer);
-        let bounds = composer.1.bounds;
-        assert!(
-            matches!(scene.hit_test(bounds.x + 1.0, bounds.y + 1.0), tze_hud_scene::HitResult::NodeHit { node_id, .. } if node_id == composer.0)
-        );
+        let driver = InProcessPortalDriver::new();
+        for invalid_id in ["p".repeat(129), "界".repeat(43)] {
+            assert_eq!(
+                driver.hub_mut().publish(
+                    &PortalKey::new("configured-agent".repeat(32), invalid_id),
+                    Publish {
+                        display_name: None,
+                        text: Some("rejected".into()),
+                        key: None,
+                        expects_reply: false,
+                        status: None
+                    },
+                    100,
+                ),
+                Err(PortalError::InvalidArgument),
+                "aliasing does not relax the public portal-id byte limit"
+            );
+        }
     }
 
     /// The ambient "N unread" count and the in-transcript divider come from
