@@ -520,7 +520,7 @@ impl TimestampGranularity {
 /// expressed as resolved token defaults rather than inline constants.
 ///
 /// These string constants are the **single source of truth** for the default portal
-/// palette. `tze_hud_projection::resident_grpc::PortalVisualTokens::default()` derives
+/// palette. `tze_hud_projection::tokens::PortalVisualTokens::default()` derives
 /// from `PortalPartTokens::default()` (which parses these constants) via
 /// `portal_visual_tokens_from_part_tokens`, so changing a value here propagates to
 /// both sides automatically (hud-dcynv consolidation).

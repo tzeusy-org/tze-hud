@@ -7,9 +7,8 @@
 //! 2. On every `about_to_wait` drain: sweeps the hub (input expiry, idle
 //!    degrade, reclaim), then renders each portal [`PortalHub::take_due`]
 //!    returns into a scene tile, creating the tile (under its own scene
-//!    lease) on first render. Rendering goes through
-//!    `ResidentGrpcPortalAdapter::render_batch_with_surface`, fed a
-//!    `PortalView` built from the hub's portal.
+//!    lease) on first render. The pure scene renderer receives a PortalView;
+//!    this driver applies its nodes and affordances with checked scene calls.
 //! 3. Mirrors liveness onto the scene lease: a degraded portal's lease is
 //!    orphaned (disconnection badge, content kept, invariant 4) and
 //!    reconnected when the agent returns. A reclaimed portal's lease is
@@ -31,19 +30,16 @@ use tze_hud_input::{DraftNotificationBatch, InputProcessor};
 pub use tze_hud_mcp::PortalHandle;
 pub use tze_hud_projection::hub::{PortalHub, PortalKey};
 use tze_hud_projection::{
-    AdapterDraftBatch, AdapterDraftCancel, AdapterDraftNotification, AdapterDraftSubmission,
-    AdapterGeometryBatch, AdapterGeometrySnapshot, AdapterPortalRect, InputDeliveryState,
-    OutputKind, PortalInputFeedback, PortalInputFeedbackState, PortalView,
-    ProjectedPortalAttention, ProjectedPortalPresentation, ProjectionLifecycleState,
-    TranscriptUnit,
+    AdapterGeometryBatch, AdapterGeometrySnapshot, AdapterPortalRect, ComposerStatus,
+    InputDeliveryState, OutputKind, PortalInputFeedback, PortalInputFeedbackState, PortalView,
+    ProjectedPortalPresentation, ProjectionLifecycleState, TranscriptUnit,
     hub::{DeadlineKind, Due, Portal, PortalStatus, Transition, Unit},
-    resident_grpc::{
-        ResidentGrpcPortalAdapter, ResidentGrpcPortalConfig, portal_visual_tokens_from_part_tokens,
-    },
+    render::{DEFAULT_PORTAL_SIZE, PortalRender, Size, render},
+    tokens::{PortalVisualTokens, portal_visual_tokens_from_part_tokens},
 };
 use tze_hud_scene::{
     Clock, Rect, SceneGraph,
-    types::{LeaseState, SceneId, TileScrollConfig},
+    types::{InputMode, LeaseState, PortalSurface, SceneId, TileScrollConfig},
 };
 
 use crate::idle_efficiency::RuntimeWakeupSource;
@@ -97,41 +93,17 @@ const PORTAL_LEASE_TTL_MS: u64 = 86_400_000;
 /// so `state`'s agent-activity / streaming-cursor cue quiesces (hud-kbm80), or
 /// `None` when the state carries no cue active as of `now_us`.
 fn activity_cue_clear_due_us(state: &PortalView, now_us: u64) -> Option<u64> {
-    tze_hud_projection::resident_grpc::agent_activity_clear_deadline_us(state)
+    tze_hud_projection::render::agent_activity_clear_deadline_us(state)
         .filter(|deadline| *deadline >= now_us)
         .map(|deadline| deadline.saturating_add(1))
-}
-
-fn adapter_draft_batch_from_runtime(batch: &DraftNotificationBatch) -> AdapterDraftBatch {
-    AdapterDraftBatch {
-        latest: batch
-            .latest
-            .as_ref()
-            .map(|latest| AdapterDraftNotification {
-                text: latest.text.clone(),
-                cursor: latest.cursor,
-                selection_anchor: latest.selection_anchor,
-                at_capacity: latest.at_capacity,
-                sequence: latest.sequence,
-            }),
-        submission: batch
-            .submission
-            .as_ref()
-            .map(|submission| AdapterDraftSubmission {
-                text: submission.text.clone(),
-                sequence: submission.sequence,
-            }),
-        cancel: batch.cancel.as_ref().map(|cancel| AdapterDraftCancel {
-            sequence: cancel.sequence,
-        }),
-    }
 }
 
 /// Runtime-side state for one portal: its renderer, scene tile and lease,
 /// and what the renderer needs beyond the hub's portal.
 struct DriveEntry {
     incarnation: Option<u64>,
-    adapter: ResidentGrpcPortalAdapter,
+    tokens: PortalVisualTokens,
+    declared_surface: Option<PortalSurface>,
     /// Scene lease the portal tile lives under; its orphan/reconnect state
     /// mirrors the portal's liveness.
     scene_lease_id: Option<SceneId>,
@@ -139,12 +111,6 @@ struct DriveEntry {
     /// Content height (px) from the last render. A decrease means content was
     /// trimmed from the head (spec §3.3, hud-pkg2g / hud-hkaw2).
     prev_content_height_px: f32,
-    /// One-shot instant to repaint so the agent-activity cue quiesces
-    /// (hud-kbm80); overwritten by every render.
-    activity_cue_clear_due_us: Option<u64>,
-    /// Units in the last rendered output batch: the ambient "N unread" count
-    /// and the unread divider, kept across repaints that add no output.
-    carried_unread: usize,
     /// Newest resize (pointer gesture or hotkey); the durable rendered size.
     latest_geometry: Option<AdapterGeometrySnapshot>,
     /// Resize not yet delivered to the renderer.
@@ -154,15 +120,14 @@ struct DriveEntry {
 }
 
 impl DriveEntry {
-    fn new(adapter: ResidentGrpcPortalAdapter) -> Self {
+    fn new(tokens: PortalVisualTokens) -> Self {
         Self {
             incarnation: None,
-            adapter,
+            tokens,
+            declared_surface: None,
             scene_lease_id: None,
             tile_scene_id: None,
             prev_content_height_px: 0.0,
-            activity_cue_clear_due_us: None,
-            carried_unread: 0,
             latest_geometry: None,
             pending_geometry: None,
             last_input_feedback: None,
@@ -188,7 +153,7 @@ impl InProcessPortalDriveState {
         }
     }
 
-    fn resolve_visual_tokens(&self) -> tze_hud_projection::resident_grpc::PortalVisualTokens {
+    fn resolve_visual_tokens(&self) -> PortalVisualTokens {
         let resolved =
             tze_hud_config::tokens::resolve_tokens(&DesignTokenMap::new(), &self.token_overrides);
         portal_visual_tokens_from_part_tokens(&resolve_portal_tokens(&resolved))
@@ -196,11 +161,8 @@ impl InProcessPortalDriveState {
 
     fn entry(&mut self, key: &PortalKey) -> &mut DriveEntry {
         if !self.entries.contains_key(key) {
-            let adapter = ResidentGrpcPortalAdapter::with_tokens(
-                ResidentGrpcPortalConfig::new(Vec::new()),
-                self.resolve_visual_tokens(),
-            );
-            self.entries.insert(key.clone(), DriveEntry::new(adapter));
+            let tokens = self.resolve_visual_tokens();
+            self.entries.insert(key.clone(), DriveEntry::new(tokens));
         }
         self.entries.get_mut(key).expect("inserted above")
     }
@@ -223,7 +185,7 @@ impl InProcessPortalDriveState {
         self.token_overrides = overrides;
         let tokens = self.resolve_visual_tokens();
         for entry in self.entries.values_mut() {
-            entry.adapter.set_visual_tokens(tokens.clone());
+            entry.tokens = tokens.clone();
         }
     }
 }
@@ -251,12 +213,11 @@ fn portal_state(
     PortalView {
         portal_id: format!("text-stream://portal/{}/{}", key.agent, key.id),
         presentation: ProjectedPortalPresentation::Expanded,
-        redacted: false,
         connection_degraded: degraded,
         // The portal exists because its agent published: it is connected.
         has_ever_connected: true,
         interaction_enabled: !degraded,
-        attention: ProjectedPortalAttention::Ambient,
+        composer: ComposerStatus::Ready,
         display_name: Some(portal.display_name.clone()),
         lifecycle_state: Some(match portal.status {
             PortalStatus::Attached => ProjectionLifecycleState::Attached,
@@ -265,8 +226,8 @@ fn portal_state(
             PortalStatus::Detached => ProjectionLifecycleState::Detached,
         }),
         status_text: None,
-        unread_output_count: Some(entry.carried_unread),
-        visible_unread_output_count: Some(entry.carried_unread.min(visible_transcript.len())),
+        unread_output_count: Some(portal.rendered_unread),
+        visible_unread_output_count: Some(portal.rendered_unread.min(visible_transcript.len())),
         visible_transcript,
         input_history: portal
             .replies
@@ -274,17 +235,71 @@ fn portal_state(
             .map(|u| unit(u, OutputKind::Viewer))
             .collect(),
         pending_input_count: Some(portal.inputs.len()),
-        latest_viewer_delivery_state: portal.inputs.back().map(|i| {
-            if i.delivered {
-                InputDeliveryState::Delivered
-            } else {
-                InputDeliveryState::Pending
-            }
-        }),
+        latest_viewer_delivery_state: portal
+            .inputs
+            .back()
+            .filter(|i| i.delivered)
+            .map(|_| InputDeliveryState::Delivered),
         last_input_feedback: entry.last_input_feedback.clone(),
-        geometry_batch: entry.pending_geometry.clone(),
-        resized_bounds: entry.latest_geometry.map(|g| g.rect),
     }
+}
+
+/// Install the renderer's native tree and overlay state under the driver's lease.
+fn apply_render(
+    scene: &mut SceneGraph,
+    binding: &mut DriveEntry,
+    tile_id: SceneId,
+    rendered: PortalRender,
+) -> Result<(), tze_hud_scene::validation::ValidationError> {
+    let ns = PORTAL_DRIVER_NAMESPACE;
+    let surface = rendered.surface;
+    let redeclare = binding.declared_surface.as_ref().is_none_or(|old| {
+        old.parts != surface.parts
+            || old.identity != surface.identity
+            || old.display_state != surface.display_state
+    });
+    if redeclare {
+        match scene.set_portal_surface(tile_id, surface.clone(), ns) {
+            Ok(()) => binding.declared_surface = Some(surface),
+            // The old renderer also painted content when this optional descriptor
+            // exceeded its identity limit. Hub keys can legally exceed that limit
+            // once the driver adds its URI prefix. Keep those accepted portals visible.
+            Err(error @ tze_hud_scene::ValidationError::InvalidPortalSurface { .. }) => {
+                tracing::warn!(
+                    ?error,
+                    "portal descriptor rejected; retaining native tile content"
+                );
+            }
+            Err(error) => return Err(error),
+        }
+    } else {
+        scene.update_portal_surface_state(
+            tile_id,
+            Some(surface.lifecycle),
+            Some(surface.display_state),
+            ns,
+        )?;
+    }
+    scene.set_tile_root_tree_checked(tile_id, rendered.root, rendered.children, ns)?;
+    scene.update_tile_input_mode(
+        tile_id,
+        if rendered.composer.is_some() {
+            InputMode::Capture
+        } else {
+            InputMode::LocalOnly
+        },
+        ns,
+    )?;
+    match rendered.accent {
+        Some(accent) => scene.set_tile_lifecycle_accent_checked(tile_id, accent, ns)?,
+        None => scene.clear_tile_lifecycle_accent_checked(tile_id, ns)?,
+    }
+    scene.set_tile_unread_count_checked(tile_id, rendered.unread, ns)?;
+    match rendered.composer {
+        Some(composer) => scene.set_tile_composer_interaction_checked(tile_id, composer, ns)?,
+        None => scene.clear_tile_composer_interaction_checked(tile_id, ns)?,
+    }
+    Ok(())
 }
 
 /// Owns the [`PortalHub`] and drives its portals onto the scene. See the
@@ -350,19 +365,10 @@ impl InProcessPortalDriver {
                 wall_us: d.at_us,
                 family: match d.kind {
                     DeadlineKind::Render => PortalDeadlineFamily::Cadence,
+                    DeadlineKind::ActivityCue => PortalDeadlineFamily::ActivityCue,
                     DeadlineKind::Liveness => PortalDeadlineFamily::AgentLiveness,
                     DeadlineKind::InputExpiry => PortalDeadlineFamily::PendingInputExpiry,
                 },
-            });
-        let activity = self
-            .drive
-            .entries
-            .values()
-            .filter_map(|entry| entry.activity_cue_clear_due_us)
-            .min()
-            .map(|wall_us| PortalWakeDeadline {
-                wall_us,
-                family: PortalDeadlineFamily::ActivityCue,
             });
         let lease = self
             .drive
@@ -394,7 +400,7 @@ impl InProcessPortalDriver {
                 wall_us: ms.saturating_mul(1_000),
                 family: PortalDeadlineFamily::LeaseLifecycle,
             });
-        [hub, activity, lease]
+        [hub, lease]
             .into_iter()
             .flatten()
             .min_by_key(|deadline| (deadline.wall_us, deadline.family))
@@ -495,7 +501,7 @@ impl InProcessPortalDriver {
 
     /// Route a focused portal composer batch to the portal that owns the tile.
     ///
-    /// The adapter consumes the draft batch; a submission is queued in the
+    /// A submission is queued directly in the
     /// hub as input for the agent's `hud_input` (and echoed in the reply
     /// band). Returns `None` when no portal owns `tile_id` or the batch has
     /// no submission.
@@ -506,18 +512,13 @@ impl InProcessPortalDriver {
         submitted_at_wall_us: u64,
     ) -> Option<PortalInputFeedback> {
         let key = self.drive.key_for_tile(tile_id)?;
-        let adapter_batch = adapter_draft_batch_from_runtime(batch);
-        let text = adapter_batch.submission.as_ref()?.text.clone();
+        let text = batch.submission.as_ref()?.text.clone();
         let submission = self
             .portals
             .submit_reply(&key, text, submitted_at_wall_us)?;
         let result = submission.result;
         let pending_input_count = submission.pending_input_count;
         let pending_input_bytes = submission.pending_input_bytes;
-        self.drive
-            .entry(&key)
-            .adapter
-            .consume_draft_batch(&adapter_batch);
         let feedback = match result {
             Ok(input_id) => PortalInputFeedback {
                 projection_id: key.id.clone(),
@@ -552,7 +553,7 @@ impl InProcessPortalDriver {
         Some(feedback)
     }
 
-    /// Apply a new design-token override map, propagating to all live adapters.
+    /// Apply a new design-token override map, propagating to all live render bindings.
     pub fn apply_token_map(&mut self, overrides: DesignTokenMap) {
         self.drive.apply_token_map(overrides);
     }
@@ -659,9 +660,6 @@ impl InProcessPortalDriver {
             match transition {
                 Transition::Degraded(key) => {
                     tracing::info!(portal = %key.id, "portal: agent idle — degraded");
-                    if let Some(entry) = self.drive.entries.get_mut(&key) {
-                        entry.activity_cue_clear_due_us = None;
-                    }
                 }
                 Transition::Reclaimed(key) => {
                     tracing::info!(portal = %key.id, "portal: reclaimed after degraded window");
@@ -676,23 +674,6 @@ impl InProcessPortalDriver {
 
         for due in due {
             self.apply_due(due, scene, input_processor, tab_id, now_us);
-        }
-
-        // Activity-cue quiesce (hud-kbm80): the "⋯ writing" cue derives from
-        // the newest unit's age, so an idle portal needs one repaint once it
-        // has aged out.
-        let quiesce: Vec<PortalKey> = self
-            .drive
-            .entries
-            .iter()
-            .filter(|(_, e)| {
-                e.tile_scene_id.is_some()
-                    && e.activity_cue_clear_due_us.is_some_and(|due| now_us >= due)
-            })
-            .map(|(key, _)| key.clone())
-            .collect();
-        for key in quiesce {
-            self.render(&key, scene, input_processor, tab_id, now_us);
         }
 
         // Orphan after rendering, so the degraded repaint lands first.
@@ -723,9 +704,6 @@ impl InProcessPortalDriver {
         }
         let entry = self.drive.entry(&due.key);
         entry.incarnation = Some(incarnation);
-        if due.unread > 0 {
-            entry.carried_unread = due.unread;
-        }
         self.render(&due.key, scene, input_processor, tab_id, now_us);
     }
 
@@ -789,17 +767,26 @@ impl InProcessPortalDriver {
             return;
         };
         entry.pending_geometry = None;
-        entry.activity_cue_clear_due_us = activity_cue_clear_due_us(&state, now_us);
-        match entry.adapter.render_batch_with_surface(&state, now_us) {
-            Ok(batch) => tze_hud_protocol::convert::apply_portal_render_batch_to_scene(
-                scene,
-                tile_id,
-                PORTAL_DRIVER_NAMESPACE,
-                &batch,
-            ),
-            Err(e) => {
-                tracing::warn!(portal = %key.id, error = ?e, "portal render failed");
-            }
+        let viewport = entry
+            .latest_geometry
+            .map(|g| Size {
+                width: g.rect.width_px as f32,
+                height: g.rect.height_px as f32,
+            })
+            .filter(|s| s.width > 0.0 && s.height > 0.0)
+            .unwrap_or(DEFAULT_PORTAL_SIZE);
+        let rendered = render(&state, &entry.tokens, viewport, now_us);
+        if let Err(error) = apply_render(scene, entry, tile_id, rendered) {
+            tracing::warn!(portal = %key.id, ?error, "portal scene render failed");
+            return;
+        }
+        // The hub owns the wake and consumes it through the same due path as dirty content.
+        if let Ok(mut hub) = self.portals.hub.lock() {
+            hub.set_activity_cue_deadline(
+                key,
+                incarnation,
+                activity_cue_clear_due_us(&state, now_us),
+            );
         }
         if created {
             return;
@@ -809,8 +796,7 @@ impl InProcessPortalDriver {
         // every rendered line: the OUTPUT transcript plus, when expanded, the
         // INPUT band (label + replies + trailing blank) painted into the same
         // markdown.
-        let line_height_px =
-            entry.adapter.visual_tokens().transcript_font_size_px * PORTAL_LINE_HEIGHT_MULTIPLIER;
+        let line_height_px = entry.tokens.transcript_font_size_px * PORTAL_LINE_HEIGHT_MULTIPLIER;
         let lines = |units: &[TranscriptUnit]| -> usize {
             units
                 .iter()
@@ -823,14 +809,8 @@ impl InProcessPortalDriver {
         }
         let new_content_height_px = total_lines.max(1) as f32 * line_height_px;
         // The live resize snapshot, then the durable resized bounds, then the
-        // adapter's configured height (hud-v4k1h).
-        let viewport_height_px = state
-            .geometry_batch
-            .as_ref()
-            .and_then(|gb| gb.latest)
-            .map(|snap| snap.rect.height_px as f32)
-            .or_else(|| state.resized_bounds.map(|r| r.height_px as f32))
-            .unwrap_or_else(|| entry.adapter.config_viewport_height(state.presentation));
+        // default portal height (hud-v4k1h).
+        let viewport_height_px = viewport.height;
         // Any height decrease is a head trim (retention or the visible
         // window), notified before the append so the scrolled-back offset
         // stays put (hud-66i1s).
@@ -879,10 +859,12 @@ impl InProcessPortalDriver {
             return false;
         };
         let entry = self.drive.entry(key);
-        let viewport_h = entry
-            .adapter
-            .config_viewport_height(ProjectedPortalPresentation::Expanded);
-        let bounds = Rect::new(0.0, 0.0, 720.0, viewport_h);
+        let bounds = Rect::new(
+            0.0,
+            0.0,
+            DEFAULT_PORTAL_SIZE.width,
+            DEFAULT_PORTAL_SIZE.height,
+        );
         match scene.create_tile(
             host_tab,
             PORTAL_DRIVER_NAMESPACE,
@@ -900,9 +882,6 @@ impl InProcessPortalDriver {
                         content_height: None,
                     },
                 );
-                entry
-                    .adapter
-                    .record_created_tile(tile_id.to_bytes_le().to_vec());
                 entry.tile_scene_id = Some(tile_id);
                 if let Some(tab) = activate {
                     let _ = scene.switch_active_tab(tab);
@@ -1067,8 +1046,8 @@ mod tests {
     use tze_hud_projection::hub::{PortalError, PortalLimits};
     use tze_hud_scene::{NodeData, TestClock};
 
-    /// The header marker line the resident adapter paints while the agent is
-    /// actively appending (mirrors `resident_grpc::PORTAL_ACTIVITY_MARKER_LINE`).
+    /// The header marker line the scene renderer paints while the agent is
+    /// actively appending (mirrors `render::PORTAL_ACTIVITY_MARKER_LINE`).
     const PORTAL_ACTIVITY_MARKER_TEXT: &str = "⋯ writing";
     const AGENT: &str = "agent";
     /// One hub render interval: drains this far apart always render.
@@ -1155,8 +1134,7 @@ mod tests {
     ) -> f32 {
         let tile_id = tile(driver, id);
         let line_h = driver.drive.entries[&key(id)]
-            .adapter
-            .visual_tokens()
+            .tokens
             .transcript_font_size_px
             * PORTAL_LINE_HEIGHT_MULTIPLIER;
         let viewport_h = line_h.ceil();
@@ -1482,8 +1460,7 @@ mod tests {
     fn apply_token_map_propagates_to_drive_state() {
         let font = |driver: &InProcessPortalDriver, id: &str| {
             driver.drive.entries[&key(id)]
-                .adapter
-                .visual_tokens()
+                .tokens
                 .transcript_font_size_px
         };
         let tokens = |size: &str| {
@@ -1526,6 +1503,14 @@ mod tests {
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + FRAME_US);
         assert!(tile_markdown(&scene, tile_id).contains("SECOND-TRANSCRIPT-MARKER-99"));
         assert_eq!(scene.tile_count(), 1);
+
+        // Both names are valid Hub inputs, even when their prefixed descriptor
+        // identity exceeds the scene's separate 256-byte limit.
+        let long_key = PortalKey::new("a".repeat(128), "p".repeat(128));
+        publish_for(&driver, &long_key, "LONG-IDENTITY-TRANSCRIPT", 300);
+        driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + 2 * FRAME_US);
+        let long_tile = driver.drive.entries[&long_key].tile_scene_id.unwrap();
+        assert!(tile_markdown(&scene, long_tile).contains("LONG-IDENTITY-TRANSCRIPT"));
     }
 
     #[test]
@@ -1572,6 +1557,19 @@ mod tests {
         assert!(child_text.contains(&"INPUT"));
         assert!(child_text.contains(&"OUTPUT"));
         assert!(child_text.iter().any(|text| text.contains("hello surface")));
+        let composer = root
+            .children
+            .iter()
+            .find_map(|id| match &scene.nodes[id].data {
+                NodeData::HitRegion(region) if region.accepts_composer_input => Some((*id, region)),
+                _ => None,
+            })
+            .expect("native composer hit region is attached to the root");
+        assert!(composer.1.accepts_focus && composer.1.accepts_pointer);
+        let bounds = composer.1.bounds;
+        assert!(
+            matches!(scene.hit_test(bounds.x + 1.0, bounds.y + 1.0), tze_hud_scene::HitResult::NodeHit { node_id, .. } if node_id == composer.0)
+        );
     }
 
     /// The ambient "N unread" count and the in-transcript divider come from
@@ -1915,79 +1913,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn portal_deadline_families_preserve_source_and_equal_deadline_tie() {
-        let mut driver = InProcessPortalDriver::new();
-        let (mut scene, tab, mut processor) = scene();
-        let t = 1_000_000;
-        publish(&mut driver, "p", "first", t);
-        assert_eq!(
-            driver.next_wake_deadline(&scene).unwrap().family,
-            PortalDeadlineFamily::Cadence
-        );
-        driver.drain_inner(&mut scene, &mut processor, Some(tab), t);
-        let cue = driver.drive.entries[&key("p")]
-            .activity_cue_clear_due_us
-            .expect("a fresh tail schedules its quiesce");
-        assert_eq!(
-            driver.next_wake_deadline(&scene),
-            Some(PortalWakeDeadline {
-                wall_us: cue,
-                family: PortalDeadlineFamily::ActivityCue,
-            })
-        );
-
-        publish(&mut driver, "p", "second", t + 100);
-        let cadence = driver.next_wake_deadline(&scene).unwrap();
-        assert_eq!(
-            cadence,
-            PortalWakeDeadline {
-                wall_us: t + FRAME_US,
-                family: PortalDeadlineFamily::Cadence,
-            }
-        );
-        driver
-            .drive
-            .entries
-            .get_mut(&key("p"))
-            .unwrap()
-            .activity_cue_clear_due_us = Some(cadence.wall_us);
-        assert_eq!(
-            driver.next_wake_deadline(&scene).unwrap().family,
-            PortalDeadlineFamily::Cadence,
-            "equal cadence/activity deadlines use the declared family order"
-        );
-
-        for (family, source) in [
-            (
-                PortalDeadlineFamily::ImmediateWork,
-                RuntimeWakeupSource::SceneChange,
-            ),
-            (
-                PortalDeadlineFamily::Cadence,
-                RuntimeWakeupSource::AnimationDeadline,
-            ),
-            (
-                PortalDeadlineFamily::ActivityCue,
-                RuntimeWakeupSource::AnimationDeadline,
-            ),
-            (
-                PortalDeadlineFamily::AgentLiveness,
-                RuntimeWakeupSource::TtlDeadline,
-            ),
-            (
-                PortalDeadlineFamily::PendingInputExpiry,
-                RuntimeWakeupSource::TtlDeadline,
-            ),
-            (
-                PortalDeadlineFamily::LeaseLifecycle,
-                RuntimeWakeupSource::TtlDeadline,
-            ),
-        ] {
-            assert_eq!(family.wakeup_source(), source, "{family:?}");
-        }
-    }
-
     /// The "⋯ writing" cue quiesces on an idle portal with one repaint, keeps
     /// the unread count, and is not repainted again (hud-kbm80).
     #[test]
@@ -2001,16 +1926,22 @@ mod tests {
         assert!(painted.contains(PORTAL_ACTIVITY_MARKER_TEXT));
         assert!(painted.contains("1 unread"));
 
-        let due = driver.drive.entries[&key("p")]
-            .activity_cue_clear_due_us
+        let due = driver
+            .hub_mut()
+            .get(&key("p"))
+            .unwrap()
+            .activity_cue_due_us
             .expect("a fresh tail schedules a quiesce repaint");
         driver.drain_inner(&mut scene, &mut processor, Some(tab), due);
         let quiesced = tile_markdown(&scene, tile_id);
         assert!(!quiesced.contains(PORTAL_ACTIVITY_MARKER_TEXT));
         assert!(quiesced.contains("1 unread"), "no viewer action cleared it");
         assert!(
-            driver.drive.entries[&key("p")]
-                .activity_cue_clear_due_us
+            driver
+                .hub_mut()
+                .get(&key("p"))
+                .unwrap()
+                .activity_cue_due_us
                 .is_none()
         );
 
@@ -2029,21 +1960,27 @@ mod tests {
         publish(&mut driver, "p", "line one", 100);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 200);
         let tile_id = tile(&driver, "p");
-        let due1 = driver.drive.entries[&key("p")]
-            .activity_cue_clear_due_us
+        let due1 = driver
+            .hub_mut()
+            .get(&key("p"))
+            .unwrap()
+            .activity_cue_due_us
             .unwrap();
 
         publish(&mut driver, "p", "line two", FRAME_US);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 2 * FRAME_US);
-        let due2 = driver.drive.entries[&key("p")]
-            .activity_cue_clear_due_us
+        let due2 = driver
+            .hub_mut()
+            .get(&key("p"))
+            .unwrap()
+            .activity_cue_due_us
             .unwrap();
         assert!(due2 > due1);
 
         driver.drain_inner(&mut scene, &mut processor, Some(tab), due1);
         assert!(tile_markdown(&scene, tile_id).contains(PORTAL_ACTIVITY_MARKER_TEXT));
         assert_eq!(
-            driver.drive.entries[&key("p")].activity_cue_clear_due_us,
+            driver.hub_mut().get(&key("p")).unwrap().activity_cue_due_us,
             Some(due2)
         );
     }

@@ -1,11 +1,7 @@
-//! Shared in-process portal state and resident rendering support.
-//!
-//! PortalHub owns authenticated-agent portal identity, transcript retention,
-//! viewer replies, liveness and render pacing. The optional resident adapter
-//! materializes its presentation without an external operation authority.
-
+//! In-process portal state and scene rendering.
 pub mod hub;
 pub use hub::*;
-
-#[cfg(feature = "resident-grpc")]
-pub mod resident_grpc;
+pub mod render;
+#[cfg(test)]
+mod render_goldens;
+pub mod tokens;

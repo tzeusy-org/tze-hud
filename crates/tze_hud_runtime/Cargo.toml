@@ -25,7 +25,7 @@ tze_hud_config = { path = "../tze_hud_config", version = "0.1.0" }
 tze_hud_widget = { path = "../tze_hud_widget", version = "0.1.0" }
 tze_hud_mcp = { path = "../tze_hud_mcp", version = "0.1.0" }
 tze_hud_resource = { path = "../tze_hud_resource", version = "0.1.0" }
-tze_hud_projection = { path = "../tze_hud_projection", version = "0.1.0", features = ["resident-grpc"] }
+tze_hud_projection = { path = "../tze_hud_projection", version = "0.1.0" }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
