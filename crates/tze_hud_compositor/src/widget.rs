@@ -145,6 +145,7 @@ struct PrimitiveText {
     text_anchor: Option<String>,
     dominant_baseline: Option<String>,
     font_family: Option<String>,
+    font_weight: Option<String>,
     font_size: f32,
     fill: Option<String>,
     opacity: f32,
@@ -797,6 +798,7 @@ impl PrimitiveText {
             text_anchor: attrs.get("text-anchor").cloned(),
             dominant_baseline: attrs.get("dominant-baseline").cloned(),
             font_family: attrs.get("font-family").cloned(),
+            font_weight: attrs.get("font-weight").cloned(),
             font_size: parse_f32_attr(attrs, "font-size").unwrap_or(12.0),
             fill: attrs.get("fill").cloned(),
             opacity: parse_f32_attr(attrs, "opacity").unwrap_or(1.0) * group_opacity(groups),
@@ -883,6 +885,9 @@ impl PrimitiveText {
         }
         if let Some(value) = &self.font_family {
             attrs.push_str(&format!(" font-family=\"{}\"", escape_attr(value)));
+        }
+        if let Some(value) = &self.font_weight {
+            attrs.push_str(&format!(" font-weight=\"{}\"", escape_attr(value)));
         }
         format!(
             "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"{} {} {} {}\" width=\"{}\" height=\"{}\"><text {attrs}>{}</text></svg>",
@@ -1046,11 +1051,18 @@ impl PrimitiveText {
         })
     }
 
+    /// The direct path draws only the default regular sans face; any other
+    /// family or a non-regular weight takes the resvg mask path.
     fn uses_fast_path_font_family(&self) -> bool {
-        self.font_family.as_deref().is_none_or(|family| {
-            let family = family.trim().to_ascii_lowercase();
-            family.is_empty() || family.contains("sans")
-        })
+        let regular = self
+            .font_weight
+            .as_deref()
+            .is_none_or(|weight| matches!(weight.trim(), "" | "normal" | "400"));
+        regular
+            && self.font_family.as_deref().is_none_or(|family| {
+                let family = family.trim().to_ascii_lowercase();
+                family.is_empty() || family.contains("sans")
+            })
     }
 
     fn direct_text_mask_cache_key(
@@ -1644,8 +1656,11 @@ pub fn resolve_binding_value(
                 ((f - p_min) / (p_max - p_min)).clamp(0.0, 1.0)
             };
             let attr_val = attr_min + normalized * (attr_max - attr_min);
-            // Format with enough precision but avoid spurious decimals
-            if (attr_val - attr_val.round()).abs() < 0.001 {
+            // Text is a readout (e.g. a percent): show whole numbers.
+            // Format attributes with enough precision but no spurious decimals.
+            if binding.target_attribute == "text-content"
+                || (attr_val - attr_val.round()).abs() < 0.001
+            {
                 let rounded = attr_val.round() as i64;
                 Some(format!("{rounded}"))
             } else {
@@ -4267,6 +4282,91 @@ mod tests {
         assert_eq!(
             val, "100",
             "level=0.5 with attr range 0..200 should give 100"
+        );
+    }
+
+    /// A linear binding onto text is a readout: a whole number, while the same
+    /// value bound to an attribute keeps its fraction.
+    #[test]
+    fn test_resolve_linear_text_content_is_whole_number() {
+        let constraints = HashMap::from([("progress".to_string(), (0.0f32, 1.0f32))]);
+        let binding = |target_attribute: &str| WidgetBinding {
+            param: "progress".to_string(),
+            target_element: "readout".to_string(),
+            target_attribute: target_attribute.to_string(),
+            mapping: WidgetBindingMapping::Linear {
+                attr_min: 0.0,
+                attr_max: 100.0,
+            },
+        };
+        for (progress, text, attr) in [
+            (0.583, "58", "58.300"),
+            (0.586, "59", "58.600"),
+            (1.0, "100", "100"),
+        ] {
+            let params =
+                HashMap::from([("progress".to_string(), WidgetParameterValue::F32(progress))]);
+            let resolve = |attribute| {
+                resolve_binding_value(&binding(attribute), &params, &constraints).unwrap()
+            };
+            assert_eq!(resolve("text-content"), text, "progress={progress}");
+            assert_eq!(resolve("width"), attr, "progress={progress}");
+        }
+    }
+
+    /// Primitive text keeps its font weight: a semibold label rasterizes
+    /// heavier than the same regular label, and leaves the regular-only direct
+    /// glyph path.
+    #[test]
+    fn test_primitive_text_honors_font_weight() {
+        let svg = |attrs: &str| {
+            format!(
+                r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 32" width="120" height="32">
+                    <text id="label" x="4" y="24" font-family="IBM Plex Sans, sans-serif" font-size="20"{attrs} fill="#ffffff">Build</text>
+                </svg>"##
+            )
+        };
+        let render = |svg: &str| {
+            let plan = PrimitiveSvgLayerPlan::parse(svg).expect("primitive text should parse");
+            let PrimitiveItem::Text(text) = &plan.items[0] else {
+                panic!("expected text primitive");
+            };
+            // A bound layer, so it takes the primitive path, not static resvg.
+            let bindings = vec![WidgetBinding {
+                param: "label".to_string(),
+                target_element: "label".to_string(),
+                target_attribute: "text-content".to_string(),
+                mapping: WidgetBindingMapping::Direct,
+            }];
+            let layers = vec![(svg, bindings.as_slice())];
+            let params = HashMap::from([(
+                "label".to_string(),
+                WidgetParameterValue::String("Build".to_string()),
+            )]);
+            let pixmap = rasterize_widget_render_plan(
+                &WidgetRenderPlan::compile(&layers),
+                &HashMap::new(),
+                &params,
+                120,
+                32,
+            )
+            .expect("text should rasterize");
+            (text.uses_fast_path_font_family(), pixmap.data().to_vec())
+        };
+        let (regular_fast, _) = render(&svg(""));
+        let (bold_fast, _) = render(&svg(r#" font-weight="600""#));
+        // A baseline keeps both on the resvg mask path, so only weight differs.
+        let (_, regular) = render(&svg(r#" dominant-baseline="alphabetic""#));
+        let (_, bold) = render(&svg(r#" dominant-baseline="alphabetic" font-weight="600""#));
+        assert!(
+            regular_fast,
+            "regular sans text keeps the direct glyph path"
+        );
+        assert!(!bold_fast, "weighted text takes the resvg mask path");
+        let coverage = |pixels: &[u8]| pixels.chunks(4).map(|p| u32::from(p[3])).sum::<u32>();
+        assert!(
+            coverage(&bold) > coverage(&regular),
+            "semibold label must cover more pixels than regular"
         );
     }
 

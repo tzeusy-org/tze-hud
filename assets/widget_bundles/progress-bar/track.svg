@@ -1,34 +1,25 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Track layer for the production progress-bar widget exemplar.
-     Renders the static background track — a pill-shaped rounded rectangle
-     that forms the visual boundary of the progress bar. Contains no bindings —
-     this layer is resolved once at bundle load time.
+<!-- Static layer: the tonal card and the empty track. No bindings.
 
-     viewBox="0 0 300 20" matches the default 300x20 geometry.
-
-     Token placeholders ({{...}}) are resolved at bundle load time against
-     the global token map — never at render time. Zero hardcoded hex colors.
-
-     IMPORTANT: This layer MUST appear before fill.svg in widget.toml layer
-     order (painter's model) so the dynamic fill layer renders on top. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 300 20" width="300" height="20">
-  <!-- Background track: full-width pill shape with rounded end-caps (rx=10). -->
+     viewBox units are logical px (geometry scales the whole widget; the
+     production config draws it at 1.5x for a 4K panel). Card and type follow
+     the notification cards: surface.container.high at opacity.surface,
+     shape.m corners, title.m label. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 52" width="360" height="52">
   <rect
-    id="track-bg"
-    x="0" y="0"
-    width="300" height="20"
-    rx="10" ry="10"
-    fill="{{token.color.backdrop.default}}"
-    fill-opacity="0.26"
-    stroke="{{token.color.text.primary}}"
-    stroke-opacity="0.16"
-    stroke-width="1"/>
-
-  <!-- Inner trough keeps fill visually contained and improves contrast. -->
+    id="card"
+    data-role="backdrop"
+    x="0.5" y="0.5"
+    width="359" height="51"
+    rx="{{token.shape.m}}" ry="{{token.shape.m}}"
+    fill="{{token.color.surface.container.high}}"
+    fill-opacity="{{token.opacity.surface}}"
+    stroke="{{token.color.outline.variant}}"
+    stroke-width="{{token.stroke.border.width}}"/>
   <rect
-    x="1" y="1"
-    width="298" height="18"
-    rx="9" ry="9"
-    fill="{{token.color.backdrop.default}}"
-    fill-opacity="0.38"/>
+    id="track"
+    x="16" y="34"
+    width="328" height="6"
+    rx="3" ry="3"
+    fill="{{token.color.outline.variant}}"/>
 </svg>

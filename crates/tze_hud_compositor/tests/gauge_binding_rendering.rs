@@ -506,28 +506,10 @@ mod contention {
             .join("gauge")
     }
 
-    /// Minimal token map that resolves all `{{token.*}}` placeholders in the
-    /// production gauge SVG files.  Values are test stubs — visual accuracy is
-    /// irrelevant; we only need the bundle to load successfully.
+    /// The canonical design tokens, which resolve every placeholder in the
+    /// production gauge bundle.
     fn gauge_test_tokens() -> HashMap<String, String> {
-        [
-            ("color.backdrop.default", "#1a1a2e"),
-            ("color.border.default", "#2a2a4e"),
-            ("color.outline.default", "#3a3a5e"),
-            ("color.severity.info", "#4a9eff"),
-            ("color.text.secondary", "#8f96a3"),
-            ("color.text.accent", "#4a9eff"),
-            ("color.text.primary", "#cccccc"),
-            ("opacity.backdrop.opaque", "0.9"),
-            ("border.radius.small", "4"),
-            ("border.radius.medium", "8"),
-            ("border.radius.large", "16"),
-            ("stroke.border.width", "1"),
-            ("stroke.outline.width", "1"),
-        ]
-        .into_iter()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect()
+        tze_hud_config::tokens::resolve_tokens(&Default::default(), &Default::default())
     }
 
     /// Load the production gauge bundle and register it in a fresh `SceneGraph`.

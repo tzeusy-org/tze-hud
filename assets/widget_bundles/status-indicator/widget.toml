@@ -1,16 +1,24 @@
 # Production status-indicator widget bundle.
 #
-# Visual contract:
-# - Compact top-right badge (icon-first; no always-visible label text)
-# - Tooltip panel appears only when runtime drives `tooltip_visible` to 1.0
-# - Tooltip content binds to `label` and `reason`
+# Visual contract (shared with gauge and progress-bar):
+# - Compact top-right badge: a tonal tile like the notification cards
+#   (surface.container.high at opacity.surface, outline.variant edge, shape.m
+#   corners); no always-visible label text
+# - `status` colors the badge content: online = success, away = caution,
+#   busy = error, offline = outline; `theme` picks dot, glyph, or expressive
+#   glyph
+# - Hover over the badge (runtime-driven `tooltip_visible`) shows a tooltip
+#   panel with a status dot, `label` and `reason`
+# - Every color, size and font comes from {{token.key}} placeholders (in the
+#   SVG and in this manifest), resolved at bundle load time. viewBox units are
+#   logical px; geometry sets the scale
 #
 # Registered as "status-indicator" in the WidgetRegistry when loaded from:
 # assets/widget_bundles/status-indicator/.
 
 name        = "status-indicator"
-version     = "1.0.0"
-description = "Compact icon status indicator with selectable visual themes and delayed-hover tooltip"
+version     = "1.1.0"
+description = "Compact status badge with selectable glyph style and hover tooltip"
 default_contention_policy = "LatestWins"
 
 [[parameter_schema]]
@@ -55,16 +63,17 @@ f32_min = 0.0
 f32_max = 1.0
 
 [hover_behavior]
-delay_ms = 1500
+delay_ms = 180
 visibility_param = "tooltip_visible"
 hidden_value = 0.0
 visible_value = 1.0
 
+# The badge: x 280..320, y 0..40 of the 320x124 viewBox.
 [hover_behavior.trigger_rect]
-x_pct = 0.88
-y_pct = 0.06
-width_pct = 0.08
-height_pct = 0.22
+x_pct = 0.875
+y_pct = 0.0
+width_pct = 0.125
+height_pct = 0.3226
 
 [[layers]]
 svg_file = "indicator.svg"
@@ -76,22 +85,10 @@ target_attribute = "fill"
 mapping          = "discrete"
 
 [layers.bindings.value_map]
-online  = "#22C55E"
-away    = "#A3A3A3"
-busy    = "#F59E0B"
-offline = "#6B7280"
-
-[[layers.bindings]]
-param            = "status"
-target_element   = "minimal-glyph"
-target_attribute = "text-content"
-mapping          = "discrete"
-
-[layers.bindings.value_map]
-online  = "●"
-away    = "◐"
-busy    = "▲"
-offline = "×"
+online  = "{{token.color.success}}"
+away    = "{{token.color.caution}}"
+busy    = "{{token.color.error}}"
+offline = "{{token.color.outline}}"
 
 [[layers.bindings]]
 param            = "status"
@@ -100,10 +97,22 @@ target_attribute = "fill"
 mapping          = "discrete"
 
 [layers.bindings.value_map]
-online  = "#4FB543"
-away    = "#D97706"
-busy    = "#DC2626"
-offline = "#6B7280"
+online  = "{{token.color.success}}"
+away    = "{{token.color.caution}}"
+busy    = "{{token.color.error}}"
+offline = "{{token.color.outline}}"
+
+[[layers.bindings]]
+param            = "status"
+target_element   = "system-glyph"
+target_attribute = "fill"
+mapping          = "discrete"
+
+[layers.bindings.value_map]
+online  = "{{token.color.success}}"
+away    = "{{token.color.caution}}"
+busy    = "{{token.color.error}}"
+offline = "{{token.color.outline}}"
 
 [[layers.bindings]]
 param            = "status"
@@ -124,10 +133,10 @@ target_attribute = "fill"
 mapping          = "discrete"
 
 [layers.bindings.value_map]
-online  = "#7DD3A7"
-away    = "#C4B5FD"
-busy    = "#EA580C"
-offline = "#94A3B8"
+online  = "{{token.color.success}}"
+away    = "{{token.color.caution}}"
+busy    = "{{token.color.error}}"
+offline = "{{token.color.outline}}"
 
 [[layers.bindings]]
 param            = "status"
@@ -148,10 +157,22 @@ target_attribute = "fill"
 mapping          = "discrete"
 
 [layers.bindings.value_map]
-online  = "#065F46"
-away    = "#5B21B6"
-busy    = "#FFFFFF"
-offline = "#0F172A"
+online  = "{{token.color.success}}"
+away    = "{{token.color.caution}}"
+busy    = "{{token.color.error}}"
+offline = "{{token.color.outline}}"
+
+[[layers.bindings]]
+param            = "status"
+target_element   = "tooltip-dot"
+target_attribute = "fill"
+mapping          = "discrete"
+
+[layers.bindings.value_map]
+online  = "{{token.color.success}}"
+away    = "{{token.color.caution}}"
+busy    = "{{token.color.error}}"
+offline = "{{token.color.outline}}"
 
 [[layers.bindings]]
 param            = "theme"
@@ -160,7 +181,7 @@ target_attribute = "opacity"
 mapping          = "discrete"
 
 [layers.bindings.value_map]
-minimal  = "0.8"
+minimal  = "1"
 system   = "0"
 friendly = "0"
 
@@ -172,7 +193,7 @@ mapping          = "discrete"
 
 [layers.bindings.value_map]
 minimal  = "0"
-system   = "0.82"
+system   = "1"
 friendly = "0"
 
 [[layers.bindings]]
@@ -184,62 +205,7 @@ mapping          = "discrete"
 [layers.bindings.value_map]
 minimal  = "0"
 system   = "0"
-friendly = "0.82"
-
-[[layers.bindings]]
-param            = "theme"
-target_element   = "tooltip-panel"
-target_attribute = "fill"
-mapping          = "discrete"
-
-[layers.bindings.value_map]
-minimal  = "#0B0E14"
-system   = "#101826"
-friendly = "#122018"
-
-[[layers.bindings]]
-param            = "theme"
-target_element   = "tooltip-panel"
-target_attribute = "stroke"
-mapping          = "discrete"
-
-[layers.bindings.value_map]
-minimal  = "#475569"
-system   = "#334155"
-friendly = "#3F6B50"
-
-[[layers.bindings]]
-param            = "theme"
-target_element   = "tooltip-theme"
-target_attribute = "text-content"
-mapping          = "discrete"
-
-[layers.bindings.value_map]
-minimal  = "Minimal"
-system   = "System Ops"
-friendly = "Friendly"
-
-[[layers.bindings]]
-param            = "theme"
-target_element   = "tooltip-theme"
-target_attribute = "fill"
-mapping          = "discrete"
-
-[layers.bindings.value_map]
-minimal  = "#94A3B8"
-system   = "#93C5FD"
-friendly = "#86EFAC"
-
-[[layers.bindings]]
-param            = "theme"
-target_element   = "tooltip-footer"
-target_attribute = "text-content"
-mapping          = "discrete"
-
-[layers.bindings.value_map]
-minimal  = "Quiet glance"
-system   = "Operational detail"
-friendly = "Assistant tone"
+friendly = "1"
 
 [[layers.bindings]]
 param            = "tooltip_visible"
@@ -248,12 +214,6 @@ target_attribute = "opacity"
 mapping          = "linear"
 attr_min         = 0.0
 attr_max         = 1.0
-
-[[layers.bindings]]
-param            = "label"
-target_element   = "label-text"
-target_attribute = "text-content"
-mapping          = "direct"
 
 [[layers.bindings]]
 param            = "label"

@@ -84,7 +84,8 @@ pub struct RawParameterDeclaration {
     /// Default value. Required. Encoding depends on `param_type`:
     /// - f32: TOML float
     /// - string: TOML string
-    /// - color: TOML array of 4 integers [r, g, b, a]
+    /// - color: TOML array of 4 integers [r, g, b, a], or a string holding
+    ///   `#RRGGBB[AA]` or a `{{token.key}}` placeholder resolved at load
     /// - enum: TOML string (must be in allowed_values)
     pub default: Option<toml::Value>,
     /// Optional constraints table.
@@ -131,6 +132,7 @@ pub struct RawBinding {
     /// For "linear" mapping: maximum output attribute value.
     pub attr_max: Option<f64>,
     /// For "discrete" mapping: enum_value → attribute_value lookup table.
+    /// Values may hold `{{token.key}}` placeholders, resolved at load.
     #[serde(default)]
     pub value_map: BTreeMap<String, String>,
 }

@@ -296,7 +296,7 @@ fn load_bundle_inner(
     let description = raw.description.as_deref().unwrap_or("").to_string();
 
     // Step 4: Parse parameter schema.
-    let parameter_schema = parse_parameter_schema(&raw.parameter_schema, path_str)?;
+    let parameter_schema = parse_parameter_schema(&raw.parameter_schema, tokens, path_str)?;
 
     // Build a set of parameter names for binding validation.
     let param_names: HashSet<&str> = parameter_schema.iter().map(|p| p.name.as_str()).collect();
@@ -321,6 +321,7 @@ fn load_bundle_inner(
         param_names: &param_names,
         param_types: &param_types,
         param_enum_values: &param_enum_values,
+        tokens,
     };
 
     // Step 5: Parse optional runtime hover behavior.
@@ -444,9 +445,7 @@ fn validate_svg_layer_and_manifest_bindings(
         raw_bindings,
         svg_file,
         &element_ids,
-        binding_validation_context.param_names,
-        binding_validation_context.param_types,
-        binding_validation_context.param_enum_values,
+        binding_validation_context,
         path_str,
     )?;
 
@@ -457,6 +456,7 @@ struct BindingValidationContext<'a> {
     param_names: &'a HashSet<&'a str>,
     param_types: &'a HashMap<&'a str, WidgetParamType>,
     param_enum_values: &'a HashMap<&'a str, &'a [String]>,
+    tokens: &'a HashMap<String, String>,
 }
 
 fn validate_svg_layer(
@@ -514,6 +514,7 @@ fn validate_svg_layer(
 
 fn parse_parameter_schema(
     raw: &[RawParameterDeclaration],
+    tokens: &HashMap<String, String>,
     path_str: &str,
 ) -> Result<Vec<WidgetParameterDeclaration>, BundleError> {
     let mut params = Vec::new();
@@ -545,8 +546,13 @@ fn parse_parameter_schema(
             }
         })?;
 
-        let default_value =
-            parse_default_value(raw_param.default.as_ref(), param_type, name, path_str)?;
+        let default_value = parse_default_value(
+            raw_param.default.as_ref(),
+            param_type,
+            name,
+            tokens,
+            path_str,
+        )?;
 
         let constraints = raw_param.constraints.as_ref().map(|c| {
             let mut wc = WidgetParamConstraints::default();
@@ -589,6 +595,7 @@ fn parse_default_value(
     raw: Option<&toml::Value>,
     param_type: WidgetParamType,
     name: &str,
+    tokens: &HashMap<String, String>,
     path_str: &str,
 ) -> Result<WidgetParameterValue, BundleError> {
     let raw = raw.ok_or_else(|| BundleError::InvalidManifest {
@@ -617,7 +624,20 @@ fn parse_default_value(
             Ok(WidgetParameterValue::String(s.to_string()))
         }
         WidgetParamType::Color => {
-            // Expect array of 4 integers [r, g, b, a].
+            // A string default is a `#RRGGBB[AA]` literal or a design-token
+            // placeholder, so the default follows the theme.
+            if let Some(text) = raw.as_str() {
+                let resolved = resolve_manifest_tokens(text, tokens, path_str)?;
+                return parse_hex_color(&resolved)
+                    .map(WidgetParameterValue::Color)
+                    .ok_or_else(|| BundleError::InvalidManifest {
+                        path: path_str.to_string(),
+                        detail: format!(
+                            "parameter '{name}': color default {text:?} resolved to {resolved:?}, not #RRGGBB or #RRGGBBAA"
+                        ),
+                    });
+            }
+            // Otherwise expect an array of 4 integers [r, g, b, a].
             let arr = raw.as_array().ok_or_else(type_err)?;
             if arr.len() != 4 {
                 return Err(BundleError::InvalidManifest {
@@ -785,11 +805,15 @@ fn resolve_bindings(
     raw_bindings: &[RawBinding],
     svg_file: &str,
     element_ids: &HashSet<String>,
-    param_names: &HashSet<&str>,
-    param_types: &HashMap<&str, WidgetParamType>,
-    param_enum_values: &HashMap<&str, &[String]>,
+    context: &BindingValidationContext<'_>,
     path_str: &str,
 ) -> Result<Vec<WidgetBinding>, BundleError> {
+    let BindingValidationContext {
+        param_names,
+        param_types,
+        param_enum_values,
+        tokens,
+    } = context;
     let mut bindings = Vec::new();
 
     for raw_b in raw_bindings {
@@ -860,7 +884,7 @@ fn resolve_bindings(
         let enum_allowed = *param_enum_values.get(param).unwrap(); // checked above
 
         // Validate and parse the mapping.
-        let mapping = parse_binding_mapping(
+        let mut mapping = parse_binding_mapping(
             mapping_str,
             raw_b,
             param,
@@ -869,6 +893,13 @@ fn resolve_bindings(
             svg_file,
             path_str,
         )?;
+        // Discrete values may name design tokens (e.g. a status color),
+        // resolved once here, like SVG placeholders.
+        if let WidgetBindingMapping::Discrete { value_map } = &mut mapping {
+            for value in value_map.values_mut() {
+                *value = resolve_manifest_tokens(value, tokens, path_str)?;
+            }
+        }
 
         bindings.push(WidgetBinding {
             param: param.to_string(),
@@ -977,6 +1008,35 @@ fn parse_binding_mapping(
             ),
         }),
     }
+}
+
+/// Resolve `{{token.key}}` placeholders in a `widget.toml` value.
+fn resolve_manifest_tokens(
+    text: &str,
+    tokens: &HashMap<String, String>,
+    path_str: &str,
+) -> Result<String, BundleError> {
+    resolve_token_placeholders(text, tokens).map_err(|key| BundleError::UnresolvedToken {
+        path: path_str.to_string(),
+        svg_file: "widget.toml".to_string(),
+        token_key: key,
+    })
+}
+
+/// Parse `#RRGGBB` or `#RRGGBBAA` into a normalized color.
+fn parse_hex_color(text: &str) -> Option<tze_hud_scene::types::Rgba> {
+    let hex = text.strip_prefix('#')?;
+    if !matches!(hex.len(), 6 | 8) || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
+        return None;
+    }
+    let channel = |i: usize| u8::from_str_radix(&hex[i..i + 2], 16).ok();
+    let alpha = if hex.len() == 8 { channel(6)? } else { 255 };
+    Some(tze_hud_scene::types::Rgba::new(
+        f32::from(channel(0)?) / 255.0,
+        f32::from(channel(2)?) / 255.0,
+        f32::from(channel(4)?) / 255.0,
+        f32::from(alpha) / 255.0,
+    ))
 }
 
 // ─── Widget type id validation ────────────────────────────────────────────────
