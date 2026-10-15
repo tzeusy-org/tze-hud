@@ -324,7 +324,9 @@ async fn frame_budgets_hold_under_sustained_portal_stream() {
     );
 }
 
-/// Under a burst workload (≥ 4096 bytes in 250ms), stage budgets stay within spec.
+/// A burst workload (≥ 4096 bytes in 250ms) must reach real truncation priming.
+/// Timing budgets are enforced by the opt-in performance lane, just like the
+/// sustained-stream test; ordinary CI always checks the workload and priming.
 ///
 /// A burst is modelled as a single large mutation batch applied in one frame.
 #[tokio::test]
@@ -403,29 +405,35 @@ async fn frame_budgets_hold_under_burst() {
         burst_telemetry.frame_time_us
     );
 
-    // Stage 3 + 4 + 5 must respect per-stage budgets.
-    assert!(
-        burst_telemetry.stage3_mutation_intake_us <= STAGE3_P99_BUDGET_US,
-        "Stage 3 (Mutation Intake) {burst_us}µs exceeded budget {STAGE3_P99_BUDGET_US}µs on burst frame",
-        burst_us = burst_telemetry.stage3_mutation_intake_us
-    );
-    assert!(
-        burst_telemetry.stage4_scene_commit_us <= STAGE4_P99_BUDGET_US,
-        "Stage 4 (Scene Commit) {burst_us}µs exceeded budget {STAGE4_P99_BUDGET_US}µs on burst frame",
-        burst_us = burst_telemetry.stage4_scene_commit_us
-    );
-    assert!(
-        burst_telemetry.stage5_layout_resolve_us <= STAGE5_P99_BUDGET_US,
-        "Stage 5 (Layout Resolve) {burst_us}µs exceeded budget {STAGE5_P99_BUDGET_US}µs on burst frame",
-        burst_us = burst_telemetry.stage5_layout_resolve_us
-    );
+    if perf_assert_enabled() {
+        // Stage 3 + 4 + 5 must respect per-stage budgets.
+        assert!(
+            burst_telemetry.stage3_mutation_intake_us <= STAGE3_P99_BUDGET_US,
+            "Stage 3 (Mutation Intake) {burst_us}µs exceeded budget {STAGE3_P99_BUDGET_US}µs on burst frame",
+            burst_us = burst_telemetry.stage3_mutation_intake_us
+        );
+        assert!(
+            burst_telemetry.stage4_scene_commit_us <= STAGE4_P99_BUDGET_US,
+            "Stage 4 (Scene Commit) {burst_us}µs exceeded budget {STAGE4_P99_BUDGET_US}µs on burst frame",
+            burst_us = burst_telemetry.stage4_scene_commit_us
+        );
+        assert!(
+            burst_telemetry.stage5_layout_resolve_us <= STAGE5_P99_BUDGET_US,
+            "Stage 5 (Layout Resolve) {burst_us}µs exceeded budget {STAGE5_P99_BUDGET_US}µs on burst frame",
+            burst_us = burst_telemetry.stage5_layout_resolve_us
+        );
 
-    // Total frame time on burst frame must stay within general budget.
-    assert!(
-        burst_telemetry.frame_time_us <= HEADLESS_FRAME_BUDGET_US,
-        "frame time {us}µs exceeded headless budget {HEADLESS_FRAME_BUDGET_US}µs on burst frame",
-        us = burst_telemetry.frame_time_us
-    );
+        // Total frame time on burst frame must stay within general budget.
+        assert!(
+            burst_telemetry.frame_time_us <= HEADLESS_FRAME_BUDGET_US,
+            "frame time {us}µs exceeded headless budget {HEADLESS_FRAME_BUDGET_US}µs on burst frame",
+            us = burst_telemetry.frame_time_us
+        );
+    } else {
+        eprintln!(
+            "[SKIP-TIMING] burst budgets recorded above; set TZE_HUD_PERF_ASSERT=1 to enforce"
+        );
+    }
 }
 
 // ─── Task 5.3: Aggregate event rate ceiling ───────────────────────────────────
