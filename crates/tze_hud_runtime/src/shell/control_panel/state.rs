@@ -158,6 +158,9 @@ pub(crate) struct Open {
     pub focus_first_result: bool,
     /// Connect an agent is showing in place of the sections.
     pub connect: Option<ConnectPage>,
+    /// A field row being typed into: (row id, text so far). Enter submits
+    /// it as [`Edit::Text`]; Esc or moving away drops it.
+    pub editing: Option<(String, String)>,
 }
 
 impl Open {
@@ -173,6 +176,7 @@ impl Open {
             focus_refused: false,
             focus_first_result: false,
             connect: None,
+            editing: None,
         }
     }
 }
@@ -253,7 +257,10 @@ fn item_for(row: &Row, open: &Open, context: Option<&str>) -> PanelItem {
         Control::Stepper { text } => PanelControl::Stepper(text.clone()),
         Control::Action { .. } => PanelControl::Action,
         Control::Field { text } => PanelControl::Value {
-            text: text.clone(),
+            text: match &open.editing {
+                Some((id, typed)) if *id == row.id => format!("{typed}▏"),
+                _ => text.clone(),
+            },
             mono: true,
         },
     };
@@ -279,6 +286,10 @@ fn item_for(row: &Row, open: &Open, context: Option<&str>) -> PanelItem {
         item.detail = Some(message.clone());
         item.detail_tone = PanelTone::Danger;
     }
+    if open.editing.as_ref().is_some_and(|(id, _)| *id == row.id) {
+        item.detail = Some("Enter saves · Esc cancels".to_owned());
+        item.detail_tone = PanelTone::Normal;
+    }
     if open.confirming.as_deref() == Some(&row.id)
         && let Some(question) = pending_question(&row.control)
     {
@@ -298,7 +309,7 @@ fn item_for(row: &Row, open: &Open, context: Option<&str>) -> PanelItem {
 fn pending_question(control: &Control) -> Option<&str> {
     [Edit::Activate, Edit::Set(true)]
         .into_iter()
-        .find_map(|edit| control.confirm_for(edit))
+        .find_map(|edit| control.confirm_for(&edit))
 }
 
 /// Rows matching `query`, best first (ties keep panel order).
@@ -609,7 +620,7 @@ fn act(open: &mut Open, nav: &Nav, id: &str, gesture: Gesture) -> Vec<Effect> {
     let Some(edit) = edit_for(control, gesture) else {
         return Vec::new();
     };
-    if control.confirm_for(edit).is_some() && open.confirming.as_deref() != Some(id) {
+    if control.confirm_for(&edit).is_some() && open.confirming.as_deref() != Some(id) {
         open.confirming = Some(id.to_owned());
         return Vec::new();
     }
@@ -668,9 +679,16 @@ pub(crate) fn on_key(
     if !matches!(key, PanelKey::Enter | PanelKey::Space | PanelKey::Escape) {
         open.confirming = None;
     }
+    if !matches!(
+        key,
+        PanelKey::Enter | PanelKey::Space | PanelKey::Backspace | PanelKey::Escape
+    ) {
+        open.editing = None;
+    }
     match key {
         PanelKey::Escape => {
-            if !open.query.is_empty() {
+            if open.editing.take().is_some() {
+            } else if !open.query.is_empty() {
                 open.query.clear();
                 // On Connect, back to the name the card asks for.
                 open.focus = if open.connect.is_some() {
@@ -801,8 +819,13 @@ pub(crate) fn on_key(
             focus_row(open, nav, target, geometry);
         }
         PanelKey::Enter | PanelKey::Space => match open.focus.clone() {
-            PanelFocus::Search if key == PanelKey::Space => on_text(open, " "),
-            PanelFocus::Row(_) if key == PanelKey::Space && typing_name(open) => on_text(open, " "),
+            PanelFocus::Search if key == PanelKey::Space => on_text(open, nav, " "),
+            PanelFocus::Row(_) if key == PanelKey::Space && typing_name(open) => {
+                on_text(open, nav, " ")
+            }
+            PanelFocus::Row(id) if key == PanelKey::Space && editing_field(open, nav, &id) => {
+                on_text(open, nav, " ")
+            }
             PanelFocus::Search => {
                 if !open.query.is_empty()
                     && let Some((id, _)) = nav.rows.first()
@@ -816,13 +839,26 @@ pub(crate) fn on_key(
                 let id = nav.tiles[i].clone();
                 return act(open, nav, &id, Gesture::Activate);
             }
-            PanelFocus::Row(id) => return act(open, nav, &id, Gesture::Activate),
+            PanelFocus::Row(id) => {
+                if let Some((editing, text)) = open.editing.take() {
+                    if editing == id {
+                        open.error = None;
+                        return vec![Effect::Apply {
+                            row: id,
+                            edit: Edit::Text(text),
+                        }];
+                    }
+                }
+                return act(open, nav, &id, Gesture::Activate);
+            }
         },
         PanelKey::Backspace => {
             if typing_name(open) {
                 if let Some(page) = open.connect.as_mut() {
                     page.erase();
                 }
+            } else if let Some((_, text)) = open.editing.as_mut() {
+                text.pop();
             } else if open.query.pop().is_some() {
                 open.scroll = 0.0;
                 open.focus_first_result = true;
@@ -858,8 +894,15 @@ pub(crate) fn on_key(
     Vec::new()
 }
 
-/// Typed text goes to the search query, wherever focus is (type-to-search).
-pub(crate) fn on_text(open: &mut Open, text: &str) {
+/// Whether typing goes into field row `id`: it has focus, is a field, and
+/// no search is showing.
+fn editing_field(open: &Open, nav: &Nav, id: &str) -> bool {
+    open.query.is_empty() && matches!(nav.control(id), Some(Control::Field { .. }))
+}
+
+/// Typed text goes to the focused field (the Connect name, or a section's
+/// field row), else to the search query, wherever focus is (type-to-search).
+pub(crate) fn on_text(open: &mut Open, nav: &Nav, text: &str) {
     if typing_name(open) {
         if let Some(page) = open.connect.as_mut() {
             page.type_name(text);
@@ -867,6 +910,18 @@ pub(crate) fn on_text(open: &mut Open, text: &str) {
         return;
     }
     let typed: String = text.chars().filter(|c| !c.is_control()).collect();
+    if let PanelFocus::Row(id) = &open.focus
+        && open.connect.is_none()
+        && editing_field(open, nav, id)
+    {
+        // The first keystroke replaces the shown value.
+        match open.editing.as_mut() {
+            Some((editing, buffer)) if editing == id => buffer.push_str(&typed),
+            _ => open.editing = Some((id.clone(), typed)),
+        }
+        open.confirming = None;
+        return;
+    }
     if typed.is_empty() || (open.query.is_empty() && typed.trim().is_empty()) {
         return;
     }
@@ -1078,6 +1133,86 @@ mod tests {
             row: row.into(),
             edit,
         }]
+    }
+
+    /// A field row takes typing while focused: the first key replaces the
+    /// value, Backspace edits, Enter submits the text, Esc or moving away
+    /// drops it and the row shows its value again; with nothing typed,
+    /// Enter just activates.
+    #[test]
+    fn field_rows_take_typing_and_submit_on_enter() {
+        let rows = vec![SectionRows {
+            id: "network",
+            title: "Network",
+            rows: vec![
+                Row::new(
+                    "network.mcp_port",
+                    "MCP port",
+                    Control::Field {
+                        text: "9090".into(),
+                    },
+                ),
+                Row::new("network.remote", "Remote agents", Control::Toggle(false)),
+            ],
+        }];
+        let ctx = ViewContext {
+            connect: None,
+            paused: false,
+            pause_chord: "Ctrl+Shift+F12".into(),
+        };
+        let shown = |open: &mut Open| {
+            let (model, nav) = build(open, &rows, &ctx);
+            let PanelBody::Sections(sections) = &model.body else {
+                panic!("sections expected")
+            };
+            let item = sections
+                .iter()
+                .flat_map(|s| &s.items)
+                .find(|i| i.id == "network.mcp_port")
+                .unwrap()
+                .clone();
+            (item, nav)
+        };
+        let mut open = Open::new(PANEL);
+        open.focus = PanelFocus::Row("network.mcp_port".into());
+        let (_, nav) = shown(&mut open);
+        assert_eq!(
+            on_key(&mut open, &nav, PanelKey::Enter, None),
+            apply("network.mcp_port", Edit::Activate),
+            "nothing typed: Enter activates"
+        );
+
+        on_text(&mut open, &nav, "92");
+        on_key(&mut open, &nav, PanelKey::Space, None);
+        on_text(&mut open, &nav, "99");
+        on_key(&mut open, &nav, PanelKey::Backspace, None);
+        let (item, nav) = shown(&mut open);
+        assert_eq!(
+            item.control,
+            PanelControl::Value {
+                text: "92 9▏".into(),
+                mono: true
+            }
+        );
+        assert_eq!(item.detail.as_deref(), Some("Enter saves · Esc cancels"));
+        assert!(open.query.is_empty(), "typing into a field is not a search");
+        assert_eq!(
+            on_key(&mut open, &nav, PanelKey::Enter, None),
+            apply("network.mcp_port", Edit::Text("92 9".into()))
+        );
+        assert_eq!(open.editing, None);
+
+        on_text(&mut open, &nav, "1");
+        assert!(on_key(&mut open, &nav, PanelKey::Escape, None).is_empty());
+        assert_eq!(open.editing, None, "Esc drops the edit");
+        assert!(
+            matches!(&shown(&mut open).0.control, PanelControl::Value { text, .. } if text == "9090")
+        );
+        assert!(on_key(&mut open, &nav, PanelKey::Escape, None) == vec![Effect::Close]);
+
+        on_text(&mut open, &nav, "1");
+        on_key(&mut open, &nav, PanelKey::Down, None);
+        assert_eq!(open.editing, None, "moving away drops the edit");
     }
 
     /// Empty sections are not listed; chips and Alt keys follow the listed
@@ -1306,9 +1441,9 @@ mod tests {
         assert_eq!(open.focus, PanelFocus::Row(connect::NAME.into()));
         assert_eq!(model.hint_end, "Esc back");
 
-        on_text(&mut open, "Claude");
+        on_text(&mut open, &nav, "Claude");
         on_key(&mut open, &nav, PanelKey::Space, None);
-        on_text(&mut open, "pc");
+        on_text(&mut open, &nav, "pc");
         on_key(&mut open, &nav, PanelKey::Backspace, None);
         assert_eq!(open.connect.as_ref().unwrap().name, "claude-p");
         assert!(open.query.is_empty(), "the name is not a search");
@@ -1330,13 +1465,13 @@ mod tests {
 
         // Typing elsewhere searches; clearing it shows the card again, with
         // typing back on the name.
-        on_text(&mut open, "pa");
+        on_text(&mut open, &nav, "pa");
         let (model, nav) = built_connect(&mut open);
         assert!(matches!(model.body, PanelBody::Results { .. }));
         assert!(on_key(&mut open, &nav, PanelKey::Escape, None).is_empty());
         let (model, nav) = built_connect(&mut open);
         assert!(matches!(model.body, PanelBody::Connect(_)));
-        on_text(&mut open, "x");
+        on_text(&mut open, &nav, "x");
         assert_eq!(open.connect.as_ref().unwrap().name, "claude-px");
         assert!(open.query.is_empty());
 
@@ -1358,7 +1493,7 @@ mod tests {
         let mut open = Open::new(PANEL);
         let (_, nav) = built(&mut open);
         on_key(&mut open, &nav, PanelKey::Down, None);
-        on_text(&mut open, "pa");
+        on_text(&mut open, &nav, "pa");
         let (model, nav) = built(&mut open);
         let PanelBody::Results { title, items } = &model.body else {
             panic!("results expected")
@@ -1378,7 +1513,7 @@ mod tests {
             apply("agents.pause", Edit::Set(true))
         );
 
-        on_text(&mut open, "zzz");
+        on_text(&mut open, &nav, "zzz");
         let (model, _) = built(&mut open);
         assert_eq!(
             model.body,
@@ -1394,7 +1529,7 @@ mod tests {
             vec![Effect::Close]
         );
         // Leading spaces and control characters are not typed.
-        on_text(&mut open, " \u{8}");
+        on_text(&mut open, &nav, " \u{8}");
         assert_eq!(open.query, "");
     }
 
@@ -1467,7 +1602,8 @@ mod tests {
     #[test]
     fn tiles_act_and_paging_is_safe_while_a_search_matches_nothing() {
         let mut open = Open::new(PANEL);
-        on_text(&mut open, "zzz");
+        let (_, nav) = built(&mut open);
+        on_text(&mut open, &nav, "zzz");
         let (model, nav) = built(&mut open);
         assert!(matches!(model.body, PanelBody::Empty(_)) && nav.rows.is_empty());
         let tile = PanelHitTarget::Tile(0, PanelPart::Body);

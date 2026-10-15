@@ -328,6 +328,8 @@ struct WindowedRuntimeState {
     /// Runtime system card / toast slot. Runtime-owned and never in the scene
     /// graph, so agents cannot observe it; setting it wakes the render loop.
     system_card: crate::shell::system_card::SystemCardHandle,
+    /// Frame rate cap and zone outlines, changed live by the control panel.
+    live: Arc<crate::launch::LiveSettings>,
     /// First-run pairing (`None` when the MCP port is disabled); the pairing
     /// chord and `--pair` open it.
     pairing: Option<Arc<crate::pairing::Pairing>>,
@@ -1513,6 +1515,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         let system_card_for_compositor = self.state.system_card.clone();
         let control_panel_for_compositor = self.state.control_panel.clone();
         let mut control_panel_seen = 0u64;
+        let live_for_compositor = Arc::clone(&self.state.live);
+        let mut live_seen = 0u64;
         let mut closed_notice_seen = 0u64;
         let capture_inbox = self.state.capture_inbox.clone();
         let display_targets = Arc::clone(&self.state.display_targets);
@@ -1561,8 +1565,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 // guard drops on any loop-exit path.
                 let _frame_timer_guard = FramePacingTimerGuard::acquire();
 
-                let frame_interval =
-                    std::time::Duration::from_micros(1_000_000 / cfg.target_fps.max(1) as u64);
+                // The degradation envelope above keeps the startup cadence;
+                // the panel's frame rate cap changes only the pacing.
+                let mut frame_interval = crate::launch::frame_interval(cfg.target_fps);
                 let mut shutdown_rx = shutdown_tok.subscribe();
                 // Running total of compositor scene try_lock misses (hud-3qpgv.2).
                 // Incremented on each frame-loop Stage 4 try_lock failure and
@@ -1813,6 +1818,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         .as_ref()
                         .and_then(|panel| panel.closed_notice_if_changed(&mut closed_notice_seen))
                         .is_some_and(|notice| compositor.set_closed_notice(notice));
+                    // Frame rate cap and zone outlines from the control panel.
+                    let outlines_changed =
+                        live_for_compositor.apply(&mut live_seen, &mut frame_interval, |on| {
+                            compositor.set_debug_zone_tints(on)
+                        });
                     surface_repaint_pending = update_surface_repaint_pending(
                         surface_repaint_pending,
                         surface_recovery.reconfigured_surface()
@@ -1820,6 +1830,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             || card_changed
                             || panel_changed
                             || notice_changed
+                            || outlines_changed
                             || displays_need_frame,
                         false,
                     );
@@ -2946,6 +2957,11 @@ impl WindowedRuntime {
         let active_tab_mirror = Arc::new(std::sync::Mutex::new(None));
         let chrome_state = Arc::new(std::sync::RwLock::new(crate::shell::ChromeState::new()));
         let system_card = crate::shell::system_card::SystemCardHandle::new(render_wake.clone());
+        let live = Arc::new(crate::launch::LiveSettings::new(
+            cfg.target_fps,
+            cfg.debug_zones,
+            render_wake.clone(),
+        ));
         let cfg_agents_empty = cfg.agents.load().is_empty();
         let agent_store = Arc::new(crate::agent_store::AgentStore::open(
             tze_hud_config::agents_path_for(
@@ -3128,8 +3144,8 @@ impl WindowedRuntime {
                     agents: Arc::clone(&cfg.agents),
                     presents: Some(Arc::clone(wake.counters())),
                     capture: Some(capture_endpoint),
-                    restart,
-                    update,
+                    restart: restart.clone(),
+                    update: update.clone(),
                     bind_gate,
                     pairing: pairing.clone(),
                 };
@@ -3211,6 +3227,13 @@ impl WindowedRuntime {
                     render_wake: render_wake.clone(),
                     main_wake: wake.main_work_notifier(),
                 }),
+                runtime: Some(crate::shell::control_panel::RuntimeControl::system(
+                    &cfg,
+                    Arc::clone(&live),
+                    restart.clone(),
+                    update.clone(),
+                    pairing.as_ref().map(|p| p.firewall()),
+                )),
                 render_wake: render_wake.clone(),
                 main_wake: wake.main_work_notifier(),
             };
@@ -3281,6 +3304,7 @@ impl WindowedRuntime {
             active_tab_mirror,
             chrome_state,
             system_card,
+            live,
             input_ring,
             pending_input_latency,
             frame_ready_rx,

@@ -148,37 +148,9 @@ impl ConfigLoader for TzeHudConfig {
             validate_profile(p, &mut errors);
         }
 
-        // ── (2b) [runtime].*_hotkey parse as chords and are distinct ─────────
-        let mut seen: Vec<(Hotkey, ChordRole)> = Vec::new();
-        for role in ChordRole::ALL {
-            let Some(chord) = self.raw.runtime.as_ref().and_then(|r| raw_chord(r, role)) else {
-                seen.push((role.default_chord(), role));
-                continue;
-            };
-            match Hotkey::parse(chord) {
-                Err(e) => errors.push(ConfigError {
-                    code: ConfigErrorCode::Other("CONFIG_INVALID_HOTKEY".into()),
-                    field_path: format!("runtime.{}", role.config_key()),
-                    expected: "chord like \"Ctrl+Shift+F12\" (modifiers Ctrl/Shift/Alt/Win + F1-F24, letter or digit)".into(),
-                    got: format!("{chord:?}"),
-                    hint: e.to_string(),
-                }),
-                Ok(hotkey) => seen.push((hotkey, role)),
-            }
-        }
-        for (i, (hotkey, role)) in seen.iter().enumerate() {
-            if let Some((_, other)) = seen[..i].iter().find(|(h, _)| h == hotkey) {
-                errors.push(ConfigError {
-                    code: ConfigErrorCode::Other("CONFIG_DUPLICATE_HOTKEY".into()),
-                    field_path: format!("runtime.{}", role.config_key()),
-                    expected: "a chord no other HUD chord uses".into(),
-                    got: format!("{hotkey}"),
-                    hint: format!(
-                        "runtime.{} already uses {hotkey}; pick another chord",
-                        other.config_key()
-                    ),
-                });
-            }
+        // ── (2b) the rest of [runtime] ────────────────────────────────────────
+        if let Some(runtime) = self.raw.runtime.as_ref() {
+            validate_runtime(runtime, &mut errors);
         }
 
         // ── (3) [display_profile] is rejected; the built-in profiles are fixed ──
@@ -410,6 +382,101 @@ fn validate_tabs(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
                 });
             }
         }
+    }
+}
+
+/// The `[runtime]` table of the config text `src`, for the launcher's
+/// flag > env > config > default precedence. `None` when the file does not
+/// parse or `[runtime]` is invalid; full loading reports why.
+pub fn runtime_section(src: &str) -> Option<crate::raw::RawRuntime> {
+    let runtime = toml::from_str::<RawConfig>(src).ok()?.runtime?;
+    let mut errors = Vec::new();
+    validate_runtime(&runtime, &mut errors);
+    errors.is_empty().then_some(runtime)
+}
+
+/// Log levels `[runtime] log_level` accepts.
+pub const LOG_LEVELS: [&str; 5] = ["error", "warn", "info", "debug", "trace"];
+
+/// The MCP port when nothing sets one.
+pub const DEFAULT_MCP_PORT: u16 = 9090;
+/// The gRPC port when nothing sets one.
+pub const DEFAULT_GRPC_PORT: u16 = 50051;
+/// Highest `[runtime] fps`.
+pub const MAX_FPS: u32 = 240;
+
+/// Validate `[runtime]` beyond the profile: chords parse and are distinct,
+/// ports differ, fps and log level are in range.
+pub(crate) fn validate_runtime(runtime: &crate::raw::RawRuntime, errors: &mut Vec<ConfigError>) {
+    // Chords parse and are distinct.
+    let mut seen: Vec<(Hotkey, ChordRole)> = Vec::new();
+    for role in ChordRole::ALL {
+        let Some(chord) = raw_chord(runtime, role) else {
+            seen.push((role.default_chord(), role));
+            continue;
+        };
+        match Hotkey::parse(chord) {
+            Err(e) => errors.push(ConfigError {
+                code: ConfigErrorCode::Other("CONFIG_INVALID_HOTKEY".into()),
+                field_path: format!("runtime.{}", role.config_key()),
+                expected: "chord like \"Ctrl+Shift+F12\" (modifiers Ctrl/Shift/Alt/Win + F1-F24, letter or digit)".into(),
+                got: format!("{chord:?}"),
+                hint: e.to_string(),
+            }),
+            Ok(hotkey) => seen.push((hotkey, role)),
+        }
+    }
+    for (i, (hotkey, role)) in seen.iter().enumerate() {
+        if let Some((_, other)) = seen[..i].iter().find(|(h, _)| h == hotkey) {
+            errors.push(ConfigError {
+                code: ConfigErrorCode::Other("CONFIG_DUPLICATE_HOTKEY".into()),
+                field_path: format!("runtime.{}", role.config_key()),
+                expected: "a chord no other HUD chord uses".into(),
+                got: format!("{hotkey}"),
+                hint: format!(
+                    "runtime.{} already uses {hotkey}; pick another chord",
+                    other.config_key()
+                ),
+            });
+        }
+    }
+    let invalid = |field: &str, expected: &str, got: String, hint: &str| ConfigError {
+        code: ConfigErrorCode::Other("CONFIG_INVALID_RUNTIME_VALUE".into()),
+        field_path: format!("runtime.{field}"),
+        expected: expected.into(),
+        got,
+        hint: hint.into(),
+    };
+    // Compared as the HUD would start: a missing key is its default.
+    let mcp = runtime.mcp_port.unwrap_or(DEFAULT_MCP_PORT);
+    let grpc = runtime.grpc_port.unwrap_or(DEFAULT_GRPC_PORT);
+    if mcp != 0 && mcp == grpc {
+        errors.push(invalid(
+            "grpc_port",
+            "a port other than mcp_port",
+            format!("{grpc}, the same as mcp_port"),
+            "MCP and gRPC need different ports",
+        ));
+    }
+    if let Some(fps) = runtime.fps
+        && !(1..=MAX_FPS).contains(&fps)
+    {
+        errors.push(invalid(
+            "fps",
+            "1-240",
+            fps.to_string(),
+            "set fps between 1 and 240",
+        ));
+    }
+    if let Some(level) = runtime.log_level.as_deref()
+        && !LOG_LEVELS.contains(&level)
+    {
+        errors.push(invalid(
+            "log_level",
+            "error, warn, info, debug or trace",
+            format!("{level:?}"),
+            "use one of error, warn, info, debug, trace",
+        ));
     }
 }
 

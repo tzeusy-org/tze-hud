@@ -182,6 +182,12 @@ impl Compositor {
         true
     }
 
+    /// Turn zone outlines on or off; true when that changed (the caller
+    /// repaints once).
+    pub fn set_debug_zone_tints(&mut self, on: bool) -> bool {
+        std::mem::replace(&mut self.debug_zone_tints, on) != on
+    }
+
     /// Card backdrop quads for the final system-card pass; empty when no card is set.
     pub(super) fn system_card_vertices(&self, sw: f32, sh: f32) -> Vec<RectVertex> {
         let Some(card) = &self.system_card else {

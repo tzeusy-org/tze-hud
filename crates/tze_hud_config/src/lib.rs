@@ -31,8 +31,12 @@ pub use agents_file::{
     agents_path_for,
 };
 pub use allow::{Grant, allow_to_permissions, validate_allow_entry, with_grant};
-pub use config_write::{ConfigWriteError, TokenUpdate, set_design_tokens};
-pub use loader::TzeHudConfig;
+pub use config_write::{
+    ConfigWriteError, RuntimeUpdate, TokenUpdate, set_design_tokens, set_runtime,
+};
+pub use loader::{
+    DEFAULT_GRPC_PORT, DEFAULT_MCP_PORT, LOG_LEVELS, MAX_FPS, TzeHudConfig, runtime_section,
+};
 pub use policy_builder::{
     apply_token_defaults_for_zone, build_all_effective_policies, build_effective_policy,
     tile_placement_from_tokens,

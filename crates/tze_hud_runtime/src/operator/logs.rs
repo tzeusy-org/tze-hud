@@ -19,6 +19,39 @@ pub const MAX_TAIL_LINES: usize = 2000;
 
 pub const LOG_FILE_NAME: &str = "tze_hud.log";
 
+/// Changes the log file's level; installed once by the app's logging setup.
+type LevelSetter = Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>;
+
+static FILE_LEVEL: std::sync::OnceLock<(LevelSetter, Mutex<String>)> = std::sync::OnceLock::new();
+
+/// Install the log file's level changer, with the level it starts at.
+/// Later calls are ignored.
+pub fn install_file_level(initial: &str, set: LevelSetter) {
+    let _ = FILE_LEVEL.set((set, Mutex::new(initial.to_owned())));
+}
+
+/// Change the log file's level now (one of `error`, `warn`, `info`,
+/// `debug`, `trace`). `Err` when the level is unknown or logging has no
+/// file layer.
+pub fn set_file_level(level: &str) -> Result<(), String> {
+    if !tze_hud_config::LOG_LEVELS.contains(&level) {
+        return Err(format!("unknown log level {level:?}"));
+    }
+    let (set, current) = FILE_LEVEL
+        .get()
+        .ok_or_else(|| "the log file is not open".to_owned())?;
+    set(level)?;
+    *current.lock().unwrap_or_else(|e| e.into_inner()) = level.to_owned();
+    Ok(())
+}
+
+/// The log file's level, if logging has a file layer.
+pub fn file_level() -> Option<String> {
+    FILE_LEVEL
+        .get()
+        .map(|(_, current)| current.lock().unwrap_or_else(|e| e.into_inner()).clone())
+}
+
 /// Where logs live: `TZE_HUD_LOG_DIR`, else `%LOCALAPPDATA%\tze_hud\logs`, else
 /// `<temp>/tze_hud/logs`.
 pub fn log_dir() -> PathBuf {

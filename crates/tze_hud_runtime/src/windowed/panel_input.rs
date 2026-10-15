@@ -414,6 +414,7 @@ mod panel_task_tests {
             pairing: None,
             agents: None,
             connect: None,
+            runtime: None,
             render_wake,
             main_wake: Default::default(),
         };
@@ -777,6 +778,141 @@ mod panel_task_tests {
         );
     }
 
+    /// An edit that waits on something slow (an administrator prompt, a
+    /// download) must not hold the human override: the row shows it is
+    /// working, a second press does not start another, Esc still closes and
+    /// resumes agents, and the outcome shows when the panel is reopened.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_slow_edit_runs_beside_the_panel_and_esc_still_resumes() {
+        use crate::shell::control_panel::Section;
+        use crate::shell::control_panel::row::{BoxFuture, Control, Edit, Row};
+
+        struct Slow {
+            started: Arc<AtomicUsize>,
+            release: Arc<tokio::sync::Notify>,
+        }
+        impl Section for Slow {
+            fn id(&self) -> &'static str {
+                "slow"
+            }
+            fn title(&self) -> &'static str {
+                "Slow"
+            }
+            fn rows(&self) -> BoxFuture<'_, Vec<Row>> {
+                Box::pin(async {
+                    vec![
+                        Row::new("slow.go", "Go", Control::Action { confirm: None }).detail("Idle"),
+                    ]
+                })
+            }
+            fn apply<'a>(&'a self, _: &'a str, _: Edit) -> BoxFuture<'a, Result<(), String>> {
+                Box::pin(async move {
+                    self.started.fetch_add(1, Ordering::SeqCst);
+                    self.release.notified().await;
+                    Err("The prompt was declined".to_owned())
+                })
+            }
+        }
+
+        let state = WindowedRuntimeState::new_headless();
+        let deps = ControlPanelDeps {
+            scene: Arc::clone(&state.shared_state.lock().await.scene),
+            pause: PauseControl::new(
+                Arc::clone(&state.shared_state),
+                Arc::clone(&state.chrome_state),
+                Arc::clone(&state.safe_mode_atomic),
+                RenderWakeNotifier::default(),
+            ),
+            chords: HudChords::default(),
+            pairing: None,
+            agents: None,
+            connect: None,
+            runtime: None,
+            render_wake: RenderWakeNotifier::default(),
+            main_wake: RenderWakeNotifier::default(),
+        };
+        let (started, release) = (
+            Arc::new(AtomicUsize::new(0)),
+            Arc::new(tokio::sync::Notify::new()),
+        );
+        let mut sections = default_sections(&deps);
+        sections.push(Box::new(Slow {
+            started: Arc::clone(&started),
+            release: Arc::clone(&release),
+        }));
+        let panel = spawn_control_panel(
+            &tokio::runtime::Handle::current(),
+            deps,
+            sections,
+            state.shutdown.clone(),
+        );
+        let paused = || state.safe_mode_atomic.load(Ordering::Acquire);
+        let detail = || {
+            let Some(PanelBody::Sections(cards)) = panel.current_model().map(|m| m.body) else {
+                return None;
+            };
+            cards
+                .iter()
+                .flat_map(|c| &c.items)
+                .find(|i| i.id == "slow.go")
+                .and_then(|i| i.detail.clone())
+        };
+        let go = PanelHitTarget::Row("slow.go".into(), PanelPart::Body);
+
+        panel.send(PanelEvent::Chord(ChordRole::Pause));
+        wait("paused and open", || paused() && panel.is_open()).await;
+        panel.send(PanelEvent::Click(go.clone()));
+        wait("working", || {
+            detail().is_some_and(|d| d.starts_with("Working"))
+        })
+        .await;
+        panel.send(PanelEvent::Click(go));
+        panel.send(PanelEvent::Key(PanelKey::Escape));
+        wait("closed and resumed while the edit runs", || {
+            !panel.is_open() && !paused()
+        })
+        .await;
+        assert_eq!(
+            started.load(Ordering::SeqCst),
+            1,
+            "a busy row starts nothing new"
+        );
+
+        panel.send(PanelEvent::Chord(ChordRole::Panel));
+        wait("reopened, still working", || {
+            detail().is_some_and(|d| d.starts_with("Working"))
+        })
+        .await;
+        release.notify_one();
+        wait("the outcome shows", || {
+            detail().as_deref() == Some("The prompt was declined")
+        })
+        .await;
+
+        // A failure while the panel is closed shows when it reopens.
+        panel.send(PanelEvent::Click(PanelHitTarget::Row(
+            "slow.go".into(),
+            PanelPart::Body,
+        )));
+        wait("working again", || {
+            detail().is_some_and(|d| d.starts_with("Working"))
+        })
+        .await;
+        panel.send(PanelEvent::Key(PanelKey::Escape));
+        wait("closed", || !panel.is_open()).await;
+        release.notify_one();
+        // Events are handled in order: once the outcome is queued, the
+        // reopen chord lands after it, on a closed panel.
+        wait("the outcome is queued", || panel.applied_sent() == 2).await;
+        panel.send(PanelEvent::Chord(ChordRole::Panel));
+        wait("the closed-time failure shows", || {
+            detail().as_deref() == Some("The prompt was declined")
+        })
+        .await;
+        panel.send(PanelEvent::Key(PanelKey::Escape));
+        wait("closed", || !panel.is_open()).await;
+    }
+
     async fn wait(what: &str, done: impl Fn() -> bool) {
         for _ in 0..200 {
             if done() {
@@ -829,6 +965,7 @@ mod panel_task_tests {
             pairing: None,
             agents: None,
             connect: None,
+            runtime: None,
             render_wake: RenderWakeNotifier::default(),
             main_wake: RenderWakeNotifier::default(),
         };

@@ -336,14 +336,15 @@ impl Section for AgentsSection {
 
     fn apply<'a>(&'a self, row: &'a str, edit: Edit) -> BoxFuture<'a, Result<(), String>> {
         Box::pin(async move {
-            if let (Self::PAUSE, Edit::Set(paused)) = (row, edit) {
+            if let (Self::PAUSE, Edit::Set(paused)) = (row, &edit) {
+                let paused = *paused;
                 self.pause.set(paused).await;
                 return Ok(());
             }
             let unsupported = || format!("{row} does not support {edit:?}");
             let (verb, agent) = Verb::parse(row).ok_or_else(unsupported)?;
             let agents = self.agents.as_ref().ok_or_else(unsupported)?;
-            match (verb, edit) {
+            match (verb, edit.clone()) {
                 (Verb::Manage, Edit::Set(open)) => {
                     *self.expanded() = open.then(|| agent.to_owned());
                 }

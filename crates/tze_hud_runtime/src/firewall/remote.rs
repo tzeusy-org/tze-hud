@@ -73,7 +73,9 @@ pub fn parse_private_child(args: &[String]) -> Result<Option<ChildRequest>, Stri
     Ok(Some(request))
 }
 
-/// Only the app's explicit early action calls this; no runtime/startup hook does.
+/// Only explicit owner actions call this: `--allow-remote` /
+/// `--disallow-remote`, and the control panel's Remote agents row. No
+/// startup hook does.
 pub fn execute(action: RemoteAction, ports: [u16; 2]) -> Result<String, String> {
     if action == RemoteAction::Allow && ports == [0, 0] {
         return Err("--allow-remote requires at least one nonzero listen port".into());

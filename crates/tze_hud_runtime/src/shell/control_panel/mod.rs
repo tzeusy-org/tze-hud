@@ -39,6 +39,7 @@ pub(crate) mod agents;
 pub(crate) mod connect;
 mod pause;
 pub(crate) mod row;
+pub(crate) mod runtime;
 mod search;
 mod sections;
 mod state;
@@ -55,6 +56,7 @@ pub(crate) use agents::AgentControl;
 pub(crate) use connect::ConnectControl;
 pub(crate) use pause::PauseControl;
 pub(crate) use row::Section;
+pub(crate) use runtime::RuntimeControl;
 pub(crate) use state::PanelKey;
 
 use crate::threads::ShutdownToken;
@@ -83,6 +85,11 @@ pub(crate) enum PanelEvent {
     /// Re-read the sections (sent once a second while open, so facts that
     /// change outside the panel, like an agent connecting, show up).
     Refresh,
+    /// A slow edit finished (sent by the panel task itself).
+    Applied {
+        row: String,
+        result: Result<(), String>,
+    },
 }
 
 struct Shared {
@@ -101,6 +108,9 @@ struct Shared {
     /// Wakes the winit loop when new geometry arrives, so the overlay's
     /// click-through state follows the panel's drawn rect.
     main_wake: RenderWakeNotifier,
+    /// Background edits whose outcome was queued (tests order on it).
+    #[cfg(test)]
+    applied_sent: AtomicU64,
 }
 
 /// Cheap, cloneable access to the panel from every thread.
@@ -113,6 +123,12 @@ impl ControlPanelHandle {
     /// Queue an event for the panel task; false once the task has stopped.
     pub(crate) fn send(&self, event: PanelEvent) -> bool {
         self.shared.events.send(event).is_ok()
+    }
+
+    /// How many background edits have queued their outcome.
+    #[cfg(test)]
+    pub(crate) fn applied_sent(&self) -> u64 {
+        self.shared.applied_sent.load(Ordering::SeqCst)
     }
 
     pub(crate) fn is_open(&self) -> bool {
@@ -261,6 +277,9 @@ pub(crate) struct ControlPanelDeps {
     pub agents: Option<AgentControl>,
     /// Connect an agent (`None` when the MCP port is disabled).
     pub connect: Option<ConnectControl>,
+    /// Launch settings, restart, update and the rest of Network,
+    /// Diagnostics and System (`None`: those show only the version).
+    pub runtime: Option<RuntimeControl>,
     /// Wakes the compositor (and the winit loop) after a publish.
     pub render_wake: RenderWakeNotifier,
     /// Wakes only the winit loop (new geometry changes pointer capture).
@@ -269,7 +288,7 @@ pub(crate) struct ControlPanelDeps {
 
 /// The sections every HUD shows, in display order.
 pub(crate) fn default_sections(deps: &ControlPanelDeps) -> Vec<Box<dyn Section>> {
-    vec![
+    let mut sections: Vec<Box<dyn Section>> = vec![
         Box::new(sections::AgentsSection::new(
             deps.pause.clone(),
             deps.agents.clone(),
@@ -283,8 +302,13 @@ pub(crate) fn default_sections(deps: &ControlPanelDeps) -> Vec<Box<dyn Section>>
             deps.chords,
             deps.pairing.is_some(),
         )),
-        Box::new(sections::SystemSection),
-    ]
+    ];
+    if let Some(runtime) = &deps.runtime {
+        sections.push(Box::new(sections::NetworkSection::new(runtime.clone())));
+        sections.push(Box::new(sections::DiagnosticsSection::new(runtime.clone())));
+    }
+    sections.push(Box::new(sections::SystemSection::new(deps.runtime.clone())));
+    sections
 }
 
 /// Start the panel task on `runtime` and return its handle.
@@ -311,6 +335,8 @@ pub(crate) fn spawn_control_panel(
             events: tx,
             render_wake: deps.render_wake.clone(),
             main_wake: deps.main_wake.clone(),
+            #[cfg(test)]
+            applied_sent: AtomicU64::new(0),
         }),
     };
     let sections: Arc<[Box<dyn Section>]> = sections.into();
@@ -323,6 +349,8 @@ pub(crate) fn spawn_control_panel(
             open: None,
             nav: Nav::default(),
             published: None,
+            busy: std::collections::HashSet::new(),
+            closed_failure: None,
         }
     };
     let recover = handle.clone();
@@ -371,6 +399,12 @@ pub(crate) fn spawn_control_panel(
 /// (and redrawn) only when something changed.
 const REFRESH_INTERVAL: std::time::Duration = std::time::Duration::from_secs(1);
 
+/// How long an edit may run before the panel stops waiting for it. A slower
+/// one (an administrator prompt, an update download) finishes in the
+/// background with its row marked busy, so keys, chords and Esc (which
+/// resumes agents) never wait on it.
+const APPLY_WAIT: std::time::Duration = std::time::Duration::from_millis(200);
+
 struct PanelTask {
     handle: ControlPanelHandle,
     deps: ControlPanelDeps,
@@ -378,11 +412,22 @@ struct PanelTask {
     open: Option<Open>,
     nav: Nav,
     published: Option<ControlPanelModel>,
+    /// Rows whose edit is still running in the background. Kept across
+    /// close and reopen so a second edit cannot start beside the first.
+    busy: std::collections::HashSet<String>,
+    /// A background edit that failed while the panel was closed, shown on
+    /// its row when the panel next opens.
+    closed_failure: Option<(String, String)>,
 }
 
 impl PanelTask {
     async fn handle(&mut self, event: PanelEvent) {
         let effects = match (event, self.open.as_mut()) {
+            (PanelEvent::Applied { row, result }, _) => {
+                self.busy.remove(&row);
+                self.applied(&row, result);
+                Vec::new()
+            }
             (PanelEvent::Chord(role), _) => {
                 self.on_chord(role).await;
                 Vec::new()
@@ -394,7 +439,7 @@ impl PanelTask {
                 match event {
                     PanelEvent::Key(key) => state::on_key(open, &self.nav, key, geometry.as_ref()),
                     PanelEvent::Text(text) => {
-                        state::on_text(open, &text);
+                        state::on_text(open, &self.nav, &text);
                         Vec::new()
                     }
                     PanelEvent::Click(target) => {
@@ -416,7 +461,7 @@ impl PanelTask {
                         self.refresh().await;
                         Vec::new()
                     }
-                    PanelEvent::Chord(_) => Vec::new(),
+                    PanelEvent::Chord(_) | PanelEvent::Applied { .. } => Vec::new(),
                 }
             }
         };
@@ -438,7 +483,12 @@ impl PanelTask {
         }
         match outcome.panel {
             PanelChange::Open(by) => {
-                self.open = Some(Open::new(by));
+                let mut open = Open::new(by);
+                open.error = self.closed_failure.take();
+                self.open = Some(open);
+                for section in self.sections.iter() {
+                    section.opened();
+                }
                 self.refresh().await;
             }
             PanelChange::Close => self.open = None,
@@ -503,20 +553,48 @@ impl PanelTask {
             tracing::warn!(row, "control panel: no section owns this row");
             return;
         };
+        if self.busy.contains(row) {
+            tracing::info!(
+                row,
+                "control panel: edit ignored; the last one is still running"
+            );
+            return;
+        }
+        tracing::info!(row, ?edit, "control panel: applying");
         // Isolated: a section that panics fails its row, not the panel.
         let (sections, owned_row) = (Arc::clone(&self.sections), row.to_owned());
-        let result = tokio::spawn(async move { sections[index].apply(&owned_row, edit).await })
-            .await
-            .unwrap_or_else(|error| {
-                tracing::error!(row, %error, "control panel: section apply failed");
+        let mut run = tokio::spawn(async move { sections[index].apply(&owned_row, edit).await });
+        let joined = |joined: Result<Result<(), String>, tokio::task::JoinError>| {
+            joined.unwrap_or_else(|error| {
+                tracing::error!(%error, "control panel: section apply failed");
                 Err("This setting failed; see the HUD log".to_owned())
-            });
+            })
+        };
+        match tokio::time::timeout(APPLY_WAIT, &mut run).await {
+            Ok(result) => self.applied(row, joined(result)),
+            Err(_) => {
+                self.busy.insert(row.to_owned());
+                let (handle, row) = (self.handle.clone(), row.to_owned());
+                tokio::spawn(async move {
+                    let result = joined(run.await);
+                    handle.send(PanelEvent::Applied { row, result });
+                    #[cfg(test)]
+                    handle.shared.applied_sent.fetch_add(1, Ordering::SeqCst);
+                });
+            }
+        }
+    }
+
+    /// Log an edit's outcome and show a failure on its row.
+    fn applied(&mut self, row: &str, result: Result<(), String>) {
         match result {
-            Ok(()) => tracing::info!(row, ?edit, "control panel: applied"),
+            Ok(()) => tracing::info!(row, "control panel: applied"),
             Err(message) => {
-                tracing::warn!(row, ?edit, %message, "control panel: edit failed");
-                if let Some(open) = self.open.as_mut() {
-                    open.error = Some((row.to_owned(), message));
+                tracing::warn!(row, %message, "control panel: edit failed");
+                let failure = Some((row.to_owned(), message));
+                match self.open.as_mut() {
+                    Some(open) => open.error = failure,
+                    None => self.closed_failure = failure,
                 }
             }
         }
@@ -563,6 +641,13 @@ impl PanelTask {
                                 .caution(true),
                             ]
                         });
+                    let mut section_rows = section_rows;
+                    for row in section_rows
+                        .iter_mut()
+                        .filter(|r| self.busy.contains(&r.id))
+                    {
+                        row.detail = Some("Working… (Esc closes; this carries on)".to_owned());
+                    }
                     rows.push(SectionRows {
                         id: section.id(),
                         title: section.title(),

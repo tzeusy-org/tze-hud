@@ -366,6 +366,16 @@ renaming their zone values. Tabs and their widgets remain configurable;
 `[displays.<NAME>].zones` remains the supported way to assign built-in zones
 to a display.
 
+`[runtime]` also holds the launch settings the control panel edits:
+`mcp_port` (default 9090) and `grpc_port` (50051), 0 disabling either and
+the two different; `fps` (1-240, default 60); `log_level` for the log file
+(`error`, `warn`, `info` default, `debug`, `trace`); and `debug_zones`
+(zone outlines, default false). Precedence, highest first: a command-line
+flag (`--mcp-port`, `--grpc-port`, `--fps`, `--debug-zones`), an
+environment variable (`TZE_HUD_MCP_PORT`, `TZE_HUD_GRPC_PORT`,
+`TZE_HUD_FPS`, `TZE_HUD_DEBUG_ZONES=1`, `TZE_HUD_FILE_LOG`), `[runtime]`, the
+default. Ports are read at start; the rest change live from the panel.
+
 ## Human chords and the control panel
 
 Three global chords work while the overlay is unfocused and click-through
@@ -441,6 +451,31 @@ longer works. Clicking the name edits it; only Enter copies. New code replaces
 the code. Esc goes back to the sections. While the card is up, the system card
 stays away, even for a code replaced after wrong guesses; once it is left, a
 replacement shows on the system card again.
+
+The Network card shows the MCP and gRPC ports and Remote agents. A port is
+typed in place (the first key replaces it, Enter saves, Esc cancels) and
+saved to `[runtime]`; it applies at the next start, so the row shows
+"Restart to apply" and the running port, and Restart now counts it.
+Changing the MCP port means paired agents must use the new one. Remote
+agents shows Windows Firewall's verdict for tailnet agents; switching it on
+(asks first) or off runs the same elevated helper as `--allow-remote` /
+`--disallow-remote` (Windows asks for administrator approval) and reads the
+firewall again.
+
+The Diagnostics card sets the log file's level, zone outlines and the frame
+rate cap (choices from 30 to 240; `[runtime] fps` takes 1-240). Each applies at once and is saved to `[runtime]`; when the
+save fails the change stays for the session and the row says so. The cap
+paces frames; load shedding keeps the startup rate.
+
+The System card has Restart now (asks first; it lists what it applies, uses
+the same health handoff as `POST /admin/restart`, and a failed restart keeps
+this instance up and shows why), Install update (asks first; the signed
+update path of `POST /admin/update`, on this build's channel, when this copy
+is installed), Start with Windows (the per-user Run entry; installed copies
+only), Open config file, Open log folder, and the version.
+
+A row whose value a flag or variable set is read-only and names it ("Set by
+--mcp-port"), because a restart reuses the same arguments and environment.
 
 Agents never see the panel: it is not in the scene, in MCP or gRPC results,
 or in `/admin/screenshot`. An idle open panel draws no frames, except that

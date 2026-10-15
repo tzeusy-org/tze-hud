@@ -223,6 +223,14 @@ pub fn build_sha() -> String {
         .map_or_else(|| "unknown".to_owned(), |b| b.sha.clone())
 }
 
+/// The release channel this build came from (`dev`, `stable`, …),
+/// `"dev"` before [`set_build_info`].
+pub fn build_channel() -> String {
+    BUILD_INFO
+        .get()
+        .map_or_else(|| "dev".to_owned(), |b| b.channel.clone())
+}
+
 /// `<channel>-<sha7>`, how toasts name this build.
 pub fn build_label() -> String {
     BUILD_INFO.get().map_or_else(

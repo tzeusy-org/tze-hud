@@ -2273,6 +2273,11 @@ mod tests {
             active_tab_mirror,
             chrome_state: Arc::new(std::sync::RwLock::new(crate::shell::ChromeState::new())),
             system_card: crate::shell::system_card::SystemCardHandle::default(),
+            live: Arc::new(crate::launch::LiveSettings::new(
+                60,
+                false,
+                Default::default(),
+            )),
             pairing: None,
             control_panel: None,
             input_ring: Arc::new(std::sync::Mutex::new(

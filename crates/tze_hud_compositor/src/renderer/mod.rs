@@ -236,7 +236,9 @@ pub struct Compositor {
     /// ([`Compositor::next_animation_deadline`]).
     drawn_owner_hidden: tze_hud_scene::graph::SurfaceClasses,
     /// When true, render all zone boundaries with colored tints even when
-    /// zones have no active content. Controlled by `TZE_HUD_DEBUG_ZONES=1`.
+    /// zones have no active content. Set from `--debug-zones`,
+    /// `TZE_HUD_DEBUG_ZONES=1` or `[runtime] debug_zones`, and live from the
+    /// control panel.
     pub debug_zone_tints: bool,
     /// Current degradation level, set by the runtime before each frame.
     ///
@@ -927,7 +929,7 @@ impl Compositor {
             control_panel_layout_generation: 0,
             closed_notice: None,
             drawn_owner_hidden: Default::default(),
-            debug_zone_tints: std::env::var("TZE_HUD_DEBUG_ZONES").is_ok_and(|v| v == "1"),
+            debug_zone_tints: false,
             degradation_level: DegradationLevel::Nominal,
             degradation_policy: CompositorDegradationPolicy::default(),
             text_rasterizer: None,
@@ -1270,7 +1272,7 @@ impl Compositor {
             control_panel_layout_generation: 0,
             closed_notice: None,
             drawn_owner_hidden: Default::default(),
-            debug_zone_tints: std::env::var("TZE_HUD_DEBUG_ZONES").is_ok_and(|v| v == "1"),
+            debug_zone_tints: false,
             degradation_level: DegradationLevel::Nominal,
             degradation_policy: CompositorDegradationPolicy::default(),
             text_rasterizer: None,

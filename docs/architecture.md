@@ -68,7 +68,12 @@ unpairs agents and edits allow lists, both through one
 [`AgentStore`](../crates/tze_hud_runtime/src/agent_store.rs) writer. The
 panel's [Connect an agent](../crates/tze_hud_runtime/src/shell/control_panel/connect.rs)
 opens [`Pairing`](../crates/tze_hud_runtime/src/pairing.rs) and copies a setup
-prompt through [`clipboard`](../crates/tze_hud_runtime/src/clipboard.rs). MCP and
+prompt through [`clipboard`](../crates/tze_hud_runtime/src/clipboard.rs). Its
+Network, Diagnostics and System cards go through
+[`RuntimeControl`](../crates/tze_hud_runtime/src/shell/control_panel/runtime.rs),
+which saves `[runtime]` with `tze_hud_config::set_runtime`, sets live values
+in [`LiveSettings`](../crates/tze_hud_runtime/src/launch.rs) (read by the
+compositor loop only when they change), and names each value's source. MCP and
 gRPC share [`SharedAgents`](../crates/tze_hud_scene/src/config/agents.rs).
 Network listeners bind loopback and local Tailscale-interface addresses
 ([`net_addrs`](../crates/tze_hud_runtime/src/net_addrs.rs)).
