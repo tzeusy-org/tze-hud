@@ -15,6 +15,326 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use serde::{Deserialize, Serialize};
+
+/// Projection lifecycle visible through bounded status summaries.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectionLifecycleState {
+    Attached,
+    Active,
+    Degraded,
+    HudUnavailable,
+    Detached,
+    CleanupPending,
+    Expired,
+}
+
+/// Output kind for published transcript units.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OutputKind {
+    #[default]
+    Assistant,
+    Tool,
+    Status,
+    Error,
+    Other,
+    /// Text submitted by the on-screen viewer via the HUD composer. Echoed into
+    /// the reply history by `PortalHub::submit_reply` so the conversation is not
+    /// structurally one-sided on the portal surface.
+    Viewer,
+}
+
+/// Daemon-owned input delivery state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InputDeliveryState {
+    Pending,
+    Delivered,
+    Deferred,
+    Handled,
+    Rejected,
+    Expired,
+}
+
+/// Expanded or collapsed projected-portal presentation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectedPortalPresentation {
+    Expanded,
+    Collapsed,
+}
+
+/// Ambient attention state exposed by projected portals.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectedPortalAttention {
+    Ambient,
+}
+
+/// Local-first HUD composer feedback.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PortalInputFeedbackState {
+    Accepted,
+    Rejected,
+}
+
+/// Local composer result; the driver uses the Hub's canonical refusal.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PortalInputFeedback {
+    pub projection_id: String,
+    pub input_id: String,
+    pub feedback_state: PortalInputFeedbackState,
+    pub error_code: Option<PortalError>,
+    pub pending_input_count: usize,
+    pub pending_input_bytes: usize,
+    pub status_summary: String,
+}
+
+/// One rendered turn, carrying the Hub's runtime-assigned arrival time.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TranscriptUnit {
+    pub sequence: u64,
+    pub output_text: String,
+    pub output_kind: OutputKind,
+    pub expects_reply: bool,
+    pub appended_at_wall_us: u64,
+}
+
+/// The renderer's view of one Hub portal. It carries presentation data only;
+/// publishing, ownership, input delivery and cadence remain in PortalHub.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PortalView {
+    pub portal_id: String,
+    pub presentation: ProjectedPortalPresentation,
+    pub redacted: bool,
+    pub connection_degraded: bool,
+    pub has_ever_connected: bool,
+    pub interaction_enabled: bool,
+    pub attention: ProjectedPortalAttention,
+    pub display_name: Option<String>,
+    pub lifecycle_state: Option<ProjectionLifecycleState>,
+    pub status_text: Option<String>,
+    pub visible_transcript: Vec<TranscriptUnit>,
+    pub input_history: Vec<TranscriptUnit>,
+    pub unread_output_count: Option<usize>,
+    pub visible_unread_output_count: Option<usize>,
+    pub pending_input_count: Option<usize>,
+    pub latest_viewer_delivery_state: Option<InputDeliveryState>,
+    pub last_input_feedback: Option<PortalInputFeedback>,
+    pub geometry_batch: Option<AdapterGeometryBatch>,
+    pub resized_bounds: Option<AdapterPortalRect>,
+}
+
+// ─── Composer draft notification types (hud-5jbra.4) ─────────────────────────
+
+/// Adapter-facing coalescible draft-state notification (state-stream class).
+///
+/// Delivered to the owning adapter to replace per-keystroke composer-text
+/// republish. The adapter MAY receive a single latest-snapshot rather than
+/// per-keystroke events; coalescing is the caller's responsibility.
+///
+/// Spec: §4.3 — "state-stream traffic, coalescible to the latest draft snapshot."
+/// Spec: §4.6 — "update the cooperative projection adapter … to consume
+/// draft-state notifications instead of per-keystroke republish."
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdapterDraftNotification {
+    /// Current draft text (never exceeds the configured draft byte cap).
+    pub text: String,
+    /// Cursor byte offset into `text`.
+    pub cursor: usize,
+    /// Selection anchor byte offset. Equal to `cursor` when no selection.
+    pub selection_anchor: usize,
+    /// True when the draft is at or over its byte cap.
+    pub at_capacity: bool,
+    /// Monotonic sequence from the runtime draft buffer.
+    pub sequence: u64,
+}
+
+/// Adapter-facing transactional draft submission.
+///
+/// Delivered exactly once when the viewer submits the draft. The submitted
+/// text equals the local buffer at the moment of submission; it is the
+/// authoritative content to forward to the owning adapter's semantic inbox.
+///
+/// Spec: §4.3 — "submission and cancel SHALL remain transactional."
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdapterDraftSubmission {
+    /// Submitted text (equals local buffer at submit time).
+    pub text: String,
+    /// Sequence at submit time.
+    pub sequence: u64,
+}
+
+/// Adapter-facing transactional draft cancel.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdapterDraftCancel {
+    pub sequence: u64,
+}
+
+/// Batched adapter notification for state-stream coalescing.
+///
+/// The adapter consumes `latest` (latest-wins) for real-time display of draft
+/// state, and `submission` / `cancel` for transactional handling. Older
+/// state-stream entries within the same batch window are discarded.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct AdapterDraftBatch {
+    /// Latest draft snapshot (coalescible — newer replaces older).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest: Option<AdapterDraftNotification>,
+    /// Pending transactional submission (first wins; not coalescible).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub submission: Option<AdapterDraftSubmission>,
+    /// Pending transactional cancel (first wins; not coalescible).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cancel: Option<AdapterDraftCancel>,
+}
+
+impl AdapterDraftBatch {
+    /// Create an empty batch.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Coalesce a state-stream notification (latest-wins).
+    pub fn coalesce_state(&mut self, notification: AdapterDraftNotification) {
+        match &self.latest {
+            Some(existing) if notification.sequence > existing.sequence => {
+                self.latest = Some(notification);
+            }
+            None => {
+                self.latest = Some(notification);
+            }
+            _ => {}
+        }
+    }
+
+    /// Record a transactional submission (first wins; clears any pending cancel
+    /// to enforce submit-XOR-cancel semantics).
+    pub fn record_submission(&mut self, sub: AdapterDraftSubmission) {
+        if self.submission.is_none() {
+            self.cancel = None;
+            self.submission = Some(sub);
+        }
+    }
+
+    /// Record a transactional cancel (first wins; clears any pending submission
+    /// to enforce submit-XOR-cancel semantics).
+    pub fn record_cancel(&mut self, cancel: AdapterDraftCancel) {
+        if self.cancel.is_none() {
+            self.submission = None;
+            self.cancel = Some(cancel);
+        }
+    }
+
+    /// True if the batch holds nothing to deliver (no latest snapshot, no
+    /// submission, no cancel).
+    ///
+    /// Twin: `tze_hud_input::composer_draft::DraftNotificationBatch::is_empty`
+    /// is the cross-crate source type this is a clone of. Keep the two in sync.
+    pub fn is_empty(&self) -> bool {
+        self.latest.is_none() && self.submission.is_none() && self.cancel.is_none()
+    }
+}
+
+// ─── Portal geometry update types (hud-5jbra.9) ──────────────────────────────
+
+/// Adapter-facing portal bounding rectangle in integer display pixels.
+///
+/// Coordinates are rounded from display-space f32 values (nearest integer) so
+/// that this type derives `Eq` and plays well with `PortalView`'s
+/// existing `Eq` bound. The rendering layer converts back to f32 before issuing
+/// draw commands. Sub-pixel precision is intentionally dropped at the adapter
+/// boundary; only the compositor's internal f32 geometry is sub-pixel exact.
+///
+/// ## Coalescible (state-stream)
+///
+/// `AdapterGeometrySnapshot` is a state-stream payload. The transport MUST
+/// deliver only the latest snapshot per delivery window (latest-wins), not
+/// every intermediate geometry during a gesture.
+///
+/// Spec §6b.4: "geometry changes [are delivered] to the owning adapter as
+/// coalescible state-stream snapshots."
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdapterPortalRect {
+    /// Left edge of the portal in display pixels (rounded from f32).
+    pub x_px: i32,
+    /// Top edge of the portal in display pixels (rounded from f32).
+    pub y_px: i32,
+    /// Width of the portal in display pixels (rounded from f32, ≥ 0).
+    pub width_px: i32,
+    /// Height of the portal in display pixels (rounded from f32, ≥ 0).
+    pub height_px: i32,
+}
+
+impl AdapterPortalRect {
+    /// Construct from float display-space coordinates.
+    ///
+    /// Width and height are clamped to 0 before rounding to avoid negative
+    /// values from rounding artefacts at the minimum-clamped boundary.
+    pub fn from_f32(x: f32, y: f32, width: f32, height: f32) -> Self {
+        Self {
+            x_px: x.round() as i32,
+            y_px: y.round() as i32,
+            width_px: width.max(0.0).round() as i32,
+            height_px: height.max(0.0).round() as i32,
+        }
+    }
+}
+
+/// Coalescible adapter-facing geometry snapshot (§6b.4).
+///
+/// Delivered to the owning adapter when portal geometry changes due to a
+/// pointer gesture or hotkey resize. The adapter MUST NOT apply `publish_geometry`
+/// while `gesture_active == true` — gesture snapshots are authoritative.
+///
+/// Message class: **state-stream**. Older snapshots for the same portal MUST be
+/// discarded when a newer one arrives within the same adapter delivery window.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AdapterGeometrySnapshot {
+    /// Final clamped portal bounds at this gesture step.
+    pub rect: AdapterPortalRect,
+    /// True while a pointer gesture is active (gesture is authoritative).
+    /// False on hotkey resize or gesture end (adapter may resume publishing).
+    pub gesture_active: bool,
+    /// Monotonic sequence counter — allows the adapter to detect skipped
+    /// snapshots when the transport does not deliver every event.
+    pub sequence: u64,
+}
+
+/// Batched adapter geometry notification for state-stream coalescing (§6b.4).
+///
+/// Replaces the `latest` field on each new snapshot (latest-wins). The adapter
+/// always reads `latest` if present to update portal geometry.
+#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub struct AdapterGeometryBatch {
+    /// Latest geometry snapshot (coalescible — newer replaces older).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest: Option<AdapterGeometrySnapshot>,
+}
+
+impl AdapterGeometryBatch {
+    /// Coalesce a geometry snapshot (latest-wins by sequence number).
+    pub fn coalesce(&mut self, snapshot: AdapterGeometrySnapshot) {
+        match &self.latest {
+            Some(existing) if snapshot.sequence > existing.sequence => {
+                self.latest = Some(snapshot);
+            }
+            None => {
+                self.latest = Some(snapshot);
+            }
+            _ => {}
+        }
+    }
+
+    /// True if there is a snapshot to deliver.
+    pub fn is_empty(&self) -> bool {
+        self.latest.is_none()
+    }
+}
+
 /// A portal's identity: the owning agent and the id after `portal:`.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct PortalKey {
@@ -930,6 +1250,22 @@ mod tests {
         assert_eq!(p.transcript_bytes, "50%".len() + "log line".len());
         assert_eq!(p.transcript[0].at_us, 3);
         assert_eq!(hub.take_due(3)[0].unread, 2, "a replacement is not new");
+        let first = hub.get(&k).unwrap().transcript[0].seq;
+        hub.publish(&k, keyed("100%"), 4).unwrap();
+        let p = hub.get(&k).unwrap();
+        assert_eq!(
+            p.transcript[0].seq, first,
+            "keyed replacement retains logical order"
+        );
+        assert_eq!(
+            p.transcript[0].at_us, 4,
+            "arrival belongs to the newest accepted replacement"
+        );
+        assert_eq!(
+            p.unread, 0,
+            "replacement after drain does not invent a new output"
+        );
+        assert_eq!(texts(&hub, &k), ["100%", "log line"]);
     }
 
     #[test]
@@ -951,6 +1287,16 @@ mod tests {
         let visible: Vec<_> = p.visible_transcript(16 * 1024).collect();
         assert_eq!(visible.len(), 1, "only the newest 10 KiB unit fits 16 KiB");
         assert!(visible[0].text.starts_with("29"));
+        let utf8 = "界".repeat(5_000);
+        hub.publish(&k, text(&utf8), 31).unwrap();
+        let p = hub.get(&k).unwrap();
+        let visible: Vec<_> = p.visible_transcript(16 * 1024).collect();
+        assert_eq!(visible.len(), 1);
+        assert_eq!(
+            visible[0].text, utf8,
+            "whole UTF-8 unit survives newest-fit retention"
+        );
+        assert!(visible.iter().map(|u| u.text.len()).sum::<usize>() <= 16 * 1024);
     }
 
     #[test]
@@ -971,6 +1317,19 @@ mod tests {
         assert_eq!(after.items.len(), 1);
         assert_eq!(after.items[0].text, "and more");
         assert_eq!(hub.get(&k).unwrap().replies.len(), 2, "replies are echoed");
+        let p = hub.get(&k).unwrap();
+        assert_eq!(p.unread, 1, "viewer echo never increments output unread");
+        assert!(
+            p.inputs[0].delivered,
+            "poll records delivery without removing unacked input"
+        );
+        assert_eq!(p.replies[0].text, "yes");
+        assert_eq!(p.replies[1].text, "and more");
+        assert_eq!(
+            texts(&hub, &k),
+            ["ask"],
+            "echo remains outside agent output"
+        );
     }
 
     #[test]
@@ -1038,6 +1397,36 @@ mod tests {
         assert!(
             hub.get(&k).unwrap().dirty,
             "expiry repaints the pending count"
+        );
+        hub.publish(&k, text("fresh ask"), 700_000_000).unwrap();
+        let accepted = hub
+            .submit_reply(&k, "fresh answer".into(), 700_000_001)
+            .unwrap();
+        let before = hub.get(&k).unwrap().replies.len();
+        let unread = hub.get(&k).unwrap().unread;
+        assert_eq!(
+            hub.submit_reply(&k, "界".repeat(4 * 1024), 700_000_002),
+            Err(PortalError::TooLarge { limit: 4 * 1024 })
+        );
+        assert_eq!(
+            hub.get(&k).unwrap().replies.len(),
+            before,
+            "rejected reply has no echo"
+        );
+        assert_eq!(
+            hub.get(&k).unwrap().inputs.len(),
+            1,
+            "rejected reply has no queue entry"
+        );
+        assert_eq!(hub.get(&k).unwrap().unread, unread);
+        let expires = hub.get(&k).unwrap().inputs[0].expires_us;
+        assert_eq!(
+            hub.poll_input("a", &[], None, expires - 1).items[0].id,
+            accepted
+        );
+        assert!(
+            hub.poll_input("a", &[], None, expires).items.is_empty(),
+            "expiry is exact at the boundary"
         );
     }
 
@@ -1200,6 +1589,17 @@ mod tests {
         );
         assert_eq!(hub.take_due(100_000), [Due { key: k, unread: 2 }]);
         assert_eq!(hub.take_due(300_000), [], "nothing changed");
+        let other = key("b", "p");
+        hub.publish(&other, text("other agent"), 300_001).unwrap();
+        assert_eq!(
+            hub.take_due(300_001),
+            [Due {
+                key: other.clone(),
+                unread: 1
+            }]
+        );
+        assert_eq!(texts(&hub, &other), ["other agent"]);
+        assert!(hub.take_due(300_002).is_empty());
 
         // An admitted local reply must render inside the ordinary 100 ms slot.
         // Timestamps use the Hub's microsecond clock, not elapsed wall time.
@@ -1238,5 +1638,177 @@ mod tests {
         );
         assert_eq!(hub.take_due(100_001), [Due { key: k, unread: 1 }]);
         assert_eq!(hub.take_due(300_001), [], "no idle feedback frame");
+    }
+
+    // Relocated from the existing cooperative adapter flow. Hub publishing is
+    // the real implicit attach boundary; there is no external owner token.
+    #[test]
+    fn portal_attach_publish_reply_poll_detach() {
+        let mut hub = PortalHub::default();
+        let k = key("projection-daemon", "projection-integration");
+        let peer = key("peer", "projection-integration");
+        hub.publish(&k, text("assistant: ready over cooperative projection"), 20)
+            .unwrap();
+        hub.publish(&peer, text("unrelated peer output"), 20)
+            .unwrap();
+        assert_eq!(
+            hub.list("projection-daemon").len(),
+            1,
+            "implicit attach is agent scoped"
+        );
+        let id = hub
+            .submit_reply(&k, "please summarize the current diff".into(), 30)
+            .unwrap();
+        let p = hub.get(&k).unwrap();
+        assert_eq!(p.inputs.len(), 1);
+        assert_eq!(
+            p.unread, 1,
+            "viewer input does not become unread agent output"
+        );
+        assert!(
+            p.transcript
+                .iter()
+                .any(|unit| unit.text.contains("ready over cooperative projection"))
+        );
+        assert_eq!(p.replies[0].text, "please summarize the current diff");
+        let poll = hub.poll_input("projection-daemon", &[], None, 40);
+        assert_eq!(poll.items.len(), 1);
+        assert_eq!(poll.items[0].id, id);
+        assert_eq!(poll.items[0].text, "please summarize the current diff");
+        assert!(hub.poll_input("peer", &[], None, 40).items.is_empty());
+        assert_eq!(
+            hub.poll_input("projection-daemon", &[], None, 41).items[0].id,
+            id,
+            "unacked delivery is stable"
+        );
+        assert!(
+            hub.poll_input("projection-daemon", &[id], None, 42)
+                .items
+                .is_empty()
+        );
+        hub.clear(&k).unwrap();
+        assert!(hub.list("projection-daemon").is_empty());
+        assert!(hub.get(&k).is_none());
+        assert_eq!(
+            texts(&hub, &peer),
+            ["unrelated peer output"],
+            "detach cannot affect another agent"
+        );
+    }
+}
+
+#[cfg(test)]
+use proptest::prelude::*;
+
+#[cfg(test)]
+fn make_snapshot(sequence: u64, gesture_active: bool) -> AdapterGeometrySnapshot {
+    AdapterGeometrySnapshot {
+        rect: AdapterPortalRect {
+            x_px: 10,
+            y_px: 20,
+            width_px: 400,
+            height_px: 300,
+        },
+        gesture_active,
+        sequence,
+    }
+}
+
+#[cfg(test)]
+#[test]
+fn coalesce_first_snapshot_is_stored() {
+    let mut batch = AdapterGeometryBatch::default();
+    assert!(batch.is_empty(), "batch must start empty");
+
+    batch.coalesce(make_snapshot(1, true));
+
+    assert!(!batch.is_empty(), "batch must not be empty after coalesce");
+    let latest = batch.latest.expect("latest must be Some after coalesce");
+    assert_eq!(latest.sequence, 1, "latest sequence must be 1");
+    assert!(latest.gesture_active, "gesture_active must match snapshot");
+}
+
+#[cfg(test)]
+#[test]
+fn coalesce_newer_snapshot_replaces_older() {
+    let mut batch = AdapterGeometryBatch::default();
+    batch.coalesce(make_snapshot(1, true));
+    batch.coalesce(make_snapshot(2, false)); // newer
+
+    let latest = batch.latest.expect("latest must be Some");
+    assert_eq!(
+        latest.sequence, 2,
+        "newer snapshot (seq=2) must replace older (seq=1)"
+    );
+    assert!(
+        !latest.gesture_active,
+        "gesture_active from newer snapshot must win"
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn coalesce_older_snapshot_does_not_replace_newer() {
+    let mut batch = AdapterGeometryBatch::default();
+    batch.coalesce(make_snapshot(5, false));
+    batch.coalesce(make_snapshot(3, true)); // older — must be dropped
+
+    let latest = batch.latest.expect("latest must be Some");
+    assert_eq!(
+        latest.sequence, 5,
+        "older snapshot (seq=3) must NOT displace newer (seq=5)"
+    );
+    assert!(
+        !latest.gesture_active,
+        "gesture_active from older snapshot must be ignored"
+    );
+}
+
+#[cfg(test)]
+#[test]
+fn coalesce_equal_sequence_does_not_replace() {
+    let mut batch = AdapterGeometryBatch::default();
+    batch.coalesce(make_snapshot(7, false));
+
+    // Same sequence with different geometry — first write wins (not strictly
+    // required by spec, but the coalescer MUST NOT drop the existing entry
+    // for an equal sequence in a way that loses a confirmed snapshot).
+    let mut snap_same_seq = make_snapshot(7, true); // gesture_active differs
+    snap_same_seq.rect = AdapterPortalRect {
+        x_px: 99,
+        y_px: 99,
+        width_px: 100,
+        height_px: 100,
+    };
+    batch.coalesce(snap_same_seq);
+
+    let latest = batch.latest.expect("latest must be Some");
+    assert_eq!(
+        latest.sequence, 7,
+        "sequence must remain 7 after equal-sequence coalesce attempt"
+    );
+    assert!(
+        !latest.gesture_active,
+        "first write (gesture_active=false) must be retained for equal sequence"
+    );
+}
+
+#[cfg(test)]
+proptest! {
+    /// For any sequence of (sequence, gesture_active) pairs,
+    /// `latest.sequence` must equal the maximum sequence seen.
+    #[test]
+    fn coalesce_latest_wins_monotone(pairs in proptest::collection::vec((0u64..100u64, proptest::bool::ANY), 1..20usize)) {
+        let mut batch = AdapterGeometryBatch::default();
+        let mut max_seq = 0u64;
+        for (seq, gesture_active) in &pairs {
+            if *seq > max_seq { max_seq = *seq; }
+            batch.coalesce(make_snapshot(*seq, *gesture_active));
+        }
+        let latest = batch.latest.expect("batch must be non-empty after coalescing snapshots");
+        prop_assert_eq!(
+            latest.sequence, max_seq,
+            "latest sequence must equal maximum sequence seen"
+        );
     }
 }

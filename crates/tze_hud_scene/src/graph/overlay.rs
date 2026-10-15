@@ -113,7 +113,7 @@ pub struct RuntimeOverlayState {
     pub tile_follow_tail_at_tail: HashMap<SceneId, bool>,
     /// Runtime-owned ambient unread-output count per tile (hud-g1ena.3).
     ///
-    /// The aggregate `ProjectedPortalState::unread_output_count` a text-stream
+    /// The aggregate `PortalView::unread_output_count` a text-stream
     /// portal already tracks, plumbed onto the transcript tile by the portal
     /// projection driver each drain. Read by the compositor to render the
     /// ambient unread badge the jump-to-latest pill MAY carry
@@ -915,7 +915,7 @@ impl SceneGraph {
     // ─── Ambient unread count (hud-g1ena.3) ───────────────────────────────
 
     /// Record a tile's ambient unread-output count (the aggregate
-    /// `ProjectedPortalState::unread_output_count`).
+    /// `PortalView::unread_output_count`).
     ///
     /// Called by the portal projection driver each drain, and by the wire apply
     /// paths for a bridged portal (hud-hwk2m). `count = 0` clears the badge; the

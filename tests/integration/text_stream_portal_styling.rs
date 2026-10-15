@@ -13,12 +13,9 @@
 //!    `visual_tokens()` accessor returns the token-derived values; the node built
 //!    by `portal_node` is verified to use those values.
 //!
-//! 4. **Redaction-safe transitions** — a restricted viewer (Public clearance)
-//!    observes `redacted = true` when the portal carries Private content,
-//!    ensuring the transition frames never expose transcript content.
-//!    The token-derived `transition_in_ms` / `transition_out_ms` govern duration
-//!    but the redaction property is structural (derived from viewer clearance vs.
-//!    content classification) and must hold regardless of transition timing.
+//! 4. **Redacted presentation rendering** — sanitized renderer views emit no
+//!    transcript or display name in either presentation, across transition tokens.
+//!    These tests exercise rendering, not the retired viewer policy authority.
 
 use tze_hud_config::{
     PORTAL_TOKEN_COLLAPSED_BACKGROUND, PORTAL_TOKEN_COLLAPSED_FONT_SIZE,
@@ -30,137 +27,77 @@ use tze_hud_config::{
     PORTAL_TOKEN_TRANSITION_OUT_MS, resolve_portal_tokens,
 };
 use tze_hud_projection::{
-    AttachRequest, ContentClassification, HudConnectionMetadata, OperationEnvelope, OutputKind,
-    ProjectedPortalPolicy, ProjectedPortalPresentation, ProjectionAuthority,
-    ProjectionLifecycleState, ProjectionOperation, ProviderKind, PublishOutputRequest,
-    PublishStatusRequest,
+    OutputKind, PortalHub, PortalKey, PortalStatus, PortalView, ProjectedPortalAttention,
+    ProjectedPortalPresentation, ProjectionLifecycleState, Publish, TranscriptUnit,
     resident_grpc::{PortalVisualTokens, ResidentGrpcPortalAdapter, ResidentGrpcPortalConfig},
 };
 use tze_hud_runtime::portal_tokens::portal_visual_tokens_from_part_tokens;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-fn bytes_hex(bytes: &[u8]) -> String {
-    let mut out = String::with_capacity(bytes.len() * 2);
-    for byte in bytes {
-        use std::fmt::Write as _;
-        write!(&mut out, "{byte:02x}").expect("writing to String cannot fail");
-    }
-    out
-}
-
-/// Build a minimal `ProjectedPortalState` for an attached + published projection.
-fn build_expanded_state(
-    authority: &mut ProjectionAuthority,
-    projection_id: &str,
-    policy: &ProjectedPortalPolicy,
-) -> tze_hud_projection::ProjectedPortalState {
-    let session_id = uuid::Uuid::now_v7().as_bytes().to_vec();
-    let lease_id = uuid::Uuid::now_v7().as_bytes().to_vec();
-
-    let attach = authority.handle_attach(
-        AttachRequest {
-            envelope: OperationEnvelope {
-                operation: ProjectionOperation::Attach,
-                projection_id: projection_id.to_string(),
-                request_id: format!("attach-{projection_id}"),
-                client_timestamp_wall_us: 1,
-            },
-            provider_kind: ProviderKind::Codex,
-            display_name: format!("{projection_id} (styling test)"),
-            workspace_hint: Some("tze-hud".to_string()),
-            repository_hint: None,
-            icon_profile_hint: None,
-            content_classification: ContentClassification::Private,
-            hud_target: Some("resident-grpc".to_string()),
-            idempotency_key: Some(format!("styling-once-{projection_id}")),
-        },
-        "styling-daemon",
-        10,
-    );
-    assert!(
-        attach.accepted,
-        "attach must succeed for projection {projection_id}"
-    );
-    let owner_token = attach.owner_token.expect("attach returns owner token");
-
-    authority
-        .record_hud_connection(
-            projection_id,
-            HudConnectionMetadata {
-                connection_id: format!("styling-conn-{projection_id}"),
-                authenticated_session_id: bytes_hex(&session_id),
-                granted_capabilities: vec![
-                    "create_tiles".to_string(),
-                    "modify_own_tiles".to_string(),
-                ],
-                connected_at_wall_us: 11,
-                last_reconnect_wall_us: 11,
-            },
-        )
-        .expect("record_hud_connection must succeed");
-
-    authority
-        .record_advisory_lease(
-            projection_id,
-            tze_hud_projection::AdvisoryLeaseIdentity {
-                lease_id: bytes_hex(&lease_id),
-                capabilities: vec!["create_tiles".to_string(), "modify_own_tiles".to_string()],
-                acquired_at_wall_us: 12,
-                expires_at_wall_us: 120_000_012,
-            },
-            13,
-        )
-        .expect("record_advisory_lease must succeed");
-
-    authority
-        .authorize_portal_republish(
-            projection_id,
-            &bytes_hex(&lease_id),
-            &["create_tiles".to_string(), "modify_own_tiles".to_string()],
-            14,
-        )
-        .expect("authorize_portal_republish must succeed");
-
-    let published = authority.handle_publish_output(
-        PublishOutputRequest {
-            envelope: OperationEnvelope {
-                operation: ProjectionOperation::PublishOutput,
-                projection_id: projection_id.to_string(),
-                request_id: format!("output-{projection_id}"),
-                client_timestamp_wall_us: 20,
-            },
-            owner_token: owner_token.clone(),
-            output_text: format!("assistant output for {projection_id}"),
-            output_kind: OutputKind::Assistant,
-            content_classification: ContentClassification::Private,
-            logical_unit_id: Some(format!("unit-{projection_id}")),
-            coalesce_key: None,
-            expects_reply: false,
+/// Build renderer presentation from a real implicit attach/publish in the Hub.
+fn build_expanded_state(hub: &mut PortalHub, portal_id: &str) -> PortalView {
+    let key = PortalKey::new("styling-agent", portal_id);
+    hub.publish(
+        &key,
+        Publish {
+            display_name: Some(format!("{portal_id} (styling test)")),
+            text: Some(format!("assistant output for {portal_id}")),
+            status: Some(PortalStatus::Active),
+            ..Publish::default()
         },
         21,
-    );
-    assert!(published.accepted, "publish output must succeed");
+    )
+    .expect("publish output must succeed");
+    let portal = hub.get(&key).expect("published portal exists");
+    PortalView {
+        portal_id: portal_id.to_string(),
+        presentation: ProjectedPortalPresentation::Expanded,
+        redacted: false,
+        connection_degraded: false,
+        has_ever_connected: true,
+        interaction_enabled: true,
+        attention: ProjectedPortalAttention::Ambient,
+        display_name: Some(portal.display_name.clone()),
+        lifecycle_state: Some(ProjectionLifecycleState::Active),
+        status_text: Some("styling test active".to_string()),
+        visible_transcript: portal
+            .visible_transcript(hub.limits().visible_bytes)
+            .map(|u| TranscriptUnit {
+                sequence: u.seq,
+                output_text: u.text.clone(),
+                output_kind: OutputKind::Assistant,
+                expects_reply: u.expects_reply,
+                appended_at_wall_us: u.at_us,
+            })
+            .collect(),
+        input_history: vec![],
+        unread_output_count: Some(portal.unread),
+        visible_unread_output_count: Some(portal.unread),
+        pending_input_count: Some(portal.inputs.len()),
+        latest_viewer_delivery_state: None,
+        last_input_feedback: None,
+        geometry_batch: None,
+        resized_bounds: None,
+    }
+}
 
-    let active = authority.handle_publish_status(
-        PublishStatusRequest {
-            envelope: OperationEnvelope {
-                operation: ProjectionOperation::PublishStatus,
-                projection_id: projection_id.to_string(),
-                request_id: format!("status-{projection_id}"),
-                client_timestamp_wall_us: 22,
-            },
-            owner_token,
-            lifecycle_state: ProjectionLifecycleState::Active,
-            status_text: Some("styling test active".to_string()),
-        },
-        23,
-    );
-    assert!(active.accepted, "publish status must succeed");
-
-    authority
-        .projected_portal_state(projection_id, policy)
-        .expect("expanded state must materialize after attach + publish")
+/// A renderer-level restricted presentation control, independent of transition
+/// tokens. This does not recreate the retired external viewer policy authority.
+fn redacted_view(mut view: PortalView) -> PortalView {
+    view.redacted = true;
+    view.interaction_enabled = false;
+    view.display_name = None;
+    view.lifecycle_state = None;
+    view.status_text = None;
+    view.visible_transcript.clear();
+    view.input_history.clear();
+    view.unread_output_count = None;
+    view.visible_unread_output_count = None;
+    view.pending_input_count = None;
+    view.latest_viewer_delivery_state = None;
+    view.last_input_feedback = None;
+    view
 }
 
 // ── §6.1: Adapter publish path contains no literal visual values ──────────────
@@ -252,12 +189,10 @@ fn portal_node_proto_uses_injected_visual_tokens() {
     // Use the production canonical conversion — no hand-rolled PortalVisualTokens
     let visual_tokens = portal_visual_tokens_from_part_tokens(&part_tokens);
 
-    let mut authority = tze_hud_projection::ProjectionAuthority::default();
-    let permit_all = tze_hud_projection::ProjectedPortalPolicy::permit_all();
+    let mut authority = PortalHub::default();
 
     // Build an expanded projection state
-    let expanded_state =
-        build_expanded_state(&mut authority, "proj-nodeproto-expanded", &permit_all);
+    let expanded_state = build_expanded_state(&mut authority, "proj-nodeproto-expanded");
 
     // Build adapter, record a fake tile ID so render_portal_message succeeds
     let fake_tile_id: Vec<u8> = vec![0xAB; 16];
@@ -325,12 +260,8 @@ fn portal_node_proto_uses_injected_visual_tokens() {
     // ── Collapsed state: background must be the injected yellow token ──
 
     // Collapse the portal and re-render
-    authority
-        .collapse_projected_portal("proj-nodeproto-expanded")
-        .expect("collapse must succeed");
-    let collapsed_state = authority
-        .projected_portal_state("proj-nodeproto-expanded", &permit_all)
-        .expect("collapsed state must materialize");
+    let mut collapsed_state = expanded_state.clone();
+    collapsed_state.presentation = ProjectedPortalPresentation::Collapsed;
     assert_eq!(
         collapsed_state.presentation,
         ProjectedPortalPresentation::Collapsed
@@ -599,173 +530,83 @@ fn token_change_propagates_to_adapter_on_republish() {
 
 // ── §6.4: Redaction-safe transitions ─────────────────────────────────────────
 
-/// Verifies that a restricted viewer (Public clearance) observes `redacted = true`
-/// when the portal carries Private content in either presentation state.
-///
-/// This is the structural invariant for §6.3: transitions are safe because the
-/// `redacted` field is computed from viewer clearance vs. content classification
-/// — NOT from a per-frame animation position. Whether the portal is Expanded
-/// or Collapsed, a restricted viewer sees `redacted = true`, so any intermediate
-/// transition frame is covered by redaction.
-///
-/// Token-derived `transition_in_ms` / `transition_out_ms` govern animation
-/// duration but cannot override this structural property.
+/// A sanitized redacted view must publish no transcript or display name in either
+/// presentation. The owner render is the positive control for real content.
 #[test]
-fn restricted_viewer_observes_redacted_in_both_presentation_states() {
-    // Policy for a restricted viewer: Public clearance, cannot see Private content
-    let restricted_policy = ProjectedPortalPolicy {
-        viewer_clearance: ContentClassification::Public,
-        reveal_identity: false,
-        reveal_lifecycle: false,
-        reveal_transcript: false,
-        reveal_unread: false,
-        reveal_pending_input: false,
-        allow_input: false,
-        safe_mode_active: false,
-        frozen: false,
-        dismissed: false,
-    };
+fn redacted_view_renders_without_content_in_both_presentation_states() {
+    let mut hub = PortalHub::default();
+    let expanded = build_expanded_state(&mut hub, "redaction-sentinel");
+    let mut adapter = ResidentGrpcPortalAdapter::new(ResidentGrpcPortalConfig::new(vec![0u8; 16]));
+    adapter.record_created_tile(vec![0xAB; 16]);
+    let owner =
+        extract_text_markdown_content(adapter.render_portal_message(&expanded, 1, 0).unwrap());
+    assert!(owner.contains("assistant output for redaction-sentinel"));
 
-    let permit_all = ProjectedPortalPolicy::permit_all();
-
-    // --- Expanded state ---
-    let mut authority_expanded = ProjectionAuthority::default();
-    let expanded_state =
-        build_expanded_state(&mut authority_expanded, "proj-redact-expanded", &permit_all);
-
-    // Owner sees it expanded (not redacted)
-    assert_eq!(
-        expanded_state.presentation,
-        ProjectedPortalPresentation::Expanded
-    );
-    assert!(
-        !expanded_state.redacted,
-        "owner must not see redacted expanded state"
-    );
-
-    // Restricted viewer sees redacted (content_classification = Private > Public)
-    let restricted_expanded = authority_expanded
-        .projected_portal_state("proj-redact-expanded", &restricted_policy)
-        .expect("restricted policy must still materialize state");
-
-    assert!(
-        restricted_expanded.redacted,
-        "restricted viewer must see redacted=true in Expanded state with Private content"
-    );
-    // Transcript must be empty for restricted viewer
-    assert!(
-        restricted_expanded.visible_transcript.is_empty(),
-        "restricted viewer must not receive transcript content"
-    );
-
-    // --- Collapsed state ---
-    let mut authority_collapsed = ProjectionAuthority::default();
-    let expanded_before_collapse = build_expanded_state(
-        &mut authority_collapsed,
-        "proj-redact-collapsed",
-        &permit_all,
-    );
-    assert_eq!(
-        expanded_before_collapse.presentation,
-        ProjectedPortalPresentation::Expanded
-    );
-
-    authority_collapsed
-        .collapse_projected_portal("proj-redact-collapsed")
-        .expect("collapse must succeed");
-
-    let collapsed_owner = authority_collapsed
-        .projected_portal_state("proj-redact-collapsed", &permit_all)
-        .expect("collapsed state must materialize");
-    assert_eq!(
-        collapsed_owner.presentation,
-        ProjectedPortalPresentation::Collapsed
-    );
-
-    let restricted_collapsed = authority_collapsed
-        .projected_portal_state("proj-redact-collapsed", &restricted_policy)
-        .expect("restricted policy must still materialize collapsed state");
-
-    assert!(
-        restricted_collapsed.redacted,
-        "restricted viewer must see redacted=true in Collapsed state with Private content"
-    );
+    for (index, presentation) in [
+        ProjectedPortalPresentation::Expanded,
+        ProjectedPortalPresentation::Collapsed,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut view = redacted_view(expanded.clone());
+        view.presentation = presentation;
+        let rendered = extract_text_markdown_content(
+            adapter
+                .render_portal_message(&view, index as u64 + 2, 0)
+                .unwrap(),
+        );
+        // The stable portal ID remains a collapsed-card address; the
+        // separately supplied display name and private content do not.
+        assert!(!rendered.contains("(styling test)"), "{rendered}");
+        assert!(!rendered.contains("assistant output"), "{rendered}");
+        assert!(!rendered.contains("styling test active"), "{rendered}");
+    }
 }
 
-/// Verifies that the structural redaction property holds regardless of the
-/// token-derived transition duration values.
-///
-/// Even if `transition_in_ms` = 0 (instant) or very large (1000ms), the
-/// redaction is not time-based — it is purely policy-based. This test confirms
-/// that swapping transition tokens does not affect the redaction invariant.
+/// Transition token changes reach the adapter before rendering the same
+/// sanitized view; neither duration may reintroduce transcript or display name.
 #[test]
-fn transition_duration_tokens_do_not_affect_redaction_safety() {
+fn transition_duration_tokens_do_not_affect_redacted_rendering() {
     use std::collections::HashMap;
-
-    let restricted_policy = ProjectedPortalPolicy {
-        viewer_clearance: ContentClassification::Public,
-        ..Default::default()
-    };
-    let permit_all = ProjectedPortalPolicy::permit_all();
-
-    // Build adapter with extreme transition durations
-    let mut instant_overrides: HashMap<String, String> = HashMap::new();
-    instant_overrides.insert(PORTAL_TOKEN_TRANSITION_IN_MS.to_string(), "1".to_string());
-    instant_overrides.insert(PORTAL_TOKEN_TRANSITION_OUT_MS.to_string(), "1".to_string());
-
-    let empty: HashMap<String, String> = HashMap::new();
-    let instant_map = tze_hud_config::tokens::resolve_tokens(&empty, &instant_overrides);
-    let instant_tokens = resolve_portal_tokens(&instant_map);
-    assert_eq!(instant_tokens.transition_in_ms, 1, "instant in must be 1ms");
-    assert_eq!(
-        instant_tokens.transition_out_ms, 1,
-        "instant out must be 1ms"
-    );
-
-    // Build adapter with slow transition durations
-    let mut slow_overrides: HashMap<String, String> = HashMap::new();
-    slow_overrides.insert(
-        PORTAL_TOKEN_TRANSITION_IN_MS.to_string(),
-        "1000".to_string(),
-    );
-    slow_overrides.insert(
-        PORTAL_TOKEN_TRANSITION_OUT_MS.to_string(),
-        "1000".to_string(),
-    );
-
-    let slow_map = tze_hud_config::tokens::resolve_tokens(&empty, &slow_overrides);
-    let slow_tokens = resolve_portal_tokens(&slow_map);
-    assert_eq!(slow_tokens.transition_in_ms, 1000, "slow in must be 1000ms");
-
-    // In both cases, a restricted viewer sees redacted = true
-    // We verify through the projection authority, which owns the redaction logic
-
-    let mut authority_a = ProjectionAuthority::default();
-    let _ = build_expanded_state(&mut authority_a, "proj-instant", &permit_all);
-    let restricted_a = authority_a
-        .projected_portal_state("proj-instant", &restricted_policy)
-        .expect("instant-transition projection must materialize");
-
-    let mut authority_b = ProjectionAuthority::default();
-    let _ = build_expanded_state(&mut authority_b, "proj-slow", &permit_all);
-    let restricted_b = authority_b
-        .projected_portal_state("proj-slow", &restricted_policy)
-        .expect("slow-transition projection must materialize");
-
-    assert!(
-        restricted_a.redacted,
-        "instant transition: restricted viewer must still see redacted=true"
-    );
-    assert!(
-        restricted_b.redacted,
-        "slow transition: restricted viewer must still see redacted=true"
-    );
-
-    // The redaction is identical regardless of transition token values
-    assert_eq!(
-        restricted_a.redacted, restricted_b.redacted,
-        "transition duration tokens must not affect redaction outcome"
-    );
+    let empty = HashMap::new();
+    let mut hub = PortalHub::default();
+    let expanded = build_expanded_state(&mut hub, "transition-sentinel");
+    let mut adapter = ResidentGrpcPortalAdapter::new(ResidentGrpcPortalConfig::new(vec![0u8; 16]));
+    adapter.record_created_tile(vec![0xAB; 16]);
+    let owner =
+        extract_text_markdown_content(adapter.render_portal_message(&expanded, 1, 0).unwrap());
+    assert!(owner.contains("assistant output for transition-sentinel"));
+    let redacted = redacted_view(expanded);
+    let mut previous = None;
+    for (index, duration) in [1, 1000].into_iter().enumerate() {
+        let overrides = HashMap::from([
+            (
+                PORTAL_TOKEN_TRANSITION_IN_MS.to_string(),
+                duration.to_string(),
+            ),
+            (
+                PORTAL_TOKEN_TRANSITION_OUT_MS.to_string(),
+                duration.to_string(),
+            ),
+        ]);
+        let resolved = tze_hud_config::tokens::resolve_tokens(&empty, &overrides);
+        let tokens = resolve_portal_tokens(&resolved);
+        assert_eq!(tokens.transition_in_ms, duration);
+        assert_eq!(tokens.transition_out_ms, duration);
+        adapter.set_visual_tokens(portal_visual_tokens_from_part_tokens(&tokens));
+        let rendered = extract_text_markdown_content(
+            adapter
+                .render_portal_message(&redacted, index as u64 + 2, 0)
+                .unwrap(),
+        );
+        assert!(!rendered.contains("(styling test)"), "{rendered}");
+        assert!(!rendered.contains("assistant output"), "{rendered}");
+        if let Some(previous) = previous {
+            assert_eq!(rendered, previous);
+        }
+        previous = Some(rendered);
+    }
 }
 
 // ── §4.1 / §4.8: Composer token NodeProto output assertions (hud-2zyt9) ────────
@@ -873,9 +714,8 @@ fn portal_node_proto_includes_draft_text_and_caret_after_notification() {
     let part_tokens = resolve_portal_tokens(&empty);
     let visual_tokens = portal_visual_tokens_from_part_tokens(&part_tokens);
 
-    let mut authority = tze_hud_projection::ProjectionAuthority::default();
-    let permit_all = tze_hud_projection::ProjectedPortalPolicy::permit_all();
-    let expanded_state = build_expanded_state(&mut authority, "proj-draft-caret", &permit_all);
+    let mut authority = PortalHub::default();
+    let expanded_state = build_expanded_state(&mut authority, "proj-draft-caret");
 
     let fake_tile_id: Vec<u8> = vec![0xCE; 16];
     let mut adapter = ResidentGrpcPortalAdapter::with_tokens(
@@ -1010,9 +850,8 @@ fn portal_node_proto_clears_composer_on_cancel() {
     let part_tokens = resolve_portal_tokens(&empty);
     let visual_tokens = portal_visual_tokens_from_part_tokens(&part_tokens);
 
-    let mut authority = tze_hud_projection::ProjectionAuthority::default();
-    let permit_all = tze_hud_projection::ProjectedPortalPolicy::permit_all();
-    let expanded_state = build_expanded_state(&mut authority, "proj-cancel-clear", &permit_all);
+    let mut authority = PortalHub::default();
+    let expanded_state = build_expanded_state(&mut authority, "proj-cancel-clear");
 
     let fake_tile_id: Vec<u8> = vec![0xCC; 16];
     let mut adapter = ResidentGrpcPortalAdapter::with_tokens(
@@ -1082,9 +921,8 @@ fn per_turn_timestamps_render_stamp_and_token_sentinel() {
     let resolved = tze_hud_config::tokens::resolve_tokens(&empty, &overrides);
     let visual_tokens = portal_visual_tokens_from_part_tokens(&resolve_portal_tokens(&resolved));
 
-    let mut authority = ProjectionAuthority::default();
-    let permit_all = ProjectedPortalPolicy::permit_all();
-    let expanded_state = build_expanded_state(&mut authority, "proj-timestamps", &permit_all);
+    let mut authority = PortalHub::default();
+    let expanded_state = build_expanded_state(&mut authority, "proj-timestamps");
 
     let mut adapter = ResidentGrpcPortalAdapter::with_tokens(
         ResidentGrpcPortalConfig::new(vec![0u8; 16]),
@@ -1138,9 +976,8 @@ fn default_profile_renders_no_timestamps() {
     let empty: HashMap<String, String> = HashMap::new();
     let visual_tokens = portal_visual_tokens_from_part_tokens(&resolve_portal_tokens(&empty));
 
-    let mut authority = ProjectionAuthority::default();
-    let permit_all = ProjectedPortalPolicy::permit_all();
-    let expanded_state = build_expanded_state(&mut authority, "proj-no-timestamps", &permit_all);
+    let mut authority = PortalHub::default();
+    let expanded_state = build_expanded_state(&mut authority, "proj-no-timestamps");
 
     let mut adapter = ResidentGrpcPortalAdapter::with_tokens(
         ResidentGrpcPortalConfig::new(vec![0u8; 16]),

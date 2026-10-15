@@ -51,7 +51,7 @@ crates, the canonical app, five examples and a separate integration package.
 | `tze_hud_scene` | Shared scene graph, tiles/nodes/zones, leases and agent identity: [SceneGraph](../crates/tze_hud_scene/src/graph/mod.rs), [lease](../crates/tze_hud_scene/src/lease/), [config](../crates/tze_hud_scene/src/config/) |
 | `tze_hud_mcp` | Discover, publish, clear, hold and input tools, with caller-scoped authorization and shared errors: [tools.rs](../crates/tze_hud_mcp/src/tools.rs) |
 | `tze_hud_protocol` | Protobuf schemas, resident session lifecycle, atomic mutations, resume and event delivery: [proto](../crates/tze_hud_protocol/proto/), [session_server](../crates/tze_hud_protocol/src/session_server/mod.rs) |
-| `tze_hud_projection` | `PortalHub` state plus transitional projection contract/renderer code: [hub.rs](../crates/tze_hud_projection/src/hub.rs), [lib.rs](../crates/tze_hud_projection/src/lib.rs) |
+| `tze_hud_projection` | `PortalHub` state and transitional resident rendering code: [hub.rs](../crates/tze_hud_projection/src/hub.rs), [lib.rs](../crates/tze_hud_projection/src/lib.rs) |
 | `tze_hud_input` | Hit testing, focus, pointer/keyboard processing, scrolling and composer editing: [lib.rs](../crates/tze_hud_input/src/lib.rs) |
 | `tze_hud_compositor` | GPU draw/present, text shaping, markdown, widget rasterization and per-display targets: [lib.rs](../crates/tze_hud_compositor/src/lib.rs) |
 | `tze_hud_config` | Validated config, profiles, zone/widget definitions, design tokens, themes and agent-file loading: [lib.rs](../crates/tze_hud_config/src/lib.rs) |
@@ -97,8 +97,7 @@ The hub is keyed by authenticated agent and portal id; its time-dependent
 operations take injected time. The driver materializes scene tiles, mirrors
 liveness onto leases, and connects composer submissions back to the hub.
 It still renders through `ResidentGrpcPortalAdapter`; deleting that adapter
-and the legacy projection contract is remaining T7 work, not an already
-completed boundary change.
+is remaining T7 work, not an already completed boundary change.
 
 **Input and reclaim [Observed].** Local input is handled by the
 [windowed keyboard](../crates/tze_hud_runtime/src/windowed/keyboard.rs) and

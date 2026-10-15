@@ -1,10 +1,10 @@
 //! Text stream portal cadence harness (hud-5jbra.5).
 //!
 //! Verifies Section 5 of text-stream-portal-phase1:
-//!   - 5.1: work-conserving coalescing with cross-portal fairness
+//!   - 5.1: dirty Hub portals drain together with per-portal render pacing
 //!   - 5.2: cadence harness (≥200 scalars/s sustained, 4KiB/250ms bursts)
 //!   - 5.3: frame/stage budget verification under sustained streams and bursts
-//!   - 5.4: dual-portal fairness test; retained-window coherence under burst
+//!   - 5.4: independent dual-portal service and retained-window burst coherence
 //!
 //! Live soak (5.5), live cadence phase (5.6), and transport-RTT evidence (5.7)
 //! require the TzeHouse Windows reference host and are recorded as discovered
@@ -16,22 +16,16 @@ use gpu_init::serialized_headless_init;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tze_hud_projection::portal_cadence::{
-    CADENCE_BURST_BYTES, CADENCE_BURST_WINDOW_MS, CADENCE_MIN_INCREMENTS_PER_SEC,
-    CADENCE_MIN_SCALARS_PER_SEC, CadenceWorkload, FairnessProbe, PortalCadenceCoalescer,
-};
-use tze_hud_projection::{
-    AttachRequest, ContentClassification, OperationEnvelope, PortalTranscriptUpdate,
-    ProjectionAuthority, ProjectionBounds, ProjectionOperation, ProviderKind, PublishOutputRequest,
-};
+use tze_hud_projection::hub::{PortalHub, PortalKey, Publish};
 use tze_hud_runtime::headless::{HeadlessConfig, HeadlessRuntime};
+use tze_hud_runtime::portal_projection_driver::{InProcessPortalDriver, PortalHandle};
 use tze_hud_runtime::{
     EnqueueResult, FreezeQueue, INPUT_TO_NEXT_PRESENT_BUDGET_US, MutationTrafficClass,
     QueuedMutation, STAGE3_BUDGET_US, STAGE4_BUDGET_US, STAGE5_BUDGET_US,
 };
+use tze_hud_scene::clock::{Clock, TestClock};
 use tze_hud_scene::{
     graph::SceneGraph,
-    mutation::{MutationBatch, SceneMutation},
     types::{Node, NodeData, Rect, Rgba, SceneId, SolidColorNode},
 };
 use tze_hud_telemetry::{LatencyBucket, SessionSummary};
@@ -97,162 +91,73 @@ async fn scene_handle(runtime: &HeadlessRuntime) -> Arc<Mutex<SceneGraph>> {
     state.scene.clone()
 }
 
-// ─── Task 5.1 + 5.2: Coalescer unit-level workload harness ───────────────────
+// The normative workload belongs to this fixture, not a second production
+// scheduler: 200 scalars/s, 10 increments/s and a 4 KiB/250 ms burst.
+const CADENCE_MIN_SCALARS_PER_SEC: u64 = 200;
+const CADENCE_MIN_INCREMENTS_PER_SEC: u64 = 10;
+const CADENCE_BURST_BYTES: usize = 4096;
+const CADENCE_BURST_WINDOW_MS: u64 = 250;
 
-/// Verify the cadence harness generates the normative sustained workload.
-///
-/// 5.2: appends totaling ≥ 200 scalars/s in ≥ 10 increments/s, sustainable.
-#[test]
-fn cadence_harness_sustained_workload_meets_spec() {
-    let stream = CadenceWorkload::build_sustained_stream(
-        CADENCE_MIN_SCALARS_PER_SEC,
-        CADENCE_MIN_INCREMENTS_PER_SEC,
-        1, // 1 second of work
-    );
-
-    // Check increment count.
-    assert!(
-        stream.len() as u64 >= CADENCE_MIN_INCREMENTS_PER_SEC,
-        "sustained stream must deliver ≥{} increments; got {}",
-        CADENCE_MIN_INCREMENTS_PER_SEC,
-        stream.len()
-    );
-
-    // Check scalar throughput.
-    let total_scalars: u64 = stream.iter().map(|(_, _, n)| *n).sum();
-    assert!(
-        total_scalars >= CADENCE_MIN_SCALARS_PER_SEC,
-        "sustained stream must carry ≥{CADENCE_MIN_SCALARS_PER_SEC} scalars/s; got {total_scalars}"
-    );
+fn sustained_stream(
+    scalars_per_sec: u64,
+    increments_per_sec: u64,
+    duration_secs: u64,
+) -> Vec<(u64, Vec<u8>, u64)> {
+    assert!(scalars_per_sec >= CADENCE_MIN_SCALARS_PER_SEC);
+    assert!(increments_per_sec >= CADENCE_MIN_INCREMENTS_PER_SEC);
+    assert!(duration_secs >= 1);
+    let scalars_per_increment = scalars_per_sec.div_ceil(increments_per_sec);
+    let interval_us = 1_000_000 / increments_per_sec;
+    (0..increments_per_sec * duration_secs)
+        .map(|i| {
+            (
+                i * interval_us,
+                vec![b'a'; scalars_per_increment as usize],
+                scalars_per_increment,
+            )
+        })
+        .collect()
 }
 
-/// Verify the cadence harness generates the normative burst workload.
-///
-/// 5.2: ≥ 4096 bytes in 250 ms.
-#[test]
-fn cadence_harness_burst_workload_meets_spec() {
-    let (ts, payload, _scalars) = CadenceWorkload::build_burst(0);
-    assert_eq!(ts, 0);
-    assert_eq!(
-        payload.len(),
-        CADENCE_BURST_BYTES,
-        "burst payload must be exactly {} bytes; got {}",
-        CADENCE_BURST_BYTES,
-        payload.len()
-    );
-    // The whole burst arrives within CADENCE_BURST_WINDOW_MS.
-    // Since build_burst returns a single chunk, arrival is instantaneous — ✓.
-    let _ = CADENCE_BURST_WINDOW_MS; // used in documentation
-}
-
-// ─── Task 5.1: Work-conserving coalescing with cross-portal fairness ──────────
-
-/// A single portal under rapid appends is served work-conservingly:
-/// after any number of coalesced appends, the next drain yields the latest state.
-#[test]
-fn work_conserving_single_portal() {
-    let mut coalescer = PortalCadenceCoalescer::new();
-    let portal = "portal://work-conserving/a";
-
-    // Simulate 50 rapid appends (far exceeds drain rate).
-    let mut expected_payload = Vec::new();
-    for i in 0u64..50 {
-        let payload = format!("snap-{i}").into_bytes();
-        expected_payload = payload.clone();
-        coalescer.record_append(portal, payload, i, i * 1_000);
+async fn portal_driver(
+    runtime: &HeadlessRuntime,
+) -> (InProcessPortalDriver, PortalHandle, Arc<TestClock>) {
+    let clock = Arc::new(TestClock::new(1_000));
+    let handle = PortalHandle::new(PortalHub::default(), clock.clone());
+    {
+        let scene_arc = scene_handle(runtime).await;
+        let mut scene = scene_arc.lock().await;
+        *scene = SceneGraph::new_with_clock(DISPLAY_W as f32, DISPLAY_H as f32, clock.clone());
     }
-
-    // One drain call must yield the latest snapshot (not empty).
-    assert!(coalescer.has_pending(), "coalescer must have pending work");
-    let key = coalescer
-        .next_ready_portal()
-        .expect("portal should be ready after 50 appends");
-    let (payload, seq) = coalescer
-        .take_snapshot(&key)
-        .expect("snapshot must be present");
-    assert_eq!(
-        payload, expected_payload,
-        "latest-wins: must have last append"
-    );
-    assert_eq!(seq, 49, "sequence must reflect last append");
-    assert!(!coalescer.has_pending(), "coalescer idle after drain");
+    (
+        InProcessPortalDriver::with_portals(handle.clone()),
+        handle,
+        clock,
+    )
 }
 
-/// Under equal sustained rates, dual portals are served by round-robin
-/// (cross-portal fairness — tasks.md §5.4).
-#[test]
-fn cross_portal_fairness_dual_portals_equal_rate() {
-    let mut coalescer = PortalCadenceCoalescer::new();
-    let mut probe = FairnessProbe::new();
-
-    let portal_a = "portal://fair/a";
-    let portal_b = "portal://fair/b";
-
-    // Pre-register both portals so that a completely-starved portal (0 services)
-    // is correctly detected by assert_fair rather than silently ignored.
-    probe.register_portal(portal_a);
-    probe.register_portal(portal_b);
-
-    // 100 rounds: each portal gets one append per round, then we drain.
-    for round in 0u64..100 {
-        let payload_a = format!("a-{round}").into_bytes();
-        let payload_b = format!("b-{round}").into_bytes();
-        coalescer.record_append(portal_a, payload_a, round, round * 1_000);
-        coalescer.record_append(portal_b, payload_b, round, round * 1_000);
-
-        // Simulate one frame: drain all pending portals.
-        let drained = coalescer.drain_all();
-        for (key, _, _) in drained {
-            probe.record_service(&key);
-        }
-    }
-
-    // Fairness assertion: spread ≤ portal_count (≤ 2 for 2 portals).
-    probe
-        .assert_fair()
-        .expect("dual portals at equal rates must meet cross-portal fairness bound");
-
-    let (min, max) = probe.service_range();
-    assert_eq!(min, max, "exact equal rates → exactly equal service counts");
+fn publish_stream(handle: &PortalHandle, key: &PortalKey, payload: &[u8], at_us: u64) {
+    let text = String::from_utf8(payload.to_vec()).expect("workload is UTF-8");
+    handle
+        .hub
+        .lock()
+        .expect("Hub lock")
+        .publish(
+            key,
+            Publish {
+                text: Some(text),
+                ..Publish::default()
+            },
+            at_us,
+        )
+        .expect("real portal publish");
 }
 
-/// Under skewed arrival rates, the slower portal is not permanently starved.
-///
-/// Portal A: 5 appends per round, Portal B: 1 append per round.
-/// After 20 rounds the fairness probe must show B received ≥ 1 service per round.
-#[test]
-fn cross_portal_no_starvation_under_skewed_rates() {
-    let mut coalescer = PortalCadenceCoalescer::new();
-    let mut probe = FairnessProbe::new();
-
-    let portal_a = "portal://skew/a";
-    let portal_b = "portal://skew/b";
-
-    // Pre-register both portals so that a completely-starved portal (0 services)
-    // is correctly detected by assert_fair rather than silently ignored.
-    probe.register_portal(portal_a);
-    probe.register_portal(portal_b);
-
-    for round in 0u64..20 {
-        // A gets 5 rapid updates (coalesced to 1); B gets 1 update.
-        for sub_seq in 0u64..5 {
-            let seq = round * 10 + sub_seq;
-            coalescer.record_append(portal_a, vec![b'a'; 4], seq, round * 1_000 + sub_seq);
-        }
-        coalescer.record_append(portal_b, vec![b'b'; 4], round, round * 1_000);
-
-        let drained = coalescer.drain_all();
-        for (key, _, _) in drained {
-            probe.record_service(&key);
-        }
-    }
-
-    // B must have been served in every round.
-    let b_count = probe.count_for(portal_b);
-    assert_eq!(
-        b_count, 20,
-        "portal B must be served once per round regardless of portal A burst rate"
-    );
+async fn drain_portals(runtime: &mut HeadlessRuntime, driver: &mut InProcessPortalDriver) {
+    let scene_arc = scene_handle(runtime).await;
+    let mut scene = scene_arc.lock().await;
+    driver.drain(&mut scene, &mut runtime.input_processor, None);
+    // No scene or Hub guard survives into render_frame().await.
 }
 
 // ─── Task 5.3: Frame/stage budget verification (headless) ─────────────────────
@@ -270,32 +175,8 @@ async fn frame_budgets_hold_under_sustained_portal_stream() {
         .await
         .expect("HeadlessRuntime init failed");
 
-    let (_tab_id, _lease_id, tile_id) = {
-        let scene_arc = scene_handle(&runtime).await;
-        let mut scene = scene_arc.lock().await;
-        let tab_id = scene.create_tab("cadence_test", 0).expect("create_tab");
-        let lease_id = scene.grant_lease("cadence_test", 300_000);
-        if let Some(lease) = scene.leases.get_mut(&lease_id) {
-            lease.resource_budget.max_tiles = 5;
-        }
-        let bounds = Rect::new(100.0, 100.0, 600.0, 400.0);
-        let tile_id = scene
-            .create_tile(tab_id, "cadence_test", lease_id, bounds, 10)
-            .expect("create_tile");
-        let root = Node {
-            layout: Default::default(),
-            id: SceneId::new(),
-            children: vec![],
-            data: NodeData::SolidColor(SolidColorNode {
-                color: Rgba::new(0.1, 0.1, 0.1, 1.0),
-                bounds: Rect::new(0.0, 0.0, 600.0, 400.0),
-                radius: None,
-            }),
-        };
-        let _ = scene.set_tile_root(tile_id, root);
-        (tab_id, lease_id, tile_id)
-    };
-
+    let (mut driver, handle, clock) = portal_driver(&runtime).await;
+    let key = PortalKey::new("cadence_test", "sustained");
     // Warmup.
     for _ in 0..5 {
         runtime.render_frame().await;
@@ -304,7 +185,7 @@ async fn frame_budgets_hold_under_sustained_portal_stream() {
     // Build the sustained stream: 200 scalars/s over BENCH_FRAME_COUNT "frames".
     // We approximate: 10 appends/s, 1 append per batch frame interval.
     // At 60 Hz, 10 appends/s = 1 append per 6 frames.
-    let stream = CadenceWorkload::build_sustained_stream(
+    let stream = sustained_stream(
         CADENCE_MIN_SCALARS_PER_SEC,
         CADENCE_MIN_INCREMENTS_PER_SEC,
         /* duration_secs = */ 20, // enough for BENCH_FRAME_COUNT frames at 6:1 ratio
@@ -325,24 +206,14 @@ async fn frame_budgets_hold_under_sustained_portal_stream() {
             let (_ts, payload, _scalars) = &stream[append_idx];
             append_idx += 1;
 
-            let scene_arc = scene_handle(&runtime).await;
-            let mut scene = scene_arc.lock().await;
-            let batch = MutationBatch {
-                batch_id: SceneId::new(),
-                agent_namespace: "cadence_test".to_string(),
-                mutations: vec![SceneMutation::UpdateTileBounds {
-                    tile_id,
-                    bounds: Rect::new(
-                        100.0 + (frame_idx as f32 % 10.0),
-                        100.0,
-                        payload.len().min(600) as f32,
-                        400.0,
-                    ),
-                }],
-                timing_hints: None,
-                lease_id: None,
-            };
-            let _ = scene.apply_batch(&batch);
+            clock.set_us(1_000_000 + frame_idx * 1_000_000 / 60);
+            publish_stream(
+                &handle,
+                &key,
+                payload,
+                1_000_000 + frame_idx * 1_000_000 / 60,
+            );
+            drain_portals(&mut runtime, &mut driver).await;
         }
 
         let telemetry = runtime.render_frame().await;
@@ -425,9 +296,37 @@ async fn frame_budgets_hold_under_sustained_portal_stream() {
         "cadence harness submitted {append_idx} appends (max allowed {max_appends}) — \
          would exceed the 1000 events/s ceiling at 60Hz"
     );
+
+    assert_eq!(
+        handle
+            .hub
+            .lock()
+            .unwrap()
+            .get(&key)
+            .unwrap()
+            .transcript
+            .len(),
+        append_idx
+    );
+    assert!(
+        append_idx > 0,
+        "real portal workload must have been accepted"
+    );
+    assert!(
+        scene_handle(&runtime)
+            .await
+            .lock()
+            .await
+            .tiles
+            .values()
+            .any(|tile| tile.namespace == "tze_hud_portal_driver"),
+        "driver must have materialized portal territory"
+    );
 }
 
-/// Under a burst workload (≥ 4096 bytes in 250ms), stage budgets stay within spec.
+/// A burst workload (≥ 4096 bytes in 250ms) must reach real truncation priming.
+/// Timing budgets are enforced by the opt-in performance lane, just like the
+/// sustained-stream test; ordinary CI always checks the workload and priming.
 ///
 /// A burst is modelled as a single large mutation batch applied in one frame.
 #[tokio::test]
@@ -437,80 +336,104 @@ async fn frame_budgets_hold_under_burst() {
         .await
         .expect("HeadlessRuntime init failed");
 
-    let (_tab_id, _lease_id, tile_id) = {
-        let scene_arc = scene_handle(&runtime).await;
-        let mut scene = scene_arc.lock().await;
-        let tab_id = scene.create_tab("burst_test", 0).expect("create_tab");
-        let lease_id = scene.grant_lease("burst_test", 300_000);
-        if let Some(lease) = scene.leases.get_mut(&lease_id) {
-            lease.resource_budget.max_tiles = 5;
-        }
-        let bounds = Rect::new(50.0, 50.0, 800.0, 600.0);
-        let tile_id = scene
-            .create_tile(tab_id, "burst_test", lease_id, bounds, 10)
-            .expect("create_tile");
-        let root = Node {
-            layout: Default::default(),
-            id: SceneId::new(),
-            children: vec![],
-            data: NodeData::SolidColor(SolidColorNode {
-                color: Rgba::new(0.2, 0.2, 0.2, 1.0),
-                bounds: Rect::new(0.0, 0.0, 800.0, 600.0),
-                radius: None,
-            }),
-        };
-        let _ = scene.set_tile_root(tile_id, root);
-        (tab_id, lease_id, tile_id)
-    };
-
+    let (mut driver, handle, clock) = portal_driver(&runtime).await;
+    let key = PortalKey::new("burst_test", "burst");
     // Warmup.
     for _ in 0..5 {
         runtime.render_frame().await;
     }
 
-    // Burst frame: apply a large geometry change to simulate a 4KiB payload flush.
-    // In the scene model, a burst maps to a batch of tile-bound updates.
+    let payload = vec![b'x'; CADENCE_BURST_BYTES];
+    clock.set_us(1_000_000);
+    publish_stream(&handle, &key, &payload, 1_000_000);
+    drain_portals(&mut runtime, &mut driver).await;
+    assert_eq!(
+        handle
+            .hub
+            .lock()
+            .unwrap()
+            .get(&key)
+            .unwrap()
+            .transcript_bytes,
+        CADENCE_BURST_BYTES
+    );
+    let accepted_at = handle.hub.lock().unwrap().get(&key).unwrap().transcript[0].at_us;
+    assert!(
+        clock.now_us().saturating_sub(accepted_at) <= CADENCE_BURST_WINDOW_MS * 1_000,
+        "accepted burst remains within the 250 ms workload window"
+    );
+    assert!(
+        scene_handle(&runtime)
+            .await
+            .lock()
+            .await
+            .tiles
+            .values()
+            .any(|tile| tile.namespace == "tze_hud_portal_driver"),
+        "real driver must have rendered the burst portal"
+    );
+
+    let shared_scene = scene_handle(&runtime).await;
     {
-        let scene_arc = scene_handle(&runtime).await;
-        let mut scene = scene_arc.lock().await;
-        let batch = MutationBatch {
-            batch_id: SceneId::new(),
-            agent_namespace: "burst_test".to_string(),
-            mutations: vec![SceneMutation::UpdateTileBounds {
-                tile_id,
-                bounds: Rect::new(51.0, 51.0, 799.0, 599.0),
-            }],
-            timing_hints: None,
-            lease_id: None,
-        };
-        let _ = scene.apply_batch(&batch);
+        let scene = shared_scene.lock().await;
+        assert_eq!(
+            runtime.compositor.primed_truncation_content_bytes(&scene),
+            None
+        );
     }
-
+    // Empty warmups prime at the 16 ms real-clock cadence. TestClock only
+    // drives the portal Hub, so make this frame eligible outside the timer.
+    // Otherwise the stage budget can pass by deferring all burst shaping.
+    tokio::time::sleep(std::time::Duration::from_millis(32)).await;
     let burst_telemetry = runtime.render_frame().await;
+    {
+        let scene = shared_scene.lock().await;
+        let primed_bytes = runtime
+            .compositor
+            .primed_truncation_content_bytes(&scene)
+            .expect("burst frame must prime the current scene, not defer it");
+        assert!(
+            primed_bytes >= CADENCE_BURST_BYTES,
+            "primed {primed_bytes} bytes, missing the {CADENCE_BURST_BYTES}-byte burst"
+        );
+    }
+    eprintln!(
+        "burst stage3={}us stage4={}us stage5={}us frame={}us",
+        burst_telemetry.stage3_mutation_intake_us,
+        burst_telemetry.stage4_scene_commit_us,
+        burst_telemetry.stage5_layout_resolve_us,
+        burst_telemetry.frame_time_us
+    );
 
-    // Stage 3 + 4 + 5 must respect per-stage budgets.
-    assert!(
-        burst_telemetry.stage3_mutation_intake_us <= STAGE3_P99_BUDGET_US,
-        "Stage 3 (Mutation Intake) {burst_us}µs exceeded budget {STAGE3_P99_BUDGET_US}µs on burst frame",
-        burst_us = burst_telemetry.stage3_mutation_intake_us
-    );
-    assert!(
-        burst_telemetry.stage4_scene_commit_us <= STAGE4_P99_BUDGET_US,
-        "Stage 4 (Scene Commit) {burst_us}µs exceeded budget {STAGE4_P99_BUDGET_US}µs on burst frame",
-        burst_us = burst_telemetry.stage4_scene_commit_us
-    );
-    assert!(
-        burst_telemetry.stage5_layout_resolve_us <= STAGE5_P99_BUDGET_US,
-        "Stage 5 (Layout Resolve) {burst_us}µs exceeded budget {STAGE5_P99_BUDGET_US}µs on burst frame",
-        burst_us = burst_telemetry.stage5_layout_resolve_us
-    );
+    if perf_assert_enabled() {
+        // Stage 3 + 4 + 5 must respect per-stage budgets.
+        assert!(
+            burst_telemetry.stage3_mutation_intake_us <= STAGE3_P99_BUDGET_US,
+            "Stage 3 (Mutation Intake) {burst_us}µs exceeded budget {STAGE3_P99_BUDGET_US}µs on burst frame",
+            burst_us = burst_telemetry.stage3_mutation_intake_us
+        );
+        assert!(
+            burst_telemetry.stage4_scene_commit_us <= STAGE4_P99_BUDGET_US,
+            "Stage 4 (Scene Commit) {burst_us}µs exceeded budget {STAGE4_P99_BUDGET_US}µs on burst frame",
+            burst_us = burst_telemetry.stage4_scene_commit_us
+        );
+        assert!(
+            burst_telemetry.stage5_layout_resolve_us <= STAGE5_P99_BUDGET_US,
+            "Stage 5 (Layout Resolve) {burst_us}µs exceeded budget {STAGE5_P99_BUDGET_US}µs on burst frame",
+            burst_us = burst_telemetry.stage5_layout_resolve_us
+        );
 
-    // Total frame time on burst frame must stay within general budget.
-    assert!(
-        burst_telemetry.frame_time_us <= HEADLESS_FRAME_BUDGET_US,
-        "frame time {us}µs exceeded headless budget {HEADLESS_FRAME_BUDGET_US}µs on burst frame",
-        us = burst_telemetry.frame_time_us
-    );
+        // Total frame time on burst frame must stay within general budget.
+        assert!(
+            burst_telemetry.frame_time_us <= HEADLESS_FRAME_BUDGET_US,
+            "frame time {us}µs exceeded headless budget {HEADLESS_FRAME_BUDGET_US}µs on burst frame",
+            us = burst_telemetry.frame_time_us
+        );
+    } else {
+        eprintln!(
+            "[SKIP-TIMING] burst budgets recorded above; set TZE_HUD_PERF_ASSERT=1 to enforce"
+        );
+    }
 }
 
 // ─── Task 5.3: Aggregate event rate ceiling ───────────────────────────────────
@@ -523,7 +446,7 @@ async fn frame_budgets_hold_under_burst() {
 #[test]
 fn portal_event_rate_stays_below_aggregate_ceiling() {
     // Simulate 10 seconds of maximum-rate sustained streaming.
-    let stream = CadenceWorkload::build_sustained_stream(
+    let stream = sustained_stream(
         CADENCE_MIN_SCALARS_PER_SEC,
         CADENCE_MIN_INCREMENTS_PER_SEC,
         10,
@@ -546,41 +469,45 @@ fn portal_event_rate_stays_below_aggregate_ceiling() {
 /// must be the most-recent coherent window (not oldest or mid-stream).
 ///
 /// This mirrors text_stream_portal_coalescing.rs but uses the
-/// PortalCadenceCoalescer instead of the raw FreezeQueue.
+/// PortalHub instead of the raw FreezeQueue.
 #[test]
 fn burst_coherence_latest_snapshot_survives_coalescing() {
     const BURST_APPENDS: usize = 50;
-
-    let mut coalescer = PortalCadenceCoalescer::new();
-    let portal = "portal://burst-coherence/a";
+    let mut hub = PortalHub::default();
+    let portal = PortalKey::new("burst-coherence", "a");
     let mut last_payload = Vec::new();
-
     for i in 0..BURST_APPENDS {
-        // Each append extends the transcript by one line.
         let line = format!("[{i:03}] burst line {i}\n");
         last_payload.extend_from_slice(line.as_bytes());
-        coalescer.record_append(portal, last_payload.clone(), i as u64, i as u64 * 5_000);
+        hub.publish(
+            &portal,
+            Publish {
+                text: Some(String::from_utf8(last_payload.clone()).unwrap()),
+                key: Some("snapshot".into()),
+                ..Publish::default()
+            },
+            i as u64 * 5_000,
+        )
+        .unwrap();
     }
-
-    // Single drain must yield the final coherent transcript window.
-    let key = coalescer.next_ready_portal().expect("portal must be ready");
-    let (payload, seq) = coalescer
-        .take_snapshot(&key)
-        .expect("snapshot must be present");
-
+    let due = hub.take_due(250_000);
+    assert_eq!(due.len(), 1, "one dirty portal yields one coherent window");
+    assert_eq!(due[0].key, portal);
+    let unit = &hub.get(&portal).unwrap().transcript[0];
+    assert_eq!(unit.seq, 1, "keyed replacement retains its logical unit");
     assert_eq!(
-        seq,
-        BURST_APPENDS as u64 - 1,
-        "sequence must reflect last burst append"
+        unit.at_us,
+        (BURST_APPENDS as u64 - 1) * 5_000,
+        "arrival reflects last accepted burst append"
     );
-    // The payload must be the full transcript (last_payload).
     assert_eq!(
-        payload, last_payload,
+        unit.text.as_bytes(),
+        last_payload,
         "burst coalescing must yield the latest coherent transcript window"
     );
     assert!(
-        !coalescer.has_pending(),
-        "coalescer must be idle after draining the burst snapshot"
+        hub.take_due(250_001).is_empty(),
+        "Hub must be idle after draining the burst window"
     );
 }
 
@@ -734,7 +661,9 @@ async fn input_latency_not_degraded_under_portal_stream() {
         .await
         .expect("HeadlessRuntime init failed");
 
-    let (_tab_id_outer, _lease_id_outer, tile_id) = {
+    let (mut driver, handle, clock) = portal_driver(&runtime).await;
+    let key = PortalKey::new("latency_test", "stream");
+    let (_tab_id_outer, _lease_id_outer, _tile_id) = {
         let scene_arc = scene_handle(&runtime).await;
         let mut scene = scene_arc.lock().await;
         let tab_id = scene.create_tab("latency_test", 0).expect("create_tab");
@@ -786,7 +715,7 @@ async fn input_latency_not_degraded_under_portal_stream() {
     let mut local_ack_samples: Vec<u64> = Vec::new();
 
     // 120 frames: apply portal mutations every 6 frames; inject pointer input every frame.
-    let stream = CadenceWorkload::build_sustained_stream(
+    let stream = sustained_stream(
         CADENCE_MIN_SCALARS_PER_SEC,
         CADENCE_MIN_INCREMENTS_PER_SEC,
         20,
@@ -820,21 +749,16 @@ async fn input_latency_not_degraded_under_portal_stream() {
 
         // Apply portal mutation every 6 frames.
         if frame_idx % 6 == 0 && append_idx < stream.len() {
-            let (_ts, _payload, _scalars) = &stream[append_idx];
+            let (_ts, payload, _scalars) = &stream[append_idx];
             append_idx += 1;
-            let scene_arc = scene_handle(&runtime).await;
-            let mut scene = scene_arc.lock().await;
-            let batch = MutationBatch {
-                batch_id: SceneId::new(),
-                agent_namespace: "latency_test".to_string(),
-                mutations: vec![SceneMutation::UpdateTileBounds {
-                    tile_id,
-                    bounds: Rect::new(1.0 + (frame_idx % 5) as f32, 0.0, 639.0, 479.0),
-                }],
-                timing_hints: None,
-                lease_id: None,
-            };
-            let _ = scene.apply_batch(&batch);
+            clock.set_us(1_000_000 + frame_idx * 1_000_000 / 60);
+            publish_stream(
+                &handle,
+                &key,
+                payload,
+                1_000_000 + frame_idx * 1_000_000 / 60,
+            );
+            drain_portals(&mut runtime, &mut driver).await;
         }
 
         runtime.render_frame().await;
@@ -876,11 +800,34 @@ async fn input_latency_not_degraded_under_portal_stream() {
             );
         }
     }
+
+    assert_eq!(
+        handle
+            .hub
+            .lock()
+            .unwrap()
+            .get(&key)
+            .unwrap()
+            .transcript
+            .len(),
+        append_idx
+    );
+    assert!(append_idx > 0);
+    assert!(
+        scene_handle(&runtime)
+            .await
+            .lock()
+            .await
+            .tiles
+            .values()
+            .any(|tile| tile.namespace == "tze_hud_portal_driver"),
+        "pointer samples coexist with real rendered portal territory"
+    );
 }
 
 // ─── Task 2 (hud-zmt1a): Arrival→present latency measurement ─────────────────
 
-/// Per-append arrival→present elapsed measured via `PortalTranscriptUpdate::submitted_at_us`.
+/// Per-append arrival→present elapsed measured via `Unit::at_us`.
 ///
 /// Verifies that `submitted_at_us` (populated by `handle_publish_output` into the
 /// cadence coalescer) is correctly propagated through `take_due_portal_update` and
@@ -893,121 +840,45 @@ async fn input_latency_not_degraded_under_portal_stream() {
 /// and confirm the measurement chain works end-to-end.
 #[test]
 fn arrival_to_present_elapsed_measured_via_submitted_at_us() {
-    // ── Setup: one projection, one portal ────────────────────────────────────
-    let mut authority = ProjectionAuthority::new(ProjectionBounds {
-        max_portal_updates_per_second: 100,
-        ..ProjectionBounds::default()
-    })
-    .unwrap();
-
-    let projection_id = "projection-cadence-timing";
-
-    // Attach the projection session.
-    let owner_token = {
-        let attach = AttachRequest {
-            envelope: OperationEnvelope {
-                operation: ProjectionOperation::Attach,
-                projection_id: projection_id.to_string(),
-                request_id: "attach-timing-1".to_string(),
-                client_timestamp_wall_us: 1_000,
-            },
-            provider_kind: ProviderKind::Codex,
-            display_name: "Cadence Timing Test".to_string(),
-            workspace_hint: None,
-            repository_hint: None,
-            icon_profile_hint: None,
-            content_classification: ContentClassification::Private,
-            hud_target: None,
-            idempotency_key: None,
-        };
-        authority
-            .handle_attach(attach, "caller-timing", 1_000)
-            .owner_token
-            .expect("attach must issue owner token")
-    };
-
-    // ── Drive: rapid appends at simulated submitted_at timestamps ─────────
-    // Simulate appends arriving over 50 ms. Each append sets submitted_at_us
-    // to a distinct simulated wall-clock value.
+    let mut hub = PortalHub::default();
+    let key = PortalKey::new("caller-timing", "projection-cadence-timing");
     const APPEND_COUNT: usize = 20;
-    const SIMULATED_APPEND_INTERVAL_US: u64 = 500; // 0.5 ms apart
-    const SIMULATED_PRESENT_OFFSET_US: u64 = 5_000; // "present" is 5 ms after last append
-
-    let mut arrival_to_present_samples: Vec<u64> = Vec::new();
-
+    const SIMULATED_APPEND_INTERVAL_US: u64 = 500;
+    const SIMULATED_PRESENT_OFFSET_US: u64 = 5_000;
     for i in 0..APPEND_COUNT {
-        let submitted_at = 10_000u64 + (i as u64) * SIMULATED_APPEND_INTERVAL_US;
-        let text = format!("[{i:03}] cadence-timing line {i}");
-
-        // Submit with the synthetic submitted_at timestamp.
-        let publish = PublishOutputRequest {
-            envelope: OperationEnvelope {
-                operation: ProjectionOperation::PublishOutput,
-                projection_id: projection_id.to_string(),
-                request_id: format!("pub-timing-{i}"),
-                client_timestamp_wall_us: submitted_at,
+        let submitted_at = 10_000 + i as u64 * SIMULATED_APPEND_INTERVAL_US;
+        hub.publish(
+            &key,
+            Publish {
+                text: Some(format!("[{i:03}] cadence-timing line {i}")),
+                ..Publish::default()
             },
-            owner_token: owner_token.clone(),
-            output_text: text,
-            output_kind: tze_hud_projection::OutputKind::Assistant,
-            content_classification: ContentClassification::Private,
-            logical_unit_id: Some(format!("unit-{i}")),
-            coalesce_key: None,
-            expects_reply: false,
-        };
-        // `server_timestamp_wall_us` is `submitted_at` so the coalescer records it.
-        authority.handle_publish_output(publish, submitted_at);
+            submitted_at,
+        )
+        .unwrap();
     }
-
-    // ── Present: simulated "frame present" time is SIMULATED_PRESENT_OFFSET_US
-    // after the last append.
-    let last_submitted = 10_000u64 + (APPEND_COUNT as u64 - 1) * SIMULATED_APPEND_INTERVAL_US;
+    let last_submitted = 10_000 + (APPEND_COUNT as u64 - 1) * SIMULATED_APPEND_INTERVAL_US;
     let present_at = last_submitted + SIMULATED_PRESENT_OFFSET_US;
-
-    // Take the coalesced portal update. The coalescer has collapsed all appends
-    // into the latest snapshot.
-    let update: PortalTranscriptUpdate = authority
-        .take_due_portal_update(projection_id, present_at)
-        .expect("projection must exist")
-        .expect("coalesced appends must produce a portal update");
-
-    // `submitted_at_us` must reflect the first registered append (or the most
-    // recent, depending on coalescer policy). What matters is that it is non-zero
-    // and strictly less than `present_at`.
+    let due = hub.take_due(present_at);
+    assert_eq!(due.len(), 1);
+    let submitted_at_us = hub.get(&key).unwrap().transcript.back().unwrap().at_us;
     assert!(
-        update.submitted_at_us > 0,
-        "submitted_at_us must be populated after handle_publish_output → cadence coalescer; got 0"
+        submitted_at_us > 0,
+        "accepted arrival timestamp must be populated"
     );
-    assert!(
-        update.submitted_at_us < present_at,
-        "submitted_at_us ({}) must be before present_at ({})",
-        update.submitted_at_us,
-        present_at,
-    );
-
-    // Compute arrival→present elapsed.
-    let elapsed_us = present_at.saturating_sub(update.submitted_at_us);
-    arrival_to_present_samples.push(elapsed_us);
-
-    // The reference Windows budget for `input_to_next_present` is 33 ms (high_mutation).
-    // On headless CI (software GPU) we allow up to 250 ms.
-    // Since we are using a purely synthetic clock here, the elapsed is fully deterministic
-    // (≤ SIMULATED_PRESENT_OFFSET_US + the spread of append timestamps). We verify:
-    //   elapsed ≤ HEADLESS_INPUT_TO_PRESENT_BUDGET_US
+    assert!(submitted_at_us < present_at, "arrival must precede present");
+    assert_eq!(submitted_at_us, last_submitted);
+    let elapsed_us = present_at.saturating_sub(submitted_at_us);
     const HEADLESS_INPUT_TO_PRESENT_BUDGET_US: u64 = 250_000;
     assert!(
         elapsed_us <= HEADLESS_INPUT_TO_PRESENT_BUDGET_US,
-        "arrival→present elapsed {elapsed_us}µs exceeded headless budget \
-         {HEADLESS_INPUT_TO_PRESENT_BUDGET_US}µs \
-         (reference Windows budget: {INPUT_TO_NEXT_PRESENT_BUDGET_US}µs)"
+        "arrival→present elapsed {elapsed_us}µs exceeded headless budget {HEADLESS_INPUT_TO_PRESENT_BUDGET_US}µs (reference Windows budget: {INPUT_TO_NEXT_PRESENT_BUDGET_US}µs)"
     );
-
-    // Also verify the coalesced_output_count is consistent with APPEND_COUNT-1
-    // (all but the first are coalesced).
     assert!(
-        update.coalesced_output_count >= 1 || update.unread_output_count >= 1,
-        "portal update must reflect at least one output unit"
+        due[0].unread >= 1,
+        "due portal must reflect at least one output unit"
     );
+    assert_eq!(hub.get(&key).unwrap().transcript.len(), APPEND_COUNT);
 }
 
 /// Dual-portal arrival→present skew stays bounded via round-robin fairness.
@@ -1017,87 +888,43 @@ fn arrival_to_present_elapsed_measured_via_submitted_at_us() {
 /// diverge by more than one inter-append interval. This exercises the scheduling
 /// oracle path (`next_due_projection_id` → `take_due_portal_update`).
 #[test]
-fn dual_portal_arrival_to_present_skew_bounded_by_round_robin() {
-    let mut authority = ProjectionAuthority::new(ProjectionBounds {
-        max_portal_updates_per_second: 100,
-        ..ProjectionBounds::default()
-    })
-    .unwrap();
-
-    let proj_a = "projection-timing-a";
-    let proj_b = "projection-timing-b";
-
-    // Attach both projections.
-    let attach_proj = |authority: &mut ProjectionAuthority, projection_id: &str| -> String {
-        let attach = AttachRequest {
-            envelope: OperationEnvelope {
-                operation: ProjectionOperation::Attach,
-                projection_id: projection_id.to_string(),
-                request_id: format!("attach-{projection_id}"),
-                client_timestamp_wall_us: 1_000,
-            },
-            provider_kind: ProviderKind::Codex,
-            display_name: format!("Timing Test {projection_id}"),
-            workspace_hint: None,
-            repository_hint: None,
-            icon_profile_hint: None,
-            content_classification: ContentClassification::Private,
-            hud_target: None,
-            idempotency_key: None,
-        };
-        authority
-            .handle_attach(attach, "caller-timing", 1_000)
-            .owner_token
-            .expect("attach must issue owner token")
-    };
-
-    let token_a = attach_proj(&mut authority, proj_a);
-    let token_b = attach_proj(&mut authority, proj_b);
-
-    // Submit one append per portal at the same simulated time.
+fn dual_portal_arrival_to_present_skew_bounded_in_same_drain() {
+    let mut hub = PortalHub::default();
+    let a = PortalKey::new("caller-timing", "projection-timing-a");
+    let b = PortalKey::new("caller-timing", "projection-timing-b");
     const SUBMIT_AT_US: u64 = 100_000;
-    const PRESENT_AT_US: u64 = 105_000; // 5 ms later
-
-    let make_publish = |projection_id: &str, owner_token: &str, seq: usize| PublishOutputRequest {
-        envelope: OperationEnvelope {
-            operation: ProjectionOperation::PublishOutput,
-            projection_id: projection_id.to_string(),
-            request_id: format!("pub-{projection_id}-{seq}"),
-            client_timestamp_wall_us: SUBMIT_AT_US,
+    const PRESENT_AT_US: u64 = 105_000;
+    hub.publish(
+        &a,
+        Publish {
+            text: Some("[000] portal a line".into()),
+            ..Publish::default()
         },
-        owner_token: owner_token.to_string(),
-        output_text: format!("[{seq:03}] portal {projection_id} line"),
-        output_kind: tze_hud_projection::OutputKind::Assistant,
-        content_classification: ContentClassification::Private,
-        logical_unit_id: Some(format!("unit-{projection_id}-{seq}")),
-        coalesce_key: None,
-        expects_reply: false,
-    };
-
-    authority.handle_publish_output(make_publish(proj_a, &token_a, 0), SUBMIT_AT_US);
-    authority.handle_publish_output(make_publish(proj_b, &token_b, 0), SUBMIT_AT_US);
-
-    // Collect submitted_at_us from both portals via round-robin scheduling.
-    let mut submitted_timestamps: Vec<(String, u64)> = Vec::new();
-
-    while let Some(next_id) = authority.next_due_projection_id() {
-        if let Ok(Some(update)) = authority.take_due_portal_update(&next_id, PRESENT_AT_US) {
-            submitted_timestamps.push((next_id, update.submitted_at_us));
-        } else {
-            break;
-        }
-    }
-
-    // Both portals must have been served.
+        SUBMIT_AT_US,
+    )
+    .unwrap();
+    hub.publish(
+        &b,
+        Publish {
+            text: Some("[000] portal b line".into()),
+            ..Publish::default()
+        },
+        SUBMIT_AT_US,
+    )
+    .unwrap();
+    let submitted_timestamps: Vec<_> = hub
+        .take_due(PRESENT_AT_US)
+        .into_iter()
+        .map(|due| {
+            let at_us = hub.get(&due.key).unwrap().transcript.back().unwrap().at_us;
+            (due.key.id, at_us)
+        })
+        .collect();
     assert_eq!(
         submitted_timestamps.len(),
         2,
-        "both portals must be served by next_due_projection_id round-robin; \
-         got {} entries",
-        submitted_timestamps.len()
+        "both dirty portals must be served in the same drain"
     );
-
-    // Both submitted_at_us values must be non-zero and before PRESENT_AT_US.
     for (id, submitted) in &submitted_timestamps {
         assert!(
             *submitted > 0,
@@ -1108,12 +935,11 @@ fn dual_portal_arrival_to_present_skew_bounded_by_round_robin() {
             "portal {id}: submitted_at_us ({submitted}) must be before present_at ({PRESENT_AT_US})"
         );
     }
-
-    // Skew between the two submitted_at_us values must be zero (both submitted at same time).
     let (_, ts_0) = &submitted_timestamps[0];
     let (_, ts_1) = &submitted_timestamps[1];
     assert_eq!(
         ts_0, ts_1,
         "dual portals submitted at the same wall time must report equal submitted_at_us"
     );
+    assert!(hub.take_due(PRESENT_AT_US + 1).is_empty());
 }

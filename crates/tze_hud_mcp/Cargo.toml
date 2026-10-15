@@ -7,9 +7,9 @@ license.workspace = true
 
 [dependencies]
 tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0" }
-# Provides the shared portal state and stable `ProjectionErrorCode`
-# (and surfaced in MCP `error.data.error_code`). No dependency cycle: the
-# projection crate does not depend on tze_hud_mcp.
+# Provides shared portal state and `PortalError`, mapped by MCP to
+# shared code-and-hint tool errors. No dependency cycle: the projection crate
+# does not depend on tze_hud_mcp.
 tze_hud_projection = { path = "../tze_hud_projection", version = "0.1.0" }
 tokio = { workspace = true }
 serde = { workspace = true }
