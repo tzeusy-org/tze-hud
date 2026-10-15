@@ -242,44 +242,211 @@ async fn test_resume_token_single_use() {
     }
 }
 
-/// Scenario: Re-authentication required on resume.
-/// Invalid credentials result in `SessionError(AUTH_FAILED)`.
+/// Manual directory changes apply to fresh/resumed authentication, while an
+/// established stream keeps its captured permissions until reconnect.
 #[tokio::test]
 async fn test_resume_auth_required() {
-    let (mut client, _server, state) = setup_test_with_state().await;
-    let resume_token =
-        handshake_and_disconnect(&mut client, "auth-check-agent", "test-key", &state).await;
+    use tze_hud_scene::config::{AgentDirectory, hash_psk};
 
-    let (resume_tx, resume_rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
-    let resume_stream = tokio_stream::wrappers::ReceiverStream::new(resume_rx);
-
-    // Use wrong PSK on resume — must be rejected with AUTH_FAILED.
-    resume_tx
-        .send(ClientMessage {
-            sequence: 1,
-            timestamp_wall_us: now_wall_us(),
-            payload: Some(ClientPayload::SessionResume(SessionResume {
-                agent_id: "auth-check-agent".to_string(),
-                resume_token: resume_token.clone(),
-                last_seen_server_sequence: 2,
-                pre_shared_key: "wrong-key".to_string(),
-                auth_credential: None,
-            })),
-        })
-        .await
-        .unwrap();
-
-    let mut response_stream = client.session(resume_stream).await.unwrap().into_inner();
-    let msg = response_stream.next().await.unwrap().unwrap();
-    match &msg.payload {
-        Some(ServerPayload::SessionError(err)) => {
-            assert_eq!(
-                err.code, "AUTH_FAILED",
-                "expected AUTH_FAILED, got: {}",
-                err.code
+    let directory = |key: Option<&str>, reduced: bool| {
+        let mut paired = AgentDirectory::default();
+        if let Some(key) = key {
+            let permission = if reduced {
+                "publish_zone:reload-control"
+            } else {
+                "*"
+            };
+            paired.insert(
+                "auth-check-agent",
+                hash_psk(key),
+                vec![permission.to_string()],
             );
         }
-        other => panic!("Expected SessionError(AUTH_FAILED), got: {other:?}"),
+        paired.insert("control", hash_psk("control-key"), vec!["*".to_string()]);
+        paired
+    };
+
+    for (change, current_key) in [
+        ("deleted", None),
+        ("rekeyed", Some("new-key")),
+        ("allow-reduced", Some("old-key")),
+    ] {
+        let mut scene = SceneGraph::new(800.0, 600.0);
+        scene.create_tab("main", 0).unwrap();
+        scene.zone_registry = ZoneRegistry::with_defaults();
+        let mut control_zone = scene.zone_registry.get_by_name("subtitle").unwrap().clone();
+        control_zone.id = SceneId::new();
+        control_zone.name = "reload-control".to_string();
+        scene.zone_registry.register(control_zone);
+        let agents = directory(Some("old-key"), false).shared();
+        let mut service = HudSessionImpl::new(scene, "unused-dev-key");
+        service.agents = Arc::clone(&agents);
+        let state = Arc::clone(&service.state);
+        let (mut client, server) = setup_widget_test_with_service(service).await;
+
+        let (old_tx, _, mut old_stream) =
+            handshake(&mut client, "auth-check-agent", "old-key").await;
+        let before = request(
+            &old_tx,
+            &mut old_stream,
+            2,
+            ClientPayload::Publish(subtitle_publish("before reload", 0, 0, 0)),
+        )
+        .await;
+        assert!(before.ok, "{change}: {before:?}");
+        let resume_token =
+            handshake_and_disconnect(&mut client, "auth-check-agent", "old-key", &state).await;
+
+        // Invalid auth must not consume the token, even before any hand edit.
+        let (wrong_tx, wrong_rx) = tokio::sync::mpsc::channel(64);
+        wrong_tx
+            .send(ClientMessage {
+                sequence: 1,
+                timestamp_wall_us: now_wall_us(),
+                payload: Some(ClientPayload::SessionResume(SessionResume {
+                    agent_id: "auth-check-agent".to_string(),
+                    resume_token: resume_token.clone(),
+                    last_seen_server_sequence: 2,
+                    auth_credential: Some(crate::auth::psk_credential("wrong-key".to_string())),
+                    ..Default::default()
+                })),
+            })
+            .await
+            .unwrap();
+        let mut wrong_stream = client
+            .session(tokio_stream::wrappers::ReceiverStream::new(wrong_rx))
+            .await
+            .unwrap()
+            .into_inner();
+        match next_server_msg(&mut wrong_stream).await.payload {
+            Some(ServerPayload::SessionError(err)) => assert_eq!(err.code, "AUTH_FAILED"),
+            other => panic!("{change}: expected wrong-key AUTH_FAILED, got {other:?}"),
+        }
+
+        agents.store(Arc::new(directory(current_key, true)));
+        let after = request(
+            &old_tx,
+            &mut old_stream,
+            3,
+            ClientPayload::Publish(subtitle_publish("established after reload", 0, 0, 0)),
+        )
+        .await;
+        assert!(
+            after.ok,
+            "{change}: established permissions changed: {after:?}"
+        );
+
+        let mut attempts = vec![(false, "old-key"), (true, "old-key")];
+        if current_key == Some("new-key") {
+            attempts.extend([(false, "new-key"), (true, "new-key")]);
+        }
+        for (resume, key) in attempts {
+            let (tx, rx) = tokio::sync::mpsc::channel(64);
+            let credential = Some(crate::auth::psk_credential(key.to_string()));
+            let payload = if resume {
+                ClientPayload::SessionResume(SessionResume {
+                    agent_id: "auth-check-agent".to_string(),
+                    resume_token: resume_token.clone(),
+                    last_seen_server_sequence: 2,
+                    auth_credential: credential,
+                    ..Default::default()
+                })
+            } else {
+                ClientPayload::SessionInit(SessionInit {
+                    agent_id: "auth-check-agent".to_string(),
+                    initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
+                    min_protocol_version: 1000,
+                    max_protocol_version: 1001,
+                    auth_credential: credential,
+                    ..Default::default()
+                })
+            };
+            tx.send(ClientMessage {
+                sequence: 1,
+                timestamp_wall_us: now_wall_us(),
+                payload: Some(payload),
+            })
+            .await
+            .unwrap();
+            let mut stream = client
+                .session(tokio_stream::wrappers::ReceiverStream::new(rx))
+                .await
+                .unwrap()
+                .into_inner();
+            let first = next_server_msg(&mut stream).await;
+            if current_key != Some(key) {
+                match first.payload {
+                    Some(ServerPayload::SessionError(err)) => assert_eq!(
+                        err.code, "AUTH_FAILED",
+                        "{change}: resume={resume} stale key"
+                    ),
+                    other => panic!("{change}: stale key accepted: {other:?}"),
+                }
+                continue;
+            }
+            match first.payload {
+                Some(ServerPayload::SessionEstablished(established)) if !resume => {
+                    assert_eq!(established.namespace, "auth-check-agent");
+                    assert!(
+                        !established
+                            .active_subscriptions
+                            .iter()
+                            .any(|s| s == "SCENE_TOPOLOGY")
+                    );
+                }
+                Some(ServerPayload::SessionResumeResult(result)) if resume => {
+                    assert!(result.accepted, "{change}: {result:?}");
+                    assert!(!result.new_session_token.is_empty());
+                    assert_ne!(result.new_session_token, resume_token);
+                    assert_eq!(
+                        result.negotiated_protocol_version,
+                        crate::auth::RUNTIME_MAX_VERSION
+                    );
+                    assert!(
+                        result
+                            .active_subscriptions
+                            .iter()
+                            .any(|s| s == "SCENE_TOPOLOGY")
+                    );
+                }
+                other => panic!("{change}: resume={resume} handshake failed: {other:?}"),
+            }
+            // Drain the existing initial state through its terminal notice;
+            // the assertions below exercise the real active session boundary.
+            loop {
+                if matches!(
+                    next_server_msg(&mut stream).await.payload,
+                    Some(ServerPayload::DegradationNotice(_))
+                ) {
+                    break;
+                }
+            }
+            let denied = request(
+                &tx,
+                &mut stream,
+                2,
+                ClientPayload::Publish(subtitle_publish("new permissions", 0, 0, 0)),
+            )
+            .await;
+            assert!(!denied.ok, "{change}: resume={resume} retained old allow");
+            assert_eq!(denied.code, "NOT_ALLOWED");
+            let mut retained = subtitle_publish("retained permission", 0, 0, 0);
+            retained.surface = "zone:reload-control".to_string();
+            let allowed = request(&tx, &mut stream, 3, ClientPayload::Publish(retained)).await;
+            assert!(allowed.ok, "{change}: resume={resume}: {allowed:?}");
+        }
+
+        let (control_tx, _, mut control_stream) =
+            handshake(&mut client, "control", "control-key").await;
+        let unaffected = request(
+            &control_tx,
+            &mut control_stream,
+            2,
+            ClientPayload::Publish(subtitle_publish("unaffected agent", 0, 0, 0)),
+        )
+        .await;
+        assert!(unaffected.ok, "{change}: unaffected agent: {unaffected:?}");
+        server.abort();
     }
 }
 

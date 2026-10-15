@@ -225,19 +225,23 @@ mod tests {
     fn hand_edits_survive_panel_changes_and_reach_the_live_directory() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("agents.toml");
-        let entry = |agent: &str, psk: &str| {
+        let entry = |agent: &str, psk: &str, allow: &[&str]| {
             format!(
-                "[agents.{agent}]\npsk_sha256 = \"{}\"\nallow = [\"*\"]\n",
+                "[agents.{agent}]\npsk_sha256 = \"{}\"\nallow = {allow:?}\n",
                 hash_psk_hex(psk)
             )
         };
-        std::fs::write(&path, entry("a", "psk-a")).unwrap();
+        std::fs::write(&path, entry("a", "psk-a", &["*"])).unwrap();
         let live = AgentDirectory::default().shared();
         let store = AgentStore::open(Some(path.clone()), Arc::clone(&live));
         store.file();
 
         // Hand-add `b`, then toggle a grant on `a` without reading first.
-        let hand = format!("{}\n{}", entry("a", "psk-a"), entry("b", "psk-b"));
+        let hand = format!(
+            "{}\n{}",
+            entry("a", "psk-a", &["*"]),
+            entry("b", "psk-b", &["*"])
+        );
         std::fs::write(&path, &hand).unwrap();
         let edited = store
             .apply(&AgentChange::Grant {
@@ -257,7 +261,7 @@ mod tests {
         assert!(live.load().resolve("psk-b", "").is_ok());
 
         // A hand removal reaches the live directory on the next read.
-        std::fs::write(&path, entry("b", "psk-b")).unwrap();
+        std::fs::write(&path, entry("b", "psk-b", &["*"])).unwrap();
         let bumped = SystemTime::now() + std::time::Duration::from_secs(5);
         std::fs::File::options()
             .write(true)
@@ -281,6 +285,48 @@ mod tests {
             .unwrap();
         assert_eq!(store.file().agents.keys().collect::<Vec<_>>(), ["b"]);
         assert!(live.load().resolve("psk-b", "").is_ok());
+
+        // A valid edit after the broken one rekeys the same id and narrows its
+        // allow list on the next read, while another agent remains unchanged.
+        std::fs::write(
+            &path,
+            format!(
+                "{}\n{}",
+                entry("b", "psk-b", &["*"]),
+                entry("control", "control-key", &["zone:subtitle"])
+            ),
+        )
+        .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(bumped + std::time::Duration::from_secs(10))
+            .unwrap();
+        store.file();
+        let control = live.load().resolve("control-key", "").unwrap();
+        std::fs::write(
+            &path,
+            format!(
+                "{}\n{}",
+                entry("b", "rotated-psk-b", &["zone:subtitle"]),
+                entry("control", "control-key", &["zone:subtitle"])
+            ),
+        )
+        .unwrap();
+        std::fs::File::options()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_modified(bumped + std::time::Duration::from_secs(15))
+            .unwrap();
+        store.file();
+        assert!(live.load().resolve("psk-b", "").is_err());
+        let rekeyed = live.load().resolve("rotated-psk-b", "").unwrap();
+        assert_eq!(rekeyed.agent_id, "b");
+        assert!(rekeyed.allows("publish_zone:subtitle"));
+        assert!(!rekeyed.allows("publish_zone:pip"));
+        assert_eq!(live.load().resolve("control-key", "").unwrap(), control);
     }
 
     #[test]
