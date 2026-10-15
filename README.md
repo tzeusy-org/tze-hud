@@ -108,7 +108,7 @@ through each lifecycle stage in one or two calls, narrates every stage in
 or file. A PSK is never printed.
 
 ```bash
-export TZE_HUD_PSK_FILE=~/.config/tze_hud/claude.psk   # or TZE_HUD_PSK; a saved POST /pair reply works
+export TZE_HUD_PSK_FILE=~/.config/tze-hud/<host>.psk   # from hud_pair.py (a saved POST /pair reply also works); or TZE_HUD_PSK
 # optional: TZE_HUD_TILE_PSK(_FILE) for a separate resident-tile agent, plus --agent <its id>
 cargo run -p poc_demo -- zones           # notification TTL, delay_ms, action press -> hud_input
 cargo run -p poc_demo -- widgets         # typed gauge/progress updates
