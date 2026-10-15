@@ -4458,7 +4458,7 @@ fn tile_font_scale_cleared_on_tile_removal() {
 
 // ─── Lifecycle-accent lease gate (hud-a745w) ─────────────────────────────────
 //
-// The in-process portal render-batch path (`apply_portal_render_batch_to_scene`)
+// The in-process portal scene-apply path (`portal_projection_driver::apply_render`)
 // bypasses the `apply_batch` Stage-1 lease check, so it must reach the accent
 // overlay through the *checked* variants. These prove the checked variants gate
 // the mutation on lease state exactly like the sibling `set_tile_root_checked`

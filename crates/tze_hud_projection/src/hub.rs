@@ -121,22 +121,8 @@ pub struct PortalView {
 
 // ─── Portal geometry update types (hud-5jbra.9) ──────────────────────────────
 
-/// Adapter-facing portal bounding rectangle in integer display pixels.
-///
-/// Coordinates are rounded from display-space f32 values (nearest integer) so
-/// that this type derives `Eq` and plays well with `PortalView`'s
-/// existing `Eq` bound. The rendering layer converts back to f32 before issuing
-/// draw commands. Sub-pixel precision is intentionally dropped at the adapter
-/// boundary; only the compositor's internal f32 geometry is sub-pixel exact.
-///
-/// ## Coalescible (state-stream)
-///
-/// `AdapterGeometrySnapshot` is a state-stream payload. The transport MUST
-/// deliver only the latest snapshot per delivery window (latest-wins), not
-/// every intermediate geometry during a gesture.
-///
-/// Spec §6b.4: "geometry changes [are delivered] to the owning adapter as
-/// coalescible state-stream snapshots."
+/// Latest runtime resize in integer display pixels. Geometry is local to the
+/// driver; it is not part of the renderer view or an agent payload.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdapterPortalRect {
     /// Left edge of the portal in display pixels (rounded from f32).

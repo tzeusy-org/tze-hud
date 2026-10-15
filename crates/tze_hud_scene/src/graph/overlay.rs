@@ -442,8 +442,8 @@ impl SceneGraph {
     /// [`set_portal_surface`](Self::set_portal_surface)): namespace isolation, a
     /// live `require_active_lease`, and `ModifyOwnTiles`. The unchecked
     /// [`set_tile_lifecycle_accent`](Self::set_tile_lifecycle_accent) only checks
-    /// tile existence, so the in-process portal render-batch path
-    /// (`apply_portal_render_batch_to_scene`) — which bypasses the `apply_batch`
+    /// tile existence, so the in-process portal scene-apply path
+    /// (`portal_projection_driver::apply_render`) — which bypasses the `apply_batch`
     /// Stage-1 lease check — could otherwise mutate the accent overlay and bump
     /// `scene.version` under a safe-mode-suspended (or orphaned/expired) lease,
     /// escaping lease suspension (hud-a745w). `require_active_lease` accepts only
@@ -553,7 +553,7 @@ impl SceneGraph {
     /// [`set_tile_lifecycle_accent_checked`](Self::set_tile_lifecycle_accent_checked)):
     /// namespace isolation, a live `require_active_lease`, and `ModifyOwnTiles`. The
     /// unchecked [`set_tile_composer_interaction`](Self::set_tile_composer_interaction)
-    /// only checks tile existence, so the in-process portal render-batch path — which
+    /// only checks tile existence, so the in-process portal scene-apply path — which
     /// bypasses the `apply_batch` Stage-1 lease check — could otherwise attach the
     /// composer node and bump `scene.version` under a suspended/orphaned/expired
     /// lease, escaping lease suspension (hud-a745w).
@@ -951,7 +951,7 @@ impl SceneGraph {
     ///
     /// The unchecked [`set_tile_unread_count`](Self::set_tile_unread_count) only
     /// checks tile existence, so the wire apply paths that bypass the `apply_batch`
-    /// Stage-1 lease check (`apply_portal_render_batch_to_scene`, and the
+    /// Stage-1 lease check (`portal_projection_driver::apply_render`, and the
     /// session-server batch that reaches `apply_single_mutation`) could otherwise
     /// mutate the badge overlay under a `ModifyOwnTiles`-revoked, safe-mode-
     /// suspended, orphaned, or expired lease — escaping tile-modification authority
