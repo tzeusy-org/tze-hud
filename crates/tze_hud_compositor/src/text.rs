@@ -5819,8 +5819,8 @@ mod tests {
             assert!(runs.iter().all(|run| run.line_w <= narrow_w));
         }
 
-        // The same retained consumer must keep contextual Unicode output and
-        // weight-separated cache slots after the candidate-search change.
+        // The cache consumer must keep contextual Unicode output and
+        // weight-separated cache slots under the union candidate search.
         for text in [
             "WWW ffi e\u{301} 👨‍👩‍👧‍👦 WWW tail",
             "العربية الطويلة WWW العربية ffi",

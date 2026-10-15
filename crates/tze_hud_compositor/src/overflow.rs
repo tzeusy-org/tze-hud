@@ -976,7 +976,7 @@ fn measure_single_line_in_buffer<'a>(
 /// binary-search the last fitting union boundary. Prefer the last original
 /// word end at or before that boundary, then use the grapheme fallback when
 /// no word end fits. Contextual Unicode shaping is not universally monotone;
-/// retained independent comparisons cover concrete vectors, not every font.
+/// unit tests compare concrete vectors against a reference, not every font.
 ///
 /// # RTL / bidi safety
 ///
@@ -1256,7 +1256,7 @@ fn binary_search_smallest_fitting(
 /// The predicate `measure(b) ≤ budget` must be **monotone**: if boundary `b`
 /// fits, all boundaries `b' < b` also fit. Contextual Advanced shaping does
 /// not guarantee monotone prefix widths for arbitrary text. The text callers
-/// rely on this precondition; retained parity tests qualify the covered cases
+/// rely on this precondition; parity tests cover sampled cases
 /// rather than proving it universally.
 ///
 /// # Complexity
@@ -1611,9 +1611,9 @@ mod tests {
             "one more whole x grapheme must exceed the box"
         );
 
-        // PARTIAL union-search parity against the prior word-first algorithm.
+        // Union-search parity against the word-first, then grapheme, reference.
         // The reference uses independent complete Buffer shaping; it does not
-        // call the changed truncation helper or derive its expected cut.
+        // call `binary_search_largest_fitting` or derive its expected cut.
         let reference_cut = |line: &str, width: f32, fonts: &mut FontSystem| {
             let mut measure = |boundary: usize| {
                 let candidate = format!("{}{ELLIPSIS}", line[..boundary].trim_end());
