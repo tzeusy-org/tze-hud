@@ -89,10 +89,6 @@ pub(crate) enum Control {
     /// Enter or click flips it, Left/Right close/open.
     Disclosure { open: bool, text: String },
     /// One of `options`: Left/Right or click cycles.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "first rows: theme and font, hud-vniri.5")
-    )]
     Choice {
         options: Vec<String>,
         selected: usize,
@@ -103,13 +99,15 @@ pub(crate) enum Control {
     /// A button. `confirm` asks once before acting (destructive or
     /// trust-widening actions).
     Action { confirm: Option<String> },
-    /// Text the owner types while the row has focus; Enter acts on it.
+    /// Text the owner types while the row has focus: the first keystroke
+    /// replaces `text`, Enter submits it as [`Edit::Text`], Esc cancels.
+    /// (On Connect an agent, Enter on the name copies the prompt.)
     Field { text: String },
 }
 
 impl Control {
     /// The question asked before `edit` applies, if it needs one.
-    pub(crate) fn confirm_for(&self, edit: Edit) -> Option<&str> {
+    pub(crate) fn confirm_for(&self, edit: &Edit) -> Option<&str> {
         match (self, edit) {
             (Control::Action { confirm }, Edit::Activate) => confirm.as_deref(),
             // Only granting asks, and only when it changes something.
@@ -120,7 +118,7 @@ impl Control {
 }
 
 /// A change the panel asks a section to make to one of its rows.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Edit {
     /// Run an action (after any confirmation).
     Activate,
@@ -130,6 +128,8 @@ pub(crate) enum Edit {
     Choose(usize),
     /// Step a stepper by `n` (negative: down).
     Step(i32),
+    /// The text typed into a field, submitted with Enter.
+    Text(String),
 }
 
 /// One card of the panel: a group of rows over one area of the HUD.
@@ -155,6 +155,10 @@ pub(crate) trait Section: Send + Sync {
     fn closed_notice(&self) -> BoxFuture<'_, Option<String>> {
         Box::pin(async { None })
     }
+
+    /// The panel opened: forget anything [`Self::refresh`] throttles, so the
+    /// first refresh reads fresh state.
+    fn opened(&self) {}
 
     /// Re-read outside state that is costly to read (locks other services
     /// take), for [`Self::rows`] to show. Called when the panel opens and

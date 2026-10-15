@@ -83,6 +83,7 @@
 //! installed exe uses the installed config and overlay mode, like autostart.
 
 use tze_hud_config::{agents_file, agents_path_for, resolve_config_path, validate_config};
+use tze_hud_runtime::launch::Source;
 use tze_hud_runtime::operator::handoff::{self, HandoffChild};
 use tze_hud_runtime::operator::install::{self, Acquire, Action, InstallPaths};
 use tze_hud_runtime::window::{WindowConfig, WindowMode};
@@ -231,6 +232,8 @@ struct StartupOptions {
     fps: u32,
     /// When true, render zone boundaries with colored debug tints.
     debug_zones: bool,
+    /// Which of the panel-visible settings a flag or variable set.
+    sources: tze_hud_runtime::launch::LaunchSources,
     /// Path for bounded windowed compositor benchmark output.
     benchmark_emit: Option<String>,
     /// Number of measured frames in benchmark mode.
@@ -272,10 +275,11 @@ impl Default for StartupOptions {
             height: 1080,
             explicit_width: false,
             explicit_height: false,
-            grpc_port: 50051,
-            mcp_port: 9090,
+            grpc_port: tze_hud_config::DEFAULT_GRPC_PORT,
+            mcp_port: tze_hud_config::DEFAULT_MCP_PORT,
             fps: 60,
             debug_zones: false,
+            sources: Default::default(),
             benchmark_emit: None,
             benchmark_frames: 600,
             benchmark_warmup_frames: 120,
@@ -524,16 +528,26 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
             opts.grpc_port = v
                 .parse::<u16>()
                 .map_err(|_| format!("TZE_HUD_GRPC_PORT: invalid port: {v:?}"))?;
+            opts.sources.grpc_port = Source::Env("TZE_HUD_GRPC_PORT");
         }
         if let Ok(v) = std::env::var("TZE_HUD_MCP_PORT") {
             opts.mcp_port = v
                 .parse::<u16>()
                 .map_err(|_| format!("TZE_HUD_MCP_PORT: invalid port: {v:?}"))?;
+            opts.sources.mcp_port = Source::Env("TZE_HUD_MCP_PORT");
         }
         if let Ok(v) = std::env::var("TZE_HUD_FPS") {
             opts.fps = v
                 .parse::<u32>()
                 .map_err(|_| format!("TZE_HUD_FPS: invalid integer: {v:?}"))?;
+            opts.sources.fps = Source::Env("TZE_HUD_FPS");
+        }
+        if std::env::var("TZE_HUD_DEBUG_ZONES").as_deref() == Ok("1") {
+            opts.debug_zones = true;
+            opts.sources.debug_zones = Source::Env("TZE_HUD_DEBUG_ZONES");
+        }
+        if std::env::var_os("TZE_HUD_FILE_LOG").is_some() {
+            opts.sources.log_level = Source::Env("TZE_HUD_FILE_LOG");
         }
         if let Ok(v) = std::env::var("TZE_HUD_BENCHMARK_EMIT") {
             opts.benchmark_emit = Some(parse_benchmark_emit_path(v, "TZE_HUD_BENCHMARK_EMIT")?);
@@ -668,6 +682,7 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
                 opts.grpc_port = val
                     .parse::<u16>()
                     .map_err(|_| format!("--grpc-port: invalid port: {val:?}"))?;
+                opts.sources.grpc_port = Source::Flag("--grpc-port");
             }
             "--mcp-port" => {
                 i += 1;
@@ -677,6 +692,7 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
                 opts.mcp_port = val
                     .parse::<u16>()
                     .map_err(|_| format!("--mcp-port: invalid port: {val:?}"))?;
+                opts.sources.mcp_port = Source::Flag("--mcp-port");
             }
             "--fps" => {
                 i += 1;
@@ -686,9 +702,11 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
                 opts.fps = val
                     .parse::<u32>()
                     .map_err(|_| format!("--fps: invalid integer: {val:?}"))?;
+                opts.sources.fps = Source::Flag("--fps");
             }
             "--debug-zones" => {
                 opts.debug_zones = true;
+                opts.sources.debug_zones = Source::Flag("--debug-zones");
             }
             "--benchmark-emit" => {
                 i += 1;
@@ -899,6 +917,31 @@ fn render_attach_info_block(opts: &StartupOptions) -> String {
     block
 }
 
+/// Fill the settings no flag or variable set from `[runtime]` in the
+/// config, recording that they came from there.
+fn apply_runtime_config(opts: &mut StartupOptions, config_toml: Option<&str>) {
+    let Some(runtime) = config_toml.and_then(tze_hud_config::runtime_section) else {
+        return;
+    };
+    let sources = &mut opts.sources;
+    sources
+        .mcp_port
+        .take_config(&mut opts.mcp_port, runtime.mcp_port);
+    sources
+        .grpc_port
+        .take_config(&mut opts.grpc_port, runtime.grpc_port);
+    sources.fps.take_config(&mut opts.fps, runtime.fps);
+    sources
+        .debug_zones
+        .take_config(&mut opts.debug_zones, runtime.debug_zones);
+    let mut level = String::new();
+    if sources.log_level.take_config(&mut level, runtime.log_level) {
+        if let Err(e) = tze_hud_runtime::operator::logs::set_file_level(&level) {
+            tracing::warn!(level, error = %e, "config log_level not applied");
+        }
+    }
+}
+
 /// Stdout logging (gated by `TZE_HUD_LOG`, JSON if `TZE_HUD_LOG_JSON=1`) plus
 /// a durable plain-text file in the log directory (`info` unless
 /// `TZE_HUD_FILE_LOG` says otherwise), because the overlay has no console.
@@ -924,12 +967,15 @@ fn init_logging() {
         Err(e) => (None, Some(e)),
     };
     let file_layer = file.map(|f| {
-        let filter =
-            EnvFilter::try_from_env("TZE_HUD_FILE_LOG").unwrap_or_else(|_| EnvFilter::new("info"));
-        fmt::layer()
-            .with_ansi(false)
-            .with_writer(move || tze_hud_runtime::operator::logs::LogWriter(f.clone()))
-            .with_filter(filter)
+        // An env filter can be any directive string; the panel's level row
+        // then shows it pinned. Otherwise the level is reloadable.
+        let initial = std::env::var("TZE_HUD_FILE_LOG").unwrap_or_else(|_| "info".to_owned());
+        let (layer, set_level) = file_log_layer(
+            move || tze_hud_runtime::operator::logs::LogWriter(f.clone()),
+            &initial,
+        );
+        tze_hud_runtime::operator::logs::install_file_level(&initial, set_level);
+        layer
     });
     tracing_subscriber::registry()
         .with(stdout)
@@ -941,6 +987,35 @@ fn init_logging() {
             tracing::warn!(path = %log_path.display(), error = %e, "log file unavailable; logging to stdout only")
         }
     }
+}
+
+/// The log file's layer, filtered at `initial`, and a setter that changes
+/// the filter while the HUD runs (the control panel's Log level row).
+#[allow(clippy::type_complexity)]
+fn file_log_layer<S, W>(
+    writer: W,
+    initial: &str,
+) -> (
+    impl tracing_subscriber::Layer<S> + use<S, W>,
+    Box<dyn Fn(&str) -> Result<(), String> + Send + Sync>,
+)
+where
+    S: tracing::Subscriber + for<'a> tracing_subscriber::registry::LookupSpan<'a>,
+    W: for<'w> tracing_subscriber::fmt::MakeWriter<'w> + Send + Sync + 'static,
+{
+    use tracing_subscriber::Layer;
+    use tracing_subscriber::{EnvFilter, fmt};
+    let (filter, handle) = tracing_subscriber::reload::Layer::new(EnvFilter::new(initial));
+    let set_level = Box::new(move |level: &str| {
+        handle
+            .reload(EnvFilter::new(level))
+            .map_err(|e| e.to_string())
+    });
+    let layer = fmt::layer()
+        .with_ansi(false)
+        .with_writer(writer)
+        .with_filter(filter);
+    (layer, set_level)
 }
 
 /// `--install` / bare first launch: install, then exit; the installed copy runs.
@@ -1298,6 +1373,8 @@ set {DEV_ALLOW_INSECURE_STARTUP_ENV}=1 only in debug/dev runs if you need fallba
                 build: format!("{VERSION}+{GIT_SHA}"),
             });
 
+    apply_runtime_config(&mut opts, config_toml.as_deref());
+
     tracing::info!(
         version = VERSION,
         git_sha = GIT_SHA,
@@ -1338,6 +1415,7 @@ set {DEV_ALLOW_INSECURE_STARTUP_ENV}=1 only in debug/dev runs if you need fallba
         }),
         handoff: opts.handoff_child.take().map(HandoffChild::new),
         updated_from: opts.updated_from.take(),
+        sources: opts.sources,
     };
 
     let runtime = WindowedRuntime::new(config);
@@ -1374,6 +1452,8 @@ mod tests {
                 "TZE_HUD_GRPC_PORT",
                 "TZE_HUD_MCP_PORT",
                 "TZE_HUD_FPS",
+                "TZE_HUD_DEBUG_ZONES",
+                "TZE_HUD_FILE_LOG",
                 "TZE_HUD_BENCHMARK_EMIT",
                 "TZE_HUD_BENCHMARK_FRAMES",
                 "TZE_HUD_BENCHMARK_WARMUP_FRAMES",
@@ -1419,6 +1499,80 @@ mod tests {
         }
         clear_parse_options_env();
         result
+    }
+
+    /// The log file's level changes while running: after the setter moves
+    /// it from info to debug, a debug event reaches the file, and back.
+    #[test]
+    fn file_log_level_reloads_live() {
+        use tracing_subscriber::layer::SubscriberExt;
+
+        #[derive(Clone, Default)]
+        struct Sink(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+        impl std::io::Write for Sink {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let sink = Sink::default();
+        let writer = sink.clone();
+        let (layer, set_level) = file_log_layer(move || writer.clone(), "info");
+        let subscriber = tracing_subscriber::registry().with(layer);
+        let written = || String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::debug!("hidden at info");
+            set_level("debug").unwrap();
+            tracing::debug!("shown at debug");
+            set_level("warn").unwrap();
+            tracing::info!("hidden at warn");
+        });
+        let log = written();
+        assert!(!log.contains("hidden at"), "{log}");
+        assert!(log.contains("shown at debug"), "{log}");
+    }
+
+    /// Flag > env > `[runtime]` > default, with each value's source kept for
+    /// the control panel: config fills only what nothing higher set.
+    #[test]
+    fn runtime_config_fills_below_flags_and_env() {
+        let config = "[runtime]\nprofile = \"full-display\"\nmcp_port = 9290\ngrpc_port = 50061\nfps = 30\ndebug_zones = true\n";
+        let mut opts =
+            parse_with_env(&[("TZE_HUD_GRPC_PORT", "50071")], &["--mcp-port", "9390"]).unwrap();
+        apply_runtime_config(&mut opts, Some(config));
+        assert_eq!(
+            (opts.mcp_port, opts.sources.mcp_port),
+            (9390, Source::Flag("--mcp-port"))
+        );
+        assert_eq!(
+            (opts.grpc_port, opts.sources.grpc_port),
+            (50071, Source::Env("TZE_HUD_GRPC_PORT"))
+        );
+        assert_eq!((opts.fps, opts.sources.fps), (30, Source::Config));
+        assert_eq!(
+            (opts.debug_zones, opts.sources.debug_zones),
+            (true, Source::Config)
+        );
+
+        // log_level: config fills it unless TZE_HUD_FILE_LOG pins it.
+        let level = "[runtime]\nprofile = \"full-display\"\nlog_level = \"debug\"\n";
+        let mut opts = parse_with_env(&[], &[]).unwrap();
+        apply_runtime_config(&mut opts, Some(level));
+        assert_eq!(opts.sources.log_level, Source::Config);
+        let mut opts = parse_with_env(&[("TZE_HUD_FILE_LOG", "trace")], &[]).unwrap();
+        apply_runtime_config(&mut opts, Some(level));
+        assert_eq!(opts.sources.log_level, Source::Env("TZE_HUD_FILE_LOG"));
+
+        // An invalid [runtime] is ignored here (loading reports it).
+        let mut opts = parse_with_env(&[], &[]).unwrap();
+        apply_runtime_config(
+            &mut opts,
+            Some("[runtime]\nprofile = \"full-display\"\nfps = 0\n"),
+        );
+        assert_eq!((opts.fps, opts.sources.fps), (60, Source::Default));
     }
 
     /// Every distinct (env, args) -> parsed-options case. `check` asserts the

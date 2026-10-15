@@ -429,6 +429,30 @@ pub fn spawn_pair_listener(on_pair: impl Fn() + Send + 'static) {
     let _ = on_pair;
 }
 
+/// Whether the HUD starts at sign-in (the `HKCU\…\Run` value exists).
+/// Always false off Windows.
+pub fn autostart_enabled() -> io::Result<bool> {
+    #[cfg(windows)]
+    return win::autostart_enabled();
+    #[cfg(not(windows))]
+    Ok(false)
+}
+
+/// Start the installed HUD at sign-in, or stop doing so. Only the `Run`
+/// value changes; the install stays as it is.
+pub fn set_autostart(paths: &InstallPaths, on: bool) -> io::Result<()> {
+    #[cfg(windows)]
+    return win::set_autostart(paths, on);
+    #[cfg(not(windows))]
+    {
+        let _ = (paths, on);
+        Err(io::Error::new(
+            io::ErrorKind::Unsupported,
+            "autostart is Windows-only",
+        ))
+    }
+}
+
 /// Ask a running instance to open pairing. True if one was listening; always
 /// false off Windows.
 pub fn signal_pair() -> bool {
@@ -455,8 +479,9 @@ mod win {
         GetLastError, HANDLE, WAIT_OBJECT_0, WIN32_ERROR,
     };
     use windows::Win32::System::Registry::{
-        HKEY, HKEY_CURRENT_USER, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RegCloseKey,
-        RegCreateKeyExW, RegDeleteKeyValueW, RegDeleteKeyW, RegSetValueExW,
+        HKEY, HKEY_CURRENT_USER, KEY_SET_VALUE, REG_OPTION_NON_VOLATILE, REG_SZ, RRF_RT_REG_SZ,
+        RegCloseKey, RegCreateKeyExW, RegDeleteKeyValueW, RegDeleteKeyW, RegGetValueW,
+        RegSetValueExW,
     };
     use windows::Win32::System::Threading::{
         CREATE_NEW_PROCESS_GROUP, CreateEventW, CreateMutexW, DETACHED_PROCESS, EVENT_MODIFY_STATE,
@@ -530,6 +555,48 @@ mod win {
             Some("Path"),
             &paths.install_dir.to_string_lossy(),
         )
+    }
+
+    pub(super) fn autostart_enabled() -> io::Result<bool> {
+        let run = wide(RUN_KEY);
+        let value = wide(RUN_VALUE_NAME);
+        // SAFETY: pointers are to live, NUL-terminated buffers; no data
+        // buffer is passed, so the call only reports whether the value exists.
+        let code = unsafe {
+            RegGetValueW(
+                HKEY_CURRENT_USER,
+                PCWSTR(run.as_ptr()),
+                PCWSTR(value.as_ptr()),
+                RRF_RT_REG_SZ,
+                None,
+                None,
+                None,
+            )
+        };
+        if is_missing(code) {
+            return Ok(false);
+        }
+        check(code, "RegGetValueW").map(|()| true)
+    }
+
+    pub(super) fn set_autostart(paths: &InstallPaths, on: bool) -> io::Result<()> {
+        if on {
+            return set_string(RUN_KEY, Some(RUN_VALUE_NAME), &paths.run_command());
+        }
+        let run = wide(RUN_KEY);
+        let value = wide(RUN_VALUE_NAME);
+        // SAFETY: pointers are to live, NUL-terminated buffers.
+        let code = unsafe {
+            RegDeleteKeyValueW(
+                HKEY_CURRENT_USER,
+                PCWSTR(run.as_ptr()),
+                PCWSTR(value.as_ptr()),
+            )
+        };
+        if is_missing(code) {
+            return Ok(());
+        }
+        check(code, "RegDeleteKeyValueW")
     }
 
     pub(super) fn unregister() -> io::Result<()> {

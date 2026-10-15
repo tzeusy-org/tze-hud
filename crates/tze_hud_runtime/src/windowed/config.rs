@@ -126,6 +126,9 @@ pub struct WindowedConfig {
     /// Set when `POST /admin/update` started this instance (`--updated-from
     /// <old sha>`): show the "Updated to ..." toast.
     pub updated_from: Option<String>,
+    /// Which settings a flag or variable pinned, and which came from config,
+    /// for the control panel.
+    pub sources: crate::launch::LaunchSources,
 }
 
 impl Default for WindowedConfig {
@@ -145,6 +148,7 @@ impl Default for WindowedConfig {
             relaunch: None,
             updated_from: None,
             handoff: None,
+            sources: Default::default(),
         }
     }
 }

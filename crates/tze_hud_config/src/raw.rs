@@ -34,6 +34,19 @@ pub struct RawRuntime {
     pub panel_hotkey: Option<String>,
     /// Global chord that opens pairing (default `"Ctrl+Shift+F10"`).
     pub pairing_hotkey: Option<String>,
+    /// MCP HTTP port (default 9090; 0 disables). `--mcp-port` and
+    /// `TZE_HUD_MCP_PORT` win over it. Read at start.
+    pub mcp_port: Option<u16>,
+    /// gRPC port (default 50051; 0 disables). `--grpc-port` and
+    /// `TZE_HUD_GRPC_PORT` win over it. Read at start.
+    pub grpc_port: Option<u16>,
+    /// Frame rate cap, 1-240 (default 60). `--fps` and `TZE_HUD_FPS` win.
+    pub fps: Option<u32>,
+    /// Log file level: `error`, `warn`, `info` (default), `debug` or
+    /// `trace`. `TZE_HUD_FILE_LOG` wins.
+    pub log_level: Option<String>,
+    /// Draw zone outlines (default false). `--debug-zones` wins.
+    pub debug_zones: Option<bool>,
 }
 
 // ─── [[tabs]] ────────────────────────────────────────────────────────────────

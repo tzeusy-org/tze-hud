@@ -372,6 +372,12 @@ impl FirewallProbe {
             .map(|(_, v)| v.clone())
     }
 
+    /// Drop the cached answer, so the next check reads the firewall again
+    /// (after the HUD changed its rules).
+    pub fn forget(&self) {
+        *self.cache.lock().unwrap_or_else(|e| e.into_inner()) = None;
+    }
+
     /// The last answer however old, for showing while a fresh one is
     /// checked. Never blocks.
     pub fn last(&self) -> Option<TailnetInbound> {

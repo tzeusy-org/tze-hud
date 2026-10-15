@@ -134,13 +134,20 @@ impl Poc {
     }
 
     async fn boot_with(agents_file: Option<(tempfile::TempDir, std::path::PathBuf)>) -> Self {
+        Self::boot_from(runtime_config(), agents_file).await
+    }
+
+    async fn boot_from(
+        cfg: WindowedConfig,
+        agents_file: Option<(tempfile::TempDir, std::path::PathBuf)>,
+    ) -> Self {
         let start_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock after epoch")
             .as_millis() as u64;
         let clock = TestClock::new(start_ms);
         let hud = HeadlessEventLoopHarness::with_network_and_agents_file(
-            runtime_config(),
+            cfg,
             Arc::new(clock.clone()),
             agents_file.as_ref().map(|(_, path)| path.clone()),
         )
@@ -1562,6 +1569,120 @@ async fn poc_panel_connect_prompt_pairs_an_agent() {
     .await;
     assert!(poc.hud.pairing_open());
     assert!(!poc.hud.safe_mode_active());
+}
+
+/// CP-7 and CP-10 through the panel: a live setting applies at once and is
+/// saved to `[runtime]` with the owner's comments kept; a value a flag set is
+/// read-only and names the flag; a port is saved, marked "Restart to apply"
+/// and counted by Restart now, whose failure leaves this instance up and says
+/// why; System's toggles and openers reach the OS (recorded by the harness).
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn poc_panel_runtime_rows_apply_save_and_stage_a_restart() {
+    use tze_hud_compositor::PanelControl;
+    use tze_hud_runtime::launch::Source;
+    let dir = tempfile::tempdir().expect("scratch dir");
+    let config = dir.path().join("tze_hud.toml");
+    std::fs::write(&config, PRODUCTION_CONFIG).expect("config copy");
+    let mut cfg = runtime_config();
+    cfg.config_file_path = Some(config.display().to_string());
+    cfg.debug_zones = true;
+    cfg.sources.debug_zones = Source::Flag("--debug-zones");
+    let mut poc = Poc::boot_from(cfg, None).await;
+    poc.open_panel().await;
+    let saved = || std::fs::read_to_string(&config).expect("config");
+    // A key the config sets (not a commented example).
+    let sets = |key: &str| saved().lines().any(|l| l.trim_start().starts_with(key));
+
+    // Pinned by a flag: read-only, naming it.
+    poc.wait_for("zone outlines row", |hud| {
+        hud.control_panel_row("diagnostics.zone_outlines")
+            .is_some_and(|item| {
+                item.detail.as_deref() == Some("Set by --debug-zones")
+                    && matches!(item.control, PanelControl::ReadOnly { ref text, .. } if text == "On")
+            })
+    })
+    .await;
+
+    // Live: the cap moves to the next choice now and is saved.
+    poc.click("diagnostics.fps").await;
+    // Applied live first, then saved.
+    poc.wait_for("fps 90 applies and is saved", |hud| {
+        hud.live_settings().0 == 90 && saved().contains("\nfps = 90")
+    })
+    .await;
+    assert!(
+        saved().starts_with(&PRODUCTION_CONFIG[..PRODUCTION_CONFIG.find("[runtime]").unwrap()]),
+        "the owner's header survives"
+    );
+    assert!(saved().contains("# Global chords (work while the overlay is unfocused"));
+
+    // A port: typed, refused when invalid, then saved and staged.
+    poc.click("network.grpc_port").await;
+    poc.hud.panel_type("99999");
+    poc.hud.panel_press("Enter");
+    poc.wait_for("the bad port is refused", |hud| {
+        hud.control_panel_row("network.grpc_port")
+            .and_then(|item| item.detail)
+            .is_some_and(|d| d.starts_with("Type a port"))
+    })
+    .await;
+    assert!(!sets("grpc_port"));
+    poc.hud.panel_type("50061");
+    poc.hud.panel_press("Enter");
+    poc.wait_for("the port is staged", |hud| {
+        hud.control_panel_row("network.grpc_port").is_some_and(|item| {
+            item.badge.as_ref().is_some_and(|b| b.text == "Restart to apply")
+                && matches!(item.control, PanelControl::Value { ref text, .. } if text == "50061")
+        })
+    })
+    .await;
+    assert!(saved().contains("grpc_port = 50061"), "{}", saved());
+    poc.wait_for("restart counts it", |hud| {
+        hud.control_panel_row("system.restart").is_some_and(|item| {
+            item.detail.as_deref() == Some("Applies 1 change · agent content clears")
+                && item.badge.as_ref().is_some_and(|b| b.text == "gRPC port")
+        })
+    })
+    .await;
+
+    // Restart: confirmed; the new instance never starts, so this one stays
+    // up and the row says why.
+    poc.click_confirmed("system.restart", "Restart the HUD now?")
+        .await;
+    poc.wait_for("the failed restart shows", |hud| {
+        hud.control_panel_row("system.restart")
+            .and_then(|item| item.detail)
+            .is_some_and(|d| d.starts_with("Last restart failed:"))
+    })
+    .await;
+    assert!(poc.hud.control_panel_open(), "this instance stays up");
+
+    // System's OS effects.
+    poc.wait_for("autostart is read", |hud| {
+        hud.control_panel_row("system.autostart")
+            .is_some_and(|item| item.control == PanelControl::Toggle(false))
+    })
+    .await;
+    poc.click("system.autostart").await;
+    poc.wait_for("autostart turns on", |hud| {
+        hud.control_panel_row("system.autostart")
+            .is_some_and(|item| item.control == PanelControl::Toggle(true))
+    })
+    .await;
+    poc.click("system.open_config").await;
+    poc.click("system.open_logs").await;
+    poc.wait_for("the openers ran", |hud| hud.panel_effects().len() == 3)
+        .await;
+    let effects = poc.hud.panel_effects();
+    assert_eq!(effects[0], "autostart true");
+    assert_eq!(effects[1], format!("open {}", config.display()));
+    // The folder the row names is the one opened.
+    let logs = poc
+        .hud
+        .control_panel_row("system.open_logs")
+        .and_then(|item| item.detail)
+        .expect("the log folder row names its folder");
+    assert_eq!(effects[2], format!("open {logs}"));
 }
 
 /// A responsive agent is told what the human did (docs/api.md): safe mode

@@ -1,4 +1,6 @@
-//! Persist `[design_tokens]` choices (theme, fonts) to `tze_hud.toml`.
+//! Persist control panel choices to `tze_hud.toml`: `[design_tokens]`
+//! (theme, fonts) and `[runtime]` (ports, fps, log level, zone outlines,
+//! chords).
 //!
 //! The only writer of `tze_hud.toml`. It edits just the named keys with
 //! `toml_edit`, so the owner's comments, key order, quoting and every other
@@ -9,6 +11,8 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use toml_edit::{DocumentMut, Item, Table, Value};
+
+use tze_hud_scene::config::ChordRole;
 
 use crate::raw::{RawConfig, RawDesignTokens};
 use crate::themes::{THEME_KEY, validate_theme};
@@ -112,38 +116,110 @@ fn validate(updates: &[(&str, TokenUpdate)]) -> Result<(), ConfigWriteError> {
 
 /// Apply `updates` to `[design_tokens]` of the TOML text `src`.
 fn apply(src: &str, updates: &[(&str, TokenUpdate)]) -> Result<String, ConfigWriteError> {
+    let edits: Vec<(&str, Option<Value>)> = updates
+        .iter()
+        .map(|(key, update)| match update {
+            TokenUpdate::Set(value) => (*key, Some(Value::from(value.as_str()))),
+            TokenUpdate::Remove => (*key, None),
+        })
+        .collect();
+    apply_table(src, "design_tokens", &edits)
+}
+
+/// Set (`Some`) or remove (`None`) keys of `[table]` in the TOML text `src`,
+/// keeping everything else byte-for-byte.
+fn apply_table(
+    src: &str,
+    table_name: &str,
+    edits: &[(&str, Option<Value>)],
+) -> Result<String, ConfigWriteError> {
     let mut doc: DocumentMut = src
         .parse()
         .map_err(|e: toml_edit::TomlError| ConfigWriteError::Parse(e.to_string()))?;
-    for (key, update) in updates {
-        match update {
-            TokenUpdate::Remove => {
-                if let Some(t) = doc.get_mut("design_tokens").and_then(Item::as_table_mut) {
+    for (key, value) in edits {
+        match value {
+            None => {
+                if let Some(t) = doc.get_mut(table_name).and_then(Item::as_table_mut) {
                     t.remove(key);
                 }
             }
-            TokenUpdate::Set(value) => {
+            Some(value) => {
                 let item = doc
-                    .entry("design_tokens")
+                    .entry(table_name)
                     .or_insert_with(|| Item::Table(Table::new()));
                 let table = item.as_table_mut().ok_or_else(|| {
-                    ConfigWriteError::Parse("[design_tokens] is not a table".to_owned())
+                    ConfigWriteError::Parse(format!("[{table_name}] is not a table"))
                 })?;
                 match table.get_mut(key).and_then(Item::as_value_mut) {
                     // Keep the trailing comment / spacing of an existing value.
                     Some(existing) => {
                         let decor = existing.decor().clone();
-                        *existing = Value::from(value.as_str());
+                        *existing = value.clone();
                         *existing.decor_mut() = decor;
                     }
                     None => {
-                        table.insert(key, toml_edit::value(value.as_str()));
+                        table.insert(key, Item::Value(value.clone()));
                     }
                 }
             }
         }
     }
     Ok(keep_line_endings(src, doc.to_string()))
+}
+
+/// One `[runtime]` key the control panel writes; `None` removes the key, so
+/// the default applies again.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RuntimeUpdate {
+    McpPort(Option<u16>),
+    GrpcPort(Option<u16>),
+    Fps(Option<u32>),
+    LogLevel(Option<String>),
+    DebugZones(Option<bool>),
+    Hotkey(ChordRole, Option<String>),
+}
+
+impl RuntimeUpdate {
+    /// The `[runtime]` key this writes.
+    pub fn key(&self) -> &'static str {
+        match self {
+            Self::McpPort(_) => "mcp_port",
+            Self::GrpcPort(_) => "grpc_port",
+            Self::Fps(_) => "fps",
+            Self::LogLevel(_) => "log_level",
+            Self::DebugZones(_) => "debug_zones",
+            Self::Hotkey(role, _) => role.config_key(),
+        }
+    }
+
+    fn value(&self) -> Option<Value> {
+        match self {
+            Self::McpPort(v) | Self::GrpcPort(v) => v.map(|p| Value::from(i64::from(p))),
+            Self::Fps(v) => v.map(|f| Value::from(i64::from(f))),
+            Self::LogLevel(v) | Self::Hotkey(_, v) => v.as_deref().map(Value::from),
+            Self::DebugZones(v) => v.map(Value::from),
+        }
+    }
+}
+
+/// Apply `updates` to `[runtime]` of `src`, then check the whole resulting
+/// `[runtime]` table (a port may not equal the other port, chords stay
+/// distinct, …).
+fn apply_runtime(src: &str, updates: &[RuntimeUpdate]) -> Result<String, ConfigWriteError> {
+    let edits: Vec<(&str, Option<Value>)> = updates.iter().map(|u| (u.key(), u.value())).collect();
+    let out = apply_table(src, "runtime", &edits)?;
+    let raw: RawConfig =
+        toml::from_str(&out).map_err(|e| ConfigWriteError::Parse(e.to_string()))?;
+    let mut errors = Vec::new();
+    crate::loader::validate_runtime(&raw.runtime.unwrap_or_default(), &mut errors);
+    if let Some(e) = errors.into_iter().next() {
+        return Err(ConfigWriteError::InvalidValue {
+            key: e.field_path,
+            expected: e.expected,
+            got: e.got,
+        });
+    }
+    Ok(out)
 }
 
 /// New lines `toml_edit` adds are LF; keep a CRLF file CRLF. A file with mixed
@@ -216,6 +292,16 @@ fn set_design_tokens_with(
     rename: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
 ) -> Result<(), ConfigWriteError> {
     validate(updates)?;
+    edit_with(config_path, |src| apply(src, updates), rename)
+}
+
+/// Read the config, edit its text with `edit`, and replace it atomically
+/// when anything changed.
+fn edit_with(
+    config_path: &Path,
+    edit: impl FnOnce(&str) -> Result<String, ConfigWriteError>,
+    rename: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(), ConfigWriteError> {
     let locked = |e: ConfigWriteError| match e {
         ConfigWriteError::ReadOnlyOrLocked(_) => {
             ConfigWriteError::ReadOnlyOrLocked(config_path.to_owned())
@@ -229,7 +315,7 @@ fn set_design_tokens_with(
         }
         Err(e) => return Err(locked(e.into())),
     };
-    let out = apply(&src, updates)?;
+    let out = edit(&src)?;
     if out == src {
         return Ok(());
     }
@@ -253,6 +339,18 @@ pub fn set_design_tokens(
     updates: &[(&str, TokenUpdate)],
 ) -> Result<(), ConfigWriteError> {
     set_design_tokens_with(config_path, updates, |from, to| std::fs::rename(from, to))
+}
+
+/// Set or remove `[runtime]` keys in the config file at `config_path`, the
+/// same way [`set_design_tokens`] does: validated first (against the whole
+/// resulting `[runtime]` table), nothing written on error, comments kept,
+/// replaced atomically.
+pub fn set_runtime(config_path: &Path, updates: &[RuntimeUpdate]) -> Result<(), ConfigWriteError> {
+    edit_with(
+        config_path,
+        |src| apply_runtime(src, updates),
+        |from, to| std::fs::rename(from, to),
+    )
 }
 
 #[cfg(test)]
@@ -370,5 +468,100 @@ mod tests {
             set_design_tokens(&path, &[("theme", TokenUpdate::Set("classic".into()))]).unwrap_err();
         assert!(matches!(err, ConfigWriteError::NotFound(_)));
         assert!(!path.exists());
+    }
+
+    /// `[runtime]` keys are written typed, beside the owner's comments,
+    /// and removing one leaves the rest of the file as it was.
+    #[test]
+    fn runtime_keys_round_trip_typed_and_keep_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tze_hud.toml");
+        std::fs::write(&path, DOC).unwrap();
+        set_runtime(
+            &path,
+            &[
+                RuntimeUpdate::GrpcPort(Some(50061)),
+                RuntimeUpdate::Fps(Some(30)),
+                RuntimeUpdate::LogLevel(Some("debug".into())),
+                RuntimeUpdate::DebugZones(Some(true)),
+                RuntimeUpdate::Hotkey(ChordRole::Panel, Some("Ctrl+Alt+F9".into())),
+            ],
+        )
+        .unwrap();
+        let got = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            got.starts_with("# my HUD\n[runtime]\nprofile = \"full-display\"  # keep\n"),
+            "{got}"
+        );
+        assert!(
+            got.contains("# pick one\ntheme = \"classic\" # trailing\n"),
+            "{got}"
+        );
+        let runtime = crate::loader::runtime_section(&got).expect("valid [runtime]");
+        assert_eq!(runtime.grpc_port, Some(50061));
+        assert_eq!(runtime.fps, Some(30));
+        assert_eq!(runtime.log_level.as_deref(), Some("debug"));
+        assert_eq!(runtime.debug_zones, Some(true));
+        assert_eq!(runtime.panel_hotkey.as_deref(), Some("Ctrl+Alt+F9"));
+
+        set_runtime(
+            &path,
+            &[
+                RuntimeUpdate::GrpcPort(None),
+                RuntimeUpdate::Fps(None),
+                RuntimeUpdate::LogLevel(None),
+                RuntimeUpdate::DebugZones(None),
+                RuntimeUpdate::Hotkey(ChordRole::Panel, None),
+            ],
+        )
+        .unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), DOC);
+    }
+
+    /// A runtime value that would make `[runtime]` invalid is refused and
+    /// nothing is written: equal ports, fps out of range, unknown log level,
+    /// a chord that does not parse or that another HUD chord uses.
+    #[test]
+    fn invalid_runtime_values_are_refused_and_nothing_is_written() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tze_hud.toml");
+        let src = "[runtime]\nprofile = \"full-display\"\nmcp_port = 9290\n";
+        std::fs::write(&path, src).unwrap();
+        for (bad, field) in [
+            (RuntimeUpdate::GrpcPort(Some(9290)), "runtime.grpc_port"),
+            // gRPC is unset, so it would start on its default.
+            (RuntimeUpdate::McpPort(Some(50051)), "runtime.grpc_port"),
+            (RuntimeUpdate::Fps(Some(0)), "runtime.fps"),
+            (RuntimeUpdate::Fps(Some(241)), "runtime.fps"),
+            (
+                RuntimeUpdate::LogLevel(Some("loud".into())),
+                "runtime.log_level",
+            ),
+            (
+                RuntimeUpdate::Hotkey(ChordRole::Pause, Some("F12".into())),
+                "runtime.safe_mode_hotkey",
+            ),
+            (
+                RuntimeUpdate::Hotkey(ChordRole::Pairing, Some("Ctrl+Shift+F11".into())),
+                "runtime.pairing_hotkey",
+            ),
+        ] {
+            match set_runtime(&path, &[bad.clone()]) {
+                Err(ConfigWriteError::InvalidValue { key, .. }) => {
+                    assert_eq!(key, field, "{bad:?}")
+                }
+                other => panic!("{bad:?}: {other:?}"),
+            }
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), src);
+        }
+        // Port 0 (disabled) twice is fine.
+        set_runtime(
+            &path,
+            &[
+                RuntimeUpdate::McpPort(Some(0)),
+                RuntimeUpdate::GrpcPort(Some(0)),
+            ],
+        )
+        .unwrap();
     }
 }

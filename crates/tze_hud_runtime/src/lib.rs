@@ -46,6 +46,7 @@ pub mod headless;
 pub(crate) mod http;
 pub(crate) mod idle_efficiency;
 mod input_latency;
+pub mod launch;
 pub(crate) mod mcp;
 pub(crate) mod mutation_budget_bridge;
 pub(crate) mod net_addrs;

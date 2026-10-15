@@ -158,7 +158,7 @@ impl Section for VisibilitySection {
             let mut scene = self.scene.lock().await;
             let old = scene.owner_hidden();
             let mut new = old;
-            match (row, edit) {
+            match (row, edit.clone()) {
                 // Hide everything, or show everything when it all is hidden.
                 (Self::HIDE_ALL, Edit::Set(hide)) => {
                     new = if hide {

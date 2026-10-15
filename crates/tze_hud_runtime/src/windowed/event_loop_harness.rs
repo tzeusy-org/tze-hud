@@ -121,6 +121,11 @@ impl WindowedRuntimeState {
             active_tab_mirror,
             chrome_state: Arc::new(std::sync::RwLock::new(crate::shell::ChromeState::new())),
             system_card: crate::shell::system_card::SystemCardHandle::default(),
+            live: Arc::new(crate::launch::LiveSettings::new(
+                60,
+                false,
+                Default::default(),
+            )),
             pairing: None,
             control_panel: None,
             input_ring: Arc::new(StdMutex::new(VecDeque::new())),
@@ -243,6 +248,10 @@ pub struct HeadlessEventLoopHarness {
     mcp_addr: Option<SocketAddr>,
     grpc_addr: Option<SocketAddr>,
     clipboard: Arc<std::sync::Mutex<Vec<String>>>,
+    /// What the panel's System and Network rows did outside the HUD
+    /// (`open <path>`, `firewall <action> <ports>`, `autostart <on>`),
+    /// recorded instead of done.
+    effects: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 impl HeadlessEventLoopHarness {
@@ -381,8 +390,14 @@ impl HeadlessEventLoopHarness {
         );
 
         let render_wake = state.wake.render_notifier();
+        state.live = Arc::new(crate::launch::LiveSettings::new(
+            cfg.target_fps,
+            cfg.debug_zones,
+            render_wake.clone(),
+        ));
         let panel_scene = Arc::clone(&state.shared_state.lock().await.scene);
         let clipboard: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
+        let effects: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
         let deps = crate::shell::control_panel::ControlPanelDeps {
             scene: Arc::clone(&panel_scene),
             pause: crate::shell::control_panel::PauseControl::new(
@@ -414,10 +429,16 @@ impl HeadlessEventLoopHarness {
                 scene: panel_scene,
                 portals: Some(portals.clone()),
                 lease_expirations: state.lease_expirations.clone(),
-                pairing,
+                pairing: pairing.clone(),
                 render_wake: render_wake.clone(),
                 main_wake: state.wake.main_work_notifier(),
             }),
+            runtime: Some(Self::panel_runtime(
+                &cfg,
+                Arc::clone(&state.live),
+                pairing.as_ref().map(|p| p.firewall()),
+                Arc::clone(&effects),
+            )),
             render_wake,
             main_wake: state.wake.main_work_notifier(),
         };
@@ -439,6 +460,7 @@ impl HeadlessEventLoopHarness {
             mcp_addr: Some(mcp_addr),
             grpc_addr: Some(grpc_addr),
             clipboard,
+            effects,
         })
     }
 
@@ -534,6 +556,72 @@ impl HeadlessEventLoopHarness {
             tze_hud_compositor::PanelBody::Connect(card) => Some(card),
             _ => None,
         }
+    }
+
+    /// The panel's Network, Diagnostics and System deps as production builds
+    /// them from `cfg` (config file, sources, ports), with every outside
+    /// effect recorded in `effects` and a restart whose new instance never
+    /// starts (so the failure path shows).
+    fn panel_runtime(
+        cfg: &super::WindowedConfig,
+        live: Arc<crate::launch::LiveSettings>,
+        firewall: Option<Arc<crate::firewall::FirewallProbe>>,
+        effects: Arc<std::sync::Mutex<Vec<String>>>,
+    ) -> crate::shell::control_panel::RuntimeControl {
+        let restart = crate::operator::handoff::RestartHandle::with_spawner(
+            Box::new(|_| Err(std::io::Error::other("test harness: no new instance"))),
+            Arc::new(|| {}),
+            std::time::Duration::from_millis(200),
+            Default::default(),
+        );
+        let mut control = crate::shell::control_panel::RuntimeControl::system(
+            cfg,
+            live,
+            Some(restart),
+            None,
+            firewall,
+        );
+        let record = move |effects: &Arc<std::sync::Mutex<Vec<String>>>, what: String| {
+            effects.lock().unwrap_or_else(|e| e.into_inner()).push(what);
+        };
+        let (e1, e2, e3) = (
+            Arc::clone(&effects),
+            Arc::clone(&effects),
+            Arc::clone(&effects),
+        );
+        control.remote = Arc::new(move |action, ports| {
+            record(&e1, format!("firewall {action:?} {ports:?}"));
+            Ok("done".to_owned())
+        });
+        control.open = Arc::new(move |path| {
+            record(&e2, format!("open {}", path.display()));
+            Ok(())
+        });
+        let autostart = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        control.autostart = Some(Arc::new(move |set| {
+            if let Some(on) = set {
+                autostart.store(on, std::sync::atomic::Ordering::SeqCst);
+                record(&e3, format!("autostart {on}"));
+            }
+            Ok(autostart.load(std::sync::atomic::Ordering::SeqCst))
+        }));
+        control
+    }
+
+    /// What the panel's rows did outside the HUD, oldest first.
+    pub fn panel_effects(&self) -> Vec<String> {
+        self.effects
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// The frame rate cap and zone outlines the compositor would use now.
+    pub fn live_settings(&self) -> (u32, bool) {
+        (
+            self.app.state.live.fps(),
+            self.app.state.live.zone_outlines(),
+        )
     }
 
     /// What the control panel last put on the clipboard (the harness
@@ -871,6 +959,7 @@ impl HeadlessEventLoopHarness {
             mcp_addr: None,
             grpc_addr: None,
             clipboard: Arc::default(),
+            effects: Arc::default(),
         }
     }
 
