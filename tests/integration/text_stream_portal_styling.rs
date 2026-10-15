@@ -14,7 +14,7 @@
 //!    by `portal_node` is verified to use those values.
 //!
 //! 4. **Redacted presentation rendering** — sanitized renderer views emit no
-//!    transcript or identity in either presentation, across transition tokens.
+//!    transcript or display name in either presentation, across transition tokens.
 //!    These tests exercise rendering, not the retired viewer policy authority.
 
 use tze_hud_config::{
@@ -530,7 +530,7 @@ fn token_change_propagates_to_adapter_on_republish() {
 
 // ── §6.4: Redaction-safe transitions ─────────────────────────────────────────
 
-/// A sanitized redacted view must publish no transcript or identity in either
+/// A sanitized redacted view must publish no transcript or display name in either
 /// presentation. The owner render is the positive control for real content.
 #[test]
 fn redacted_view_renders_without_content_in_both_presentation_states() {
@@ -556,14 +556,16 @@ fn redacted_view_renders_without_content_in_both_presentation_states() {
                 .render_portal_message(&view, index as u64 + 2, 0)
                 .unwrap(),
         );
-        assert!(!rendered.contains("redaction-sentinel"), "{rendered}");
+        // The stable portal ID remains a collapsed-card address; the
+        // separately supplied display name and private content do not.
+        assert!(!rendered.contains("(styling test)"), "{rendered}");
         assert!(!rendered.contains("assistant output"), "{rendered}");
         assert!(!rendered.contains("styling test active"), "{rendered}");
     }
 }
 
 /// Transition token changes reach the adapter before rendering the same
-/// sanitized view; neither duration may reintroduce transcript or identity.
+/// sanitized view; neither duration may reintroduce transcript or display name.
 #[test]
 fn transition_duration_tokens_do_not_affect_redacted_rendering() {
     use std::collections::HashMap;
@@ -598,7 +600,7 @@ fn transition_duration_tokens_do_not_affect_redacted_rendering() {
                 .render_portal_message(&redacted, index as u64 + 2, 0)
                 .unwrap(),
         );
-        assert!(!rendered.contains("transition-sentinel"), "{rendered}");
+        assert!(!rendered.contains("(styling test)"), "{rendered}");
         assert!(!rendered.contains("assistant output"), "{rendered}");
         if let Some(previous) = previous {
             assert_eq!(rendered, previous);
