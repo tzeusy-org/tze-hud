@@ -349,6 +349,7 @@ impl HeadlessEventLoopHarness {
 
         let render_wake = state.wake.render_notifier();
         let deps = crate::shell::control_panel::ControlPanelDeps {
+            scene: Arc::clone(&state.shared_state.lock().await.scene),
             pause: crate::shell::control_panel::PauseControl::new(
                 Arc::clone(&state.shared_state),
                 Arc::clone(&state.chrome_state),

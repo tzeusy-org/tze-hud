@@ -589,3 +589,108 @@ async fn widget_param_update_rasterizes_only_that_instance() {
         compositor.adapter_info()
     );
 }
+
+/// Owner hiding (control panel, CP-6): while widgets are hidden a publish
+/// costs no raster or upload and nothing is drawn; showing them again
+/// rasterizes the newest parameters once and draws them directly, even when
+/// they were published with a transition.
+#[tokio::test]
+async fn hidden_widgets_do_no_raster_work_and_draw_nothing() {
+    use tze_hud_scene::graph::SurfaceClasses;
+
+    if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
+        eprintln!("SKIPPED: hidden widgets TZE_HUD_SKIP_GPU_TESTS=1");
+        return;
+    }
+    let mut compositor = match Compositor::new_headless(512, 256).await {
+        Ok(c) => c,
+        Err(CompositorError::NoAdapter) => {
+            assert!(
+                !std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1"),
+                "TZE_HUD_REQUIRE_GPU=1 but no adapter"
+            );
+            return;
+        }
+        Err(e) => panic!("unexpected compositor error: {e}"),
+    };
+    let mut surface = HeadlessSurface::new(&compositor.device, 512, 256);
+    compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut scene = SceneGraph::new(512.0, 256.0);
+    let tab = scene.create_tab("Main", 0).unwrap();
+    let BundleScanResult::Ok(b) = bundle!("gauge", ["background.svg", "fill.svg"]) else {
+        panic!("gauge bundle failed to load");
+    };
+    let type_name = b.definition.id.clone();
+    for (file, bytes) in b.svg_contents {
+        compositor
+            .widget_renderer_mut()
+            .unwrap()
+            .register_svg(&type_name, &file, bytes);
+    }
+    scene.widget_registry.register_definition(b.definition);
+    scene.widget_registry.register_instance(WidgetInstance {
+        id: SceneId::new(),
+        widget_type_name: type_name,
+        tab_id: tab,
+        geometry_override: None,
+        contention_override: None,
+        instance_name: "main-gauge".to_string(),
+        current_params: HashMap::new(),
+    });
+    let count = |c: &Compositor| c.widget_renderer().unwrap().raster_count("main-gauge");
+    // The frame with no published widget: what "nothing drawn" looks like.
+    render(&mut compositor, &mut scene, &mut surface);
+    let empty = surface.read_pixels(&compositor.device);
+
+    // What the newest value (0.75) looks like when published directly.
+    publish(&mut scene, "main-gauge", "level", 0.75);
+    render(&mut compositor, &mut scene, &mut surface);
+    let at_075 = surface.read_pixels(&compositor.device);
+    assert!(at_075 != empty, "the gauge draws");
+
+    publish(&mut scene, "main-gauge", "level", 0.25);
+    render(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(count(&compositor), 2);
+
+    scene.set_owner_hidden(SurfaceClasses {
+        widgets: true,
+        ..SurfaceClasses::NONE
+    });
+    // Published with a transition while hidden.
+    let params = HashMap::from([("level".to_string(), WidgetParameterValue::F32(0.75))]);
+    scene
+        .publish_to_widget("main-gauge", params, "agent-a", None, 500, None)
+        .unwrap();
+    let hidden = render(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(count(&compositor), 2, "no raster while hidden");
+    assert!(hidden.widget_rasterized.is_empty());
+    assert!(
+        surface.read_pixels(&compositor.device) == empty,
+        "nothing drawn while hidden"
+    );
+
+    scene.set_owner_hidden(SurfaceClasses::NONE);
+    let shown = render(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(count(&compositor), 3, "one raster of the newest params");
+    assert_eq!(shown.widget_rasterized, ["main-gauge"]);
+    assert!(
+        !compositor
+            .widget_renderer()
+            .unwrap()
+            .has_active_transition(),
+        "showing snaps: no transition from the value drawn before hiding"
+    );
+    // Raster rounding varies by one step; a transition starting from the
+    // pre-hide 0.25 would differ by whole fill colors.
+    let again = surface.read_pixels(&compositor.device);
+    let max_step = again
+        .iter()
+        .zip(&at_075)
+        .map(|(a, b)| a.abs_diff(*b))
+        .max()
+        .unwrap_or(0);
+    assert!(
+        max_step <= 2,
+        "drawn again at the newest value (max channel step {max_step})"
+    );
+}

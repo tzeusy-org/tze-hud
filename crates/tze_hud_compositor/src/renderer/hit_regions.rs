@@ -305,10 +305,13 @@ pub(crate) fn populate_notification_hit_regions_in(
     // Sort zone names for deterministic tab-order assignment across frames.
     // HashMap iteration order is nondeterministic; sorting ensures keyboard
     // focus cycling is stable when multiple interactive zones are present.
-    let mut zone_names: Vec<_> = scene.zone_registry.active_publishes.keys().collect();
+    let mut zone_names: Vec<String> = scene
+        .shown_zone_publishes()
+        .map(|(name, _)| name.clone())
+        .collect();
     zone_names.sort_unstable();
 
-    for zone_name in zone_names {
+    for zone_name in &zone_names {
         let publishes = match scene.zone_registry.active_publishes.get(zone_name) {
             Some(p) => p,
             None => continue,

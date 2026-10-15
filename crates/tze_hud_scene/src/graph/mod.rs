@@ -189,7 +189,9 @@ pub mod tabs;
 pub mod tiles;
 pub mod timed;
 pub use tiles::validate_text_markdown_node_data;
+pub mod visibility;
 pub mod zone_ops;
+pub use visibility::SurfaceClasses;
 
 /// A publisher callback and a runtime-authored human close are distinct.
 #[derive(Clone, Debug, PartialEq, Eq)]

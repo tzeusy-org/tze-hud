@@ -783,9 +783,12 @@ impl Compositor {
         &self,
         now: std::time::Instant,
     ) -> Option<std::time::Instant> {
+        // Hidden zones: their TTL fades complete unseen; the first frame after
+        // they are shown again prunes what expired.
         let fade_starts = self
             .pub_animation_states
             .values()
+            .filter(|_| !self.drawn_owner_hidden.zones)
             .flat_map(|zone| zone.values())
             .filter_map(|s| s.fade_start_deadline());
         let caret_toggle = self.local_composer.as_ref().map(|_| {
@@ -829,14 +832,20 @@ impl Compositor {
         scene: &SceneGraph,
         now: std::time::Instant,
     ) -> bool {
+        // Animations on content the owner hid run on, unseen, without frames:
+        // their state is kept, and the frame that shows them again resumes it.
+        let zones_shown = scene.zones_shown();
+        let tile_shown = |id: &SceneId| !scene.tile_id_hidden(*id);
+
         // Zone fade-in / fade-out transitions (subtitles, content/chrome zones).
         // Completed transitions are pruned by `update_zone_animations`, but a
         // just-completed entry may linger for one frame — `!is_complete()` is the
         // authoritative in-flight test.
-        if self
-            .zone_animation_states
-            .values()
-            .any(|s| !s.is_complete_at(now))
+        if zones_shown
+            && self
+                .zone_animation_states
+                .values()
+                .any(|s| !s.is_complete_at(now))
         {
             return true;
         }
@@ -844,8 +853,8 @@ impl Compositor {
         // Portal-tile fade-in / fade-out transitions (§6.3 collapse/expand).
         if self
             .portal_tile_anim_states
-            .values()
-            .any(|s| !s.is_complete_at(now))
+            .iter()
+            .any(|(id, s)| tile_shown(id) && !s.is_complete_at(now))
         {
             return true;
         }
@@ -854,10 +863,11 @@ impl Compositor {
         // that has started fading is in flight. One still counting down to its
         // fade is idle: `next_animation_deadline` wakes the loop at the fade
         // start instead of rendering identical frames for the whole TTL.
-        if self
-            .pub_animation_states
-            .values()
-            .any(|zone| zone.values().any(|s| s.is_fading_at(now)))
+        if zones_shown
+            && self
+                .pub_animation_states
+                .values()
+                .any(|zone| zone.values().any(|s| s.is_fading_at(now)))
         {
             return true;
         }
@@ -872,7 +882,7 @@ impl Compositor {
         }
 
         // Streaming word-by-word reveal still progressing through breakpoints.
-        if self.stream_reveal_states.values().any(|s| s.is_revealing()) {
+        if zones_shown && self.stream_reveal_states.values().any(|s| s.is_revealing()) {
             return true;
         }
 
@@ -881,8 +891,8 @@ impl Compositor {
         // the fade advances instead of freezing mid-reveal (#943).
         if self
             .portal_tile_reveal_states
-            .values()
-            .any(|s| s.is_revealing())
+            .iter()
+            .any(|((tile_id, _), s)| tile_shown(tile_id) && s.is_revealing())
         {
             return true;
         }
@@ -892,6 +902,9 @@ impl Compositor {
         // (windowed); headless snaps and never registers smoothers.
         if self.scroll_smoothing_enabled {
             for (&tile_id, smoother) in &self.scroll_smoothers {
+                if !tile_shown(&tile_id) {
+                    continue;
+                }
                 let (target_x, target_y) = scene.tile_scroll_offset_local(tile_id);
                 if !smoother.is_settled(target_x, target_y) {
                     return true;

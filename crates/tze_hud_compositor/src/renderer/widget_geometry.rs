@@ -131,7 +131,7 @@ impl Compositor {
             });
         }
 
-        let mut zone_names: Vec<_> = scene.zone_registry.active_publishes.keys().collect();
+        let mut zone_names: Vec<_> = scene.shown_zone_publishes().map(|(name, _)| name).collect();
         zone_names.sort_unstable();
         for zone_name in zone_names {
             if scene
@@ -167,7 +167,12 @@ impl Compositor {
         }
 
         let active_tab = scene.active_tab;
-        let mut widget_names: Vec<_> = scene.widget_registry.instances.keys().collect();
+        let mut widget_names: Vec<_> = scene
+            .widget_registry
+            .instances
+            .keys()
+            .filter(|_| scene.widgets_shown())
+            .collect();
         widget_names.sort_unstable();
         for instance_name in widget_names {
             if scene

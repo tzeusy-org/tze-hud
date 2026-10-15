@@ -390,9 +390,14 @@ impl Compositor {
         self.degradation_policy = policy;
     }
 
-    /// Visible tiles for this frame. Degradation never hides tiles.
+    /// Visible tiles for this frame: the active tab minus the classes the
+    /// owner hid (`SceneGraph::tile_shown`). Degradation never hides tiles.
     pub(super) fn policy_visible_tiles<'a>(&self, scene: &'a SceneGraph) -> Vec<&'a Tile> {
-        scene.visible_tiles()
+        let mut tiles = scene.visible_tiles();
+        if scene.owner_hidden().any() {
+            tiles.retain(|t| scene.tile_shown(t));
+        }
+        tiles
     }
 
     pub(super) fn rendered_tile_opacity(&self, tile: &Tile, scene: &SceneGraph) -> f32 {

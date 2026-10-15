@@ -80,8 +80,8 @@ use icon::*;
 // in private imports.
 pub use control_panel::{
     ControlPanelGeometry, ControlPanelModel, PanelBadge, PanelBody, PanelChip, PanelControl,
-    PanelFocus, PanelHit, PanelHitTarget, PanelItem, PanelPart, PanelRect, PanelSection, PanelSpan,
-    PanelTone, estimate_control_panel_geometry,
+    PanelFocus, PanelHit, PanelHitTarget, PanelItem, PanelNotice, PanelPart, PanelRect,
+    PanelSection, PanelSpan, PanelTone, estimate_control_panel_geometry,
 };
 pub use focus_ring::{FocusRingOwner, FocusRingOwnerHandle};
 pub use system_card::{SystemCardKind, SystemCardModel};
@@ -228,6 +228,13 @@ pub struct Compositor {
     /// Bumped on every panel re-layout so the runtime can skip unchanged
     /// geometry.
     control_panel_layout_generation: u64,
+    /// The panel's notice while it is closed (see
+    /// [`Compositor::set_closed_notice`]).
+    closed_notice: Option<PanelNotice>,
+    /// The owner's hidden classes as of the last built frame. Animations on
+    /// hidden content keep their state but schedule no frames
+    /// ([`Compositor::next_animation_deadline`]).
+    drawn_owner_hidden: tze_hud_scene::graph::SurfaceClasses,
     /// When true, render all zone boundaries with colored tints even when
     /// zones have no active content. Controlled by `TZE_HUD_DEBUG_ZONES=1`.
     pub debug_zone_tints: bool,
@@ -918,6 +925,8 @@ impl Compositor {
             control_panel: None,
             control_panel_layout: None,
             control_panel_layout_generation: 0,
+            closed_notice: None,
+            drawn_owner_hidden: Default::default(),
             debug_zone_tints: std::env::var("TZE_HUD_DEBUG_ZONES").is_ok_and(|v| v == "1"),
             degradation_level: DegradationLevel::Nominal,
             degradation_policy: CompositorDegradationPolicy::default(),
@@ -1259,6 +1268,8 @@ impl Compositor {
             control_panel: None,
             control_panel_layout: None,
             control_panel_layout_generation: 0,
+            closed_notice: None,
+            drawn_owner_hidden: Default::default(),
             debug_zone_tints: std::env::var("TZE_HUD_DEBUG_ZONES").is_ok_and(|v| v == "1"),
             degradation_level: DegradationLevel::Nominal,
             degradation_policy: CompositorDegradationPolicy::default(),
@@ -2195,6 +2206,9 @@ impl Compositor {
     /// [`Compositor::evict_unused_image_textures`] once per frame so that
     /// stale cache entries are reclaimed and the cache does not grow without
     /// bound across frames.
+    ///
+    /// Content the owner hid still counts: its bytes must survive until it is
+    /// shown again.
     fn scene_image_resource_ids(scene: &SceneGraph) -> HashSet<ResourceId> {
         let mut referenced = HashSet::new();
         for node in scene.nodes.values() {
@@ -2220,11 +2234,41 @@ impl Compositor {
         referenced
     }
 
+    /// Every node under a tile the owner has not hidden.
+    fn shown_tile_node_ids(scene: &SceneGraph) -> HashSet<SceneId> {
+        let mut shown = HashSet::new();
+        let mut stack: Vec<SceneId> = scene
+            .tiles
+            .values()
+            .filter(|t| scene.tile_shown(t))
+            .filter_map(|t| t.root_node)
+            .collect();
+        while let Some(id) = stack.pop() {
+            if shown.insert(id)
+                && let Some(node) = scene.nodes.get(&id)
+            {
+                stack.extend(&node.children);
+            }
+        }
+        shown
+    }
+
     fn ensure_scene_image_textures(&mut self, scene: &SceneGraph) -> HashSet<ResourceId> {
         let mut referenced: HashSet<ResourceId> = HashSet::new();
 
-        // Collect all referenced StaticImage resource IDs from tiles.
-        for node in scene.nodes.values() {
+        // Collect all referenced StaticImage resource IDs from tiles. Tiles
+        // the owner hid upload nothing until they are shown again.
+        let shown_nodes = scene
+            .owner_hidden()
+            .any()
+            .then(|| Self::shown_tile_node_ids(scene));
+        for (id, node) in &scene.nodes {
+            if shown_nodes
+                .as_ref()
+                .is_some_and(|shown| !shown.contains(id))
+            {
+                continue;
+            }
             if let NodeData::StaticImage(img) = &node.data {
                 self.ensure_image_texture(img.resource_id, img.width, img.height);
                 referenced.insert(img.resource_id);
@@ -2232,7 +2276,7 @@ impl Compositor {
         }
 
         // Collect from zone publications.
-        for publishes in scene.zone_registry.active_publishes.values() {
+        for (_, publishes) in scene.shown_zone_publishes() {
             for record in publishes {
                 match &record.content {
                     ZoneContent::StaticImage(resource_id) => {

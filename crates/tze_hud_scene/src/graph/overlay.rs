@@ -28,6 +28,10 @@ pub struct RuntimeOverlayState {
     /// at the start of each frame before zone geometry is recomputed.
     #[serde(skip, default)]
     pub zone_hit_regions: Vec<ZoneHitRegion>,
+    /// Surface classes the owner hid from the control panel (session-only;
+    /// see [`super::visibility`]).
+    #[serde(skip, default)]
+    pub owner_hidden: super::visibility::SurfaceClasses,
     /// Runtime-managed chrome drag-handle hit regions.
     ///
     /// Populated by the compositor each frame from currently visible tiles,

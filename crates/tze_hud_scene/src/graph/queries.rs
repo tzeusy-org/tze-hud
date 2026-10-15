@@ -271,6 +271,7 @@ impl SceneGraph {
             .tiles
             .values()
             .filter(|t| t.tab_id == active && t.bounds.contains_point(x, y))
+            .filter(|t| self.tile_shown(t))
             .collect();
 
         // ── Tiles, z-order descending; ties go to the later claim ─────────

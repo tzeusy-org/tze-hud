@@ -284,7 +284,7 @@ impl super::Compositor {
     ) -> Vec<TextItem> {
         let mut items: Vec<TextItem> = Vec::new();
 
-        for (zone_name, publishes) in &scene.zone_registry.active_publishes {
+        for (zone_name, publishes) in scene.shown_zone_publishes() {
             if publishes.is_empty() {
                 continue;
             }
@@ -450,7 +450,7 @@ impl super::Compositor {
         }
 
         // ── Zone StreamText, Notification, and StatusBar content ─────────────
-        for (zone_name, publishes) in &scene.zone_registry.active_publishes {
+        for (zone_name, publishes) in scene.shown_zone_publishes() {
             if publishes.is_empty() {
                 continue;
             }

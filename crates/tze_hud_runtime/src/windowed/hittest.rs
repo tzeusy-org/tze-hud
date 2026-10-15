@@ -101,7 +101,7 @@ fn zone_hit_regions_to_overlay_regions(scene: &SceneGraph) -> Vec<HitRegion> {
 fn content_tile_hit_regions_from_scene(scene: &SceneGraph) -> Vec<HitRegion> {
     let mut regions = Vec::new();
     for tile in scene.tiles.values() {
-        if tile.input_mode == tze_hud_scene::InputMode::Passthrough {
+        if tile.input_mode == tze_hud_scene::InputMode::Passthrough || !scene.tile_shown(tile) {
             continue;
         }
         if let Some(root_id) = tile.root_node {
@@ -726,6 +726,52 @@ mod tests {
             regions.is_empty(),
             "passthrough tile must not register a capture region"
         );
+    }
+
+    /// A tile the owner hid from the control panel lets the desktop have the
+    /// pointer: the overlay stops capturing over it until it is shown again.
+    #[test]
+    fn hidden_tile_does_not_register_capture_region() {
+        use tze_hud_scene::graph::SurfaceClasses;
+        use tze_hud_scene::{HitRegionNode, Node, NodeData, Rect, SceneId};
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        let tab_id = scene.create_tab("Main", 0).unwrap();
+        let lease_id = scene.grant_lease("agent", 60_000);
+        let tile_id = scene
+            .create_tile(
+                tab_id,
+                "agent",
+                lease_id,
+                Rect::new(0.0, 0.0, 200.0, 100.0),
+                1,
+            )
+            .unwrap();
+        scene
+            .set_tile_root(
+                tile_id,
+                Node {
+                    layout: Default::default(),
+                    id: SceneId::new(),
+                    children: vec![],
+                    data: NodeData::HitRegion(HitRegionNode {
+                        bounds: Rect::new(0.0, 0.0, 200.0, 100.0),
+                        interaction_id: "btn".to_string(),
+                        accepts_pointer: true,
+                        ..Default::default()
+                    }),
+                },
+            )
+            .unwrap();
+        assert_eq!(content_tile_hit_regions_from_scene(&scene).len(), 1);
+
+        scene.set_owner_hidden(SurfaceClasses {
+            tiles: true,
+            ..SurfaceClasses::NONE
+        });
+        assert!(content_tile_hit_regions_from_scene(&scene).is_empty());
+
+        scene.set_owner_hidden(SurfaceClasses::NONE);
+        assert_eq!(content_tile_hit_regions_from_scene(&scene).len(), 1);
     }
 
     #[test]

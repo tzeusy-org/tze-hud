@@ -8587,6 +8587,52 @@ mod tests {
         );
     }
 
+    /// Hiding the tile that holds a focused composer (control panel, CP-6)
+    /// blurs it the same way, so typing can never reach a hidden surface; the
+    /// tile itself stays in the scene. Clicking where it was passes through.
+    #[test]
+    fn hiding_focused_composer_tile_blurs_it_and_passes_clicks_through() {
+        use tze_hud_input::{FocusManager, InputProcessor};
+        use tze_hud_scene::graph::SurfaceClasses;
+
+        let (scene, tab_id) = scene_with_pointer_composer();
+        let tile_id = *scene.tiles.keys().next().unwrap();
+        let mut fm = FocusManager::new();
+        fm.add_tab(tab_id);
+        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+
+        app.state.cursor_x = 200.0;
+        app.state.cursor_y = 50.0;
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        app.enqueue_pointer_event(PointerEventKind::Up);
+        app.state.input_processor.route_character_to_composer("a");
+        app.push_local_composer_echo(std::time::Instant::now());
+        assert!(app.state.input_processor.is_composer_active());
+
+        {
+            let state = app.state.shared_state.try_lock().unwrap();
+            let mut scene = state.scene.try_lock().unwrap();
+            scene.set_owner_hidden(SurfaceClasses::ALL);
+        }
+        app.clear_focus_on_removed_tile();
+
+        assert!(
+            !app.state.input_processor.is_composer_active(),
+            "the hidden tile's composer must be blurred"
+        );
+        assert!(
+            matches!(*app.state.local_composer_state.lock().unwrap(), Some(None)),
+            "the compositor must drop the hidden composer's caret"
+        );
+        let state = app.state.shared_state.try_lock().unwrap();
+        let scene = state.scene.try_lock().unwrap();
+        assert!(scene.tiles.contains_key(&tile_id), "hiding keeps the tile");
+        assert_eq!(
+            scene.hit_test(200.0, 50.0),
+            tze_hud_scene::types::HitResult::Passthrough
+        );
+    }
+
     /// PointerDown on the focused composer must place the caret via the real
     /// glyph-geometry hit-test (`byte_at_point`/`byte_at_x`) once the
     /// compositor has published a fresh wrapped visual-row layout — not the

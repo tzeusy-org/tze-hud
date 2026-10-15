@@ -222,11 +222,38 @@ its tests are deterministic and never sleep.
   and lease grace all advanced by one `TestClock`) [`poc_portal_abandoned_is_reclaimed`](../tests/integration/poc_acceptance.rs),
   [`poc_zone_notification_ttl_disappears_unattended`](../tests/integration/poc_acceptance.rs), [`poc_zone_delay_ms_appears_on_schedule`](../tests/integration/poc_acceptance.rs)
 
+## 10. Owner hiding changes the view, never state
+
+From the control panel the owner can hide portals, zones, widgets or other
+agent tiles, or all of them (Hide all, Alt+H; also how to present a shared
+screen). Hidden content is not drawn, catches no pointer input, holds no
+keyboard focus (a focused composer blurs), and costs no raster or upload work;
+its fades, reveals and scroll catch-up schedule no frames, and widgets shown
+again draw their newest values directly.
+Leases, publications and agents are untouched and nothing tells an agent:
+publishes keep landing and draw, as they are now, when shown again. The set is
+runtime-only overlay state beside the scene model, never serialized and never
+in `CompositorDegradationPolicy` (§6); a restart shows everything. While
+anything is hidden and the panel is closed, a pill at the bottom right of the
+primary display names what is hidden and the chord that opens the panel. A
+word-by-word reveal under way when its zone was hidden finishes after the
+zone is shown again.
+
+- `tze_hud_scene` [`classes_hide_their_own_tiles_only`](../crates/tze_hud_scene/src/graph/visibility.rs), [`hidden_tiles_pass_pointer_input_through`](../crates/tze_hud_scene/src/graph/visibility.rs),
+  [`a_change_bumps_the_version_once_and_keeps_content`](../crates/tze_hud_scene/src/graph/visibility.rs)
+- `tze_hud_input` [`hidden_tile_loses_focus_and_leaves_the_cycle`](../crates/tze_hud_input/src/focus.rs)
+- `tze_hud_runtime` [`hiding_focused_composer_tile_blurs_it_and_passes_clicks_through`](../crates/tze_hud_runtime/src/windowed/portal.rs),
+  [`hidden_tile_does_not_register_capture_region`](../crates/tze_hud_runtime/src/windowed/hittest.rs),
+  [`hide_all_class_rows_and_the_closed_notice`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
+  [`reopen_chord_falls_back_to_the_pause_chord`](../crates/tze_hud_runtime/src/shell/control_panel/mod.rs),
+  [`hidden_names_read_as_a_phrase`](../crates/tze_hud_runtime/src/shell/control_panel/sections/visibility.rs)
+- `tze_hud_compositor` [`hidden_content_is_not_drawn_and_the_closed_notice_is`](../crates/tze_hud_compositor/src/renderer/tests/control_panel.rs),
+  [`hidden_widgets_do_no_raster_work_and_draw_nothing`](../crates/tze_hud_compositor/tests/widget_raster_count.rs),
+  [`hidden_content_animations_schedule_no_frames`](../crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs),
+  [`hidden_notification_sets_no_fade_deadline`](../crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs)
+
 ## Deferred ideas (notes, not code)
 
-- **Screen-share hiding.** The owner's screen is sometimes seen by others. If
-  needed, add one "presenting" flag that hides portal content; don't bring
-  back viewer classes.
 - **Interruption control.** If agents get noisy, use zone policy
   (latest-wins, stack depth) and an urgency field on notifications, not an
   attention budget.

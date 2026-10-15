@@ -45,7 +45,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use tokio::sync::mpsc;
-use tze_hud_compositor::{ControlPanelGeometry, ControlPanelModel, PanelHitTarget};
+use tze_hud_compositor::{ControlPanelGeometry, ControlPanelModel, PanelHitTarget, PanelNotice};
 use tze_hud_scene::config::{ChordRole, HudChords};
 use tze_hud_scene::render_wake::RenderWakeNotifier;
 
@@ -82,6 +82,9 @@ struct Shared {
     /// What the compositor draws (`None`: closed), with a version that changes
     /// on every publish.
     model: RwLock<(u64, Option<ControlPanelModel>)>,
+    /// The notice the compositor draws while the panel is closed, versioned
+    /// like `model`.
+    closed_notice: RwLock<(u64, Option<PanelNotice>)>,
     open: AtomicBool,
     /// The geometry the compositor last drew, with its layout generation.
     geometry: RwLock<Option<(u64, ControlPanelGeometry)>>,
@@ -118,6 +121,48 @@ impl ControlPanelHandle {
         }
         *seen = guard.0;
         Some(guard.1.clone())
+    }
+
+    /// For the compositor thread: the closed-panel notice when it changed since
+    /// `seen` (updating `seen`), else `None`.
+    pub(crate) fn closed_notice_if_changed(&self, seen: &mut u64) -> Option<Option<PanelNotice>> {
+        let guard = self
+            .shared
+            .closed_notice
+            .read()
+            .unwrap_or_else(|e| e.into_inner());
+        if guard.0 == *seen {
+            return None;
+        }
+        *seen = guard.0;
+        Some(guard.1.clone())
+    }
+
+    /// The closed-panel notice last published.
+    #[cfg(test)]
+    pub(crate) fn current_closed_notice(&self) -> Option<PanelNotice> {
+        self.shared
+            .closed_notice
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .1
+            .clone()
+    }
+
+    fn publish_closed_notice(&self, notice: Option<PanelNotice>) {
+        {
+            let mut guard = self
+                .shared
+                .closed_notice
+                .write()
+                .unwrap_or_else(|e| e.into_inner());
+            if guard.1 == notice {
+                return;
+            }
+            guard.0 += 1;
+            guard.1 = notice;
+        }
+        self.shared.render_wake.notify();
     }
 
     /// For the compositor thread: record the geometry it drew. Cheap when the
@@ -200,6 +245,8 @@ impl ControlPanelHandle {
 #[derive(Clone)]
 pub(crate) struct ControlPanelDeps {
     pub pause: PauseControl,
+    /// The scene, for the visibility rows (its runtime-only overlay state).
+    pub scene: Arc<tokio::sync::Mutex<tze_hud_scene::graph::SceneGraph>>,
     pub chords: HudChords,
     /// Shows the pairing card (`None` when the MCP port is disabled).
     pub pairing: Option<Arc<crate::pairing::Pairing>>,
@@ -213,6 +260,10 @@ pub(crate) struct ControlPanelDeps {
 pub(crate) fn default_sections(deps: &ControlPanelDeps) -> Vec<Box<dyn Section>> {
     vec![
         Box::new(sections::AgentsSection::new(deps.pause.clone())),
+        Box::new(sections::VisibilitySection::new(
+            Arc::clone(&deps.scene),
+            deps.render_wake.clone(),
+        )),
         Box::new(sections::InputSection::new(
             deps.chords,
             deps.pairing.is_some(),
@@ -238,6 +289,7 @@ pub(crate) fn spawn_control_panel(
     let handle = ControlPanelHandle {
         shared: Arc::new(Shared {
             model: RwLock::new((0, None)),
+            closed_notice: RwLock::new((0, None)),
             open: AtomicBool::new(false),
             geometry: RwLock::new(None),
             geometry_generation: AtomicU64::new(0),
@@ -442,9 +494,74 @@ impl PanelTask {
                 Some(model)
             }
         };
+        let closed = model.is_none();
         if model != self.published {
             self.published = model.clone();
             self.handle.publish(model);
         }
+        if closed {
+            let notice = self.closed_notice().await;
+            self.handle.publish_closed_notice(notice);
+        }
+    }
+
+    /// The sections' notices joined, with the chord that reopens the panel;
+    /// `None` when no section has one.
+    async fn closed_notice(&self) -> Option<PanelNotice> {
+        let mut parts = Vec::new();
+        for index in 0..self.sections.len() {
+            let sections = Arc::clone(&self.sections);
+            match tokio::spawn(async move { sections[index].closed_notice().await }).await {
+                Ok(Some(notice)) => parts.push(notice),
+                Ok(None) => {}
+                Err(error) => tracing::error!(
+                    section = self.sections[index].id(),
+                    %error,
+                    "control panel: section notice failed"
+                ),
+            }
+        }
+        if parts.is_empty() {
+            return None;
+        }
+        let panel_chord = crate::operator::status::hotkey(ChordRole::Panel);
+        Some(PanelNotice {
+            text: parts.join(" · "),
+            key: reopen_chord(&panel_chord, &self.deps.chords).to_string(),
+        })
+    }
+}
+
+/// The chord that opens the panel: the panel chord, or the pause chord when
+/// Windows refused the panel chord.
+fn reopen_chord(
+    panel_chord: &crate::operator::status::HotkeyStatus,
+    chords: &HudChords,
+) -> tze_hud_scene::config::Hotkey {
+    match panel_chord {
+        crate::operator::status::HotkeyStatus::Failed { .. } => chords.pause,
+        _ => chords.panel,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::operator::status::HotkeyStatus;
+
+    /// The closed-panel notice names the panel chord, or the pause chord when
+    /// Windows refused the panel chord (CP-6).
+    #[test]
+    fn reopen_chord_falls_back_to_the_pause_chord() {
+        let chords = HudChords::default();
+        let failed = HotkeyStatus::Failed {
+            chord: chords.panel.to_string(),
+            reason: "in use".into(),
+        };
+        assert_eq!(reopen_chord(&failed, &chords), chords.pause);
+        assert_eq!(
+            reopen_chord(&HotkeyStatus::NotApplicable, &chords),
+            chords.panel
+        );
     }
 }

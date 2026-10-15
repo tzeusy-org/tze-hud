@@ -2544,6 +2544,9 @@ pub(crate) struct WidgetDrawQuad {
 /// Created once per compositor and kept for the lifetime of the runtime.
 pub struct WidgetRenderer {
     resident_ledger: Option<tze_hud_resource::ResidentLedger>,
+    /// Widgets were hidden: the next shown sync draws the newest parameters
+    /// directly instead of transitioning from what was drawn before hiding.
+    snap_on_show: bool,
     /// Raw SVG bytes keyed by (widget_type_id, svg_filename).
     /// Stored at widget type registration time.
     svgs: HashMap<(String, String), Vec<u8>>,
@@ -2624,6 +2627,7 @@ impl WidgetRenderer {
             Self::create_texture_pipeline(device, &texture_bind_group_layout, output_format);
 
         Self {
+            snap_on_show: false,
             resident_ledger: None,
             svgs: HashMap::new(),
             svg_resident_allocation_ids: HashMap::new(),
@@ -2802,6 +2806,20 @@ impl WidgetRenderer {
         }
 
         (result, still_animating)
+    }
+
+    /// Widgets are hidden: drop every in-flight transition, and make the sync
+    /// that shows them again snap to the newest parameters.
+    pub(crate) fn hide(&mut self) {
+        for entry in self.textures.values_mut() {
+            entry.animation = None;
+        }
+        self.snap_on_show = true;
+    }
+
+    /// Whether this sync must snap (the first one after [`Self::hide`]).
+    pub(crate) fn take_snap_on_show(&mut self) -> bool {
+        std::mem::take(&mut self.snap_on_show)
     }
 
     /// True while any widget instance has a transition in flight. Idle widgets
