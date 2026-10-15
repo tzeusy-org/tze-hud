@@ -189,8 +189,10 @@ impl super::Compositor {
         surf_h: f32,
     ) -> Vec<crate::widget::WidgetDrawQuad> {
         match &self.widget_renderer {
-            Some(wr) => wr.collect_widget_draw_quads(&scene.widget_registry, surf_w, surf_h),
-            None => Vec::new(),
+            Some(wr) if scene.widgets_shown() => {
+                wr.collect_widget_draw_quads(&scene.widget_registry, surf_w, surf_h)
+            }
+            _ => Vec::new(),
         }
     }
 
@@ -366,6 +368,9 @@ impl super::Compositor {
         let degraded = self.degradation_policy.level >= tze_hud_scene::DegradationLevel::Simplified;
         let action_tokens = resolve_notification_action_tokens(&self.token_map);
 
+        if !scene.zones_shown() {
+            return result;
+        }
         for (zone_name, publishes) in &scene.zone_registry.active_publishes {
             if publishes.is_empty() {
                 continue;

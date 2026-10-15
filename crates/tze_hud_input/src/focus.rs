@@ -505,12 +505,14 @@ impl FocusManager {
         transition
     }
 
-    /// Clears focus from a tile that no longer exists in the scene.
+    /// Clears focus from a tile that no longer exists in the scene or that the
+    /// owner hid from the control panel.
     ///
     /// Lease revocation and expiry remove a tile without telling the focus
     /// manager, so the runtime calls this every frame. Focus falls back through
-    /// history, skipping tiles that are also gone. The `FocusLostEvent` is
-    /// dropped: the owning agent's tile is already gone.
+    /// history, skipping tiles that are also gone or hidden. The
+    /// `FocusLostEvent` is dropped: the owning agent's tile is gone, and
+    /// hiding is silent toward agents.
     pub fn clear_focus_on_missing_tile(
         &mut self,
         tab_id: SceneId,
@@ -518,7 +520,7 @@ impl FocusManager {
     ) -> FocusTransition {
         let mut transition = FocusTransition::default();
         while let Some(tile_id) = self.current_owner(tab_id).tile_id() {
-            if scene.tiles.contains_key(&tile_id) {
+            if scene.tile_id_shown(tile_id) {
                 break;
             }
             transition = self.on_tile_destroyed(tab_id, tile_id, scene);
@@ -698,6 +700,7 @@ fn build_focus_cycle(tab_id: SceneId, scene: &SceneGraph) -> Vec<CycleStep> {
         .tiles
         .values()
         .filter(|t| t.tab_id == tab_id && t.input_mode != InputMode::Passthrough)
+        .filter(|t| scene.tile_shown(t))
         .collect();
     tiles.sort_by_key(|t| t.z_order);
 
@@ -1280,6 +1283,88 @@ mod tests {
         let (ev, ns) = t.lost.unwrap();
         assert_eq!(ev.reason, FocusLostReason::TileDestroyed);
         assert_eq!(ns, "agent-a");
+    }
+
+    /// Owner hiding (hud-vniri.4): a hidden tile loses focus to the next shown
+    /// tile in history and Tab skips it, without telling its agent.
+    #[test]
+    fn hidden_tile_loses_focus_and_leaves_the_cycle() {
+        use tze_hud_scene::graph::SurfaceClasses;
+
+        let (mut scene, tab_id, tile_id) = setup_scene();
+        let node_id = add_hit_region(
+            &mut scene,
+            tile_id,
+            Rect::new(0.0, 0.0, 100.0, 50.0),
+            "btn",
+            true,
+        );
+        let lease_id2 = scene.grant_lease("agent-b", 60_000);
+        let tile_id2 = scene
+            .create_tile(
+                tab_id,
+                "agent-b",
+                lease_id2,
+                Rect::new(600.0, 100.0, 100.0, 100.0),
+                2,
+            )
+            .unwrap();
+        let node_id2 = add_hit_region(
+            &mut scene,
+            tile_id2,
+            Rect::new(0.0, 0.0, 100.0, 50.0),
+            "btn2",
+            true,
+        );
+        // agent-a's tile is a portal; agent-b's is a plain tile.
+        scene
+            .register_tile_scroll_config(
+                tile_id,
+                tze_hud_scene::types::TileScrollConfig {
+                    scrollable_x: false,
+                    scrollable_y: true,
+                    content_width: None,
+                    content_height: None,
+                },
+            )
+            .unwrap();
+
+        let mut fm = FocusManager::new();
+        fm.add_tab(tab_id);
+        fm.on_click(tab_id, tile_id2, Some(node_id2), &scene);
+        fm.on_click(tab_id, tile_id, Some(node_id), &scene);
+
+        let shown = fm.clear_focus_on_missing_tile(tab_id, &scene);
+        assert!(shown.lost.is_none(), "shown: focus stays");
+        assert_eq!(fm.current_owner(tab_id).node_id(), Some(node_id));
+
+        scene.set_owner_hidden(SurfaceClasses {
+            portals: true,
+            ..SurfaceClasses::NONE
+        });
+        fm.clear_focus_on_missing_tile(tab_id, &scene);
+        assert_eq!(
+            *fm.current_owner(tab_id),
+            FocusOwner::Node {
+                tile_id: tile_id2,
+                node_id: node_id2
+            },
+            "focus falls back to the shown tile"
+        );
+        for _ in 0..3 {
+            fm.navigate_next(tab_id, &scene);
+            assert_eq!(fm.current_owner(tab_id).tile_id(), Some(tile_id2));
+        }
+
+        scene.set_owner_hidden(SurfaceClasses::ALL);
+        fm.clear_focus_on_missing_tile(tab_id, &scene);
+        assert_eq!(*fm.current_owner(tab_id), FocusOwner::None);
+        fm.navigate_next(tab_id, &scene);
+        assert_eq!(
+            *fm.current_owner(tab_id),
+            FocusOwner::None,
+            "nothing to Tab to"
+        );
     }
 
     #[test]

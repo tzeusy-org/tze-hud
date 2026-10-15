@@ -1513,6 +1513,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         let system_card_for_compositor = self.state.system_card.clone();
         let control_panel_for_compositor = self.state.control_panel.clone();
         let mut control_panel_seen = 0u64;
+        let mut closed_notice_seen = 0u64;
         let capture_inbox = self.state.capture_inbox.clone();
         let display_targets = Arc::clone(&self.state.display_targets);
         let displays_dirty = Arc::clone(&self.state.displays_dirty);
@@ -1807,12 +1808,18 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         .as_ref()
                         .and_then(|panel| panel.model_if_changed(&mut control_panel_seen))
                         .is_some_and(|model| compositor.set_control_panel(model));
+                    // Its closed-state notice (hidden content) likewise.
+                    let notice_changed = control_panel_for_compositor
+                        .as_ref()
+                        .and_then(|panel| panel.closed_notice_if_changed(&mut closed_notice_seen))
+                        .is_some_and(|notice| compositor.set_closed_notice(notice));
                     surface_repaint_pending = update_surface_repaint_pending(
                         surface_repaint_pending,
                         surface_recovery.reconfigured_surface()
                             || safe_mode_flipped
                             || card_changed
                             || panel_changed
+                            || notice_changed
                             || displays_need_frame,
                         false,
                     );
@@ -3174,6 +3181,7 @@ impl WindowedRuntime {
         // Without a network runtime there is nothing to pause.
         let control_panel = network_rt.as_ref().map(|rt| {
             let deps = crate::shell::control_panel::ControlPanelDeps {
+                scene: Arc::clone(&shared_scene),
                 pause: crate::shell::control_panel::PauseControl::new(
                     Arc::clone(&shared_state),
                     Arc::clone(&chrome_state),

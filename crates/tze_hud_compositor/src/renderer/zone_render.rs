@@ -96,6 +96,9 @@ impl Compositor {
         now: std::time::Instant,
     ) {
         let (sw, sh) = viewport;
+        if !scene.zones_shown() {
+            return;
+        }
         for (zone_name, publishes) in &scene.zone_registry.active_publishes {
             if publishes.is_empty() {
                 continue;

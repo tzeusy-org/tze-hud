@@ -184,3 +184,121 @@ async fn panel_layout_is_reused_until_the_model_or_size_changes() {
         "the panel spans the new width"
     );
 }
+
+/// Owner hiding (CP-6): a hidden tile and a hidden zone draw nothing, showing
+/// them again draws the current content, and while anything is hidden the
+/// closed panel's notice pill sits at the top centre.
+#[tokio::test]
+async fn hidden_content_is_not_drawn_and_the_closed_notice_is() {
+    use tze_hud_scene::graph::SurfaceClasses;
+
+    let (w, h) = (640_u32, 400_u32);
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(w, h).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut scene = red_scene(w as f32, h as f32);
+    scene.register_zone(ZoneDefinition {
+        id: SceneId::new(),
+        name: "pip".to_owned(),
+        description: "zone".to_owned(),
+        geometry_policy: GeometryPolicy::Relative {
+            x_pct: 0.0,
+            y_pct: 0.0,
+            width_pct: 0.25,
+            height_pct: 0.25,
+        },
+        accepted_media_types: vec![ZoneMediaType::StaticImage],
+        rendering_policy: RenderingPolicy::default(),
+        contention_policy: ContentionPolicy::Replace,
+        max_publishers: 1,
+        auto_clear_ms: None,
+        ephemeral: false,
+        layer_attachment: LayerAttachment::Content,
+    });
+    let image = ResourceId::of(b"image");
+    compositor.register_image_bytes(image, std::sync::Arc::from(vec![255u8; 16]), 2, 2);
+    scene
+        .publish_to_zone(
+            "pip",
+            ZoneContent::StaticImage(image),
+            "agent",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    compositor.render_frame_headless(&mut scene, &surface);
+    compositor.portal_tile_anim_states.clear();
+
+    let zone_vertices = |compositor: &Compositor, scene: &SceneGraph| {
+        let (mut vertices, mut textured) = (Vec::new(), Vec::new());
+        compositor.render_zone_content(
+            scene,
+            &mut vertices,
+            &mut textured,
+            w as f32,
+            h as f32,
+            None,
+        );
+        vertices.len() + textured.len()
+    };
+    let center = |px: &[u8]| crate::test_pixels::pixel_at(px, w, w / 2, h / 2);
+    let notice_at = |px: &[u8]| crate::test_pixels::pixel_at(px, w, w / 2, 34);
+    assert!(zone_vertices(&compositor, &scene) > 0);
+
+    scene.set_owner_hidden(SurfaceClasses::ALL);
+    // A visibility change bumps the scene version; production primes at
+    // commit each frame, so the test does too.
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    assert_eq!(
+        zone_vertices(&compositor, &scene),
+        0,
+        "a hidden zone emits nothing"
+    );
+    compositor.render_frame_headless(&mut scene, &surface);
+    let hidden = surface.read_pixels(&compositor.device);
+    assert!(
+        !is_red(center(&hidden)),
+        "a hidden tile is not drawn: {:?}",
+        center(&hidden)
+    );
+    let bare = notice_at(&hidden);
+    assert!(
+        compositor.image_bytes.contains_key(&image),
+        "a hidden zone's image survives eviction, to draw when shown"
+    );
+
+    assert!(
+        compositor.set_closed_notice(Some("Hidden: everything · open with Ctrl+Shift+F11".into()))
+    );
+    assert!(
+        !compositor.set_closed_notice(Some("Hidden: everything · open with Ctrl+Shift+F11".into())),
+        "same notice: no repaint"
+    );
+    compositor.render_frame_headless(&mut scene, &surface);
+    let noticed = surface.read_pixels(&compositor.device);
+    assert_ne!(notice_at(&noticed), bare, "the notice pill is drawn");
+    assert_eq!(
+        crate::test_pixels::pixel_at(&noticed, w, w / 2, h - 4),
+        crate::test_pixels::pixel_at(&hidden, w, w / 2, h - 4),
+        "the notice is a pill, not a full-screen layer"
+    );
+
+    // Showing again draws the content as it is now.
+    scene.set_owner_hidden(SurfaceClasses::NONE);
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    assert!(compositor.set_closed_notice(None));
+    compositor.render_frame_headless(&mut scene, &surface);
+    compositor.portal_tile_anim_states.clear();
+    compositor.render_frame_headless(&mut scene, &surface);
+    let shown = surface.read_pixels(&compositor.device);
+    assert!(is_red(center(&shown)), "{:?}", center(&shown));
+    assert!(
+        compositor.image_texture_cache.contains_key(&image),
+        "uploaded again"
+    );
+    assert!(zone_vertices(&compositor, &scene) > 0);
+}

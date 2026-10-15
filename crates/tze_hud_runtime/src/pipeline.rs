@@ -84,6 +84,7 @@ impl HitTestSnapshot {
         let mut tiles: Vec<TileBoundsEntry> = scene
             .tiles
             .values()
+            .filter(|t| scene.tile_shown(t))
             .map(|t| TileBoundsEntry {
                 tile_id_bytes: t.id.to_bytes_le(),
                 bounds: t.bounds,

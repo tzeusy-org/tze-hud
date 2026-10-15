@@ -61,6 +61,10 @@ pub fn build_hover_trackers(
     existing: &HashMap<String, WidgetHoverTracker>,
 ) -> HashMap<String, WidgetHoverTracker> {
     let mut trackers = HashMap::new();
+    // Hidden widgets take no hover input (and so cause no scene writes).
+    if !scene.widgets_shown() {
+        return trackers;
+    }
 
     for (instance_name, instance) in &scene.widget_registry.instances {
         let Some(definition) = scene

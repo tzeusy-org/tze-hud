@@ -1321,7 +1321,9 @@ impl Compositor {
         self.encode_image_pass(&mut encoder, &frame.view, &textured_cmds, sw, sh);
 
         // ── Widget pass: composite pre-synced textures above zone content ────
-        self.encode_widget_pass(&mut encoder, &frame.view, &scene.widget_registry, sw, sh);
+        if scene.widgets_shown() {
+            self.encode_widget_pass(&mut encoder, &frame.view, &scene.widget_registry, sw, sh);
+        }
         self.encode_rounded_rect_pass(&mut encoder, &frame.view, &drag_highlight_cmds, sw, sh);
         self.encode_drag_handle_pass(&mut encoder, &frame.view, &drag_handle_vertices);
 

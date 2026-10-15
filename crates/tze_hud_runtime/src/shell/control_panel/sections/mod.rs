@@ -4,7 +4,9 @@
 mod agents;
 mod input;
 mod system;
+mod visibility;
 
 pub(crate) use agents::AgentsSection;
 pub(crate) use input::InputSection;
 pub(crate) use system::SystemSection;
+pub(crate) use visibility::VisibilitySection;

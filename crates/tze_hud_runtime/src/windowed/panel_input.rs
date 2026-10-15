@@ -403,6 +403,7 @@ mod panel_task_tests {
             w.fetch_add(1, Ordering::SeqCst);
         });
         let deps = ControlPanelDeps {
+            scene: Arc::clone(&state.shared_state.try_lock().expect("fresh state").scene),
             pause: PauseControl::new(
                 Arc::clone(&state.shared_state),
                 Arc::clone(&state.chrome_state),
@@ -480,9 +481,9 @@ mod panel_task_tests {
         assert_eq!(lease_state().await, LeaseState::Suspended);
         assert!(f.state.chrome_state.read().unwrap().safe_mode_active);
         let model = f.model().expect("panel open");
-        assert_eq!(model.tiles[0].id, "agents.pause");
+        assert_eq!(model.tiles[1].id, "agents.pause");
         assert_eq!(
-            model.tiles[0].emphasis,
+            model.tiles[1].emphasis,
             PanelTone::Caution,
             "paused tile is caution"
         );
@@ -505,11 +506,11 @@ mod panel_task_tests {
             .await;
         assert!(!f.paused());
 
-        let tile = PanelHitTarget::Tile(0, PanelPart::Body);
+        let tile = PanelHitTarget::Tile(1, PanelPart::Body);
         f.send_and_wait(PanelEvent::Click(tile), |f| f.paused())
             .await;
         assert!(f.panel.is_open(), "pausing from the panel keeps it open");
-        assert_eq!(f.model().unwrap().focus, PanelFocus::Tile(0));
+        assert_eq!(f.model().unwrap().focus, PanelFocus::Tile(1));
 
         // The pause chord on a panel opened by the panel chord only toggles.
         f.send_and_wait(PanelEvent::Chord(ChordRole::Pause), |f| !f.paused())
@@ -521,6 +522,94 @@ mod panel_task_tests {
         f.send_and_wait(PanelEvent::Key(PanelKey::Escape), |f| !f.panel.is_open())
             .await;
         assert!(!f.paused(), "closing always resumes");
+    }
+
+    /// Visibility (CP-6): Alt+H hides everything, a class row shows one class
+    /// again, and closing leaves a notice naming what is hidden and the chord
+    /// that reopens the panel; Hide all off shows everything and clears it.
+    /// The scene's leases stay untouched throughout.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn hide_all_class_rows_and_the_closed_notice() {
+        use tze_hud_scene::graph::SurfaceClasses;
+
+        let f = fixture();
+        let scene = Arc::clone(&f.state.shared_state.lock().await.scene);
+        let lease_id = scene.lock().await.grant_lease("agent", 60_000);
+        let hidden = || scene.try_lock().map(|s| s.owner_hidden()).ok();
+        let row = |id: &str| {
+            let Some(PanelBody::Sections(cards)) = f.model().map(|m| m.body) else {
+                return None;
+            };
+            cards.into_iter().flat_map(|c| c.items).find(|i| i.id == id)
+        };
+
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Panel), |f| f.panel.is_open())
+            .await;
+        let model = f.model().unwrap();
+        assert_eq!(model.tiles[0].id, "visibility.hide_all");
+        assert_eq!(model.tiles[0].shortcut.as_deref(), Some("Alt+H"));
+
+        let wakes = f.wakes.load(Ordering::SeqCst);
+        f.send_and_wait(PanelEvent::Key(PanelKey::Alt('h')), |_| {
+            hidden() == Some(SurfaceClasses::ALL)
+        })
+        .await;
+        assert!(f.wakes.load(Ordering::SeqCst) > wakes, "hiding repaints");
+        f.send_and_wait(PanelEvent::Hover(None), |f| {
+            f.model()
+                .is_some_and(|m| m.tiles[0].emphasis == PanelTone::Caution)
+        })
+        .await;
+        assert!(
+            row("visibility.portals").is_some_and(|r| r.emphasis == PanelTone::Caution
+                && r.control == tze_hud_compositor::PanelControl::Toggle(false))
+        );
+
+        // Show portals again from its row: every other class stays hidden.
+        f.send_and_wait(
+            PanelEvent::Click(PanelHitTarget::Row(
+                "visibility.portals".into(),
+                PanelPart::Body,
+            )),
+            |_| hidden().is_some_and(|h| !h.portals && h.zones),
+        )
+        .await;
+
+        assert!(
+            f.panel.current_closed_notice().is_none(),
+            "no notice while open"
+        );
+        f.send_and_wait(PanelEvent::Key(PanelKey::Escape), |f| !f.panel.is_open())
+            .await;
+        f.send_and_wait(PanelEvent::Hover(None), |f| {
+            f.panel.current_closed_notice().is_some()
+        })
+        .await;
+        assert_eq!(
+            f.panel.current_closed_notice().as_deref(),
+            Some("Hidden: zones, widgets, tiles · open with Ctrl+Shift+F11")
+        );
+
+        // Hide all off (it is not all hidden, so the toggle first hides all).
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Panel), |f| f.panel.is_open())
+            .await;
+        f.send_and_wait(PanelEvent::Key(PanelKey::Alt('h')), |_| {
+            hidden() == Some(SurfaceClasses::ALL)
+        })
+        .await;
+        f.send_and_wait(PanelEvent::Key(PanelKey::Alt('h')), |_| {
+            hidden() == Some(SurfaceClasses::NONE)
+        })
+        .await;
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Panel), |f| {
+            !f.panel.is_open() && f.panel.current_closed_notice().is_none()
+        })
+        .await;
+        assert_eq!(
+            scene.lock().await.leases[&lease_id].state,
+            LeaseState::Active,
+            "hiding never touches leases"
+        );
     }
 
     /// Typing searches; input after close is ignored; input that changes
@@ -624,7 +713,7 @@ mod panel_task_tests {
         let tile = geometry
             .hits
             .iter()
-            .find(|h| h.target == PanelHitTarget::Tile(0, PanelPart::Body))
+            .find(|h| h.target == PanelHitTarget::Tile(1, PanelPart::Body))
             .expect("pause tile")
             .rect;
         (app.state.cursor_x, app.state.cursor_y) = (tile.x + tile.w / 2.0, tile.y + tile.h / 2.0);
@@ -724,6 +813,7 @@ mod panel_task_tests {
 
         let state = WindowedRuntimeState::new_headless();
         let deps = ControlPanelDeps {
+            scene: Arc::clone(&state.shared_state.lock().await.scene),
             pause: PauseControl::new(
                 Arc::clone(&state.shared_state),
                 Arc::clone(&state.chrome_state),

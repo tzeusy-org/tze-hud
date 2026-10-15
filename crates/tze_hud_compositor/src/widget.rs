@@ -2806,6 +2806,13 @@ impl WidgetRenderer {
 
     /// True while any widget instance has a transition in flight. Idle widgets
     /// report false, so the frame loop schedules no work for them.
+    /// Drop every in-flight transition (the next raster snaps to target).
+    pub(crate) fn cancel_transitions(&mut self) {
+        for entry in self.textures.values_mut() {
+            entry.animation = None;
+        }
+    }
+
     pub fn has_active_transition(&self) -> bool {
         self.textures.values().any(|e| e.animation.is_some())
     }
