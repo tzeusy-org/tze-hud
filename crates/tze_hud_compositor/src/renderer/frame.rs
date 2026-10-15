@@ -254,6 +254,8 @@ impl Compositor {
         self.ensure_scene_image_textures(scene);
         self.ensure_scene_icon_textures(scene);
 
+        // What the owner hid this frame: its animations schedule no frames.
+        self.drawn_owner_hidden = scene.owner_hidden();
         // Update zone animation states (fade-in/fade-out) before rendering.
         // Must run before any render_zone_content call below.
         self.update_zone_animations_at(scene, animation_now);
@@ -481,6 +483,8 @@ impl Compositor {
         // `tile.close_button.*`.
         self.append_tile_close_button_vertices(scene, &mut vertices, sw, sh);
 
+        // What the owner hid this frame: its animations schedule no frames.
+        self.drawn_owner_hidden = scene.owner_hidden();
         // Update zone animation states (fade-in/fade-out) before rendering.
         self.update_zone_animations_at(scene, animation_now);
         // §6.3 portal transition: advance per-portal-tile fade animations

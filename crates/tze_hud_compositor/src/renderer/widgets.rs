@@ -64,12 +64,13 @@ impl super::Compositor {
         };
         wr.begin_sync();
         // Hidden by the owner: no raster or upload. Cached textures stay for
-        // when they are shown again; transitions snap rather than tick
-        // frames nobody sees.
+        // when they are shown again; transitions stop rather than tick frames
+        // nobody sees, and the first shown sync snaps to the newest values.
         if !scene.widgets_shown() {
-            wr.cancel_transitions();
+            wr.hide();
             return;
         }
+        let snap = wr.take_snap_on_show();
 
         let registry = &scene.widget_registry;
         let now_us = scene.now_monotonic_us();
@@ -134,7 +135,7 @@ impl super::Compositor {
                 .get(&instance_name)
                 .and_then(|p| p.iter().max_by_key(|r| r.published_at_wall_us))
                 .map_or(0, |r| r.transition_ms);
-            if transition_ms == 0 {
+            if transition_ms == 0 || snap {
                 if let Some(entry) = wr.texture_entry_mut(&instance_name) {
                     entry.animation = None;
                 }

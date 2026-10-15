@@ -231,6 +231,10 @@ pub struct Compositor {
     /// The panel's notice while it is closed (see
     /// [`Compositor::set_closed_notice`]).
     closed_notice: Option<String>,
+    /// The owner's hidden classes as of the last built frame. Animations on
+    /// hidden content keep their state but schedule no frames
+    /// ([`Compositor::next_animation_deadline`]).
+    drawn_owner_hidden: tze_hud_scene::graph::SurfaceClasses,
     /// When true, render all zone boundaries with colored tints even when
     /// zones have no active content. Controlled by `TZE_HUD_DEBUG_ZONES=1`.
     pub debug_zone_tints: bool,
@@ -922,6 +926,7 @@ impl Compositor {
             control_panel_layout: None,
             control_panel_layout_generation: 0,
             closed_notice: None,
+            drawn_owner_hidden: Default::default(),
             debug_zone_tints: std::env::var("TZE_HUD_DEBUG_ZONES").is_ok_and(|v| v == "1"),
             degradation_level: DegradationLevel::Nominal,
             degradation_policy: CompositorDegradationPolicy::default(),
@@ -1264,6 +1269,7 @@ impl Compositor {
             control_panel_layout: None,
             control_panel_layout_generation: 0,
             closed_notice: None,
+            drawn_owner_hidden: Default::default(),
             debug_zone_tints: std::env::var("TZE_HUD_DEBUG_ZONES").is_ok_and(|v| v == "1"),
             degradation_level: DegradationLevel::Nominal,
             degradation_policy: CompositorDegradationPolicy::default(),

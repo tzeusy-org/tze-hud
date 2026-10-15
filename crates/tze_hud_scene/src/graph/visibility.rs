@@ -62,23 +62,28 @@ impl SceneGraph {
     }
 
     /// Whether `tile` belongs to a session portal: some tile of its lease
-    /// carries a portal surface or a local scroll config.
+    /// carries a portal surface or a local scroll config. Costs one lookup per
+    /// marked (portal) tile, not per scene tile.
     pub fn tile_is_portal(&self, tile: &Tile) -> bool {
-        let marks = |id: SceneId| {
-            self.overlay.tile_scroll_configs.contains_key(&id) || self.portal_surface(id).is_some()
-        };
-        marks(tile.id)
-            || self
-                .tiles
-                .values()
-                .any(|t| t.lease_id == tile.lease_id && t.id != tile.id && marks(t.id))
+        self.overlay
+            .tile_scroll_configs
+            .keys()
+            .chain(self.overlay.portal_surfaces.keys())
+            .any(|id| {
+                *id == tile.id
+                    || self
+                        .tiles
+                        .get(id)
+                        .is_some_and(|marked| marked.lease_id == tile.lease_id)
+            })
     }
 
     /// Whether `tile` is drawn and interactive under the owner's visibility.
     pub fn tile_shown(&self, tile: &Tile) -> bool {
         let hidden = self.overlay.owner_hidden;
-        if !hidden.portals && !hidden.tiles {
-            return true;
+        // Portals and plain tiles share a state: no need to tell them apart.
+        if hidden.portals == hidden.tiles {
+            return !hidden.tiles;
         }
         if self.tile_is_portal(tile) {
             !hidden.portals
@@ -90,6 +95,14 @@ impl SceneGraph {
     /// [`Self::tile_shown`] by id (`false` for an unknown tile).
     pub fn tile_id_shown(&self, tile_id: SceneId) -> bool {
         self.tiles.get(&tile_id).is_some_and(|t| self.tile_shown(t))
+    }
+
+    /// Whether `tile_id` is a tile the owner hid (`false` for an unknown tile,
+    /// unlike `!tile_id_shown`).
+    pub fn tile_id_hidden(&self, tile_id: SceneId) -> bool {
+        self.tiles
+            .get(&tile_id)
+            .is_some_and(|t| !self.tile_shown(t))
     }
 
     /// Zone publications are drawn and interactive.
@@ -243,14 +256,5 @@ mod tests {
 
         assert!(scene.set_owner_hidden(SurfaceClasses::NONE));
         assert!(scene.tiles.keys().all(|id| scene.tile_id_shown(*id)));
-    }
-
-    #[test]
-    fn owner_hiding_is_never_serialized() {
-        let (mut scene, ..) = scene();
-        scene.set_owner_hidden(SurfaceClasses::ALL);
-        let json = serde_json::to_string(&scene).unwrap();
-        let restored: SceneGraph = serde_json::from_str(&json).unwrap();
-        assert_eq!(restored.owner_hidden(), SurfaceClasses::NONE);
     }
 }

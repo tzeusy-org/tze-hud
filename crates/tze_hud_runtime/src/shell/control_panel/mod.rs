@@ -524,16 +524,45 @@ impl PanelTask {
         if parts.is_empty() {
             return None;
         }
-        parts.push(format!("open with {}", reopen_chord(&self.deps.chords)));
+        let panel_chord = crate::operator::status::hotkey(ChordRole::Panel);
+        parts.push(format!(
+            "open with {}",
+            reopen_chord(&panel_chord, &self.deps.chords)
+        ));
         Some(parts.join(" · "))
     }
 }
 
 /// The chord that opens the panel: the panel chord, or the pause chord when
 /// Windows refused the panel chord.
-fn reopen_chord(chords: &HudChords) -> tze_hud_scene::config::Hotkey {
-    match crate::operator::status::hotkey(ChordRole::Panel) {
+fn reopen_chord(
+    panel_chord: &crate::operator::status::HotkeyStatus,
+    chords: &HudChords,
+) -> tze_hud_scene::config::Hotkey {
+    match panel_chord {
         crate::operator::status::HotkeyStatus::Failed { .. } => chords.pause,
         _ => chords.panel,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::operator::status::HotkeyStatus;
+
+    /// The closed-panel notice names the panel chord, or the pause chord when
+    /// Windows refused the panel chord (CP-6).
+    #[test]
+    fn reopen_chord_falls_back_to_the_pause_chord() {
+        let chords = HudChords::default();
+        let failed = HotkeyStatus::Failed {
+            chord: chords.panel.to_string(),
+            reason: "in use".into(),
+        };
+        assert_eq!(reopen_chord(&failed, &chords), chords.pause);
+        assert_eq!(
+            reopen_chord(&HotkeyStatus::NotApplicable, &chords),
+            chords.panel
+        );
     }
 }

@@ -697,3 +697,109 @@ async fn hold_moves_the_fade_deadline_and_ttl_zero_never_fades() {
     compositor.update_publication_animations_at(&scene, now);
     assert_eq!(compositor.next_animation_deadline_at(now), None);
 }
+
+/// Owner hiding (CP-6): an animation on hidden content (a portal's scroll
+/// catch-up, a zone's fade-in) keeps its state but schedules no frames;
+/// showing the content again resumes it.
+#[tokio::test]
+async fn hidden_content_animations_schedule_no_frames() {
+    use tze_hud_scene::graph::SurfaceClasses;
+
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(720, 480).await);
+    compositor.scroll_smoothing_enabled = true;
+    let mut scene = SceneGraph::new(720.0, 480.0);
+    let tab_id = scene.create_tab("gate", 0).unwrap();
+    let lease_id = scene.grant_lease("gate", 120_000);
+    let tile_id = scene
+        .create_tile(
+            tab_id,
+            "gate",
+            lease_id,
+            Rect::new(0.0, 0.0, 400.0, 300.0),
+            1,
+        )
+        .unwrap();
+    scene
+        .register_tile_scroll_config(
+            tile_id,
+            tze_hud_scene::types::TileScrollConfig {
+                scrollable_x: false,
+                scrollable_y: true,
+                content_width: None,
+                content_height: Some(2000.0),
+            },
+        )
+        .unwrap();
+    compositor.update_scroll_smoothing(&scene);
+    scene
+        .set_tile_scroll_offset_local(tile_id, 0.0, 1500.0)
+        .unwrap();
+    compositor.update_scroll_smoothing(&scene);
+    assert!(
+        compositor.has_inflight_animation(&scene),
+        "portal catching up"
+    );
+
+    let portals = SurfaceClasses {
+        portals: true,
+        ..SurfaceClasses::NONE
+    };
+    scene.set_owner_hidden(portals);
+    assert!(
+        !compositor.has_inflight_animation(&scene),
+        "a hidden portal's catch-up schedules no frames"
+    );
+    scene.set_owner_hidden(SurfaceClasses::NONE);
+    assert!(
+        compositor.has_inflight_animation(&scene),
+        "shown: it resumes"
+    );
+    compositor.scroll_smoothers.clear();
+
+    // A zone fading in on its first publish.
+    scene.register_zone(ZoneDefinition {
+        id: SceneId::new(),
+        name: "status".to_owned(),
+        description: "zone".to_owned(),
+        geometry_policy: GeometryPolicy::Relative {
+            x_pct: 0.0,
+            y_pct: 0.0,
+            width_pct: 0.25,
+            height_pct: 0.25,
+        },
+        accepted_media_types: vec![ZoneMediaType::StreamText],
+        rendering_policy: RenderingPolicy {
+            transition_in_ms: Some(500),
+            ..Default::default()
+        },
+        contention_policy: ContentionPolicy::Replace,
+        max_publishers: 1,
+        auto_clear_ms: None,
+        ephemeral: false,
+        layer_attachment: LayerAttachment::Content,
+    });
+    scene
+        .publish_to_zone(
+            "status",
+            ZoneContent::StreamText("hello".into()),
+            "gate",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let now = std::time::Instant::now();
+    compositor.update_zone_animations_at(&scene, now);
+    assert!(
+        compositor.has_inflight_animation_at(&scene, now),
+        "zone fading in"
+    );
+    scene.set_owner_hidden(SurfaceClasses {
+        zones: true,
+        ..SurfaceClasses::NONE
+    });
+    assert!(
+        !compositor.has_inflight_animation_at(&scene, now),
+        "a hidden zone's fade schedules no frames"
+    );
+}
