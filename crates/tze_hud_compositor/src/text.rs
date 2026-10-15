@@ -5757,6 +5757,214 @@ mod tests {
             result_base.text,
             result_bold.text,
         );
+
+        // Repeated priming at the exact effective attributes must preserve the
+        // bold result and its single cache slot. A base-weight result remains
+        // separate even when both live in the same cache.
+        let repeated_bold = cache_bold
+            .prime(
+                expected_bold_key,
+                content,
+                narrow_w,
+                height,
+                font_size,
+                FontFamily::SystemSansSerif,
+                eff_weight,
+                TruncationViewport::HeadAnchored,
+                1.4,
+                &mut fs,
+            )
+            .clone();
+        assert_eq!(repeated_bold, result_bold);
+        assert_eq!(cache_bold.entries.len(), 1);
+        let separate_base = cache_bold
+            .prime(
+                base_key,
+                content,
+                narrow_w,
+                height,
+                font_size,
+                FontFamily::SystemSansSerif,
+                base_weight,
+                TruncationViewport::HeadAnchored,
+                1.4,
+                &mut fs,
+            )
+            .clone();
+        assert_eq!(separate_base, result_base);
+        assert_eq!(cache_bold.entries.len(), 2);
+        assert_eq!(
+            cache_bold.entries.get(&expected_bold_key),
+            Some(&result_bold)
+        );
+
+        // The cached strings must actually fit when shaped at their respective
+        // effective weights, independently of the key and prefix-length checks.
+        for (result, weight) in [(&result_base, base_weight), (&result_bold, eff_weight)] {
+            let mut buffer = Buffer::new(&mut fs, Metrics::new(font_size, font_size * 1.4));
+            buffer.set_size(&mut fs, Some(narrow_w), None);
+            buffer.set_wrap(&mut fs, Wrap::Word);
+            buffer.set_text(
+                &mut fs,
+                &result.text,
+                Attrs::new()
+                    .family(Family::SansSerif)
+                    .weight(Weight(weight)),
+                Shaping::Advanced,
+            );
+            buffer.shape_until_scroll(&mut fs, false);
+            let runs: Vec<_> = buffer.layout_runs().collect();
+            assert!(!runs.is_empty());
+            assert!(runs.len() <= 1, "the 40px box contains one whole line");
+            assert!(runs.iter().all(|run| run.line_w <= narrow_w));
+        }
+
+        // The cache consumer must keep contextual Unicode output and
+        // weight-separated cache slots under the union candidate search.
+        for text in [
+            "WWW ffi e\u{301} 👨‍👩‍👧‍👦 WWW tail",
+            "العربية الطويلة WWW العربية ffi",
+            "heading\nWWW ffi e\u{301} 👨‍👩‍👧‍👦\nlast row",
+        ] {
+            for weight in [base_weight, eff_weight] {
+                let key = TruncationKey::new(
+                    text,
+                    narrow_w,
+                    height,
+                    font_size,
+                    FontFamily::SystemSansSerif,
+                    weight,
+                    TruncationViewport::HeadAnchored,
+                );
+                let first = cache_bold
+                    .prime(
+                        key,
+                        text,
+                        narrow_w,
+                        height,
+                        font_size,
+                        FontFamily::SystemSansSerif,
+                        weight,
+                        TruncationViewport::HeadAnchored,
+                        1.4,
+                        &mut fs,
+                    )
+                    .clone();
+                // Shape the actual cached output independently at its exact
+                // effective weight; a matching cache entry alone is insufficient.
+                let mut output_reference =
+                    Buffer::new(&mut fs, Metrics::new(font_size, font_size * 1.4));
+                output_reference.set_size(&mut fs, Some(narrow_w), None);
+                output_reference.set_wrap(&mut fs, Wrap::Word);
+                output_reference.set_text(
+                    &mut fs,
+                    &first.text,
+                    Attrs::new()
+                        .family(Family::SansSerif)
+                        .weight(Weight(weight)),
+                    Shaping::Advanced,
+                );
+                output_reference.shape_until_scroll(&mut fs, false);
+                let output_runs: Vec<_> = output_reference.layout_runs().collect();
+                assert!(!output_runs.is_empty());
+                assert!(output_runs.len() <= 1);
+                assert!(output_runs.iter().all(|run| run.line_w <= narrow_w));
+                let entries = cache_bold.entries.len();
+                let repeated = cache_bold
+                    .prime(
+                        key,
+                        text,
+                        narrow_w,
+                        height,
+                        font_size,
+                        FontFamily::SystemSansSerif,
+                        weight,
+                        TruncationViewport::HeadAnchored,
+                        1.4,
+                        &mut fs,
+                    )
+                    .clone();
+                assert_eq!(repeated, first);
+                assert_eq!(cache_bold.entries.len(), entries);
+                assert_eq!(cache_bold.entries.get(&key), Some(&first));
+            }
+        }
+
+        // Source-independent full backend layout is the oracle for these
+        // fitting consumer inputs, rather than another truncation helper.
+        // Fixed weight/configuration per call must not leak previous attributes.
+        for text in [
+            "",
+            "العربية ffi",
+            "LTR e\u{301} 👨‍👩‍👧‍👦",
+            "one\ttwo",
+            "first\r\nsecond\nthird",
+        ] {
+            for weight in [eff_weight, base_weight, eff_weight] {
+                let attrs = Attrs::new()
+                    .family(Family::SansSerif)
+                    .weight(Weight(weight));
+                let mut reference = Buffer::new(&mut fs, Metrics::new(font_size, font_size * 1.4));
+                reference.set_size(&mut fs, Some(400.0), None);
+                reference.set_wrap(&mut fs, Wrap::Word);
+                reference.set_text(&mut fs, text, attrs, Shaping::Advanced);
+                reference.shape_until_scroll(&mut fs, false);
+                let expected_runs: Vec<_> = reference.layout_runs().collect();
+                assert!(expected_runs.len() <= 4);
+                assert!(expected_runs.iter().all(|run| run.line_w <= 400.0));
+                for run in &expected_runs {
+                    let min_start = run.glyphs.iter().map(|g| g.start).min().unwrap_or(0);
+                    assert!(
+                        reference.lines[run.line_i]
+                            .text()
+                            .is_char_boundary(min_start)
+                    );
+                }
+                let key = TruncationKey::new(
+                    text,
+                    400.0,
+                    100.0,
+                    font_size,
+                    FontFamily::SystemSansSerif,
+                    weight,
+                    TruncationViewport::HeadAnchored,
+                );
+                let actual = cache_bold
+                    .prime(
+                        key,
+                        text,
+                        400.0,
+                        100.0,
+                        font_size,
+                        FontFamily::SystemSansSerif,
+                        weight,
+                        TruncationViewport::HeadAnchored,
+                        1.4,
+                        &mut fs,
+                    )
+                    .clone();
+                assert_eq!(actual.text, text);
+                assert!(!actual.was_truncated);
+                let entries = cache_bold.entries.len();
+                let repeated = cache_bold
+                    .prime(
+                        key,
+                        text,
+                        400.0,
+                        100.0,
+                        font_size,
+                        FontFamily::SystemSansSerif,
+                        weight,
+                        TruncationViewport::HeadAnchored,
+                        1.4,
+                        &mut fs,
+                    )
+                    .clone();
+                assert_eq!(repeated, actual);
+                assert_eq!(cache_bold.entries.len(), entries);
+                assert_eq!(cache_bold.entries.get(&key), Some(&actual));
+            }
+        }
     }
 
     /// Phase 2 (hud-9ieev): `compute_inline_backdrop_quads` returns a quad for a
