@@ -382,12 +382,17 @@ class PrePushTests(unittest.TestCase):
             git("worktree", "add", "-q", "--detach", str(other_source), frozen_head)
             result, calls = guarded(cwd=other_source)
             self.assertNotEqual(result.returncode, 0)
+            self.assertIn("foreign-checkout-target", result.stderr)
             self.assertEqual(calls, [])
+            # A new commit in the same checkout reuses its warm target.
             commit("README.md", "new frozen HEAD\n")
             result, calls = guarded()
-            self.assertNotEqual(result.returncode, 0)
-            self.assertEqual(calls, [])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(calls, [["check", "--workspace"]])
+            self.assertEqual(json.loads((target / ".tze-hud-source-binding.json").read_text())["head"], git("rev-parse", "HEAD"))
             git("reset", "--hard", frozen_head)  # Only this parent's owned fixture.
+            result, calls = guarded()
+            self.assertEqual(result.returncode, 0, result.stderr)
 
             # Built-in EOL conversion preserves Git content without changing the
             # user's config. Raw materialized bytes still get their own binding.
@@ -679,9 +684,11 @@ class PrePushTests(unittest.TestCase):
             self.assertEqual(calls, [["check", "--workspace"]])
             self.assertFalse(json.loads((target / ".tze-hud-source-binding.json").read_text())["valid"])
             git("restore", "lib.rs")
+            # The same checkout rebinds; Cargo fingerprints the restored source.
             result, calls = guarded()
-            self.assertNotEqual(result.returncode, 0)
-            self.assertEqual(calls, [])
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(calls, [["check", "--workspace"]])
+            self.assertTrue(json.loads((target / ".tze-hud-source-binding.json").read_text())["valid"])
 
             # Git rename detection must not hide removal of a sensitive path.
             # Each proposed HEAD differs only by this exact-content R100 rename.
