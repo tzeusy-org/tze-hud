@@ -415,7 +415,8 @@ roles: frame and transcript use `color.surface.container`, composer uses
 `color.surface.container.highest`, code uses the high container, and dimmed
 content uses the low container. Text uses the corresponding on-surface roles;
 status cues keep the theme's primary, success, caution and error meanings.
-Composer selection uses primary with the theme's hover alpha. Portal sizes,
+Composer selection keeps the portal default, since no theme role is a
+selection highlight. Portal sizes,
 fonts, numeric defaults and behavior are unchanged. Explicit `[design_tokens]`
 color overrides still take precedence.
 

@@ -310,18 +310,18 @@ mod tests {
             for (name, _) in BUILTIN_THEMES {
                 let theme = builtin_theme(name).unwrap();
                 let selected = resolve_config_tokens(&tokens(&[(THEME_KEY, name)]));
+                // Every portal color but selection maps to a theme role. No theme
+                // role is a selection highlight (hover opacity is a state layer,
+                // too faint to show a selection), so it keeps the portal default.
                 assert_eq!(role_colors.len() + 1, PORTAL_COLOR_KEYS.len());
                 for (key, role) in role_colors {
                     assert_eq!(theme[key], theme[role], "{name}: {key} must use {role}");
                     assert_eq!(selected[key], theme[key], "{name} must supply {key}");
                 }
-                let hover = theme["state.hover.opacity"].parse::<f64>().unwrap();
-                assert!((0.0..=1.0).contains(&hover));
-                let alpha = (hover * 255.0).round() as u8;
-                let primary = &theme["color.primary"];
-                let selection = format!("{primary}{alpha:02X}");
-                assert_eq!(theme["portal.composer.selection_color"], selection);
-                assert_eq!(selected["portal.composer.selection_color"], selection);
+                assert!(
+                    !theme.contains_key(portal_tokens::PORTAL_TOKEN_COMPOSER_SELECTION_COLOR),
+                    "{name} must leave composer selection to the portal default"
+                );
                 let part = portal_tokens::resolve_portal_tokens(&selected);
                 assert_eq!(
                     part.frame_background,
@@ -335,7 +335,7 @@ mod tests {
                 );
                 assert_eq!(
                     part.composer_selection_color,
-                    parse_color_hex(&selection).unwrap()
+                    portal_tokens::PortalPartTokens::default().composer_selection_color
                 );
                 assert_eq!(
                     part.frame_opacity,
@@ -426,24 +426,6 @@ mod tests {
                     assert!(
                         ratio >= 4.5,
                         "{name}: {foreground}/{background} contrast {ratio}"
-                    );
-                }
-                let composer = rgb(&selected["portal.composer.background"]).map(linearize);
-                let primary = rgb(primary).map(linearize);
-                let alpha = f64::from(alpha) / 255.0;
-                let selection_background =
-                    std::array::from_fn(|i| composer[i] * (1.0 - alpha) + primary[i] * alpha);
-                for foreground in [
-                    "portal.composer.text_color",
-                    "portal.composer.at_capacity_color",
-                ] {
-                    let ratio = contrast(
-                        rgb(&selected[foreground]).map(linearize),
-                        selection_background,
-                    );
-                    assert!(
-                        ratio >= 4.5,
-                        "{name}: selected {foreground} contrast {ratio}"
                     );
                 }
                 // White is the brightest desktop under the retained 0.98 frame;

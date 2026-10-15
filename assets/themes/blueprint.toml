@@ -166,7 +166,6 @@
 "portal.collapsed_card.text_color"         = "#F6F7F9"    # color.on_surface
 "portal.scroll_indicator.color"            = "#5F6B7C"    # color.outline
 "portal.composer.caret_color"              = "#F6F7F9"    # color.on_surface
-"portal.composer.selection_color"          = "#4C90F003"  # color.primary + existing state.hover.opacity alpha
 "portal.composer.placeholder_color"        = "#ABB3BF"    # color.on_surface.variant
 "portal.focus_ring.color"                  = "#4C90F0"    # color.primary
 "portal.window.resize_grip.color"          = "#5F6B7C"    # color.outline
