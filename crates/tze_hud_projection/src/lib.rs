@@ -2,6 +2,6 @@
 pub mod hub;
 pub use hub::*;
 pub mod render;
-pub mod tokens;
 #[cfg(test)]
 mod render_goldens;
+pub mod tokens;
