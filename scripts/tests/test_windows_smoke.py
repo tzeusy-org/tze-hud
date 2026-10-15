@@ -167,7 +167,7 @@ def test_assert_not_early_allows_slack_but_rejects_an_early_event():
         ws.assert_not_early(1.0, 3.0, "x")
 
 
-def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subtests, capsys):
+def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subtests, capsys, tmp_path):
     """Exercise the real smoke/PNG path with one publish and an offline clock."""
     background = b"\x10\x20\x30\xff" * 400
     shown = b"\x90\xa0\xb0\xff" * 200 + background[800:]
@@ -193,10 +193,12 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
             self.clock, self.case = clock, case
             self.held, self.due = True, None  # Earlier screenshot content.
             self.publishes, self.captures, self.clears = [], [], 0
+            self.capture_bodies = []
             self.rpc_s, self.capture_s = (0.001, 0.0005) if case == "coarse monotonic" else (0.05, 0.05)
 
         def urlopen(self, request, timeout):
             if request.get_method() == "GET":
+                assert not (self.diagnostics / "delay.json").exists()  # No I/O before the witness.
                 assert request.full_url.endswith("/admin/screenshot") and timeout == 15
                 started = self.clock()
                 shot = len(self.captures) + 1
@@ -235,6 +237,7 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                         raise ws.urllib.error.URLError("synthetic unavailable capture")
                 self.clock.now += 3 if self.case == "cross-due capture" and shot == 3 else self.capture_s
                 self.captures.append((started, self.clock()))
+                self.capture_bodies.append(body)
                 return Response(body, status, ctype)
 
             assert timeout == 10
@@ -283,8 +286,9 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                 patch.setattr(ws, "decode_png_rgba", slow_decode)
             smoke = ws.Smoke("http://offline-smoke/", "synthetic-unused-key")
             for invocation in range(2 if case == "normal" else 1):
+                endpoint.diagnostics = tmp_path / case / str(invocation)
                 if success:
-                    ws.check_delay(smoke)
+                    ws.check_delay(smoke, endpoint.diagnostics)
                     assert endpoint.held is False and endpoint.due is None
                     assert len(endpoint.publishes) == invocation + 1
                     captures = endpoint.captures[invocation * 5 :]
@@ -292,13 +296,32 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                     assert len(captures) == 5
                     assert captures[2][1] < sent + 3
                     assert captures[3][0] >= acknowledged + 3
+                    assert len(clock.sleeps) == (invocation + 1) * 2  # Existing baseline and due sleeps only.
                 else:
                     with pytest.raises(AssertionError):
-                        ws.check_delay(smoke)
+                        ws.check_delay(smoke, endpoint.diagnostics)
                     baseline_failed = case in ("unstable baseline", "baseline dimensions")
                     assert len(endpoint.publishes) == (0 if baseline_failed else 1)
                     assert endpoint.clears == (1 if baseline_failed else 2)
                     assert len(endpoint.captures) <= 5  # No retry on invalid evidence.
+
+                manifest = ws.json.loads((endpoint.diagnostics / "delay.json").read_text())
+                assert manifest["outcome"] == ("success" if success else "failure")
+                assert manifest["minimum_changed_pixels"] == 200
+                saved = manifest["captures"]
+                names = ["warm", "baseline", "before-due", "after-due", "restored"]
+                for index, body in enumerate(endpoint.capture_bodies[invocation * 5:]):
+                    capture = saved.get(names[index], {})
+                    if "file" in capture:
+                        assert (endpoint.diagnostics / capture["file"]).read_bytes() == body
+                        assert capture["requested_at"] <= capture["responded_at"]
+                if case == "native observed footprint":
+                    assert manifest["changed_pixels"] == 192
+                    assert sum(manifest["pixel_delta"]["max_channel_delta_counts"].values()) == 192
+                    assert list(saved) == names[:4]  # Failed original witness; no replacement capture.
+                if case in ("malformed PNG", "truncated PNG", "transport"):
+                    assert "file" not in saved["before-due"]
+                assert "synthetic-unused-key" not in (endpoint.diagnostics / "delay.json").read_text()
 
                 output = capsys.readouterr()
                 assert "synthetic-unused-key" not in output.out + output.err
@@ -315,6 +338,37 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
     ):
         with subtests.test(case=case):
             run(case, success=False)
+
+    # A failing artifact sink preserves the original failure and its count.
+    with monkeypatch.context() as patch:
+        def unavailable(directory, evidence):
+            assert evidence["outcome"] == "failure" and evidence["changed_pixels"] == 192
+            assert endpoint.clears == 2
+            raise OSError("synthetic-sensitive-write-error")
+
+        patch.setattr(ws, "write_delay_evidence", unavailable)
+        clock = FakeClock()
+        endpoint = Endpoint(clock, "native observed footprint")
+        endpoint.diagnostics = tmp_path / "unavailable"
+        patch.setattr(ws.time, "perf_counter", clock)
+        patch.setattr(ws.time, "sleep", clock.sleep)
+        patch.setattr(ws.urllib.request, "urlopen", endpoint.urlopen)
+        with pytest.raises(AssertionError, match="192"):
+            ws.check_delay(ws.Smoke("http://offline-smoke/", "synthetic-unused-key"), endpoint.diagnostics)
+        assert "synthetic-sensitive-write-error" not in capsys.readouterr().err
+
+    log = tmp_path / "hud.log"
+    log.write_text('\n'.join([
+        "synthetic-sensitive-unstructured-line",
+        ws.json.dumps({"target": "other", "fields": {"event": "private"}}),
+        ws.json.dumps({"target": "tze_hud_delay_diagnostic", "timestamp": "2026-10-15T00:00:00Z",
+                       "fields": {"event": "zone_text_sample", "opacity": 0.01, "frame": 3,
+                                  "content": "synthetic-sensitive-content", "psk": "synthetic-unused-key"}}),
+    ]))
+    ws.write_delay_trace(tmp_path, log)
+    trace = ws.json.loads((tmp_path / "runtime-timing.json").read_text())
+    assert trace == [{"timestamp": "2026-10-15T00:00:00Z",
+                      "fields": {"event": "zone_text_sample", "opacity": 0.01, "frame": 3}}]
 
 
 def test_parse_tile_count_finds_the_line_among_other_output():

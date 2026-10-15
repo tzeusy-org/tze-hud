@@ -104,9 +104,17 @@ jobs:
       - name: Boot smoke (production config, MCP lifecycle, POC stages)
         timeout-minutes: 10
         env:
-          TZE_HUD_LOG: error,tze_hud_mcp_phases=debug
+          TZE_HUD_LOG: error,tze_hud_mcp_phases=debug,tze_hud_delay_diagnostic=debug
           TZE_HUD_LOG_JSON: "1"
-        run: python scripts/ci/windows_smoke.py --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --poc-demo "target/$env:HUD_BUILD_PROFILE/poc_demo.exe" --config app/tze_hud_app/config/production.toml
+        run: python scripts/ci/windows_smoke.py --diagnostics "$env:RUNNER_TEMP/windows-smoke-diagnostics" --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --poc-demo "target/$env:HUD_BUILD_PROFILE/poc_demo.exe" --config app/tze_hud_app/config/production.toml
+
+      - name: Upload original boot-smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: windows-smoke-diagnostics
+          path: ${{ runner.temp }}/windows-smoke-diagnostics/
+          if-no-files-found: warn
 
       # Informational, not a gate: boots a second HUD under the runtime's own
       # constrained WARP fullscreen measurement (5 s settle + 60 s), with held
