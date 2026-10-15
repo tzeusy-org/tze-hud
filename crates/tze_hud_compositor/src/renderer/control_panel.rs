@@ -73,6 +73,25 @@ pub enum PanelBody {
     },
     /// Nothing to list (e.g. no search match): one explanatory line.
     Empty(String),
+    /// One full-width card: a monospace text block beside a column of rows
+    /// (e.g. Connect an agent: the setup prompt, its code and actions).
+    Connect(PanelConnect),
+}
+
+/// A card with a text block to copy and the rows that act on it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PanelConnect {
+    pub title: String,
+    /// One line beside the title.
+    pub subtitle: String,
+    /// The text block, one entry per line, drawn monospace.
+    pub block: Vec<String>,
+    /// Rows beside the block (fields, facts, actions), top to bottom.
+    pub items: Vec<PanelItem>,
+    /// A line under the rows (e.g. what the last action did).
+    pub status: Option<(String, PanelTone)>,
+    /// Warnings shown under the card.
+    pub banners: Vec<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1407,6 +1426,15 @@ pub(super) fn control_panel_layout(
     let mut cards: Vec<PanelRect> = Vec::new();
     let mut heads: Vec<(String, Option<String>, PanelRect)> = Vec::new();
     let mut empty_line: Option<&str> = None;
+    // Connect: (title, subtitle) rect, text block rect and lines, status
+    // line rect, banner rects; all in content coordinates.
+    let mut connect: Option<(
+        &PanelConnect,
+        PanelRect,
+        PanelRect,
+        PanelRect,
+        Vec<PanelRect>,
+    )> = None;
     let content_h = match &model.body {
         PanelBody::Sections(list) => {
             let heights: Vec<f32> = list
@@ -1491,6 +1519,103 @@ pub(super) fn control_panel_layout(
             empty_line = Some(line);
             s.space_l * 2.0 + s.body.line
         }
+        PanelBody::Connect(c) => {
+            let pad = s.space_m;
+            let gap = s.space_l;
+            let inner = content_w - pad * 2.0;
+            // The rows take a column; the block the rest, or the full width
+            // above them when the panel is too narrow for both.
+            let side_w = (s.column_min * 1.5).min(inner);
+            let stacked = inner < side_w + gap + s.column_min;
+            let head = PanelRect {
+                x: pad,
+                y: s.space_l + pad,
+                w: inner,
+                h: s.title.line.max(s.body.line),
+            };
+            let block_line = s.readout.line;
+            let block_h = block_line * c.block.len() as f32 + pad * 2.0;
+            let rows_h = row_h * c.items.len() as f32;
+            let status_h = if c.status.is_some() {
+                s.body.line + s.space_s
+            } else {
+                0.0
+            };
+            let top = head.y + head.h + s.space_s;
+            let (block, side_x, side_y) = if stacked {
+                let block = PanelRect {
+                    x: pad,
+                    y: top,
+                    w: inner,
+                    h: block_h,
+                };
+                (block, pad, top + block_h + gap)
+            } else {
+                let block = PanelRect {
+                    x: pad,
+                    y: top,
+                    w: inner - side_w - gap,
+                    h: block_h.max(rows_h + status_h),
+                };
+                (block, pad + inner - side_w, top)
+            };
+            let side_w = if stacked { inner } else { side_w };
+            for (r, item) in c.items.iter().enumerate() {
+                let rect = PanelRect {
+                    x: side_x,
+                    y: side_y + r as f32 * row_h,
+                    w: side_w,
+                    h: row_h,
+                };
+                row_items.push((item, rect, 0.0));
+            }
+            let status = PanelRect {
+                x: side_x + s.space_m,
+                y: side_y + rows_h + s.space_s,
+                w: side_w - s.space_m,
+                h: s.body.line,
+            };
+            let body_bottom = if stacked {
+                side_y + rows_h + status_h
+            } else {
+                (block.y + block.h).max(side_y + rows_h + status_h)
+            };
+            let card = PanelRect {
+                x: 0.0,
+                y: s.space_l,
+                w: content_w,
+                h: body_bottom + pad - s.space_l,
+            };
+            cards.push(card);
+            sections.push(PanelSpan {
+                id: "connect".to_owned(),
+                top: card.y,
+                bottom: card.y + card.h,
+            });
+            // Banners: two to a line under the card.
+            let banner_h = s.body.line + s.space_m;
+            let banner_w = (content_w - s.space_m) / 2.0;
+            let mut banners = Vec::new();
+            let mut y = card.y + card.h + s.space_m;
+            for (i, _) in c.banners.iter().enumerate() {
+                let x = if i % 2 == 0 {
+                    0.0
+                } else {
+                    banner_w + s.space_m
+                };
+                banners.push(PanelRect {
+                    x,
+                    y,
+                    w: banner_w,
+                    h: banner_h,
+                });
+                if i % 2 == 1 || i + 1 == c.banners.len() {
+                    y += banner_h + s.space_s;
+                }
+            }
+            connect = Some((c, head, block, status, banners));
+            y + s.space_l - s.space_s
+        }
     };
     let max_scroll = (content_h - viewport.h).max(0.0);
     let scroll = if model.scroll_px.is_finite() {
@@ -1509,6 +1634,94 @@ pub(super) fn control_panel_layout(
     let clip = Some(viewport);
     for card in &cards {
         p.shape(place(*card), s.shape_card, s.card, None, clip);
+    }
+    if let Some((c, head, block, status, banners)) = &connect {
+        let r = place(*head);
+        let cy = r.y + r.h / 2.0;
+        let tw = p.width(&c.title, s.title, false) + 2.0;
+        p.text(
+            &c.title,
+            r.x,
+            cy,
+            tw.min(r.w),
+            s.title,
+            s.on_surface,
+            false,
+            Align::Start,
+            clip,
+        );
+        p.text(
+            &c.subtitle,
+            r.x + tw + s.space_s,
+            cy,
+            (r.w - tw - s.space_s).max(0.0),
+            s.body,
+            s.on_surface_variant,
+            false,
+            Align::Start,
+            clip,
+        );
+        let b = place(*block);
+        p.shape(
+            b,
+            s.shape_row,
+            s.field,
+            Some((1.0, s.outline_variant)),
+            clip,
+        );
+        let line = s.readout.line;
+        for (i, text) in c.block.iter().enumerate() {
+            p.text(
+                text,
+                b.x + s.space_m,
+                b.y + s.space_m + line * (i as f32 + 0.5),
+                (b.w - s.space_m * 2.0).max(1.0),
+                s.readout,
+                s.on_surface,
+                true,
+                Align::Start,
+                clip,
+            );
+        }
+        if let Some((text, tone)) = &c.status {
+            let r = place(*status);
+            let color = match tone {
+                PanelTone::Normal => s.on_surface_variant,
+                tone => p.tone_color(*tone),
+            };
+            p.text(
+                text,
+                r.x,
+                r.y + r.h / 2.0,
+                r.w,
+                s.body,
+                color,
+                false,
+                Align::Start,
+                clip,
+            );
+        }
+        for (text, rect) in c.banners.iter().zip(banners) {
+            let r = place(*rect);
+            p.shape(
+                r,
+                s.shape_row,
+                s.caution_container,
+                Some((1.0, s.caution_outline)),
+                clip,
+            );
+            p.text(
+                text,
+                r.x + s.space_m,
+                r.y + r.h / 2.0,
+                (r.w - s.space_m * 2.0).max(1.0),
+                s.body,
+                s.on_caution_container,
+                false,
+                Align::Start,
+                clip,
+            );
+        }
     }
     for (title, key, rect) in &heads {
         let r = place(*rect);
@@ -2208,5 +2421,60 @@ mod tests {
                 .iter()
                 .any(|t| t.text.contains("No settings match"))
         );
+    }
+
+    /// Connect (CP-13): the prompt block sits beside its rows on a wide
+    /// panel and above them on a narrow one; every row is hit-testable and
+    /// focusable, and the status line and banners draw.
+    #[test]
+    fn connect_body_puts_the_rows_beside_or_under_the_prompt() {
+        let card = PanelConnect {
+            title: "Connect an agent".into(),
+            subtitle: "Paste this into any agent session.".into(),
+            block: (0..18).map(|i| format!("prompt line {i}")).collect(),
+            items: ["connect.name", "connect.code", "connect.copy"]
+                .into_iter()
+                .map(|id| item(id, id, PanelControl::Action))
+                .collect(),
+            status: Some(("Copied. Waiting for a to pair…".into(), PanelTone::Success)),
+            banners: vec!["Tailscale isn't up".into()],
+        };
+        let rows_of = |l: &ControlPanelLayout| l.geometry.rows.clone();
+        let wide = layout(&model(PanelBody::Connect(card.clone())), 1600.0, 2000.0);
+        assert_eq!(rows_of(&wide).len(), 3);
+        let row_rect = |l: &ControlPanelLayout, id: &str| {
+            l.geometry
+                .hits
+                .iter()
+                .find(|h| h.target == PanelHitTarget::Row(id.into(), PanelPart::Body))
+                .expect("row hit")
+                .rect
+        };
+        let block_text = |l: &ControlPanelLayout| {
+            l.texts
+                .iter()
+                .find(|t| &*t.text == "prompt line 0")
+                .expect("prompt drawn")
+                .clone()
+        };
+        let name = row_rect(&wide, "connect.name");
+        let line = block_text(&wide);
+        assert!(name.x > line.pixel_x, "rows beside the prompt");
+        assert!(
+            name.y < line.pixel_y + 50.0,
+            "rows start level with the prompt"
+        );
+        for text in [
+            "Copied. Waiting for a to pair…",
+            "Tailscale isn't up",
+            "Connect an agent",
+        ] {
+            assert!(wide.texts.iter().any(|t| &*t.text == text), "{text} drawn");
+        }
+
+        let narrow = layout(&model(PanelBody::Connect(card)), 700.0, 2000.0);
+        let name = row_rect(&narrow, "connect.name");
+        let line = block_text(&narrow);
+        assert!(name.y > line.pixel_y, "rows under the prompt");
     }
 }

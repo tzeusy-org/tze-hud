@@ -20,7 +20,8 @@ impl<'a> Haystack<'a> {
             Control::Toggle(_)
             | Control::Grant { .. }
             | Control::Disclosure { .. }
-            | Control::Action { .. } => None,
+            | Control::Action { .. }
+            | Control::Field { .. } => None,
         };
         Self {
             label: &row.label,

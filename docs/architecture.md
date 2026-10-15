@@ -65,7 +65,10 @@ crates, the canonical app, five examples and a separate integration package.
 **Identity and deployment [Observed].** The app loads `agents.toml` beside
 its config; pairing adds an agent with a hashed PSK, and the control panel
 unpairs agents and edits allow lists, both through one
-[`AgentStore`](../crates/tze_hud_runtime/src/agent_store.rs) writer. MCP and
+[`AgentStore`](../crates/tze_hud_runtime/src/agent_store.rs) writer. The
+panel's [Connect an agent](../crates/tze_hud_runtime/src/shell/control_panel/connect.rs)
+opens [`Pairing`](../crates/tze_hud_runtime/src/pairing.rs) and copies a setup
+prompt through [`clipboard`](../crates/tze_hud_runtime/src/clipboard.rs). MCP and
 gRPC share [`SharedAgents`](../crates/tze_hud_scene/src/config/agents.rs).
 Network listeners bind loopback and local Tailscale-interface addresses
 ([`net_addrs`](../crates/tze_hud_runtime/src/net_addrs.rs)).

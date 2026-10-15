@@ -242,6 +242,7 @@ pub struct HeadlessEventLoopHarness {
     app: WinitApp,
     mcp_addr: Option<SocketAddr>,
     grpc_addr: Option<SocketAddr>,
+    clipboard: Arc<std::sync::Mutex<Vec<String>>>,
 }
 
 impl HeadlessEventLoopHarness {
@@ -303,6 +304,22 @@ impl HeadlessEventLoopHarness {
             tze_hud_projection::hub::PortalHub::default(),
             Arc::clone(&clock),
         );
+        let grpc_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await?;
+        let grpc_addr = grpc_listener.local_addr()?;
+        // Pairing, as production builds it, when there is a store to pair into.
+        let has_store = agents_path.is_some();
+        let store = Arc::new(crate::agent_store::AgentStore::open(
+            agents_path,
+            Arc::clone(&cfg.agents),
+        ));
+        let pairing = has_store.then(|| {
+            Arc::new(crate::pairing::Pairing::system(
+                Arc::clone(&store),
+                state.system_card.clone(),
+                grpc_addr.port(),
+            ))
+        });
+        state.pairing = pairing.clone();
         let mcp_config = crate::mcp::McpServerConfig {
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
                 &global_tokens,
@@ -316,7 +333,7 @@ impl HeadlessEventLoopHarness {
             restart: None,
             update: None,
             bind_gate: None,
-            pairing: None,
+            pairing: pairing.clone(),
         };
         let (_mcp_task, mcp_addrs) = crate::mcp::start_mcp_http_server_with_render_wake(
             scene_handle,
@@ -329,6 +346,13 @@ impl HeadlessEventLoopHarness {
         )
         .await?;
         let mcp_addr = mcp_addrs[0];
+        if let Some(pairing) = &pairing {
+            // Bound on port 0: hand out the port the listener got.
+            *pairing
+                .binds(&mcp_addrs)
+                .lock()
+                .unwrap_or_else(|e| e.into_inner()) = mcp_addrs.clone();
+        }
 
         // The gRPC session server over the same `SharedState` (so one scene,
         // one session registry, one safe-mode flag), built as production
@@ -348,8 +372,6 @@ impl HeadlessEventLoopHarness {
             ..SessionDeps::new(Arc::clone(&state.shared_state), Arc::clone(&cfg.agents))
         });
         state.lease_expirations = Some(service.lease_expirations.clone());
-        let grpc_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await?;
-        let grpc_addr = grpc_listener.local_addr()?;
         tokio::spawn(
             tonic::transport::Server::builder()
                 .add_service(HudSessionServer::new(service))
@@ -360,20 +382,7 @@ impl HeadlessEventLoopHarness {
 
         let render_wake = state.wake.render_notifier();
         let panel_scene = Arc::clone(&state.shared_state.lock().await.scene);
-        // Pairing, as production builds it, when there is a store to pair into.
-        let has_store = agents_path.is_some();
-        let store = Arc::new(crate::agent_store::AgentStore::open(
-            agents_path,
-            Arc::clone(&cfg.agents),
-        ));
-        let pairing = has_store.then(|| {
-            Arc::new(crate::pairing::Pairing::system(
-                Arc::clone(&store),
-                state.system_card.clone(),
-                grpc_addr.port(),
-            ))
-        });
-        state.pairing = pairing.clone();
+        let clipboard: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
         let deps = crate::shell::control_panel::ControlPanelDeps {
             scene: Arc::clone(&panel_scene),
             pause: crate::shell::control_panel::PauseControl::new(
@@ -384,6 +393,21 @@ impl HeadlessEventLoopHarness {
             ),
             chords: runtime_context.chords,
             pairing: pairing.clone(),
+            connect: pairing.clone().map(|pairing| {
+                let clipboard = Arc::clone(&clipboard);
+                crate::shell::control_panel::ConnectControl {
+                    pairing,
+                    store: Arc::clone(&store),
+                    clipboard: Arc::new(move |text: &str| {
+                        clipboard
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .push(text.to_owned());
+                        Ok(())
+                    }),
+                    machine: Some("test-pc".to_owned()),
+                }
+            }),
             agents: Some(crate::shell::control_panel::AgentControl {
                 store,
                 shared: Arc::clone(&state.shared_state),
@@ -414,6 +438,7 @@ impl HeadlessEventLoopHarness {
             app: WinitApp { state },
             mcp_addr: Some(mcp_addr),
             grpc_addr: Some(grpc_addr),
+            clipboard,
         })
     }
 
@@ -496,8 +521,28 @@ impl HeadlessEventLoopHarness {
             tze_hud_compositor::PanelBody::Results { items, .. } => {
                 items.into_iter().find(|item| item.id == row)
             }
+            tze_hud_compositor::PanelBody::Connect(card) => {
+                card.items.into_iter().find(|item| item.id == row)
+            }
             tze_hud_compositor::PanelBody::Empty(_) => None,
         }
+    }
+
+    /// The open control panel's Connect an agent card, if it is showing.
+    pub fn control_panel_connect(&self) -> Option<tze_hud_compositor::PanelConnect> {
+        match self.control_panel().current_model()?.body {
+            tze_hud_compositor::PanelBody::Connect(card) => Some(card),
+            _ => None,
+        }
+    }
+
+    /// What the control panel last put on the clipboard (the harness
+    /// clipboard records instead of touching the OS one).
+    pub fn clipboard(&self) -> Vec<String> {
+        self.clipboard
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Where keyboard focus is in the open control panel.
@@ -670,6 +715,47 @@ impl HeadlessEventLoopHarness {
         }
     }
 
+    /// Type `text` into the open control panel, key by key, through the
+    /// window's panel key routing (the panel takes keys before agents do).
+    pub fn panel_type(&mut self, text: &str) {
+        use winit::keyboard::{Key, NamedKey, NativeKeyCode, PhysicalKey};
+        let physical = PhysicalKey::Unidentified(NativeKeyCode::Unidentified);
+        for ch in text.chars() {
+            let logical = if ch == ' ' {
+                Key::Named(NamedKey::Space)
+            } else {
+                Key::Character(ch.to_string().into())
+            };
+            assert!(
+                self.app.panel_key_input(physical, &logical, true),
+                "the panel is open"
+            );
+            self.app.panel_key_input(physical, &logical, false);
+        }
+    }
+
+    /// Press a named key (`Enter`, `Escape`, `Backspace`, `ArrowDown`...) on
+    /// the open control panel.
+    pub fn panel_press(&mut self, key: &str) {
+        use winit::keyboard::{Key, NamedKey, NativeKeyCode, PhysicalKey};
+        let named = match key {
+            "Enter" => NamedKey::Enter,
+            "Escape" => NamedKey::Escape,
+            "Backspace" => NamedKey::Backspace,
+            "ArrowDown" => NamedKey::ArrowDown,
+            "ArrowUp" => NamedKey::ArrowUp,
+            "Tab" => NamedKey::Tab,
+            other => panic!("panel_press: unsupported key {other}"),
+        };
+        let physical = PhysicalKey::Unidentified(NativeKeyCode::Unidentified);
+        let logical = Key::Named(named);
+        assert!(
+            self.app.panel_key_input(physical, &logical, true),
+            "the panel is open"
+        );
+        self.app.panel_key_input(physical, &logical, false);
+    }
+
     /// Press and release a named key (e.g. `"Enter"`), as winit delivers it.
     pub fn press_named_key(&mut self, key: &str) {
         self.press_key(key, key, None);
@@ -784,6 +870,7 @@ impl HeadlessEventLoopHarness {
             },
             mcp_addr: None,
             grpc_addr: None,
+            clipboard: Arc::default(),
         }
     }
 

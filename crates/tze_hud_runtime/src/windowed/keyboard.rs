@@ -13,7 +13,7 @@ use super::input_dispatch::{
     dispatch_command_event, dispatch_focus_event, dispatch_keyboard_event, dispatch_pointer_event,
     dispatch_scroll_offset_event_to_namespace,
 };
-use super::lifecycle::{INTERACTION_LOCK_BUDGET, spin_acquire, write_windows_clipboard_text};
+use super::lifecycle::{INTERACTION_LOCK_BUDGET, spin_acquire};
 use crate::shell::{ChromeShortcut, ChromeTab, handle_shortcut};
 
 pub(super) struct ComposerDeliveryContext {
@@ -841,7 +841,7 @@ impl WinitApp {
                 && matches!(raw.key_code.as_str(), "KeyC" | "KeyX")
             {
                 if let Some(selected) = self.state.input_processor.composer_selected_text() {
-                    write_windows_clipboard_text(&selected);
+                    let _ = crate::clipboard::write_text(&selected);
                 }
             }
             // Capture the input-started-at instant for local-ack latency

@@ -90,6 +90,17 @@ impl SystemCardHandle {
         true
     }
 
+    /// Remove the card if it is a `kind` card, leaving other cards (an
+    /// update toast) alone.
+    pub fn clear_kind(&self, kind: SystemCardKind) {
+        let mut slot = self.slot.write().unwrap_or_else(|e| e.into_inner());
+        if slot.as_ref().is_some_and(|c| c.kind == kind) {
+            *slot = None;
+            drop(slot);
+            self.render_wake.notify();
+        }
+    }
+
     /// Remove the card, waking the render loop only if one was showing.
     pub fn clear(&self) {
         let had = self

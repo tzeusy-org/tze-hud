@@ -413,6 +413,7 @@ mod panel_task_tests {
             chords: HudChords::default(),
             pairing: None,
             agents: None,
+            connect: None,
             render_wake,
             main_wake: Default::default(),
         };
@@ -827,6 +828,7 @@ mod panel_task_tests {
             chords: HudChords::default(),
             pairing: None,
             agents: None,
+            connect: None,
             render_wake: RenderWakeNotifier::default(),
             main_wake: RenderWakeNotifier::default(),
         };

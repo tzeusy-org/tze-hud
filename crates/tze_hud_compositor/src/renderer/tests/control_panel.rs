@@ -359,3 +359,97 @@ async fn status_dots_draw_filled_or_outlined_before_the_label() {
         "filled and outlined dots look different"
     );
 }
+
+/// Connect an agent (CP-13) draws its prompt block (a field-coloured well
+/// unlike the card around it) and its rows, and a set status line.
+#[tokio::test]
+async fn connect_card_draws_the_prompt_well_and_its_rows() {
+    let (w, h) = (1600_u32, 900_u32);
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(w, h).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut scene = SceneGraph::new(w as f32, h as f32);
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    let ro = |text: &str, mono: bool| PanelControl::ReadOnly {
+        text: text.into(),
+        mono,
+    };
+    let mut items = vec![
+        item(
+            "connect.name",
+            "Agent name",
+            PanelControl::Value {
+                text: "claude-laptop".into(),
+                mono: true,
+            },
+        ),
+        item("connect.code", "One-time code", ro("564 016", true)),
+        item(
+            "connect.reach",
+            "Reachable at",
+            ro("100.87.181.125:9290", true),
+        ),
+        item("connect.network", "Network", ro("", false)),
+        item("connect.grants", "Grants", ro("", false)),
+        item("connect.copy", "Copy prompt · Enter", PanelControl::Action),
+        item("connect.new_code", "New code", PanelControl::Action),
+    ];
+    items[1].detail = Some("expires in 4:52 · works once".into());
+    items[3].detail = Some("Tailnet only · firewall allows it".into());
+    items[3].status = Some(PanelTone::Success);
+    items[4].detail = Some("Zones, widgets, portal, tiles. Not admin.".into());
+    let mut m = panel();
+    m.tiles.clear();
+    m.chips.clear();
+    m.focus = PanelFocus::Row("connect.name".into());
+    m.body = PanelBody::Connect(crate::PanelConnect {
+        title: "Connect an agent".into(),
+        subtitle: "Paste this into any agent session. It pairs once, then uses the HUD.".into(),
+        block: [
+            "Connect to my tze_hud HUD, a screen overlay on my Windows PC (tzehouse-windows).",
+            "It is reachable ONLY inside my Tailscale tailnet at 100.87.181.125:9290.",
+            "",
+            "1. Pair once. The code works one time and expires within 5 minutes:",
+            "   curl -s http://100.87.181.125:9290/pair \\",
+            r#"     -d '{"agent":"claude-laptop","code":"564016"}'"#,
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect(),
+        items,
+        status: Some((
+            "Copied. Waiting for claude-laptop to pair…".into(),
+            PanelTone::Success,
+        )),
+        banners: vec!["Tailscale isn't up: agents can only connect from this PC.".into()],
+    });
+    compositor.set_control_panel(Some(m));
+    let geometry = compositor
+        .control_panel_geometry(w as f32, h as f32)
+        .unwrap()
+        .1
+        .clone();
+    compositor.render_frame_headless(&mut scene, &surface);
+    let px = surface.read_pixels(&compositor.device);
+    if let Ok(path) = std::env::var("TZE_HUD_PANEL_DUMP") {
+        // Manual look: write a binary PPM of the frame.
+        let mut out = format!("P6 {w} {h} 255\n").into_bytes();
+        for p in px.chunks(4) {
+            out.extend_from_slice(&p[..3]);
+        }
+        std::fs::write(path, out).unwrap();
+    }
+    let rows: Vec<&str> = geometry.rows.iter().map(|r| r.id.as_str()).collect();
+    assert_eq!(rows.len(), 7, "{rows:?}");
+    let name = geometry
+        .hits
+        .iter()
+        .find(|h| h.target == PanelHitTarget::Row("connect.name".into(), crate::PanelPart::Body))
+        .unwrap()
+        .rect;
+    // The prompt well, left of the rows, is a different colour from the card
+    // beside it (just right of the well, left of the rows).
+    let well = crate::test_pixels::pixel_at(&px, w, (name.x / 2.0) as u32, (name.y + 4.0) as u32);
+    let card = crate::test_pixels::pixel_at(&px, w, (name.x - 8.0) as u32, (name.y + 4.0) as u32);
+    assert_ne!(well, card, "the prompt sits in its own well");
+}

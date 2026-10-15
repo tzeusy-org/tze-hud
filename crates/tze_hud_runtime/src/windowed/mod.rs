@@ -3193,6 +3193,14 @@ impl WindowedRuntime {
                 ),
                 chords: runtime_context.chords,
                 pairing: pairing.clone(),
+                connect: pairing.clone().map(|pairing| {
+                    crate::shell::control_panel::ConnectControl {
+                        pairing,
+                        store: Arc::clone(&agent_store),
+                        clipboard: Arc::new(crate::clipboard::write_text),
+                        machine: std::env::var("COMPUTERNAME").ok(),
+                    }
+                }),
                 agents: Some(crate::shell::control_panel::AgentControl {
                     store: Arc::clone(&agent_store),
                     shared: Arc::clone(&shared_state),
