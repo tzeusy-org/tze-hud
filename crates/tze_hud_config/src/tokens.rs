@@ -538,6 +538,11 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Notification action button label font weight",
         default_value: "600",
     },
+    CanonicalToken {
+        key: "typography.notification.dismiss.font_size_px",
+        description: "Notification dismiss x font size (px)",
+        default_value: "12",
+    },
     // Runtime system card / toast (pairing code, update notices); never agent-visible.
     CanonicalToken {
         key: "system_card.background",
