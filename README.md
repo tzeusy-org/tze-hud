@@ -19,33 +19,21 @@ limits explicitly.
 
 ---
 
-# Quickstart — portal as your primary LLM interface
+# Quickstart — a Windows HUD with an agent in WSL
 
-New here and just want an LLM session projecting onto your own screen? Start with
-**[`docs/QUICKSTART.md`](docs/QUICKSTART.md)** (<10 minutes). One command from the
-repo root:
-
-```bash
-cargo build --bin tze_hud --release
-scripts/quickstart.sh --window-mode overlay   # scaffolds config + PSK, prints ATTACH INFO, launches
-```
-
-`scripts/quickstart.sh --print-attach-info` prints the MCP endpoint and a
-redacted client-config template **without** opening a window. To create a
-ready-to-use mode-600 config with the bearer already wired, run
-`scripts/quickstart.sh --emit-mcp-config=tze-hud.mcp.json`. The rest of this
-README is the deeper build/test/deploy reference.
+Start with **[docs/QUICKSTART.md](docs/QUICKSTART.md)**: install the Windows
+`dev` release (or cross-build with `just build-windows`), pair from the HUD
+card, connect the current MCP client, and project a real session onto the
+overlay. The runtime runs on Windows; Linux/WSL provides headless checks,
+agent tooling and Windows cross-builds. The rest of this README is the
+build/test reference.
 
 ---
 
 # Build/Test/Run Commands
 
-The rest of this README is command-first and focused on four workflows:
-
-1. Build on Linux and Windows
-2. Build/run on Linux inside TigerVNC and connect from Windows
-3. Run all test categories
-4. Trigger zone publishing to the server and verify UI-control/overlay path
+The rest of this README covers headless Linux checks, Windows builds,
+test categories, and publishing to the Windows overlay.
 
 ## Required Gates / CI
 
@@ -120,7 +108,7 @@ through each lifecycle stage in one or two calls, narrates every stage in
 or file. A PSK is never printed.
 
 ```bash
-export TZE_HUD_PSK_FILE=~/.config/tze_hud/claude.psk   # or TZE_HUD_PSK; a saved POST /pair reply works
+export TZE_HUD_PSK_FILE=~/.config/tze-hud/<host>.psk   # from hud_pair.py (a saved POST /pair reply also works); or TZE_HUD_PSK
 # optional: TZE_HUD_TILE_PSK(_FILE) for a separate resident-tile agent, plus --agent <its id>
 cargo run -p poc_demo -- zones           # notification TTL, delay_ms, action press -> hud_input
 cargo run -p poc_demo -- widgets         # typed gauge/progress updates
@@ -153,7 +141,7 @@ through Cargo and selects the build-host binary explicitly. No system protoc
 installation or `PROTOC` override is used. The original three schemas regenerate
 into `OUT_DIR` during the build; unsupported hosts fail without a system fallback.
 
-### Linux (Ubuntu/Debian) - Native Build
+### Linux/WSL (Ubuntu/Debian) - Headless checks and cross-build prerequisites
 
 ```bash
 # System deps (Rust toolchain deps + common windowing libs)
@@ -265,17 +253,13 @@ name = "Main"
 default_tab = true
 ```
 
-**Runtime usage:**
+**Windows runtime usage** (PowerShell, explicit arguments for an in-place build):
 
-```bash
-# Fullscreen (default) with config
-./tze_hud --config tze_hud.toml
+```powershell
+.\tze_hud.exe --config tze_hud.toml --window-mode overlay
 
 # Overlay with explicit endpoint settings
-./tze_hud --config tze_hud.toml --window-mode overlay --grpc-port 50051 --mcp-port 9090
-
-# Or on Windows with prebuilt binary
-.\tze_hud.exe --config tze_hud.toml
+.\tze_hud.exe --config tze_hud.toml --window-mode overlay --grpc-port 50051 --mcp-port 9090
 ```
 
 To install on Windows, see [Windows install and operation](#12-windows-install-and-operation) below.
@@ -296,53 +280,6 @@ operator endpoints are in
 The canonical binary is `tze_hud.exe` (built natively on Windows MSVC, one
 file). Release assets include `tze_hud.exe.sha256` and `tze_hud.exe.minisig`;
 verify before running (see the runbook).
-
-## 2) Linux + TigerVNC, then connect from Windows
-
-### On Linux host (start VNC desktop)
-
-```bash
-# Install VNC server + lightweight desktop
-sudo apt update
-sudo apt install -y tigervnc-standalone-server tigervnc-common xfce4 xfce4-goodies
-
-# Set VNC password (first run)
-vncpasswd
-
-# Create VNC startup script
-cat > ~/.vnc/xstartup <<'XEOF'
-#!/bin/sh
-unset SESSION_MANAGER
-unset DBUS_SESSION_BUS_ADDRESS
-startxfce4 &
-XEOF
-chmod +x ~/.vnc/xstartup
-
-# Start VNC display :1 (TCP 5901)
-vncserver :1 -localhost no -geometry 1920x1080 -depth 24
-
-# Run the windowed app inside that display
-export DISPLAY=:1
-cargo run -p tze_hud_app -- --config app/tze_hud_app/config/production.toml
-```
-
-### From Windows client
-
-```powershell
-# Connect to <linux-host>:5901 over your tailnet or VPN
-```
-
-Then open TigerVNC Viewer and connect to:
-
-```text
-<linux-host>:5901
-```
-
-To stop VNC on Linux:
-
-```bash
-vncserver -kill :1
-```
 
 ## 3) Run tests (all categories)
 
@@ -420,21 +357,4 @@ You should see logs for:
 - a `Publish` to `zone:status-bar`,
 - `Hold` and `Clear` of the tile.
 
-**For operational workflows**, use the **canonical runtime app binary** instead. See [Windows install and operation](#12-windows-install-and-operation) and [Cross-machine validation](#5-cross-machine-validation-via-user-test).
-
-## 5) Cross-machine validation via user-test
-
-Once a Windows HUD is installed and paired (see
-[`docs/operations/windows-install.md`](docs/operations/windows-install.md)), the
-`user-test` skill publishes test messages to it over MCP and drives the
-`/admin` endpoints. Everything goes over HTTP and gRPC; nothing needs a shell
-on the Windows host.
-
-```bash
-export HUD_HOST=<tailscale-ip>
-python3 .claude/skills/user-test/scripts/hud_pair.py --code <6-digit code on the HUD card> --admin
-python3 .claude/skills/user-test/scripts/hud_admin.py status
-python3 .claude/skills/user-test/scripts/publish_zone_batch.py --messages-file <messages.json>
-```
-
-See `.claude/skills/user-test/SKILL.md` for the full flow.
+**For operational workflows**, use the **canonical runtime app binary** instead. See [Windows install and operation](#12-windows-install-and-operation) and the [Windows-first Quickstart](docs/QUICKSTART.md).

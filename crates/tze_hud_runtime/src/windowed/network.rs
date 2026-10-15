@@ -380,10 +380,8 @@ pub(super) fn render_startup_banner(
         ));
     }
     lines.extend(hotkey.banner_line());
-    lines.push(
-        "   attach : invoke the `hud-projection` skill in an LLM session, or run".to_string(),
-    );
-    lines.push("            scripts/quickstart.sh — see docs/QUICKSTART.md".to_string());
+    lines.push("   attach : invoke the `hud-projection` skill in an LLM session".to_string());
+    lines.push("            see docs/QUICKSTART.md".to_string());
     lines.push(RULE.to_string());
     lines.join("\n")
 }
@@ -539,6 +537,14 @@ mod tests {
             "MCP URL missing"
         );
         assert!(banner.contains("hud-projection"), "attach hint missing");
+        assert!(
+            banner.contains("docs/QUICKSTART.md"),
+            "Quickstart link missing"
+        );
+        assert!(
+            !banner.contains("scripts/"),
+            "attach hint must not recommend an obsolete script"
+        );
         assert!(banner.contains("tze_hud runtime ready"), "header missing");
     }
 

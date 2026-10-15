@@ -155,8 +155,9 @@ to `.git/info/exclude` to keep it from being committed. To pair an agent:
 - The agent trades the code for its PSK with `POST /pair`. See
   [Pair an agent](../operations/windows-install.md#pair-an-agent).
 
-`scripts/quickstart.sh` runs under Git Bash but was written for Linux. On
-Windows, `--print-attach-info` plus pairing is the more direct path.
+Follow the [Windows-first Quickstart](../QUICKSTART.md) for the install,
+pairing, MCP connection and real session-portal path. `--print-attach-info`
+prints redacted discovery information without launching another window.
 
 ### Runtime behavior specific to Windows
 
