@@ -3500,7 +3500,6 @@ version = "0.1.0"
 dependencies = [
  "proptest",
  "serde",
- "thiserror 2.0.18",
  "tze_hud_config",
  "tze_hud_scene",
 ]
