@@ -1,27 +1,28 @@
-//! Long-press drag interaction for chrome drag handles.
+//! Drag interaction for chrome drag handles.
 //!
-//! Implements the compositor-internal drag state machine described in RFC 0004
-//! §3.0 (V1 chrome interaction carve-out) and the drag-to-reposition spec in
-//! `openspec/changes/persistent-movable-elements/specs/drag-to-reposition/`.
+//! Supports immediate mouse/header-band activation and held touch-grip
+//! activation through `InputProcessor::process_drag_handle_pointer`.
 //!
-//! ## State machine (per device_id)
+//! ## Non-immediate touch-grip state machine (per device_id)
 //!
 //! ```text
 //! Idle ──[PointerDown on drag handle]──► Accumulating
 //!                                             │
-//!              [move > 10dp threshold]──► Cancelled → Idle
+//!              [move > 10dp tolerance]──► Cancelled → Idle
 //!                                             │
-//!              [hold ≥ threshold ms]──► Activated
+//!              [hold ≥ 1000ms, on Move]──► Activated
 //!                                             │
 //!              [PointerMove]──► move element (snap + clamp)
 //!                                             │
 //!              [PointerUp]──► persist geometry → Idle
 //! ```
 //!
-//! ## Activation thresholds (per RFC 0004 §3.0 + design.md §2)
+//! ## Activation policy
 //!
-//! - Pointer/mouse: 250 ms
-//! - Touch (device_id ≥ TOUCH_DEVICE_ID_START): 1000 ms
+//! - Mouse (`device_id == 0`): any handle activates on the first Move.
+//! - Touch (`device_id != 0`): a grip requires a 1000 ms hold within 10 dp.
+//! - Header bands: first-Move activation for either device class.
+//! - Down/Up without a Move: no drag activation or geometry change.
 //!
 //! ## Performance contract
 //!
@@ -34,7 +35,7 @@ use std::time::{Duration, Instant};
 
 use tze_hud_scene::{DragHandleElementKind, ElementStore, ElementType, GeometryPolicy, SceneId};
 
-/// Activation hold duration for pointer/mouse drag handles.
+/// Stored pointer/mouse hold duration; immediate activation bypasses it.
 pub const LONG_PRESS_POINTER_THRESHOLD_MS: u64 = 250;
 /// Activation hold duration for touch drag handles.
 pub const LONG_PRESS_TOUCH_THRESHOLD_MS: u64 = 1000;
@@ -60,14 +61,14 @@ pub const DRAG_OPACITY_BOOST: f32 = 1.0;
 /// Width of the 2px highlight border applied during active drag.
 pub const DRAG_HIGHLIGHT_BORDER_PX: f32 = 2.0;
 
-/// Phase of a per-device long-press drag recognizer.
+/// Phase of a per-device drag recognizer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DragPhase {
     /// No drag interaction in progress for this device.
     Idle,
-    /// Pointer is held down; accumulating towards long-press threshold.
+    /// Pointer is down; waiting for an immediate Move or the held-grip threshold.
     Accumulating,
-    /// Long-press threshold met; drag is active.
+    /// First immediate Move or held-grip threshold met; drag is active.
     Activated,
 }
 
@@ -90,7 +91,7 @@ impl Default for DragConfig {
     }
 }
 
-/// Per-device long-press drag state.
+/// Per-device immediate or held-grip drag state.
 ///
 /// One instance exists per active pointer device that has touched a drag handle.
 /// Instances are created on `PointerDown` and removed when the interaction ends.
@@ -121,18 +122,17 @@ pub struct DeviceDragState {
     pub threshold_ms: u64,
     /// Long-press progress last emitted (0.0–1.0).
     pub last_progress: f32,
-    /// Immediate-activation handle (hud-cpjqe): a portal header BAND drags on the
-    /// first pointer-move with no long-press hold and no early-movement cancel —
-    /// Windows-titlebar semantics. `false` for the legacy grip, which keeps the
-    /// long-press hysteresis to distinguish tap-to-focus from drag.
+    /// First-Move activation without a hold or early-movement cancellation.
+    /// Set for every mouse handle and for header bands of either device class.
+    /// `false` for a nonzero-device grip, which retains hold/tolerance checks.
     pub immediate: bool,
 }
 
 impl DeviceDragState {
     /// Construct a new state for a pointer-down event.
     ///
-    /// `threshold_ms` is 250 for pointer/mouse or 1000 for touch. `immediate`
-    /// marks a header-band handle that activates on the first move (hud-cpjqe).
+    /// `threshold_ms` stores 250 ms for mouse or 1000 ms for touch. `immediate`
+    /// bypasses the hold on the first Move for mouse handles and header bands.
     pub fn new(
         interaction_id: String,
         element_id: SceneId,
