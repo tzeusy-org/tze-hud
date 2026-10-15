@@ -1290,12 +1290,13 @@ mod tests {
 
         let mut rejected_notify = std::pin::pin!(ready.notified());
         assert!(!rejected_notify.as_mut().enable());
-        let too_large = "x".repeat(driver.hub_mut().limits().input_item_bytes + 1);
+        let input_limit = driver.hub_mut().limits().input_item_bytes;
+        let too_large = "x".repeat(input_limit + 1);
         let rejected = submit(&mut driver, tile_id, &too_large, 200 + FRAME_US + 1);
         assert_eq!(rejected.feedback_state, PortalInputFeedbackState::Rejected);
         assert_eq!(
             rejected.error_code,
-            Some(ProjectionErrorCode::ProjectionInputTooLarge)
+            Some(tze_hud_projection::PortalError::TooLarge { limit: input_limit })
         );
         assert_eq!(rejected.pending_input_count, 0);
         assert!(std::future::Future::poll(rejected_notify.as_mut(), &mut context).is_pending());

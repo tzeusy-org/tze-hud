@@ -13,12 +13,9 @@
 //!    `visual_tokens()` accessor returns the token-derived values; the node built
 //!    by `portal_node` is verified to use those values.
 //!
-//! 4. **Redaction-safe transitions** — a restricted viewer (Public clearance)
-//!    observes `redacted = true` when the portal carries Private content,
-//!    ensuring the transition frames never expose transcript content.
-//!    The token-derived `transition_in_ms` / `transition_out_ms` govern duration
-//!    but the redaction property is structural (derived from viewer clearance vs.
-//!    content classification) and must hold regardless of transition timing.
+//! 4. **Redacted presentation rendering** — sanitized renderer views emit no
+//!    transcript or identity in either presentation, across transition tokens.
+//!    These tests exercise rendering, not the retired viewer policy authority.
 
 use tze_hud_config::{
     PORTAL_TOKEN_COLLAPSED_BACKGROUND, PORTAL_TOKEN_COLLAPSED_FONT_SIZE,
@@ -533,136 +530,81 @@ fn token_change_propagates_to_adapter_on_republish() {
 
 // ── §6.4: Redaction-safe transitions ─────────────────────────────────────────
 
-/// Verifies that a restricted viewer (Public clearance) observes `redacted = true`
-/// when the portal carries Private content in either presentation state.
-///
-/// This is the structural invariant for §6.3: transitions are safe because the
-/// `redacted` field is computed from viewer clearance vs. content classification
-/// — NOT from a per-frame animation position. Whether the portal is Expanded
-/// or Collapsed, a restricted viewer sees `redacted = true`, so any intermediate
-/// transition frame is covered by redaction.
-///
-/// Token-derived `transition_in_ms` / `transition_out_ms` govern animation
-/// duration but cannot override this structural property.
+/// A sanitized redacted view must publish no transcript or identity in either
+/// presentation. The owner render is the positive control for real content.
 #[test]
-fn restricted_viewer_observes_redacted_in_both_presentation_states() {
-    // Policy for a restricted viewer: Public clearance, cannot see Private content
+fn redacted_view_renders_without_content_in_both_presentation_states() {
+    let mut hub = PortalHub::default();
+    let expanded = build_expanded_state(&mut hub, "redaction-sentinel");
+    let mut adapter = ResidentGrpcPortalAdapter::new(ResidentGrpcPortalConfig::new(vec![0u8; 16]));
+    adapter.record_created_tile(vec![0xAB; 16]);
+    let owner =
+        extract_text_markdown_content(adapter.render_portal_message(&expanded, 1, 0).unwrap());
+    assert!(owner.contains("assistant output for redaction-sentinel"));
 
-    // --- Expanded state ---
-    let mut authority_expanded = PortalHub::default();
-    let expanded_state = build_expanded_state(&mut authority_expanded, "proj-redact-expanded");
-
-    // Owner sees it expanded (not redacted)
-    assert_eq!(
-        expanded_state.presentation,
-        ProjectedPortalPresentation::Expanded
-    );
-    assert!(
-        !expanded_state.redacted,
-        "owner must not see redacted expanded state"
-    );
-
-    // Restricted viewer sees redacted (content_classification = Private > Public)
-    let restricted_expanded = redacted_view(expanded_state.clone());
-
-    assert!(
-        restricted_expanded.redacted,
-        "restricted viewer must see redacted=true in Expanded state with Private content"
-    );
-    // Transcript must be empty for restricted viewer
-    assert!(
-        restricted_expanded.visible_transcript.is_empty(),
-        "restricted viewer must not receive transcript content"
-    );
-
-    // --- Collapsed state ---
-    let mut authority_collapsed = PortalHub::default();
-    let expanded_before_collapse =
-        build_expanded_state(&mut authority_collapsed, "proj-redact-collapsed");
-    assert_eq!(
-        expanded_before_collapse.presentation,
-        ProjectedPortalPresentation::Expanded
-    );
-
-    let mut collapsed_owner = expanded_before_collapse.clone();
-    collapsed_owner.presentation = ProjectedPortalPresentation::Collapsed;
-    assert_eq!(
-        collapsed_owner.presentation,
-        ProjectedPortalPresentation::Collapsed
-    );
-
-    let restricted_collapsed = redacted_view(collapsed_owner.clone());
-
-    assert!(
-        restricted_collapsed.redacted,
-        "restricted viewer must see redacted=true in Collapsed state with Private content"
-    );
+    for (index, presentation) in [
+        ProjectedPortalPresentation::Expanded,
+        ProjectedPortalPresentation::Collapsed,
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let mut view = redacted_view(expanded.clone());
+        view.presentation = presentation;
+        let rendered = extract_text_markdown_content(
+            adapter
+                .render_portal_message(&view, index as u64 + 2, 0)
+                .unwrap(),
+        );
+        assert!(!rendered.contains("redaction-sentinel"), "{rendered}");
+        assert!(!rendered.contains("assistant output"), "{rendered}");
+        assert!(!rendered.contains("styling test active"), "{rendered}");
+    }
 }
 
-/// Verifies that the structural redaction property holds regardless of the
-/// token-derived transition duration values.
-///
-/// Even if `transition_in_ms` = 0 (instant) or very large (1000ms), the
-/// redaction is not time-based — it is purely policy-based. This test confirms
-/// that swapping transition tokens does not affect the redaction invariant.
+/// Transition token changes reach the adapter before rendering the same
+/// sanitized view; neither duration may reintroduce transcript or identity.
 #[test]
-fn transition_duration_tokens_do_not_affect_redaction_safety() {
+fn transition_duration_tokens_do_not_affect_redacted_rendering() {
     use std::collections::HashMap;
-
-    // Build adapter with extreme transition durations
-    let mut instant_overrides: HashMap<String, String> = HashMap::new();
-    instant_overrides.insert(PORTAL_TOKEN_TRANSITION_IN_MS.to_string(), "1".to_string());
-    instant_overrides.insert(PORTAL_TOKEN_TRANSITION_OUT_MS.to_string(), "1".to_string());
-
-    let empty: HashMap<String, String> = HashMap::new();
-    let instant_map = tze_hud_config::tokens::resolve_tokens(&empty, &instant_overrides);
-    let instant_tokens = resolve_portal_tokens(&instant_map);
-    assert_eq!(instant_tokens.transition_in_ms, 1, "instant in must be 1ms");
-    assert_eq!(
-        instant_tokens.transition_out_ms, 1,
-        "instant out must be 1ms"
-    );
-
-    // Build adapter with slow transition durations
-    let mut slow_overrides: HashMap<String, String> = HashMap::new();
-    slow_overrides.insert(
-        PORTAL_TOKEN_TRANSITION_IN_MS.to_string(),
-        "1000".to_string(),
-    );
-    slow_overrides.insert(
-        PORTAL_TOKEN_TRANSITION_OUT_MS.to_string(),
-        "1000".to_string(),
-    );
-
-    let slow_map = tze_hud_config::tokens::resolve_tokens(&empty, &slow_overrides);
-    let slow_tokens = resolve_portal_tokens(&slow_map);
-    assert_eq!(slow_tokens.transition_in_ms, 1000, "slow in must be 1000ms");
-
-    // In both cases, a restricted viewer sees redacted = true
-    // We supply the same restricted renderer control for both token sets
-
-    let mut authority_a = PortalHub::default();
-    let state_a = build_expanded_state(&mut authority_a, "proj-instant");
-    let restricted_a = redacted_view(state_a);
-
-    let mut authority_b = PortalHub::default();
-    let state_b = build_expanded_state(&mut authority_b, "proj-slow");
-    let restricted_b = redacted_view(state_b);
-
-    assert!(
-        restricted_a.redacted,
-        "instant transition: restricted viewer must still see redacted=true"
-    );
-    assert!(
-        restricted_b.redacted,
-        "slow transition: restricted viewer must still see redacted=true"
-    );
-
-    // The redaction is identical regardless of transition token values
-    assert_eq!(
-        restricted_a.redacted, restricted_b.redacted,
-        "transition duration tokens must not affect redaction outcome"
-    );
+    let empty = HashMap::new();
+    let mut hub = PortalHub::default();
+    let expanded = build_expanded_state(&mut hub, "transition-sentinel");
+    let mut adapter = ResidentGrpcPortalAdapter::new(ResidentGrpcPortalConfig::new(vec![0u8; 16]));
+    adapter.record_created_tile(vec![0xAB; 16]);
+    let owner =
+        extract_text_markdown_content(adapter.render_portal_message(&expanded, 1, 0).unwrap());
+    assert!(owner.contains("assistant output for transition-sentinel"));
+    let redacted = redacted_view(expanded);
+    let mut previous = None;
+    for (index, duration) in [1, 1000].into_iter().enumerate() {
+        let overrides = HashMap::from([
+            (
+                PORTAL_TOKEN_TRANSITION_IN_MS.to_string(),
+                duration.to_string(),
+            ),
+            (
+                PORTAL_TOKEN_TRANSITION_OUT_MS.to_string(),
+                duration.to_string(),
+            ),
+        ]);
+        let resolved = tze_hud_config::tokens::resolve_tokens(&empty, &overrides);
+        let tokens = resolve_portal_tokens(&resolved);
+        assert_eq!(tokens.transition_in_ms, duration);
+        assert_eq!(tokens.transition_out_ms, duration);
+        adapter.set_visual_tokens(portal_visual_tokens_from_part_tokens(&tokens));
+        let rendered = extract_text_markdown_content(
+            adapter
+                .render_portal_message(&redacted, index as u64 + 2, 0)
+                .unwrap(),
+        );
+        assert!(!rendered.contains("transition-sentinel"), "{rendered}");
+        assert!(!rendered.contains("assistant output"), "{rendered}");
+        if let Some(previous) = previous {
+            assert_eq!(rendered, previous);
+        }
+        previous = Some(rendered);
+    }
 }
 
 // ── §4.1 / §4.8: Composer token NodeProto output assertions (hud-2zyt9) ────────

@@ -371,7 +371,37 @@ async fn frame_budgets_hold_under_burst() {
         "real driver must have rendered the burst portal"
     );
 
+    let shared_scene = scene_handle(&runtime).await;
+    {
+        let scene = shared_scene.lock().await;
+        assert_eq!(
+            runtime.compositor.primed_truncation_content_bytes(&scene),
+            None
+        );
+    }
+    // Empty warmups prime at the 16 ms real-clock cadence. TestClock only
+    // drives the portal Hub, so make this frame eligible outside the timer.
+    // Otherwise the stage budget can pass by deferring all burst shaping.
+    tokio::time::sleep(std::time::Duration::from_millis(32)).await;
     let burst_telemetry = runtime.render_frame().await;
+    {
+        let scene = shared_scene.lock().await;
+        let primed_bytes = runtime
+            .compositor
+            .primed_truncation_content_bytes(&scene)
+            .expect("burst frame must prime the current scene, not defer it");
+        assert!(
+            primed_bytes >= CADENCE_BURST_BYTES,
+            "primed {primed_bytes} bytes, missing the {CADENCE_BURST_BYTES}-byte burst"
+        );
+    }
+    eprintln!(
+        "burst stage3={}us stage4={}us stage5={}us frame={}us",
+        burst_telemetry.stage3_mutation_intake_us,
+        burst_telemetry.stage4_scene_commit_us,
+        burst_telemetry.stage5_layout_resolve_us,
+        burst_telemetry.frame_time_us
+    );
 
     // Stage 3 + 4 + 5 must respect per-stage budgets.
     assert!(

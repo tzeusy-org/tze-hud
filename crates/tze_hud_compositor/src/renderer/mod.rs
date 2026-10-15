@@ -1927,6 +1927,16 @@ impl Compositor {
         self.markdown_primer.load()
     }
 
+    /// Bytes visited by the last completed truncation prime, only when it
+    /// belongs to this exact scene version. Test harnesses use this witness to
+    /// distinguish measured shaping work from a cadence-deferred frame.
+    #[cfg(any(test, feature = "dev-mode"))]
+    pub fn primed_truncation_content_bytes(&self, scene: &SceneGraph) -> Option<usize> {
+        (self.truncation_cache_scene_instance == Some(scene.instance_id)
+            && self.truncation_cache_scene_version == scene.version)
+            .then_some(self.resize_reprime_content_bytes)
+    }
+
     /// Prime the ellipsis-truncation cache for all `TextOverflow::Ellipsis` items
     /// currently in the scene (hud-wgq7j, hud-ghhxa).
     ///
