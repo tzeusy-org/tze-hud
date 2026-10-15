@@ -2299,7 +2299,7 @@ mod tests {
             telemetry: TelemetryCollector::new(),
             pipeline: FramePipeline::new(),
             shutdown: ShutdownToken::new(),
-            benchmark_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            quiescent_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             terminal_surface_recovery_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             quiescent_efficiency: None,
             cursor_x: 0.0,

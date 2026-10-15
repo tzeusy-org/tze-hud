@@ -77,7 +77,10 @@ source links when implementation changes the status.
   root/tab zone configuration and the unused sealed-image upload workflow are
   removed; built-in zones, display assignments and offline render-scene and
   render-widget authoring remain supported. No Criterion benchmark targets
-  are currently declared. Pre-reset references remain in the projection and
+  are currently declared. The orphaned windowed benchmark mode and unbounded
+  frame history are removed; telemetry keeps cumulative session totals and
+  bounded recent latency samples. Headless benchmarks and the windowed
+  quiescent-efficiency artifact remain. Pre-reset references remain in the projection and
   protocol crate docs. `hud-bstmy` and its reconciliation work remain open;
   a passing test inventory alone does not establish that the diet is complete.
 - **T9 — monitors [Observed].**

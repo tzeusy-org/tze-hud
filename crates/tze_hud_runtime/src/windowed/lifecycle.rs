@@ -19,7 +19,7 @@ use tze_hud_telemetry::{
     EfficiencyScenarioIdentity, EfficiencyViewport, EfficiencyWakeupCounters, EfficiencyWindowMode,
     QUIESCENT_EFFICIENCY_SCHEMA_VERSION, QUIESCENT_INTERVAL_MIN_MS, QUIESCENT_SCENARIO_NAME,
     QUIESCENT_SCENARIO_VERSION, QUIESCENT_SETTLING_MIN_MS, QuiescentEfficiencyArtifact,
-    QuiescentEfficiencyValidation, QuiescentMeasurementStatus, SessionSummary,
+    QuiescentEfficiencyValidation, QuiescentMeasurementStatus,
 };
 
 use crate::channels::{InputEvent, InputEventKind};
@@ -36,7 +36,7 @@ use super::portal::{
     apply_drag_handle_pointer_event, apply_portal_resize_pointer_event, drag_feedback_target,
     reconcile_drag_feedback,
 };
-use super::{WindowedBenchmarkConfig, WindowedQuiescentEfficiencyConfig, WinitApp};
+use super::{WindowedQuiescentEfficiencyConfig, WinitApp};
 
 #[cfg(target_os = "windows")]
 fn hwnd_for_window(window: &Window) -> Option<windows::Win32::Foundation::HWND> {
@@ -1438,21 +1438,6 @@ fn tile_local_pointer_xy(
     }
 }
 
-pub(super) const WINDOWED_BENCHMARK_AGENT: &str = "windowed-compositor-benchmark";
-const WINDOWED_BENCHMARK_SCENE: &str = "composite_tiles_v1";
-const OVERLAY_COMPOSITE_DELTA_TARGET_US: i64 = 500;
-const WINDOWED_BENCHMARK_INPUT_X: f32 = 16.0;
-const WINDOWED_BENCHMARK_INPUT_Y: f32 = 16.0;
-
-/// No-progress timeout for the windowed benchmark watchdog (hud-gcn01).
-///
-/// If the compositor renders no frames (warmup or measured) within this window,
-/// the watchdog emits a partial/diagnostic artifact and exits non-zero. This
-/// prevents a silent infinite hang when fullscreen window redraw callbacks never
-/// fire for a non-foreground window on Windows.
-pub(super) const BENCHMARK_NO_PROGRESS_TIMEOUT: std::time::Duration =
-    std::time::Duration::from_secs(30);
-
 pub(super) use crate::input_latency::{
     PendingInputLatencySamples, drain_pending_input_latency, record_pending_input_latency,
 };
@@ -1471,130 +1456,16 @@ pub(super) fn drain_windowed_input_latency(
     )
 }
 
-pub(super) fn seed_windowed_benchmark_scene(scene: &mut SceneGraph, width: u32, height: u32) {
-    use tze_hud_scene::types::HitRegionNode;
-    use tze_hud_scene::{Node, NodeData, Rect, Rgba, SceneId, SolidColorNode};
-
-    let width = width.max(1) as f32;
-    let height = height.max(1) as f32;
-    scene.display_area = Rect::new(0.0, 0.0, width, height);
-
-    let display_order = scene
-        .tabs
-        .values()
-        .map(|tab| tab.display_order)
-        .max()
-        .map_or(0, |order| order.saturating_add(1));
-    let Ok(tab_id) = scene.create_tab("windowed_perf", display_order) else {
-        tracing::warn!("windowed benchmark: failed to create benchmark tab");
-        return;
-    };
-    scene.active_tab = Some(tab_id);
-    let lease_id = scene.grant_lease(WINDOWED_BENCHMARK_AGENT, 300_000);
-    if let Some(lease) = scene.leases.get_mut(&lease_id) {
-        lease.resource_budget.max_tiles = 32;
-    }
-
-    let cols = 5usize;
-    let rows = 4usize;
-    let tile_w = width / 4.85;
-    let tile_h = height / 3.8;
-    let step_x = width / 5.65;
-    let step_y = height / 5.0;
-
-    for i in 0..(cols * rows) {
-        let col = i % cols;
-        let row = i / cols;
-        let x = col as f32 * step_x + (row % 2) as f32 * step_x * 0.25;
-        let y = row as f32 * step_y;
-        let bounds = Rect::new(x, y, tile_w, tile_h);
-
-        let Ok(tile_id) = scene.create_tile(
-            tab_id,
-            WINDOWED_BENCHMARK_AGENT,
-            lease_id,
-            bounds,
-            (i + 1) as u32,
-        ) else {
-            continue;
-        };
-
-        let alpha = match i % 4 {
-            0 => 0.58,
-            1 => 0.72,
-            2 => 0.86,
-            _ => 1.0,
-        };
-        let root_id = SceneId::new();
-        let node = Node {
-            layout: Default::default(),
-            id: root_id,
-            children: vec![],
-            data: NodeData::SolidColor(SolidColorNode {
-                color: Rgba::new(
-                    (i % cols) as f32 / cols as f32,
-                    0.32 + (row as f32 / rows as f32) * 0.45,
-                    1.0 - (i as f32 / (cols * rows) as f32) * 0.7,
-                    alpha,
-                ),
-                bounds: Rect::new(0.0, 0.0, tile_w, tile_h),
-                radius: Some(10.0),
-            }),
-        };
-        if let Err(err) = scene.set_tile_root(tile_id, node) {
-            tracing::warn!(?err, "windowed benchmark: failed to set tile root");
-            continue;
-        }
-        let hit_region = Node {
-            layout: Default::default(),
-            id: SceneId::new(),
-            children: vec![],
-            data: NodeData::HitRegion(HitRegionNode {
-                bounds: Rect::new(0.0, 0.0, tile_w, tile_h),
-                interaction_id: format!("windowed-benchmark-input-{i}"),
-                accepts_pointer: true,
-                ..Default::default()
-            }),
-        };
-        if let Err(err) = scene.add_node_to_tile(tile_id, Some(root_id), hit_region) {
-            tracing::warn!(?err, "windowed benchmark: failed to add input hit region");
-        }
-    }
-}
-
-pub(super) struct WindowedBenchmarkRunState {
-    pub(super) config: WindowedBenchmarkConfig,
-    requested_mode: WindowMode,
-    effective_mode: WindowMode,
-    width: u32,
-    height: u32,
-    target_fps: u32,
-    warmup_seen: u64,
-    measured_seen: u64,
-    measured_start: Option<Instant>,
-    pub(super) summary: SessionSummary,
-    /// Instant of the last recorded frame (warmup or measured).
-    /// Reset by `record()`; read by `is_stalled()` to detect no-progress hangs.
-    last_frame_at: Instant,
-}
-
 /// Decide whether the windowed compositor must build and present this frame.
 ///
-/// An explicitly configured benchmark is fixed-cadence active work: every
-/// requested sample must reach [`WindowedBenchmarkRunState::record`], even when
-/// its deterministic scene is otherwise unchanged. Normal runtime sessions
-/// remain gated on presentation-relevant changes, except that a successfully
-/// recovered swapchain needs one repaint to resume display output.
 pub(super) fn windowed_frame_needs_render(
     scene_changed: bool,
     geometry_changed: bool,
     animation_inflight: bool,
     composer_needs_render: bool,
-    benchmark_active: bool,
     surface_repaint_pending: bool,
 ) -> bool {
-    benchmark_active
-        || scene_changed
+    scene_changed
         || geometry_changed
         || animation_inflight
         || composer_needs_render
@@ -1613,175 +1484,6 @@ pub(super) const fn update_surface_repaint_pending(
     frame_submitted: bool,
 ) -> bool {
     (was_pending || surface_recovered) && !frame_submitted
-}
-
-impl WindowedBenchmarkRunState {
-    pub(super) fn new(
-        config: WindowedBenchmarkConfig,
-        requested_mode: WindowMode,
-        effective_mode: WindowMode,
-        width: u32,
-        height: u32,
-        target_fps: u32,
-    ) -> Self {
-        Self {
-            config,
-            requested_mode,
-            effective_mode,
-            width,
-            height,
-            target_fps,
-            warmup_seen: 0,
-            measured_seen: 0,
-            measured_start: None,
-            summary: SessionSummary::new(),
-            last_frame_at: Instant::now(),
-        }
-    }
-
-    pub(super) fn record(&mut self, telemetry: &tze_hud_telemetry::FrameTelemetry) -> bool {
-        self.record_at(telemetry, Instant::now())
-    }
-
-    fn record_at(&mut self, telemetry: &tze_hud_telemetry::FrameTelemetry, now: Instant) -> bool {
-        if telemetry.stage7_gpu_submit_us == 0 {
-            return false;
-        }
-        self.last_frame_at = now;
-        if self.warmup_seen < self.config.warmup_frames {
-            self.warmup_seen += 1;
-            return false;
-        }
-
-        if self.measured_start.is_none() {
-            self.measured_start = Some(now);
-        }
-        self.summary
-            .record_frame(telemetry.frame_time_us, telemetry.tile_count);
-        if telemetry.input_to_local_ack_us > 0 {
-            self.summary
-                .input_to_local_ack
-                .record(telemetry.input_to_local_ack_us);
-        }
-        if telemetry.input_to_scene_commit_us > 0 {
-            self.summary
-                .input_to_scene_commit
-                .record(telemetry.input_to_scene_commit_us);
-        }
-        if telemetry.input_to_next_present_us > 0 {
-            self.summary
-                .input_to_next_present
-                .record(telemetry.input_to_next_present_us);
-        }
-        self.measured_seen += 1;
-        self.measured_seen >= self.config.frames
-    }
-
-    pub(super) fn finish(mut self) -> std::io::Result<()> {
-        if let Some(start) = self.measured_start {
-            self.summary.elapsed_us = start.elapsed().as_micros() as u64;
-        }
-        self.summary.finalize();
-
-        let frame_time = serde_json::json!({
-            "p50_us": self.summary.frame_time.p50(),
-            "p99_us": self.summary.frame_time.p99(),
-            "p99_9_us": self.summary.frame_time.percentile(99.9),
-            "peak_us": self.summary.peak_frame_time_us,
-        });
-        let report = serde_json::json!({
-            "schema": "tze_hud.windowed_compositor_benchmark.v1",
-            "scene": WINDOWED_BENCHMARK_SCENE,
-            "target": {
-                "overlay_composite_delta_p99_us": OVERLAY_COMPOSITE_DELTA_TARGET_US,
-            },
-            "requested_mode": self.requested_mode.to_string(),
-            "effective_mode": self.effective_mode.to_string(),
-            "window": {
-                "width": self.width,
-                "height": self.height,
-                "target_fps": self.target_fps,
-            },
-            "benchmark": {
-                "warmup_frames": self.config.warmup_frames,
-                "measured_frames": self.config.frames,
-                "recorded_frames": self.summary.total_frames,
-            },
-            "frame_time": frame_time,
-            "summary": self.summary,
-        });
-
-        if let Some(parent) = self.config.emit_path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
-        }
-        std::fs::write(
-            &self.config.emit_path,
-            serde_json::to_vec_pretty(&report)
-                .expect("windowed benchmark report JSON serialization must succeed"),
-        )
-    }
-
-    /// Returns `true` when no `record()` call has landed within `timeout`.
-    ///
-    /// The compositor benchmark watchdog calls this every frame loop iteration.
-    /// When it fires, the caller should emit a partial result and exit non-zero
-    /// instead of hanging indefinitely.
-    pub(super) fn is_stalled(&self, timeout: std::time::Duration) -> bool {
-        self.is_stalled_at(timeout, Instant::now())
-    }
-
-    fn is_stalled_at(&self, timeout: std::time::Duration, now: Instant) -> bool {
-        now.saturating_duration_since(self.last_frame_at) > timeout
-    }
-
-    /// Emit a partial/diagnostic JSON artifact for a watchdog-aborted benchmark.
-    ///
-    /// Writes the same schema as [`finish`] but adds a `watchdog_abort` object
-    /// carrying `reason`, `timeout_secs`, and frame-progress counters so harnesses
-    /// can distinguish a watchdog exit from a normal completion.
-    ///
-    /// The caller must set `benchmark_failed` and trigger shutdown so the process
-    /// exits with a non-zero code.
-    pub(super) fn emit_watchdog_abort(mut self, reason: &str) -> std::io::Result<()> {
-        if let Some(start) = self.measured_start {
-            self.summary.elapsed_us = start.elapsed().as_micros() as u64;
-        }
-        self.summary.finalize();
-        let report = serde_json::json!({
-            "schema": "tze_hud.windowed_compositor_benchmark.v1",
-            "scene": WINDOWED_BENCHMARK_SCENE,
-            "watchdog_abort": {
-                "reason": reason,
-                "timeout_secs": BENCHMARK_NO_PROGRESS_TIMEOUT.as_secs(),
-                "warmup_frames_seen": self.warmup_seen,
-                "measured_frames_seen": self.measured_seen,
-            },
-            "requested_mode": self.requested_mode.to_string(),
-            "effective_mode": self.effective_mode.to_string(),
-            "window": {
-                "width": self.width,
-                "height": self.height,
-                "target_fps": self.target_fps,
-            },
-            "benchmark": {
-                "warmup_frames": self.config.warmup_frames,
-                "measured_frames": self.config.frames,
-                "recorded_frames": self.summary.total_frames,
-            },
-        });
-        if let Some(parent) = self.config.emit_path.parent() {
-            if !parent.as_os_str().is_empty() {
-                std::fs::create_dir_all(parent)?;
-            }
-        }
-        std::fs::write(
-            &self.config.emit_path,
-            serde_json::to_vec_pretty(&report)
-                .expect("windowed benchmark watchdog JSON serialization must succeed"),
-        )
-    }
 }
 
 /// Maximum time to wait for the first real surface presentation before the
@@ -2567,15 +2269,6 @@ impl WinitApp {
         // Fallback: the pre-hud-etrs0 crude linear proportion.
         let frac = (local_x / node_w) as f64;
         Some((frac * draft_text_len.unwrap_or(0) as f64).round() as usize)
-    }
-
-    pub(super) fn inject_windowed_benchmark_input_probe(&mut self) {
-        if self.state.config.benchmark.is_none() {
-            return;
-        }
-        self.state.cursor_x = WINDOWED_BENCHMARK_INPUT_X;
-        self.state.cursor_y = WINDOWED_BENCHMARK_INPUT_Y;
-        self.enqueue_pointer_event(PointerEventKind::Move);
     }
 
     /// Enqueue a pointer event into the input ring buffer.
@@ -3629,57 +3322,6 @@ mod tests {
     }
 
     #[test]
-    fn seed_windowed_benchmark_scene_creates_deterministic_tile_stack() {
-        let mut scene = SceneGraph::new(1920.0, 1080.0);
-        seed_windowed_benchmark_scene(&mut scene, 1920, 1080);
-
-        assert_eq!(scene.display_area.width, 1920.0);
-        assert_eq!(scene.display_area.height, 1080.0);
-        assert_eq!(scene.tiles.len(), 20);
-        assert!(
-            scene.active_tab.is_some(),
-            "benchmark scene must select the benchmark tab as active"
-        );
-        assert!(
-            scene
-                .leases
-                .values()
-                .any(|lease| lease.namespace == WINDOWED_BENCHMARK_AGENT),
-            "benchmark scene must be owned by the benchmark agent namespace"
-        );
-        assert!(
-            scene.nodes.values().any(|node| {
-                matches!(
-                    &node.data,
-                    NodeData::HitRegion(hit_region)
-                        if hit_region
-                            .interaction_id
-                            .starts_with("windowed-benchmark-input-")
-                            && hit_region.accepts_pointer
-                )
-            }),
-            "benchmark scene must include pointer hit regions for input-latency probes"
-        );
-    }
-
-    #[test]
-    fn seed_windowed_benchmark_scene_uses_unique_tab_order() {
-        let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let existing = scene.create_tab("configured", 0).unwrap();
-        assert_eq!(scene.active_tab, Some(existing));
-
-        seed_windowed_benchmark_scene(&mut scene, 1920, 1080);
-
-        assert_eq!(scene.tabs.len(), 2);
-        assert_ne!(
-            scene.active_tab,
-            Some(existing),
-            "benchmark mode must activate its own deterministic tab"
-        );
-        assert_eq!(scene.tiles.len(), 20);
-    }
-
-    #[test]
     fn pending_input_latency_drains_into_split_latency_fields() {
         use crate::input_latency::record_committed_input_response;
 
@@ -3755,25 +3397,6 @@ mod tests {
             .expect("sample drains");
 
         assert_eq!(local_ack, 1);
-    }
-
-    fn make_benchmark_state(warmup: u64, frames: u64) -> WindowedBenchmarkRunState {
-        let config = WindowedBenchmarkConfig {
-            warmup_frames: warmup,
-            frames,
-            emit_path: std::env::temp_dir().join(format!(
-                "windowed-benchmark-test-{}.json",
-                warmup * 1000 + frames
-            )),
-        };
-        WindowedBenchmarkRunState::new(
-            config,
-            WindowMode::Fullscreen,
-            WindowMode::Fullscreen,
-            1920,
-            1080,
-            60,
-        )
     }
 
     #[test]
@@ -3855,46 +3478,22 @@ mod tests {
     }
 
     #[test]
-    fn unchanged_windowed_benchmark_scene_presents_every_requested_sample() {
-        let warmup_frames = 2;
-        let measured_frames = 3;
-        let requested_samples = warmup_frames + measured_frames;
-        let mut state = make_benchmark_state(warmup_frames, measured_frames);
-        let mut completed = false;
-
-        for frame_number in 1..=requested_samples {
-            assert!(
-                windowed_frame_needs_render(false, false, false, false, true, false),
-                "explicit benchmark mode must bypass the unchanged-scene idle gate for sample {frame_number}"
-            );
-            let mut telemetry = tze_hud_telemetry::FrameTelemetry::new(frame_number);
-            telemetry.frame_time_us = 8_000;
-            telemetry.stage7_gpu_submit_us = 1;
-            completed = state.record(&telemetry);
-            assert_eq!(
-                completed,
-                frame_number == requested_samples,
-                "benchmark completion must occur on exactly the final requested sample"
-            );
+    fn unchanged_windowed_scene_sleeps_after_animation_completes() {
+        assert!(!windowed_frame_needs_render(
+            false, false, false, false, false
+        ));
+        for (scene, geometry, animation, composer) in [
+            (true, false, false, false),
+            (false, true, false, false),
+            (false, false, true, false),
+            (false, false, false, true),
+        ] {
+            assert!(windowed_frame_needs_render(
+                scene, geometry, animation, composer, false
+            ));
         }
-
         assert!(
-            completed,
-            "the final requested benchmark sample must complete the run"
-        );
-        assert_eq!(state.warmup_seen, warmup_frames);
-        assert_eq!(state.measured_seen, measured_frames);
-        assert_eq!(state.summary.total_frames, measured_frames);
-        assert!(
-            !windowed_frame_needs_render(false, false, false, false, false, false),
-            "normal unchanged runtime sessions must remain behind the idle render gate"
-        );
-        assert!(
-            windowed_frame_needs_render(false, false, true, false, false, false),
-            "normal sessions render while the compositor reports a transition"
-        );
-        assert!(
-            !windowed_frame_needs_render(false, false, false, false, false, false),
+            !windowed_frame_needs_render(false, false, false, false, false),
             "the same production consumer sleeps after the transition lands"
         );
     }
@@ -3902,7 +3501,7 @@ mod tests {
     #[test]
     fn successful_surface_recovery_repaints_an_unchanged_scene() {
         assert!(
-            windowed_frame_needs_render(false, false, false, false, false, true),
+            windowed_frame_needs_render(false, false, false, false, true),
             "a reconfigured surface needs one fresh frame even when scene state is unchanged"
         );
     }
@@ -3912,7 +3511,7 @@ mod tests {
         let pending_after_recovery = update_surface_repaint_pending(false, true, false);
         assert!(pending_after_recovery);
         assert!(
-            windowed_frame_needs_render(false, false, false, false, false, pending_after_recovery),
+            windowed_frame_needs_render(false, false, false, false, pending_after_recovery),
             "the recovered surface must request a fresh frame even for an unchanged scene"
         );
 
@@ -3927,148 +3526,6 @@ mod tests {
             !update_surface_repaint_pending(pending_after_lock_miss, false, true),
             "the repaint requirement clears only after a frame submits"
         );
-    }
-
-    #[test]
-    fn windowed_benchmark_does_not_count_skipped_present_attempt() {
-        let mut state = make_benchmark_state(0, 2);
-        let mut skipped_attempt = tze_hud_telemetry::FrameTelemetry::new(1);
-        skipped_attempt.frame_time_us = 8_000;
-        assert!(!state.record(&skipped_attempt));
-        assert_eq!(
-            state.measured_seen, 0,
-            "telemetry without a completed Stage 7 submit/present must not advance benchmark progress"
-        );
-    }
-
-    #[test]
-    fn benchmark_watchdog_fires_when_no_frame_recorded_past_timeout() {
-        let state = make_benchmark_state(0, 10);
-        let created_at = state.last_frame_at;
-        let timeout = Duration::from_millis(1);
-        assert!(
-            !state.is_stalled_at(timeout, created_at + timeout),
-            "watchdog must remain active exactly at the timeout boundary"
-        );
-        assert!(
-            state.is_stalled_at(timeout, created_at + timeout + Duration::from_millis(1)),
-            "watchdog must fire when no frame recorded past the timeout"
-        );
-    }
-
-    #[test]
-    fn benchmark_watchdog_does_not_fire_immediately_after_record() {
-        let mut state = make_benchmark_state(0, 10);
-        let created_at = state.last_frame_at;
-        let timeout = Duration::from_millis(100);
-        let recorded_at = created_at + Duration::from_millis(200);
-        assert!(state.is_stalled_at(timeout, recorded_at));
-
-        let mut telem = tze_hud_telemetry::FrameTelemetry::new(1);
-        telem.frame_time_us = 8_000;
-        telem.stage7_gpu_submit_us = 1;
-        state.record_at(&telem, recorded_at);
-        assert!(
-            !state.is_stalled_at(timeout, recorded_at),
-            "watchdog must not fire immediately after a frame is recorded"
-        );
-        assert!(
-            !state.is_stalled_at(timeout, recorded_at + timeout),
-            "a successful record must refresh the exact timeout boundary"
-        );
-        assert!(
-            !state.is_stalled_at(timeout, created_at),
-            "an earlier injected timestamp must not panic or spuriously stall"
-        );
-
-        telem.stage7_gpu_submit_us = 0;
-        let skipped_at = recorded_at + timeout + Duration::from_millis(1);
-        assert!(!state.record_at(&telem, skipped_at));
-        assert!(
-            state.is_stalled_at(timeout, skipped_at),
-            "a skipped submit must not refresh watchdog progress"
-        );
-    }
-
-    #[test]
-    fn windowed_benchmark_records_nonzero_split_input_latency() {
-        let config = WindowedBenchmarkConfig {
-            warmup_frames: 0,
-            frames: 10,
-            emit_path: std::env::temp_dir().join("windowed-benchmark-test.json"),
-        };
-        let mut state = WindowedBenchmarkRunState::new(
-            config,
-            WindowMode::Overlay,
-            WindowMode::Overlay,
-            1920,
-            1080,
-            60,
-        );
-        let mut telemetry = tze_hud_telemetry::FrameTelemetry::new(1);
-        telemetry.frame_time_us = 12_000;
-        telemetry.stage7_gpu_submit_us = 1;
-        telemetry.tile_count = 3;
-        telemetry.input_to_local_ack_us = 900;
-        telemetry.input_to_scene_commit_us = 10_500;
-        telemetry.input_to_next_present_us = 18_000;
-
-        assert!(!state.record(&telemetry));
-        assert_eq!(
-            state
-                .summary
-                .input_to_local_ack
-                .samples
-                .iter()
-                .copied()
-                .collect::<Vec<u64>>(),
-            vec![900]
-        );
-        assert_eq!(
-            state
-                .summary
-                .input_to_scene_commit
-                .samples
-                .iter()
-                .copied()
-                .collect::<Vec<u64>>(),
-            vec![10_500]
-        );
-        assert_eq!(
-            state
-                .summary
-                .input_to_next_present
-                .samples
-                .iter()
-                .copied()
-                .collect::<Vec<u64>>(),
-            vec![18_000]
-        );
-    }
-
-    #[test]
-    fn windowed_benchmark_does_not_treat_zero_input_latency_as_sample() {
-        let config = WindowedBenchmarkConfig {
-            warmup_frames: 0,
-            frames: 10,
-            emit_path: std::env::temp_dir().join("windowed-benchmark-test.json"),
-        };
-        let mut state = WindowedBenchmarkRunState::new(
-            config,
-            WindowMode::Overlay,
-            WindowMode::Overlay,
-            1920,
-            1080,
-            60,
-        );
-        let mut telemetry = tze_hud_telemetry::FrameTelemetry::new(1);
-        telemetry.frame_time_us = 12_000;
-        telemetry.stage7_gpu_submit_us = 1;
-
-        assert!(!state.record(&telemetry));
-        assert!(state.summary.input_to_local_ack.samples.is_empty());
-        assert!(state.summary.input_to_scene_commit.samples.is_empty());
-        assert!(state.summary.input_to_next_present.samples.is_empty());
     }
 
     /// `spin_acquire` is the bounded-wait acquisition used on the main-thread

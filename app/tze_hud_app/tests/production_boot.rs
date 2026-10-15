@@ -129,13 +129,6 @@ async fn production_config_boots_with_builtin_widget_bundles() {
     let mut first_names = first.widget_rasterized.clone();
     first_names.sort();
     assert_eq!(first_names, ["main-gauge", "main-progress"]);
-    let first_record = runtime
-        .telemetry
-        .records()
-        .last()
-        .expect("first frame record");
-    assert_eq!(first_record.frame_number, first.frame_number);
-    assert_eq!(first_record.widget_rasterized, first.widget_rasterized);
 
     // Changing only the gauge must preserve that exact same-frame observation.
     {
@@ -154,24 +147,10 @@ async fn production_config_boots_with_builtin_widget_bundles() {
     }
     let update = runtime.render_frame().await;
     assert_eq!(update.widget_rasterized, ["main-gauge"]);
-    let update_record = runtime
-        .telemetry
-        .records()
-        .last()
-        .expect("updated frame record");
-    assert_eq!(update_record.frame_number, update.frame_number);
-    assert_eq!(update_record.widget_rasterized, update.widget_rasterized);
 
     // An actually rendered idle frame must not carry the previous raster list.
     let idle = runtime.render_frame().await;
     assert!(idle.widget_rasterized.is_empty());
-    let idle_record = runtime
-        .telemetry
-        .records()
-        .last()
-        .expect("idle frame record");
-    assert_eq!(idle_record.frame_number, idle.frame_number);
-    assert_eq!(idle_record.widget_rasterized, idle.widget_rasterized);
 }
 
 /// Only agents paired in `agents.toml` may connect: an unpaired PSK is

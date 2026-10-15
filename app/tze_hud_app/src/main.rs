@@ -20,9 +20,6 @@
 //! | `--grpc-port <port>`| `TZE_HUD_GRPC_PORT`    | `50051`      | gRPC listen port (0 to disable).         |
 //! | `--mcp-port <port>` | `TZE_HUD_MCP_PORT`     | `9090`       | MCP HTTP listen port (0 to disable).     |
 //! | `--fps <n>`         | `TZE_HUD_FPS`          | `60`         | Target frames per second.                |
-//! | `--benchmark-emit <path>` | `TZE_HUD_BENCHMARK_EMIT` | — | Emit bounded windowed benchmark JSON and exit. |
-//! | `--benchmark-frames <n>` | `TZE_HUD_BENCHMARK_FRAMES` | `600` | Measured frames for benchmark mode. |
-//! | `--benchmark-warmup-frames <n>` | `TZE_HUD_BENCHMARK_WARMUP_FRAMES` | `120` | Warmup frames skipped before measurement. |
 //! | `--quiescent-efficiency-emit <path>` | `TZE_HUD_QUIESCENT_EFFICIENCY_EMIT` | — | Emit a real event-driven static-overlay efficiency artifact after 5s settle + 60s observation. |
 //! | `--print-attach-info` | —                    | —            | Print the MCP attach-info block (endpoint URL, bearer-PSK auth rule, paste-ready MCP client config) and exit 0 without starting the runtime. Never prints the PSK. |
 //! | `--help`            | —                      | —            | Print this help and exit.                |
@@ -88,8 +85,7 @@ use tze_hud_runtime::operator::handoff::{self, HandoffChild};
 use tze_hud_runtime::operator::install::{self, Acquire, Action, InstallPaths};
 use tze_hud_runtime::window::{WindowConfig, WindowMode};
 use tze_hud_runtime::windowed::{
-    Relaunch, WindowedBenchmarkConfig, WindowedConfig, WindowedQuiescentEfficiencyConfig,
-    WindowedRuntime,
+    Relaunch, WindowedConfig, WindowedQuiescentEfficiencyConfig, WindowedRuntime,
 };
 use tze_hud_scene::config::AgentDirectory;
 
@@ -125,14 +121,6 @@ OPTIONS:
                            (env: TZE_HUD_MCP_PORT)
     --fps <n>              Target frames per second  [default: 60]
                            (env: TZE_HUD_FPS)
-    --benchmark-emit <path>
-                           Emit bounded windowed compositor benchmark JSON and exit
-                           (env: TZE_HUD_BENCHMARK_EMIT)
-    --benchmark-frames <n> Measured frames for benchmark mode  [default: 600]
-                           (env: TZE_HUD_BENCHMARK_FRAMES)
-    --benchmark-warmup-frames <n>
-                           Warmup frames skipped before measurement  [default: 120]
-                           (env: TZE_HUD_BENCHMARK_WARMUP_FRAMES)
     --quiescent-efficiency-emit <path>
                            Measure a static event-driven windowed runtime for a
                            mandatory 5s settle plus 60s interval, emit JSON, and exit.
@@ -234,12 +222,6 @@ struct StartupOptions {
     debug_zones: bool,
     /// Which of the panel-visible settings a flag or variable set.
     sources: tze_hud_runtime::launch::LaunchSources,
-    /// Path for bounded windowed compositor benchmark output.
-    benchmark_emit: Option<String>,
-    /// Number of measured frames in benchmark mode.
-    benchmark_frames: u64,
-    /// Number of warmup frames skipped before benchmark measurement.
-    benchmark_warmup_frames: u64,
     /// Path for a bounded real-runtime quiescent-efficiency artifact.
     quiescent_efficiency_emit: Option<String>,
     /// When true, print the MCP attach-info block (endpoint URL, the
@@ -280,9 +262,6 @@ impl Default for StartupOptions {
             fps: 60,
             debug_zones: false,
             sources: Default::default(),
-            benchmark_emit: None,
-            benchmark_frames: 600,
-            benchmark_warmup_frames: 120,
             quiescent_efficiency_emit: None,
             print_attach_info: false,
             install: false,
@@ -427,7 +406,7 @@ fn validate_config_toml_for_startup(toml_src: &str) -> Result<(), String> {
     })
 }
 
-fn parse_benchmark_emit_path(value: String, source: &str) -> Result<String, String> {
+fn parse_emit_path(value: String, source: &str) -> Result<String, String> {
     if value.trim().is_empty() {
         Err(format!("{source} requires a non-empty path"))
     } else {
@@ -463,9 +442,6 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
                 | "--mcp-port"
                 | "--fps"
                 | "--updated-from"
-                | "--benchmark-emit"
-                | "--benchmark-frames"
-                | "--benchmark-warmup-frames"
                 | "--quiescent-efficiency-emit"
         ) || (arg == "--handoff"
             && args
@@ -549,24 +525,9 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
         if std::env::var_os("TZE_HUD_FILE_LOG").is_some() {
             opts.sources.log_level = Source::Env("TZE_HUD_FILE_LOG");
         }
-        if let Ok(v) = std::env::var("TZE_HUD_BENCHMARK_EMIT") {
-            opts.benchmark_emit = Some(parse_benchmark_emit_path(v, "TZE_HUD_BENCHMARK_EMIT")?);
-        }
-        if let Ok(v) = std::env::var("TZE_HUD_BENCHMARK_FRAMES") {
-            opts.benchmark_frames = v
-                .parse::<u64>()
-                .map_err(|_| format!("TZE_HUD_BENCHMARK_FRAMES: invalid integer: {v:?}"))?;
-        }
-        if let Ok(v) = std::env::var("TZE_HUD_BENCHMARK_WARMUP_FRAMES") {
-            opts.benchmark_warmup_frames = v
-                .parse::<u64>()
-                .map_err(|_| format!("TZE_HUD_BENCHMARK_WARMUP_FRAMES: invalid integer: {v:?}"))?;
-        }
         if let Ok(v) = std::env::var("TZE_HUD_QUIESCENT_EFFICIENCY_EMIT") {
-            opts.quiescent_efficiency_emit = Some(parse_benchmark_emit_path(
-                v,
-                "TZE_HUD_QUIESCENT_EFFICIENCY_EMIT",
-            )?);
+            opts.quiescent_efficiency_emit =
+                Some(parse_emit_path(v, "TZE_HUD_QUIESCENT_EFFICIENCY_EMIT")?);
         }
     } else if opts.remote_action == Some(tze_hud_runtime::remote_firewall::RemoteAction::Allow) {
         for (cli_override, variable, destination) in [
@@ -708,41 +669,13 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
                 opts.debug_zones = true;
                 opts.sources.debug_zones = Source::Flag("--debug-zones");
             }
-            "--benchmark-emit" => {
-                i += 1;
-                let path = args
-                    .get(i)
-                    .cloned()
-                    .ok_or_else(|| "--benchmark-emit requires a path argument".to_string())?;
-                opts.benchmark_emit = Some(parse_benchmark_emit_path(path, "--benchmark-emit")?);
-            }
-            "--benchmark-frames" => {
-                i += 1;
-                let val = args.get(i).ok_or_else(|| {
-                    "--benchmark-frames requires a frame count argument".to_string()
-                })?;
-                opts.benchmark_frames = val
-                    .parse::<u64>()
-                    .map_err(|_| format!("--benchmark-frames: invalid integer: {val:?}"))?;
-            }
-            "--benchmark-warmup-frames" => {
-                i += 1;
-                let val = args.get(i).ok_or_else(|| {
-                    "--benchmark-warmup-frames requires a frame count argument".to_string()
-                })?;
-                opts.benchmark_warmup_frames = val
-                    .parse::<u64>()
-                    .map_err(|_| format!("--benchmark-warmup-frames: invalid integer: {val:?}"))?;
-            }
             "--quiescent-efficiency-emit" => {
                 i += 1;
                 let path = args.get(i).cloned().ok_or_else(|| {
                     "--quiescent-efficiency-emit requires a path argument".to_string()
                 })?;
-                opts.quiescent_efficiency_emit = Some(parse_benchmark_emit_path(
-                    path,
-                    "--quiescent-efficiency-emit",
-                )?);
+                opts.quiescent_efficiency_emit =
+                    Some(parse_emit_path(path, "--quiescent-efficiency-emit")?);
             }
             flag if flag.starts_with('-') => {
                 return Err(format!(
@@ -1213,7 +1146,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Acquire::Acquired(guard) => Some(guard),
             Acquire::AlreadyRunning => {
                 // Silent exit 0 only for a bare launch or the autostart command;
-                // a launch with explicit args (benchmark, validation, CI) did not
+                // a launch with explicit args (measurement, validation, CI) did not
                 // do its work and must say so.
                 let canonical = InstallPaths::from_env()
                     .map(|p| install::is_canonical_launch(&args, &p))
@@ -1347,24 +1280,6 @@ set {DEV_ALLOW_INSECURE_STARTUP_ENV}=1 only in debug/dev runs if you need fallba
     // explicitly, auto-detection is disabled so the user's intent is honoured.
     let overlay_auto_size =
         opts.window_mode == WindowMode::Overlay && !opts.explicit_width && !opts.explicit_height;
-    if opts.benchmark_emit.is_some() && opts.benchmark_frames == 0 {
-        eprintln!("error: --benchmark-frames must be greater than zero");
-        std::process::exit(1);
-    }
-    if opts.benchmark_emit.is_some() && opts.quiescent_efficiency_emit.is_some() {
-        eprintln!(
-            "error: --benchmark-emit and --quiescent-efficiency-emit cannot be used together"
-        );
-        std::process::exit(1);
-    }
-    let benchmark = opts
-        .benchmark_emit
-        .as_ref()
-        .map(|path| WindowedBenchmarkConfig {
-            warmup_frames: opts.benchmark_warmup_frames,
-            frames: opts.benchmark_frames,
-            emit_path: std::path::PathBuf::from(path),
-        });
     let quiescent_efficiency =
         opts.quiescent_efficiency_emit
             .as_ref()
@@ -1385,7 +1300,6 @@ set {DEV_ALLOW_INSECURE_STARTUP_ENV}=1 only in debug/dev runs if you need fallba
         grpc_port = opts.grpc_port,
         mcp_port = opts.mcp_port,
         fps = opts.fps,
-        benchmark = benchmark.is_some(),
         quiescent_efficiency = quiescent_efficiency.is_some(),
         "tze_hud runtime starting"
     );
@@ -1407,7 +1321,6 @@ set {DEV_ALLOW_INSECURE_STARTUP_ENV}=1 only in debug/dev runs if you need fallba
         config_toml,
         config_file_path,
         debug_zones: opts.debug_zones,
-        benchmark,
         quiescent_efficiency,
         relaunch: Some(Relaunch {
             exe: current_exe,
@@ -1588,8 +1501,7 @@ mod tests {
                 assert_eq!((o.grpc_port, o.mcp_port, o.fps), (50051, 9090, 60));
                 assert!(o.config_path.is_none());
                 assert!(o.remote_action.is_none());
-                assert!(o.benchmark_emit.is_none() && o.quiescent_efficiency_emit.is_none());
-                assert_eq!((o.benchmark_frames, o.benchmark_warmup_frames), (600, 120));
+                assert!(o.quiescent_efficiency_emit.is_none());
                 assert!(
                     !(o.print_attach_info
                         || o.debug_zones
@@ -1796,23 +1708,29 @@ mod tests {
                 },
             ),
             (
-                "benchmark flags",
-                &[],
+                "former benchmark env is inert",
                 &[
-                    "--benchmark-emit",
-                    "artifacts/fullscreen.json",
-                    "--benchmark-frames",
-                    "720",
-                    "--benchmark-warmup-frames",
-                    "180",
+                    ("TZE_HUD_BENCHMARK_EMIT", "artifacts/removed.json"),
+                    ("TZE_HUD_BENCHMARK_FRAMES", "invalid"),
+                    ("TZE_HUD_BENCHMARK_WARMUP_FRAMES", "invalid"),
                 ],
+                &[],
                 |o| {
-                    assert_eq!(
-                        o.benchmark_emit.as_deref(),
-                        Some("artifacts/fullscreen.json")
-                    );
-                    assert_eq!((o.benchmark_frames, o.benchmark_warmup_frames), (720, 180));
+                    assert!(o.quiescent_efficiency_emit.is_none());
+                    assert_eq!(o.fps, 60);
                 },
+            ),
+            (
+                "quiescent env",
+                &[("TZE_HUD_QUIESCENT_EFFICIENCY_EMIT", "env.json")],
+                &[],
+                |o| assert_eq!(o.quiescent_efficiency_emit.as_deref(), Some("env.json")),
+            ),
+            (
+                "quiescent env and cli override",
+                &[("TZE_HUD_QUIESCENT_EFFICIENCY_EMIT", "env.json")],
+                &["--quiescent-efficiency-emit", "cli.json"],
+                |o| assert_eq!(o.quiescent_efficiency_emit.as_deref(), Some("cli.json")),
             ),
             (
                 "quiescent-efficiency-emit",
@@ -1826,7 +1744,6 @@ mod tests {
                         o.quiescent_efficiency_emit.as_deref(),
                         Some("artifacts/idle-efficiency.json")
                     );
-                    assert!(o.benchmark_emit.is_none());
                 },
             ),
         ];
@@ -1992,22 +1909,22 @@ mod tests {
             ("mcp-port missing", &[], &["--mcp-port"], &["--mcp-port"]),
             ("fps missing", &[], &["--fps"], &["--fps"]),
             (
-                "benchmark-emit missing",
+                "removed benchmark-emit",
                 &[],
-                &["--benchmark-emit"],
-                &["--benchmark-emit"],
+                &["--benchmark-emit", "removed.json"],
+                &["unknown flag", "--benchmark-emit"],
             ),
             (
-                "benchmark-frames missing",
+                "removed benchmark-frames",
                 &[],
-                &["--benchmark-frames"],
-                &["--benchmark-frames"],
+                &["--benchmark-frames", "600"],
+                &["unknown flag", "--benchmark-frames"],
             ),
             (
-                "benchmark-warmup-frames missing",
+                "removed benchmark-warmup-frames",
                 &[],
-                &["--benchmark-warmup-frames"],
-                &["--benchmark-warmup-frames"],
+                &["--benchmark-warmup-frames", "120"],
+                &["unknown flag", "--benchmark-warmup-frames"],
             ),
             (
                 "quiescent-efficiency-emit missing",
@@ -2036,22 +1953,10 @@ mod tests {
             ),
             ("fps non-integer", &[], &["--fps", "x"], &["--fps"]),
             (
-                "benchmark-frames non-integer",
+                "empty quiescent env path",
+                &[("TZE_HUD_QUIESCENT_EFFICIENCY_EMIT", "")],
                 &[],
-                &["--benchmark-frames", "x"],
-                &["--benchmark-frames"],
-            ),
-            (
-                "benchmark-warmup-frames non-integer",
-                &[],
-                &["--benchmark-warmup-frames", "x"],
-                &["--benchmark-warmup-frames"],
-            ),
-            (
-                "empty benchmark-emit path",
-                &[],
-                &["--benchmark-emit", ""],
-                &["--benchmark-emit", "non-empty path"],
+                &["TZE_HUD_QUIESCENT_EFFICIENCY_EMIT", "non-empty path"],
             ),
             (
                 "empty quiescent-efficiency-emit path",
@@ -2151,10 +2056,10 @@ mod tests {
                 action: Action::Run,
             },
             LaunchCase {
-                name: "explicit benchmark",
+                name: "explicit quiescent measurement",
                 exe: outside,
                 windows: true,
-                raw: &["--benchmark-emit", "report.json"],
+                raw: &["--quiescent-efficiency-emit", "report.json"],
                 mode: WindowMode::Fullscreen,
                 config: None,
                 action: Action::Run,

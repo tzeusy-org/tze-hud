@@ -610,14 +610,34 @@ mod tests {
 
     #[test]
     fn test_session_summary_serialization() {
-        let mut summary = SessionSummary::new();
-        summary.total_frames = 100;
-        summary.frame_time.record(12000);
-        summary.frame_time.record(14000);
+        let mut collector = crate::TelemetryCollector::new();
+        let frames = LATENCY_BUCKET_WINDOW as u64 + 17;
+        for number in 0..frames {
+            let mut frame = FrameTelemetry::new(number);
+            frame.frame_time_us = 12_000 + number;
+            frame.invariant_violations_this_frame = 2;
+            frame.scene_lock_miss_count = number;
+            collector.record(frame);
+        }
+        let summary = collector.summary();
+        assert_eq!(summary.total_frames, frames);
+        assert_eq!(summary.invariant_violations, frames * 2);
+        assert_eq!(summary.scene_lock_misses, frames - 1);
+        assert_eq!(summary.frame_time.samples.len(), LATENCY_BUCKET_WINDOW);
+        assert_eq!(summary.frame_time.samples.front(), Some(&12_017));
+        assert_eq!(
+            summary.frame_time.samples.back(),
+            Some(&(12_000 + frames - 1))
+        );
 
         let json = summary.to_json().unwrap();
-        assert!(json.contains("frame_time"));
-        assert!(json.contains("12000"));
+        let value: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(value["total_frames"], frames);
+        assert_eq!(value["invariant_violations"], frames * 2);
+        assert!(value["frame_time"].is_object());
+        let restored: SessionSummary = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored.total_frames, frames);
+        assert_eq!(restored.frame_time.samples, summary.frame_time.samples);
     }
 
     /// Verify that all three split latency buckets exist in SessionSummary and
