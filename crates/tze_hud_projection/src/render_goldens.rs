@@ -131,7 +131,7 @@ fn render_visual_goldens() {
             adapter.apply_draft_notification(&AdapterDraftNotification {
                 text: "Unsent local draft".into(),
                 cursor: 6,
-                selection_anchor: None,
+                selection_anchor: 6,
                 at_capacity: false,
                 sequence: 1,
             });
