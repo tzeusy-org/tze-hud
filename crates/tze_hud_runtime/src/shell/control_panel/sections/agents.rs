@@ -20,6 +20,8 @@ pub(crate) struct AgentsSection {
     /// The roster as last read: reading it takes the session, scene and
     /// portal locks, so rows read this and `refresh` renews it.
     roster: Mutex<Vec<AgentEntry>>,
+    /// Offer Connect an agent (the panel task runs it).
+    connect: bool,
 }
 
 /// What a per-agent row does. Row ids are `agents.<verb>:<agent>`, so any
@@ -158,12 +160,13 @@ fn grant_question(grant: Grant, agent: &str) -> String {
 impl AgentsSection {
     pub(crate) const PAUSE: &'static str = "agents.pause";
 
-    pub(crate) fn new(pause: PauseControl, agents: Option<AgentControl>) -> Self {
+    pub(crate) fn new(pause: PauseControl, agents: Option<AgentControl>, connect: bool) -> Self {
         Self {
             pause,
             agents,
             expanded: Mutex::new(None),
             roster: Mutex::new(Vec::new()),
+            connect,
         }
     }
 
@@ -308,6 +311,24 @@ impl Section for AgentsSection {
                 .clone();
             for entry in &roster {
                 self.agent_rows(entry, &mut rows);
+            }
+            if self.connect {
+                rows.push(
+                    Row::new(
+                        super::super::connect::OPEN,
+                        "Connect an agent",
+                        Control::Action { confirm: None },
+                    )
+                    .detail("Copy a prompt with a one-time code")
+                    .keywords(&[
+                        "pair",
+                        "pairing",
+                        "connect",
+                        "prompt",
+                        "code",
+                        "add agent",
+                    ]),
+                );
             }
             rows
         })

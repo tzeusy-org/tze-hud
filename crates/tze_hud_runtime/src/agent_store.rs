@@ -89,6 +89,15 @@ impl AgentStore {
         cached.file.clone()
     }
 
+    /// The paired agents as last read or written, without checking the disk.
+    pub(crate) fn cached(&self) -> AgentsFile {
+        self.cached
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .file
+            .clone()
+    }
+
     /// Apply `change` to `agents.toml`, then to the live directory. Returns
     /// the store before and as written. Blocking file I/O: call it off async
     /// workers.

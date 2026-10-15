@@ -36,6 +36,7 @@
 //! changes).
 
 pub(crate) mod agents;
+pub(crate) mod connect;
 mod pause;
 pub(crate) mod row;
 mod search;
@@ -51,6 +52,7 @@ use tze_hud_scene::config::{ChordRole, HudChords};
 use tze_hud_scene::render_wake::RenderWakeNotifier;
 
 pub(crate) use agents::AgentControl;
+pub(crate) use connect::ConnectControl;
 pub(crate) use pause::PauseControl;
 pub(crate) use row::Section;
 pub(crate) use state::PanelKey;
@@ -257,6 +259,8 @@ pub(crate) struct ControlPanelDeps {
     pub pairing: Option<Arc<crate::pairing::Pairing>>,
     /// The Agents section's roster and actions (`None`: pause only).
     pub agents: Option<AgentControl>,
+    /// Connect an agent (`None` when the MCP port is disabled).
+    pub connect: Option<ConnectControl>,
     /// Wakes the compositor (and the winit loop) after a publish.
     pub render_wake: RenderWakeNotifier,
     /// Wakes only the winit loop (new geometry changes pointer capture).
@@ -269,6 +273,7 @@ pub(crate) fn default_sections(deps: &ControlPanelDeps) -> Vec<Box<dyn Section>>
         Box::new(sections::AgentsSection::new(
             deps.pause.clone(),
             deps.agents.clone(),
+            deps.connect.is_some(),
         )),
         Box::new(sections::VisibilitySection::new(
             Arc::clone(&deps.scene),
@@ -439,11 +444,48 @@ impl PanelTask {
             PanelChange::Close => self.open = None,
             PanelChange::Keep => {}
         }
-        if outcome.pairing
-            && let Some(pairing) = &self.deps.pairing
-        {
-            pairing.open();
+        if outcome.connect {
+            self.open_connect();
         }
+    }
+
+    /// Show Connect an agent with a fresh one-time code. Without the
+    /// panel's Connect (no network runtime), the pairing card shows instead.
+    fn open_connect(&mut self) {
+        match (&self.deps.connect, self.open.as_mut()) {
+            (Some(control), Some(open)) => {
+                open.connect = Some(control.open());
+                open.query.clear();
+                open.confirming = None;
+                open.scroll = 0.0;
+                open.focus = tze_hud_compositor::PanelFocus::Row(connect::NAME.to_owned());
+            }
+            _ => {
+                if let Some(pairing) = &self.deps.pairing {
+                    pairing.open();
+                }
+            }
+        }
+    }
+
+    /// Run a Connect row's action; `false` when `row` is not one.
+    async fn apply_connect(&mut self, row: &str) -> bool {
+        if row == connect::OPEN {
+            self.open_connect();
+            return true;
+        }
+        let Some(control) = self.deps.connect.clone() else {
+            return false;
+        };
+        let Some(page) = self.open.as_mut().and_then(|o| o.connect.as_mut()) else {
+            return false;
+        };
+        match row {
+            connect::NAME | connect::COPY => control.copy(page).await,
+            connect::NEW_CODE => control.new_code(page),
+            _ => return false,
+        }
+        true
     }
 
     /// Close the panel; closing always resumes agents.
@@ -453,6 +495,9 @@ impl PanelTask {
     }
 
     async fn apply(&mut self, row: &str, edit: Edit) {
+        if edit == Edit::Activate && self.apply_connect(row).await {
+            return;
+        }
         let section_id = row.split('.').next().unwrap_or_default();
         let Some(index) = self.sections.iter().position(|s| s.id() == section_id) else {
             tracing::warn!(row, "control panel: no section owns this row");
@@ -527,6 +572,11 @@ impl PanelTask {
                 let ctx = ViewContext {
                     paused: self.deps.pause.is_paused(),
                     pause_chord: self.deps.chords.pause.to_string(),
+                    connect: open
+                        .connect
+                        .as_ref()
+                        .zip(self.deps.connect.as_ref())
+                        .map(|(page, control)| control.view(page)),
                 };
                 let (model, nav) = state::build(open, &rows, &ctx);
                 self.nav = nav;
@@ -534,6 +584,12 @@ impl PanelTask {
             }
         };
         let closed = model.is_none();
+        // Off the Connect card, a replacement code shows on the system card.
+        if let Some(control) = &self.deps.connect
+            && self.open.as_ref().is_none_or(|o| o.connect.is_none())
+        {
+            control.leave();
+        }
         if model != self.published {
             self.published = model.clone();
             self.handle.publish(model);

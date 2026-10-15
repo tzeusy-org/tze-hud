@@ -65,7 +65,7 @@ impl Section for InputSection {
                         ChordRole::Pairing => (
                             "input.pairing_chord",
                             "Pairing chord",
-                            "Shows a one-time pairing code",
+                            "Opens Connect an agent with a one-time code",
                             &["hotkey", "shortcut", "pairing_hotkey", "pair", "connect"],
                         ),
                     };

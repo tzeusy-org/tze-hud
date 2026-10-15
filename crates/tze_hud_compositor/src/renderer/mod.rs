@@ -79,9 +79,9 @@ use icon::*;
 // Re-export the externally consumed shared state; renderer-only helpers stay
 // in private imports.
 pub use control_panel::{
-    ControlPanelGeometry, ControlPanelModel, PanelBadge, PanelBody, PanelChip, PanelControl,
-    PanelFocus, PanelHit, PanelHitTarget, PanelItem, PanelNotice, PanelPart, PanelRect,
-    PanelSection, PanelSpan, PanelTone, estimate_control_panel_geometry,
+    ControlPanelGeometry, ControlPanelModel, PanelBadge, PanelBody, PanelChip, PanelConnect,
+    PanelControl, PanelFocus, PanelHit, PanelHitTarget, PanelItem, PanelNotice, PanelPart,
+    PanelRect, PanelSection, PanelSpan, PanelTone, estimate_control_panel_geometry,
 };
 pub use focus_ring::{FocusRingOwner, FocusRingOwnerHandle};
 pub use system_card::{SystemCardKind, SystemCardModel};

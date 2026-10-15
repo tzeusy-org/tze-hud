@@ -372,6 +372,13 @@ impl FirewallProbe {
             .map(|(_, v)| v.clone())
     }
 
+    /// The last answer however old, for showing while a fresh one is
+    /// checked. Never blocks.
+    pub fn last(&self) -> Option<TailnetInbound> {
+        let cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
+        cache.as_ref().map(|(_, v)| v.clone())
+    }
+
     /// The cached answer or a fresh evaluation. Blocks on a cache miss (COM
     /// enumeration can take a while): call from a blocking context.
     pub fn current(&self) -> TailnetInbound {

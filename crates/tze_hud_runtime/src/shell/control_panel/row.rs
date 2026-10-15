@@ -103,6 +103,8 @@ pub(crate) enum Control {
     /// A button. `confirm` asks once before acting (destructive or
     /// trust-widening actions).
     Action { confirm: Option<String> },
+    /// Text the owner types while the row has focus; Enter acts on it.
+    Field { text: String },
 }
 
 impl Control {

@@ -49,7 +49,7 @@ impl HotkeyStatus {
         let (label, does, lost) = match role {
             ChordRole::Pause => ("safe", "pauses agents", "no human safe-mode override"),
             ChordRole::Panel => ("panel", "opens the control panel", "use the pause chord"),
-            ChordRole::Pairing => ("pair", "opens pairing", "use the control panel"),
+            ChordRole::Pairing => ("pair", "opens Connect an agent", "use the control panel"),
         };
         match self {
             Self::NotApplicable => None,

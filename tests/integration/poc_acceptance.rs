@@ -688,6 +688,22 @@ async fn post(addr: std::net::SocketAddr, psk: &str, body: String) -> String {
         .expect("HTTP response body")
 }
 
+/// `POST /pair` as an agent following the Connect prompt sends it.
+async fn post_pair(addr: std::net::SocketAddr, body: &str) -> String {
+    let mut stream = TcpStream::connect(addr).await.expect("connect to MCP");
+    let request = format!(
+        "POST /pair HTTP/1.0\r\nContent-Type: application/json\r\n\
+         Content-Length: {}\r\n\r\n{body}",
+        body.len()
+    );
+    stream.write_all(request.as_bytes()).await.expect("write");
+    let mut raw = String::new();
+    stream.read_to_string(&mut raw).await.expect("read");
+    raw.split_once("\r\n\r\n")
+        .map(|(_, body)| body.to_string())
+        .expect("HTTP response body")
+}
+
 fn input_items(reply: &Reply) -> &Vec<Value> {
     reply.body["items"].as_array().expect("items array")
 }
@@ -1435,6 +1451,117 @@ async fn poc_panel_roster_updates_live_without_moving_focus() {
     poc.wait_for("a hand-unpaired agent leaves", move |hud| !listed(hud))
         .await;
     assert_eq!(poc.hud.control_panel_focus(), focus, "focus did not move");
+}
+
+/// CP-13 end to end: Connect an agent shows a prompt with a fresh one-time
+/// code; the owner names the agent and copies; an agent following the prompt
+/// pairs with that code (and gets a key the prompt never held); the card says
+/// so and the agent joins the roster. The pairing chord opens the card too.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn poc_panel_connect_prompt_pairs_an_agent() {
+    let mut poc = Poc::boot_with_agents_file().await;
+    poc.open_panel().await;
+    poc.click("agents.connect").await;
+    poc.wait_for("Connect shows", |hud| hud.control_panel_connect().is_some())
+        .await;
+    assert!(poc.hud.pairing_open(), "a fresh code is open");
+    let card = poc.hud.control_panel_connect().unwrap();
+    let prompt = card.block.join("\n");
+    let mcp = poc.hud.mcp_addr();
+    assert!(
+        prompt.contains(&format!("reachable ONLY from that PC itself, at {mcp}")),
+        "{prompt}"
+    );
+    assert!(
+        prompt.contains(r#""agent":"agent","code":"#),
+        "a free default name: {prompt}"
+    );
+
+    poc.hud.panel_type("Laptop 2");
+    poc.wait_for("the name is typed", |hud| {
+        hud.control_panel_row("connect.name").is_some_and(|item| {
+            item.control
+                == tze_hud_compositor::PanelControl::Value {
+                    text: "laptop-2".into(),
+                    mono: true,
+                }
+        })
+    })
+    .await;
+    poc.hud.panel_press("Enter");
+    poc.wait_for("the prompt is copied", |hud| hud.clipboard().len() == 1)
+        .await;
+    let copied = poc.hud.clipboard().remove(0);
+    let code = copied
+        .split(r#""code":""#)
+        .nth(1)
+        .and_then(|rest| rest.get(..6))
+        .expect("the prompt carries the code")
+        .to_owned();
+    assert!(
+        copied.contains(r#"{"agent":"laptop-2","code":""#),
+        "{copied}"
+    );
+    let status = |hud: &HeadlessEventLoopHarness| {
+        hud.control_panel_connect()
+            .and_then(|card| card.status)
+            .map(|(text, _)| text)
+    };
+    poc.wait_for("the card waits for the agent", move |hud| {
+        status(hud).as_deref() == Some("Copied. Waiting for laptop-2 to pair…")
+    })
+    .await;
+
+    // The agent follows the prompt.
+    let reply = post_pair(mcp, &format!(r#"{{"agent":"laptop-2","code":"{code}"}}"#)).await;
+    let reply: Value = serde_json::from_str(&reply).expect("pair reply");
+    let psk = reply["psk"].as_str().expect("a key").to_owned();
+    assert!(!copied.contains(&psk), "the prompt never holds a key");
+    assert_eq!(reply["mcp"], json!(format!("http://{mcp}/mcp")));
+    poc.wait_for("the card says it paired", move |hud| {
+        status(hud).as_deref() == Some("laptop-2 paired. It shows in Agents.")
+    })
+    .await;
+    assert!(poc.paired().contains(&"laptop-2".to_owned()));
+    assert!(!poc.hud.pairing_open(), "the code worked once");
+    assert_eq!(
+        poc.hud.control_panel_focus(),
+        Some(tze_hud_compositor::PanelFocus::Row("connect.name".into())),
+        "pairing does not move focus"
+    );
+
+    // Copying again, with the code spent, copies a fresh one.
+    poc.hud.panel_press("Enter");
+    poc.wait_for("the prompt is copied again", |hud| {
+        hud.clipboard().len() == 2
+    })
+    .await;
+    let again = poc.hud.clipboard().remove(1);
+    assert!(!again.contains(&format!(r#""code":"{code}""#)), "{again}");
+    assert!(poc.hud.pairing_open(), "the fresh code is live");
+    // A Connect code cannot ask for admin.
+    let refused = post_pair(mcp, r#"{"agent":"boss","code":"000000","admin":true}"#).await;
+    assert!(refused.contains("NOT_ADMIN"), "{refused}");
+
+    // Esc goes back to the sections, where the new agent is listed.
+    poc.hud.panel_press("Escape");
+    poc.wait_for("laptop-2 is in the roster", |hud| {
+        hud.control_panel_row("agents.manage:laptop-2").is_some()
+    })
+    .await;
+    poc.hud.panel_press("Escape");
+    poc.wait_for("the panel closes", |hud| !hud.control_panel_open())
+        .await;
+
+    // The pairing chord opens the panel, agents running, at Connect.
+    poc.hud
+        .press_chord(tze_hud_scene::config::ChordRole::Pairing);
+    poc.wait_for("the chord opens Connect", |hud| {
+        hud.control_panel_connect().is_some()
+    })
+    .await;
+    assert!(poc.hud.pairing_open());
+    assert!(!poc.hud.safe_mode_active());
 }
 
 /// A responsive agent is told what the human did (docs/api.md): safe mode

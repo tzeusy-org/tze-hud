@@ -21,6 +21,7 @@
 //! to the agent store, the system card, and the HTTP route.
 
 use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
@@ -165,6 +166,20 @@ impl PairingState {
         Opened::Code(self.issue(now))
     }
 
+    /// The code that can be redeemed now, if any.
+    pub fn current_at(&self, now: Instant) -> Option<IssuedCode> {
+        let open = self.open.as_ref().filter(|_| self.is_open_at(now))?;
+        Some(IssuedCode {
+            code: String::from_utf8_lossy(&open.digits).into_owned(),
+            expires_at: open.expires_at,
+        })
+    }
+
+    /// Whether pairing is closed after too many wrong codes.
+    pub fn is_cooling_down_at(&self, now: Instant) -> bool {
+        self.cooling_down(now)
+    }
+
     /// Whether a code can currently be redeemed.
     pub fn is_open_at(&self, now: Instant) -> bool {
         !self.cooling_down(now) && self.open.as_ref().is_some_and(|o| now <= o.expires_at)
@@ -287,6 +302,34 @@ pub struct Pairing {
     binds: Arc<Mutex<Vec<SocketAddr>>>,
     /// Windows Firewall check for the tailnet address, shared with `/admin/status`.
     firewall: Arc<crate::firewall::FirewallProbe>,
+    /// The control panel's Connect card is showing the code, so the system
+    /// card stays away until the card is left ([`Pairing::leave_panel`]).
+    in_panel: AtomicBool,
+    /// The open code came from the Connect card, which promises "not admin":
+    /// `POST /pair` refuses `admin` until the next [`Pairing::open`].
+    panel_code: AtomicBool,
+    /// A background firewall check is running (the panel asks every second).
+    probing: Arc<AtomicBool>,
+    /// When the endpoint was last seen on a local interface, and whether it
+    /// was (Tailscale can go down after the bind).
+    endpoint_seen: Mutex<Option<(Instant, SocketAddr, bool)>>,
+    /// This PC's addresses ([`crate::net_addrs::local_ips`]; fixed in tests).
+    local_ips: fn() -> Vec<std::net::IpAddr>,
+}
+
+/// How long [`Pairing::reach`] trusts its last interface check.
+const ENDPOINT_CHECK_TTL: Duration = Duration::from_secs(5);
+
+/// Where agents should reach this HUD, as the Connect card states it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct Reach {
+    /// The MCP port's address to hand out (tailnet when bound).
+    pub endpoint: SocketAddr,
+    /// `endpoint` is a Tailscale address.
+    pub tailnet: bool,
+    /// Windows Firewall's verdict for the tailnet address; `None` while it
+    /// is being checked.
+    pub firewall: Option<crate::firewall::TailnetInbound>,
 }
 
 /// The pairing card's lines: code, address, validity, and (only when Windows
@@ -336,6 +379,11 @@ impl Pairing {
                 vec![grpc_port],
             )),
             binds,
+            in_panel: Default::default(),
+            panel_code: Default::default(),
+            probing: Default::default(),
+            endpoint_seen: Mutex::default(),
+            local_ips: crate::net_addrs::local_ips,
         }
     }
 
@@ -376,6 +424,9 @@ impl Pairing {
     }
 
     fn show(&self, issued: &IssuedCode) {
+        if self.in_panel.load(Ordering::Acquire) {
+            return;
+        }
         let (endpoint, address) = {
             let binds = self.binds.lock().unwrap_or_else(|e| e.into_inner());
             let endpoint = Self::endpoint(&binds);
@@ -428,6 +479,8 @@ impl Pairing {
     /// Open pairing and show the code. Called at startup with no agents, and
     /// when the owner asks (`--pair`, the pairing chord).
     pub fn open(&self) {
+        self.in_panel.store(false, Ordering::Release);
+        self.panel_code.store(false, Ordering::Release);
         match self.lock().open_at(self.clock.now()) {
             Opened::Code(issued) => {
                 tracing::info!("pairing open; code shown on the HUD");
@@ -446,6 +499,99 @@ impl Pairing {
         self.lock().is_open_at(self.clock.now())
     }
 
+    /// Open pairing for the control panel's Connect card, which shows the
+    /// code itself: no system card, now or on a replacement code, while the
+    /// card is up. The code cannot grant admin. `None` while cooling down.
+    pub(crate) fn open_in_panel(&self) -> Option<IssuedCode> {
+        self.in_panel.store(true, Ordering::Release);
+        self.panel_code.store(true, Ordering::Release);
+        self.card
+            .clear_kind(tze_hud_compositor::SystemCardKind::Pairing);
+        match self.lock().open_at(self.clock.now()) {
+            Opened::Code(issued) => {
+                tracing::info!("pairing open; code shown in the control panel");
+                Some(issued)
+            }
+            Opened::CoolingDown => None,
+        }
+    }
+
+    /// The Connect card is no longer showing the code: a replacement code
+    /// (after wrong guesses or a failed save) shows on the system card again.
+    /// The copied code stays valid and still cannot grant admin.
+    pub(crate) fn leave_panel(&self) {
+        self.in_panel.store(false, Ordering::Release);
+    }
+
+    /// The code that can be redeemed now and how long it has left, or `Err`
+    /// with whether pairing is cooling down.
+    pub(crate) fn code(&self) -> Result<(String, Duration), bool> {
+        let now = self.clock.now();
+        let state = self.lock();
+        match state.current_at(now) {
+            Some(issued) => Ok((
+                issued.code,
+                issued.expires_at.saturating_duration_since(now),
+            )),
+            None => Err(state.is_cooling_down_at(now)),
+        }
+    }
+
+    /// Where agents should connect. Never blocks: an unknown firewall
+    /// verdict is checked in the background and shows on a later call.
+    pub(crate) fn reach(&self) -> Reach {
+        let binds = self.binds.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let mut endpoint =
+            Self::endpoint(&binds).unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 9090)));
+        let mut tailnet = !crate::net_addrs::tailnet_addrs(&[endpoint.ip()]).is_empty();
+        if tailnet && !self.still_local(endpoint) {
+            // Tailscale went down after the bind: only this PC can connect,
+            // through its loopback listener.
+            tailnet = false;
+            endpoint = binds
+                .iter()
+                .find(|a| a.ip().is_loopback())
+                .copied()
+                .unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], endpoint.port())));
+        }
+        let firewall = if tailnet {
+            let cached = self.firewall.cached();
+            if cached.is_none() && !self.probing.swap(true, Ordering::AcqRel) {
+                let (probe, probing) = (Arc::clone(&self.firewall), Arc::clone(&self.probing));
+                std::thread::spawn(move || {
+                    probe.current();
+                    probing.store(false, Ordering::Release);
+                });
+            }
+            // While a stale answer is re-checked, keep showing it.
+            cached.or_else(|| self.firewall.last())
+        } else {
+            Some(crate::firewall::TailnetInbound::NotApplicable)
+        };
+        Reach {
+            endpoint,
+            tailnet,
+            firewall,
+        }
+    }
+
+    /// Whether `endpoint` is still on a local interface. Interface lists are
+    /// cheap to read, but the panel asks every second, so the answer is
+    /// reused for [`ENDPOINT_CHECK_TTL`].
+    fn still_local(&self, endpoint: SocketAddr) -> bool {
+        let now = Instant::now();
+        let mut seen = self.endpoint_seen.lock().unwrap_or_else(|e| e.into_inner());
+        if let Some((at, addr, up)) = *seen
+            && addr == endpoint
+            && now.saturating_duration_since(at) < ENDPOINT_CHECK_TTL
+        {
+            return up;
+        }
+        let up = (self.local_ips)().contains(&endpoint.ip());
+        *seen = Some((now, endpoint, up));
+        up
+    }
+
     /// Serve `POST /pair`.
     pub fn pair(&self, body: &[u8]) -> Response {
         let bad_request = |hint: &str| {
@@ -458,6 +604,16 @@ impl Pairing {
         // was right.
         if !valid_agent_id(&req.agent) {
             return bad_request("agent must be 1-32 characters of a-z, 0-9 and -");
+        }
+        // Checked before the code, so the refused request does not spend it.
+        if req.admin && self.panel_code.load(Ordering::Acquire) {
+            return Response::operator_error(
+                403,
+                &OperatorError::new(
+                    OperatorCode::NotAdmin,
+                    "this code cannot grant admin; pair without it and ask the owner to grant it in the HUD's control panel",
+                ),
+            );
         }
         let mut state = self.lock();
         let now = self.clock.now();
@@ -489,30 +645,38 @@ impl Pairing {
                     ),
                 )
             }
-            Attempt::Accepted => match self.redeem(&req) {
-                Ok(psk) => {
-                    drop(state);
-                    self.card.clear();
-                    self.card.set(SystemCard::toast(
-                        format!("Paired {}", req.agent),
-                        self.clock.wall_us(),
-                    ));
-                    tracing::info!(agent = %req.agent, admin = req.admin, "agent paired");
-                    self.success(&req.agent, &psk)
+            Attempt::Accepted => {
+                // The code is spent, so nothing else can redeem it while
+                // agents.toml is written without the lock held.
+                drop(state);
+                match self.redeem(&req) {
+                    Ok(psk) => {
+                        self.card
+                            .clear_kind(tze_hud_compositor::SystemCardKind::Pairing);
+                        // The Connect card already says so.
+                        if !self.in_panel.load(Ordering::Acquire) {
+                            self.card.set(SystemCard::toast(
+                                format!("Paired {}", req.agent),
+                                self.clock.wall_us(),
+                            ));
+                        }
+                        tracing::info!(agent = %req.agent, admin = req.admin, "agent paired");
+                        self.success(&req.agent, &psk)
+                    }
+                    Err(why) => {
+                        tracing::error!(error = %why, "pairing could not save the agent");
+                        let issued = self.lock().reopen_after_failure(self.clock.now());
+                        self.show(&issued);
+                        Response::operator_error(
+                            503,
+                            &OperatorError::new(
+                                OperatorCode::Unavailable,
+                                "could not save agents.toml; a new code is on the HUD",
+                            ),
+                        )
+                    }
                 }
-                Err(why) => {
-                    tracing::error!(error = %why, "pairing could not save the agent");
-                    let issued = state.reopen_after_failure(now);
-                    self.show(&issued);
-                    Response::operator_error(
-                        503,
-                        &OperatorError::new(
-                            OperatorCode::Unavailable,
-                            "could not save agents.toml; a new code is on the HUD",
-                        ),
-                    )
-                }
-            },
+            }
         }
     }
 
@@ -552,7 +716,7 @@ impl Pairing {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -560,20 +724,20 @@ mod tests {
     use tze_hud_scene::config::SharedAgents;
 
     /// A clock the test advances by hand.
-    struct TestClock {
+    pub(crate) struct TestClock {
         base: Instant,
         offset_ms: AtomicU64,
     }
 
     impl TestClock {
-        fn new() -> Arc<Self> {
+        pub(crate) fn new() -> Arc<Self> {
             Arc::new(Self {
                 base: Instant::now(),
                 offset_ms: AtomicU64::new(0),
             })
         }
 
-        fn advance(&self, by: Duration) {
+        pub(crate) fn advance(&self, by: Duration) {
             self.offset_ms
                 .fetch_add(by.as_millis() as u64, Ordering::SeqCst);
         }
@@ -711,31 +875,34 @@ mod tests {
 
     // -- Pairing service --------------------------------------------------
 
-    struct Rig {
-        pairing: Pairing,
-        clock: Arc<TestClock>,
+    pub(crate) struct Rig {
+        pub(crate) pairing: Arc<Pairing>,
+        pub(crate) store: Arc<AgentStore>,
+        pub(crate) clock: Arc<TestClock>,
         card: SystemCardHandle,
-        agents: SharedAgents,
+        pub(crate) agents: SharedAgents,
         path: PathBuf,
         _dir: tempfile::TempDir,
     }
 
-    fn rig() -> Rig {
+    pub(crate) fn rig() -> Rig {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("agents.toml");
         let clock = TestClock::new();
         let card = SystemCardHandle::default();
         let agents = SharedAgents::default();
-        let pairing = Pairing::new(
+        let store = Arc::new(AgentStore::open(Some(path.clone()), agents.clone()));
+        let pairing = Arc::new(Pairing::new(
             PairingState::new(counting_words()),
             clock.clone(),
-            Arc::new(AgentStore::open(Some(path.clone()), agents.clone())),
+            Arc::clone(&store),
             card.clone(),
             50051,
-        );
+        ));
         pairing.binds(&["127.0.0.1:9090".parse().unwrap()]);
         Rig {
             pairing,
+            store,
             clock,
             card,
             agents,
@@ -794,10 +961,11 @@ mod tests {
             binds.clear();
             binds.push("100.100.1.2:9090".parse().unwrap());
         }
-        rig.pairing.firewall = Arc::new(FirewallProbe::new(|| TailnetInbound::Blocked {
-            reason: BlockReason::NoAllowRule,
-            rule: None,
-        }));
+        Arc::get_mut(&mut rig.pairing).unwrap().firewall =
+            Arc::new(FirewallProbe::new(|| TailnetInbound::Blocked {
+                reason: BlockReason::NoAllowRule,
+                rule: None,
+            }));
         rig.pairing.open();
         // Shown at once without the warning; the background check adds it.
         let deadline = std::time::Instant::now() + Duration::from_secs(5);
@@ -860,6 +1028,124 @@ mod tests {
         assert!(admin.is_operator_admin());
         let saved = std::fs::read_to_string(&rig.path).unwrap();
         assert!(saved.contains("allow = [\"*\", \"admin\"]"));
+    }
+
+    /// The Connect card names the tailnet address only while it is still on
+    /// this PC; once Tailscale drops it falls back to the loopback listener.
+    #[test]
+    fn reach_falls_back_to_loopback_when_the_tailnet_address_is_gone() {
+        let mut rig = rig();
+        {
+            let mut binds = rig.pairing.binds.lock().unwrap();
+            binds.clear();
+            binds.push("100.100.1.2:9090".parse().unwrap());
+            binds.push("127.0.0.1:9090".parse().unwrap());
+        }
+        let pairing = Arc::get_mut(&mut rig.pairing).unwrap();
+        pairing.local_ips = || vec!["127.0.0.1".parse().unwrap(), "100.100.1.2".parse().unwrap()];
+        let up = rig.pairing.reach();
+        assert!(up.tailnet);
+        assert_eq!(up.endpoint, "100.100.1.2:9090".parse().unwrap());
+
+        let pairing = Arc::get_mut(&mut rig.pairing).unwrap();
+        pairing.local_ips = || vec!["127.0.0.1".parse().unwrap()];
+        *pairing.endpoint_seen.lock().unwrap() = None;
+        let down = rig.pairing.reach();
+        assert!(!down.tailnet);
+        assert_eq!(down.endpoint, "127.0.0.1:9090".parse().unwrap());
+        assert_eq!(
+            down.firewall,
+            Some(crate::firewall::TailnetInbound::NotApplicable)
+        );
+    }
+
+    /// A Connect-card code never grants admin, and asking for it does not
+    /// spend the code; the next owner `open()` lifts that.
+    #[test]
+    fn a_panel_code_refuses_admin_without_spending_itself() {
+        let rig = rig();
+        let code = rig.pairing.open_in_panel().unwrap().code;
+        let refused = rig.pairing.pair(&pair_body("boss", &code, true));
+        assert_eq!(refused.status, 403);
+        assert!(String::from_utf8_lossy(&refused.body).contains("NOT_ADMIN"));
+        assert!(rig.pairing.is_open(), "the refusal leaves the code usable");
+        let plain = json(&rig.pairing.pair(&pair_body("boss", &code, false)));
+        let dir = rig.agents.load();
+        assert!(
+            !dir.resolve(plain["psk"].as_str().unwrap(), "")
+                .unwrap()
+                .is_operator_admin()
+        );
+
+        rig.pairing.open();
+        let code = rig.pairing.code().unwrap().0;
+        let admin = json(&rig.pairing.pair(&pair_body("root", &code, true)));
+        let dir = rig.agents.load();
+        assert!(
+            dir.resolve(admin["psk"].as_str().unwrap(), "")
+                .unwrap()
+                .is_operator_admin()
+        );
+    }
+
+    /// While the Connect card shows the code the system card stays away,
+    /// even for a replacement code; once the card is left a replacement
+    /// shows again, and an owner `open()` always shows.
+    #[test]
+    fn the_system_card_stays_away_only_while_connect_shows_the_code() {
+        let rig = rig();
+        rig.card
+            .set(SystemCard::toast("Updated to 1.2", rig.clock.wall_us()));
+        rig.pairing.open_in_panel().unwrap();
+        assert!(
+            matches!(card_lines(&rig), Some((SystemCardKind::Toast, _))),
+            "an unrelated toast is left alone"
+        );
+        let guess = |rig: &Rig| {
+            for _ in 0..MAX_BAD_ATTEMPTS {
+                rig.pairing.pair(&pair_body("x", "000000", false));
+            }
+        };
+        guess(&rig);
+        assert!(
+            !matches!(card_lines(&rig), Some((SystemCardKind::Pairing, _))),
+            "the replacement code shows on the Connect card only"
+        );
+        let replacement = rig.pairing.code().unwrap().0;
+
+        rig.pairing.leave_panel();
+        guess(&rig);
+        let (kind, lines) = card_lines(&rig).expect("card after leaving Connect");
+        assert_eq!(kind, SystemCardKind::Pairing);
+        let shown = rig.pairing.code().unwrap().0;
+        assert_ne!(shown, replacement);
+        assert!(lines.iter().any(|l| l.contains(&shown)));
+
+        rig.pairing.open_in_panel();
+        assert!(
+            card_lines(&rig).is_none(),
+            "Connect takes the code off the card"
+        );
+        rig.pairing.open();
+        assert!(matches!(
+            card_lines(&rig),
+            Some((SystemCardKind::Pairing, _))
+        ));
+    }
+
+    /// Pairing from the Connect card shows no "Paired" toast over the panel,
+    /// which already says so.
+    #[test]
+    fn pairing_from_connect_shows_no_toast() {
+        let rig = rig();
+        let code = rig.pairing.open_in_panel().unwrap().code;
+        assert_eq!(rig.pairing.pair(&pair_body("a", &code, false)).status, 200);
+        assert!(card_lines(&rig).is_none());
+        rig.pairing.leave_panel();
+        rig.pairing.open();
+        let code = rig.pairing.code().unwrap().0;
+        assert_eq!(rig.pairing.pair(&pair_body("b", &code, false)).status, 200);
+        assert!(matches!(card_lines(&rig), Some((SystemCardKind::Toast, _))));
     }
 
     #[test]

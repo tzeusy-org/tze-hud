@@ -4,11 +4,12 @@
 //! gathers rows, runs the resulting [`Effect`]s and publishes the model.
 
 use tze_hud_compositor::{
-    ControlPanelGeometry, ControlPanelModel, PanelBadge, PanelBody, PanelChip, PanelControl,
-    PanelFocus, PanelHitTarget, PanelItem, PanelPart, PanelSection, PanelTone,
+    ControlPanelGeometry, ControlPanelModel, PanelBadge, PanelBody, PanelChip, PanelConnect,
+    PanelControl, PanelFocus, PanelHitTarget, PanelItem, PanelPart, PanelSection, PanelTone,
 };
 use tze_hud_scene::config::ChordRole;
 
+use super::connect::{self, ConnectPage, ConnectView};
 use super::row::{Control, Edit, Row};
 use super::search::{Haystack, score};
 
@@ -28,8 +29,8 @@ pub(crate) struct ChordOutcome {
     /// Pause (`Some(true)`) or resume (`Some(false)`) agents.
     pub pause: Option<bool>,
     pub panel: PanelChange,
-    /// Show the pairing card (the pairing chord).
-    pub pairing: bool,
+    /// Show Connect an agent (the pairing chord).
+    pub connect: bool,
 }
 
 /// The chord state machine (spec CP-1):
@@ -39,7 +40,8 @@ pub(crate) struct ChordOutcome {
 /// Closed --panel chord--> Open(running, opened_by=Panel)
 /// Open   --pause chord--> toggle pause; if opened_by=Pause and now running: close
 /// Open   --panel chord--> close, resuming agents if paused
-/// any    --pairing chord--> close (resuming) and show the pairing card
+/// Closed --pairing chord--> Open(running, opened_by=Pairing) at Connect
+/// Open   --pairing chord--> show Connect (pause unchanged)
 /// ```
 ///
 /// Closing always resumes, so "paused with the panel closed" cannot happen.
@@ -53,12 +55,12 @@ pub(crate) fn on_chord(
         (None, ChordRole::Pause) => ChordOutcome {
             pause: (!paused).then_some(true),
             panel: PanelChange::Open(ChordRole::Pause),
-            pairing: false,
+            connect: false,
         },
         (None, ChordRole::Panel) => ChordOutcome {
             pause: None,
             panel: PanelChange::Open(ChordRole::Panel),
-            pairing: false,
+            connect: false,
         },
         (Some(by), ChordRole::Pause) => {
             let now_paused = !paused;
@@ -70,22 +72,22 @@ pub(crate) fn on_chord(
                 } else {
                     PanelChange::Keep
                 },
-                pairing: false,
+                connect: false,
             }
         }
         (Some(_), ChordRole::Panel) => ChordOutcome {
             pause: resume_if_paused,
             panel: PanelChange::Close,
-            pairing: false,
+            connect: false,
         },
         (opened_by, ChordRole::Pairing) => ChordOutcome {
-            pause: opened_by.and(resume_if_paused),
+            pause: None,
             panel: if opened_by.is_some() {
-                PanelChange::Close
-            } else {
                 PanelChange::Keep
+            } else {
+                PanelChange::Open(ChordRole::Pairing)
             },
-            pairing: true,
+            connect: true,
         },
     }
 }
@@ -154,6 +156,8 @@ pub(crate) struct Open {
     pub focus_refused: bool,
     /// The query just changed: focus the best match on the next build.
     pub focus_first_result: bool,
+    /// Connect an agent is showing in place of the sections.
+    pub connect: Option<ConnectPage>,
 }
 
 impl Open {
@@ -168,6 +172,7 @@ impl Open {
             error: None,
             focus_refused: false,
             focus_first_result: false,
+            connect: None,
         }
     }
 }
@@ -188,6 +193,8 @@ pub(crate) struct ViewContext {
     pub paused: bool,
     /// The pause chord as shown on its tile (e.g. `Ctrl+Shift+F12`).
     pub pause_chord: String,
+    /// Connect an agent as it stands, while its page is open.
+    pub connect: Option<ConnectView>,
 }
 
 /// The focus order the keyboard walks, from the last build.
@@ -245,6 +252,10 @@ fn item_for(row: &Row, open: &Open, context: Option<&str>) -> PanelItem {
         }
         Control::Stepper { text } => PanelControl::Stepper(text.clone()),
         Control::Action { .. } => PanelControl::Action,
+        Control::Field { text } => PanelControl::Value {
+            text: text.clone(),
+            mono: true,
+        },
     };
     let mut item = PanelItem {
         id: row.id.clone(),
@@ -314,6 +325,14 @@ pub(crate) fn build(
     let find = |id: &str| sections.iter().flat_map(|s| &s.rows).find(|r| r.id == id);
     let mut nav = Nav::default();
 
+    let query = open.query.trim();
+    if query.is_empty()
+        && open.connect.is_some()
+        && let Some(view) = &ctx.connect
+    {
+        return build_connect(open, view);
+    }
+
     let mut tiles = Vec::new();
     for quick in QUICK_ACTIONS {
         let Some(row) = find(quick.row) else { continue };
@@ -340,7 +359,6 @@ pub(crate) fn build(
         })
         .collect();
 
-    let query = open.query.trim();
     let body = if query.is_empty() {
         let mut cards = Vec::new();
         for (i, section) in listed.iter().enumerate() {
@@ -452,6 +470,59 @@ pub(crate) fn build(
     (model, nav)
 }
 
+/// Connect an agent in place of the sections: the prompt beside its rows.
+fn build_connect(open: &mut Open, view: &ConnectView) -> (ControlPanelModel, Nav) {
+    let nav = Nav {
+        rows: view
+            .rows
+            .iter()
+            .map(|r| (r.id.clone(), r.control.clone()))
+            .collect(),
+        sections: vec![0],
+        ..Nav::default()
+    };
+    if matches!(&open.focus, PanelFocus::Row(id) if nav.row_index(id).is_none())
+        || matches!(open.focus, PanelFocus::Tile(_))
+    {
+        open.focus = PanelFocus::Row(connect::NAME.to_owned());
+    }
+    let model = ControlPanelModel {
+        query: open.query.clone(),
+        placeholder: "Search every HUD setting".into(),
+        notice: open
+            .focus_refused
+            .then(|| "Click the panel to type · chords still work".to_owned()),
+        tiles: Vec::new(),
+        chips: Vec::new(),
+        state_line: String::new(),
+        body: PanelBody::Connect(PanelConnect {
+            title: "Connect an agent".into(),
+            subtitle: "Paste this into any agent session. It pairs once, then uses the HUD.".into(),
+            block: view.prompt.clone(),
+            items: view.rows.iter().map(|r| item_for(r, open, None)).collect(),
+            status: view.status.clone(),
+            banners: view.banners.clone(),
+        }),
+        hints: ["Type the agent's name", "↑↓ move", "Enter copy"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect(),
+        hint_end: "Esc back".into(),
+        focus: open.focus.clone(),
+        hover: open.hover.clone(),
+        scroll_px: open.scroll,
+        scale: 1.0,
+    };
+    (model, nav)
+}
+
+/// Whether typing goes to Connect's agent name rather than the search.
+fn typing_name(open: &Open) -> bool {
+    open.query.is_empty()
+        && open.connect.is_some()
+        && open.focus == PanelFocus::Row(connect::NAME.to_owned())
+}
+
 // ─── Input ───────────────────────────────────────────────────────────────────
 
 /// A key the panel handles while open (the winit loop translates).
@@ -525,7 +596,7 @@ fn edit_for(control: &Control, gesture: Gesture) -> Option<Edit> {
         }
         (Control::Stepper { .. }, Gesture::Left) => Some(Edit::Step(-1)),
         (Control::Stepper { .. }, Gesture::Right) => Some(Edit::Step(1)),
-        (Control::Action { .. }, Gesture::Activate) => Some(Edit::Activate),
+        (Control::Action { .. } | Control::Field { .. }, Gesture::Activate) => Some(Edit::Activate),
         _ => None,
     }
 }
@@ -601,9 +672,19 @@ pub(crate) fn on_key(
         PanelKey::Escape => {
             if !open.query.is_empty() {
                 open.query.clear();
-                open.focus = PanelFocus::Search;
+                // On Connect, back to the name the card asks for.
+                open.focus = if open.connect.is_some() {
+                    PanelFocus::Row(connect::NAME.to_owned())
+                } else {
+                    PanelFocus::Search
+                };
                 open.scroll = 0.0;
-            } else if open.confirming.take().is_none() {
+            } else if open.confirming.take().is_some() {
+            } else if open.connect.take().is_some() {
+                // Back to the sections, at the row that opened Connect.
+                open.focus = PanelFocus::Row(connect::OPEN.to_owned());
+                open.scroll = 0.0;
+            } else {
                 return vec![Effect::Close];
             }
         }
@@ -721,6 +802,7 @@ pub(crate) fn on_key(
         }
         PanelKey::Enter | PanelKey::Space => match open.focus.clone() {
             PanelFocus::Search if key == PanelKey::Space => on_text(open, " "),
+            PanelFocus::Row(_) if key == PanelKey::Space && typing_name(open) => on_text(open, " "),
             PanelFocus::Search => {
                 if !open.query.is_empty()
                     && let Some((id, _)) = nav.rows.first()
@@ -737,7 +819,11 @@ pub(crate) fn on_key(
             PanelFocus::Row(id) => return act(open, nav, &id, Gesture::Activate),
         },
         PanelKey::Backspace => {
-            if open.query.pop().is_some() {
+            if typing_name(open) {
+                if let Some(page) = open.connect.as_mut() {
+                    page.erase();
+                }
+            } else if open.query.pop().is_some() {
                 open.scroll = 0.0;
                 open.focus_first_result = true;
             }
@@ -774,6 +860,12 @@ pub(crate) fn on_key(
 
 /// Typed text goes to the search query, wherever focus is (type-to-search).
 pub(crate) fn on_text(open: &mut Open, text: &str) {
+    if typing_name(open) {
+        if let Some(page) = open.connect.as_mut() {
+            page.type_name(text);
+        }
+        return;
+    }
     let typed: String = text.chars().filter(|c| !c.is_control()).collect();
     if typed.is_empty() || (open.query.is_empty() && typed.trim().is_empty()) {
         return;
@@ -819,6 +911,10 @@ pub(crate) fn on_click(
             if let Some(i) = nav.row_index(id) {
                 focus_row(open, nav, i, geometry);
             }
+            // Clicking a field edits it; only Enter acts on it.
+            if matches!(nav.control(id), Some(Control::Field { .. })) {
+                return Vec::new();
+            }
             act(open, nav, id, gesture_for(*part))
         }
         PanelHitTarget::Panel => Vec::new(),
@@ -842,11 +938,11 @@ mod tests {
     const PANEL: ChordRole = ChordRole::Panel;
     const PAIR: ChordRole = ChordRole::Pairing;
 
-    fn outcome(pause: Option<bool>, panel: PanelChange, pairing: bool) -> ChordOutcome {
+    fn outcome(pause: Option<bool>, panel: PanelChange, connect: bool) -> ChordOutcome {
         ChordOutcome {
             pause,
             panel,
-            pairing,
+            connect,
         }
     }
 
@@ -863,7 +959,8 @@ mod tests {
             on_chord(None, false, PANEL),
             outcome(None, Open(PANEL), false)
         );
-        assert_eq!(on_chord(None, false, PAIR), outcome(None, Keep, true));
+        // Pairing opens the panel, agents running, at Connect an agent.
+        assert_eq!(on_chord(None, false, PAIR), outcome(None, Open(PAIR), true));
         // Opened by the pause chord: pressing it again resumes and closes.
         assert_eq!(
             on_chord(Some(PAUSE), true, PAUSE),
@@ -896,10 +993,12 @@ mod tests {
             on_chord(Some(PANEL), false, PANEL),
             outcome(None, Close, false)
         );
-        // Pairing closes an open panel (resuming) and shows the card.
+        // On an open panel it shows Connect and leaves the pause alone.
+        assert_eq!(on_chord(Some(PAUSE), true, PAIR), outcome(None, Keep, true));
+        // Opened by pairing, the pause chord pauses without closing.
         assert_eq!(
-            on_chord(Some(PAUSE), true, PAIR),
-            outcome(Some(false), Close, true)
+            on_chord(Some(PAIR), false, PAUSE),
+            outcome(Some(true), Keep, false)
         );
     }
 
@@ -967,6 +1066,7 @@ mod tests {
             open,
             &sections(),
             &ViewContext {
+                connect: None,
                 paused: false,
                 pause_chord: "Ctrl+Shift+F12".into(),
             },
@@ -1154,6 +1254,100 @@ mod tests {
         assert_eq!(
             on_click(&mut open, &nav, &target, None),
             apply("agents.clear", Edit::Activate)
+        );
+    }
+
+    /// Connect an agent (CP-13) replaces the sections: typing names the agent
+    /// (as `POST /pair` takes names), Enter copies, a search still works and
+    /// returns to the card when cleared, and Esc goes back to the sections
+    /// before it closes.
+    #[test]
+    fn connect_page_takes_the_name_and_escape_goes_back() {
+        let view = ConnectView {
+            prompt: vec!["Connect to my tze_hud HUD".into()],
+            rows: vec![
+                Row::new(
+                    connect::NAME,
+                    "Agent name",
+                    Control::Field {
+                        text: String::new(),
+                    },
+                ),
+                Row::new(
+                    connect::COPY,
+                    "Copy prompt · Enter",
+                    Control::Action { confirm: None },
+                ),
+            ],
+            status: None,
+            banners: vec![],
+        };
+        let built_connect = |open: &mut Open| {
+            build(
+                open,
+                &sections(),
+                &ViewContext {
+                    connect: Some(view.clone()),
+                    paused: false,
+                    pause_chord: "Ctrl+Shift+F12".into(),
+                },
+            )
+        };
+        // As the task opens it: the name focused.
+        let mut open = Open::new(PAIR);
+        open.connect = Some(ConnectPage::default());
+        open.focus = PanelFocus::Row(connect::NAME.into());
+        let (model, nav) = built_connect(&mut open);
+        let PanelBody::Connect(card) = &model.body else {
+            panic!("connect expected")
+        };
+        assert_eq!(card.block, view.prompt);
+        assert!(model.tiles.is_empty() && model.chips.is_empty());
+        assert_eq!(open.focus, PanelFocus::Row(connect::NAME.into()));
+        assert_eq!(model.hint_end, "Esc back");
+
+        on_text(&mut open, "Claude");
+        on_key(&mut open, &nav, PanelKey::Space, None);
+        on_text(&mut open, "pc");
+        on_key(&mut open, &nav, PanelKey::Backspace, None);
+        assert_eq!(open.connect.as_ref().unwrap().name, "claude-p");
+        assert!(open.query.is_empty(), "the name is not a search");
+        assert_eq!(
+            on_key(&mut open, &nav, PanelKey::Enter, None),
+            apply(connect::NAME, Edit::Activate)
+        );
+        on_key(&mut open, &nav, PanelKey::Down, None);
+        assert_eq!(
+            on_key(&mut open, &nav, PanelKey::Enter, None),
+            apply(connect::COPY, Edit::Activate)
+        );
+
+        // Clicking the name focuses it to edit; it does not copy.
+        let name = PanelHitTarget::Row(connect::NAME.into(), PanelPart::Body);
+        assert!(on_click(&mut open, &nav, &name, None).is_empty());
+        assert_eq!(open.focus, PanelFocus::Row(connect::NAME.into()));
+        on_key(&mut open, &nav, PanelKey::Down, None);
+
+        // Typing elsewhere searches; clearing it shows the card again, with
+        // typing back on the name.
+        on_text(&mut open, "pa");
+        let (model, nav) = built_connect(&mut open);
+        assert!(matches!(model.body, PanelBody::Results { .. }));
+        assert!(on_key(&mut open, &nav, PanelKey::Escape, None).is_empty());
+        let (model, nav) = built_connect(&mut open);
+        assert!(matches!(model.body, PanelBody::Connect(_)));
+        on_text(&mut open, "x");
+        assert_eq!(open.connect.as_ref().unwrap().name, "claude-px");
+        assert!(open.query.is_empty());
+
+        assert!(on_key(&mut open, &nav, PanelKey::Escape, None).is_empty());
+        assert!(open.connect.is_none(), "Esc leaves Connect");
+        assert_eq!(open.focus, PanelFocus::Row(connect::OPEN.into()));
+        let (model, nav) = built_connect(&mut open);
+        assert!(matches!(model.body, PanelBody::Sections(_)));
+        assert_eq!(
+            on_key(&mut open, &nav, PanelKey::Escape, None),
+            vec![Effect::Close]
         );
     }
 
