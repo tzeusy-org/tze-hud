@@ -158,3 +158,45 @@
 "spacing.padding.medium"               = "10"
 "typography.notification.body.scale"   = "0.90"
 "typography.notification.title.weight" = "700"
+
+# Portal color overrides: the existing accepted portal-key exception.
+# Same-theme roles retain neutral structure and existing status meanings.
+"portal.frame.background"                  = "#1B2028"    # color.surface.container
+"portal.frame.border_color"                = "#343B47"    # color.outline.variant
+"portal.header.text_color"                 = "#E8EBF0"    # color.on_surface
+"portal.composer.background"               = "#2A313D"    # color.surface.container.highest
+"portal.composer.text_color"               = "#E8EBF0"    # color.on_surface
+"portal.composer.at_capacity_color"        = "#F2C14E"    # color.caution
+"portal.transcript.background"             = "#1B2028"    # color.surface.container
+"portal.transcript.text_color"             = "#E8EBF0"    # color.on_surface
+"portal.transcript.system_color"           = "#A9B1BE"    # color.on_surface.variant
+"portal.transcript.code_background"        = "#222833"    # color.surface.container.high
+"portal.transcript.code_text"              = "#E8EBF0"    # color.on_surface
+"portal.transcript.link_color"             = "#8AB4FF"    # color.primary
+"portal.transcript.dim_text_color"         = "#A9B1BE"    # color.on_surface.variant
+"portal.transcript.dim_background"         = "#161A20"    # color.surface.container.low
+"portal.stale_marker.color"                = "#F2C14E"    # color.caution
+"portal.disconnect_badge.color"            = "#F2C14E"    # color.caution
+"portal.unread_indicator.color"            = "#A9B1BE"    # color.on_surface.variant
+"portal.awaiting_reply.color"              = "#8AB4FF"    # color.primary
+"portal.empty_state.color"                 = "#A9B1BE"    # color.on_surface.variant
+"portal.connecting_marker.color"           = "#8AB4FF"    # color.primary
+"portal.activity_cue.color"                = "#A9B1BE"    # color.on_surface.variant
+"portal.streaming_cursor.color"            = "#A9B1BE"    # color.on_surface.variant
+"portal.delivery.inflight_color"           = "#8AB4FF"    # color.primary
+"portal.delivery.delivered_color"          = "#7BD88F"    # color.success
+"portal.delivery.failed_color"             = "#FF8A80"    # color.error
+"portal.timestamp.color"                   = "#A9B1BE"    # color.on_surface.variant
+"portal.lifecycle.active_color"            = "#7BD88F"    # color.success
+"portal.lifecycle.attached_color"          = "#8AB4FF"    # color.primary
+"portal.lifecycle.attention_color"         = "#F2C14E"    # color.caution
+"portal.lifecycle.inactive_color"          = "#A9B1BE"    # color.on_surface.variant
+"portal.unread_divider.color"              = "#5A6475"    # color.outline
+"portal.collapsed_card.background"         = "#1B2028"    # color.surface.container
+"portal.collapsed_card.text_color"         = "#E8EBF0"    # color.on_surface
+"portal.scroll_indicator.color"            = "#5A6475"    # color.outline
+"portal.composer.caret_color"              = "#E8EBF0"    # color.on_surface
+"portal.composer.placeholder_color"        = "#A9B1BE"    # color.on_surface.variant
+"portal.focus_ring.color"                  = "#8AB4FF"    # color.primary
+"portal.window.resize_grip.color"          = "#5A6475"    # color.outline
+"portal.window.resize_grip.hover_color"    = "#A9B1BE"    # color.on_surface.variant

@@ -410,6 +410,16 @@ malformed colors, and nonstring values remain errors. Accepting these existing
 color overrides adds no canonical defaults and leaves built-in palettes and
 explicit config precedence unchanged.
 
+All three built-in themes also supply portal colors from their own semantic
+roles: frame and transcript use `color.surface.container`, composer uses
+`color.surface.container.highest`, code uses the high container, and dimmed
+content uses the low container. Text uses the corresponding on-surface roles;
+status cues keep the theme's primary, success, caution and error meanings.
+Composer selection keeps the portal default, since no theme role is a
+selection highlight. Portal sizes,
+fonts, numeric defaults and behavior are unchanged. Explicit `[design_tokens]`
+color overrides still take precedence.
+
 **Semantic families** (Tonal Glass values; sizes are logical px):
 
 | Family | Keys |
