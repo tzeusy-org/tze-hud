@@ -1034,6 +1034,33 @@ impl PortalHub {
         }
     }
 
+    /// The owner cleared the agent: reclaim every live portal it holds, as a
+    /// viewer dismiss would. Returns how many.
+    pub fn reclaim_agent(&mut self, agent: &str) -> usize {
+        let mut reclaimed = 0;
+        for (key, portal) in &mut self.portals {
+            if key.agent == agent && portal.live() {
+                *portal = Portal::tombstone();
+                reclaimed += 1;
+            }
+        }
+        reclaimed
+    }
+
+    /// Live portals per agent.
+    pub fn live_counts(&self) -> std::collections::BTreeMap<String, usize> {
+        let mut counts = std::collections::BTreeMap::new();
+        for key in self
+            .portals
+            .iter()
+            .filter(|(_, p)| p.live())
+            .map(|(k, _)| k)
+        {
+            *counts.entry(key.agent.clone()).or_insert(0) += 1;
+        }
+        counts
+    }
+
     /// Expire input, degrade idle portals, and reclaim long-degraded ones.
     pub fn sweep(&mut self, now_us: u64) -> Vec<Transition> {
         self.active_input_polls.retain(|_, polls| {
@@ -1563,6 +1590,24 @@ mod tests {
         assert!(again.reattached);
         assert_eq!(again.pending_input, 0);
         assert_eq!(texts(&hub, &k), ["after reclaim"]);
+    }
+
+    /// The owner's Clear reclaims all of one agent's portals, like a viewer
+    /// dismiss, and nobody else's (hud-vniri.6).
+    #[test]
+    fn reclaim_agent_reclaims_only_that_agents_portals() {
+        let mut hub = PortalHub::default();
+        for (agent, id) in [("a", "p"), ("a", "q"), ("b", "p")] {
+            hub.publish(&key(agent, id), text("x"), 0).unwrap();
+        }
+        assert_eq!(hub.live_counts(), [("a".into(), 2), ("b".into(), 1)].into());
+        assert_eq!(hub.reclaim_agent("a"), 2);
+        assert_eq!(hub.live_counts(), [("b".into(), 1)].into());
+        assert_eq!(hub.reclaim_agent("a"), 0);
+        let again = hub
+            .publish_with_hold(&key("a", "p"), text("y"), None, 1)
+            .unwrap();
+        assert!(again.reattached, "the next publish reattaches");
     }
 
     #[test]

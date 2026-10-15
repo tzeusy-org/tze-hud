@@ -295,6 +295,11 @@ impl HudSession for HudSessionImpl {
             SESSION_EVENT_CHANNEL_CAPACITY,
         );
 
+        // The owner's unpair ends the session from outside (see below).
+        let (closer, close) = crate::session::SessionCloser::pair();
+        let (closing_tx, closing_state) = (tx.clone(), Arc::clone(&state));
+        let live_agents = self.agents.clone();
+
         // Spawn the session handler task
         #[cfg(test)]
         let handler_state = Arc::clone(&state);
@@ -328,6 +333,8 @@ impl HudSession for HudSessionImpl {
             let handshake_ctx = HandshakeCtx {
                 state: &state,
                 agents: &agents,
+                live_agents: &live_agents,
+                closer: &closer,
                 resource_budget: &resource_budget,
                 budget_enforcer: budget_enforcer.as_ref(),
                 peer_ip,
@@ -357,11 +364,11 @@ impl HudSession for HudSessionImpl {
                 // Safe mode reaches this stream through the registry: it needs
                 // the outbound sender to send `SessionSuspended`/`SessionResumed`.
                 // `remove_session` at cleanup drops it.
-                state
-                    .lock()
-                    .await
-                    .sessions
-                    .register_server_message_tx(&session.session_id, tx.clone());
+                {
+                    let mut st = state.lock().await;
+                    st.sessions
+                        .register_server_message_tx(&session.session_id, tx.clone());
+                }
 
                 // Register the durable input lane only after the session has an
                 // authenticated namespace. This prevents unrelated or incomplete
@@ -642,6 +649,25 @@ impl HudSession for HudSessionImpl {
                 .await
                 .sessions
                 .finish_cleanup(&session.scene_session_id);
+        };
+        // Unpair drops the handler wherever it waits, even on a send to a hung
+        // agent; its registry guard unregisters it, and the stream ends. The
+        // close arm is polled first, so a closed handler makes no more progress.
+        let session_handler = async move {
+            tokio::select! {
+                biased;
+                () = close.closed() => {
+                    tracing::info!("session closed: the owner unpaired this agent");
+                    // The handler may have stopped between registering and
+                    // arming its registry guard; unregister it here either way.
+                    closing_state.lock().await.sessions.remove_closed(&close);
+                    let _ = closing_tx.try_send(Err(Status::unauthenticated(
+                        "this agent was unpaired; pair again to reconnect",
+                    )));
+                }
+                () = session_handler => {}
+            }
+            // Dropping `close` here tells the unpairing owner this task ended.
         };
         #[cfg(not(test))]
         tokio::spawn(session_handler);

@@ -258,6 +258,17 @@ impl HeadlessEventLoopHarness {
         cfg: super::WindowedConfig,
         clock: Arc<dyn Clock>,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::with_network_and_agents_file(cfg, clock, None).await
+    }
+
+    /// [`Self::with_network`] whose control panel changes agents in the
+    /// `agents.toml` at `agents_path` (which should describe `cfg.agents`).
+    /// Without one, Unpair and allow-list edits fail.
+    pub async fn with_network_and_agents_file(
+        cfg: super::WindowedConfig,
+        clock: Arc<dyn Clock>,
+        agents_path: Option<std::path::PathBuf>,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         let runtime_context = super::build_runtime_context(&cfg);
         let mut state = WindowedRuntimeState::new_headless();
 
@@ -348,8 +359,23 @@ impl HeadlessEventLoopHarness {
         );
 
         let render_wake = state.wake.render_notifier();
+        let panel_scene = Arc::clone(&state.shared_state.lock().await.scene);
+        // Pairing, as production builds it, when there is a store to pair into.
+        let has_store = agents_path.is_some();
+        let store = Arc::new(crate::agent_store::AgentStore::open(
+            agents_path,
+            Arc::clone(&cfg.agents),
+        ));
+        let pairing = has_store.then(|| {
+            Arc::new(crate::pairing::Pairing::system(
+                Arc::clone(&store),
+                state.system_card.clone(),
+                grpc_addr.port(),
+            ))
+        });
+        state.pairing = pairing.clone();
         let deps = crate::shell::control_panel::ControlPanelDeps {
-            scene: Arc::clone(&state.shared_state.lock().await.scene),
+            scene: Arc::clone(&panel_scene),
             pause: crate::shell::control_panel::PauseControl::new(
                 Arc::clone(&state.shared_state),
                 Arc::clone(&state.chrome_state),
@@ -357,7 +383,17 @@ impl HeadlessEventLoopHarness {
                 render_wake.clone(),
             ),
             chords: runtime_context.chords,
-            pairing: None,
+            pairing: pairing.clone(),
+            agents: Some(crate::shell::control_panel::AgentControl {
+                store,
+                shared: Arc::clone(&state.shared_state),
+                scene: panel_scene,
+                portals: Some(portals.clone()),
+                lease_expirations: state.lease_expirations.clone(),
+                pairing,
+                render_wake: render_wake.clone(),
+                main_wake: state.wake.main_work_notifier(),
+            }),
             render_wake,
             main_wake: state.wake.main_work_notifier(),
         };
@@ -440,7 +476,71 @@ impl HeadlessEventLoopHarness {
         );
     }
 
+    fn control_panel(&self) -> &crate::shell::control_panel::ControlPanelHandle {
+        self.app
+            .state
+            .control_panel
+            .as_ref()
+            .expect("harness was built without with_network")
+    }
+
+    /// The open control panel's row `row` as last published (in a section
+    /// card, or a search result), or `None`.
+    pub fn control_panel_row(&self, row: &str) -> Option<tze_hud_compositor::PanelItem> {
+        let model = self.control_panel().current_model()?;
+        match model.body {
+            tze_hud_compositor::PanelBody::Sections(sections) => sections
+                .into_iter()
+                .flat_map(|s| s.items)
+                .find(|item| item.id == row),
+            tze_hud_compositor::PanelBody::Results { items, .. } => {
+                items.into_iter().find(|item| item.id == row)
+            }
+            tze_hud_compositor::PanelBody::Empty(_) => None,
+        }
+    }
+
+    /// Where keyboard focus is in the open control panel.
+    pub fn control_panel_focus(&self) -> Option<tze_hud_compositor::PanelFocus> {
+        self.control_panel().current_model().map(|m| m.focus)
+    }
+
+    /// Click the body of row `row` in the open control panel (press and
+    /// release on it), as the winit loop reports a click.
+    pub fn control_panel_click(&self, row: &str) {
+        assert!(
+            self.control_panel()
+                .send(crate::shell::control_panel::PanelEvent::Click(
+                    tze_hud_compositor::PanelHitTarget::Row(
+                        row.to_owned(),
+                        tze_hud_compositor::PanelPart::Body,
+                    ),
+                )),
+            "control panel task is running"
+        );
+    }
+
+    /// Open gRPC sessions for `agent`.
+    pub async fn agent_sessions(&self, agent: &str) -> usize {
+        self.app
+            .state
+            .shared_state
+            .lock()
+            .await
+            .sessions
+            .connected(agent)
+    }
+
     /// Whether the control panel is open.
+    /// Whether a pairing code is open (booted with an agents file).
+    pub fn pairing_open(&self) -> bool {
+        self.app
+            .state
+            .pairing
+            .as_ref()
+            .is_some_and(|pairing| pairing.is_open())
+    }
+
     pub fn control_panel_open(&self) -> bool {
         self.app
             .state

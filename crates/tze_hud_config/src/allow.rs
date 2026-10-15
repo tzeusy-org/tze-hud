@@ -81,6 +81,74 @@ pub fn allow_to_permissions(allow: &[String]) -> Vec<String> {
     out
 }
 
+/// A surface class granted or withdrawn as a whole (the control panel's
+/// allow-list toggles).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Grant {
+    Zones,
+    Widgets,
+    Portal,
+    Tiles,
+    Admin,
+}
+
+impl Grant {
+    pub const ALL: [Grant; 5] = [
+        Grant::Zones,
+        Grant::Widgets,
+        Grant::Portal,
+        Grant::Tiles,
+        Grant::Admin,
+    ];
+
+    /// The allow entry that grants the whole class.
+    pub fn entry(self) -> &'static str {
+        match self {
+            Grant::Zones => "zone:*",
+            Grant::Widgets => "widget:*",
+            Grant::Portal => "portal",
+            Grant::Tiles => "tiles",
+            Grant::Admin => "admin",
+        }
+    }
+
+    /// Whether `allow` grants the whole class (`*` covers all but admin).
+    pub fn granted(self, allow: &[String]) -> bool {
+        allow
+            .iter()
+            .any(|e| e == self.entry() || (e == "*" && self != Grant::Admin))
+    }
+}
+
+/// `allow` with `grant` on or off. Withdrawing a class that `*` covered
+/// rewrites `*` as the classes that remain. Entries naming one zone or widget
+/// are kept either way.
+pub fn with_grant(allow: &[String], grant: Grant, on: bool) -> Vec<String> {
+    if grant.granted(allow) == on {
+        return allow.to_vec();
+    }
+    let mut out: Vec<String> = Vec::with_capacity(allow.len() + 3);
+    for entry in allow {
+        if entry == "*" && !on {
+            // Withdrawing a class `*` covered.
+            out.extend(
+                Grant::ALL
+                    .into_iter()
+                    .filter(|g| *g != grant && *g != Grant::Admin)
+                    .map(|g| g.entry().to_owned()),
+            );
+        } else if entry != grant.entry() {
+            out.push(entry.clone());
+        }
+    }
+    if on {
+        out.push(grant.entry().to_owned());
+    }
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|e| seen.insert(e.clone()));
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,5 +189,43 @@ mod tests {
         // `admin` is its own permission, never implied by `*`.
         let admin = allow_to_permissions(&["*".into(), "admin".into()]);
         assert_eq!(admin, vec!["*".to_string(), "operator_admin".to_string()]);
+    }
+
+    /// Withdrawing a class `*` covered spells out the rest; granting adds the
+    /// class entry; single-surface entries survive both (hud-vniri.6).
+    #[test]
+    fn grants_toggle_whole_classes_and_expand_star() {
+        let v = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let star = v(&["*", "admin"]);
+        assert!(Grant::Zones.granted(&star) && Grant::Admin.granted(&star));
+        assert!(!Grant::Admin.granted(&v(&["*"])), "* never grants admin");
+
+        let no_zones = with_grant(&star, Grant::Zones, false);
+        assert_eq!(no_zones, v(&["widget:*", "portal", "tiles", "admin"]));
+        assert!(!Grant::Zones.granted(&no_zones));
+        assert!(Grant::Tiles.granted(&no_zones));
+        assert_eq!(
+            with_grant(&no_zones, Grant::Zones, true),
+            v(&["widget:*", "portal", "tiles", "admin", "zone:*"])
+        );
+
+        let narrow = v(&["zone:subtitle", "tiles"]);
+        assert_eq!(
+            with_grant(&narrow, Grant::Tiles, false),
+            v(&["zone:subtitle"])
+        );
+        assert_eq!(
+            with_grant(&narrow, Grant::Zones, true),
+            v(&["zone:subtitle", "tiles", "zone:*"])
+        );
+        assert_eq!(with_grant(&narrow, Grant::Portal, false), narrow, "no-op");
+        assert_eq!(
+            with_grant(&v(&["*"]), Grant::Admin, true),
+            star,
+            "granting admin keeps `*`"
+        );
+        for g in Grant::ALL {
+            assert!(validate_allow_entry(g.entry()).is_ok());
+        }
     }
 }

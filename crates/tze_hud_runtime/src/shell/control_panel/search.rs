@@ -17,7 +17,10 @@ impl<'a> Haystack<'a> {
         let value = match &row.control {
             Control::ReadOnly { text, .. } | Control::Stepper { text } => Some(text.as_str()),
             Control::Choice { options, selected } => options.get(*selected).map(String::as_str),
-            Control::Toggle(_) | Control::Action { .. } => None,
+            Control::Toggle(_)
+            | Control::Grant { .. }
+            | Control::Disclosure { .. }
+            | Control::Action { .. } => None,
         };
         Self {
             label: &row.label,

@@ -104,21 +104,99 @@ struct Reply {
 struct Poc {
     hud: HeadlessEventLoopHarness,
     clock: TestClock,
+    /// The scratch `agents.toml` the control panel edits, if any.
+    agents_file: Option<(tempfile::TempDir, std::path::PathBuf)>,
+}
+
+/// `runtime_config`'s agents as an `agents.toml`.
+fn agents_file() -> tze_hud_config::AgentsFile {
+    tze_hud_config::agents_file::AgentsFile::default()
+        .with_agent("claude", CLAUDE_PSK, &["*"])
+        .with_agent(
+            "resident",
+            RESIDENT_PSK,
+            &["tiles", "zone:notification-area"],
+        )
 }
 
 impl Poc {
     async fn boot() -> Self {
+        Self::boot_with(None).await
+    }
+
+    /// Boot with the agents also in a scratch `agents.toml`, so the control
+    /// panel can unpair them and edit their allow lists.
+    async fn boot_with_agents_file() -> Self {
+        let dir = tempfile::tempdir().expect("scratch dir");
+        let path = dir.path().join("agents.toml");
+        tze_hud_config::agents_file::save_atomic(&path, &agents_file()).expect("agents.toml");
+        Self::boot_with(Some((dir, path))).await
+    }
+
+    async fn boot_with(agents_file: Option<(tempfile::TempDir, std::path::PathBuf)>) -> Self {
         let start_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .expect("clock after epoch")
             .as_millis() as u64;
         let clock = TestClock::new(start_ms);
-        let hud = HeadlessEventLoopHarness::with_network(runtime_config(), Arc::new(clock.clone()))
-            .await
-            .expect("boot the runtime from production.toml");
-        let mut poc = Poc { hud, clock };
+        let hud = HeadlessEventLoopHarness::with_network_and_agents_file(
+            runtime_config(),
+            Arc::new(clock.clone()),
+            agents_file.as_ref().map(|(_, path)| path.clone()),
+        )
+        .await
+        .expect("boot the runtime from production.toml");
+        let mut poc = Poc {
+            hud,
+            clock,
+            agents_file,
+        };
         poc.settle().await;
         poc
+    }
+
+    fn paired(&self) -> Vec<String> {
+        let (_, path) = self
+            .agents_file
+            .as_ref()
+            .expect("booted with an agents file");
+        tze_hud_config::agents_file::load(path)
+            .expect("agents.toml")
+            .agents
+            .into_keys()
+            .collect()
+    }
+
+    /// Open the panel (agents keep running) if it is closed.
+    async fn open_panel(&mut self) {
+        if !self.hud.control_panel_open() {
+            self.hud
+                .press_chord(tze_hud_scene::config::ChordRole::Panel);
+            self.wait_for("the panel opens", |hud| hud.control_panel_open())
+                .await;
+        }
+    }
+
+    /// Click panel row `row` once it is listed, then let the panel apply it.
+    async fn click(&mut self, row: &str) {
+        self.wait_for(&format!("row {row}"), |hud| {
+            hud.control_panel_row(row).is_some()
+        })
+        .await;
+        self.hud.control_panel_click(row);
+    }
+
+    /// Click a confirmed action or grant twice: the first click asks, the
+    /// second does it.
+    async fn click_confirmed(&mut self, row: &str, question: &str) {
+        self.click(row).await;
+        self.wait_for(&format!("{row} asks"), |hud| {
+            hud.control_panel_row(row)
+                .and_then(|item| item.detail)
+                .is_some_and(|detail| detail.contains(question))
+        })
+        .await;
+        self.hud.control_panel_click(row);
     }
 
     /// Call an MCP tool over loopback HTTP while the event loop keeps turning,
@@ -1165,6 +1243,198 @@ async fn poc_override_exit_safe_mode_with_agent_hung_during_it() {
         .await;
     assert_eq!(poc.hud.suspended_lease_count(), 0, "the lease resumes");
     flood.abort();
+}
+
+/// CP-8 with a hung agent: the owner clears, then unpairs, a resident agent
+/// that has stopped reading, from the control panel. Neither waits on it: its
+/// tile goes at once, its session ends, its key stops working, and the other
+/// agent's content and key are untouched.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn poc_override_clear_and_unpair_with_hung_grpc_agent() {
+    let mut poc = Poc::boot_with_agents_file().await;
+    poc.call(
+        "hud_publish",
+        json!({"surface": SUBTITLE, "content": "bystander"}),
+    )
+    .await;
+    let hung = HungAgent::connect(poc.hud.grpc_addr()).await;
+    assert_eq!(poc.hud.tile_count(), 1);
+    let flood = hung.keep_sending(|| {
+        ClientPayload::Clear(wire::Clear {
+            surface: format!("zone:{}", "z".repeat(2_000)),
+        })
+    });
+    poc.wait_until_hung("resident").await;
+
+    poc.open_panel().await;
+    poc.click("agents.manage:resident").await;
+    poc.click_confirmed("agents.clear:resident", "Clear resident?")
+        .await;
+    poc.wait_for("the hung agent's tile goes", |hud| hud.tile_count() == 0)
+        .await;
+    assert_eq!(poc.shown(SUBTITLE), 1, "the other agent's content stays");
+
+    poc.click_confirmed("agents.unpair:resident", "Unpair resident?")
+        .await;
+    poc.wait_for("resident leaves the roster", |hud| {
+        hud.control_panel_row("agents.manage:resident").is_none()
+    })
+    .await;
+    assert_eq!(
+        poc.hud.agent_sessions("resident").await,
+        0,
+        "its session ended"
+    );
+    assert_eq!(poc.paired(), ["claude"]);
+    let refused = Resident::connect(poc.hud.grpc_addr(), "resident", RESIDENT_PSK).await;
+    assert_eq!(
+        refused.err().as_deref(),
+        Some("AUTH_FAILED"),
+        "its key stops working"
+    );
+    poc.call(
+        "hud_publish",
+        json!({"surface": SUBTITLE, "content": "still here"}),
+    )
+    .await;
+    flood.abort();
+
+    // Unpairing the last agent reopens pairing, so the HUD is never left
+    // with no way in.
+    assert!(!poc.hud.pairing_open());
+    poc.click("agents.manage:claude").await;
+    poc.click_confirmed("agents.unpair:claude", "Unpair claude?")
+        .await;
+    poc.wait_for("pairing reopens", |hud| hud.pairing_open())
+        .await;
+    assert!(poc.paired().is_empty());
+}
+
+/// CP-8 with responsive agents: Clear takes an MCP agent's portal and zone
+/// content and the next publish reattaches; a connected gRPC agent is told
+/// (`Reclaimed{OVERRIDE}`). Withdrawing a grant applies at once; adding one
+/// asks first; the agent's next request honours both.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn poc_panel_clear_reattaches_and_grants_apply_to_the_next_request() {
+    let mut poc = Poc::boot_with_agents_file().await;
+    poc.call(
+        "hud_publish",
+        json!({"surface": PORTAL, "content": "Working."}),
+    )
+    .await;
+    poc.call(
+        "hud_publish",
+        json!({"surface": SUBTITLE, "content": "hello"}),
+    )
+    .await;
+    let mut agent = poc.resident().await;
+    let claimed = agent
+        .claim(wire::TileAnchor::TopRight, wire::TileSize::Small, "working")
+        .await;
+    assert_eq!(poc.hud.tile_count(), 2);
+
+    poc.open_panel().await;
+    poc.click("agents.manage:claude").await;
+    poc.click_confirmed("agents.clear:claude", "Clear claude?")
+        .await;
+    poc.wait_for("claude's portal goes", |hud| hud.tile_count() == 1)
+        .await;
+    assert_eq!(poc.shown(SUBTITLE), 0);
+    let again = poc
+        .call(
+            "hud_publish",
+            json!({"surface": PORTAL, "content": "Back."}),
+        )
+        .await;
+    assert_eq!(again.body["reattached"], json!(true));
+
+    poc.click("agents.manage:resident").await;
+    poc.click_confirmed("agents.clear:resident", "Clear resident?")
+        .await;
+    match next_message(&mut agent.stream).await.payload {
+        Some(ServerPayload::Reclaimed(reclaimed)) => {
+            assert_eq!(reclaimed.why, wire::ReclaimReason::Override as i32);
+            assert_eq!(reclaimed.lease_id, claimed.lease);
+        }
+        other => panic!("expected Reclaimed, got {other:?}"),
+    }
+
+    let zones = "agents.grant.zones:claude";
+    let toggle = |on: bool| {
+        move |hud: &HeadlessEventLoopHarness| {
+            hud.control_panel_row(zones)
+                .is_some_and(|item| item.control == tze_hud_compositor::PanelControl::Toggle(on))
+        }
+    };
+    let subtitle = json!({"surface": SUBTITLE, "content": "hi"});
+    poc.click("agents.manage:claude").await;
+    poc.click(zones).await;
+    poc.wait_for("zones withdrawn at once", toggle(false)).await;
+    assert_eq!(
+        poc.call_err("hud_publish", subtitle.clone()).await,
+        "NOT_ALLOWED"
+    );
+
+    poc.click_confirmed(zones, "Let claude use zones?").await;
+    poc.wait_for("zones granted after the confirm", toggle(true))
+        .await;
+    poc.call("hud_publish", subtitle).await;
+}
+
+/// CP-8/CP-3: the roster follows agents as they connect, while the panel is
+/// open, without moving keyboard focus.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn poc_panel_roster_updates_live_without_moving_focus() {
+    let mut poc = Poc::boot_with_agents_file().await;
+    poc.open_panel().await;
+    poc.click("agents.manage:claude").await;
+    let row = "agents.manage:resident";
+    let detail = move |hud: &HeadlessEventLoopHarness| {
+        hud.control_panel_row(row).and_then(|item| item.detail)
+    };
+    poc.wait_for("resident listed idle", move |hud| {
+        detail(hud).as_deref() == Some("Idle · holds nothing")
+    })
+    .await;
+    let focus = Some(tze_hud_compositor::PanelFocus::Row(
+        "agents.manage:claude".into(),
+    ));
+    let focused = focus.clone();
+    poc.wait_for("the click focuses claude's row", move |hud| {
+        hud.control_panel_focus() == focused
+    })
+    .await;
+
+    let mut agent = poc.resident().await;
+    agent
+        .claim(wire::TileAnchor::TopRight, wire::TileSize::Small, "working")
+        .await;
+    poc.wait_for("resident shows as connected", move |hud| {
+        detail(hud).as_deref() == Some("Connected · 1 tile")
+    })
+    .await;
+    assert_eq!(poc.hud.control_panel_focus(), focus, "focus did not move");
+
+    // A hand edit to agents.toml adds a row above the focused one, then
+    // takes it away; the focus stays on claude's row throughout.
+    let path = poc.agents_file.as_ref().expect("agents file").1.clone();
+    let hand_edit = |change| tze_hud_config::agents_file::edit(&path, &change).expect("edit");
+    hand_edit(tze_hud_config::AgentChange::Pair {
+        agent: "aardvark".into(),
+        record: tze_hud_config::AgentRecord {
+            psk_sha256: tze_hud_config::agents_file::hash_psk_hex("aardvark-psk"),
+            allow: vec!["tiles".into()],
+            paired_at: None,
+        },
+    });
+    let listed =
+        |hud: &HeadlessEventLoopHarness| hud.control_panel_row("agents.manage:aardvark").is_some();
+    poc.wait_for("a hand-paired agent appears", listed).await;
+    assert_eq!(poc.hud.control_panel_focus(), focus, "focus did not move");
+    hand_edit(tze_hud_config::AgentChange::Unpair("aardvark".into()));
+    poc.wait_for("a hand-unpaired agent leaves", move |hud| !listed(hud))
+        .await;
+    assert_eq!(poc.hud.control_panel_focus(), focus, "focus did not move");
 }
 
 /// A responsive agent is told what the human did (docs/api.md): safe mode

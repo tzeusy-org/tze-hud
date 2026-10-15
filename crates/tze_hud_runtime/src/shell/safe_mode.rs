@@ -421,7 +421,9 @@ mod tests {
         let (tx, mut rx) = mpsc::channel(8);
         {
             let mut st = fx.shared.lock().await;
-            let session = st.sessions.register("agent.notify_test", &[]);
+            let session = st
+                .sessions
+                .register("agent.notify_test", &[], Default::default());
             assert!(
                 st.sessions
                     .register_server_message_tx(&session.session_id, tx)

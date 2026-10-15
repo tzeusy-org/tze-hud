@@ -36,6 +36,7 @@
 //! library and `cfg(test)` is set by the compiler. Integration test binaries
 //! (in `tests/` directories) require `features = ["dev-mode"]` explicitly.
 //!
+pub(crate) mod agent_store;
 pub(crate) mod channels;
 pub(crate) mod degradation;
 pub mod diag;

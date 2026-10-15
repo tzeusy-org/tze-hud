@@ -442,7 +442,7 @@ impl SceneGraph {
     /// and widget publications, and record the terminal state in place. Does NOT
     /// bump `self.version` — the caller batches that so a multi-lease sweep bumps
     /// once. Shared by the whole-scene sweep and scoped expiry fixture.
-    fn reap_lease(&mut self, id: SceneId, terminal_state: LeaseState) -> LeaseExpiry {
+    pub(crate) fn reap_lease(&mut self, id: SceneId, terminal_state: LeaseState) -> LeaseExpiry {
         // Collect the old state before mutating so terminal delivery can
         // report the actual transition.
         let previous_state = self

@@ -121,6 +121,28 @@ Windows held-press/release acceptance remains separate.
 - `tze_hud_compositor` [`test_chrome_always_above_max_zorder_tile`](../crates/tze_hud_compositor/src/renderer/tests/surface.rs),
   [`windowed_frame_draws_chrome_overlay_in_safe_mode`](../crates/tze_hud_compositor/src/renderer/safe_mode_overlay.rs)
 
+The control panel's per-agent Clear and Unpair are the same override at agent
+scope: Clear revokes every live lease the agent holds (in any state) with its
+tiles, removes all of its zone and widget publications under any lease or
+none, drops its scheduled content and reclaims its portals, then forwards
+`Reclaimed{OVERRIDE}`; nothing waits on the agent, and its next publish is
+served (portals reattach). Unpair first removes its PSK hash from
+`agents.toml` (so no new request authenticates, and a gRPC handshake that
+authenticated against the old directory is refused when it registers), then
+ends its gRPC sessions by dropping their handlers wherever they wait, waits
+for those tasks to end, then clears.
+
+- `tze_hud_scene` [`reclaim_agent_clears_everything_it_holds_and_nothing_else`](../crates/tze_hud_scene/src/graph/agents.rs);
+  `tze_hud_projection` [`reclaim_agent_reclaims_only_that_agents_portals`](../crates/tze_hud_projection/src/hub.rs)
+- `integration` [`poc_override_clear_and_unpair_with_hung_grpc_agent`](../tests/integration/poc_acceptance.rs),
+  [`poc_panel_clear_reattaches_and_grants_apply_to_the_next_request`](../tests/integration/poc_acceptance.rs),
+  [`poc_panel_roster_updates_live_without_moving_focus`](../tests/integration/poc_acceptance.rs);
+  `tze_hud_protocol` [`test_handshake_unpaired_mid_flight_is_refused_at_registration`](../crates/tze_hud_protocol/src/session_server/tests/session_handshake.rs)
+- `agents.toml` writers (pairing and the panel) serialize, re-read and keep
+  comments and hand edits: `tze_hud_runtime` [`racing_writers_lose_nothing_and_keep_comments`](../crates/tze_hud_runtime/src/agent_store.rs),
+  [`hand_edits_survive_panel_changes_and_reach_the_live_directory`](../crates/tze_hud_runtime/src/agent_store.rs);
+  `tze_hud_config` [`edits_keep_comments_and_other_agents`](../crates/tze_hud_config/src/agents_file.rs)
+
 ## 4. Disconnect is not release
 
 A disconnected agent's leases become orphaned (badge shown, content kept) for
@@ -128,7 +150,8 @@ a grace period. Reconnecting within the grace period with the resume token
 restores the same surfaces and their budget usage; when the grace period
 ends, the runtime reclaims everything with no agent help. Reclaiming a lease
 clears only the zone and widget publications made under that lease, never the
-rest of the agent's namespace. Before a gRPC session's first successful tile
+rest of the agent's namespace; only the owner's agent-wide Clear (§3) takes
+the whole namespace. Before a gRPC session's first successful tile
 claim, zone and widget publications (including scheduled zone content) carry
 that session's transient origin. A complete successful claim adopts only its
 still-unleased publications into the granted lease; failed claims change no

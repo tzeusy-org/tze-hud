@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use tze_hud_scene::config::{AgentDirectory, ConfigError, ConfigErrorCode, PskDigest, hash_psk};
 
-use crate::allow::{allow_to_permissions, validate_allow_entry};
-use crate::config_write::{FileMode, write_atomic};
+use crate::allow::{Grant, allow_to_permissions, validate_allow_entry, with_grant};
+use crate::config_write::{FileMode, keep_line_endings, write_atomic};
 
 /// File name of the agent store.
 pub const AGENTS_FILE_NAME: &str = "agents.toml";
@@ -52,6 +52,8 @@ pub enum AgentsFileError {
     Io(std::io::Error),
     Parse(String),
     Invalid(Vec<ConfigError>),
+    /// The change names an agent the file does not have.
+    NoSuchAgent(String),
 }
 
 impl std::fmt::Display for AgentsFileError {
@@ -66,6 +68,7 @@ impl std::fmt::Display for AgentsFileError {
                 }
                 Ok(())
             }
+            Self::NoSuchAgent(agent) => write!(f, "{agent} is not paired"),
         }
     }
 }
@@ -199,6 +202,140 @@ pub fn save_atomic(path: &Path, file: &AgentsFile) -> std::io::Result<()> {
     })
 }
 
+/// One change to `agents.toml`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AgentChange {
+    /// Pair an agent, or re-pair one (a new hash replaces the old key).
+    Pair { agent: String, record: AgentRecord },
+    /// Forget an agent: its PSK stops authenticating. Forgetting an agent the
+    /// file does not have changes nothing.
+    Unpair(String),
+    /// Grant or withdraw one surface class in an agent's allow list, as it
+    /// stands in the file (see [`with_grant`]).
+    Grant {
+        agent: String,
+        grant: Grant,
+        on: bool,
+    },
+}
+
+/// The store either side of one [`edit`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Edited {
+    pub before: AgentsFile,
+    pub after: AgentsFile,
+}
+
+/// Apply `change` to the `agents.toml` at `path` (a missing file is an empty
+/// store) and return the store before and as written.
+///
+/// The file is re-read first, so hand edits made since startup are kept, and
+/// it is edited in place with `toml_edit`: comments, key order and other
+/// agents' tables survive. The result is validated before anything is
+/// written, then replaced atomically (owner-only, like [`save_atomic`]).
+/// Callers that write concurrently must serialize their calls; this function
+/// holds no lock of its own.
+pub fn edit(path: &Path, change: &AgentChange) -> Result<Edited, AgentsFileError> {
+    let src = match std::fs::read_to_string(path) {
+        Ok(src) => src,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => return Err(AgentsFileError::Io(e)),
+    };
+    let before = AgentsFile::parse(&src)?;
+    let out = apply_change(&src, change)?;
+    let after = AgentsFile::parse(&out)?;
+    after.directory()?;
+    if out != src {
+        if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+            std::fs::create_dir_all(dir).map_err(AgentsFileError::Io)?;
+        }
+        write_atomic(path, out.as_bytes(), FileMode::Private, |from, to| {
+            std::fs::rename(from, to)
+        })
+        .map_err(AgentsFileError::Io)?;
+    }
+    Ok(Edited { before, after })
+}
+
+fn string_array(items: &[String]) -> toml_edit::Value {
+    toml_edit::Value::Array(items.iter().map(String::as_str).collect())
+}
+
+/// Set `key` in `table`, keeping the decoration (comments, spacing) of an
+/// existing value.
+fn set_key(table: &mut toml_edit::Table, key: &str, value: toml_edit::Value) {
+    match table.get_mut(key).and_then(toml_edit::Item::as_value_mut) {
+        Some(existing) => {
+            let decor = existing.decor().clone();
+            *existing = value;
+            *existing.decor_mut() = decor;
+        }
+        None => {
+            table.insert(key, toml_edit::Item::Value(value));
+        }
+    }
+}
+
+/// Apply `change` to the TOML text `src`.
+fn apply_change(src: &str, change: &AgentChange) -> Result<String, AgentsFileError> {
+    use toml_edit::{DocumentMut, Item, Table};
+    let mut doc: DocumentMut = src
+        .parse()
+        .map_err(|e: toml_edit::TomlError| AgentsFileError::Parse(e.to_string()))?;
+    let not_a_table = || AgentsFileError::Parse("[agents] is not a table".to_owned());
+    let agents = doc
+        .entry("agents")
+        .or_insert_with(|| {
+            let mut t = Table::new();
+            t.set_implicit(true);
+            Item::Table(t)
+        })
+        .as_table_mut()
+        .ok_or_else(not_a_table)?;
+    let missing = |agent: &str| AgentsFileError::NoSuchAgent(agent.to_owned());
+    match change {
+        AgentChange::Pair { agent, record } => {
+            let table = agents
+                .entry(agent)
+                .or_insert_with(|| Item::Table(Table::new()))
+                .as_table_mut()
+                .ok_or_else(not_a_table)?;
+            set_key(table, "psk_sha256", record.psk_sha256.as_str().into());
+            set_key(table, "allow", string_array(&record.allow));
+            match &record.paired_at {
+                Some(at) => set_key(table, "paired_at", at.as_str().into()),
+                None => {
+                    table.remove("paired_at");
+                }
+            }
+        }
+        AgentChange::Unpair(agent) => {
+            agents.remove(agent);
+        }
+        AgentChange::Grant { agent, grant, on } => {
+            let table = agents
+                .get_mut(agent)
+                .ok_or_else(|| missing(agent))?
+                .as_table_mut()
+                .ok_or_else(not_a_table)?;
+            let allow: Vec<String> = table
+                .get("allow")
+                .and_then(toml_edit::Item::as_array)
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_owned))
+                        .collect()
+                })
+                .unwrap_or_default();
+            let changed = with_grant(&allow, *grant, *on);
+            if changed != allow {
+                set_key(table, "allow", string_array(&changed));
+            }
+        }
+    }
+    Ok(keep_line_endings(src, doc.to_string()))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,5 +421,138 @@ mod tests {
             err.contains("agents.b.psk_sha256") && err.contains("agents.a"),
             "{err}"
         );
+    }
+
+    /// Panel and pairing edits keep the owner's comments and other agents'
+    /// tables, re-read the file each time, and validate before writing
+    /// (hud-vniri.6).
+    #[test]
+    fn edits_keep_comments_and_other_agents() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join(AGENTS_FILE_NAME);
+        let hash = hash_psk_hex(PSK);
+        let other = hash_psk_hex("another-psk");
+        std::fs::write(
+            &path,
+            format!(
+                "# my agents\n[agents.a] # laptop\npsk_sha256 = \"{hash}\"\nallow = [\"*\"] # all\n\n\
+                 [agents.b]\npsk_sha256 = \"{other}\"\nallow = [\"tiles\"]\n"
+            ),
+        )
+        .unwrap();
+
+        // A grant edits the list as it stands in the file, so the hand-made
+        // single-zone entry survives withdrawing `*`'s zones.
+        std::fs::write(
+            &path,
+            std::fs::read_to_string(&path).unwrap().replace(
+                "allow = [\"*\"] # all",
+                "allow = [\"*\", \"zone:subtitle\"] # all",
+            ),
+        )
+        .unwrap();
+        let edited = edit(
+            &path,
+            &AgentChange::Grant {
+                agent: "a".into(),
+                grant: Grant::Zones,
+                on: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(edited.before.agents["a"].allow, ["*", "zone:subtitle"]);
+        assert_eq!(
+            edited.after.agents["a"].allow,
+            ["widget:*", "portal", "tiles", "zone:subtitle"]
+        );
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            saved.starts_with("# my agents\n[agents.a] # laptop\n"),
+            "{saved}"
+        );
+        assert!(saved.contains("\"zone:subtitle\"] # all"), "{saved}");
+
+        let file = edit(&path, &AgentChange::Unpair("b".into())).unwrap().after;
+        assert_eq!(file.agents.keys().collect::<Vec<_>>(), ["a"]);
+        let file = edit(
+            &path,
+            &AgentChange::Pair {
+                agent: "c".into(),
+                record: AgentRecord {
+                    psk_sha256: other.clone(),
+                    allow: vec!["*".into()],
+                    paired_at: Some("2026-10-15T00:00:00Z".into()),
+                },
+            },
+        )
+        .unwrap()
+        .after;
+        assert_eq!(file.agents.len(), 2);
+        assert_eq!(load(&path).unwrap(), file);
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("# my agents")
+        );
+
+        // Nothing is written when the result would not load, or names an
+        // agent the file lacks; unpairing a missing agent changes nothing.
+        let before = std::fs::read_to_string(&path).unwrap();
+        let dup = AgentChange::Pair {
+            agent: "d".into(),
+            record: AgentRecord {
+                psk_sha256: other,
+                allow: vec![],
+                paired_at: None,
+            },
+        };
+        assert!(matches!(
+            edit(&path, &dup),
+            Err(AgentsFileError::Invalid(_))
+        ));
+        let grant_missing = AgentChange::Grant {
+            agent: "zz".into(),
+            grant: Grant::Tiles,
+            on: true,
+        };
+        assert!(matches!(
+            edit(&path, &grant_missing),
+            Err(AgentsFileError::NoSuchAgent(_))
+        ));
+        let edited = edit(&path, &AgentChange::Unpair("zz".into())).unwrap();
+        assert_eq!(edited.before, edited.after);
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn edit_creates_a_missing_store_owner_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sub").join(AGENTS_FILE_NAME);
+        let record = AgentRecord {
+            psk_sha256: hash_psk_hex(PSK),
+            allow: vec!["*".into()],
+            paired_at: None,
+        };
+        let file = edit(
+            &path,
+            &AgentChange::Pair {
+                agent: "a".into(),
+                record,
+            },
+        )
+        .unwrap()
+        .after;
+        assert_eq!(load(&path).unwrap(), file);
+        let saved = std::fs::read_to_string(&path).unwrap();
+        assert!(
+            saved.starts_with("[agents.a]"),
+            "no empty [agents] header: {saved}"
+        );
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+            assert_eq!(mode & 0o777, 0o600);
+        }
     }
 }
