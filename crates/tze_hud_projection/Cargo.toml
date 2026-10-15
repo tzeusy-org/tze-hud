@@ -8,16 +8,8 @@ license.workspace = true
 [dependencies]
 serde = { workspace = true }
 thiserror = { workspace = true }
-tze_hud_config = { path = "../tze_hud_config", version = "0.1.0", optional = true }
-tze_hud_protocol = { path = "../tze_hud_protocol", version = "0.1.0", optional = true }
-uuid = { workspace = true, optional = true }
-
-[features]
-default = []
-# Enable the resident gRPC projection driver (tze_hud_protocol + tze_hud_config + uuid).
-# Note: tze_hud_runtime always enables this feature (`features = ["resident-grpc"]`)
-# so in practice it is unconditionally active whenever the runtime is linked.
-resident-grpc = ["dep:tze_hud_config", "dep:tze_hud_protocol", "dep:uuid"]
+tze_hud_config = { path = "../tze_hud_config", version = "0.1.0" }
+tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0" }
 
 [dev-dependencies]
 proptest = { workspace = true }

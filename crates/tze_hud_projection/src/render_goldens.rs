@@ -1,19 +1,17 @@
 //! Fixed visual fixtures captured before the scene renderer migration.
-use crate::resident_grpc::{
-    PortalVisualTokens, ResidentGrpcPortalAdapter, ResidentGrpcPortalConfig,
-};
+use crate::render::{DEFAULT_PORTAL_SIZE, Size, render};
+use crate::tokens::PortalVisualTokens;
 use crate::*;
-use tze_hud_protocol::proto::{self, mutation_proto::Mutation};
+use tze_hud_scene::{Node, NodeData, Rect, Rgba};
 
-fn view() -> PortalView {
+pub(crate) fn view() -> PortalView {
     PortalView {
         portal_id: "golden".into(),
         presentation: ProjectedPortalPresentation::Expanded,
-        redacted: false,
         connection_degraded: false,
         has_ever_connected: true,
         interaction_enabled: true,
-        attention: ProjectedPortalAttention::Ambient,
+        composer: ComposerStatus::Ready,
         display_name: Some("Session".into()),
         lifecycle_state: Some(ProjectionLifecycleState::Active),
         status_text: None,
@@ -24,11 +22,9 @@ fn view() -> PortalView {
         pending_input_count: Some(0),
         latest_viewer_delivery_state: None,
         last_input_feedback: None,
-        geometry_batch: None,
-        resized_bounds: None,
     }
 }
-fn unit(text: &str, at: u64) -> TranscriptUnit {
+pub(crate) fn unit(text: &str, at: u64) -> TranscriptUnit {
     TranscriptUnit {
         sequence: 1,
         output_text: text.into(),
@@ -37,43 +33,40 @@ fn unit(text: &str, at: u64) -> TranscriptUnit {
         appended_at_wall_us: at,
     }
 }
-fn snapshot(node: &proto::NodeProto, result: &mut String) {
+fn snapshot(node: &Node, result: &mut String) {
     use std::fmt::Write;
-    let color = |c: proto::Rgba| [c.r, c.g, c.b, c.a];
-    let rect = |r: proto::Rect| [r.x, r.y, r.width, r.height];
-    match node.data.as_ref().unwrap() {
-        proto::node_proto::Data::TextMarkdown(text) => {
+    let color = |c: Rgba| [c.r, c.g, c.b, c.a];
+    let rect = |r: Rect| [r.x, r.y, r.width, r.height];
+    match &node.data {
+        NodeData::TextMarkdown(text) => {
             let runs: Vec<_> = text
                 .color_runs
                 .iter()
-                .map(|r| (r.start_byte, r.end_byte, color(r.color.unwrap())))
+                .map(|r| (r.start_byte, r.end_byte, color(r.color)))
                 .collect();
             writeln!(
                 result,
                 "text {:?} bounds {:?} font {:?} colour {:?} background {:?} runs {:?}",
                 text.content,
-                rect(text.bounds.unwrap()),
+                rect(text.bounds),
                 text.font_size_px,
-                color(text.color.unwrap()),
+                color(text.color),
                 text.background.map(color),
                 runs
             )
             .unwrap();
         }
-        proto::node_proto::Data::SolidColor(solid) => {
+        NodeData::SolidColor(solid) => {
             writeln!(
                 result,
                 "solid {:?} {:?} {:?}",
-                color(solid.color.unwrap()),
-                rect(solid.bounds.unwrap()),
-                solid.radius
+                color(solid.color),
+                rect(solid.bounds),
+                solid.radius.unwrap()
             )
             .unwrap();
         }
         other => panic!("unexpected visual {other:?}"),
-    }
-    for child in &node.children {
-        snapshot(child, result);
     }
 }
 #[test]
@@ -95,6 +88,7 @@ fn render_visual_goldens() {
     ] {
         let mut state = view();
         let mut tokens = PortalVisualTokens::default();
+        let mut viewport = DEFAULT_PORTAL_SIZE;
         if !matches!(name, "empty" | "connecting") {
             state.visible_transcript.push(unit("Hello **world**", now));
         }
@@ -125,7 +119,10 @@ fn render_visual_goldens() {
                     .push(unit("Newest retained tail", now));
             }
             "narrow" => {
-                state.resized_bounds = Some(AdapterPortalRect::from_f32(20.0, 40.0, 180.0, 140.0))
+                viewport = Size {
+                    width: 180.0,
+                    height: 140.0,
+                }
             }
             "rollover" => {
                 tokens.timestamp_granularity = tze_hud_config::TimestampGranularity::PerTurn;
@@ -136,40 +133,23 @@ fn render_visual_goldens() {
             }
             _ => {}
         }
-        let mut adapter = ResidentGrpcPortalAdapter::with_tokens(
-            ResidentGrpcPortalConfig::new(vec![0; 16]),
-            tokens,
-        );
-        adapter.record_created_tile(vec![1; 16]);
         if name == "composer" {
-            adapter.apply_draft_notification(&AdapterDraftNotification {
-                text: "Unsent local draft".into(),
-                cursor: 6,
-                selection_anchor: 6,
-                at_capacity: false,
-                sequence: 1,
-            });
+            state.composer = ComposerStatus::Composing;
         }
-        let batch = adapter.render_batch_with_surface(&state, now).unwrap();
+        let rendered = render(&state, &tokens, viewport, now);
         let mut actual = String::new();
-        for mutation in batch.mutations {
-            match mutation.mutation.unwrap() {
-                Mutation::PublishToTile(publish) => {
-                    snapshot(publish.node.as_ref().unwrap(), &mut actual)
-                }
-                Mutation::SetTileLifecycleAccent(accent) => {
-                    actual.push_str(&format!(
-                        "accent {:?} {:?}\n",
-                        accent.color.map(|c| [c.r, c.g, c.b, c.a]),
-                        accent.width_px
-                    ));
-                }
-                Mutation::SetTileUnreadCount(unread) => {
-                    actual.push_str(&format!("unread {}\n", unread.count))
-                }
-                _ => {}
-            }
+        snapshot(&rendered.root, &mut actual);
+        for child in &rendered.children {
+            snapshot(child, &mut actual);
         }
+        actual.push_str(&format!(
+            "accent {:?} {:?}\n",
+            rendered
+                .accent
+                .map(|a| [a.color.r, a.color.g, a.color.b, a.color.a]),
+            rendered.accent.map_or(0.0, |a| a.width_px)
+        ));
+        actual.push_str(&format!("unread {}\n", rendered.unread));
         assert_eq!(actual, expected(name), "visual fixture {name}");
     }
 }

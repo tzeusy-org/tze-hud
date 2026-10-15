@@ -1,38 +1,5 @@
-//! Production bridge: `PortalPartTokens` → `PortalVisualTokens`.
-//!
-//! The canonical conversion function lives in `tze_hud_projection::resident_grpc`
-//! alongside the resident portal adapter. The runtime depends on that crate
-//! and re-exports the conversion here for its consumers.
-//!
-//! This module re-exports `portal_visual_tokens_from_part_tokens` for consumers
-//! that import from `tze_hud_runtime`.
-//!
-//! ## Production wiring contract
-//!
-//! Any code that constructs a `ResidentGrpcPortalAdapter` MUST call
-//! `portal_visual_tokens_from_part_tokens` instead of hand-constructing
-//! `PortalVisualTokens`. When a token-map swap occurs (e.g. profile hot-reload
-//! via `compositor.set_token_map`), call `resolve_portal_tokens` on the new
-//! `DesignTokenMap` to get `PortalPartTokens`, then pass the result to this
-//! function, and forward the resulting `PortalVisualTokens` to
-//! `adapter.set_visual_tokens(...)`.
-//!
-//! ```rust,ignore
-//! use tze_hud_config::{resolve_portal_tokens, tokens::DesignTokenMap};
-//! use tze_hud_projection::resident_grpc::{ResidentGrpcPortalAdapter, ResidentGrpcPortalConfig};
-//! use tze_hud_runtime::portal_tokens::portal_visual_tokens_from_part_tokens;
-//!
-//! // At adapter construction:
-//! let part_tokens = resolve_portal_tokens(&resolved_token_map);
-//! let visual_tokens = portal_visual_tokens_from_part_tokens(&part_tokens);
-//! let adapter = ResidentGrpcPortalAdapter::with_tokens(config, visual_tokens);
-//!
-//! // On profile hot-reload:
-//! let new_part_tokens = resolve_portal_tokens(&new_token_map);
-//! adapter.set_visual_tokens(portal_visual_tokens_from_part_tokens(&new_part_tokens));
-//! ```
-
-pub use tze_hud_projection::resident_grpc::portal_visual_tokens_from_part_tokens;
+//! Portal design-token conversion shared with the pure scene renderer.
+pub use tze_hud_projection::tokens::portal_visual_tokens_from_part_tokens;
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -40,7 +7,7 @@ pub use tze_hud_projection::resident_grpc::portal_visual_tokens_from_part_tokens
 mod tests {
     use super::*;
     use tze_hud_config::resolve_portal_tokens;
-    use tze_hud_projection::resident_grpc::PortalVisualTokens;
+    use tze_hud_projection::tokens::PortalVisualTokens;
 
     /// Single-source-of-truth assertion (hud-dcynv): `PortalVisualTokens::default()` now
     /// derives from `tze_hud_config::PortalPartTokens::default()` via

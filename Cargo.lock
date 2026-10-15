@@ -3502,8 +3502,7 @@ dependencies = [
  "serde",
  "thiserror 2.0.18",
  "tze_hud_config",
- "tze_hud_protocol",
- "uuid",
+ "tze_hud_scene",
 ]
 
 [[package]]

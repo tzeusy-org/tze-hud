@@ -36,10 +36,6 @@ pub enum ProjectionLifecycleState {
 pub enum OutputKind {
     #[default]
     Assistant,
-    Tool,
-    Status,
-    Error,
-    Other,
     /// Text submitted by the on-screen viewer via the HUD composer. Echoed into
     /// the reply history by `PortalHub::submit_reply` so the conversation is not
     /// structurally one-sided on the portal surface.
@@ -50,12 +46,7 @@ pub enum OutputKind {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InputDeliveryState {
-    Pending,
     Delivered,
-    Deferred,
-    Handled,
-    Rejected,
-    Expired,
 }
 
 /// Expanded or collapsed projected-portal presentation.
@@ -66,11 +57,14 @@ pub enum ProjectedPortalPresentation {
     Collapsed,
 }
 
-/// Ambient attention state exposed by projected portals.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ProjectedPortalAttention {
-    Ambient,
+/// Only the local composer's presentation status crosses the render boundary.
+/// Draft text, selection and caret remain in ComposerDraftManager.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ComposerStatus {
+    #[default]
+    Ready,
+    Composing,
+    AtCapacity,
 }
 
 /// Local-first HUD composer feedback.
@@ -109,11 +103,10 @@ pub struct TranscriptUnit {
 pub struct PortalView {
     pub portal_id: String,
     pub presentation: ProjectedPortalPresentation,
-    pub redacted: bool,
     pub connection_degraded: bool,
     pub has_ever_connected: bool,
     pub interaction_enabled: bool,
-    pub attention: ProjectedPortalAttention,
+    pub composer: ComposerStatus,
     pub display_name: Option<String>,
     pub lifecycle_state: Option<ProjectionLifecycleState>,
     pub status_text: Option<String>,
@@ -124,119 +117,6 @@ pub struct PortalView {
     pub pending_input_count: Option<usize>,
     pub latest_viewer_delivery_state: Option<InputDeliveryState>,
     pub last_input_feedback: Option<PortalInputFeedback>,
-    pub geometry_batch: Option<AdapterGeometryBatch>,
-    pub resized_bounds: Option<AdapterPortalRect>,
-}
-
-// ─── Composer draft notification types (hud-5jbra.4) ─────────────────────────
-
-/// Adapter-facing coalescible draft-state notification (state-stream class).
-///
-/// Delivered to the owning adapter to replace per-keystroke composer-text
-/// republish. The adapter MAY receive a single latest-snapshot rather than
-/// per-keystroke events; coalescing is the caller's responsibility.
-///
-/// Spec: §4.3 — "state-stream traffic, coalescible to the latest draft snapshot."
-/// Spec: §4.6 — "update the cooperative projection adapter … to consume
-/// draft-state notifications instead of per-keystroke republish."
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AdapterDraftNotification {
-    /// Current draft text (never exceeds the configured draft byte cap).
-    pub text: String,
-    /// Cursor byte offset into `text`.
-    pub cursor: usize,
-    /// Selection anchor byte offset. Equal to `cursor` when no selection.
-    pub selection_anchor: usize,
-    /// True when the draft is at or over its byte cap.
-    pub at_capacity: bool,
-    /// Monotonic sequence from the runtime draft buffer.
-    pub sequence: u64,
-}
-
-/// Adapter-facing transactional draft submission.
-///
-/// Delivered exactly once when the viewer submits the draft. The submitted
-/// text equals the local buffer at the moment of submission; it is the
-/// authoritative content to forward to the owning adapter's semantic inbox.
-///
-/// Spec: §4.3 — "submission and cancel SHALL remain transactional."
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AdapterDraftSubmission {
-    /// Submitted text (equals local buffer at submit time).
-    pub text: String,
-    /// Sequence at submit time.
-    pub sequence: u64,
-}
-
-/// Adapter-facing transactional draft cancel.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct AdapterDraftCancel {
-    pub sequence: u64,
-}
-
-/// Batched adapter notification for state-stream coalescing.
-///
-/// The adapter consumes `latest` (latest-wins) for real-time display of draft
-/// state, and `submission` / `cancel` for transactional handling. Older
-/// state-stream entries within the same batch window are discarded.
-#[derive(Clone, Debug, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub struct AdapterDraftBatch {
-    /// Latest draft snapshot (coalescible — newer replaces older).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub latest: Option<AdapterDraftNotification>,
-    /// Pending transactional submission (first wins; not coalescible).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub submission: Option<AdapterDraftSubmission>,
-    /// Pending transactional cancel (first wins; not coalescible).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cancel: Option<AdapterDraftCancel>,
-}
-
-impl AdapterDraftBatch {
-    /// Create an empty batch.
-    pub fn new() -> Self {
-        Self::default()
-    }
-
-    /// Coalesce a state-stream notification (latest-wins).
-    pub fn coalesce_state(&mut self, notification: AdapterDraftNotification) {
-        match &self.latest {
-            Some(existing) if notification.sequence > existing.sequence => {
-                self.latest = Some(notification);
-            }
-            None => {
-                self.latest = Some(notification);
-            }
-            _ => {}
-        }
-    }
-
-    /// Record a transactional submission (first wins; clears any pending cancel
-    /// to enforce submit-XOR-cancel semantics).
-    pub fn record_submission(&mut self, sub: AdapterDraftSubmission) {
-        if self.submission.is_none() {
-            self.cancel = None;
-            self.submission = Some(sub);
-        }
-    }
-
-    /// Record a transactional cancel (first wins; clears any pending submission
-    /// to enforce submit-XOR-cancel semantics).
-    pub fn record_cancel(&mut self, cancel: AdapterDraftCancel) {
-        if self.cancel.is_none() {
-            self.submission = None;
-            self.cancel = Some(cancel);
-        }
-    }
-
-    /// True if the batch holds nothing to deliver (no latest snapshot, no
-    /// submission, no cancel).
-    ///
-    /// Twin: `tze_hud_input::composer_draft::DraftNotificationBatch::is_empty`
-    /// is the cross-crate source type this is a clone of. Keep the two in sync.
-    pub fn is_empty(&self) -> bool {
-        self.latest.is_none() && self.submission.is_none() && self.cancel.is_none()
-    }
 }
 
 // ─── Portal geometry update types (hud-5jbra.9) ──────────────────────────────
@@ -468,6 +348,10 @@ pub struct Portal {
     pub inputs: VecDeque<Input>,
     /// Units appended since the last [`PortalHub::take_due`].
     pub unread: usize,
+    /// Latest nonempty rendered batch's badge, retained across local repaints.
+    pub rendered_unread: usize,
+    /// One-shot runtime-requested repaint when a rendered activity cue expires.
+    pub activity_cue_due_us: Option<u64>,
     pub last_seen_us: u64,
     /// `u64::MAX` holds until cleared.
     pub hold_until_us: Option<u64>,
@@ -495,6 +379,8 @@ impl Portal {
             replies: VecDeque::new(),
             inputs: VecDeque::new(),
             unread: 0,
+            rendered_unread: 0,
+            activity_cue_due_us: None,
             last_seen_us: now_us,
             hold_until_us: None,
             degraded_since_us: None,
@@ -638,6 +524,7 @@ pub struct Due {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum DeadlineKind {
     Render,
+    ActivityCue,
     Liveness,
     InputExpiry,
 }
@@ -1109,12 +996,17 @@ impl PortalHub {
             .iter_mut()
             .filter(|(_, p)| {
                 p.live()
-                    && p.dirty
-                    && (p.local_feedback_pending
-                        || p.last_render_us
-                            .is_none_or(|t| now_us >= t.saturating_add(interval)))
+                    && ((p.dirty
+                        && (p.local_feedback_pending
+                            || p.last_render_us
+                                .is_none_or(|t| now_us >= t.saturating_add(interval))))
+                        || p.activity_cue_due_us.is_some_and(|due| now_us >= due))
             })
             .map(|(key, portal)| {
+                portal.activity_cue_due_us = None;
+                if portal.unread > 0 {
+                    portal.rendered_unread = portal.unread;
+                }
                 portal.dirty = false;
                 portal.local_feedback_pending = false;
                 portal.last_render_us = Some(now_us);
@@ -1124,6 +1016,22 @@ impl PortalHub {
                 }
             })
             .collect()
+    }
+
+    /// Schedule the single repaint needed to clear a cue that was actually drawn.
+    pub fn set_activity_cue_deadline(
+        &mut self,
+        key: &PortalKey,
+        incarnation: u64,
+        due_us: Option<u64>,
+    ) {
+        if let Some(portal) = self
+            .portals
+            .get_mut(key)
+            .filter(|p| p.incarnation == incarnation)
+        {
+            portal.activity_cue_due_us = due_us;
+        }
     }
 
     /// The earliest instant the hub needs `take_due` or `sweep` again.
@@ -1169,7 +1077,11 @@ impl PortalHub {
                         at_us,
                         kind: DeadlineKind::InputExpiry,
                     });
-                [render, liveness, expiry]
+                let activity = p.activity_cue_due_us.map(|at_us| Deadline {
+                    at_us,
+                    kind: DeadlineKind::ActivityCue,
+                });
+                [render, activity, liveness, expiry]
             })
             .flatten()
             .min_by_key(|d| (d.at_us, d.kind))

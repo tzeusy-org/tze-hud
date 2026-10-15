@@ -1,66 +1,38 @@
-//! Phase-1 portal component profile styling tests (hud-5jbra.6).
-//!
-//! Covers §6.4 of `text-stream-portal-phase1/tasks.md`:
-//!
-//! 1. **Profile-swap reskin** — token override changes all portal parts without
-//!    any adapter logic change (§6.1 invariant: only token values differ, not
-//!    the code path that calls `resolve_portal_tokens`).
-//!
-//! 2. **Token propagation on republish** — adapter renders updated visual tokens
-//!    on the second render call, no adapter code change required.
-//!
-//! 3. **Adapter publish path contains no literal visual values** — the adapter's
-//!    `visual_tokens()` accessor returns the token-derived values; the node built
-//!    by `portal_node` is verified to use those values.
-//!
-//! 4. **Redacted presentation rendering** — sanitized renderer views emit no
-//!    transcript or display name in either presentation, across transition tokens.
-//!    These tests exercise rendering, not the retired viewer policy authority.
-
-use tze_hud_config::{
-    PORTAL_TOKEN_COLLAPSED_BACKGROUND, PORTAL_TOKEN_COLLAPSED_FONT_SIZE,
-    PORTAL_TOKEN_COLLAPSED_TEXT_COLOR, PORTAL_TOKEN_COMPOSER_BACKGROUND,
-    PORTAL_TOKEN_COMPOSER_FONT_SIZE, PORTAL_TOKEN_COMPOSER_TEXT_COLOR,
-    PORTAL_TOKEN_TIMESTAMP_COLOR, PORTAL_TOKEN_TIMESTAMP_GRANULARITY,
-    PORTAL_TOKEN_TRANSCRIPT_BACKGROUND, PORTAL_TOKEN_TRANSCRIPT_FONT_SIZE,
-    PORTAL_TOKEN_TRANSCRIPT_TEXT_COLOR, PORTAL_TOKEN_TRANSITION_IN_MS,
-    PORTAL_TOKEN_TRANSITION_OUT_MS, resolve_portal_tokens,
-};
+//! Token-resolved portal rendering through the native scene boundary.
+use tze_hud_config::{resolve_portal_tokens, tokens::DesignTokenMap};
 use tze_hud_projection::{
-    OutputKind, PortalHub, PortalKey, PortalStatus, PortalView, ProjectedPortalAttention,
+    ComposerStatus, OutputKind, PortalHub, PortalKey, PortalStatus, PortalView,
     ProjectedPortalPresentation, ProjectionLifecycleState, Publish, TranscriptUnit,
-    resident_grpc::{PortalVisualTokens, ResidentGrpcPortalAdapter, ResidentGrpcPortalConfig},
+    render::{DEFAULT_COMPACT_SIZE, DEFAULT_PORTAL_SIZE, PortalRender, Size, render},
+    tokens::{PortalVisualTokens, portal_visual_tokens_from_part_tokens},
 };
-use tze_hud_runtime::portal_tokens::portal_visual_tokens_from_part_tokens;
+use tze_hud_scene::{NodeData, Rgba, TextMarkdownNode};
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-/// Build renderer presentation from a real implicit attach/publish in the Hub.
-fn build_expanded_state(hub: &mut PortalHub, portal_id: &str) -> PortalView {
-    let key = PortalKey::new("styling-agent", portal_id);
+fn build_expanded_state() -> PortalView {
+    let mut hub = PortalHub::default();
+    let key = PortalKey::new("styling-agent", "test");
     hub.publish(
         &key,
         Publish {
-            display_name: Some(format!("{portal_id} (styling test)")),
-            text: Some(format!("assistant output for {portal_id}")),
+            display_name: Some("Session".into()),
+            text: Some("assistant output".into()),
             status: Some(PortalStatus::Active),
-            ..Publish::default()
+            ..Default::default()
         },
         21,
     )
-    .expect("publish output must succeed");
-    let portal = hub.get(&key).expect("published portal exists");
+    .unwrap();
+    let portal = hub.get(&key).unwrap();
     PortalView {
-        portal_id: portal_id.to_string(),
+        portal_id: key.id.clone(),
         presentation: ProjectedPortalPresentation::Expanded,
-        redacted: false,
         connection_degraded: false,
         has_ever_connected: true,
         interaction_enabled: true,
-        attention: ProjectedPortalAttention::Ambient,
+        composer: ComposerStatus::Ready,
         display_name: Some(portal.display_name.clone()),
         lifecycle_state: Some(ProjectionLifecycleState::Active),
-        status_text: Some("styling test active".to_string()),
+        status_text: Some("styling test active".into()),
         visible_transcript: portal
             .visible_transcript(hub.limits().visible_bytes)
             .map(|u| TranscriptUnit {
@@ -74,996 +46,188 @@ fn build_expanded_state(hub: &mut PortalHub, portal_id: &str) -> PortalView {
         input_history: vec![],
         unread_output_count: Some(portal.unread),
         visible_unread_output_count: Some(portal.unread),
-        pending_input_count: Some(portal.inputs.len()),
+        pending_input_count: Some(0),
         latest_viewer_delivery_state: None,
         last_input_feedback: None,
-        geometry_batch: None,
-        resized_bounds: None,
     }
 }
-
-/// A renderer-level restricted presentation control, independent of transition
-/// tokens. This does not recreate the retired external viewer policy authority.
-fn redacted_view(mut view: PortalView) -> PortalView {
-    view.redacted = true;
-    view.interaction_enabled = false;
-    view.display_name = None;
-    view.lifecycle_state = None;
-    view.status_text = None;
-    view.visible_transcript.clear();
-    view.input_history.clear();
-    view.unread_output_count = None;
-    view.visible_unread_output_count = None;
-    view.pending_input_count = None;
-    view.latest_viewer_delivery_state = None;
-    view.last_input_feedback = None;
-    view
-}
-
-// ── §6.1: Adapter publish path contains no literal visual values ──────────────
-
-/// Verifies that the resident gRPC adapter's publish path (portal_node) sources
-/// all visual values from `visual_tokens()` — never from inline literals.
-///
-/// We inject a sentinel color (full magenta) as the expanded transcript text
-/// color, then verify the adapter's `visual_tokens()` returns it. This proves
-/// the adapter would use that value in portal_node, satisfying §6.1.
-#[test]
-fn adapter_publish_path_sources_colors_from_visual_tokens() {
-    // Default adapter has default visual tokens
-    let adapter_default =
-        ResidentGrpcPortalAdapter::new(ResidentGrpcPortalConfig::new(vec![0u8; 16]));
-    let default_tokens = adapter_default.visual_tokens();
-
-    // Inject a sentinel transcript text color
-    let sentinel_tokens = PortalVisualTokens {
-        transcript_text_color: tze_hud_protocol::proto::Rgba {
-            r: 1.0,
-            g: 0.0,
-            b: 1.0,
-            a: 1.0,
-        }, // magenta sentinel
-        ..PortalVisualTokens::default()
-    };
-
-    let adapter_with_sentinel = ResidentGrpcPortalAdapter::with_tokens(
-        ResidentGrpcPortalConfig::new(vec![0u8; 16]),
-        sentinel_tokens.clone(),
-    );
-
-    // The default adapter must NOT have the sentinel (proves injection works)
-    assert_ne!(
-        default_tokens.transcript_text_color, sentinel_tokens.transcript_text_color,
-        "default tokens must differ from sentinel"
-    );
-
-    // The injected adapter must return exactly the sentinel
-    assert_eq!(
-        *adapter_with_sentinel.visual_tokens(),
-        sentinel_tokens,
-        "adapter must return the tokens provided to with_tokens"
-    );
-
-    // After set_visual_tokens, the same sentinel must be accessible
-    let mut adapter_mutable =
-        ResidentGrpcPortalAdapter::new(ResidentGrpcPortalConfig::new(vec![0u8; 16]));
-    adapter_mutable.set_visual_tokens(sentinel_tokens.clone());
-    assert_eq!(
-        *adapter_mutable.visual_tokens(),
-        sentinel_tokens,
-        "set_visual_tokens must replace visual tokens on the adapter"
-    );
-}
-
-// ── §6.4 (d): NodeProto output assertion ─────────────────────────────────────
-
-/// Verifies that the published `NodeProto` output from `render_portal_message`
-/// actually uses the injected `PortalVisualTokens` values.
-///
-/// This is the §6.4 strengthened test: previous tests only asserted on
-/// `visual_tokens()` — the getter accessor. A reintroduced literal in
-/// `portal_node` would pass those tests. This test asserts on the *published*
-/// `TextMarkdownNodeProto.color` and `.background` in the `MutationBatch`,
-/// proving the render path actually consumes the injected tokens.
-#[test]
-fn portal_node_proto_uses_injected_visual_tokens() {
-    use std::collections::HashMap;
-    use tze_hud_protocol::proto;
-    use tze_hud_protocol::proto::session as session_proto;
-
-    let empty: HashMap<String, String> = HashMap::new();
-
-    // Build a sentinel PortalVisualTokens via the canonical conversion chain:
-    // override transcript_text_color to cyan and collapsed_background to yellow.
-    let mut overrides = HashMap::new();
-    overrides.insert(
-        tze_hud_config::PORTAL_TOKEN_TRANSCRIPT_TEXT_COLOR.to_string(),
-        "#00FFFF".to_string(), // cyan — r=0, g=1, b=1
-    );
-    overrides.insert(
-        tze_hud_config::PORTAL_TOKEN_COLLAPSED_BACKGROUND.to_string(),
-        "#FFFF00".to_string(), // yellow — r=1, g=1, b=0
-    );
-    let resolved = tze_hud_config::tokens::resolve_tokens(&empty, &overrides);
-    let part_tokens = resolve_portal_tokens(&resolved);
-    // Use the production canonical conversion — no hand-rolled PortalVisualTokens
-    let visual_tokens = portal_visual_tokens_from_part_tokens(&part_tokens);
-
-    let mut authority = PortalHub::default();
-
-    // Build an expanded projection state
-    let expanded_state = build_expanded_state(&mut authority, "proj-nodeproto-expanded");
-
-    // Build adapter, record a fake tile ID so render_portal_message succeeds
-    let fake_tile_id: Vec<u8> = vec![0xAB; 16];
-    let mut adapter = ResidentGrpcPortalAdapter::with_tokens(
-        ResidentGrpcPortalConfig::new(vec![0u8; 16]),
-        visual_tokens.clone(),
-    );
-    adapter.record_created_tile(fake_tile_id.clone());
-
-    // Call render_portal_message and extract the NodeProto from the MutationBatch
-    let cmd = adapter
-        .render_portal_message(&expanded_state, 1, 0)
-        .expect("render_portal_message must succeed after tile is recorded");
-
-    // Extract the MutationBatch from the ClientMessage payload
-    let batch = match cmd.message.payload.expect("render must produce payload") {
-        session_proto::client_message::Payload::MutationBatch(b) => b,
-        other => panic!("expected MutationBatch payload, got {other:?}"),
-    };
-
-    // The first mutation must be PublishToTile
-    let publish = batch
-        .mutations
-        .into_iter()
-        .find_map(|m| match m.mutation {
-            Some(proto::mutation_proto::Mutation::PublishToTile(p)) => Some(p),
+fn text_nodes(rendered: &PortalRender) -> Vec<&TextMarkdownNode> {
+    std::iter::once(&rendered.root)
+        .chain(&rendered.children)
+        .filter_map(|n| match &n.data {
+            NodeData::TextMarkdown(t) => Some(t),
             _ => None,
         })
-        .expect("MutationBatch must contain a PublishToTile mutation");
-
-    // Extract the native subtree and its OUTPUT transcript node.
-    let node = publish.node.expect("PublishToTile must have a node");
-    let text_md = find_transcript_node(&node)
-        .expect("expanded native portal subtree must contain an OUTPUT transcript node");
-
-    // ── Core assertion (§6.4d): NodeProto color must be the injected token value ──
-
-    // Expanded state uses transcript_text_color: injected to cyan (#00FFFF)
-    let color = text_md
-        .color
-        .as_ref()
-        .expect("TextMarkdownNodeProto must have a color");
-    assert!(
-        color.r.abs() < 1e-2,
-        "expanded NodeProto color.r must be 0.0 (cyan has r=0), got {r}",
-        r = color.r
-    );
-    assert!(
-        (color.g - 1.0).abs() < 1e-2,
-        "expanded NodeProto color.g must be 1.0 (cyan has g=1), got {g}",
-        g = color.g
-    );
-    assert!(
-        (color.b - 1.0).abs() < 1e-2,
-        "expanded NodeProto color.b must be 1.0 (cyan has b=1), got {b}",
-        b = color.b
-    );
-
-    // Font size must match the token-derived transcript_font_size_px
-    assert!(
-        (text_md.font_size_px - part_tokens.transcript_font_size_px).abs() < 1e-3,
-        "expanded NodeProto font_size_px must equal token-derived transcript_font_size_px"
-    );
-
-    // ── Collapsed state: background must be the injected yellow token ──
-
-    // Collapse the portal and re-render
-    let mut collapsed_state = expanded_state.clone();
-    collapsed_state.presentation = ProjectedPortalPresentation::Collapsed;
-    assert_eq!(
-        collapsed_state.presentation,
-        ProjectedPortalPresentation::Collapsed
-    );
-
-    let cmd_collapsed = adapter
-        .render_portal_message(&collapsed_state, 2, 0)
-        .expect("render_portal_message must succeed for collapsed state");
-    let batch_collapsed = match cmd_collapsed
-        .message
-        .payload
-        .expect("collapsed render must produce payload")
-    {
-        session_proto::client_message::Payload::MutationBatch(b) => b,
-        other => panic!("expected MutationBatch payload for collapsed, got {other:?}"),
-    };
-    let publish_collapsed = batch_collapsed
-        .mutations
+        .collect()
+}
+fn transcript(rendered: &PortalRender) -> &TextMarkdownNode {
+    text_nodes(rendered)
         .into_iter()
-        .find_map(|m| match m.mutation {
-            Some(proto::mutation_proto::Mutation::PublishToTile(p)) => Some(p),
+        .find(|t| t.content.contains("assistant output"))
+        .unwrap()
+}
+fn tokens(overrides: &[(&str, &str)]) -> PortalVisualTokens {
+    let map: DesignTokenMap = overrides
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+    portal_visual_tokens_from_part_tokens(&resolve_portal_tokens(&map))
+}
+
+#[test]
+fn portal_node_uses_injected_visual_tokens() {
+    let tokens = tokens(&[
+        ("portal.transcript.text_color", "#FF0000"),
+        ("portal.transcript.background", "#0000FF"),
+        ("portal.transcript.font_size", "23"),
+        ("portal.collapsed_card.text_color", "#00FF00"),
+        ("portal.collapsed_card.background", "#FF00FF"),
+        ("portal.collapsed_card.font_size", "21"),
+        ("portal.composer.text_color", "#00FFFF"),
+        ("portal.composer.background", "#FFFF00"),
+        ("portal.composer.font_size", "19"),
+    ]);
+    let mut view = build_expanded_state();
+    let expanded = render(&view, &tokens, DEFAULT_PORTAL_SIZE, 100);
+    let body = transcript(&expanded);
+    assert_eq!(body.color, Rgba::new(1.0, 0.0, 0.0, 1.0));
+    assert_eq!(body.font_size_px, 23.0);
+    // Pane backgrounds are separate native nodes; text is transparent above them.
+    assert_eq!(body.background, Some(Rgba::TRANSPARENT));
+    let solids: Vec<_> = expanded
+        .children
+        .iter()
+        .filter_map(|n| match &n.data {
+            NodeData::SolidColor(s) => Some(s.color),
             _ => None,
         })
-        .expect("collapsed MutationBatch must contain a PublishToTile mutation");
-    let node_collapsed = publish_collapsed
-        .node
-        .expect("collapsed PublishToTile must have a node");
-    let text_md_collapsed = match node_collapsed
-        .data
-        .expect("collapsed NodeProto must have data")
-    {
-        proto::node_proto::Data::TextMarkdown(tm) => tm,
-        other => panic!("collapsed NodeProto must be TextMarkdown, got {other:?}"),
-    };
-
-    // Collapsed state uses collapsed_background: injected to yellow (#FFFF00)
-    let bg_collapsed = text_md_collapsed
-        .background
-        .expect("collapsed TextMarkdownNodeProto must have background");
-    assert!(
-        (bg_collapsed.r - 1.0).abs() < 1e-2,
-        "collapsed NodeProto background.r must be 1.0 (yellow has r=1), got {r}",
-        r = bg_collapsed.r
-    );
-    assert!(
-        (bg_collapsed.g - 1.0).abs() < 1e-2,
-        "collapsed NodeProto background.g must be 1.0 (yellow has g=1), got {g}",
-        g = bg_collapsed.g
-    );
-    assert!(
-        bg_collapsed.b.abs() < 1e-2,
-        "collapsed NodeProto background.b must be 0.0 (yellow has b=0), got {b}",
-        b = bg_collapsed.b
-    );
+        .collect();
+    assert!(solids.contains(&tokens.transcript_background));
+    assert!(solids.contains(&tokens.composer_background));
+    let input = text_nodes(&expanded)
+        .into_iter()
+        .find(|t| t.content.contains("composer: ready"))
+        .unwrap();
+    assert_eq!(input.color, tokens.composer_text_color);
+    assert_eq!(input.font_size_px, 19.0);
+    assert!(expanded.composer.as_ref().unwrap().accepts_pointer);
+    view.presentation = ProjectedPortalPresentation::Collapsed;
+    let compact = render(&view, &tokens, DEFAULT_COMPACT_SIZE, 100);
+    let text = transcript(&compact);
+    assert_eq!(text.color, Rgba::new(0.0, 1.0, 0.0, 1.0));
+    assert_eq!(text.background, Some(tokens.collapsed_background));
+    assert_eq!(text.font_size_px, 21.0);
 }
 
-// ── §6.2: Portal part inventory — all parts covered by tokens ────────────────
-
-/// Verifies that all portal parts in the inventory have a non-zero token value
-/// after resolution from the default (empty) token map.
-///
-/// All assertions check `tokens.*` (the output of `resolve_portal_tokens`) to
-/// verify the resolver produces sane defaults, not `PortalVisualTokens::default`
-/// which exercises a different code path.
 #[test]
-fn portal_part_inventory_all_parts_have_non_zero_defaults() {
-    use std::collections::HashMap;
-    let empty: HashMap<String, String> = HashMap::new();
-    let tokens = resolve_portal_tokens(&empty);
-
-    // Frame
-    assert!(
-        tokens.frame_opacity > 0.0 && tokens.frame_opacity <= 1.0,
-        "portal part inventory: frame opacity must be in (0, 1]"
-    );
-
-    // Header
-    assert!(
-        tokens.header_font_size_px > 0.0,
-        "portal part inventory: header font size must be positive"
-    );
-
-    // Composer
-    assert!(
-        tokens.composer_font_size_px > 0.0,
-        "portal part inventory: composer font size must be positive"
-    );
-
-    // Transcript
-    assert!(
-        tokens.transcript_font_size_px > 0.0,
-        "portal part inventory: transcript font size must be positive"
-    );
-
-    // Collapsed
-    assert!(
-        tokens.collapsed_font_size_px > 0.0,
-        "portal part inventory: collapsed font size must be positive"
-    );
-
-    // Transitions
-    assert!(
-        tokens.transition_in_ms > 0,
-        "portal part inventory: transition_in_ms must be positive"
-    );
-    assert!(
-        tokens.transition_out_ms > 0,
-        "portal part inventory: transition_out_ms must be positive"
-    );
+fn profile_swap_reskins_renderer_without_logic_change() {
+    let view = build_expanded_state();
+    let baseline = PortalVisualTokens::default();
+    let changed = tokens(&[
+        ("portal.transcript.text_color", "#123456"),
+        ("portal.transcript.font_size", "28"),
+        ("portal.composer.font_size", "25"),
+    ]);
+    let first = render(&view, &baseline, DEFAULT_PORTAL_SIZE, 100);
+    let second = render(&view, &changed, DEFAULT_PORTAL_SIZE, 100);
+    assert_eq!(transcript(&first).content, transcript(&second).content);
+    assert_ne!(transcript(&first).color, transcript(&second).color);
+    assert_eq!(transcript(&second).color, changed.transcript_text_color);
+    assert_eq!(transcript(&second).font_size_px, 28.0);
+    let back = render(&view, &baseline, DEFAULT_PORTAL_SIZE, 100);
+    assert_eq!(transcript(&back), transcript(&first));
+    let expected =
+        portal_visual_tokens_from_part_tokens(&tze_hud_config::PortalPartTokens::default());
+    assert_eq!(baseline, expected);
 }
 
-// ── §6.4: Profile-swap reskin (core scenario) ─────────────────────────────────
-
-/// Profile swap reskins the adapter without changing adapter logic.
-///
-/// The adapter code path (`with_tokens`/`set_visual_tokens`) is the same for
-/// both profiles. Only the token *values* differ. This is the §6.1 invariant:
-/// "a profile/token change must reskin the portal end-to-end with zero adapter
-/// logic changes."
-///
-/// Uses `portal_visual_tokens_from_part_tokens` (the canonical production
-/// conversion) rather than hand-rolling each field — de-duplicating the
-/// test conversion with the production path (§6.4 / issue (c)).
-#[test]
-fn profile_swap_reskins_adapter_without_adapter_logic_change() {
-    use std::collections::HashMap;
-
-    // Profile A: default (dark) — no overrides
-    let empty: HashMap<String, String> = HashMap::new();
-    let profile_a_config_tokens = resolve_portal_tokens(&empty);
-    let profile_a_visual = portal_visual_tokens_from_part_tokens(&profile_a_config_tokens);
-
-    // Profile B: light theme — transcript/collapsed parts overridden
-    let mut profile_b_overrides: HashMap<String, String> = HashMap::new();
-    profile_b_overrides.insert(
-        PORTAL_TOKEN_TRANSCRIPT_TEXT_COLOR.to_string(),
-        "#111111".to_string(),
-    );
-    profile_b_overrides.insert(
-        PORTAL_TOKEN_TRANSCRIPT_BACKGROUND.to_string(),
-        "#F0F0F0".to_string(),
-    );
-    profile_b_overrides.insert(
-        PORTAL_TOKEN_TRANSCRIPT_FONT_SIZE.to_string(),
-        "16".to_string(),
-    );
-    profile_b_overrides.insert(
-        PORTAL_TOKEN_COLLAPSED_BACKGROUND.to_string(),
-        "#E8E8E8".to_string(),
-    );
-    profile_b_overrides.insert(
-        PORTAL_TOKEN_COLLAPSED_TEXT_COLOR.to_string(),
-        "#222222".to_string(),
-    );
-    profile_b_overrides.insert(
-        PORTAL_TOKEN_COLLAPSED_FONT_SIZE.to_string(),
-        "13".to_string(),
-    );
-
-    // Use resolve_tokens to merge overrides (profile layer)
-    let resolved_b = tze_hud_config::tokens::resolve_tokens(&empty, &profile_b_overrides);
-    let profile_b_config_tokens = resolve_portal_tokens(&resolved_b);
-    let profile_b_visual = portal_visual_tokens_from_part_tokens(&profile_b_config_tokens);
-
-    // Both adapters use IDENTICAL code paths — only token values differ.
-    let adapter_a = ResidentGrpcPortalAdapter::with_tokens(
-        ResidentGrpcPortalConfig::new(vec![0u8; 16]),
-        profile_a_visual.clone(),
-    );
-    let adapter_b = ResidentGrpcPortalAdapter::with_tokens(
-        ResidentGrpcPortalConfig::new(vec![0u8; 16]),
-        profile_b_visual.clone(),
-    );
-
-    // Token values must differ — proving the profile swap had effect
-    assert_ne!(
-        adapter_a.visual_tokens().transcript_background,
-        adapter_b.visual_tokens().transcript_background,
-        "profile swap must produce different transcript background"
-    );
-    assert_ne!(
-        adapter_a.visual_tokens().transcript_text_color,
-        adapter_b.visual_tokens().transcript_text_color,
-        "profile swap must produce different transcript text color"
-    );
-    assert_ne!(
-        adapter_a.visual_tokens().collapsed_background,
-        adapter_b.visual_tokens().collapsed_background,
-        "profile swap must produce different collapsed background"
-    );
-    assert!(
-        (adapter_b.visual_tokens().transcript_font_size_px - 16.0).abs() < 1e-3,
-        "profile B transcript font size must be 16px"
-    );
-    assert!(
-        (adapter_b.visual_tokens().collapsed_font_size_px - 13.0).abs() < 1e-3,
-        "profile B collapsed font size must be 13px"
-    );
-}
-
-// ── §6.4: Token propagation on republish ─────────────────────────────────────
-
-/// Verifies that a token change propagates to the adapter on the next render
-/// cycle without any adapter code change. This covers the "republish"
-/// scenario: the adapter is updated with new tokens, then re-renders.
-///
-/// Uses `portal_visual_tokens_from_part_tokens` (the canonical production
-/// conversion) rather than hand-rolling each field — de-duplicating the
-/// test conversion with the production path (§6.4 / issue (c)).
-#[test]
-fn token_change_propagates_to_adapter_on_republish() {
-    use std::collections::HashMap;
-
-    let empty: HashMap<String, String> = HashMap::new();
-
-    // Cycle 1: default tokens — use canonical conversion
-    let cycle1_part = resolve_portal_tokens(&empty);
-    let mut adapter = ResidentGrpcPortalAdapter::with_tokens(
-        ResidentGrpcPortalConfig::new(vec![0u8; 16]),
-        portal_visual_tokens_from_part_tokens(&cycle1_part),
-    );
-
-    let cycle1_background = adapter.visual_tokens().transcript_background;
-
-    // Cycle 2: token update (simulate profile hot-reload)
-    let mut overrides: HashMap<String, String> = HashMap::new();
-    overrides.insert(
-        PORTAL_TOKEN_TRANSCRIPT_BACKGROUND.to_string(),
-        "#4A90D9".to_string(), // distinctive blue
-    );
-    let new_map = tze_hud_config::tokens::resolve_tokens(&empty, &overrides);
-    let cycle2_part = resolve_portal_tokens(&new_map);
-
-    // Use the canonical conversion — this is the production hot-reload path
-    adapter.set_visual_tokens(portal_visual_tokens_from_part_tokens(&cycle2_part));
-
-    let cycle2_background = adapter.visual_tokens().transcript_background;
-
-    // The token change must propagate — backgrounds must differ
-    assert_ne!(
-        cycle1_background, cycle2_background,
-        "token change must propagate to adapter on republish"
-    );
-
-    // Independent decoded #4A90D9 reference; the republished blue stays dominant.
-    for (actual, expected) in [
-        cycle2_background.r,
-        cycle2_background.g,
-        cycle2_background.b,
-    ]
-    .into_iter()
-    .zip([
-        0.06847816984440017_f64,
-        0.2788942634768104,
-        0.6938717612919899,
-    ]) {
-        assert!((f64::from(actual) - expected).abs() < 1e-6);
-    }
-    assert!(cycle2_background.b > cycle2_background.g);
-    assert!(cycle2_background.g > cycle2_background.r);
-    assert_eq!(
-        cycle2_background.a.to_bits(),
-        cycle2_part.transcript_background.a.to_bits(),
-    );
-}
-
-// ── §6.4: Redaction-safe transitions ─────────────────────────────────────────
-
-/// A sanitized redacted view must publish no transcript or display name in either
-/// presentation. The owner render is the positive control for real content.
-#[test]
-fn redacted_view_renders_without_content_in_both_presentation_states() {
-    let mut hub = PortalHub::default();
-    let expanded = build_expanded_state(&mut hub, "redaction-sentinel");
-    let mut adapter = ResidentGrpcPortalAdapter::new(ResidentGrpcPortalConfig::new(vec![0u8; 16]));
-    adapter.record_created_tile(vec![0xAB; 16]);
-    let owner =
-        extract_text_markdown_content(adapter.render_portal_message(&expanded, 1, 0).unwrap());
-    assert!(owner.contains("assistant output for redaction-sentinel"));
-
-    for (index, presentation) in [
-        ProjectedPortalPresentation::Expanded,
-        ProjectedPortalPresentation::Collapsed,
-    ]
-    .into_iter()
-    .enumerate()
-    {
-        let mut view = redacted_view(expanded.clone());
-        view.presentation = presentation;
-        let rendered = extract_text_markdown_content(
-            adapter
-                .render_portal_message(&view, index as u64 + 2, 0)
-                .unwrap(),
-        );
-        // The stable portal ID remains a collapsed-card address; the
-        // separately supplied display name and private content do not.
-        assert!(!rendered.contains("(styling test)"), "{rendered}");
-        assert!(!rendered.contains("assistant output"), "{rendered}");
-        assert!(!rendered.contains("styling test active"), "{rendered}");
-    }
-}
-
-/// Transition token changes reach the adapter before rendering the same
-/// sanitized view; neither duration may reintroduce transcript or display name.
-#[test]
-fn transition_duration_tokens_do_not_affect_redacted_rendering() {
-    use std::collections::HashMap;
-    let empty = HashMap::new();
-    let mut hub = PortalHub::default();
-    let expanded = build_expanded_state(&mut hub, "transition-sentinel");
-    let mut adapter = ResidentGrpcPortalAdapter::new(ResidentGrpcPortalConfig::new(vec![0u8; 16]));
-    adapter.record_created_tile(vec![0xAB; 16]);
-    let owner =
-        extract_text_markdown_content(adapter.render_portal_message(&expanded, 1, 0).unwrap());
-    assert!(owner.contains("assistant output for transition-sentinel"));
-    let redacted = redacted_view(expanded);
-    let mut previous = None;
-    for (index, duration) in [1, 1000].into_iter().enumerate() {
-        let overrides = HashMap::from([
-            (
-                PORTAL_TOKEN_TRANSITION_IN_MS.to_string(),
-                duration.to_string(),
-            ),
-            (
-                PORTAL_TOKEN_TRANSITION_OUT_MS.to_string(),
-                duration.to_string(),
-            ),
-        ]);
-        let resolved = tze_hud_config::tokens::resolve_tokens(&empty, &overrides);
-        let tokens = resolve_portal_tokens(&resolved);
-        assert_eq!(tokens.transition_in_ms, duration);
-        assert_eq!(tokens.transition_out_ms, duration);
-        adapter.set_visual_tokens(portal_visual_tokens_from_part_tokens(&tokens));
-        let rendered = extract_text_markdown_content(
-            adapter
-                .render_portal_message(&redacted, index as u64 + 2, 0)
-                .unwrap(),
-        );
-        assert!(!rendered.contains("(styling test)"), "{rendered}");
-        assert!(!rendered.contains("assistant output"), "{rendered}");
-        if let Some(previous) = previous {
-            assert_eq!(rendered, previous);
-        }
-        previous = Some(rendered);
-    }
-}
-
-// ── §4.1 / §4.8: Composer token NodeProto output assertions (hud-2zyt9) ────────
-
-/// Verifies that the composer token fields propagate through the canonical
-/// conversion chain (`resolve_portal_tokens` → `portal_visual_tokens_from_part_tokens`)
-/// and are accessible via `visual_tokens()` on the adapter.
-///
-/// This is the §6.1 composer-side proof: the adapter's published composer
-/// visual values always come from the resolved token set, never from literals.
-#[test]
-fn composer_tokens_propagate_through_canonical_conversion() {
-    use std::collections::HashMap;
-
-    let empty: HashMap<String, String> = HashMap::new();
-
-    // Override all composer tokens to sentinel values
-    let mut overrides = HashMap::new();
-    overrides.insert(
-        PORTAL_TOKEN_COMPOSER_TEXT_COLOR.to_string(),
-        "#FF00FF".to_string(), // magenta
-    );
-    overrides.insert(
-        PORTAL_TOKEN_COMPOSER_BACKGROUND.to_string(),
-        "#FFFF00".to_string(), // yellow
-    );
-    overrides.insert(
-        PORTAL_TOKEN_COMPOSER_FONT_SIZE.to_string(),
-        "18".to_string(),
-    );
-
-    let resolved = tze_hud_config::tokens::resolve_tokens(&empty, &overrides);
-    let part_tokens = resolve_portal_tokens(&resolved);
-    let visual_tokens = portal_visual_tokens_from_part_tokens(&part_tokens);
-
-    let adapter = ResidentGrpcPortalAdapter::with_tokens(
-        ResidentGrpcPortalConfig::new(vec![0u8; 16]),
-        visual_tokens,
-    );
-
-    let vt = adapter.visual_tokens();
-
-    // composer_text_color must be magenta (r=1, g=0, b=1)
-    assert!(
-        (vt.composer_text_color.r - 1.0).abs() < 1e-2,
-        "composer_text_color.r must be 1.0 (magenta)"
-    );
-    assert!(
-        vt.composer_text_color.g.abs() < 1e-2,
-        "composer_text_color.g must be 0.0 (magenta)"
-    );
-    assert!(
-        (vt.composer_text_color.b - 1.0).abs() < 1e-2,
-        "composer_text_color.b must be 1.0 (magenta)"
-    );
-
-    // composer_background must be yellow (r=1, g=1, b=0)
-    assert!(
-        (vt.composer_background.r - 1.0).abs() < 1e-2,
-        "composer_background.r must be 1.0 (yellow)"
-    );
-    assert!(
-        (vt.composer_background.g - 1.0).abs() < 1e-2,
-        "composer_background.g must be 1.0 (yellow)"
-    );
-    assert!(
-        vt.composer_background.b.abs() < 1e-2,
-        "composer_background.b must be 0.0 (yellow)"
-    );
-
-    // composer_font_size_px must be 18
-    assert!(
-        (vt.composer_font_size_px - 18.0).abs() < 1e-3,
-        "composer_font_size_px must be 18.0"
-    );
-    // NOTE: the composer at-capacity color is no longer mirrored on
-    // PortalVisualTokens (hud-9gyao); it is resolved + applied compositor-side
-    // (portal.composer.at_capacity_color -> composer_draft_base_color).
-}
-
-/// Verifies the §4.1 local-first draft contract at the projection layer: after
-/// `apply_draft_notification` delivers a state-stream update, the adapter caches
-/// the draft text + caret byte offset in its `ComposerDisplayState` immediately,
-/// with no remote roundtrip, and the next `render_portal_message` reflects the
-/// active-draft status.
-///
-/// Layering note (hud-f6zfa / hud-2zsbf): the live draft text + `▌` caret glyph
-/// are rendered exclusively by the compositor's bottom-pinned input strip
-/// (`composer_input_box` → `composer_display_text_blink`), which is the single
-/// source of truth for the draft echo. The portal NodeProto markdown deliberately
-/// does NOT embed the draft glyphs (embedding them there produced a second,
-/// misaligned composer copy mid-transcript). So this test asserts the caret at the
-/// layer that owns it now — the adapter's `ComposerDisplayState` (text + cursor),
-/// which the compositor renders verbatim — rather than scanning the NodeProto
-/// markdown for a `▌` that no longer belongs there. The composer status line is
-/// verified to flip `ready → composing` as the draft goes active.
-#[test]
-fn portal_node_proto_includes_draft_text_and_caret_after_notification() {
-    use std::collections::HashMap;
-    use tze_hud_projection::{
-        AdapterDraftNotification, resident_grpc::ResidentGrpcDraftCommandKind,
-    };
-
-    let empty: HashMap<String, String> = HashMap::new();
-    let part_tokens = resolve_portal_tokens(&empty);
-    let visual_tokens = portal_visual_tokens_from_part_tokens(&part_tokens);
-
-    let mut authority = PortalHub::default();
-    let expanded_state = build_expanded_state(&mut authority, "proj-draft-caret");
-
-    let fake_tile_id: Vec<u8> = vec![0xCE; 16];
-    let mut adapter = ResidentGrpcPortalAdapter::with_tokens(
-        ResidentGrpcPortalConfig::new(vec![0u8; 16]),
-        visual_tokens,
-    );
-    adapter.record_created_tile(fake_tile_id);
-
-    // Compose the caret string exactly as the compositor's bottom input strip
-    // does (`composer_display_text_blink`): insert the `▌` glyph at the cursor
-    // byte offset. This is the documented `ComposerDisplayState` contract, so the
-    // projection layer is verified against the same rendering the compositor
-    // applies verbatim, without reaching into the compositor's `pub(crate)` helper.
-    let caret_render = |display: &tze_hud_projection::resident_grpc::ComposerDisplayState| {
-        format!(
-            "{}▌{}",
-            &display.text[..display.cursor],
-            &display.text[display.cursor..]
-        )
-    };
-
-    // ── Baseline: no draft active → no cached composer state, status "ready" ──
-
-    assert!(
-        adapter.composer_display().is_none(),
-        "baseline: no draft notification delivered yet → composer_display() must be None"
-    );
-    let baseline_cmd = adapter
-        .render_portal_message(&expanded_state, 1, 0)
-        .expect("baseline render must succeed");
-    let baseline_content = extract_text_markdown_content(baseline_cmd);
-    assert!(
-        baseline_content.contains("composer: ready"),
-        "baseline (no draft) must show 'composer: ready'; got:\n{baseline_content}"
-    );
-    assert!(
-        !baseline_content.contains("▌"),
-        "the node markdown must never carry the caret glyph — the bottom input \
-         strip owns the draft echo (hud-f6zfa)"
-    );
-
-    // ── Deliver a draft notification ──
-
-    let notification = AdapterDraftNotification {
-        text: "hello".to_string(),
-        cursor: 5, // cursor at end
-        selection_anchor: 5,
-        at_capacity: false,
-        sequence: 1,
-    };
-    let cmd = adapter
-        .apply_draft_notification(&notification)
-        .expect("notification must be accepted");
-    assert_eq!(
-        cmd.kind,
-        ResidentGrpcDraftCommandKind::UpdateComposerDisplay
-    );
-
-    // ── After notification: draft state cached locally, caret at end ──
-
-    let display = adapter
-        .composer_display()
-        .expect("draft notification must populate composer_display() (§4.1 local-first)");
-    assert_eq!(
-        display.text, "hello",
-        "cached draft text must match notification"
-    );
-    assert_eq!(
-        display.cursor, 5,
-        "cached caret byte offset must match notification"
-    );
-    assert!(!display.at_capacity, "notification was not at capacity");
-    assert_eq!(
-        caret_render(display),
-        "hello▌",
-        "caret must render at the end of 'hello' from the cached cursor offset"
-    );
-
-    // The node markdown flips ready → composing (the draft glyphs live in the
-    // bottom strip, not here), and still never carries the caret glyph.
-    let draft_cmd = adapter
-        .render_portal_message(&expanded_state, 2, 0)
-        .expect("draft render must succeed");
-    let draft_content = extract_text_markdown_content(draft_cmd);
-    assert!(
-        draft_content.contains("composer: composing"),
-        "active draft must flip the composer status line to 'composing'; got:\n{draft_content}"
-    );
-    assert!(
-        !draft_content.contains("composer: ready"),
-        "active draft must replace the 'composer: ready' placeholder"
-    );
-    assert!(
-        !draft_content.contains("▌"),
-        "the node markdown must never carry the caret glyph (hud-f6zfa)"
-    );
-
-    // ── Verify caret is at mid-string cursor position ──
-
-    let mid_notification = AdapterDraftNotification {
-        text: "hello world".to_string(),
-        cursor: 5, // cursor after "hello"
-        selection_anchor: 5,
-        at_capacity: false,
-        sequence: 2,
-    };
-    adapter.apply_draft_notification(&mid_notification);
-
-    let mid_display = adapter
-        .composer_display()
-        .expect("mid-cursor notification must populate composer_display()");
-    assert_eq!(mid_display.text, "hello world");
-    assert_eq!(
-        mid_display.cursor, 5,
-        "caret byte offset must sit after 'hello'"
-    );
-    assert_eq!(
-        caret_render(mid_display),
-        "hello▌ world",
-        "caret must render between 'hello' and ' world' at byte offset 5"
-    );
-}
-
-/// Verifies that after a ProcessCancel command, the composer display resets to
-/// "composer: ready" (no draft active) in the next render.
-#[test]
-fn portal_node_proto_clears_composer_on_cancel() {
-    use std::collections::HashMap;
-    use tze_hud_projection::{AdapterDraftBatch, AdapterDraftCancel, AdapterDraftNotification};
-
-    let empty: HashMap<String, String> = HashMap::new();
-    let part_tokens = resolve_portal_tokens(&empty);
-    let visual_tokens = portal_visual_tokens_from_part_tokens(&part_tokens);
-
-    let mut authority = PortalHub::default();
-    let expanded_state = build_expanded_state(&mut authority, "proj-cancel-clear");
-
-    let fake_tile_id: Vec<u8> = vec![0xCC; 16];
-    let mut adapter = ResidentGrpcPortalAdapter::with_tokens(
-        ResidentGrpcPortalConfig::new(vec![0u8; 16]),
-        visual_tokens,
-    );
-    adapter.record_created_tile(fake_tile_id);
-
-    // Deliver a draft notification — composer shows draft text
-    let notification = AdapterDraftNotification {
-        text: "typed so far".to_string(),
-        cursor: 12,
-        selection_anchor: 12,
-        at_capacity: false,
-        sequence: 1,
-    };
-    adapter.apply_draft_notification(&notification);
-    assert!(
-        adapter.composer_display().is_some(),
-        "composer_display must be Some after notification"
-    );
-
-    // Send a cancel batch — composer display must clear
-    let mut batch = AdapterDraftBatch::new();
-    batch.record_cancel(AdapterDraftCancel { sequence: 2 });
-    adapter.consume_draft_batch(&batch);
-
-    assert!(
-        adapter.composer_display().is_none(),
-        "composer_display must be None after ProcessCancel"
-    );
-
-    // NodeProto after cancel must show "composer: ready"
-    let cmd = adapter
-        .render_portal_message(&expanded_state, 3, 0)
-        .expect("post-cancel render must succeed");
-    let content = extract_text_markdown_content(cmd);
-    assert!(
-        content.contains("composer: ready"),
-        "post-cancel render must show 'composer: ready'; got:\n{content}"
-    );
-}
-
-// ── Ambient per-turn timestamps (hud-g1ena.4) ────────────────────────────────
-
-/// A profile that enables per-turn timestamps and a sentinel timestamp color must
-/// (1) present the runtime-assigned wall-clock arrival stamp in the transcript
-/// body and (2) carry the token-resolved color as a zero-length sentinel run —
-/// all runs staying zero-length (the §6.1 Phase-1 sentinel invariant) — proving
-/// the token propagates end-to-end and the granularity is profile-governed.
 #[test]
 fn per_turn_timestamps_render_stamp_and_token_sentinel() {
-    use std::collections::HashMap;
-
-    let empty: HashMap<String, String> = HashMap::new();
-
-    // Profile: per-turn timestamps, sentinel pure-green timestamp color.
-    let mut overrides = HashMap::new();
-    overrides.insert(
-        PORTAL_TOKEN_TIMESTAMP_GRANULARITY.to_string(),
-        "per_turn".to_string(),
-    );
-    overrides.insert(
-        PORTAL_TOKEN_TIMESTAMP_COLOR.to_string(),
-        "#00FF00".to_string(), // pure green — r=0, g=1, b=0
-    );
-    let resolved = tze_hud_config::tokens::resolve_tokens(&empty, &overrides);
-    let visual_tokens = portal_visual_tokens_from_part_tokens(&resolve_portal_tokens(&resolved));
-
-    let mut authority = PortalHub::default();
-    let expanded_state = build_expanded_state(&mut authority, "proj-timestamps");
-
-    let mut adapter = ResidentGrpcPortalAdapter::with_tokens(
-        ResidentGrpcPortalConfig::new(vec![0u8; 16]),
-        visual_tokens,
-    );
-    adapter.record_created_tile(vec![0xDE; 16]);
-
-    let cmd = adapter
-        .render_portal_message(&expanded_state, 1, 0)
-        .expect("render must succeed after tile is recorded");
-    let (content, color_runs) = extract_text_markdown_with_runs(cmd);
-
-    // build_expanded_state appends its one turn at a small wall-clock time
-    // (µs since epoch), which formats to the 00:00 UTC minute; the stamp and its
-    // separator must be present in the transcript body.
-    assert!(
-        content.contains("00:00 · "),
-        "per-turn timestamp stamp must be present in the transcript body; got:\n{content}"
-    );
-
-    // Exactly one run carries the injected pure-green timestamp sentinel. Other
-    // ambient sentinels (e.g. the lifecycle accent for this Active state) share
-    // the zero-length span but a different color.
-    let is_timestamp_green = |run: &tze_hud_protocol::proto::TextColorRunProto| {
-        run.color
-            .as_ref()
-            .is_some_and(|c| c.g > 0.9 && c.r < 0.1 && c.b < 0.1)
-    };
-    let green_runs = color_runs.iter().filter(|r| is_timestamp_green(r)).count();
-    assert_eq!(
-        green_runs,
-        1,
-        "exactly one timestamp sentinel with the injected green token; got {green_runs} \
-         among {total} run(s): {color_runs:?}",
-        total = color_runs.len()
-    );
-
-    // §6.1 Phase-1 invariant: every published run is a zero-length sentinel.
-    assert!(
-        color_runs.iter().all(|r| r.start_byte >= r.end_byte),
-        "all color runs must be zero-length sentinels (no pixel runs): {color_runs:?}"
-    );
+    let mut view = build_expanded_state();
+    view.visible_transcript[0].appended_at_wall_us = 86_399_000_000;
+    view.visible_transcript.push(TranscriptUnit {
+        sequence: 2,
+        output_text: "next day".into(),
+        output_kind: OutputKind::Assistant,
+        expects_reply: false,
+        appended_at_wall_us: 86_400_000_000,
+    });
+    for (granularity, expected) in [
+        ("per_turn", "23:59 · assistant output"),
+        ("grouped", "23:59 · assistant output"),
+        ("off", "assistant output"),
+    ] {
+        let token = tokens(&[
+            ("portal.timestamp.granularity", granularity),
+            ("portal.timestamp.color", "#FF00FF"),
+        ]);
+        let rendered = render(&view, &token, DEFAULT_PORTAL_SIZE, 90_000_000_000);
+        let body = transcript(&rendered);
+        assert!(body.content.contains(expected));
+        if granularity == "off" {
+            assert!(!body.content.contains("23:59"));
+        } else {
+            assert!(body.content.contains("00:00 · next day"));
+            assert!(
+                body.color_runs.iter().any(|r| r.start_byte == 0
+                    && r.end_byte == 0
+                    && r.color == token.timestamp_color)
+            );
+        }
+    }
 }
 
-/// With the default profile (timestamps OFF), no stamp and no timestamp sentinel
-/// are emitted — the ambient default keeps the base surface calm.
 #[test]
-fn default_profile_renders_no_timestamps() {
-    use std::collections::HashMap;
-
-    let empty: HashMap<String, String> = HashMap::new();
-    let visual_tokens = portal_visual_tokens_from_part_tokens(&resolve_portal_tokens(&empty));
-
-    let mut authority = PortalHub::default();
-    let expanded_state = build_expanded_state(&mut authority, "proj-no-timestamps");
-
-    let mut adapter = ResidentGrpcPortalAdapter::with_tokens(
-        ResidentGrpcPortalConfig::new(vec![0u8; 16]),
-        visual_tokens,
-    );
-    adapter.record_created_tile(vec![0xAD; 16]);
-
-    let cmd = adapter
-        .render_portal_message(&expanded_state, 1, 0)
-        .expect("render must succeed after tile is recorded");
-    let content = extract_text_markdown_content(cmd);
-    assert!(
-        !content.contains("00:00 · "),
-        "default (Off) profile must not render a per-turn timestamp; got:\n{content}"
-    );
-}
-
-// ── Test helpers ──────────────────────────────────────────────────────────────
-
-/// Extract the `content` string from a `TextMarkdownNodeProto` inside a
-/// `ResidentGrpcPortalCommand`'s `ClientMessage` payload.
-fn extract_text_markdown_content(
-    cmd: tze_hud_projection::resident_grpc::ResidentGrpcPortalCommand,
-) -> String {
-    fn collect(node: &tze_hud_protocol::proto::NodeProto, output: &mut String) {
-        if let Some(tze_hud_protocol::proto::node_proto::Data::TextMarkdown(text)) =
-            node.data.as_ref()
-        {
-            if !output.is_empty() {
-                output.push('\n');
-            }
-            output.push_str(&text.content);
+fn resize_and_interaction_changes_keep_surface_and_nodes_in_sync() {
+    let mut view = build_expanded_state();
+    let tokens = PortalVisualTokens::default();
+    for size in [
+        DEFAULT_PORTAL_SIZE,
+        Size {
+            width: 180.0,
+            height: 140.0,
+        },
+        Size {
+            width: 900.0,
+            height: 600.0,
+        },
+    ] {
+        let rendered = render(&view, &tokens, size, 100);
+        assert_eq!(rendered.root.children.len(), rendered.children.len());
+        for (id, node) in rendered.root.children.iter().zip(&rendered.children) {
+            assert_eq!(*id, node.id);
         }
-        for child in &node.children {
-            collect(child, output);
-        }
+        let surface_composer = rendered
+            .surface
+            .parts
+            .iter()
+            .find(|p| p.kind == tze_hud_scene::PortalPartKind::Composer)
+            .unwrap();
+        assert_eq!(surface_composer.bounds, rendered.composer.unwrap().bounds);
+        let frame = rendered
+            .surface
+            .parts
+            .iter()
+            .find(|p| p.kind == tze_hud_scene::PortalPartKind::Frame)
+            .unwrap();
+        assert_eq!(
+            (frame.bounds.width, frame.bounds.height),
+            (size.width, size.height)
+        );
     }
-
-    let root = published_portal_root(cmd);
-    let mut output = String::new();
-    collect(&root, &mut output);
+    view.interaction_enabled = false;
+    let rendered = render(&view, &tokens, DEFAULT_PORTAL_SIZE, 100);
+    assert!(rendered.composer.is_none());
     assert!(
-        !output.is_empty(),
-        "published portal subtree must contain visible text"
+        !rendered
+            .surface
+            .parts
+            .iter()
+            .any(|p| p.kind == tze_hud_scene::PortalPartKind::Composer)
     );
-    output
-}
-
-/// Extract both the content string and color_runs from a published NodeProto.
-fn extract_text_markdown_with_runs(
-    cmd: tze_hud_projection::resident_grpc::ResidentGrpcPortalCommand,
-) -> (String, Vec<tze_hud_protocol::proto::TextColorRunProto>) {
-    let root = published_portal_root(cmd);
-    let transcript = find_transcript_node(&root)
-        .expect("published portal subtree must contain an OUTPUT transcript node");
-    (transcript.content.clone(), transcript.color_runs.clone())
-}
-
-fn published_portal_root(
-    cmd: tze_hud_projection::resident_grpc::ResidentGrpcPortalCommand,
-) -> tze_hud_protocol::proto::NodeProto {
-    use tze_hud_protocol::proto;
-    use tze_hud_protocol::proto::session as session_proto;
-
-    let batch = match cmd.message.payload.expect("render must produce payload") {
-        session_proto::client_message::Payload::MutationBatch(b) => b,
-        other => panic!("expected MutationBatch payload, got {other:?}"),
-    };
-    let publish = batch
-        .mutations
-        .into_iter()
-        .find_map(|m| match m.mutation {
-            Some(proto::mutation_proto::Mutation::PublishToTile(p)) => Some(p),
-            _ => None,
-        })
-        .expect("MutationBatch must contain a PublishToTile mutation");
-    publish.node.expect("PublishToTile must have a node")
-}
-
-fn find_transcript_node(
-    node: &tze_hud_protocol::proto::NodeProto,
-) -> Option<&tze_hud_protocol::proto::TextMarkdownNodeProto> {
-    if let Some(tze_hud_protocol::proto::node_proto::Data::TextMarkdown(text)) = node.data.as_ref()
-        && text.overflow == tze_hud_protocol::proto::TextOverflowProto::Ellipsis as i32
-    {
-        return Some(text);
-    }
-    node.children.iter().find_map(find_transcript_node)
+    assert!(
+        text_nodes(&rendered)
+            .iter()
+            .any(|t| t.content.contains("composer: unavailable"))
+    );
 }

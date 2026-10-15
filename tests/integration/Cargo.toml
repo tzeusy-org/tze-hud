@@ -112,7 +112,7 @@ tze_hud_input = { path = "../../crates/tze_hud_input", version = "0.1.0" }
 tze_hud_compositor = { path = "../../crates/tze_hud_compositor", version = "0.1.0" }
 tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0" }
 tze_hud_protocol = { path = "../../crates/tze_hud_protocol", version = "0.1.0" }
-tze_hud_projection = { path = "../../crates/tze_hud_projection", version = "0.1.0", features = ["resident-grpc"] }
+tze_hud_projection = { path = "../../crates/tze_hud_projection", version = "0.1.0" }
 tze_hud_config = { path = "../../crates/tze_hud_config", version = "0.1.0" }
 tze_hud_resource = { path = "../../crates/tze_hud_resource", version = "0.1.0" }
 tze_hud_telemetry = { path = "../../crates/tze_hud_telemetry", version = "0.1.0" }

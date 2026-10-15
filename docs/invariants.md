@@ -143,6 +143,14 @@ for those tasks to end, then clears.
   [`hand_edits_survive_panel_changes_and_reach_the_live_directory`](../crates/tze_hud_runtime/src/agent_store.rs);
   `tze_hud_config` [`edits_keep_comments_and_other_agents`](../crates/tze_hud_config/src/agents_file.rs)
 
+Portal rendering is native scene data. The renderer's fixed visual fixtures and
+integration token/composer checks preserve presentation independently of wire
+encoding: [`render_visual_goldens`](../crates/tze_hud_projection/src/render_goldens.rs),
+[`portal_node_uses_injected_visual_tokens`](../tests/integration/text_stream_portal_styling.rs),
+[`local_echo_does_not_depend_on_adapter_round_trip`](../tests/integration/text_stream_portal_composer.rs).
+The driver preserves the first-class surface and focusable composer in
+[`drain_declares_first_class_portal_surface_on_tile`](../crates/tze_hud_runtime/src/portal_projection_driver.rs).
+
 ## 4. Disconnect is not release
 
 A disconnected agent's leases become orphaned (badge shown, content kept) for
