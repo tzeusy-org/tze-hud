@@ -19,6 +19,7 @@ The repo ships a `justfile` that reproduces CI gates locally. Requires [just](ht
 ```bash
 just bootstrap       # install/report dev-host deps (idempotent; --check reports only)
 just build-windows   # cross-build tze_hud.exe (x86_64-pc-windows-gnu) from Linux/WSL
+just dev-run <dir> [host] # rebuild and hot-swap the running Windows dev HUD (docs/development/windows.md)
 just check           # cargo check (fast compilation gate)
 just fmt             # cargo fmt --check
 just fmt-fix         # cargo fmt (apply formatting)

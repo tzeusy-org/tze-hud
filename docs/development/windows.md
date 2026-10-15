@@ -417,6 +417,10 @@ the swap single-flight. A definitive pre-admission failure restores the old
 pathname; an uncertain restart or 45-second observation timeout retains the
 backup and journal for inspection. Do not blindly retry or delete another
 updater's `.old` file. There is no `taskkill`, install or elevation fallback.
+The lock (`.tze_hud-dev-run.lock`, holding the journal) and the receipt
+(`.tze_hud-dev-run.json`) sit beside the exe. After a retained-lock failure,
+compare `tze_hud.exe` and `tze_hud.old.exe` with the journal, fix them by hand,
+then delete the lock to allow the next run.
 
 Output includes `sha`, `channel`, `cpu_pct_2s`, executable hash and new process
 identity. A dirty rebuild at the same HEAD prints `sha_changed: false`; it does
