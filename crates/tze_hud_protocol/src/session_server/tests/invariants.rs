@@ -101,6 +101,7 @@ fn configure_lifetime_surfaces(scene: &mut SceneGraph) {
         contention_override: None,
         instance_name: "gauge".into(),
         current_params: Default::default(),
+        auto_clear_ms: None,
     });
 }
 

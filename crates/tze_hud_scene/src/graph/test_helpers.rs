@@ -103,6 +103,7 @@ pub(super) fn scene_with_gauge(contention: ContentionPolicy) -> (SceneGraph, Sce
                 WidgetParameterValue::Enum("info".to_string()),
             ),
         ]),
+        auto_clear_ms: None,
     });
 
     (scene, tab_id)
@@ -139,6 +140,7 @@ pub(super) fn scene_with_gauge_and_clock(
                 WidgetParameterValue::Enum("info".to_string()),
             ),
         ]),
+        auto_clear_ms: None,
     });
 
     (scene, tab_id, clock)

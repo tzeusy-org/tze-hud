@@ -66,6 +66,8 @@ default_tab = true
 # MCP widget_name: "main-gauge"
 # Parameters: level (f32 0–1), label (string), fill_color (color), severity (enum)
 # Position: left edge, vertically centered; narrow vertical meter clear of subtitles.
+# The control panel's Layout card rewrites an entry's geometry and
+# `auto_clear_ms` (each publication clears that long after it is published).
 # Widget sizes are fractions of the display: the compositor draws physical px,
 # so on the owner's 3840x2160 panel each widget is 1.5x its SVG viewBox
 # (matching tonal-glass's 1.5x tile classes). Gauge: 72x224 -> 108x336.

@@ -140,6 +140,7 @@ mod calibration {
             contention_override: None,
             instance_name: "gauge".to_string(),
             current_params: HashMap::from([("level".to_string(), WidgetParameterValue::F32(0.0))]),
+            auto_clear_ms: None,
         });
     }
 

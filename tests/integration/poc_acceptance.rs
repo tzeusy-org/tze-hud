@@ -1571,6 +1571,114 @@ async fn poc_panel_connect_prompt_pairs_an_agent() {
     assert!(!poc.hud.safe_mode_active());
 }
 
+/// Layout (T11, hud-vniri.7): a widget is moved by typing its box and its
+/// content limit is chosen, both live in the scene and saved into its own
+/// `[[tabs.widgets]]` entry with the owner's comments kept; a box off the
+/// display is refused and changes nothing.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn poc_panel_layout_moves_widgets_and_saves_their_entry() {
+    use tze_hud_compositor::PanelControl;
+    use tze_hud_scene::types::GeometryPolicy;
+    let dir = tempfile::tempdir().expect("scratch dir");
+    let config = dir.path().join("tze_hud.toml");
+    std::fs::write(&config, PRODUCTION_CONFIG).expect("config copy");
+    let mut cfg = runtime_config();
+    cfg.config_file_path = Some(config.display().to_string());
+    let mut poc = Poc::boot_from(cfg, None).await;
+    poc.open_panel().await;
+    let saved = || std::fs::read_to_string(&config).expect("config");
+    let row = "layout.main-gauge.geometry";
+
+    poc.wait_for("the gauge's box shows", |hud| {
+        hud.control_panel_row(row).is_some_and(|item| {
+            matches!(item.control, PanelControl::Value { ref text, .. } if text == "1.25%, 42.22% · 2.81×15.56%")
+        })
+    })
+    .await;
+    poc.click(row).await;
+    poc.hud.panel_type("95 10 10 10");
+    poc.hud.panel_press("Enter");
+    poc.wait_for("a box off the display is refused", |hud| {
+        hud.control_panel_row(row)
+            .and_then(|item| item.detail)
+            .is_some_and(|d| d.contains("fit on the display"))
+    })
+    .await;
+    assert_eq!(saved(), PRODUCTION_CONFIG, "nothing written");
+
+    poc.hud.panel_type("4 8 18 12");
+    poc.hud.panel_press("Enter");
+    poc.wait_for("the gauge moves", |hud| {
+        hud.widget_layout("main-gauge").is_some_and(|(g, _)| {
+            g == Some(GeometryPolicy::Relative {
+                x_pct: 0.04,
+                y_pct: 0.08,
+                width_pct: 0.18,
+                height_pct: 0.12,
+            })
+        })
+    })
+    .await;
+    poc.wait_for("and is saved", |_| saved().contains("x_pct      = 0.04"))
+        .await;
+    let out = saved();
+    assert!(
+        out.contains("# MCP widget_name: \"main-gauge\""),
+        "comments kept"
+    );
+    assert!(
+        out.contains("x_pct      = 0.4296875"),
+        "other widgets untouched"
+    );
+
+    poc.click("layout.main-gauge.clear").await;
+    poc.wait_for("clears after 5 s, live and saved", |hud| {
+        hud.widget_layout("main-gauge")
+            .is_some_and(|(_, ms)| ms == Some(5_000))
+            && saved().contains("auto_clear_ms = 5000")
+    })
+    .await;
+}
+
+/// Chords (T11 CP-10): a chord is typed in place, registered at once (the
+/// harness records Windows' registrar) and saved to `[runtime]`; a chord
+/// another role has is refused before Windows is asked.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn poc_panel_chords_rebind_live_and_save() {
+    use tze_hud_compositor::PanelControl;
+    let dir = tempfile::tempdir().expect("scratch dir");
+    let config = dir.path().join("tze_hud.toml");
+    std::fs::write(&config, PRODUCTION_CONFIG).expect("config copy");
+    let mut cfg = runtime_config();
+    cfg.config_file_path = Some(config.display().to_string());
+    let mut poc = Poc::boot_from(cfg, None).await;
+    poc.open_panel().await;
+    let saved = || std::fs::read_to_string(&config).expect("config");
+    let row = "input.panel_chord";
+
+    poc.click(row).await;
+    poc.hud.panel_type("Ctrl+Shift+F12");
+    poc.hud.panel_press("Enter");
+    poc.wait_for("a chord in use is refused", |hud| {
+        hud.control_panel_row(row)
+            .and_then(|item| item.detail)
+            .is_some_and(|d| d == "Ctrl+Shift+F12 is already the pause chord")
+    })
+    .await;
+    assert!(poc.hud.panel_effects().is_empty(), "Windows was not asked");
+
+    poc.hud.panel_type("ctrl+alt+f9");
+    poc.hud.panel_press("Enter");
+    poc.wait_for("the new chord is in and saved", |hud| {
+        hud.control_panel_row(row).is_some_and(|item| {
+            matches!(item.control, PanelControl::Value { ref text, .. } if text == "Ctrl+Alt+F9")
+        }) && saved().contains("panel_hotkey = \"Ctrl+Alt+F9\"")
+    })
+    .await;
+    assert_eq!(poc.hud.panel_effects(), ["rebind Panel Ctrl+Alt+F9"]);
+    assert!(saved().contains("# Open the control panel with agents running."));
+}
+
 /// CP-7 and CP-10 through the panel: a live setting applies at once and is
 /// saved to `[runtime]` with the owner's comments kept; a value a flag set is
 /// read-only and names the flag; a port is saved, marked "Restart to apply"

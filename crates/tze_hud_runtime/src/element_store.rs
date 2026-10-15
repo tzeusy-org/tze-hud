@@ -451,6 +451,7 @@ mod tests {
             contention_override: None,
             instance_name: "gauge-main".to_string(),
             current_params: HashMap::<String, WidgetParameterValue>::new(),
+            auto_clear_ms: None,
         });
 
         scene

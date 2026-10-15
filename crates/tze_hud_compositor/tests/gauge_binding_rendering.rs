@@ -560,6 +560,7 @@ mod contention {
             contention_override: None,
             instance_name: "gauge".to_string(),
             current_params,
+            auto_clear_ms: None,
         });
 
         (scene, tab_id)

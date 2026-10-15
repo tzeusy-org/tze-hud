@@ -1,6 +1,6 @@
 //! Persist control panel choices to `tze_hud.toml`: `[design_tokens]`
-//! (theme, fonts) and `[runtime]` (ports, fps, log level, zone outlines,
-//! chords).
+//! (theme, fonts), `[runtime]` (ports, fps, log level, zone outlines,
+//! chords) and `[[tabs.widgets]]` (layout, auto-clear).
 //!
 //! The only writer of `tze_hud.toml`. It edits just the named keys with
 //! `toml_edit`, so the owner's comments, key order, quoting and every other
@@ -133,38 +133,172 @@ fn apply_table(
     table_name: &str,
     edits: &[(&str, Option<Value>)],
 ) -> Result<String, ConfigWriteError> {
-    let mut doc: DocumentMut = src
-        .parse()
-        .map_err(|e: toml_edit::TomlError| ConfigWriteError::Parse(e.to_string()))?;
+    let mut doc = parse_document(src)?;
+    if edits.iter().any(|(_, v)| v.is_some()) || doc.contains_key(table_name) {
+        let item = doc
+            .entry(table_name)
+            .or_insert_with(|| Item::Table(Table::new()));
+        let table = item
+            .as_table_like_mut()
+            .ok_or_else(|| ConfigWriteError::Parse(format!("[{table_name}] is not a table")))?;
+        set_keys(table, edits);
+    }
+    Ok(keep_line_endings(src, doc.to_string()))
+}
+
+fn parse_document(src: &str) -> Result<DocumentMut, ConfigWriteError> {
+    src.parse()
+        .map_err(|e: toml_edit::TomlError| ConfigWriteError::Parse(e.to_string()))
+}
+
+/// Set (`Some`) or remove (`None`) keys of `table`, keeping the spacing and
+/// trailing comment of a value that is replaced.
+fn set_keys(table: &mut dyn toml_edit::TableLike, edits: &[(&str, Option<Value>)]) {
     for (key, value) in edits {
         match value {
             None => {
-                if let Some(t) = doc.get_mut(table_name).and_then(Item::as_table_mut) {
-                    t.remove(key);
-                }
+                table.remove(key);
             }
-            Some(value) => {
-                let item = doc
-                    .entry(table_name)
-                    .or_insert_with(|| Item::Table(Table::new()));
-                let table = item.as_table_mut().ok_or_else(|| {
-                    ConfigWriteError::Parse(format!("[{table_name}] is not a table"))
-                })?;
-                match table.get_mut(key).and_then(Item::as_value_mut) {
-                    // Keep the trailing comment / spacing of an existing value.
-                    Some(existing) => {
-                        let decor = existing.decor().clone();
-                        *existing = value.clone();
-                        *existing.decor_mut() = decor;
-                    }
-                    None => {
-                        table.insert(key, Item::Value(value.clone()));
-                    }
+            Some(value) => match table.get_mut(key).and_then(Item::as_value_mut) {
+                Some(existing) => {
+                    let decor = existing.decor().clone();
+                    *existing = value.clone();
+                    *existing.decor_mut() = decor;
                 }
-            }
+                None => {
+                    table.insert(key, Item::Value(value.clone()));
+                }
+            },
         }
     }
-    Ok(keep_line_endings(src, doc.to_string()))
+}
+
+/// A change to one `[[tabs.widgets]]` entry.
+#[derive(Clone, Debug, PartialEq)]
+pub enum WidgetUpdate {
+    /// Position and size as fractions of the display (0-1), written as
+    /// `geometry.x_pct` etc.; any pixel form there is removed.
+    Geometry {
+        x_pct: f32,
+        y_pct: f32,
+        width_pct: f32,
+        height_pct: f32,
+    },
+    /// `auto_clear_ms`; `None` removes it (no limit).
+    AutoClearMs(Option<u64>),
+}
+
+impl WidgetUpdate {
+    /// A geometry must be a box inside the display with a size above 0.
+    pub fn validate(&self) -> Result<(), ConfigWriteError> {
+        let Self::Geometry {
+            x_pct,
+            y_pct,
+            width_pct,
+            height_pct,
+        } = *self
+        else {
+            return Ok(());
+        };
+        let in_unit = |v: f32| (0.0..=1.0).contains(&v);
+        let fits = |start: f32, len: f32| len > 0.0 && start + len <= 1.0 + 1e-4;
+        if [x_pct, y_pct, width_pct, height_pct]
+            .into_iter()
+            .all(in_unit)
+            && fits(x_pct, width_pct)
+            && fits(y_pct, height_pct)
+        {
+            Ok(())
+        } else {
+            Err(ConfigWriteError::InvalidValue {
+                key: "tabs.widgets.geometry".into(),
+                expected: "a box inside the display (fractions 0-1, size above 0)".into(),
+                got: format!("{x_pct}, {y_pct}, {width_pct}x{height_pct}"),
+            })
+        }
+    }
+}
+
+/// A fraction rounded for the file (0.0125, not 0.012500000186).
+fn fraction(v: f32) -> Value {
+    Value::from((f64::from(v) * 1e6).round() / 1e6)
+}
+
+/// Apply `update` to the `[[tabs.widgets]]` entry named `instance` (its
+/// `instance_id`, or `widget_type` without one) on the `[[tabs]]` named
+/// `tab`.
+fn apply_widget(
+    src: &str,
+    tab: &str,
+    instance: &str,
+    update: &WidgetUpdate,
+) -> Result<String, ConfigWriteError> {
+    let mut doc = parse_document(src)?;
+    let missing = || ConfigWriteError::InvalidValue {
+        key: "tabs.widgets".into(),
+        expected: format!("a widget {instance:?} on tab {tab:?}"),
+        got: "none in the config file".into(),
+    };
+    let named = |t: &Table, key: &str| t.get(key).and_then(Item::as_str).map(str::to_owned);
+    let entry = doc
+        .get_mut("tabs")
+        .and_then(Item::as_array_of_tables_mut)
+        .and_then(|tabs| {
+            tabs.iter_mut()
+                .find(|t| named(t, "name").as_deref() == Some(tab))
+        })
+        .and_then(|t| t.get_mut("widgets"))
+        .and_then(Item::as_array_of_tables_mut)
+        .and_then(|widgets| {
+            widgets.iter_mut().find(|w| {
+                let id = named(w, "instance_id").filter(|id| !id.is_empty());
+                id.or_else(|| named(w, "widget_type")).as_deref() == Some(instance)
+            })
+        })
+        .ok_or_else(missing)?;
+    match *update {
+        WidgetUpdate::Geometry {
+            x_pct,
+            y_pct,
+            width_pct,
+            height_pct,
+        } => {
+            let geometry = entry
+                .entry("geometry")
+                .or_insert_with(|| Item::Value(Value::InlineTable(toml_edit::InlineTable::new())));
+            let table = geometry.as_table_like_mut().ok_or_else(|| {
+                ConfigWriteError::Parse("tabs.widgets.geometry is not a table".into())
+            })?;
+            set_keys(
+                table,
+                &[
+                    ("x", None),
+                    ("y", None),
+                    ("width", None),
+                    ("height", None),
+                    ("x_pct", Some(fraction(x_pct))),
+                    ("y_pct", Some(fraction(y_pct))),
+                    ("width_pct", Some(fraction(width_pct))),
+                    ("height_pct", Some(fraction(height_pct))),
+                ],
+            );
+        }
+        WidgetUpdate::AutoClearMs(ms) => {
+            let value = ms
+                .map(|ms| i64::try_from(ms).map(Value::from))
+                .transpose()
+                .map_err(|_| ConfigWriteError::InvalidValue {
+                    key: "tabs.widgets.auto_clear_ms".into(),
+                    expected: "a duration in ms".into(),
+                    got: format!("{ms:?}"),
+                })?;
+            set_keys(entry, &[("auto_clear_ms", value)]);
+        }
+    }
+    let out = doc.to_string();
+    // Defensive: the edited file must still deserialize.
+    toml::from_str::<RawConfig>(&out).map_err(|e| ConfigWriteError::Parse(e.to_string()))?;
+    Ok(keep_line_endings(src, out))
 }
 
 /// One `[runtime]` key the control panel writes; `None` removes the key, so
@@ -349,6 +483,24 @@ pub fn set_runtime(config_path: &Path, updates: &[RuntimeUpdate]) -> Result<(), 
     edit_with(
         config_path,
         |src| apply_runtime(src, updates),
+        |from, to| std::fs::rename(from, to),
+    )
+}
+
+/// Change one `[[tabs.widgets]]` entry (named by its tab and instance) in
+/// the config file at `config_path`, the same way [`set_runtime`] does:
+/// validated first, nothing written on error, comments and layout kept,
+/// replaced atomically.
+pub fn set_widget(
+    config_path: &Path,
+    tab: &str,
+    instance: &str,
+    update: &WidgetUpdate,
+) -> Result<(), ConfigWriteError> {
+    update.validate()?;
+    edit_with(
+        config_path,
+        |src| apply_widget(src, tab, instance, update),
         |from, to| std::fs::rename(from, to),
     )
 }
@@ -563,5 +715,92 @@ mod tests {
             ],
         )
         .unwrap();
+    }
+
+    /// A widget's layout and auto-clear are written into its own
+    /// `[[tabs.widgets]]` entry, in its geometry table's own form, leaving
+    /// every comment and every other entry as it was.
+    #[test]
+    fn widget_entries_are_edited_in_place() {
+        let src = "[[tabs]]\nname = \"Main\"\n\n# the gauge\n[[tabs.widgets]]\nwidget_type = \"gauge\"\ninstance_id = \"main-gauge\"\n\n[tabs.widgets.geometry]\nx_pct      = 0.0125 # left edge\ny_pct      = 0.4\nwidth_pct  = 0.03\nheight_pct = 0.15\n\n[[tabs.widgets]]\nwidget_type = \"gauge\"\ninstance_id = \"other\"\ngeometry = { x = 10.0, y = 20.0, width = 30.0, height = 40.0 }\n\n[[tabs.widgets]]\nwidget_type = \"progress-bar\"\n";
+        let geometry = WidgetUpdate::Geometry {
+            x_pct: 0.25,
+            y_pct: 0.5,
+            width_pct: 0.1,
+            height_pct: 0.2,
+        };
+        let out = apply_widget(src, "Main", "main-gauge", &geometry).unwrap();
+        assert!(out.contains("x_pct      = 0.25 # left edge"), "{out}");
+        assert!(out.contains("height_pct = 0.2\n") && out.contains("# the gauge"));
+        assert!(
+            out.contains("geometry = { x = 10.0"),
+            "other entries untouched"
+        );
+
+        // Pixel form is replaced; an entry with no geometry gains one.
+        let out = apply_widget(&out, "Main", "other", &geometry).unwrap();
+        assert!(
+            !out.contains("x = 10.0") && out.contains("width_pct = 0.1"),
+            "{out}"
+        );
+        let out = apply_widget(
+            &out,
+            "Main",
+            "progress-bar",
+            &WidgetUpdate::AutoClearMs(Some(30_000)),
+        )
+        .unwrap();
+        assert!(
+            out.ends_with("widget_type = \"progress-bar\"\nauto_clear_ms = 30000\n"),
+            "{out}"
+        );
+        let back = apply_widget(
+            &out,
+            "Main",
+            "progress-bar",
+            &WidgetUpdate::AutoClearMs(None),
+        )
+        .unwrap();
+        assert!(!back.contains("auto_clear_ms"));
+
+        // What was written loads as the same layout.
+        let raw: RawConfig = toml::from_str(&out).unwrap();
+        let g = raw.tabs[0].widgets[1].geometry.as_ref().unwrap();
+        assert_eq!((g.x_pct, g.width_pct, g.x), (Some(0.25), Some(0.1), None));
+
+        for (tab, instance) in [("Main", "nope"), ("Other", "main-gauge")] {
+            assert!(matches!(
+                apply_widget(src, tab, instance, &geometry),
+                Err(ConfigWriteError::InvalidValue { .. })
+            ));
+        }
+    }
+
+    /// A box outside the display is refused before the file is touched.
+    #[test]
+    fn widget_geometry_must_fit_the_display() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tze_hud.toml");
+        let src = "[[tabs]]\nname = \"Main\"\n[[tabs.widgets]]\nwidget_type = \"gauge\"\n";
+        std::fs::write(&path, src).unwrap();
+        let geometry = |x_pct, width_pct| WidgetUpdate::Geometry {
+            x_pct,
+            y_pct: 0.0,
+            width_pct,
+            height_pct: 0.5,
+        };
+        for bad in [geometry(0.9, 0.2), geometry(0.1, 0.0), geometry(-0.1, 0.2)] {
+            assert!(matches!(
+                set_widget(&path, "Main", "gauge", &bad),
+                Err(ConfigWriteError::InvalidValue { .. })
+            ));
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), src);
+        }
+        set_widget(&path, "Main", "gauge", &geometry(0.8, 0.2)).unwrap();
+        assert!(
+            std::fs::read_to_string(&path)
+                .unwrap()
+                .contains("x_pct = 0.8")
+        );
     }
 }

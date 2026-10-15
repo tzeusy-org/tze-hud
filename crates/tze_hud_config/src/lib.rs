@@ -32,7 +32,8 @@ pub use agents_file::{
 };
 pub use allow::{Grant, allow_to_permissions, validate_allow_entry, with_grant};
 pub use config_write::{
-    ConfigWriteError, RuntimeUpdate, TokenUpdate, set_design_tokens, set_runtime,
+    ConfigWriteError, RuntimeUpdate, TokenUpdate, WidgetUpdate, set_design_tokens, set_runtime,
+    set_widget,
 };
 pub use loader::{
     DEFAULT_GRPC_PORT, DEFAULT_MCP_PORT, LOG_LEVELS, MAX_FPS, TzeHudConfig, runtime_section,

@@ -297,6 +297,7 @@ pub fn build_widget_instance(
         contention_override,
         instance_name,
         current_params,
+        auto_clear_ms: raw_widget.auto_clear_ms.filter(|ms| *ms > 0),
     })
 }
 

@@ -89,6 +89,7 @@ fn scene_with(name: &str) -> SceneGraph {
         contention_override: None,
         instance_name: name.to_string(),
         current_params,
+        auto_clear_ms: None,
     });
     scene
 }
