@@ -377,77 +377,122 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
         }
     }
 
-    // ── Phase 6b: Adversarial cross-agent namespace security check ──────────
+    // ── Phase 6b: Malformed input and real cross-agent ownership checks ─────
     //
-    // Verify that the session server rejects a mutation from agent B (notifications)
-    // that targets a tile owned by agent A (weather).  This exercises the
-    // namespace-isolation enforcement path end-to-end via gRPC — not just the
-    // scene-graph layer in isolation.
-    //
-    // Agent B attempts to change the opacity of agent A's tile (tile_a1_id).  The
-    // session server fills `agent_namespace` from the authenticated session context
-    // (agent B's namespace), NOT from the client payload.  The scene graph's
-    // `update_tile_opacity` call then rejects the mutation because the tile's
-    // namespace does not match agent B's namespace.
-    //
-    // This replaces the previous `passed: true` hardcoded fiat (hud-59b32).
-    let cross_agent_mutation_rejected = {
-        let seq = agent_b.next_seq();
-        agent_b
-            .tx
-            .send(session_proto::ClientMessage {
-                sequence: seq,
-                timestamp_wall_us: now_wall_us(),
-                payload: Some(session_proto::client_message::Payload::MutationBatch(
-                    session_proto::MutationBatch {
-                        batch_id: uuid::Uuid::now_v7().as_bytes().to_vec(),
-                        lease_id: agent_b.lease_id_bytes.clone(),
-                        mutations: vec![proto::MutationProto {
-                            mutation: Some(proto::mutation_proto::Mutation::UpdateTileOpacity(
-                                proto::UpdateTileOpacityMutation {
-                                    // tile_a1_id belongs to agent A — agent B must not be allowed
-                                    // to mutate it.
-                                    tile_id: tile_a1_id.clone(),
-                                    opacity: 0.5,
-                                },
-                            )),
-                        }],
-                        timing: None,
-                    },
-                )),
-            })
-            .await
-            .is_ok()
-            && {
-                // Receive the MutationResult.
-                match agent_b.next_server_msg().await {
-                    Some(Ok(msg)) => {
-                        match &msg.payload {
-                            Some(session_proto::server_message::Payload::RequestResult(result)) => {
-                                // The mutation must be rejected (not accepted).
-                                let rejected = !result.ok;
-                                eprintln!(
-                                    "    Cross-agent mutation rejected={rejected} \
-                                     (error_code='{}', error_message='{}')",
-                                    result.code, result.hint
-                                );
-                                rejected
-                            }
-                            other => {
-                                eprintln!(
-                                    "    Cross-agent security check: unexpected payload: {other:?}"
-                                );
-                                false
-                            }
-                        }
-                    }
-                    other => {
-                        eprintln!("    Cross-agent security check: stream error: {other:?}");
-                        false
-                    }
-                }
-            }
+    // Agent B remains zone-only, so its empty lease is a malformed-input control.
+    // Present agent A's real ClaimTile lease in the second request: the valid
+    // payload reaches the scene's tile namespace check using B's session identity.
+    // This dev directory proves session-namespace isolation, not paired-PSK mapping.
+    assert!(
+        agent_b.lease_id_bytes.is_empty(),
+        "agent B remains zone-only"
+    );
+    let weather_lease = SceneId::from_uuid(uuid::Uuid::from_bytes(
+        agent_a.lease_id_bytes.as_slice().try_into()?,
+    ));
+    let weather_tile =
+        SceneId::from_uuid(uuid::Uuid::from_bytes(tile_a1_id.as_slice().try_into()?));
+    let foreign_tile_before = {
+        let state = runtime.shared_state().lock().await;
+        let scene = state.scene.lock().await;
+        let tile = &scene.tiles[&weather_tile];
+        assert_eq!(tile.namespace, agent_a.namespace);
+        assert_eq!(
+            tile.lease_id, weather_lease,
+            "use the target's issued lease"
+        );
+        let lease = &scene.leases[&weather_lease];
+        assert_eq!(lease.namespace, agent_a.namespace);
+        assert_eq!(lease.state, LeaseState::Active);
+        assert_ne!(
+            tile.opacity, 0.5,
+            "an accepted adversarial update would change opacity"
+        );
+        tile.clone()
     };
+
+    let (malformed_input_rejected, cross_agent_mutation_rejected) = {
+        let mut rejected = [false; 2];
+        for (index, (case, lease_id, expected_code)) in [
+            (
+                "empty lease",
+                agent_b.lease_id_bytes.clone(),
+                "INVALID_ARGUMENT",
+            ),
+            ("foreign owner", agent_a.lease_id_bytes.clone(), "NOT_HELD"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let seq = agent_b.next_seq();
+            let batch_id = uuid::Uuid::now_v7().as_bytes().to_vec();
+            agent_b
+                .tx
+                .send(session_proto::ClientMessage {
+                    sequence: seq,
+                    timestamp_wall_us: now_wall_us(),
+                    payload: Some(session_proto::client_message::Payload::MutationBatch(
+                        session_proto::MutationBatch {
+                            batch_id: batch_id.clone(),
+                            lease_id,
+                            mutations: vec![proto::MutationProto {
+                                mutation: Some(proto::mutation_proto::Mutation::UpdateTileOpacity(
+                                    proto::UpdateTileOpacityMutation {
+                                        tile_id: tile_a1_id.clone(),
+                                        opacity: 0.5,
+                                    },
+                                )),
+                            }],
+                            timing: None,
+                        },
+                    )),
+                })
+                .await?;
+            let msg = agent_b
+                .next_server_msg()
+                .await
+                .ok_or("no adversarial result")??;
+            let result = match msg.payload {
+                Some(session_proto::server_message::Payload::RequestResult(result)) => result,
+                other => {
+                    return Err(format!("{case}: expected RequestResult, got {other:?}").into());
+                }
+            };
+            eprintln!(
+                "    {case}: rejected={} (error_code='{}', error_message='{}')",
+                !result.ok, result.code, result.hint
+            );
+            assert_eq!(result.seq, seq, "{case}: correlate the request sequence");
+            assert_eq!(
+                result.batch_id, batch_id,
+                "{case}: correlate the fresh batch"
+            );
+            assert!(!result.ok, "{case}: mutation must be rejected");
+            assert_eq!(
+                result.code, expected_code,
+                "{case}: reject for the real reason"
+            );
+            assert!(result.ids.is_empty(), "{case}: no created IDs on rejection");
+            let foreign_tile_after = {
+                let state = runtime.shared_state().lock().await;
+                let scene = state.scene.lock().await;
+                let lease = &scene.leases[&weather_lease];
+                assert_eq!(lease.namespace, agent_a.namespace);
+                assert_eq!(lease.state, LeaseState::Active);
+                scene.tiles[&weather_tile].clone()
+            };
+            assert_eq!(
+                foreign_tile_after, foreign_tile_before,
+                "{case}: foreign tile unchanged"
+            );
+            rejected[index] = !result.ok;
+        }
+        (rejected[0], rejected[1])
+    };
+    assert!(
+        malformed_input_rejected,
+        "an empty lease must fail as malformed input"
+    );
 
     assert!(
         cross_agent_mutation_rejected,
@@ -618,15 +663,22 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
         },
         NamespaceIsolationCheck {
             description: "Cross-agent mutation rejected: session server derives namespace \
-                          from auth credential, not from client payload"
+                          from authenticated session identity, not from client payload"
                 .to_string(),
-            // Driven by the adversarial test in Phase 6b: agent-notifications sent an
-            // UpdateTileOpacity targeting a tile owned by agent-weather.  The server must
-            // reject it — if it accepted, namespace isolation is broken.
+            // Only the valid producer-issued lease case reaches the namespace check.
             passed: cross_agent_mutation_rejected,
             detail: format!(
-                "Agent-notifications attempted to mutate a tile owned by agent-weather. \
-                 Mutation rejected by session server: {cross_agent_mutation_rejected}",
+                "Agent-notifications presented agent-weather's issued lease for its existing tile. \
+                 NOT_HELD rejection and unchanged foreign tile: {cross_agent_mutation_rejected}",
+            ),
+        },
+        NamespaceIsolationCheck {
+            description: "Empty lease rejected as malformed input, separate from ownership"
+                .to_string(),
+            passed: malformed_input_rejected,
+            detail: format!(
+                "Zone-only agent-notifications sent an empty lease. \
+                 INVALID_ARGUMENT rejection and unchanged foreign tile: {malformed_input_rejected}",
             ),
         },
     ];
