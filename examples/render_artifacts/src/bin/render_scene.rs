@@ -463,6 +463,7 @@ fn widget_instance(bundle: &LoadedBundle, scene: &SceneGraph) -> Result<WidgetIn
             .iter()
             .map(|p| (p.name.clone(), p.default_value.clone()))
             .collect(),
+        auto_clear_ms: None,
     })
 }
 

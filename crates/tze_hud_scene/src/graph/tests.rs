@@ -1569,6 +1569,7 @@ fn test_contention_widget_max_publishers_rejected() {
             "value".to_string(),
             WidgetParameterValue::F32(0.0),
         )]),
+        auto_clear_ms: None,
     });
 
     let params =

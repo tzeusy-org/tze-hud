@@ -4,6 +4,7 @@
 mod agents;
 mod diagnostics;
 mod input;
+mod layout;
 mod network;
 mod system;
 mod visibility;
@@ -11,6 +12,7 @@ mod visibility;
 pub(crate) use agents::AgentsSection;
 pub(crate) use diagnostics::DiagnosticsSection;
 pub(crate) use input::InputSection;
+pub(crate) use layout::LayoutSection;
 pub(crate) use network::NetworkSection;
 pub(crate) use system::SystemSection;
 pub(crate) use visibility::VisibilitySection;

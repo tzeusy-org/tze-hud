@@ -510,6 +510,7 @@ async fn test_ephemeral_widget_no_publish_result() {
             contention_override: None,
             instance_name: "live-bar".to_string(),
             current_params: std::collections::HashMap::new(),
+            auto_clear_ms: None,
         });
     }
 

@@ -336,6 +336,7 @@ fn widget_registry_register_and_retrieve_instance() {
         contention_override: None,
         instance_name: "cpu-gauge".to_string(),
         current_params: Default::default(),
+        auto_clear_ms: None,
     };
     scene.widget_registry.register_instance(instance);
 
@@ -874,6 +875,7 @@ fn widget_registry_snapshot_includes_all_types_and_instances() {
         contention_override: None,
         instance_name: "mem-gauge".to_string(),
         current_params: Default::default(),
+        auto_clear_ms: None,
     });
 
     let snapshot = scene.widget_registry.snapshot();
@@ -1523,6 +1525,7 @@ fn clear_publications_for_lease_removes_only_that_leases_widget_pubs() {
         contention_override: None,
         instance_name: "mem-gauge".to_string(),
         current_params: Default::default(),
+        auto_clear_ms: None,
     });
 
     // Publish as "agent.a" to both widgets
@@ -1665,4 +1668,35 @@ fn clear_widget_via_mutation_batch() {
         "agent.a's publication should be cleared"
     );
     assert_eq!(remaining[0].publisher_namespace, "agent.b");
+}
+
+/// The owner's auto-clear limit clears a publication that has no expiry of its
+/// own, applies to what is showing when it is set, and never extends an
+/// earlier agent expiry.
+#[test]
+fn widget_auto_clear_caps_each_publication() {
+    let (mut scene, _tab, clock) = scene_with_gauge_and_clock(ContentionPolicy::LatestWins);
+    let level = |v| HashMap::from([("level".to_string(), WidgetParameterValue::F32(v))]);
+    scene
+        .publish_to_widget("gauge", level(0.5), "agent.test", None, 0, None)
+        .unwrap();
+    assert_eq!(scene.next_publication_expiry_wall_us(), None);
+
+    let version = scene.version;
+    assert!(scene.set_widget_auto_clear("gauge", Some(5_000)));
+    assert!(scene.version > version, "the scheduler re-reads the expiry");
+    assert_eq!(scene.next_publication_expiry_wall_us(), Some(6_000_000));
+    clock.advance(4_999);
+    assert_eq!(scene.drain_expired_widget_publications(), 0);
+    clock.advance(1);
+    assert_eq!(scene.drain_expired_widget_publications(), 1);
+
+    // An agent expiry sooner than the limit still wins.
+    scene
+        .publish_to_widget("gauge", level(0.7), "agent.test", None, 0, Some(7_000_000))
+        .unwrap();
+    assert_eq!(scene.next_publication_expiry_wall_us(), Some(7_000_000));
+    assert!(!scene.set_widget_auto_clear("missing", Some(1)));
+    assert!(scene.set_widget_auto_clear("gauge", None));
+    assert_eq!(scene.next_publication_expiry_wall_us(), Some(7_000_000));
 }

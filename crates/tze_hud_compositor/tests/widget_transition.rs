@@ -92,6 +92,7 @@ impl Rig {
             contention_override: None,
             instance_name: GAUGE.to_string(),
             current_params: HashMap::new(),
+            auto_clear_ms: None,
         });
         let mut rig = Rig {
             compositor,

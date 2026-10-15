@@ -406,7 +406,20 @@ impl HeadlessEventLoopHarness {
                 Arc::clone(&state.safe_mode_atomic),
                 render_wake.clone(),
             ),
-            chords: runtime_context.chords,
+            // Windows' registrar, as a record: every rebind takes.
+            chords: {
+                let effects = Arc::clone(&effects);
+                crate::shell::control_panel::chords::ChordControl::new(
+                    runtime_context.chords,
+                    Some(Arc::new(move |role, hotkey| {
+                        effects
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .push(format!("rebind {role:?} {hotkey}"));
+                        Ok(())
+                    })),
+                )
+            },
             pairing: pairing.clone(),
             connect: pairing.clone().map(|pairing| {
                 let clipboard = Arc::clone(&clipboard);
@@ -914,6 +927,19 @@ impl HeadlessEventLoopHarness {
                     region.bounds.y + region.bounds.height / 2.0,
                 )
             })
+    }
+
+    /// Widget instance `name`'s geometry override and auto-clear limit.
+    pub fn widget_layout(
+        &self,
+        name: &str,
+    ) -> Option<(Option<tze_hud_scene::types::GeometryPolicy>, Option<u64>)> {
+        let scene = self.scene();
+        scene
+            .widget_registry
+            .instances
+            .get(name)
+            .map(|i| (i.geometry_override, i.auto_clear_ms))
     }
 
     /// Number of publications currently shown in zone `zone`.

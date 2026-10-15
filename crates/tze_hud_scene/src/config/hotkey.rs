@@ -211,6 +211,14 @@ impl HudChords {
         }
     }
 
+    pub fn set(&mut self, role: ChordRole, hotkey: Hotkey) {
+        match role {
+            ChordRole::Pause => self.pause = hotkey,
+            ChordRole::Panel => self.panel = hotkey,
+            ChordRole::Pairing => self.pairing = hotkey,
+        }
+    }
+
     /// The role whose chord is `hotkey`, if any.
     pub fn role_of(&self, hotkey: &Hotkey) -> Option<ChordRole> {
         ChordRole::ALL.into_iter().find(|r| self.get(*r) == *hotkey)

@@ -87,6 +87,7 @@ fn scene(clock: &TestClock) -> SceneGraph {
             ("level".into(), WidgetParameterValue::F32(0.0)),
             ("label".into(), WidgetParameterValue::String(String::new())),
         ]),
+        auto_clear_ms: None,
     });
     scene
 }
@@ -937,6 +938,92 @@ async fn mcp_lease_is_reused_across_publishes() {
 }
 
 // ── Widgets ──────────────────────────────────────────────────────────────────
+
+/// The owner's "Clears after" limit is what agents are told: a durable
+/// publish, a hold until cleared and `hud_surfaces` all report it, since a
+/// hold cannot outlast it.
+#[tokio::test]
+async fn widget_auto_clear_limit_is_reported_to_agents() {
+    let (server, clock) = server();
+    assert!(
+        server
+            .scene
+            .lock()
+            .await
+            .set_widget_auto_clear("gauge", Some(30_000))
+    );
+    let v = call(
+        &server,
+        "hud_publish",
+        json!({"surface": "widget:gauge", "params": {"level": 0.5}}),
+    )
+    .await;
+    assert_eq!(v, json!({"ok": true, "expires_in_ms": 30_000}));
+    clock.advance(10_000);
+    let v = call(
+        &server,
+        "hud_hold",
+        json!({"surface": "widget:gauge", "ttl_ms": 0}),
+    )
+    .await;
+    assert_eq!(
+        v,
+        json!({"ok": true, "expires_in_ms": 20_000}),
+        "a hold cannot outlast it"
+    );
+    let v = call(
+        &server,
+        "hud_hold",
+        json!({"surface": "widget:gauge", "ttl_ms": 5_000}),
+    )
+    .await;
+    assert_eq!(
+        v,
+        json!({"ok": true, "expires_in_ms": 5_000}),
+        "a shorter one stands"
+    );
+    let surfaces = call(&server, "hud_surfaces", json!({})).await;
+    let gauge = surfaces["surfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["s"] == "widget:gauge")
+        .unwrap()
+        .clone();
+    assert_eq!(gauge["expires_in_ms"], 5_000);
+}
+
+/// A keyed publish reports its own expiry, not a sibling key's.
+#[tokio::test]
+async fn keyed_widget_publish_reports_its_own_expiry() {
+    let (server, _clock) = server();
+    {
+        let mut scene = server.scene.lock().await;
+        let gauge = scene
+            .widget_registry
+            .instances
+            .values_mut()
+            .find(|i| i.instance_name == "gauge")
+            .unwrap();
+        gauge.contention_override = Some(ContentionPolicy::MergeByKey { max_keys: 4 });
+    }
+    let publish = |key: &'static str, ttl: Option<u64>| {
+        let mut args = json!({"surface": "widget:gauge", "params": {"level": 0.5}, "key": key});
+        if let Some(ttl) = ttl {
+            args["ttl_ms"] = json!(ttl);
+        }
+        call(&server, "hud_publish", args)
+    };
+    assert_eq!(
+        publish("a", Some(60_000)).await,
+        json!({"ok": true, "expires_in_ms": 60_000})
+    );
+    assert_eq!(
+        publish("b", Some(5_000)).await,
+        json!({"ok": true, "expires_in_ms": 5_000})
+    );
+    assert_eq!(publish("c", None).await, json!({"ok": true}), "durable");
+}
 
 #[tokio::test]
 async fn widget_publish_hold_clear() {

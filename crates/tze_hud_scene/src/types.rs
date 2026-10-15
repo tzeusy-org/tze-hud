@@ -2406,6 +2406,11 @@ pub struct WidgetInstance {
     pub instance_name: std::string::String,
     /// Current effective parameter values (HashMap for runtime use).
     pub current_params: HashMap<std::string::String, WidgetParameterValue>,
+    /// The owner's limit on how long a publication stays up (`[[tabs.widgets]]
+    /// auto_clear_ms`, or the control panel): each one clears this long after
+    /// it was published, or sooner if the agent asked. `None`: no limit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auto_clear_ms: Option<u64>,
 }
 
 /// A recorded widget publication (the third level of the widget ontology).
@@ -3539,6 +3544,7 @@ mod tests {
             contention_override: None,
             instance_name: "main".to_string(),
             current_params: HashMap::new(),
+            auto_clear_ms: None,
         })
         .expect("serialize widget instance");
         value
@@ -3656,6 +3662,7 @@ mod tests {
             contention_override: None,
             instance_name: "gauge-main".to_string(),
             current_params: HashMap::new(),
+            auto_clear_ms: None,
         });
 
         let user_override = GeometryPolicy::Relative {

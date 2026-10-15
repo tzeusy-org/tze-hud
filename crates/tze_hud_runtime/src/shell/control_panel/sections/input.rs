@@ -1,22 +1,42 @@
 //! Input: the HUD's global chords and whether Windows registered them (the
-//! same facts as `/admin/status`). Read-only until live rebinding lands.
+//! same facts as `/admin/status`). A chord is typed in place: Windows takes
+//! the new one before letting the old one go, so a refused chord leaves the
+//! old one working; it is then saved to `[runtime]`.
 
 use tze_hud_compositor::{PanelBadge, PanelTone};
-use tze_hud_scene::config::{ChordRole, HudChords};
+use tze_hud_config::RuntimeUpdate;
+use tze_hud_scene::config::{ChordRole, Hotkey};
 
+use super::super::chords::ChordControl;
 use super::super::row::{BoxFuture, Control, Edit, Row, Section};
+use super::super::runtime::ConfigWriter;
 use crate::operator::status::{HotkeyStatus, hotkey};
 
 pub(crate) struct InputSection {
-    chords: HudChords,
+    chords: ChordControl,
     /// Pairing is available (the MCP port is on); without it the pairing
     /// chord is not registered and not listed.
     pairing: bool,
+    /// Saves a changed chord; `None`: no config file, it lasts the session.
+    save: Option<ConfigWriter>,
 }
 
 impl InputSection {
-    pub(crate) fn new(chords: HudChords, pairing: bool) -> Self {
-        Self { chords, pairing }
+    pub(crate) fn new(chords: ChordControl, pairing: bool, save: Option<ConfigWriter>) -> Self {
+        Self {
+            chords,
+            pairing,
+            save,
+        }
+    }
+
+    fn role_of(row: &str) -> Option<ChordRole> {
+        Some(match row {
+            "input.pause_chord" => ChordRole::Pause,
+            "input.panel_chord" => ChordRole::Panel,
+            "input.pairing_chord" => ChordRole::Pairing,
+            _ => return None,
+        })
     }
 }
 
@@ -74,23 +94,42 @@ impl Section for InputSection {
                         HotkeyStatus::Failed { reason, .. } => format!("{does} · {reason}"),
                         _ => does.to_owned(),
                     };
-                    Row::new(
-                        id,
-                        label,
-                        Control::ReadOnly {
-                            text: self.chords.get(role).to_string(),
-                            mono: true,
-                        },
-                    )
-                    .detail(detail)
-                    .keywords(keywords)
-                    .badge(registration_badge(&status))
+                    let text = self.chords.get().get(role).to_string();
+                    let control = if self.chords.rebind.is_some() {
+                        Control::Field { text }
+                    } else {
+                        Control::ReadOnly { text, mono: true }
+                    };
+                    Row::new(id, label, control)
+                        .detail(detail)
+                        .keywords(keywords)
+                        .badge(registration_badge(&status))
                 })
                 .collect()
         })
     }
 
     fn apply<'a>(&'a self, row: &'a str, edit: Edit) -> BoxFuture<'a, Result<(), String>> {
-        Box::pin(async move { Err(format!("{row} is read-only ({edit:?})")) })
+        Box::pin(async move {
+            let (Some(role), Edit::Text(text)) = (Self::role_of(row), &edit) else {
+                return match edit {
+                    // Enter without typing: nothing to change.
+                    Edit::Activate => Ok(()),
+                    _ => Err(format!("{row} does not support {edit:?}")),
+                };
+            };
+            let new = Hotkey::parse(text.trim())
+                .map_err(|e| format!("Type a chord like Ctrl+Shift+F9: {e}"))?;
+            let chords = self.chords.clone();
+            tokio::task::spawn_blocking(move || chords.rebind(role, new))
+                .await
+                .map_err(|e| e.to_string())??;
+            tracing::info!(?role, chord = %new, "control panel: chord changed");
+            let Some(save) = &self.save else {
+                return Ok(());
+            };
+            save(&[RuntimeUpdate::Hotkey(role, Some(new.to_string()))])
+                .map_err(|e| format!("Works until restart; not saved: {e}"))
+        })
     }
 }

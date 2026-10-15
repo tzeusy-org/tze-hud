@@ -281,6 +281,7 @@ mod tests {
             contention_override: None,
             instance_name: "main-status".to_string(),
             current_params: HashMap::new(),
+            auto_clear_ms: None,
         });
         scene
     }
