@@ -39,22 +39,36 @@ fn unit(text: &str, at: u64) -> TranscriptUnit {
 }
 fn snapshot(node: &proto::NodeProto, result: &mut String) {
     use std::fmt::Write;
+    let color = |c: proto::Rgba| [c.r, c.g, c.b, c.a];
+    let rect = |r: proto::Rect| [r.x, r.y, r.width, r.height];
     match node.data.as_ref().unwrap() {
         proto::node_proto::Data::TextMarkdown(text) => {
+            let runs: Vec<_> = text
+                .color_runs
+                .iter()
+                .map(|r| (r.start_byte, r.end_byte, color(r.color.unwrap())))
+                .collect();
             writeln!(
                 result,
                 "text {:?} bounds {:?} font {:?} colour {:?} background {:?} runs {:?}",
                 text.content,
-                text.bounds,
+                rect(text.bounds.unwrap()),
                 text.font_size_px,
-                text.color,
-                text.background,
-                text.color_runs
+                color(text.color.unwrap()),
+                text.background.map(color),
+                runs
             )
             .unwrap();
         }
         proto::node_proto::Data::SolidColor(solid) => {
-            writeln!(result, "solid {:?}", solid).unwrap();
+            writeln!(
+                result,
+                "solid {:?} {:?} {:?}",
+                color(solid.color.unwrap()),
+                rect(solid.bounds.unwrap()),
+                solid.radius
+            )
+            .unwrap();
         }
         other => panic!("unexpected visual {other:?}"),
     }
@@ -146,7 +160,8 @@ fn render_visual_goldens() {
                 Mutation::SetTileLifecycleAccent(accent) => {
                     actual.push_str(&format!(
                         "accent {:?} {:?}\n",
-                        accent.color, accent.width_px
+                        accent.color.map(|c| [c.r, c.g, c.b, c.a]),
+                        accent.width_px
                     ));
                 }
                 Mutation::SetTileUnreadCount(unread) => {
