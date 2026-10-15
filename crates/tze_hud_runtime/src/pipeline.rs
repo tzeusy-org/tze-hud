@@ -177,7 +177,26 @@ impl Default for FramePipeline {
 /// expiries; the caller forwards them to sessions after releasing the scene
 /// lock.
 pub fn sweep_timed_scene_state(scene: &mut SceneGraph) -> Vec<tze_hud_scene::types::LeaseExpiry> {
+    // Diagnostic work is opt-in; normal sweeps allocate no extra metadata.
+    let scheduled = tracing::enabled!(target: "tze_hud_delay_diagnostic", tracing::Level::DEBUG)
+        .then(|| {
+            scene
+                .scheduled_batches
+                .iter()
+                .map(|s| (s.batch.batch_id, s.present_at_wall_us))
+                .collect::<std::collections::HashMap<_, _>>()
+        });
     for late in scene.apply_due_batches() {
+        if let Some(present_at) = scheduled.as_ref().and_then(|s| s.get(&late.batch_id)) {
+            tracing::debug!(
+                target: "tze_hud_delay_diagnostic",
+                event = "scheduled_activation",
+                present_at_wall_us = present_at,
+                applied_at_wall_us = scene.now_wall_us(),
+                scene_version = scene.version,
+                accepted = late.error.is_none(),
+            );
+        }
         if let Some(err) = late.error {
             tracing::warn!(
                 batch_id = %late.batch_id,

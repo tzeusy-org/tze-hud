@@ -545,7 +545,95 @@ def check_notification_ttl(smoke: Smoke) -> None:
     print(f"ok  notification ttl_ms={ttl_ms} expired unattended after {waited:.1f}s")
 
 
-def check_delay(smoke: Smoke) -> None:
+def write_delay_evidence(directory: Path, evidence: dict) -> None:
+    """Persist already-observed frames after the original witness and cleanup."""
+    directory.mkdir(parents=True, exist_ok=True)
+    manifest = {key: value for key, value in evidence.items() if key != "captures"}
+    manifest["captures"] = {}
+    for name, capture in evidence["captures"].items():
+        metadata = {key: value for key, value in capture.items() if key != "png"}
+        if capture.get("decoded"):
+            filename = name + ".png"
+            (directory / filename).write_bytes(capture["png"])
+            metadata["file"] = filename
+        manifest["captures"][name] = metadata
+    baseline, late = (evidence["captures"].get(name, {}) for name in ("baseline", "after-due"))
+    if baseline.get("decoded") and late.get("decoded"):
+        width, height, before = decode_png_rgba(baseline["png"])
+        w2, h2, after = decode_png_rgba(late["png"])
+        if (width, height) == (w2, h2):
+            bounds, deltas = None, {}
+            for i in range(0, len(before), 4):
+                delta = max(abs(a - b) for a, b in zip(before[i:i + 4], after[i:i + 4]))
+                if delta:
+                    x, y = (i // 4) % width, (i // 4) // width
+                    bounds = ([x, y, x, y] if bounds is None else
+                              [min(bounds[0], x), min(bounds[1], y), max(bounds[2], x), max(bounds[3], y)])
+                    deltas[delta] = deltas.get(delta, 0) + 1
+            manifest["pixel_delta"] = {"bounds": bounds,
+                                       "max_channel_delta_counts": deltas}
+    (directory / "delay.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+
+
+def write_delay_trace(directory: Path, log_path: Path) -> None:
+    """Keep only the dedicated numeric trace, never arbitrary HUD log payloads."""
+    events = []
+    for line in log_path.read_text(errors="replace").splitlines():
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict) or event.get("target") != "tze_hud_delay_diagnostic":
+            continue
+        fields = event.get("fields", {})
+        if not isinstance(fields, dict):
+            continue
+        numeric_fields = {"present_at_wall_us", "applied_at_wall_us", "scene_version", "accepted", "success",
+                          "is_subtitle", "frame", "duration_ms", "from_opacity", "target_opacity",
+                          "active_publications", "opacity", "transition_active", "transition_elapsed_us",
+                          "transition_duration_ms"}
+        safe = {key: value for key, value in fields.items()
+                if (key in numeric_fields and isinstance(value, (int, float, bool)))
+                or (key == "event" and isinstance(value, str) and re.fullmatch(r"[a-z_]+", value))}
+        timestamp = event.get("timestamp")
+        if not isinstance(timestamp, str) or not re.fullmatch(r"[0-9T:.Z+\-]+", timestamp):
+            timestamp = None
+        events.append({"timestamp": timestamp, "fields": safe})
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "runtime-timing.json").write_text(json.dumps(events, indent=2) + "\n", encoding="utf-8")
+
+
+def check_delay(smoke: Smoke, diagnostics: Path | None = None) -> None:
+    evidence = None
+    if diagnostics is not None:
+        anchor_start = time.perf_counter()
+        wall_time_ns = time.time_ns()
+        evidence = {"schema": 1, "minimum_changed_pixels": MIN_CHANGED_PIXELS, "captures": {},
+                    "clock_anchor": {"perf_counter_before": anchor_start, "wall_time_ns": wall_time_ns,
+                                     "perf_counter_after": time.perf_counter()},
+                    "provenance": {key: os.environ.get(key) for key in
+                                   ("GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_WORKFLOW")}}
+    try:
+        _check_delay(smoke, evidence)
+    except Exception as error:
+        if evidence is not None:
+            evidence.update(outcome="failure", failure_class=type(error).__name__)
+        raise
+    else:
+        if evidence is not None:
+            evidence["outcome"] = "success"
+    finally:
+        if evidence is not None:
+            try:
+                write_delay_evidence(diagnostics, evidence)
+            except OSError:
+                # Artifact I/O must not replace the original witness failure.
+                print("FAIL delayed smoke evidence write (OSError)", file=sys.stderr)
+                if evidence["outcome"] == "success":
+                    raise AssertionError("delayed smoke evidence unavailable") from None
+
+
+def _check_delay(smoke: Smoke, evidence: dict | None) -> None:
     """Capture absence before due and presence after due without a second publish.
 
     Screenshots force an offscreen render, so this does not prove an autonomous
@@ -554,9 +642,9 @@ def check_delay(smoke: Smoke) -> None:
     zone = next(s["s"] for s in surfaces_of(smoke) if s.get("accepts") == "text")
     smoke.ok("hud_clear", {"surface": zone})  # earlier steps may still hold this zone
     assert not is_held(surfaces_of(smoke), zone), f"{zone} still held after hud_clear"
-    warm, _, _ = capture_frame(smoke)
+    warm, _, _ = capture_frame(smoke, evidence=evidence, name="warm")
     time.sleep(POLL_S)  # Let earlier publication fades settle at the existing cadence.
-    baseline, _, _ = capture_frame(smoke)
+    baseline, _, _ = capture_frame(smoke, evidence=evidence, name="baseline")
     assert baseline[:2] == warm[:2], "screenshot dimensions changed during baseline"
     assert baseline[2] == warm[2], "delay baseline is not stable after hud_clear"
     width, height, before = baseline
@@ -572,7 +660,10 @@ def check_delay(smoke: Smoke) -> None:
         # Processing occurred between the request and its acknowledgement. Use
         # both bounds; a capture spanning the earliest due time proves no absence.
         earliest_due, latest_due = sent + delay_ms / 1000, accepted + delay_ms / 1000
-        early, _, early_finished = capture_frame(smoke)
+        if evidence is not None:
+            evidence.update(delay_ms=delay_ms, ttl_ms=20_000, sent=sent, accepted=accepted,
+                            earliest_due=earliest_due, latest_due=latest_due)
+        early, _, early_finished = capture_frame(smoke, evidence=evidence, name="before-due")
         assert early_finished < earliest_due, "capture did not finish before the earliest due time"
         assert early[:2] == (width, height), "screenshot dimensions changed before due"
         assert early[2] == before, f"{zone} rendered content before its {delay_ms} ms delay"
@@ -580,11 +671,13 @@ def check_delay(smoke: Smoke) -> None:
         remaining = latest_due - time.perf_counter()
         if remaining > 0:
             time.sleep(remaining)
-        late, late_started, late_finished = capture_frame(smoke)
+        late, late_started, late_finished = capture_frame(smoke, evidence=evidence, name="after-due")
         assert late_started >= latest_due, "capture started before the latest due time"
         assert late[:2] == (width, height), "screenshot dimensions changed after due"
         after = late[2]
         changed = sum(1 for i in range(0, len(after), 4) if after[i : i + 4] != before[i : i + 4])
+        if evidence is not None:
+            evidence["changed_pixels"] = changed
         assert changed >= MIN_CHANGED_PIXELS, (
             f"{zone} delayed content changed only {changed} pixels after due (need {MIN_CHANGED_PIXELS})"
         )
@@ -593,7 +686,7 @@ def check_delay(smoke: Smoke) -> None:
         smoke.ok("hud_clear", {"surface": zone})
 
     assert not is_held(surfaces_of(smoke), zone), f"{zone} still held after delayed content was cleared"
-    restored, _, _ = capture_frame(smoke)
+    restored, _, _ = capture_frame(smoke, evidence=evidence, name="restored")
     assert restored[:2] == (width, height), "screenshot dimensions changed after clear"
     assert restored[2] == before, "delay capture did not return to its baseline after hud_clear"
     print(
@@ -1045,7 +1138,7 @@ def post_capture_comment(output: Path) -> int:
         return 1
 
 
-def capture_frame(smoke: Smoke) -> tuple[tuple[int, int, bytes], float, float]:
+def capture_frame(smoke: Smoke, *, evidence: dict | None = None, name: str = "") -> tuple[tuple[int, int, bytes], float, float]:
     """Decode one own-frame capture, bounded by high-resolution monotonic times.
 
     The response timestamp precedes PNG decoding: CPU decode time is not part
@@ -1053,10 +1146,17 @@ def capture_frame(smoke: Smoke) -> tuple[tuple[int, int, bytes], float, float]:
     Capture failures propagate; this helper never retries unavailable evidence.
     """
     started = time.perf_counter()
+    if evidence is not None:
+        evidence["captures"][name] = {"requested_at": started}
     status, ctype, body = smoke.get_bytes("/admin/screenshot")
     finished = time.perf_counter()
+    if evidence is not None:
+        evidence["captures"][name]["responded_at"] = finished
     assert status == 200 and ctype == "image/png", f"/admin/screenshot: {status} {ctype}"
-    return decode_png_rgba(body), started, finished
+    frame = decode_png_rgba(body)
+    if evidence is not None:
+        evidence["captures"][name].update(decoded=True, width=frame[0], height=frame[1], png=body)
+    return frame, started, finished
 
 
 def check_screenshot(smoke: Smoke) -> None:
@@ -1302,6 +1402,7 @@ def main(argv=None) -> int:
     mode.add_argument("--url", help="authorized MUTATING smoke on an idle dedicated paired HUD agent; no process ownership")
     ap.add_argument("--config", type=Path)
     ap.add_argument("--captures", type=Path, help="owned WARP theme/fixture frames and informational main diff")
+    ap.add_argument("--diagnostics", type=Path, help="owned boot-smoke original delayed frames and numeric timing evidence")
     ap.add_argument("--capture-comment", type=Path, help="comment on changed captures after successful artifact upload")
     ap.add_argument("--poc-demo", type=Path, help="poc_demo.exe: the resident-tile orphan/reclaim step needs it")
     ap.add_argument("--quiescent-with-content", action="store_true", help="run only the held-content idle measurement")
@@ -1311,15 +1412,17 @@ def main(argv=None) -> int:
     ap.add_argument("--settle-s", type=float, default=3, help="seconds the HUD must stay up after checks")
     args = ap.parse_args(argv)
     if args.capture_comment is not None:
-        if args.exe or args.url or args.config or args.captures or args.quiescent_with_content:
+        if args.exe or args.url or args.config or args.captures or args.diagnostics or args.quiescent_with_content:
             ap.error("--capture-comment cannot launch or attach to a HUD")
         return post_capture_comment(args.capture_comment)
     if args.url:
-        if args.config is not None or args.poc_demo is not None or args.captures or args.quiescent_with_content:
+        if args.config is not None or args.poc_demo is not None or args.captures or args.diagnostics or args.quiescent_with_content:
             ap.error("--url cannot use owned --config, --poc-demo, --captures or --quiescent-with-content")
         return run_borrowed(args.url, args.settle_s)
     if args.exe is None or args.config is None:
         ap.error("--exe and --config are required for owned smoke/captures")
+    if args.diagnostics is not None and (args.captures is not None or args.quiescent_with_content):
+        ap.error("--diagnostics is only for the owned boot smoke")
     if args.captures is not None:
         return run_captures(args)
     if args.quiescent_with_content:
@@ -1351,7 +1454,7 @@ def main(argv=None) -> int:
         print("ok  HUD still running after the checks")
         check_widget(smoke)
         check_notification_ttl(smoke)
-        check_delay(smoke)
+        check_delay(smoke, args.diagnostics)
         check_tile_orphan(smoke, args.poc_demo)
         check_pair(smoke, args.exe)
         restarted_pid = check_restart(smoke, proc)
@@ -1373,6 +1476,11 @@ def main(argv=None) -> int:
             kill_pid(restarted_pid)
         print(f"--- HUD log ({log_path}) ---")
         print(log_path.read_text(errors="replace")[-20_000:])
+        if args.diagnostics is not None:
+            try:
+                write_delay_trace(args.diagnostics, log_path)
+            except OSError:
+                print("FAIL delayed smoke trace write (OSError)", file=sys.stderr)
         # Durable log (shared by the old and restarted instance).
         base = os.environ.get("LOCALAPPDATA") if sys.platform == "win32" else None
         durable = (Path(base) if base else Path(tempfile.gettempdir())) / "tze_hud" / "logs" / "tze_hud.log"

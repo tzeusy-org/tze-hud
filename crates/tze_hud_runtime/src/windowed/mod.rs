@@ -1916,7 +1916,18 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         // waiter below wakes this loop to retry.
                         let capture_job = capture_inbox.next_live().map(|req| {
                             let (w, h) = surface_for_compositor.size();
-                            (req, compositor.build_windowed_frame(&mut scene, w, h))
+                            tracing::debug!(
+                                target: "tze_hud_delay_diagnostic",
+                                event = "capture_build_begin",
+                                scene_version = scene.version,
+                            );
+                            let build = compositor.build_windowed_frame(&mut scene, w, h);
+                            tracing::debug!(
+                                target: "tze_hud_delay_diagnostic",
+                                event = "capture_build_end",
+                                scene_version = scene.version,
+                            );
+                            (req, build)
                         });
 
                         if !plan.full {
@@ -2213,6 +2224,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                     req.display.clone().unwrap_or_default(),
                                 )),
                             };
+                            tracing::debug!(
+                                target: "tze_hud_delay_diagnostic",
+                                event = "capture_render_end",
+                                success = result.is_ok(),
+                            );
                             let _ = req.reply.send(result);
                         }
                     } else {

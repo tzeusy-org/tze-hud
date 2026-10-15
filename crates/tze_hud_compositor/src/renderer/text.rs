@@ -473,6 +473,22 @@ impl super::Compositor {
                     .map(|s| s.current_opacity_at(now))
                     .unwrap_or(1.0)
             };
+            if tracing::enabled!(target: "tze_hud_delay_diagnostic", tracing::Level::DEBUG) {
+                let transition = self.zone_animation_states.get(zone_name);
+                tracing::debug!(
+                    target: "tze_hud_delay_diagnostic",
+                    event = "zone_text_sample",
+                    is_subtitle = zone_name == "subtitle",
+                    frame = self.frame_number,
+                    scene_version = scene.version,
+                    active_publications = publishes.len(),
+                    opacity = anim_opacity,
+                    transition_active = transition.is_some(),
+                    transition_elapsed_us = transition
+                        .map(|s| now.saturating_duration_since(s.transition_start).as_micros() as u64),
+                    transition_duration_ms = transition.map(|s| s.duration_ms),
+                );
+            }
 
             // Emit TextItems based on contention policy.
             //

@@ -90,6 +90,16 @@ impl Compositor {
                                     ZoneAnimationState::fade_in_at(ms, now)
                                 };
                             new_state.easing = self.zone_motion.enter;
+                            tracing::debug!(
+                                target: "tze_hud_delay_diagnostic",
+                                event = "zone_fade_started",
+                                is_subtitle = zone_name == "subtitle",
+                                frame = self.frame_number,
+                                scene_version = scene.version,
+                                duration_ms = ms,
+                                from_opacity = new_state.from_opacity,
+                                target_opacity = new_state.target_opacity,
+                            );
                             self.zone_animation_states
                                 .insert(zone_name.clone(), new_state);
                         } else {

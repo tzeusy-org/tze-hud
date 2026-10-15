@@ -280,6 +280,24 @@ python scripts/ci/windows_smoke.py --exe target/release-dev/tze_hud.exe --poc-de
 python scripts/ci/windows_install_smoke.py --exe target/release-dev/tze_hud.exe
 ```
 
+The boot smoke accepts `--diagnostics <directory>`. CI uploads that directory as
+`windows-smoke-diagnostics` even when the first check fails. `delay.json` records
+the original delayed-content result, source/run provenance and precise capture
+bounds; PNGs preserve the successful screenshot responses already requested by
+the check. Invalid/unavailable responses remain metadata only. Files are written
+after the original witness and cleanup, without another publication, capture,
+wait or retry. These are offscreen renders on request, not proof of autonomous
+on-screen presentation.
+
+For activation/fade evidence, set `TZE_HUD_LOG_JSON=1` and include
+`tze_hud_delay_diagnostic=debug` in `TZE_HUD_LOG`. `runtime-timing.json` retains
+only numeric timing/state fields from that target: scheduled application,
+screenshot build boundaries, fade starts and text opacity samples. The wall-clock
+anchor in `delay.json` relates Python capture bounds to the runtime timestamps;
+fade elapsed times use the renderer's monotonic clock. Tracing can perturb a
+timing-sensitive observation. Retain each run's first result and report that
+limit; a later pass alone does not explain an earlier undercount.
+
 The informational `Quiescent with content` step uses a directly owned fullscreen
 HUD process. Measurement startup narrows its existing allowed affinity to two
 CPUs before runtime/window/compositor initialization and fails closed if that
