@@ -399,10 +399,14 @@ async fn test_element_repositioned_not_delivered_without_scene_topology_subscrip
     .await
     .unwrap();
     let mut response_stream = client.session(stream).await.unwrap().into_inner();
-    // Drain handshake baseline.
-    response_stream.next().await;
-    response_stream.next().await;
-    response_stream.next().await;
+    assert!(matches!(
+        next_server_msg(&mut response_stream).await.payload,
+        Some(ServerPayload::SessionEstablished(_))
+    ));
+    assert!(matches!(
+        next_server_msg(&mut response_stream).await.payload,
+        Some(ServerPayload::DegradationNotice(_))
+    ));
 
     tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
 
@@ -503,10 +507,14 @@ async fn handshake_telemetry(
     .unwrap();
 
     let mut response_stream = client.session(stream).await.unwrap().into_inner();
-    // Drain the three-message handshake baseline.
-    response_stream.next().await;
-    response_stream.next().await;
-    response_stream.next().await;
+    assert!(matches!(
+        next_server_msg(&mut response_stream).await.payload,
+        Some(ServerPayload::SessionEstablished(_))
+    ));
+    assert!(matches!(
+        next_server_msg(&mut response_stream).await.payload,
+        Some(ServerPayload::DegradationNotice(_))
+    ));
     (tx, response_stream)
 }
 
