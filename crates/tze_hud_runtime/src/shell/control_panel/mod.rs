@@ -86,6 +86,8 @@ pub(crate) enum PanelEvent {
     /// Re-read the sections (sent once a second while open, so facts that
     /// change outside the panel, like an agent connecting, show up).
     Refresh,
+    /// The compositor laid out a row the panel asked to scroll into view.
+    Geometry,
     /// A slow edit finished (sent by the panel task itself).
     Applied {
         row: String,
@@ -104,6 +106,8 @@ struct Shared {
     /// The geometry the compositor last drew, with its layout generation.
     geometry: RwLock<Option<(u64, ControlPanelGeometry)>>,
     geometry_generation: AtomicU64,
+    /// The panel waits for new geometry to scroll a row into view.
+    wants_geometry: AtomicBool,
     events: mpsc::UnboundedSender<PanelEvent>,
     render_wake: RenderWakeNotifier,
     /// Wakes the winit loop when new geometry arrives, so the overlay's
@@ -210,6 +214,9 @@ impl ControlPanelHandle {
             .write()
             .unwrap_or_else(|e| e.into_inner()) = Some((generation, geometry()));
         self.shared.main_wake.notify();
+        if self.shared.wants_geometry.swap(false, Ordering::AcqRel) {
+            self.send(PanelEvent::Geometry);
+        }
     }
 
     fn geometry(&self) -> Option<ControlPanelGeometry> {
@@ -363,6 +370,7 @@ pub(crate) fn spawn_control_panel(
             open: AtomicBool::new(false),
             geometry: RwLock::new(None),
             geometry_generation: AtomicU64::new(0),
+            wants_geometry: AtomicBool::new(false),
             events: tx,
             render_wake: deps.render_wake.clone(),
             main_wake: deps.main_wake.clone(),
@@ -495,6 +503,12 @@ impl PanelTask {
                         self.refresh().await;
                         Vec::new()
                     }
+                    PanelEvent::Geometry => {
+                        if let Some(g) = &geometry {
+                            state::reveal_focus(open, g);
+                        }
+                        Vec::new()
+                    }
                     PanelEvent::Chord(_) | PanelEvent::Applied { .. } => Vec::new(),
                 }
             }
@@ -506,6 +520,32 @@ impl PanelTask {
             }
         }
         self.rebuild().await;
+        // Focus left a previewing row (a key, a click, or a search moved
+        // it): back to the saved option.
+        if let Some(row) = self
+            .open
+            .as_mut()
+            .and_then(|open| open.left_preview(&self.nav))
+        {
+            self.apply(&row, Edit::Revert).await;
+            self.rebuild().await;
+        }
+        if self.open.as_ref().is_some_and(|open| open.reveal) {
+            // Ask first, then look: geometry drawn in between still wakes us.
+            self.handle
+                .shared
+                .wants_geometry
+                .store(true, Ordering::Release);
+            if let (Some(open), Some(g)) = (self.open.as_mut(), self.handle.geometry())
+                && state::reveal_focus(open, &g)
+            {
+                self.handle
+                    .shared
+                    .wants_geometry
+                    .store(false, Ordering::Release);
+                self.rebuild().await;
+            }
+        }
     }
 
     async fn on_chord(&mut self, role: ChordRole) {
@@ -525,7 +565,7 @@ impl PanelTask {
                 }
                 self.refresh().await;
             }
-            PanelChange::Close => self.open = None,
+            PanelChange::Close => self.end_preview().await,
             PanelChange::Keep => {}
         }
         if outcome.connect {
@@ -574,8 +614,15 @@ impl PanelTask {
 
     /// Close the panel; closing always resumes agents.
     async fn close(&mut self) {
-        self.open = None;
+        self.end_preview().await;
         self.deps.pause.set(false).await;
+    }
+
+    /// Forget the open panel, reverting a preview it was showing.
+    async fn end_preview(&mut self) {
+        if let Some(row) = self.open.take().and_then(|open| open.preview) {
+            self.apply(&row, Edit::Revert).await;
+        }
     }
 
     async fn apply(&mut self, row: &str, edit: Edit) {
@@ -704,11 +751,15 @@ impl PanelTask {
                     paused: self.deps.pause.is_paused(),
                     state_line: summaries.join(" · "),
                     pause_chord: self.deps.chords.get().pause.to_string(),
-                    connect: open
-                        .connect
-                        .as_ref()
-                        .zip(self.deps.connect.as_ref())
-                        .map(|(page, control)| control.view(page)),
+                    connect: open.connect.as_ref().zip(self.deps.connect.as_ref()).map(
+                        |(page, control)| {
+                            let remote_row = rows
+                                .iter()
+                                .flat_map(|s| &s.rows)
+                                .any(|r| r.id == sections::NetworkSection::REMOTE);
+                            control.view(page, remote_row)
+                        },
+                    ),
                 };
                 let (model, nav) = state::build(open, &rows, &ctx);
                 self.nav = nav;

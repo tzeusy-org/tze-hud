@@ -398,6 +398,9 @@ pub fn runtime_section(src: &str) -> Option<crate::raw::RawRuntime> {
 /// Log levels `[runtime] log_level` accepts.
 pub const LOG_LEVELS: [&str; 5] = ["error", "warn", "info", "debug", "trace"];
 
+/// The log file's level when nothing sets one.
+pub const DEFAULT_LOG_LEVEL: &str = "info";
+
 /// The MCP port when nothing sets one.
 pub const DEFAULT_MCP_PORT: u16 = 9090;
 /// The gRPC port when nothing sets one.

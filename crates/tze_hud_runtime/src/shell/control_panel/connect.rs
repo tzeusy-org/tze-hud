@@ -175,8 +175,10 @@ pub(crate) fn prompt(
     lines
 }
 
-/// What the Network row and the banners say about reachability.
-fn network(reach: &Reach) -> (String, PanelTone, Option<String>) {
+/// What the Network row and the banners say about reachability, and
+/// whether Network › Remote agents can fix it (`remote_row`: the panel has
+/// that row).
+fn network(reach: &Reach, remote_row: bool) -> (String, PanelTone, Option<String>, bool) {
     if !reach.tailnet {
         return (
             "This PC only · Tailscale isn't up".to_owned(),
@@ -186,9 +188,20 @@ fn network(reach: &Reach) -> (String, PanelTone, Option<String>) {
                  The prompt says so and uses this PC's address."
                     .to_owned(),
             ),
+            false,
         );
     }
     match &reach.firewall {
+        Some(TailnetInbound::Blocked { .. }) if remote_row => (
+            "Tailnet only · Windows Firewall blocks it · Enter opens Remote agents".to_owned(),
+            PanelTone::Caution,
+            Some(
+                "Windows Firewall blocks tailnet agents. Until it allows them the prompt \
+                 won't work: Network below opens Remote agents."
+                    .to_owned(),
+            ),
+            true,
+        ),
         Some(TailnetInbound::Blocked { .. }) => (
             "Tailnet only · Windows Firewall blocks it".to_owned(),
             PanelTone::Caution,
@@ -196,21 +209,25 @@ fn network(reach: &Reach) -> (String, PanelTone, Option<String>) {
                 "Windows Firewall blocks tailnet agents: {}. Until then the prompt won't work.",
                 crate::firewall::FIX_HINT
             )),
+            false,
         ),
         Some(TailnetInbound::Unknown { .. }) => (
             "Tailnet only · firewall state unknown".to_owned(),
             PanelTone::Muted,
             None,
+            false,
         ),
         Some(_) => (
             "Tailnet only · firewall allows it".to_owned(),
             PanelTone::Success,
             None,
+            false,
         ),
         None => (
             "Tailnet only · checking the firewall…".to_owned(),
             PanelTone::Muted,
             None,
+            false,
         ),
     }
 }
@@ -308,7 +325,9 @@ impl ConnectControl {
     /// The card as it stands now. Takes only short locks (the pairing
     /// state, the agent cache) and reads the interface list at most every
     /// few seconds; the firewall check runs in the background.
-    pub(crate) fn view(&self, page: &ConnectPage) -> ConnectView {
+    /// `remote_row`: the panel has Network › Remote agents, so a blocked
+    /// firewall links to it.
+    pub(crate) fn view(&self, page: &ConnectPage, remote_row: bool) -> ConnectView {
         let reach = self.pairing.reach();
         let code = self.pairing.code();
         let name = if page.name.is_empty() {
@@ -336,7 +355,7 @@ impl ConnectControl {
                 Duration::ZERO,
             ),
         };
-        let (network_text, network_tone, banner) = network(&reach);
+        let (network_text, network_tone, banner, fixable) = network(&reach, remote_row);
         let banners: Vec<String> = banner.into_iter().collect();
         let rows = vec![
             Row::new(
@@ -368,9 +387,13 @@ impl ConnectControl {
             Row::new(
                 NETWORK,
                 "Network",
-                Control::ReadOnly {
-                    text: String::new(),
-                    mono: false,
+                if fixable {
+                    Control::Action { confirm: None }
+                } else {
+                    Control::ReadOnly {
+                        text: String::new(),
+                        mono: false,
+                    }
                 },
             )
             .detail(network_text)
@@ -582,22 +605,36 @@ mod tests {
     #[test]
     fn network_row_and_banners_follow_reachability() {
         let mut r = reach("100.64.0.1:9090", true);
-        assert_eq!(network(&r).1, PanelTone::Success);
+        assert_eq!(network(&r, true).1, PanelTone::Success);
         r.firewall = None;
-        assert!(network(&r).0.contains("checking"));
+        assert!(network(&r, true).0.contains("checking"));
         r.firewall = Some(TailnetInbound::Blocked {
             reason: crate::firewall::BlockReason::NoAllowRule,
             rule: None,
         });
-        let (_, tone, banner) = network(&r);
+        // Without Network › Remote agents the banner names the helper.
+        let (_, tone, banner, fixable) = network(&r, false);
         assert_eq!(tone, PanelTone::Caution);
+        assert!(!fixable);
+        let banner = banner.unwrap();
+        assert!(banner.contains("Windows Firewall blocks tailnet agents"));
+        assert!(banner.contains(crate::firewall::FIX_HINT));
+        // With it, the Network row links there.
+        let (text, _, banner, fixable) = network(&r, true);
+        assert!(fixable);
+        assert!(text.contains("Enter opens Remote agents"));
         assert!(
             banner
                 .unwrap()
-                .contains("Windows Firewall blocks tailnet agents")
+                .contains("Network below opens Remote agents")
         );
         let down = reach("127.0.0.1:9090", false);
-        assert!(network(&down).2.unwrap().starts_with("Tailscale isn't up"));
+        let (_, _, banner, fixable) = network(&down, true);
+        assert!(banner.unwrap().starts_with("Tailscale isn't up"));
+        assert!(
+            !fixable,
+            "the firewall is not what blocks a PC without Tailscale"
+        );
     }
 
     /// Copy replaces a spent, expired or nearly expired code before it
@@ -652,12 +689,19 @@ mod tests {
         // Spent by an agent pairing.
         let body = serde_json::json!({"agent": page.name, "code": renewed}).to_string();
         assert_eq!(rig.pairing.pair(body.as_bytes()).status, 200);
-        assert!(control.view(&page).status.unwrap().0.contains("paired"));
+        assert!(
+            control
+                .view(&page, false)
+                .status
+                .unwrap()
+                .0
+                .contains("paired")
+        );
         control.copy(&mut page).await;
         assert_ne!(code_in(&copied.lock().unwrap()[3]), renewed);
 
         // Wrong guesses replace the copied code: the card says so.
-        let status = |page: &ConnectPage| control.view(page).status.unwrap().0;
+        let status = |page: &ConnectPage| control.view(page, false).status.unwrap().0;
         assert!(status(&page).starts_with("Copied."));
         for _ in 0..crate::pairing::MAX_BAD_ATTEMPTS {
             rig.pairing.pair(br#"{"agent":"x","code":"000000"}"#);
@@ -682,7 +726,7 @@ mod tests {
         };
         let mut page = control.open();
         control.copy(&mut page).await;
-        let (text, tone) = control.view(&page).status.unwrap();
+        let (text, tone) = control.view(&page, false).status.unwrap();
         assert_eq!(text, "Couldn't copy: clipboard is busy");
         assert_eq!(tone, PanelTone::Danger);
     }

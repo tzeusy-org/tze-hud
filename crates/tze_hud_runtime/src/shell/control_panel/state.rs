@@ -12,6 +12,7 @@ use tze_hud_scene::config::ChordRole;
 use super::connect::{self, ConnectPage, ConnectView};
 use super::row::{Control, Edit, Row};
 use super::search::{Haystack, score};
+use super::sections::NetworkSection;
 
 // ─── Chords ──────────────────────────────────────────────────────────────────
 
@@ -161,6 +162,12 @@ pub(crate) struct Open {
     /// A field row being typed into: (row id, text so far). Enter submits
     /// it as [`Edit::Text`]; Esc or moving away drops it.
     pub editing: Option<(String, String)>,
+    /// A previewing choice showing an option it has not saved: Enter or a
+    /// click keeps it; Esc, moving away or closing reverts it.
+    pub preview: Option<String>,
+    /// Scroll the focused row into view once the compositor has laid it out
+    /// (after a jump to a row the current layout does not hold).
+    pub reveal: bool,
 }
 
 impl Open {
@@ -177,7 +184,27 @@ impl Open {
             focus_first_result: false,
             connect: None,
             editing: None,
+            preview: None,
+            reveal: false,
         }
+    }
+
+    /// The row id behind the focus (a row, or a tile's row).
+    fn focused_row<'a>(&'a self, nav: &'a Nav) -> Option<&'a str> {
+        match &self.focus {
+            PanelFocus::Row(id) => Some(id),
+            PanelFocus::Tile(i) => nav.tiles.get(*i).map(String::as_str),
+            PanelFocus::Search => None,
+        }
+    }
+
+    /// The preview to revert because focus left its row, if any.
+    pub(crate) fn left_preview(&mut self, nav: &Nav) -> Option<String> {
+        let row = self.preview.as_deref()?;
+        if self.focused_row(nav) == Some(row) {
+            return None;
+        }
+        self.preview.take()
     }
 }
 
@@ -215,6 +242,10 @@ pub(crate) struct Nav {
     pub rows: Vec<(String, Control)>,
     /// Index into `rows` where each listed section starts (sections view).
     pub sections: Vec<usize>,
+    /// Rows that offer `Reset` (from every section, listed or not).
+    pub resettable: Vec<String>,
+    /// Choice rows whose keyboard steps preview first.
+    pub previews: Vec<String>,
 }
 
 impl Nav {
@@ -281,7 +312,12 @@ fn item_for(row: &Row, open: &Open, context: Option<&str>) -> PanelItem {
             PanelTone::Normal
         },
         status: row.status,
+        reset: row.reset,
     };
+    if open.preview.as_deref() == Some(&row.id) {
+        item.detail = Some("Preview · Enter keeps it · Esc restores".to_owned());
+        item.detail_tone = PanelTone::Normal;
+    }
     if let Some((id, message)) = &open.error
         && *id == row.id
     {
@@ -344,6 +380,14 @@ pub(crate) fn build(
 ) -> (ControlPanelModel, Nav) {
     let find = |id: &str| sections.iter().flat_map(|s| &s.rows).find(|r| r.id == id);
     let mut nav = Nav::default();
+    for row in sections.iter().flat_map(|s| &s.rows) {
+        if row.reset {
+            nav.resettable.push(row.id.clone());
+        }
+        if row.previews {
+            nav.previews.push(row.id.clone());
+        }
+    }
 
     let query = open.query.trim();
     if query.is_empty()
@@ -463,6 +507,12 @@ pub(crate) fn build(
     if !nav.sections.is_empty() && query.is_empty() {
         hints.push("Alt+1–9 jump".into());
     }
+    if open
+        .focused_row(&nav)
+        .is_some_and(|id| nav.resettable.iter().any(|r| r == id))
+    {
+        hints.push("Del reset".into());
+    }
     let hint_end = if !query.is_empty() {
         "Esc clear search"
     } else if ctx.paused {
@@ -556,6 +606,8 @@ pub(crate) enum PanelKey {
     Space,
     Escape,
     Backspace,
+    /// Delete: reset the focused row.
+    Delete,
     Home,
     End,
     PageUp,
@@ -587,6 +639,8 @@ fn gesture_for(part: PanelPart) -> Gesture {
         PanelPart::Body => Gesture::Activate,
         PanelPart::Decrement => Gesture::Left,
         PanelPart::Increment => Gesture::Right,
+        // Handled before gestures: a reset is not a step.
+        PanelPart::Reset => Gesture::Activate,
     }
 }
 
@@ -619,13 +673,38 @@ fn edit_for(control: &Control, gesture: Gesture) -> Option<Edit> {
     }
 }
 
+/// How an input reached the panel: a pointer click keeps a previewing
+/// choice at once, a key previews it first.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum By {
+    Key,
+    Pointer,
+}
+
 /// Run `gesture` on row `id`, asking once first for a confirmed action.
-fn act(open: &mut Open, nav: &Nav, id: &str, gesture: Gesture) -> Vec<Effect> {
+fn act(open: &mut Open, nav: &Nav, id: &str, gesture: Gesture, by: By) -> Vec<Effect> {
     let Some(control) = nav.control(id) else {
         return Vec::new();
     };
+    if id == connect::NETWORK && matches!(control, Control::Action { .. }) {
+        open_remote_row(open);
+        return Vec::new();
+    }
+    let previews = nav.previews.iter().any(|r| r == id);
     let Some(edit) = edit_for(control, gesture) else {
         return Vec::new();
+    };
+    let edit = match edit {
+        Edit::Choose(n) if previews && by == By::Key => {
+            open.preview = Some(id.to_owned());
+            Edit::Preview(n)
+        }
+        edit => {
+            if previews {
+                open.preview = None;
+            }
+            edit
+        }
     };
     if control.confirm_for(&edit).is_some() && open.confirming.as_deref() != Some(id) {
         open.confirming = Some(id.to_owned());
@@ -707,6 +786,11 @@ pub(crate) fn on_key(
                 };
                 open.scroll = 0.0;
             } else if open.confirming.take().is_some() {
+            } else if let Some(row) = open.preview.take() {
+                return vec![Effect::Apply {
+                    row,
+                    edit: Edit::Revert,
+                }];
             } else if open.connect.take().is_some() {
                 // Back to the sections, at the row that opened Connect.
                 open.focus = PanelFocus::Row(connect::OPEN.to_owned());
@@ -744,7 +828,7 @@ pub(crate) fn on_key(
                     let id = nav.tiles[i].clone();
                     // Steppers step; elsewhere Left/Right move between tiles.
                     if matches!(nav.control(&id), Some(Control::Stepper { .. })) {
-                        return act(open, nav, &id, gesture);
+                        return act(open, nav, &id, gesture, By::Key);
                     }
                     let last = nav.tiles.len().saturating_sub(1);
                     open.focus = PanelFocus::Tile(if gesture == Gesture::Left {
@@ -753,7 +837,7 @@ pub(crate) fn on_key(
                         (i + 1).min(last)
                     });
                 }
-                PanelFocus::Row(id) => return act(open, nav, &id, gesture),
+                PanelFocus::Row(id) => return act(open, nav, &id, gesture, By::Key),
                 PanelFocus::Search => {}
             }
         }
@@ -841,12 +925,15 @@ pub(crate) fn on_key(
                 {
                     let id = id.clone();
                     open.focus = PanelFocus::Row(id.clone());
-                    return act(open, nav, &id, Gesture::Activate);
+                    return act(open, nav, &id, Gesture::Activate, By::Key);
                 }
             }
             PanelFocus::Tile(i) => {
                 let id = nav.tiles[i].clone();
-                return act(open, nav, &id, Gesture::Activate);
+                if let Some(keep) = keep_preview(open, nav, &id) {
+                    return keep;
+                }
+                return act(open, nav, &id, Gesture::Activate, By::Key);
             }
             PanelFocus::Row(id) => {
                 if let Some((editing, text)) = open.editing.take() {
@@ -869,7 +956,10 @@ pub(crate) fn on_key(
                         }];
                     }
                 }
-                return act(open, nav, &id, Gesture::Activate);
+                if let Some(keep) = keep_preview(open, nav, &id) {
+                    return keep;
+                }
+                return act(open, nav, &id, Gesture::Activate, By::Key);
             }
         },
         PanelKey::Backspace => {
@@ -884,6 +974,11 @@ pub(crate) fn on_key(
                 open.focus_first_result = true;
             }
         }
+        PanelKey::Delete => {
+            if let Some(id) = open.focused_row(nav).map(str::to_owned) {
+                return reset(open, nav, &id);
+            }
+        }
         PanelKey::Alt(c) => {
             let quick = QUICK_ACTIONS
                 .iter()
@@ -894,7 +989,7 @@ pub(crate) fn on_key(
                 if let Some(i) = nav.tiles.iter().position(|t| t == quick.row) {
                     open.focus = PanelFocus::Tile(i);
                 }
-                return act(open, nav, quick.row, Gesture::Activate);
+                return act(open, nav, quick.row, Gesture::Activate, By::Key);
             }
         }
         PanelKey::ZoomIn | PanelKey::ZoomOut => {
@@ -907,11 +1002,68 @@ pub(crate) fn on_key(
                 } else {
                     Gesture::Left
                 };
-                return act(open, nav, quick.row, gesture);
+                return act(open, nav, quick.row, gesture, By::Key);
             }
         }
     }
     Vec::new()
+}
+
+/// Leave Connect for Network › Remote agents, the row that lets tailnet
+/// agents through the firewall; it scrolls into view once laid out.
+fn open_remote_row(open: &mut Open) {
+    open.connect = None;
+    open.query.clear();
+    open.confirming = None;
+    open.focus = PanelFocus::Row(NetworkSection::REMOTE.to_owned());
+    open.reveal = true;
+}
+
+/// Scroll the focused row into view if `geometry` has laid it out; `true`
+/// once done (the pending reveal is then cleared).
+pub(crate) fn reveal_focus(open: &mut Open, geometry: &ControlPanelGeometry) -> bool {
+    let PanelFocus::Row(id) = &open.focus else {
+        open.reveal = false;
+        return false;
+    };
+    let Some(span) = geometry.rows.iter().find(|s| s.id == *id) else {
+        return false;
+    };
+    open.scroll = geometry.reveal(span, open.scroll);
+    open.reveal = false;
+    true
+}
+
+/// Enter on a row showing a preview keeps the shown option.
+fn keep_preview(open: &mut Open, nav: &Nav, id: &str) -> Option<Vec<Effect>> {
+    if open.preview.as_deref() != Some(id) {
+        return None;
+    }
+    open.preview = None;
+    let Some(Control::Choice { selected, .. }) = nav.control(id) else {
+        return Some(Vec::new());
+    };
+    Some(vec![Effect::Apply {
+        row: id.to_owned(),
+        edit: Edit::Choose(*selected),
+    }])
+}
+
+/// Reset row `id` to its default, if it offers that.
+fn reset(open: &mut Open, nav: &Nav, id: &str) -> Vec<Effect> {
+    if !nav.resettable.iter().any(|r| r == id) {
+        return Vec::new();
+    }
+    open.confirming = None;
+    open.editing = None;
+    open.error = None;
+    if open.preview.as_deref() == Some(id) {
+        open.preview = None;
+    }
+    vec![Effect::Apply {
+        row: id.to_owned(),
+        edit: Edit::Reset,
+    }]
 }
 
 /// Whether typing goes into field row `id`: it has focus, is a field, and
@@ -977,7 +1129,7 @@ pub(crate) fn on_click(
                 open.confirming = None;
             }
             open.focus = PanelFocus::Tile(*i);
-            act(open, nav, &id, gesture_for(*part))
+            act(open, nav, &id, gesture_for(*part), By::Pointer)
         }
         PanelHitTarget::Row(id, part) => {
             if open.confirming.as_deref() != Some(id.as_str()) {
@@ -986,11 +1138,14 @@ pub(crate) fn on_click(
             if let Some(i) = nav.row_index(id) {
                 focus_row(open, nav, i, geometry);
             }
+            if *part == PanelPart::Reset {
+                return reset(open, nav, id);
+            }
             // Clicking a field edits it; only Enter acts on it.
             if matches!(nav.control(id), Some(Control::Field { .. })) {
                 return Vec::new();
             }
-            act(open, nav, id, gesture_for(*part))
+            act(open, nav, id, gesture_for(*part), By::Pointer)
         }
         PanelHitTarget::Panel => Vec::new(),
     }
@@ -1718,5 +1873,180 @@ mod tests {
         ] {
             assert!(on_key(&mut open, &nav, key, Some(&stale)).is_empty());
         }
+    }
+    /// A section list with a previewing theme (option `theme` showing), a
+    /// changed zoom and an unchanged toggle.
+    fn preview_sections(theme: usize) -> Vec<SectionRows> {
+        vec![SectionRows {
+            id: "look",
+            title: "Look",
+            rows: vec![
+                Row::new(
+                    "look.theme",
+                    "Theme",
+                    Control::Choice {
+                        options: vec!["a".into(), "b".into(), "c".into()],
+                        selected: theme,
+                    },
+                )
+                .previews(),
+                Row::new(
+                    "look.zoom",
+                    "Zoom",
+                    Control::Stepper {
+                        text: "120%".into(),
+                    },
+                )
+                .resettable(true),
+                toggle("look.plain", true),
+            ],
+        }]
+    }
+
+    fn built_with(open: &mut Open, sections: &[SectionRows]) -> (ControlPanelModel, Nav) {
+        build(
+            open,
+            sections,
+            &ViewContext {
+                pause_chord: "Ctrl+Shift+F12".into(),
+                ..ViewContext::default()
+            },
+        )
+    }
+
+    /// Theme preview (G4): a key shows an option without saving it; Enter
+    /// keeps what shows, Esc or moving away restores the saved option, and
+    /// a click keeps at once.
+    #[test]
+    fn keys_preview_a_choice_and_enter_keeps_it() {
+        let mut open = Open::new(PAUSE);
+        open.focus = PanelFocus::Row("look.theme".into());
+        let (_, nav) = built_with(&mut open, &preview_sections(0));
+        assert_eq!(
+            on_key(&mut open, &nav, PanelKey::Right, None),
+            apply("look.theme", Edit::Preview(1))
+        );
+        // The section now shows option 1, unsaved.
+        let (model, nav) = built_with(&mut open, &preview_sections(1));
+        let PanelBody::Sections(cards) = &model.body else {
+            panic!("sections expected")
+        };
+        assert_eq!(
+            cards[0].items[0].detail.as_deref(),
+            Some("Preview · Enter keeps it · Esc restores")
+        );
+        assert_eq!(open.left_preview(&nav), None, "still on the row");
+        assert_eq!(
+            on_key(&mut open, &nav, PanelKey::Enter, None),
+            apply("look.theme", Edit::Choose(1)),
+            "Enter keeps the option showing"
+        );
+        assert_eq!(open.preview, None);
+
+        // Esc restores.
+        on_key(&mut open, &nav, PanelKey::Left, None);
+        assert_eq!(
+            on_key(&mut open, &nav, PanelKey::Escape, None),
+            apply("look.theme", Edit::Revert)
+        );
+        assert!(open.preview.is_none());
+
+        // Moving away restores (the task applies the revert).
+        on_key(&mut open, &nav, PanelKey::Right, None);
+        on_key(&mut open, &nav, PanelKey::Down, None);
+        assert_eq!(open.left_preview(&nav).as_deref(), Some("look.theme"));
+        assert_eq!(open.left_preview(&nav), None, "reverted once");
+
+        // A click keeps at once: a pointer has no focus walk to preview.
+        let click = PanelHitTarget::Row("look.theme".into(), PanelPart::Increment);
+        assert_eq!(
+            on_click(&mut open, &nav, &click, None),
+            apply("look.theme", Edit::Choose(2))
+        );
+        assert!(open.preview.is_none());
+    }
+
+    /// Changed rows offer Reset (G4): Delete or the row's link resets it;
+    /// an unchanged row has neither.
+    #[test]
+    fn changed_rows_reset_with_delete_or_their_link() {
+        let mut open = Open::new(PAUSE);
+        open.focus = PanelFocus::Row("look.zoom".into());
+        let (model, nav) = built_with(&mut open, &preview_sections(0));
+        let PanelBody::Sections(cards) = &model.body else {
+            panic!("sections expected")
+        };
+        let resets: Vec<bool> = cards[0].items.iter().map(|i| i.reset).collect();
+        assert_eq!(resets, [false, true, false]);
+        assert!(model.hints.iter().any(|h| h == "Del reset"));
+        assert_eq!(
+            on_key(&mut open, &nav, PanelKey::Delete, None),
+            apply("look.zoom", Edit::Reset)
+        );
+        let link = PanelHitTarget::Row("look.zoom".into(), PanelPart::Reset);
+        assert_eq!(
+            on_click(&mut open, &nav, &link, None),
+            apply("look.zoom", Edit::Reset)
+        );
+        open.focus = PanelFocus::Row("look.plain".into());
+        let (model, nav) = built_with(&mut open, &preview_sections(0));
+        assert!(!model.hints.iter().any(|h| h == "Del reset"));
+        assert!(on_key(&mut open, &nav, PanelKey::Delete, None).is_empty());
+    }
+
+    /// On Connect, a firewall that blocks tailnet agents links to Network ›
+    /// Remote agents (CP-13): Enter leaves Connect, focuses that row and
+    /// scrolls it into view once laid out.
+    #[test]
+    fn the_firewall_link_jumps_to_remote_agents() {
+        let view = ConnectView {
+            prompt: vec!["Connect to my tze_hud HUD".into()],
+            rows: vec![Row::new(
+                connect::NETWORK,
+                "Network",
+                Control::Action { confirm: None },
+            )],
+            status: None,
+            banners: vec![],
+        };
+        let mut sections = sections();
+        sections.push(SectionRows {
+            id: "network",
+            title: "Network",
+            rows: vec![toggle(NetworkSection::REMOTE, false)],
+        });
+        let ctx = ViewContext {
+            connect: Some(view),
+            pause_chord: "Ctrl+Shift+F12".into(),
+            ..ViewContext::default()
+        };
+        let mut open = Open::new(PAIR);
+        open.connect = Some(ConnectPage::default());
+        open.focus = PanelFocus::Row(connect::NETWORK.into());
+        let (_, nav) = build(&mut open, &sections, &ctx);
+        assert!(on_key(&mut open, &nav, PanelKey::Enter, None).is_empty());
+        assert!(open.connect.is_none());
+        assert_eq!(open.focus, PanelFocus::Row(NetworkSection::REMOTE.into()));
+        assert!(open.reveal);
+
+        // Geometry without the row (Connect's) waits; the next layout
+        // scrolls it to the bottom of the view.
+        let row = |id: &str, top: f32| tze_hud_compositor::PanelSpan {
+            id: id.into(),
+            top,
+            bottom: top + 40.0,
+        };
+        let mut geometry = ControlPanelGeometry {
+            viewport_height: 400.0,
+            max_scroll: 1000.0,
+            rows: vec![row(connect::NETWORK, 0.0)],
+            ..ControlPanelGeometry::default()
+        };
+        assert!(!reveal_focus(&mut open, &geometry));
+        assert!(open.reveal);
+        geometry.rows = vec![row("agents.pause", 0.0), row(NetworkSection::REMOTE, 900.0)];
+        assert!(reveal_focus(&mut open, &geometry));
+        assert!(!open.reveal);
+        assert_eq!(open.scroll, 540.0);
     }
 }

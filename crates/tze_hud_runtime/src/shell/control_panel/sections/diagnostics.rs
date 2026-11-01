@@ -2,7 +2,7 @@
 //! Each applies at once and is saved to `[runtime]`; a value a flag or
 //! variable set is shown read-only, naming it.
 
-use tze_hud_config::{LOG_LEVELS, RuntimeUpdate};
+use tze_hud_config::{DEFAULT_LOG_LEVEL, LOG_LEVELS, RuntimeUpdate};
 
 use super::super::row::{BoxFuture, Control, Edit, Row, Section};
 use super::super::runtime::RuntimeControl;
@@ -10,6 +10,11 @@ use crate::launch::Source;
 
 /// Frame rate caps offered (the running one is added when it is not here).
 const FPS_CHOICES: [u32; 6] = [30, 60, 90, 120, 144, 240];
+
+/// The frame rate cap when nothing sets one.
+fn default_fps() -> u32 {
+    crate::windowed::WindowedConfig::default().target_fps
+}
 
 pub(crate) struct DiagnosticsSection {
     control: RuntimeControl,
@@ -78,7 +83,8 @@ impl Section for DiagnosticsSection {
                         selected: LOG_LEVELS.iter().position(|l| *l == level).unwrap_or(2),
                     },
                 )
-                .detail(sources.log_level.describe()),
+                .detail(sources.log_level.describe())
+                .resettable(sources.log_level == Source::Config),
             }
             .keywords(&[
                 "log",
@@ -104,6 +110,7 @@ impl Section for DiagnosticsSection {
                     Control::Toggle(outlines),
                 )
                 .detail("Tint every zone's bounds")
+                .resettable(sources.debug_zones == Source::Config)
             }
             .keywords(&["debug", "zones", "debug-zones", "geometry", "bounds"]);
 
@@ -121,6 +128,7 @@ impl Section for DiagnosticsSection {
                     },
                 )
                 .detail(sources.fps.describe())
+                .resettable(sources.fps == Source::Config)
             }
             .keywords(&["fps", "frames", "refresh", "rate", "performance"]);
 
@@ -157,6 +165,25 @@ impl Section for DiagnosticsSection {
                         self.control
                             .save(RuntimeUpdate::Fps(Some(fps)), |s| &mut s.fps),
                     )
+                }
+                // Reset: the default now, and the key leaves the config.
+                (Self::LOG_LEVEL, Edit::Reset) if !sources.log_level.is_pinned() => {
+                    (self.control.log_level.set)(DEFAULT_LOG_LEVEL)?;
+                    self.saved(
+                        self.control
+                            .clear(RuntimeUpdate::LogLevel(None), |s| &mut s.log_level),
+                    )
+                }
+                (Self::ZONE_OUTLINES, Edit::Reset) if !sources.debug_zones.is_pinned() => {
+                    self.control.live.set_zone_outlines(false);
+                    self.saved(
+                        self.control
+                            .clear(RuntimeUpdate::DebugZones(None), |s| &mut s.debug_zones),
+                    )
+                }
+                (Self::FPS, Edit::Reset) if !sources.fps.is_pinned() => {
+                    self.control.live.set_fps(default_fps());
+                    self.saved(self.control.clear(RuntimeUpdate::Fps(None), |s| &mut s.fps))
                 }
                 (_, edit) => Err(format!("{row} does not support {edit:?}")),
             }
@@ -229,6 +256,34 @@ mod tests {
                 .detail
                 .as_deref(),
             Some("Saved to config")
+        );
+        let rows = section.rows().await;
+        assert!(row(&rows, DiagnosticsSection::LOG_LEVEL).reset);
+        assert!(
+            !row(&rows, DiagnosticsSection::FPS).reset,
+            "a pinned rate has no Reset"
+        );
+
+        // Reset: the default now, the key out of the config, the source Default.
+        section
+            .apply(DiagnosticsSection::LOG_LEVEL, Edit::Reset)
+            .await
+            .unwrap();
+        assert_eq!(*level.lock().unwrap(), DEFAULT_LOG_LEVEL);
+        assert!(
+            !std::fs::read_to_string(&config)
+                .unwrap()
+                .contains("log_level")
+        );
+        let log_row = row(&section.rows().await, DiagnosticsSection::LOG_LEVEL).clone();
+        assert_eq!(log_row.detail.as_deref(), Some("Default"));
+        assert!(!log_row.reset);
+        assert!(
+            section
+                .apply(DiagnosticsSection::FPS, Edit::Reset)
+                .await
+                .is_err(),
+            "a pinned rate does not reset"
         );
 
         // The config became unwritable: the outline still turns off now.

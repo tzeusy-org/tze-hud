@@ -5,7 +5,7 @@
 
 use tze_hud_compositor::{PanelBadge, PanelTone};
 use tze_hud_config::RuntimeUpdate;
-use tze_hud_scene::config::{ChordRole, Hotkey};
+use tze_hud_scene::config::{ChordRole, Hotkey, HudChords};
 
 use super::super::chords::ChordControl;
 use super::super::row::{BoxFuture, Control, Edit, Row, Section};
@@ -90,11 +90,20 @@ impl Section for InputSection {
                         ),
                     };
                     let status = hotkey(role);
-                    let detail = match &status {
-                        HotkeyStatus::Failed { reason, .. } => format!("{does} · {reason}"),
-                        _ => does.to_owned(),
+                    let chord = self.chords.get().get(role);
+                    let changed = chord != HudChords::default().get(role);
+                    let source = match (changed, &self.save) {
+                        (false, _) => "Default",
+                        (true, Some(_)) => "Saved to config",
+                        (true, None) => "Lasts until restart",
                     };
-                    let text = self.chords.get().get(role).to_string();
+                    let detail = match &status {
+                        HotkeyStatus::Failed { reason, .. } => {
+                            format!("{does} · {source} · {reason}")
+                        }
+                        _ => format!("{does} · {source}"),
+                    };
+                    let text = chord.to_string();
                     let control = if self.chords.rebind.is_some() {
                         Control::Field {
                             text,
@@ -107,6 +116,7 @@ impl Section for InputSection {
                         .detail(detail)
                         .keywords(keywords)
                         .badge(registration_badge(&status))
+                        .resettable(changed && self.chords.rebind.is_some())
                 })
                 .collect()
         })
@@ -114,15 +124,19 @@ impl Section for InputSection {
 
     fn apply<'a>(&'a self, row: &'a str, edit: Edit) -> BoxFuture<'a, Result<(), String>> {
         Box::pin(async move {
-            let (Some(role), Edit::Text(text)) = (Self::role_of(row), &edit) else {
-                return match edit {
-                    // Enter without typing: nothing to change.
-                    Edit::Activate => Ok(()),
-                    _ => Err(format!("{row} does not support {edit:?}")),
-                };
+            let Some(role) = Self::role_of(row) else {
+                return Err(format!("{row} does not support {edit:?}"));
             };
-            let new = Hotkey::parse(text.trim())
-                .map_err(|e| format!("Type a chord like Ctrl+Shift+F9: {e}"))?;
+            let new = match &edit {
+                Edit::Text(text) => Hotkey::parse(text.trim())
+                    .map_err(|e| format!("Type a chord like Ctrl+Shift+F9: {e}"))?,
+                Edit::Reset => HudChords::default().get(role),
+                // Enter without typing: nothing to change.
+                Edit::Activate => return Ok(()),
+                _ => return Err(format!("{row} does not support {edit:?}")),
+            };
+            // A reset clears the config key, so the default follows releases.
+            let saved = (edit != Edit::Reset).then(|| new.to_string());
             let chords = self.chords.clone();
             tokio::task::spawn_blocking(move || chords.rebind(role, new))
                 .await
@@ -131,8 +145,65 @@ impl Section for InputSection {
             let Some(save) = &self.save else {
                 return Ok(());
             };
-            save(&[RuntimeUpdate::Hotkey(role, Some(new.to_string()))])
+            save(&[RuntimeUpdate::Hotkey(role, saved)])
                 .map_err(|e| format!("Works until restart; not saved: {e}"))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+
+    /// Chord rows name their source; a changed chord offers Reset, which
+    /// rebinds the default and clears the config key.
+    #[tokio::test]
+    async fn chord_rows_name_their_source_and_reset_to_the_default() {
+        let saved: Arc<Mutex<Vec<String>>> = Arc::default();
+        let log = Arc::clone(&saved);
+        let save: ConfigWriter = Arc::new(move |updates: &[RuntimeUpdate]| {
+            log.lock().unwrap().push(format!("{updates:?}"));
+            Ok(())
+        });
+        let chords = ChordControl::new(HudChords::default(), Some(Arc::new(|_, _| Ok(()))));
+        let section = InputSection::new(chords.clone(), false, Some(save));
+        let panel = |rows: Vec<Row>| {
+            rows.into_iter()
+                .find(|r| r.id == "input.panel_chord")
+                .unwrap()
+        };
+        let row = panel(section.rows().await);
+        assert!(row.detail.unwrap().ends_with("· Default"));
+        assert!(!row.reset);
+
+        section
+            .apply("input.panel_chord", Edit::Text("Ctrl+Shift+F9".into()))
+            .await
+            .unwrap();
+        let row = panel(section.rows().await);
+        assert!(row.detail.unwrap().ends_with("· Saved to config"));
+        assert!(row.reset);
+
+        section
+            .apply("input.panel_chord", Edit::Reset)
+            .await
+            .unwrap();
+        assert_eq!(chords.get().panel, HudChords::default().panel);
+        assert_eq!(
+            saved.lock().unwrap().last().unwrap(),
+            &format!("{:?}", [RuntimeUpdate::Hotkey(ChordRole::Panel, None)])
+        );
+        assert!(!panel(section.rows().await).reset);
+
+        // Without a config file a change lasts the session.
+        let unsaved = InputSection::new(chords.clone(), false, None);
+        unsaved
+            .apply("input.panel_chord", Edit::Text("Ctrl+Shift+F9".into()))
+            .await
+            .unwrap();
+        let row = panel(unsaved.rows().await);
+        assert!(row.detail.unwrap().ends_with("· Lasts until restart"));
     }
 }

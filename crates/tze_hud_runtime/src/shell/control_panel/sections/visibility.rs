@@ -130,7 +130,8 @@ impl Section for VisibilitySection {
                         "Hides every agent surface; agents keep running".to_owned()
                     })
                     .keywords(&["show", "presenting", "screen share", "clear", "declutter"])
-                    .caution(hidden.any()),
+                    .caution(hidden.any())
+                    .resettable(hidden.any()),
             ];
             for (id, label, covers, keywords) in CLASSES {
                 let off = class_hidden(hidden, id);
@@ -141,12 +142,13 @@ impl Section for VisibilitySection {
                         Control::Toggle(!off),
                     )
                     .detail(if off {
-                        format!("Hidden · {covers}")
+                        "Hidden until restart · agents not told".to_owned()
                     } else {
                         covers.to_owned()
                     })
                     .keywords(keywords)
-                    .caution(off),
+                    .caution(off)
+                    .resettable(off),
                 );
             }
             rows
@@ -160,6 +162,12 @@ impl Section for VisibilitySection {
             let mut new = old;
             match (row, edit.clone()) {
                 // Hide everything, or show everything when it all is hidden.
+                // Reset shows everything (Hide all) or the class.
+                (Self::HIDE_ALL, Edit::Reset) => new = SurfaceClasses::NONE,
+                (_, Edit::Reset) => match class_mut(&mut new, row) {
+                    Some(hidden) => *hidden = false,
+                    None => return Err(format!("{row} does not support {edit:?}")),
+                },
                 (Self::HIDE_ALL, Edit::Set(hide)) => {
                     new = if hide {
                         SurfaceClasses::ALL
@@ -220,5 +228,40 @@ mod tests {
             "Portals, zones and tiles"
         );
         assert_eq!(hidden_names(SurfaceClasses::ALL), "Everything");
+    }
+
+    /// A hidden class offers Reset, which shows it; Hide all's Reset shows
+    /// everything.
+    #[tokio::test]
+    async fn reset_shows_what_is_hidden() {
+        let scene = Arc::new(Mutex::new(SceneGraph::new(800.0, 600.0)));
+        let section = VisibilitySection::new(Arc::clone(&scene), RenderWakeNotifier::default());
+        let resets = |rows: Vec<Row>| -> Vec<(String, bool)> {
+            rows.into_iter().map(|r| (r.id, r.reset)).collect()
+        };
+        assert!(resets(section.rows().await).iter().all(|(_, reset)| !reset));
+        section
+            .apply(VisibilitySection::WIDGETS, Edit::Set(false))
+            .await
+            .unwrap();
+        let rows = resets(section.rows().await);
+        let offers = |id: &str| rows.iter().find(|(r, _)| r == id).unwrap().1;
+        assert!(offers(VisibilitySection::WIDGETS) && offers(VisibilitySection::HIDE_ALL));
+        assert!(!offers(VisibilitySection::ZONES));
+        section
+            .apply(VisibilitySection::WIDGETS, Edit::Reset)
+            .await
+            .unwrap();
+        assert_eq!(section.hidden().await, SurfaceClasses::NONE);
+
+        section
+            .apply(VisibilitySection::HIDE_ALL, Edit::Set(true))
+            .await
+            .unwrap();
+        section
+            .apply(VisibilitySection::HIDE_ALL, Edit::Reset)
+            .await
+            .unwrap();
+        assert_eq!(section.hidden().await, SurfaceClasses::NONE);
     }
 }

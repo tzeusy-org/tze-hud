@@ -5,7 +5,9 @@
 
 use std::sync::Arc;
 
-use tze_hud_config::themes::{THEME_KEY, builtin_theme, builtin_theme_names, selected_theme_name};
+use tze_hud_config::themes::{
+    DEFAULT_THEME, THEME_KEY, builtin_theme, builtin_theme_names, selected_theme_name,
+};
 use tze_hud_config::tokens::{
     CANONICAL_TOKENS, DesignTokenMap, UI_SCALE_KEY, UI_SCALE_RANGE, ui_scale,
 };
@@ -46,6 +48,15 @@ impl Tokens {
     /// Apply `updates` to the table in effect now, then save them. A failed
     /// save keeps the change for the session and says why.
     async fn change(&self, updates: &[(&str, TokenUpdate)]) -> Result<(), String> {
+        self.change_with(updates, Save::IfChanged).await
+    }
+
+    /// Apply `updates` live only (a preview); nothing is saved.
+    async fn show(&self, updates: &[(&str, TokenUpdate)]) -> Result<(), String> {
+        self.change_with(updates, Save::Never).await
+    }
+
+    async fn change_with(&self, updates: &[(&str, TokenUpdate)], save: Save) -> Result<(), String> {
         let mut table = self.table();
         for (key, update) in updates {
             match update {
@@ -67,8 +78,14 @@ impl Tokens {
                 e => e.to_string(),
             })?;
         }
-        if !self.appearance.apply(table).await? {
+        let changed = self.appearance.apply(table).await?;
+        let save_it = match save {
+            Save::Never => false,
             // Already in effect (e.g. Zoom held at its limit): nothing to save.
+            Save::IfChanged => changed,
+            Save::Always => true,
+        };
+        if !save_it {
             return Ok(());
         }
         tracing::info!(?updates, "control panel: design tokens changed");
@@ -79,6 +96,22 @@ impl Tokens {
         self.appearance.saved(updates);
         Ok(())
     }
+}
+
+/// Whether [`Tokens::change_with`] saves what it applied.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Save {
+    /// A preview: live only.
+    Never,
+    /// Only if the table changed (the usual edit).
+    IfChanged,
+    /// Even when already live: keeping a preview saves the shown value.
+    Always,
+}
+
+/// The update that puts `key` back to `value` (`None`: unset).
+fn restore(value: Option<String>) -> TokenUpdate {
+    value.map_or(TokenUpdate::Remove, TokenUpdate::Set)
 }
 
 /// "tonal-glass" → "Tonal Glass".
@@ -99,6 +132,9 @@ fn theme_title(name: &str) -> String {
 
 pub(crate) struct AppearanceSection {
     tokens: Tokens,
+    /// While a theme previews: the `theme` value in effect before it
+    /// (`Some(None)`: unset), which leaving the row restores.
+    before_preview: std::sync::Mutex<Option<Option<String>>>,
 }
 
 impl AppearanceSection {
@@ -111,6 +147,55 @@ impl AppearanceSection {
     pub(crate) fn new(appearance: Arc<Appearance>, save: Option<TokenWriter>) -> Self {
         Self {
             tokens: Tokens { appearance, save },
+            before_preview: std::sync::Mutex::new(None),
+        }
+    }
+
+    /// End a preview; the theme value it replaced, if one was showing.
+    fn end_preview(&self) -> Option<Option<String>> {
+        self.before_preview
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+    }
+
+    async fn apply_theme(&self, edit: Edit) -> Result<(), String> {
+        let theme = |i: usize| {
+            builtin_theme_names()
+                .nth(i)
+                .map(|t| TokenUpdate::Set(t.to_owned()))
+                .ok_or("No such theme")
+        };
+        match edit {
+            Edit::Preview(i) => {
+                let update = theme(i)?;
+                self.before_preview
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get_or_insert_with(|| self.tokens.table().get(THEME_KEY).cloned());
+                self.tokens.show(&[(THEME_KEY, update)]).await
+            }
+            Edit::Revert => match self.end_preview() {
+                Some(before) => self.tokens.show(&[(THEME_KEY, restore(before))]).await,
+                None => Ok(()),
+            },
+            // Keeping a preview saves the theme already showing.
+            Edit::Choose(i) => {
+                let save = match self.end_preview() {
+                    Some(_) => Save::Always,
+                    None => Save::IfChanged,
+                };
+                self.tokens
+                    .change_with(&[(THEME_KEY, theme(i)?)], save)
+                    .await
+            }
+            Edit::Reset => {
+                self.end_preview();
+                self.tokens
+                    .change_with(&[(THEME_KEY, TokenUpdate::Remove)], Save::Always)
+                    .await
+            }
+            edit => Err(format!("{} does not support {edit:?}", Self::THEME)),
         }
     }
 }
@@ -130,6 +215,15 @@ impl Section for AppearanceSection {
             let resolved = self.tokens.appearance.live.resolved();
             let themes: Vec<&str> = builtin_theme_names().collect();
             let current = selected_theme_name(&table);
+            // A preview shows on the row; Reset follows the kept theme.
+            let saved_theme = match &*self
+                .before_preview
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+            {
+                Some(before) => before.clone(),
+                None => table.get(THEME_KEY).cloned(),
+            };
             let mut rows = vec![
                 Row::new(
                     Self::THEME,
@@ -139,8 +233,13 @@ impl Section for AppearanceSection {
                         selected: themes.iter().position(|t| *t == current).unwrap_or(0),
                     },
                 )
-                .detail(format!("Applies now · {}", self.tokens.saved_detail()))
-                .keywords(&["theme", "color", "colour", "look", "style", "dark"]),
+                .detail(format!(
+                    "←→ previews · Enter keeps · {}",
+                    self.tokens.saved_detail()
+                ))
+                .keywords(&["theme", "color", "colour", "look", "style", "dark"])
+                .previews()
+                .resettable(saved_theme.is_some_and(|t| t != DEFAULT_THEME)),
                 Row::new(
                     Self::ZOOM,
                     "Zoom",
@@ -149,12 +248,13 @@ impl Section for AppearanceSection {
                     },
                 )
                 .detail(format!(
-                    "Applies now · {} · on top of Windows display scaling (widgets: zoom only) · Enter resets",
+                    "Applies now · {} · on top of Windows display scaling (widgets: zoom only)",
                     self.tokens.saved_detail()
                 ))
                 .keywords(&[
                     "zoom", "scale", "size", "bigger", "smaller", "dpi", "ui.scale",
-                ]),
+                ])
+                .resettable(table.contains_key(UI_SCALE_KEY)),
             ];
             for (key, label) in FONTS {
                 let set = table.get(key);
@@ -164,7 +264,7 @@ impl Section for AppearanceSection {
                     .unwrap_or_else(|| "Bundled".to_owned());
                 let detail = match set {
                     Some(_) => format!(
-                        "Applies now · {} · clear it for the theme's",
+                        "Applies now · {} · Reset for the theme's",
                         self.tokens.saved_detail()
                     ),
                     None => {
@@ -181,7 +281,8 @@ impl Section for AppearanceSection {
                         },
                     )
                     .detail(detail)
-                    .keywords(&["font", "typeface", "family", "text"]),
+                    .keywords(&["font", "typeface", "family", "text"])
+                    .resettable(set.is_some()),
                 );
             }
             rows
@@ -194,8 +295,8 @@ impl Section for AppearanceSection {
             let unsupported = || format!("{row} does not support {described}");
             if row == Self::ZOOM {
                 let update = match edit {
-                    // Enter: back to 100%.
-                    Edit::Activate => TokenUpdate::Remove,
+                    Edit::Activate => return Ok(()),
+                    Edit::Reset => TokenUpdate::Remove,
                     Edit::Step(n) => {
                         let (lo, hi) = UI_SCALE_RANGE;
                         let next = (ui_scale(&self.tokens.table()) + n as f32 * Self::ZOOM_STEP)
@@ -213,14 +314,7 @@ impl Section for AppearanceSection {
                 return self.tokens.change(&[(UI_SCALE_KEY, update)]).await;
             }
             if row == Self::THEME {
-                let Edit::Choose(i) = edit else {
-                    return Err(unsupported());
-                };
-                let theme = builtin_theme_names().nth(i).ok_or("No such theme")?;
-                return self
-                    .tokens
-                    .change(&[(THEME_KEY, TokenUpdate::Set(theme.to_owned()))])
-                    .await;
+                return self.apply_theme(edit).await;
             }
             let key = row
                 .strip_prefix(Self::FONT_PREFIX)
@@ -228,6 +322,7 @@ impl Section for AppearanceSection {
                 .ok_or_else(unsupported)?;
             let text = match edit {
                 Edit::Text(text) => text,
+                Edit::Reset => String::new(),
                 Edit::Activate => return Ok(()),
                 _ => return Err(unsupported()),
             };
@@ -307,7 +402,7 @@ impl Section for TokensSection {
                 let key = token.key;
                 let detail = if table.contains_key(key) {
                     format!(
-                        "Override · {} · clear it for the theme's",
+                        "Override · {} · Reset for the theme's",
                         self.tokens.saved_detail()
                     )
                 } else if theme.contains_key(key) {
@@ -325,7 +420,8 @@ impl Section for TokensSection {
                         },
                     )
                     .detail(detail)
-                    .keywords(&["token", "design token", "advanced"]),
+                    .keywords(&["token", "design token", "advanced"])
+                    .resettable(table.contains_key(key)),
                 );
             }
             // Hand-written overrides of keys the panel does not set (e.g.
@@ -340,8 +436,9 @@ impl Section for TokensSection {
                             confirm: None,
                         },
                     )
-                    .detail("Override from the config file · clear it to remove")
-                    .keywords(&["token", "design token", "advanced"]),
+                    .detail("Override from the config file · Reset removes it")
+                    .keywords(&["token", "design token", "advanced"])
+                    .resettable(true),
                 );
             }
             rows
@@ -373,6 +470,7 @@ impl Section for TokensSection {
                 .ok_or_else(unsupported)?;
             let text = match edit {
                 Edit::Text(text) => text,
+                Edit::Reset => String::new(),
                 Edit::Activate => return Ok(()),
                 _ => return Err(unsupported()),
             };
@@ -437,7 +535,7 @@ mod tests {
     }
 
     /// Zoom steps `ui.scale` by 10% within its range, restyles at once,
-    /// saves, and Enter returns to 100%.
+    /// saves, and Reset returns to 100%.
     #[tokio::test]
     async fn zoom_steps_ui_scale_live_and_saves() {
         let (appearance, _, saved) = sections(Some(Ok(())));
@@ -475,20 +573,100 @@ mod tests {
             },
             "clamped to the range"
         );
+        let zoom_row = |rows: &[Row]| {
+            rows.iter()
+                .find(|r| r.id == "appearance.zoom")
+                .unwrap()
+                .reset
+        };
+        assert!(
+            zoom_row(&appearance.rows().await),
+            "a changed zoom offers Reset"
+        );
         appearance
             .apply("appearance.zoom", Edit::Activate)
             .await
             .unwrap();
         assert!(
-            !appearance.tokens.table().contains_key("ui.scale"),
-            "Enter resets"
+            appearance.tokens.table().contains_key("ui.scale"),
+            "Enter changes nothing"
         );
+        appearance
+            .apply("appearance.zoom", Edit::Reset)
+            .await
+            .unwrap();
+        assert!(!appearance.tokens.table().contains_key("ui.scale"));
+        assert!(!zoom_row(&appearance.rows().await));
         let saved = saved.lock().unwrap();
         assert_eq!(saved[0], r#"[("ui.scale", Set("1.1"))]"#);
         assert_eq!(saved[1], r#"[("ui.scale", Set("1.2"))]"#);
         assert_eq!(saved.last().unwrap(), r#"[("ui.scale", Remove)]"#);
-        // 110% to 300% is 20 saves, then Enter's: none once clamped.
+        // 110% to 300% is 20 saves, then Reset's: none once clamped.
         assert_eq!(saved.len(), 21, "{saved:?}");
+    }
+
+    /// A previewed theme restyles live without saving; leaving restores the
+    /// saved one, keeping saves it (already showing), and Reset goes back to
+    /// the default theme.
+    #[tokio::test]
+    async fn a_theme_preview_restyles_without_saving_until_kept() {
+        let (appearance, _, saved) = sections(Some(Ok(())));
+        let themes: Vec<&str> = builtin_theme_names().collect();
+        let other = themes.iter().position(|t| *t != DEFAULT_THEME).unwrap();
+        let theme_row = |rows: Vec<Row>| {
+            rows.into_iter()
+                .find(|r| r.id == "appearance.theme")
+                .unwrap()
+        };
+        let live = |a: &AppearanceSection| a.tokens.table().get(THEME_KEY).cloned();
+
+        appearance
+            .apply("appearance.theme", Edit::Preview(other))
+            .await
+            .unwrap();
+        assert_eq!(live(&appearance).as_deref(), Some(themes[other]));
+        let row = theme_row(appearance.rows().await);
+        assert!(row.previews);
+        assert!(!row.reset, "Reset follows the saved theme, not the preview");
+        assert!(saved.lock().unwrap().is_empty(), "a preview saves nothing");
+
+        appearance
+            .apply("appearance.theme", Edit::Revert)
+            .await
+            .unwrap();
+        assert_eq!(live(&appearance), None, "back to the unset theme");
+
+        appearance
+            .apply("appearance.theme", Edit::Preview(other))
+            .await
+            .unwrap();
+        appearance
+            .apply("appearance.theme", Edit::Choose(other))
+            .await
+            .unwrap();
+        assert_eq!(
+            saved.lock().unwrap().as_slice(),
+            [format!(r#"[("theme", Set("{}"))]"#, themes[other])],
+            "keeping the shown preview saves it"
+        );
+        assert!(theme_row(appearance.rows().await).reset);
+        // Revert after keeping changes nothing.
+        appearance
+            .apply("appearance.theme", Edit::Revert)
+            .await
+            .unwrap();
+        assert_eq!(live(&appearance).as_deref(), Some(themes[other]));
+
+        appearance
+            .apply("appearance.theme", Edit::Reset)
+            .await
+            .unwrap();
+        assert_eq!(live(&appearance), None);
+        assert_eq!(
+            saved.lock().unwrap().last().unwrap(),
+            r#"[("theme", Remove)]"#
+        );
+        assert!(!theme_row(appearance.rows().await).reset);
     }
 
     /// The theme and a font apply live and save; clearing a font gives the
@@ -579,6 +757,8 @@ mod tests {
             }
         );
         assert!(primary.detail.as_deref().unwrap().starts_with("Override"));
+        assert!(primary.reset, "an override offers Reset");
+        assert!(!row(&rows, "tokens.color.text.secondary").reset);
         assert!(
             row(&rows, "tokens.reset_all")
                 .detail
@@ -587,6 +767,16 @@ mod tests {
                 .starts_with("1 override")
         );
 
+        // One row's Reset clears just that override.
+        tokens
+            .apply("tokens.color.text.primary", Edit::Reset)
+            .await
+            .unwrap();
+        assert!(!tokens.tokens.table().contains_key("color.text.primary"));
+        tokens
+            .apply("tokens.color.text.primary", Edit::Text("#ff0000".into()))
+            .await
+            .unwrap();
         tokens
             .apply("tokens.reset_all", Edit::Activate)
             .await

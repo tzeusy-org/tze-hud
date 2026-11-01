@@ -89,6 +89,7 @@ pub(super) fn panel_key(
         NamedKey::Space if !ctrl && !alt => PanelKey::Space,
         NamedKey::Escape => PanelKey::Escape,
         NamedKey::Backspace => PanelKey::Backspace,
+        NamedKey::Delete => PanelKey::Delete,
         NamedKey::Home => PanelKey::Home,
         NamedKey::End => PanelKey::End,
         NamedKey::PageUp => PanelKey::PageUp,
