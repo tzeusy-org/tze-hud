@@ -457,13 +457,21 @@ fn set_design_tokens_with(
     edit_with(config_path, |src| apply(src, updates), rename)
 }
 
+/// Serializes this process's config writers. Each edit reads the file,
+/// changes its text and renames a new copy over it; two at once (a slow
+/// font change still saving while the next edit lands) would each start from
+/// the same text and the later rename would drop the other's change.
+static WRITER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Read the config, edit its text with `edit`, and replace it atomically
-/// when anything changed.
+/// when anything changed, holding [`WRITER`] throughout.
 fn edit_with(
     config_path: &Path,
     edit: impl FnOnce(&str) -> Result<String, ConfigWriteError>,
     rename: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
 ) -> Result<(), ConfigWriteError> {
+    // A writer that panicked left the file whole (the rename is atomic).
+    let _writer = WRITER.lock().unwrap_or_else(|e| e.into_inner());
     let locked = |e: ConfigWriteError| match e {
         ConfigWriteError::ReadOnlyOrLocked(_) => {
             ConfigWriteError::ReadOnlyOrLocked(config_path.to_owned())
@@ -536,6 +544,44 @@ pub fn set_widget(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A runtime edit that starts while a token edit is mid-save still lands,
+    /// and the owner's comments survive (one writer at a time).
+    #[test]
+    fn concurrent_writers_lose_no_update() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tze_hud.toml");
+        std::fs::write(
+            &path,
+            "# mine\n[runtime]\nprofile = \"full-display\" # keep\n\n[design_tokens]\n",
+        )
+        .unwrap();
+        // Writer A has read the file and holds its edit when writer B starts;
+        // A then waits before its rename. Without one writer at a time, B
+        // reads the old text and A's rename drops B's change every run.
+        let (mid_save, started) = std::sync::mpsc::channel();
+        std::thread::scope(|scope| {
+            let path = &path;
+            scope.spawn(move || {
+                set_design_tokens_with(
+                    path,
+                    &[("theme", TokenUpdate::Set("classic".into()))],
+                    |from, to| {
+                        mid_save.send(()).unwrap();
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        std::fs::rename(from, to)
+                    },
+                )
+                .unwrap();
+            });
+            started.recv().unwrap();
+            set_runtime(path, &[RuntimeUpdate::Fps(Some(30))]).unwrap();
+        });
+        let out = std::fs::read_to_string(&path).unwrap();
+        assert!(out.contains("theme = \"classic\""), "{out}");
+        assert!(out.contains("fps = 30"), "{out}");
+        assert!(out.contains("# mine") && out.contains("# keep"), "{out}");
+    }
 
     fn set(k: &str, v: &str) -> (String, TokenUpdate) {
         (k.to_owned(), TokenUpdate::Set(v.to_owned()))

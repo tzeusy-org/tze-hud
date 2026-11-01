@@ -64,11 +64,19 @@ impl NetworkSection {
             (true, false) => format!("Saved to config · running {running}"),
             (false, _) => source.describe(),
         };
+        // Every paired agent saved the MCP endpoint; changing it strands
+        // them until each re-pairs or is told the new port.
+        let confirm = (id == Self::MCP_PORT).then(|| {
+            "Change the MCP port? Every paired agent must switch to the new port after the \
+             restart."
+                .to_owned()
+        });
         Row::new(
             id,
             label,
             Control::Field {
                 text: saved.to_string(),
+                confirm,
             },
         )
         .detail(detail)
@@ -372,7 +380,8 @@ mod tests {
         assert_eq!(
             grpc.control,
             Control::Field {
-                text: "50061".into()
+                text: "50061".into(),
+                confirm: None,
             }
         );
         assert_eq!(
