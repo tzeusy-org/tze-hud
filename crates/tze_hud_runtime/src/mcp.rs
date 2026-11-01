@@ -882,6 +882,46 @@ mod tests {
                 }
             }
         }
+
+        // Admin requests resolve the current directory too: neither a stale
+        // key nor a formerly granted admin permission survives a reload.
+        for permissions in [vec!["*", "operator_admin"], vec!["*"], vec![]] {
+            let mut changed = tze_hud_scene::config::AgentDirectory::default();
+            changed.insert(
+                "star",
+                tze_hud_scene::config::hash_psk("star-psk"),
+                vec!["*".to_string()],
+            );
+            if !permissions.is_empty() {
+                changed.insert(
+                    "root",
+                    tze_hud_scene::config::hash_psk("rotated-root-psk"),
+                    permissions.iter().map(|p| p.to_string()).collect(),
+                );
+            }
+            src.agents.store(Arc::new(changed));
+            let expected = if permissions.contains(&"operator_admin") {
+                200
+            } else if permissions.is_empty() {
+                401
+            } else {
+                403
+            };
+            for which in [Status, Logs] {
+                for (bearer, status) in [
+                    ("root-psk", 401),
+                    ("rotated-root-psk", expected),
+                    ("star-psk", 403),
+                ] {
+                    let req = admin_get("/admin/x", Some(bearer));
+                    let r = handle_admin(which, &req, &src).await;
+                    assert_eq!(r.status, status, "{bearer} {permissions:?} {which:?}");
+                    if status == 403 {
+                        assert!(String::from_utf8_lossy(&r.body).contains("NOT_ADMIN"));
+                    }
+                }
+            }
+        }
     }
 
     #[tokio::test]
