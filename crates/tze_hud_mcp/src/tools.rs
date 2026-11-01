@@ -191,6 +191,59 @@ fn now_us(scene: &SceneGraph) -> u64 {
     scene.now_wall_us()
 }
 
+/// How long until `ns`'s last publication on `widget` clears, counting the
+/// owner's auto-clear limit (which a hold cannot extend).
+fn widget_expires_in(
+    scene: &tze_hud_scene::graph::SceneGraph,
+    widget: &str,
+    ns: &str,
+    now: u64,
+) -> Option<u64> {
+    scene
+        .widget_registry
+        .active_publishes
+        .get(widget)
+        .into_iter()
+        .flatten()
+        .filter(|r| r.publisher_namespace == ns)
+        .filter_map(|r| remaining_ms(scene.widget_expiry(r), now))
+        .max()
+}
+
+/// How long until the publication `ns` just made on `widget` (under `key`)
+/// clears, counting the owner's auto-clear limit. Other publications of
+/// `ns` there (other keys, a stack) keep their own expiry.
+fn published_expires_in(
+    scene: &tze_hud_scene::graph::SceneGraph,
+    widget: &str,
+    ns: &str,
+    key: Option<&str>,
+    now: u64,
+) -> Option<u64> {
+    let mine: Vec<_> = scene
+        .widget_registry
+        .active_publishes
+        .get(widget)
+        .into_iter()
+        .flatten()
+        .filter(|r| r.publisher_namespace == ns)
+        .collect();
+    let keyed: Vec<_> = mine
+        .iter()
+        .filter(|r| r.merge_key.as_deref() == key)
+        .collect();
+    let candidates = if keyed.is_empty() {
+        mine.iter().collect()
+    } else {
+        keyed
+    };
+    // The newest; on a tie the last stored, which is the one just made.
+    let record = candidates
+        .into_iter()
+        .max_by_key(|r| r.published_at_wall_us)?;
+    remaining_ms(scene.widget_expiry(record), now)
+}
+
 fn remaining_ms(expires_at_us: Option<u64>, now_us: u64) -> Option<u64> {
     expires_at_us.map(|e| e.saturating_sub(now_us) / 1_000)
 }
@@ -318,11 +371,7 @@ pub async fn hud_surfaces(ctx: &ToolCtx<'_>) -> McpResult<Value> {
                 .collect();
             if !mine.is_empty() {
                 o.insert("held".into(), json!(true));
-                if let Some(ms) = mine
-                    .iter()
-                    .filter_map(|r| remaining_ms(r.expires_at_wall_us, now))
-                    .max()
-                {
+                if let Some(ms) = widget_expires_in(&scene, &w, ns, now) {
                     o.insert("expires_in_ms".into(), json!(ms));
                 }
             }
@@ -624,6 +673,7 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
     let lease_id = ensure_lease(ctx, &mut scene)?;
     let ttl_ms = p.ttl_ms.unwrap_or(0);
     let expires = (ttl_ms > 0).then(|| now_us(&scene).saturating_add(ttl_ms * 1_000));
+    let key = p.key.clone();
     scene
         .publish_to_widget_for_lease(
             widget,
@@ -635,7 +685,14 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
             Some(lease_id),
         )
         .map_err(|e| scene_error(&e))?;
-    Ok(ok_with_expiry((ttl_ms > 0).then_some(ttl_ms)))
+    let now = now_us(&scene);
+    Ok(ok_with_expiry(published_expires_in(
+        &scene,
+        widget,
+        &ns,
+        key.as_deref(),
+        now,
+    )))
 }
 
 /// Whether this agent may hold portals and the portal driver is wired, so
@@ -778,7 +835,7 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     check_not_safe_mode(ctx)?;
     let ns = ctx.agent.agent_id.clone();
     let expiry = |now: u64| (p.ttl_ms > 0).then(|| now.saturating_add(p.ttl_ms * 1_000));
-    let result = ok_with_expiry((p.ttl_ms > 0).then_some(p.ttl_ms));
+    let mut result = ok_with_expiry((p.ttl_ms > 0).then_some(p.ttl_ms));
     match surface {
         Surface::Zone(zone) => {
             let mut scene = ctx.scene.lock().await;
@@ -795,6 +852,9 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
                 return Err(not_held(&p.surface));
             }
             ensure_lease(ctx, &mut scene)?;
+            // The owner's auto-clear limit may end it sooner.
+            let now = now_us(&scene);
+            result = ok_with_expiry(widget_expires_in(&scene, &widget, &ns, now));
         }
         Surface::Portal(pid) => {
             // The runtime keeps a held portal (and its transcript) past the

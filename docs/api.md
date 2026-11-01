@@ -103,7 +103,10 @@ otherwise. Scheduled zone publications count as held before presentation;
   with the same key (progress lines). Portals are per agent: another agent's
   `portal:<id>` with the same id is a separate portal.
 - `ttl_ms` defaults to 60000 for zones; widgets are durable unless given one.
-  0 means held until cleared. On a portal, an optional `ttl_ms` holds the
+  0 means held until cleared. A widget's owner-set "Clears after" limit
+  (`[[tabs.widgets]] auto_clear_ms`) caps every publication, held or not, at
+  that long after it was published; `hud_publish`, `hud_hold` and
+  `hud_surfaces` report the capped expiry. On a portal, an optional `ttl_ms` holds the
   portal atomically with this publish, with the same semantics as `hud_hold`.
 - `delay_ms` (zones, ≤ 300000) holds the content until then (invariant 1);
   the expiry counts from presentation, and `ttl_ms: 0` holds a delayed
@@ -362,7 +365,9 @@ The runtime installs its built-in zones independently of configuration. Root
 `[zones]` custom definitions and `[[tabs]].zones` are unsupported, including
 empty tables or arrays: startup rejects them with `ParseError` and a hint to
 remove or correct the field. Remove those obsolete entries rather than
-renaming their zone values. Tabs and their widgets remain configurable;
+renaming their zone values. Tabs and their widgets remain configurable
+(a `[[tabs.widgets]]` entry's `geometry` and `auto_clear_ms` are what the
+control panel's Layout card writes);
 `[displays.<NAME>].zones` remains the supported way to assign built-in zones
 to a display.
 
@@ -391,7 +396,11 @@ F1-F24, a letter or a digit, and the three must differ):
 A global chord takes its keys from every other app while the HUD runs, so the
 defaults are F-key chords; rebind one that clashes (Ctrl+Shift+F10 is also
 JetBrains IDEs' "Run"). The pairing chord is not registered when the MCP port
-is disabled.
+is disabled. The control panel's Input card changes a chord while the HUD
+runs: type it (`Ctrl+Alt+F9`) and press Enter. A chord another role has is
+refused; otherwise Windows registers the new chord before the old one is
+released, so a chord another program holds is refused and the old one keeps
+working. The new chord is saved to `[runtime]`.
 
 The control panel is a full-width pane over the primary display: a search
 field, quick-action tiles, and section cards of settings that scroll
@@ -473,6 +482,17 @@ this instance up and shows why), Install update (asks first; the signed
 update path of `POST /admin/update`, on this build's channel, when this copy
 is installed), Start with Windows (the per-user Run entry; installed copies
 only), Open config file, Open log folder, and the version.
+
+The Layout card shows, per widget, its box as percentages of the display
+("4%, 8% · 18×12%": x, y, width×height) and how long its content stays up.
+Typing four numbers and Enter moves or resizes it at once (a box that does
+not fit on the display is refused); "Clears after" (Never, 5 s ... 1 h)
+caps each publication at that long after it was published, including what
+shows now, unless the agent asked for less. Both are saved into the
+widget's own `[[tabs.widgets]]` entry with the file's comments kept; when the
+save fails the change lasts the session and the row says so. A
+`[displays.<NAME>]` table's zones show read-only until monitor names are
+stable across reboots.
 
 A row whose value a flag or variable set is read-only and names it ("Set by
 --mcp-port"), because a restart reuses the same arguments and environment.

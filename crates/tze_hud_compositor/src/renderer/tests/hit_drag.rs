@@ -586,6 +586,7 @@ async fn drag_handle_regions_cover_visible_tile_zone_and_widget() {
         contention_override: None,
         instance_name: "test-widget-1".to_string(),
         current_params: std::collections::HashMap::new(),
+        auto_clear_ms: None,
     });
     scene
         .publish_to_widget(
