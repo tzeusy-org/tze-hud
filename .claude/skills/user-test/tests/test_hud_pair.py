@@ -28,6 +28,7 @@ class FakeHud(BaseHTTPRequestHandler):
     entered = {}
     release = threading.Event()
     condition = threading.Condition()
+    grpc_target = "h:50051"
 
     def do_GET(self):
         if self.headers.get("Authorization") != f"Bearer {type(self).last_psk}":
@@ -119,7 +120,7 @@ class FakeHud(BaseHTTPRequestHandler):
         type(self).issued += 1
         psk = f"{type(self).issued:02d}" + "ab" * 31
         type(self).last_psk = psk
-        self.reply(200, {"agent": body["agent"], "psk": psk, "mcp": "http://h:9090/mcp", "grpc": "h:50051"})
+        self.reply(200, {"agent": body["agent"], "psk": psk, "mcp": "http://h:9090/mcp", "grpc": type(self).grpc_target})
 
     def reply(self, status, payload):
         data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
@@ -135,6 +136,7 @@ class FakeHud(BaseHTTPRequestHandler):
 @pytest.fixture
 def hud(tmp_path):
     FakeHud.issued = 0
+    FakeHud.grpc_target = "h:50051"
     FakeHud.requests, FakeHud.modes, FakeHud.entered = [], {}, {}
     FakeHud.release = threading.Event()
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeHud)
@@ -342,7 +344,8 @@ def test_pair_writes_0600_file_and_never_prints_the_psk(hud):
     assert json.loads(result.stdout)["psk_file"] == str(psk_file(home))
 
     record = json.loads(endpoint_file(home).read_text())
-    assert record == {"schema": 1, "mcp_url": f"http://{host}/mcp", "psk_sha256": hashlib.sha256(psk.encode()).hexdigest()}
+    assert record == {"schema": 2, "mcp_url": f"http://{host}/mcp", "psk_sha256": hashlib.sha256(psk.encode()).hexdigest(),
+                      "grpc_target": "h:50051"}
     assert stat.S_IMODE(endpoint_file(home).stat().st_mode) == 0o600
     assert psk not in endpoint_file(home).read_text()
     for config in [".mcp.json", ".claude/skills/hud-projection/mcp.template.json", ".claude/skills/th-hud-publish/mcp.template.json"]:
@@ -441,6 +444,28 @@ def test_hud_env_derives_urls_and_reads_the_file(hud, monkeypatch, capsys):
         hud_env.load_psk("h")
     pair(host, home)
     assert hud_env.load_psk("127.0.0.1:1") == psk_file(home).read_text().strip()
+    assert hud_env.grpc_target(host) == "h:50051"
+    # Disabled/pending/failed gRPC still permits MCP pairing and stdio use;
+    # every gRPC client resolves through this helper instead of inventing :50051.
+    for advertised in [None, "[fd7a:115c:a1e0::1]:50072"]:
+        FakeHud.grpc_target = advertised
+        result = pair(host, home)
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout)["grpc"] == advertised
+        assert json.loads(endpoint_file(home).read_text())["grpc_target"] == advertised
+        if advertised is None:
+            with pytest.raises(hud_env.HudEnvError, match="no available gRPC listener"):
+                hud_env.grpc_target(host)
+        else:
+            assert hud_env.grpc_target(host) == advertised
+        with AdapterProcess(home) as adapter:
+            adapter.ready()
+    # Retain the existing legacy schema1 reader contract.
+    record = json.loads(endpoint_file(home).read_text())
+    record["schema"] = 1
+    del record["grpc_target"]
+    endpoint_file(home).write_text(json.dumps(record))
+    assert hud_env.grpc_target(host) == "127.0.0.1:50051"
 
     # The stress publisher uses this same private paired file, with host metrics
     # explicitly unavailable even when authenticated publishing succeeds.
@@ -480,7 +505,9 @@ def test_hud_env_derives_urls_and_reads_the_file(hud, monkeypatch, capsys):
     monkeypatch.delenv("HUD_HOST")
     for invalid in [{}, {"schema": 1, "mcp_url": "http://wrong:9090/mcp", "psk_sha256": "0" * 64},
                     {"schema": 1, "mcp_url": f"http://{host}/mcp?secret=none", "psk_sha256": "0" * 64},
-                    {"schema": 1, "mcp_url": "http://${HUD_HOST}:9090/mcp", "psk_sha256": "0" * 64}]:
+                    {"schema": 1, "mcp_url": "http://${HUD_HOST}:9090/mcp", "psk_sha256": "0" * 64},
+                    *[{"schema": 2, "mcp_url": f"http://{host}/mcp", "psk_sha256": "0" * 64,
+                       "grpc_target": target} for target in [12, "h", "user:pass@h:50051", "h:99999"]]]:
         endpoint_file(home).write_text(json.dumps(invalid))
         with pytest.raises(hud_env.HudEnvError):
             hud_env.adapter_endpoint()

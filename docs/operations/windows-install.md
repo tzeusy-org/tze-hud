@@ -83,8 +83,13 @@ python3 .claude/skills/user-test/scripts/hud_pair.py --host <tailscale-ip[:port]
 ```
 
 The Python helper also writes a private nonsecret `<host>.endpoint.json` record
-containing schema1, the actual pairing HTTP origin/port `/mcp`, and the stored
-key's SHA-256. It does not trust an advertised reply hostname for this record.
+containing schema2, the actual pairing HTTP origin/port `/mcp`, the stored
+key's SHA-256, and the separately advertised gRPC socket or `null`. MCP retains
+the request origin rather than trusting an advertised reply hostname. The shared
+Python gRPC resolver refuses a known unavailable listener instead of assuming
+port 50051; re-pair after it binds or select a known endpoint with `--target`.
+Schema1/key-only pairs keep their legacy default until re-paired. A null gRPC
+socket does not prevent MCP pairing or stdio use.
 If metadata storage fails after the key is written, pairing reports failure;
 re-pair to repair the partial state. In a fresh Linux/WSL Claude session the
 project stdio MCP entry selects one paired host without `HUD_HOST`; multiple

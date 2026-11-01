@@ -8,6 +8,7 @@ POSTs /pair on the MCP port and writes the PSK to ~/.config/tze-hud/<host>.psk
 the same agent again rotates its key.
 Private nonsecret endpoint metadata retains the actual request port. If its
 write fails after key storage, pairing reports failure rather than a complete pair.
+The advertised gRPC listener is stored separately, including null when unavailable.
 """
 
 from __future__ import annotations
@@ -62,7 +63,8 @@ def pair(host: str | None, agent: str, code: str, admin: bool) -> dict:
     path = hud_env.psk_path(host)
     write_psk(path, psk)
     # Persist the actual request port, not an advertised hostname in the reply.
-    record = {"schema": 1, "mcp_url": hud_env.mcp_url(host), "psk_sha256": hashlib.sha256(psk.encode()).hexdigest()}
+    record = {"schema": 2, "mcp_url": hud_env.mcp_url(host), "psk_sha256": hashlib.sha256(psk.encode()).hexdigest(),
+              "grpc_target": reply.get("grpc")}
     write_psk(path.with_suffix(".endpoint.json"), json.dumps(record, separators=(",", ":")))
     return {"agent": reply.get("agent", agent), "psk_file": str(path), "mcp": reply.get("mcp"), "grpc": reply.get("grpc")}
 
