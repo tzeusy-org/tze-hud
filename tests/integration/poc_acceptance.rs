@@ -1640,6 +1640,116 @@ async fn poc_panel_layout_moves_widgets_and_saves_their_entry() {
     .await;
 }
 
+/// Appearance (T11 CP-5, hud-h51u7.5): the theme and any token change the
+/// tokens the HUD draws with on its next turn and are saved to
+/// `[design_tokens]` with the owner's comments kept; a token takes only a
+/// value of its kind; Reset all overrides removes every override, even one
+/// that hides text; a read-only config keeps the change for the session and
+/// says why; a restart keeps what was saved.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn poc_panel_appearance_restyles_live_and_saves() {
+    use tze_hud_config::themes::resolve_config_tokens;
+    let dir = tempfile::tempdir().expect("scratch dir");
+    let config = dir.path().join("tze_hud.toml");
+    // A portal color override (not a canonical token): Reset all removes it
+    // too.
+    let production = PRODUCTION_CONFIG.replace(
+        "theme = \"tonal-glass\"\n",
+        "theme = \"tonal-glass\"\n\"portal.header.text_color\" = \"#00000000\"\n",
+    );
+    assert_ne!(production, PRODUCTION_CONFIG);
+    std::fs::write(&config, &production).expect("config copy");
+    let mut cfg = runtime_config();
+    cfg.config_toml = Some(production.clone());
+    cfg.config_file_path = Some(config.display().to_string());
+    let mut poc = Poc::boot_from(cfg.clone(), None).await;
+    poc.open_panel().await;
+    let saved = || std::fs::read_to_string(&config).expect("config");
+    poc.wait_for("the portal override is listed", |hud| {
+        hud.control_panel_row("tokens.portal.header.text_color")
+            .is_some()
+    })
+    .await;
+    let theme = |name: &str| resolve_config_tokens(&[("theme".to_owned(), name.to_owned())].into());
+    let key = "color.backdrop.default";
+    assert_ne!(theme("tonal-glass")[key], theme("classic")[key]);
+
+    // Click (or Alt+T) moves to the next theme: tonal-glass → classic.
+    poc.click("appearance.theme").await;
+    poc.wait_for("the HUD draws with classic, saved", |hud| {
+        hud.design_token(key).as_deref() == Some(theme("classic")[key].as_str())
+            && saved().contains("theme = \"classic\"")
+    })
+    .await;
+    assert!(
+        saved().contains("# Keep overrides for deployment-specific"),
+        "comments kept"
+    );
+
+    let token = "tokens.color.on_surface";
+    poc.click(token).await;
+    poc.hud.panel_type("blue");
+    poc.hud.panel_press("Enter");
+    poc.wait_for("a word is not a color", |hud| {
+        hud.control_panel_row(token)
+            .and_then(|item| item.detail)
+            .is_some_and(|d| d.contains("#RRGGBB"))
+    })
+    .await;
+    // Transparent text: the panel keeps its own text legible.
+    poc.hud.panel_type("#00000000");
+    poc.hud.panel_press("Enter");
+    poc.wait_for("the override applies and is saved", |hud| {
+        hud.design_token("color.on_surface").as_deref() == Some("#00000000")
+            && saved().contains("\"color.on_surface\" = \"#00000000\"")
+    })
+    .await;
+
+    poc.click("tokens.reset_all").await;
+    poc.wait_for("every override is gone, the theme stays", |hud| {
+        hud.design_token("color.on_surface") == theme("classic").get("color.on_surface").cloned()
+            && !saved().contains("\"color.on_surface\"")
+            && !saved().contains("portal.header.text_color")
+            && saved().contains("theme = \"classic\"")
+    })
+    .await;
+
+    // A read-only config: the change applies for the session and says why.
+    let mut perms = std::fs::metadata(&config).unwrap().permissions();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&config, perms).unwrap();
+    poc.click("appearance.font.mono").await;
+    poc.hud.panel_type("Consolas");
+    poc.hud.panel_press("Enter");
+    poc.wait_for("live, not saved, with the reason and path", |hud| {
+        hud.design_token("font.mono").as_deref() == Some("Consolas")
+            && hud
+                .control_panel_row("appearance.font.mono")
+                .and_then(|item| item.detail)
+                .is_some_and(|d| {
+                    d.contains("not saved") && d.contains(&config.display().to_string())
+                })
+    })
+    .await;
+    assert!(!saved().contains("Consolas"));
+    #[allow(clippy::permissions_set_readonly_false)]
+    {
+        let mut perms = std::fs::metadata(&config).unwrap().permissions();
+        perms.set_readonly(false);
+        std::fs::set_permissions(&config, perms).unwrap();
+    }
+    drop(poc);
+
+    // A restart reads what was saved.
+    let mut cfg = cfg;
+    cfg.config_toml = Some(saved());
+    let poc = Poc::boot_from(cfg, None).await;
+    assert_eq!(
+        poc.hud.design_token(key).as_deref(),
+        Some(theme("classic")[key].as_str())
+    );
+}
+
 /// Chords (T11 CP-10): a chord is typed in place, registered at once (the
 /// harness records Windows' registrar) and saved to `[runtime]`; a chord
 /// another role has is refused before Windows is asked.

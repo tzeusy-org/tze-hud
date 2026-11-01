@@ -453,3 +453,86 @@ async fn connect_card_draws_the_prompt_well_and_its_rows() {
     let card = crate::test_pixels::pixel_at(&px, w, (name.x - 8.0) as u32, (name.y + 4.0) as u32);
     assert_ne!(well, card, "the prompt sits in its own well");
 }
+
+/// Each built-in theme restyles the panel (CP-5), and an override that makes
+/// text invisible draws the panel exactly as the canonical text color would:
+/// the panel keeps itself legible so "Reset all overrides" stays usable.
+#[tokio::test]
+async fn panel_follows_each_theme_and_survives_invisible_text() {
+    use tze_hud_config::themes::{builtin_theme_names, resolve_config_tokens};
+    let (w, h) = (640_u32, 400_u32);
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(w, h).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut scene = red_scene(w as f32, h as f32);
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    compositor.render_frame_headless(&mut scene, &surface);
+    compositor.portal_tile_anim_states.clear();
+    let mut draw = |tokens: std::collections::HashMap<String, String>| {
+        compositor.set_token_map(tokens);
+        // As the frame loop does: new tokens re-prime at commit.
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
+        compositor.set_control_panel(Some(panel()));
+        compositor.render_frame_headless(&mut scene, &surface);
+        surface.read_pixels(&compositor.device)
+    };
+    let table = |pairs: &[(&str, &str)]| {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
+    };
+
+    let frames: Vec<(&str, Vec<u8>)> = builtin_theme_names()
+        .map(|theme| {
+            (
+                theme,
+                draw(resolve_config_tokens(&table(&[("theme", theme)]))),
+            )
+        })
+        .collect();
+    for (i, (a, pa)) in frames.iter().enumerate() {
+        let center = crate::test_pixels::pixel_at(pa, w, w / 2, h / 2);
+        assert!(!is_red(center), "{a}: the panel covers the frame");
+        for (b, pb) in &frames[i + 1..] {
+            assert_ne!(pa, pb, "{a} and {b} draw the panel alike");
+        }
+    }
+
+    // Panel text is `color.on_surface[.variant]` over the container surfaces.
+    // Text an override makes unreadable sends that whole set back to the
+    // canonical pairs; a readable override is used as given.
+    let neutral = [
+        "color.surface.container.high",
+        "color.surface.container",
+        "color.surface.container.low",
+        "color.on_surface",
+        "color.on_surface.variant",
+    ];
+    let canonical = |key: &str| {
+        tze_hud_config::tokens::CANONICAL_TOKENS
+            .iter()
+            .find(|t| t.key == key)
+            .unwrap()
+            .default_value
+    };
+    let classic = draw(resolve_config_tokens(&table(&[("theme", "classic")])));
+    let invisible = draw(resolve_config_tokens(&table(&[
+        ("theme", "classic"),
+        ("color.on_surface", "#00000000"),
+    ])));
+    let mut canonical_pairs = vec![("theme", "classic")];
+    canonical_pairs.extend(neutral.iter().map(|k| (*k, canonical(k))));
+    let readable = draw(resolve_config_tokens(&table(&canonical_pairs)));
+    assert!(
+        invisible == readable,
+        "invisible text falls back to readable"
+    );
+    assert!(invisible != classic, "the fallback is visible");
+    let yellow = draw(resolve_config_tokens(&table(&[
+        ("theme", "classic"),
+        ("color.on_surface", "#FFFF00"),
+    ])));
+    assert!(yellow != classic, "a readable override is drawn as given");
+}

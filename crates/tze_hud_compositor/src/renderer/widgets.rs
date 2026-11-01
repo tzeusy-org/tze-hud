@@ -176,6 +176,7 @@ impl super::Compositor {
                 || still_animating
                 || params_changed
                 || resized
+                || wr.restyled(&instance.widget_type_name)
                 || wr
                     .texture_entry(&instance_name)
                     .map(|e| e.dirty)
@@ -198,5 +199,6 @@ impl super::Compositor {
                 }
             }
         }
+        wr.end_sync();
     }
 }

@@ -95,7 +95,7 @@ pub fn run_scene_startup(
 /// The key is never user config — config validation rejects it in
 /// `[design_tokens]` — and any value that slipped in is overwritten or
 /// dropped here.  With no `config_parent` (headless tests) fonts stay bundled.
-fn resolve_font_dir(tokens: &mut DesignTokenMap, config_parent: Option<&Path>) {
+pub(crate) fn resolve_font_dir(tokens: &mut DesignTokenMap, config_parent: Option<&Path>) {
     use tze_hud_compositor::fonts::RUNTIME_FONTS_DIR_KEY;
     tokens.remove(RUNTIME_FONTS_DIR_KEY);
     let Some(dir) = config_parent

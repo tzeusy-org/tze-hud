@@ -318,6 +318,8 @@ pub struct StatusSource {
     pub pairing: Option<Arc<crate::pairing::Pairing>>,
     /// Windows Firewall check behind `tailnet_inbound`.
     pub firewall: Arc<crate::firewall::FirewallProbe>,
+    /// Live design tokens behind `config_reload`.
+    pub(crate) appearance: Option<Arc<crate::appearance::Appearance>>,
 }
 
 /// Window over which `cpu_pct_2s` is sampled.
@@ -397,6 +399,13 @@ impl StatusSource {
                 .restart
                 .as_ref()
                 .map_or(Value::Null, |r| r.last_json()),
+            // The last `[design_tokens]` reload from the config file that
+            // changed something or failed: null, or {ok, error?, at_ms}.
+            "config_reload": self
+                .appearance
+                .as_ref()
+                .and_then(|a| a.reload_status())
+                .map_or(Value::Null, |s| json!(s)),
         })
     }
 }

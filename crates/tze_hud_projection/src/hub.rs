@@ -860,6 +860,15 @@ impl PortalHub {
         true
     }
 
+    /// The design tokens changed: repaint every live portal on the next
+    /// drain, without waiting out the render interval.
+    pub fn restyle_all(&mut self) {
+        for portal in self.portals.values_mut().filter(|p| p.live()) {
+            portal.dirty = true;
+            portal.local_feedback_pending = true;
+        }
+    }
+
     /// Test support: queue input with a fixed id, without an echo.
     #[doc(hidden)]
     pub fn inject_input(

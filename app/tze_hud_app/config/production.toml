@@ -54,6 +54,8 @@ pairing_hotkey = "Ctrl+Shift+F10"
 #   "border.radius.medium" = "12"
 # Keep overrides for deployment-specific values; visual design lives in themes
 # (assets/themes/*.toml, documented in docs/api.md "Design tokens and themes").
+# Edits here apply to the running HUD without a restart, as do the control
+# panel's Appearance and Advanced tokens cards (which save here).
 [design_tokens]
 theme = "tonal-glass"
 

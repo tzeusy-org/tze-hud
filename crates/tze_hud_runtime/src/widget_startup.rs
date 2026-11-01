@@ -98,29 +98,26 @@ const BUILTIN_BUNDLES: &[(&str, BundleFiles)] = &[
 /// SVG asset from a loaded widget bundle: `(widget_type_id, svg_filename, svg_bytes)`.
 pub type WidgetSvgAsset = (String, String, Vec<u8>);
 
-pub fn init_widget_registry(
-    scene: &mut SceneGraph,
-    raw: &RawConfig,
-    config_parent: Option<&Path>,
-    tab_name_to_id: &HashMap<String, SceneId>,
-    token_map: &HashMap<String, String>,
-) -> Vec<WidgetSvgAsset> {
-    // Step 1: Resolve on-disk bundle roots (optional) relative to `config_parent`.
+/// The on-disk bundle roots `[widget_bundles].paths` names, relative to
+/// `config_parent` (the working directory when `None`).
+pub fn bundle_roots(raw: &RawConfig, config_parent: Option<&Path>) -> Vec<std::path::PathBuf> {
     let base = config_parent.unwrap_or_else(|| Path::new("."));
-    let bundle_roots: Vec<std::path::PathBuf> = raw
-        .widget_bundles
+    raw.widget_bundles
         .iter()
         .flat_map(|wb| wb.paths.iter())
         .map(|p| resolve_bundle_path(p, base))
-        .collect();
+        .collect()
+}
 
-    // Step 2: Scan on-disk bundles with token substitution. Per
-    // component-shape-language/spec.md §SVG Token Placeholder Resolution: global
-    // bundles resolve {{token.key}} placeholders against the global token map.
-    let mut scan_results = scan_bundle_dirs(&bundle_roots, token_map);
-
-    // Built-in bundles are defaults: an on-disk bundle with the same type name
-    // overrides the embedded one.
+/// Every bundle: the on-disk ones under `roots`, then each built-in that no
+/// on-disk bundle overrides, with `{{token.key}}` placeholders resolved
+/// against `token_map` (component-shape-language §SVG Token Placeholder
+/// Resolution: global bundles resolve against the global token map).
+fn scan_all_bundles(
+    roots: &[std::path::PathBuf],
+    token_map: &HashMap<String, String>,
+) -> Vec<BundleScanResult> {
+    let mut scan_results = scan_bundle_dirs(roots, token_map);
     for (name, files) in BUILTIN_BUNDLES {
         let overridden = scan_results.iter().any(|r| match r {
             BundleScanResult::Ok(b) => b.definition.id == *name,
@@ -139,6 +136,39 @@ pub fn init_widget_registry(
             token_map,
         ));
     }
+    scan_results
+}
+
+/// The SVGs of every loadable bundle with placeholders resolved against
+/// `token_map`, first bundle of a name winning as at startup: what a live
+/// token change re-registers so widgets restyle.
+pub fn widget_svg_assets(
+    roots: &[std::path::PathBuf],
+    token_map: &HashMap<String, String>,
+) -> Vec<WidgetSvgAsset> {
+    let mut seen = std::collections::HashSet::new();
+    let mut assets = Vec::new();
+    for result in scan_all_bundles(roots, token_map) {
+        if let BundleScanResult::Ok(bundle) = result
+            && seen.insert(bundle.definition.id.clone())
+        {
+            for (file, bytes) in bundle.svg_contents {
+                assets.push((bundle.definition.id.clone(), file, bytes));
+            }
+        }
+    }
+    assets
+}
+
+pub fn init_widget_registry(
+    scene: &mut SceneGraph,
+    raw: &RawConfig,
+    config_parent: Option<&Path>,
+    tab_name_to_id: &HashMap<String, SceneId>,
+    token_map: &HashMap<String, String>,
+) -> Vec<WidgetSvgAsset> {
+    // Steps 1-2: on-disk bundles, then the built-ins they do not override.
+    let scan_results = scan_all_bundles(&bundle_roots(raw, config_parent), token_map);
 
     // Step 3: Register each valid WidgetDefinition.
     // Track registered names to detect cross-dir duplicates (scan_bundle_dirs

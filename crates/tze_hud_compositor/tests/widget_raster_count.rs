@@ -770,3 +770,76 @@ async fn resizing_a_widget_rerasters_it_and_moving_does_not() {
     assert_eq!((count(&compositor), size(&compositor)), (2, (256, 128)));
     assert!(!scene.set_widget_geometry("missing", at(0.0, 0.1)));
 }
+
+/// A theme change re-registers a widget type's SVGs with new token values:
+/// its instances re-raster once; the same bytes again cost nothing.
+#[tokio::test]
+async fn a_restyled_widget_type_rerasters_once() {
+    if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
+        return;
+    }
+    let mut compositor = match Compositor::new_headless(512, 256).await {
+        Ok(c) => c,
+        Err(CompositorError::NoAdapter) => {
+            assert!(
+                !std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1"),
+                "TZE_HUD_REQUIRE_GPU=1 but no adapter"
+            );
+            return;
+        }
+        Err(e) => panic!("unexpected compositor error: {e}"),
+    };
+    let mut surface = HeadlessSurface::new(&compositor.device, 512, 256);
+    compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut scene = SceneGraph::new(512.0, 256.0);
+    let tab = scene.create_tab("Main", 0).unwrap();
+    let BundleScanResult::Ok(b) = bundle!("gauge", ["background.svg", "fill.svg"]) else {
+        panic!("built-in gauge bundle failed to load");
+    };
+    let type_name = b.definition.id.clone();
+    let svgs = b.svg_contents.clone();
+    let register = |c: &mut Compositor, svgs: &HashMap<String, Vec<u8>>| {
+        for (file, bytes) in svgs {
+            c.widget_renderer_mut()
+                .unwrap()
+                .register_svg(&type_name, file, bytes.clone());
+        }
+    };
+    register(&mut compositor, &svgs);
+    scene.widget_registry.register_definition(b.definition);
+    scene.widget_registry.register_instance(WidgetInstance {
+        id: SceneId::new(),
+        widget_type_name: type_name.clone(),
+        tab_id: tab,
+        geometry_override: None,
+        contention_override: None,
+        instance_name: "g".to_string(),
+        current_params: HashMap::new(),
+        auto_clear_ms: None,
+    });
+    publish(&mut scene, "g", "level", 0.5);
+    render(&mut compositor, &mut scene, &mut surface);
+    let count = |c: &Compositor| c.widget_renderer().unwrap().raster_count("g");
+    assert_eq!(count(&compositor), 1);
+
+    register(&mut compositor, &svgs);
+    let same = render(&mut compositor, &mut scene, &mut surface);
+    assert!(
+        same.widget_rasterized.is_empty(),
+        "same bytes keep the raster"
+    );
+
+    let restyled: HashMap<String, Vec<u8>> = svgs
+        .iter()
+        .map(|(file, bytes)| {
+            let mut bytes = bytes.clone();
+            bytes.extend_from_slice(b"<!-- restyled -->");
+            (file.clone(), bytes)
+        })
+        .collect();
+    register(&mut compositor, &restyled);
+    let frame = render(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(frame.widget_rasterized, ["g"]);
+    let next = render(&mut compositor, &mut scene, &mut surface);
+    assert!(next.widget_rasterized.is_empty(), "once");
+}

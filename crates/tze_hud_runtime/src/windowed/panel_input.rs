@@ -415,6 +415,7 @@ mod panel_task_tests {
             agents: None,
             connect: None,
             runtime: None,
+            appearance: None,
             render_wake,
             main_wake: Default::default(),
         };
@@ -828,6 +829,7 @@ mod panel_task_tests {
             agents: None,
             connect: None,
             runtime: None,
+            appearance: None,
             render_wake: RenderWakeNotifier::default(),
             main_wake: RenderWakeNotifier::default(),
         };
@@ -966,6 +968,7 @@ mod panel_task_tests {
             agents: None,
             connect: None,
             runtime: None,
+            appearance: None,
             render_wake: RenderWakeNotifier::default(),
             main_wake: RenderWakeNotifier::default(),
         };

@@ -1315,6 +1315,7 @@ pub(crate) mod tests {
         let pairing = Arc::new(rig.pairing);
         let shutdown = crate::threads::ShutdownToken::new();
         let config = crate::mcp::McpServerConfig {
+            appearance: None,
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
                 &Default::default(),
                 "motion.state.ms",

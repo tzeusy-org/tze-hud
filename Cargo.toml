@@ -58,6 +58,8 @@ proptest = "1"
 
 # Config
 toml = "0.8"
+# Config file watching for live [design_tokens] (hud-h51u7.5).
+notify = { version = "8", default-features = false }
 # Comment-preserving edits of tze_hud.toml (same major as `toml` 0.8).
 toml_edit = "0.22"
 

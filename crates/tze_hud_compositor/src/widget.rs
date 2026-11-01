@@ -2547,6 +2547,9 @@ pub struct WidgetRenderer {
     /// Widgets were hidden: the next shown sync draws the newest parameters
     /// directly instead of transitioning from what was drawn before hiding.
     snap_on_show: bool,
+    /// Widget types whose SVG changed since the last sync (a live theme
+    /// change re-resolves their tokens): their instances re-raster.
+    restyled_types: std::collections::HashSet<String>,
     /// Raw SVG bytes keyed by (widget_type_id, svg_filename).
     /// Stored at widget type registration time.
     svgs: HashMap<(String, String), Vec<u8>>,
@@ -2628,6 +2631,7 @@ impl WidgetRenderer {
 
         Self {
             snap_on_show: false,
+            restyled_types: std::collections::HashSet::new(),
             resident_ledger: None,
             svgs: HashMap::new(),
             svg_resident_allocation_ids: HashMap::new(),
@@ -2715,7 +2719,11 @@ impl WidgetRenderer {
                 return;
             }
         };
-        self.svgs.insert(key.clone(), svg_bytes);
+        if let Some(old) = self.svgs.insert(key.clone(), svg_bytes)
+            && Some(&old) != self.svgs.get(&key)
+        {
+            self.restyled_types.insert(widget_type_id.to_owned());
+        }
         if let Some(old_id) = self.resident_ledger.as_ref().and_then(|_| {
             self.svg_resident_allocation_ids
                 .insert(key, allocation_id.clone())
@@ -3274,6 +3282,16 @@ impl WidgetRenderer {
     /// Start a new sync pass: forget the previous pass's rasterized set.
     pub(crate) fn begin_sync(&mut self) {
         self.rasterized_last_sync.clear();
+    }
+
+    /// Whether `widget_type`'s SVG changed since the last shown sync.
+    pub(crate) fn restyled(&self, widget_type: &str) -> bool {
+        self.restyled_types.contains(widget_type)
+    }
+
+    /// A shown sync re-rastered every restyled instance.
+    pub(crate) fn end_sync(&mut self) {
+        self.restyled_types.clear();
     }
 
     pub fn texture_entry(&self, instance_name: &str) -> Option<&WidgetTextureEntry> {

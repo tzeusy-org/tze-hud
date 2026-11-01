@@ -81,7 +81,12 @@ compositor loop only when they change), and names each value's source. The
 Layout card edits widget instances in the scene and their `[[tabs.widgets]]`
 entries (`tze_hud_config::set_widget`); the Input card's chord changes go
 through [`ChordControl`](../crates/tze_hud_runtime/src/shell/control_panel/chords.rs)
-to the Windows hotkey thread. MCP and
+to the Windows hotkey thread. The Appearance and Advanced tokens cards, and
+edits to `[design_tokens]` in the config file (watched by
+[`appearance::watch`](../crates/tze_hud_runtime/src/appearance.rs)), go
+through `Appearance::apply`: it restyles zones and re-resolves widget SVGs
+in the scene and publishes the new token map in `LiveTokens`, which the
+compositor and main thread take on their next turn. MCP and
 gRPC share [`SharedAgents`](../crates/tze_hud_scene/src/config/agents.rs).
 Network listeners bind loopback and local Tailscale-interface addresses
 ([`net_addrs`](../crates/tze_hud_runtime/src/net_addrs.rs)).

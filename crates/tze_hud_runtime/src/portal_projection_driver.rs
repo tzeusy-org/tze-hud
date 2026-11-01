@@ -553,9 +553,13 @@ impl InProcessPortalDriver {
         Some(feedback)
     }
 
-    /// Apply a new design-token override map, propagating to all live render bindings.
+    /// Apply a new design-token override map, propagating to all live render
+    /// bindings; attached portals repaint on the next drain.
     pub fn apply_token_map(&mut self, overrides: DesignTokenMap) {
         self.drive.apply_token_map(overrides);
+        if let Some(mut hub) = self.lock_hub() {
+            hub.restyle_all();
+        }
     }
 
     /// Test support: queue portal input with a fixed id (the token-footprint
@@ -1479,11 +1483,18 @@ mod tests {
             "a new portal takes the current tokens"
         );
 
+        let _ = driver.hub_mut().take_due(300);
+        assert!(driver.hub_mut().take_due(301).is_empty(), "idle");
         driver.apply_token_map(tokens("48"));
         assert_eq!(
             font(&driver, "pre"),
             48.0,
             "a live portal picks up new tokens"
+        );
+        assert_eq!(
+            driver.hub_mut().take_due(302).len(),
+            1,
+            "and repaints at once, without new content"
         );
     }
 

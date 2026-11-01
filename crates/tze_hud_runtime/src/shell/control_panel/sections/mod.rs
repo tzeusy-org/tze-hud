@@ -2,6 +2,7 @@
 //! and applies edits; see [`super::row::Section`] for the contract.
 
 mod agents;
+mod appearance;
 mod diagnostics;
 mod input;
 mod layout;
@@ -10,6 +11,7 @@ mod system;
 mod visibility;
 
 pub(crate) use agents::AgentsSection;
+pub(crate) use appearance::{AppearanceSection, TokensSection};
 pub(crate) use diagnostics::DiagnosticsSection;
 pub(crate) use input::InputSection;
 pub(crate) use layout::LayoutSection;

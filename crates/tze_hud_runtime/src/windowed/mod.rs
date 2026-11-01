@@ -479,6 +479,14 @@ struct WindowedRuntimeState {
     /// `resumed()`. After that call the field is no longer needed but is kept
     /// for potential hot-reload use.
     global_tokens: std::collections::HashMap<String, String>,
+    /// Live design tokens (hud-h51u7.5): the control panel and config edits
+    /// change them; `global_tokens`, the portal driver and the compositor
+    /// follow on their next turn. `None` in tests that build no scene.
+    appearance: Option<Arc<crate::appearance::Appearance>>,
+    /// The `appearance` generation `global_tokens` reflects.
+    tokens_seen: u64,
+    /// Watches the config for `[design_tokens]` edits while it lives.
+    _config_watch: Option<crate::appearance::watch::ConfigWatch>,
     /// Broadcast sender for `ElementRepositionedEvent`.
     ///
     /// Cloned from the `HudSessionImpl` after creation. `None` when gRPC is
@@ -837,6 +845,28 @@ impl WinitApp {
         // newly-created work.
         self.state.wake.mark_main_work_pending(deadline.source);
     }
+
+    /// Take a live design-token change (hud-h51u7.5) into the main thread's
+    /// copy (portal geometry, hit testing) and the portal driver (portals
+    /// attached from now on).
+    fn sync_design_tokens(&mut self) {
+        let Some(map) = self
+            .state
+            .appearance
+            .as_ref()
+            .and_then(|a| a.live.if_changed(&mut self.state.tokens_seen))
+        else {
+            return;
+        };
+        self.state.global_tokens = (*map).clone();
+        self.state
+            .portal_projection_driver
+            .apply_token_map(self.state.global_tokens.clone());
+        tracing::debug!(
+            token_count = self.state.global_tokens.len(),
+            "windowed: live design tokens taken"
+        );
+    }
 }
 
 impl WinitApp {
@@ -993,6 +1023,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             return;
         }
         self.sync_panel_focus();
+        self.sync_design_tokens();
         if displays::take_dirty(&self.state.displays_dirty) {
             self.sync_displays(event_loop);
         }
@@ -1414,8 +1445,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
 
         // Apply resolved design tokens to the compositor so severity colors are
         // looked up from the token map at render time rather than using hardcoded
-        // constants.  Clone the map so the state retains its copy for potential
-        // future hot-reload use.
+        // constants. Later changes arrive through `appearance` (hud-h51u7.5).
         compositor.set_token_map(self.state.global_tokens.clone());
         tracing::debug!(
             token_count = self.state.global_tokens.len(),
@@ -1430,9 +1460,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         //
         // The driver stores the map in `InProcessPortalDriveState::token_overrides`
         // and re-resolves `PortalVisualTokens` for every new adapter at attach
-        // time, so this call is the only site needed for a single-startup-token
-        // profile.  A hot-reload path would call `apply_token_map` again here
-        // after updating `self.state.global_tokens`.
+        // time; `sync_design_tokens` re-applies it after a live change.
         self.state
             .portal_projection_driver
             .apply_token_map(self.state.global_tokens.clone());
@@ -1511,6 +1539,10 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         let mut control_panel_seen = 0u64;
         let live_for_compositor = Arc::clone(&self.state.live);
         let mut live_seen = 0u64;
+        // The compositor was given the tokens in effect when it started
+        // (`set_token_map` above); it picks up later changes.
+        let tokens_for_compositor = self.state.appearance.as_ref().map(|a| Arc::clone(&a.live));
+        let mut tokens_seen = self.state.tokens_seen;
         let mut closed_notice_seen = 0u64;
         let capture_inbox = self.state.capture_inbox.clone();
         let display_targets = Arc::clone(&self.state.display_targets);
@@ -1758,6 +1790,12 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         live_for_compositor.apply(&mut live_seen, &mut frame_interval, |on| {
                             compositor.set_debug_zone_tints(on)
                         });
+                    // A theme, font or token change (hud-h51u7.5).
+                    let tokens_changed = tokens_for_compositor
+                        .as_ref()
+                        .and_then(|live| live.if_changed(&mut tokens_seen))
+                        .map(|map| compositor.set_token_map((*map).clone()))
+                        .is_some();
                     surface_repaint_pending = update_surface_repaint_pending(
                         surface_repaint_pending,
                         surface_recovery.reconfigured_surface()
@@ -1766,6 +1804,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             || panel_changed
                             || notice_changed
                             || outlines_changed
+                            || tokens_changed
                             || displays_need_frame,
                         false,
                     );
@@ -2855,6 +2894,14 @@ impl WindowedRuntime {
             cfg.debug_zones,
             render_wake.clone(),
         ));
+        let appearance = Arc::new(crate::appearance::Appearance::for_startup(
+            raw_config_for_startup.as_ref(),
+            cfg.config_file_path.as_deref().map(std::path::Path::new),
+            startup_compositor_tokens.clone(),
+            Arc::clone(&shared_scene),
+            render_wake.clone(),
+            wake.main_work_notifier(),
+        ));
         let cfg_agents_empty = cfg.agents.load().is_empty();
         let agent_store = Arc::new(crate::agent_store::AgentStore::open(
             tze_hud_config::agents_path_for(
@@ -3025,6 +3072,7 @@ impl WindowedRuntime {
             if let Some(ref rt) = network_rt {
                 // Same addresses as gRPC: loopback plus local Tailscale.
                 let mcp_config = McpServerConfig {
+                    appearance: Some(Arc::clone(&appearance)),
                     widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
                         &startup_compositor_tokens,
                         "motion.state.ms",
@@ -3107,6 +3155,17 @@ impl WindowedRuntime {
         };
         #[cfg(not(target_os = "windows"))]
         let rebind = None;
+        // `[design_tokens]` edits to the config restyle the running HUD.
+        let config_watch = network_rt
+            .as_ref()
+            .zip(cfg.config_file_path.as_ref())
+            .and_then(|(rt, path)| {
+                crate::appearance::watch::spawn(
+                    std::path::PathBuf::from(path),
+                    Arc::clone(&appearance),
+                    rt.rt.handle().clone(),
+                )
+            });
         let control_panel = network_rt.as_ref().map(|rt| {
             let deps = crate::shell::control_panel::ControlPanelDeps {
                 scene: Arc::clone(&shared_scene),
@@ -3146,6 +3205,7 @@ impl WindowedRuntime {
                     update.clone(),
                     pairing.as_ref().map(|p| p.firewall()),
                 )),
+                appearance: Some(Arc::clone(&appearance)),
                 render_wake: render_wake.clone(),
                 main_wake: wake.main_work_notifier(),
             };
@@ -3265,6 +3325,9 @@ impl WindowedRuntime {
             zone_press: None,
             primary_drag_gesture: None,
             global_tokens: startup_compositor_tokens,
+            appearance: Some(appearance),
+            tokens_seen: 0,
+            _config_watch: config_watch,
             element_repositioned_tx,
             input_event_tx,
             pending_blur_delivery_context: None,
