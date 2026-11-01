@@ -389,6 +389,7 @@ pub(crate) fn spawn_control_panel(
             nav: Nav::default(),
             published: None,
             busy: std::collections::HashSet::new(),
+            after_busy: std::collections::HashMap::new(),
             changes: std::collections::HashMap::new(),
             closed_failure: None,
         }
@@ -455,6 +456,10 @@ struct PanelTask {
     /// Rows whose edit is still running in the background. Kept across
     /// close and reopen so a second edit cannot start beside the first.
     busy: std::collections::HashSet<String>,
+    /// A previewing row's latest edit (keep, revert, another preview), run
+    /// once its still-running edit finishes: dropping it would leave an
+    /// unsaved theme on screen or lose the one kept.
+    after_busy: std::collections::HashMap<String, Edit>,
     /// Each running edit's (old, new) value, for its outcome's log line.
     changes: std::collections::HashMap<String, (String, String)>,
     /// A background edit that failed while the panel was closed, shown on
@@ -468,7 +473,10 @@ impl PanelTask {
             (PanelEvent::Applied { row, result }, _) => {
                 self.busy.remove(&row);
                 self.applied(&row, result);
-                Vec::new()
+                match self.after_busy.remove(&row) {
+                    Some(edit) => vec![Effect::Apply { row, edit }],
+                    None => Vec::new(),
+                }
             }
             (PanelEvent::Chord(role), _) => {
                 self.on_chord(role).await;
@@ -635,6 +643,10 @@ impl PanelTask {
             return;
         };
         if self.busy.contains(row) {
+            if self.nav.previews.iter().any(|r| r == row) || edit == Edit::Revert {
+                self.after_busy.insert(row.to_owned(), edit);
+                return;
+            }
             tracing::info!(
                 row,
                 "control panel: edit ignored; the last one is still running"
