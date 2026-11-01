@@ -38,7 +38,7 @@ pub struct AgentRecord {
     /// SHA-256 of the agent's PSK, 64 lowercase hex characters.
     pub psk_sha256: String,
     /// Surfaces the agent may use: `zone:<name|*>`, `widget:<name|*>`,
-    /// `portal`, `tiles`, or `*`.
+    /// `portal`, `admin`, or `*`.
     #[serde(default)]
     pub allow: Vec<String>,
     /// When the agent was paired (RFC 3339), for the operator.
