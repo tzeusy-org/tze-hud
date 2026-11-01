@@ -826,9 +826,11 @@ pub(crate) fn zone_geometry_in(
     }
 }
 
-/// Backends the windowed compositor requests: Vulkan on Linux, D3D12 and
-/// Vulkan on Windows, Metal on macOS. Headless construction uses
-/// `Backends::all()` so software renderers (llvmpipe, WARP) still work.
+/// Backends the compositor requests: Vulkan on Linux, D3D12 and Vulkan on
+/// Windows, Metal on macOS. Software renderers stay reachable through them
+/// (llvmpipe via Vulkan, WARP via D3D12). Headless construction must not add
+/// GL: its EGL probe connects to any Wayland socket under `XDG_RUNTIME_DIR`
+/// and can block for a minute or more on an unresponsive compositor (WSLg).
 fn platform_backends() -> wgpu::Backends {
     if cfg!(target_os = "linux") {
         wgpu::Backends::VULKAN
@@ -859,7 +861,7 @@ impl Compositor {
             .unwrap_or(false);
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
+            backends: platform_backends(),
             ..Default::default()
         });
 
@@ -1014,7 +1016,7 @@ impl Compositor {
     /// immediately after creation. The `WindowSurface` is owned by the main thread.
     ///
     /// Per spec §Platform GPU Backends (line 189): this path uses the platform-
-    /// mandated backends — unlike `new_headless` which uses `Backends::all()`.
+    /// mandated backends, as `new_headless` does.
     pub async fn new_windowed(
         window: std::sync::Arc<winit::window::Window>,
         width: u32,

@@ -100,3 +100,66 @@ async fn gpu_adapter_available_when_required() {
         }
     }
 }
+
+/// Headless construction must not wait on a display server. wgpu's GL backend
+/// probes EGL, which connects to `$XDG_RUNTIME_DIR/wayland-0` and blocks until
+/// the compositor answers; under WSLg that stalled each GPU test 60–100 s.
+/// The probe runs in a child process (this binary, re-executed) whose
+/// `XDG_RUNTIME_DIR` holds a Wayland socket that accepts and never replies.
+#[cfg(target_os = "linux")]
+#[test]
+fn headless_construction_ignores_an_unresponsive_wayland_socket() {
+    use std::os::unix::net::UnixListener;
+    use std::process::{Command, Stdio};
+    use std::time::{Duration, Instant};
+
+    const CHILD: &str = "TZE_HUD_HEADLESS_PROBE_CHILD";
+    if std::env::var_os(CHILD).is_some() {
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("tokio runtime");
+        match runtime.block_on(Compositor::new_headless(64, 64)) {
+            Ok(_) | Err(CompositorError::NoAdapter) => return,
+            Err(e) => panic!("headless construction failed: {e}"),
+        }
+    }
+
+    let dir = std::env::temp_dir().join(format!("tze-hud-wayland-stall-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).expect("create runtime dir");
+    // Bound but never accepted: connect() succeeds, every request goes unanswered.
+    let _silent_compositor = UnixListener::bind(dir.join("wayland-0")).expect("bind wayland-0");
+
+    let mut child = Command::new(std::env::current_exe().expect("test binary path"))
+        .args([
+            "--exact",
+            "headless_construction_ignores_an_unresponsive_wayland_socket",
+            "--nocapture",
+        ])
+        .env(CHILD, "1")
+        .env("XDG_RUNTIME_DIR", &dir)
+        .env_remove("WAYLAND_DISPLAY")
+        .env_remove("DISPLAY")
+        .stdout(Stdio::null())
+        .spawn()
+        .expect("spawn probe child");
+
+    let deadline = Instant::now() + Duration::from_secs(20);
+    let status = loop {
+        if let Some(status) = child.try_wait().expect("poll probe child") {
+            break Some(status);
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            break None;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let _ = std::fs::remove_dir_all(&dir);
+
+    let status = status.expect(
+        "Compositor::new_headless blocked for 20 s on an unresponsive Wayland socket; \
+         headless construction must not enable wgpu's GL/EGL backend",
+    );
+    assert!(status.success(), "headless probe child failed: {status}");
+}
