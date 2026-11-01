@@ -175,8 +175,7 @@ pub fn handle_shortcut(state: &mut ChromeState, shortcut: ChromeShortcut) -> Sho
 #[derive(Clone, Debug)]
 pub struct DismissTileResult {
     /// The terminal lease transition. `Some` when the tile's lease was
-    /// reclaimed; forward it to the owning session
-    /// (`Reclaimed{OVERRIDE}`). `None` when the tile or lease was already gone.
+    /// reclaimed. `None` when the tile or lease was already gone.
     pub expiry: Option<tze_hud_scene::types::LeaseExpiry>,
 }
 

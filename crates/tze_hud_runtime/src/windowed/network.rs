@@ -53,7 +53,6 @@ type NetworkServices = (
     Option<tze_hud_protocol::session_server::InputEventSender>,
     Option<tokio::sync::broadcast::Sender<tze_hud_protocol::proto::FramePresented>>,
     Option<tze_hud_protocol::session_server::DegradationNoticeSender>,
-    Option<tze_hud_protocol::session_server::LeaseExpirySender>,
     Vec<std::net::SocketAddr>,
 );
 
@@ -93,7 +92,7 @@ pub(super) fn start_network_services_with_render_wake(
         // Compositor-only mode: no session, so no present-ack subscriber. The
         // compositor thread still drains the present-ack queue (bounded memory)
         // but has no sender to broadcast on (hud-4va6q).
-        return Ok((None, Vec::new(), None, None, None, None, None, Vec::new()));
+        return Ok((None, Vec::new(), None, None, None, None, Vec::new()));
     }
 
     start_enabled_network_services(
@@ -190,7 +189,6 @@ fn start_enabled_network_services(
     // gRPC task; subscribers attach via HudSession::subscribe_frame_presented.
     let frame_presented_tx = service.frame_presented_tx.clone();
     let degradation_notices = service.degradation_notices.clone();
-    let lease_expirations = service.lease_expirations.clone();
 
     // Bind the listeners eagerly (hud-ylwqc). `std::net::TcpListener::bind` is
     // synchronous and needs no reactor, so a port conflict fails startup fast
@@ -299,7 +297,6 @@ fn start_enabled_network_services(
         Some(input_event_tx),
         Some(frame_presented_tx),
         Some(degradation_notices),
-        Some(lease_expirations),
         grpc_bound_addrs,
     ))
 }
@@ -602,17 +599,9 @@ mod tests {
     fn start_network_services_grpc_port_zero_returns_no_runtime() {
         let shared_state = make_shared_state();
         let ctx: SharedRuntimeContext = Arc::new(RuntimeContext::headless_default());
-        let (
-            rt,
-            handles,
-            _tx,
-            _scroll_tx,
-            present_tx,
-            _degradation_notices,
-            lease_expirations,
-            grpc_addrs,
-        ) = start_network_services(0, Default::default(), shared_state, ctx)
-            .expect("start_network_services should not fail for port 0");
+        let (rt, handles, _tx, _scroll_tx, present_tx, _degradation_notices, grpc_addrs) =
+            start_network_services(0, Default::default(), shared_state, ctx)
+                .expect("start_network_services should not fail for port 0");
         assert!(
             rt.is_none(),
             "grpc_port=0 must not create a NetworkRuntime (compositor-only)"
@@ -624,10 +613,6 @@ mod tests {
         assert!(
             present_tx.is_none(),
             "grpc_port=0 has no session, so no present-ack sender (hud-4va6q)"
-        );
-        assert!(
-            lease_expirations.is_none(),
-            "grpc_port=0 has no session, so no terminal lease-expiry sender"
         );
         assert!(
             grpc_addrs.is_empty(),
@@ -649,23 +634,15 @@ mod tests {
                 .is_err(),
             "production startup must reject an occupied loopback port"
         );
-        let (
-            rt,
-            handles,
-            _tx,
-            _scroll_tx,
-            present_tx,
-            _degradation_notices,
-            lease_expirations,
-            grpc_addrs,
-        ) = start_network_services_on_listener(
-            listener,
-            Default::default(),
-            shared_state,
-            ctx,
-            None,
-        )
-        .expect("start_network_services should not error for a valid port");
+        let (rt, handles, _tx, _scroll_tx, present_tx, _degradation_notices, grpc_addrs) =
+            start_network_services_on_listener(
+                listener,
+                Default::default(),
+                shared_state,
+                ctx,
+                None,
+            )
+            .expect("start_network_services should not error for a valid port");
         assert!(
             rt.is_some(),
             "non-zero grpc_port must create a NetworkRuntime"
@@ -678,11 +655,6 @@ mod tests {
             present_tx.is_some(),
             "non-zero grpc_port must expose the session present-ack sender so the \
              compositor thread can broadcast FramePresented (hud-4va6q)"
-        );
-        assert!(
-            lease_expirations.is_some(),
-            "non-zero grpc_port must expose the terminal lease-expiry sender so the \
-             compositor can notify connected lease owners"
         );
         assert_eq!(
             grpc_addrs.first().map(|a| a.port()),

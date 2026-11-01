@@ -1,4 +1,4 @@
-//! Visibility: hide portals, zones, widgets or tiles from the screen, or all of
+//! Visibility: hide portals, zones or widgets from the screen, or all of
 //! them at once (spec CP-6).
 //!
 //! Hiding is a view choice of the owner, not a scene change: hidden content is
@@ -27,7 +27,7 @@ type ClassRow = (
     &'static [&'static str],
 );
 
-const CLASSES: [ClassRow; 4] = [
+const CLASSES: [ClassRow; 3] = [
     (
         VisibilitySection::PORTALS,
         "Portals",
@@ -46,12 +46,6 @@ const CLASSES: [ClassRow; 4] = [
         "SVG widgets: gauges, progress, badges",
         &["gauge", "progress", "badge", "svg"],
     ),
-    (
-        VisibilitySection::TILES,
-        "Tiles",
-        "Agent tiles other than portals",
-        &["tile", "resident", "lease"],
-    ),
 ];
 
 fn class_hidden(set: SurfaceClasses, row: &str) -> bool {
@@ -64,7 +58,6 @@ fn class_mut<'a>(set: &'a mut SurfaceClasses, row: &str) -> Option<&'a mut bool>
         VisibilitySection::PORTALS => &mut set.portals,
         VisibilitySection::ZONES => &mut set.zones,
         VisibilitySection::WIDGETS => &mut set.widgets,
-        VisibilitySection::TILES => &mut set.tiles,
         _ => return None,
     })
 }
@@ -72,7 +65,7 @@ fn class_mut<'a>(set: &'a mut SurfaceClasses, row: &str) -> Option<&'a mut bool>
 /// What is hidden, as a sentence fragment: "Widgets", "Portals and zones",
 /// "Portals, zones and widgets", or "Everything".
 pub(crate) fn hidden_names(hidden: SurfaceClasses) -> String {
-    if hidden.all() {
+    if hidden.portals && hidden.zones && hidden.widgets {
         return "Everything".to_owned();
     }
     let names: Vec<String> = CLASSES
@@ -99,7 +92,6 @@ impl VisibilitySection {
     pub(crate) const PORTALS: &'static str = "visibility.portals";
     pub(crate) const ZONES: &'static str = "visibility.zones";
     pub(crate) const WIDGETS: &'static str = "visibility.widgets";
-    pub(crate) const TILES: &'static str = "visibility.tiles";
 
     pub(crate) fn new(scene: Arc<Mutex<SceneGraph>>, render_wake: RenderWakeNotifier) -> Self {
         Self { scene, render_wake }
@@ -123,15 +115,19 @@ impl Section for VisibilitySection {
         Box::pin(async move {
             let hidden = self.hidden().await;
             let mut rows = vec![
-                Row::new(Self::HIDE_ALL, "Hide all", Control::Toggle(hidden.all()))
-                    .detail(if hidden.any() {
-                        format!("{} hidden · agents keep running", hidden_names(hidden))
-                    } else {
-                        "Hides every agent surface; agents keep running".to_owned()
-                    })
-                    .keywords(&["show", "presenting", "screen share", "clear", "declutter"])
-                    .caution(hidden.any())
-                    .resettable(hidden.any()),
+                Row::new(
+                    Self::HIDE_ALL,
+                    "Hide all",
+                    Control::Toggle(hidden.portals && hidden.zones && hidden.widgets),
+                )
+                .detail(if hidden.any() {
+                    format!("{} hidden · agents keep running", hidden_names(hidden))
+                } else {
+                    "Hides every agent surface; agents keep running".to_owned()
+                })
+                .keywords(&["show", "presenting", "screen share", "clear", "declutter"])
+                .caution(hidden.any())
+                .resettable(hidden.any()),
             ];
             for (id, label, covers, keywords) in CLASSES {
                 let off = class_hidden(hidden, id);
@@ -223,9 +219,9 @@ mod tests {
             only(|s| {
                 s.portals = true;
                 s.zones = true;
-                s.tiles = true;
+                s.widgets = true;
             }),
-            "Portals, zones and tiles"
+            "Everything"
         );
         assert_eq!(hidden_names(SurfaceClasses::ALL), "Everything");
     }

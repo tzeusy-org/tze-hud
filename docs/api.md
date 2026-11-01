@@ -15,27 +15,23 @@ discovery.
 | Zone | `zone:<name>`, e.g. `zone:subtitle` | MCP, gRPC |
 | Widget instance | `widget:<name>`, e.g. `widget:gauge` | MCP, gRPC |
 | Portal projection | `portal:<projection_id>` | MCP |
-| Tile | `tile:<id>` (runtime-assigned) | gRPC |
 
 | Stage | MCP tool | gRPC message | Notes |
 |---|---|---|---|
-| Discover | `hud_surfaces` | `SessionEstablished` + `SceneSnapshot` | Lists surfaces the agent may use and what it holds now |
-| Claim + fill | `hud_publish` | `Publish` (zones, widgets); `ClaimTile` (tiles) | Claiming is implicit in the first publish |
-| Update | `hud_publish` | `Publish` / `MutationBatch` | Latest wins |
+| Discover | `hud_surfaces` | `SessionEstablished` + current `DegradationNotice` | MCP lists usable surfaces and holdings; gRPC establishes the session |
+| Claim + fill | `hud_publish` | `Publish` (zones, widgets) | Claiming is implicit in the first publish |
+| Update | `hud_publish` | `Publish` | Latest wins |
 | Interact | `hud_input` | `EventBatch` (pushed) | MCP pulls input and acks it in the same call |
 | Hold | `hud_hold` | `Hold` | Renews without resending content |
 | Release | `hud_clear` | `Clear` | |
-| Reclaim | none (runtime) | `Reclaimed` (pushed while connected) | Runs on expiry, disconnect, or human override; a disconnect has no live session to push to |
+| Reclaim | none (runtime) | none (runtime) | Runs on expiry, disconnect, or human override; a disconnect has no live session to push to |
 
-MCP `tools/list` has five tools. The resident tile API is gRPC only.
+MCP `tools/list` has five tools. gRPC supports resident zone/widget sessions.
 
-**Viewer dismiss.** Hovering an agent tile or portal shows a close button
-(`tile.close_button.*` tokens). Pressing it reclaims the tile's lease on the
-spot, with no agent round trip: a gRPC agent gets `Reclaimed{OVERRIDE}` for
-`tile:<id>`. A dismissed portal is detached; the agent's next `hud_publish` to
-`portal:<id>` attaches a fresh one and reports `reattached: true`;
-`hud_hold` answers `NOT_HELD` and
-`hud_clear` succeeds as a no-op.
+**Viewer dismiss.** Hovering a portal shows a close button
+(`tile.close_button.*` tokens). Pressing it revokes its internal lease and
+detaches the portal immediately. The next `hud_publish` to that portal
+attaches afresh and reports `reattached: true`.
 
 ## MCP tools
 
@@ -189,8 +185,17 @@ only its SHA-256, in `agents.toml` next to the config file:
 ```toml
 [agents.claude-main]
 psk_sha256 = "<64 hex: SHA-256 of the agent's PSK>"
-allow = ["zone:*", "widget:gauge", "portal", "tiles"]
+allow = ["zone:*", "widget:gauge", "portal"]
 ```
+
+Before upgrading an existing `agents.toml`, remove every `tiles` allow entry,
+including one mixed with `*`; the new binary rejects it. Preserve agent ids,
+PSK hashes, `paired_at`, comments and file ACLs. Choose only the zone, widget
+and portal grants the agent needs. Tile-only agents may keep an empty allow
+list or be retired. There is no alias, automatic migration, or grant widening;
+`*` remains an explicit owner choice. Do not add upload, input or telemetry
+permissions as a substitute. Validate the edited file with the new binary and
+restart it before reconnecting agents.
 
 - The runtime loads `agents.toml` at startup and shares it live between MCP
   and gRPC, so pairing and the control panel's Agents card (unpair, allow
@@ -302,7 +307,7 @@ unknown PSK) is a JSON-RPC error.
 |---|---|
 | `INVALID_ARGUMENT` | Unknown field, wrong type, or bad surface string |
 | `NOT_ALLOWED` | The agent's `allow` list doesn't cover the surface |
-| `NOT_HELD` | A tile mutation targets an absent tile or one owned by another authenticated namespace; `hud_hold` with nothing to extend (including a portal the viewer dismissed); `hud_clear` on a portal this agent never attached (a dismissed portal's `hud_clear` is an ok no-op) |
+| `NOT_HELD` | `hud_hold` with nothing to extend (including a portal the viewer dismissed); `hud_clear` on a portal this agent never attached (a dismissed portal's `hud_clear` is an ok no-op) |
 | `ZONE_NOT_FOUND` | No such zone |
 | `WIDGET_NOT_FOUND` | No such widget instance |
 | `WIDGET_PARAMETER_INVALID` | Unknown widget param, or a value of the wrong type or range |
@@ -324,31 +329,23 @@ down to the lifecycle.
 
 | Client → server | Server → client |
 |---|---|
-| `SessionInit{agent_id, auth_credential, subscriptions, …}` / `SessionResume{resume_token}` | `SessionEstablished{session_id, namespace, resume_token, heartbeat_interval_ms, …}` + `SceneSnapshot` |
-| `Publish{surface, content \| params, ttl_ms, present_at_us?, expires_at_us?, key?}` | `RequestResult{seq, ok, code?, hint?, ids?, lease_id?, ttl_ms?, batch_id?}` (one shape for every request) |
-| `Clear{surface}` (`tile:<id>` releases the tile and its lease) | `EventBatch{…}` (input, focus, element moved) |
-| `ClaimTile{placement, ttl_ms, root?}` → tile id, lease, and content in one round trip | `Reclaimed{surface, why: EXPIRED \| OVERRIDE, lease_id}` (not sent after a disconnect: the session is gone) |
-| `MutationBatch{lease_id, mutations}` (node tree updates on own tiles) | `SessionSuspended` / `SessionResumed` (safe mode) |
-| `Hold{surface, ttl_ms}` (zone, widget, or `tile:<id>`) | `Heartbeat` |
-| `ResourceUpload*` (images), `Heartbeat`, `SessionClose` | `DegradationNotice{level: NORMAL \| SIMPLIFIED}` |
+| `SessionInit{agent_id, auth_credential, subscriptions, …}` / `SessionResume{resume_token, auth_credential}` | `SessionEstablished{session_id, namespace, resume_token, heartbeat_interval_ms, …}` / `SessionResumeResult`, then current `DegradationNotice` |
+| `Publish{surface, content \| params, ttl_ms, present_at_us?, expires_at_us?, key?}` | `RequestResult{seq, ok, code?, hint?, ttl_ms?}` |
+| `Clear{surface}` (zone or widget) | `EventBatch{…}` (input, focus, commands), `ElementRepositioned`, `FramePresented` |
+| `Hold{surface, ttl_ms}` (zone or widget) | `SessionSuspended` / `SessionResumed` (safe mode) |
+| `ResourceUpload*` (images), `Heartbeat`, `SessionClose` | Resource upload replies, `Heartbeat`, `DegradationNotice` |
 
-- **Init to a visible, filled tile takes 2 round trips** (handshake, then
-  `ClaimTile` with `root`), down from 4 (handshake, `LeaseRequest`,
-  `CreateTile`, `SetTileRoot`). `RequestResult.ids` is the tile id followed
-  by the root tree's node ids in pre-order.
-- **Placement is a hint the runtime resolves.** `TilePlacement{anchor, size}`
-  names one of nine anchors (default top-right) and a size class (`SMALL`,
-  `MEDIUM` (default), `LARGE`, `WIDE`, `TALL`). Sizes, the screen margin, and
-  the stacking gap come from `[design_tokens]` `tile.<size>.width|height`,
-  `tile.margin`, and `tile.gap`. Claims at the same anchor stack away from
-  the edge (down from top and middle anchors, up from bottom anchors) and
-  are clamped to the display. Z-order follows claim order. Agents never send
-  bounds or z-order.
+Public `ClaimTile`, `MutationBatch`, `SceneSnapshot`, `Reclaimed`, placement
+and tile surfaces are removed. Their wire tags and names stay reserved.
+Only structured PSK credentials authenticate init and resume; legacy resume
+PSKs, local-socket credentials and protocol-version negotiation are removed.
+Handshake and resume send no scene content, foreign portal transcript or draft.
+
 - **Every `RequestResult` carries `code` + `hint`.** Scene validation hints
   reach the agent rather than being flattened to `MUTATION_REJECTED`.
   `seq` echoes the request's `sequence`, including legacy zero and rejected
   empty/unknown-only envelopes; those rejections keep the stream open.
-  Ephemeral zone publishes get no reply. `ClaimTile`, `Hold`, and `Clear`
+  Ephemeral zone publishes get no reply. `Hold` and `Clear`
   retransmits replay the cached reply.
 - **Timing hints are honored**, not just validated: `present_at_us` holds
   content, and `expires_at_us` sweeps it (invariant 1). On `Publish`,
@@ -359,7 +356,8 @@ down to the lifecycle.
   presentation. Other zone content and widget publications have no derived
   content expiry. MCP differs: omitted zone `ttl_ms` gives 60 s, while an
   explicit `ttl_ms: 0` holds even a notification until cleared.
-- **Hold a notification with `Publish`, then `Hold{surface, ttl_ms: 0}`.**
+- **Hold0 means until cleared for both zones and widgets.** Publish first,
+  then `Hold{surface, ttl_ms: 0}`.
   Hold removes content expiry from the agent's active and pending publications
   on that zone; it is namespace-wide, not limited to one merge key. Pending
   content still waits for `present_at_us`, and `Clear` cancels it. The two
@@ -368,10 +366,9 @@ down to the lifecycle.
   notification can restore an expiry. Held content remains subject to
   clearing, human override and lease/session-origin reclamation (invariant 4);
   Hold does not make a lease immortal. There is no atomic held mode on Publish.
-- **Runtime-internal mutations.** `CreateTile`, `PublishToTile`, and the
-  portal mutations (`MutationProto` 13–17) are applied only by the runtime's
-  in-process portal driver. The session server rejects them from agents with
-  `INVALID_ARGUMENT`.
+- **Runtime-internal mutations.** `MutationBatch` / `TimingHints` containers
+  and `MutationProto` 1, 10 and 13–17 remain internal scene contracts. No public
+  session route dispatches them. Native portal rendering stays in-process.
 
 ## Configuration
 
@@ -422,7 +419,7 @@ The control panel is a full-width pane over the primary display: a search
 field, quick-action tiles, and section cards of settings that scroll
 vertically. Its header line counts the agents connected or showing
 something and what they hold ("3 agents · 2 portals · 5 zones · 1 widget ·
-0 tiles") and says "restart pending" while a saved setting waits for a
+0 widgets") and says "restart pending" while a saved setting waits for a
 restart (Restart now is in System, Alt+8). It takes keyboard focus when it
 opens (if Windows refuses, the header says to click it) and returns focus
 on close. Typing searches every row; arrows, Tab, Enter and Space move and
@@ -435,7 +432,7 @@ offer it; ports and widget boxes take a typed value. Clicks outside the
 panel pass through to the desktop. Closing the panel always resumes
 agents. While paused, the pause tile and row turn caution-colored.
 
-The Visibility card hides portals, zones, widgets or other agent tiles for
+The Visibility card hides portals, zones or widgets for
 the session; the Hide all tile (Alt+H) hides all of them and, when everything
 is hidden, shows it all again. Hidden content is not drawn and takes no input
 or focus; agents keep their leases and publications and are not told. While
@@ -445,19 +442,18 @@ pause chord when Windows refused the panel chord). A restart shows everything.
 
 The Agents card lists every paired agent, and any other agent that is
 connected or shows something, with a status dot and what it holds (portals,
-zones, widgets, tiles); the list follows agents as they come and go while the
+zones, widgets); the list follows agents as they come and go while the
 panel is open. Opening an agent's row shows:
 
 - **Clear** (asks first): removes everything the agent shows now, as a viewer
-  dismiss would, without waiting on it. A connected gRPC agent gets
-  `Reclaimed{OVERRIDE}` per lease. Clear is not a block: the agent's next
+  dismiss would, without waiting on it. Clear is not a block: the agent's next
   publish is served, and a portal publish reports `reattached: true`.
 - **Unpair** (asks first): removes the agent from `agents.toml`, so its PSK
   stops authenticating at once (a handshake already under way is refused);
   ends its gRPC sessions, even a hung one; and then clears its content.
   Unpairing the last agent reopens pairing.
-- **Zones, Widgets, Portal, Tiles, Admin**: grant or withdraw a whole class
-  (`zone:*`, `widget:*`, `portal`, `tiles`, `admin`) in the allow list as it
+- **Zones, Widgets, Portal, Admin**: grant or withdraw a whole class
+  (`zone:*`, `widget:*`, `portal`, `admin`) in the allow list as it
   stands in the file. Withdrawing applies at once; granting asks first. A `*` entry is rewritten as the classes that
   remain when one is withdrawn; single-surface entries (`zone:subtitle`) are
   kept. MCP requests use the new list from the next call; a connected gRPC
@@ -567,7 +563,7 @@ canonical keys, their descriptions, and their defaults are in
 `CANONICAL_TOKENS` (`crates/tze_hud_config/src/tokens.rs`).
 
 **Sizes are logical (dp).** Every size token (font sizes, spacing,
-radii, strokes, tile sizes, portal and panel chrome, in canonical and
+radii, strokes, portal and panel chrome, in canonical and
 `portal.*` keys alike) is drawn at the monitor's Windows scale factor ×
 `ui.scale` physical pixels: at 150% a 16 dp body is 24 px, and
 `"ui.scale" = "1.25"` makes it 30 px. `ui.scale` is a `[design_tokens]`
@@ -577,8 +573,7 @@ and a theme that sets it is invalid, because it is the owner's preference
 rather than part of a look. A zone placed on a secondary monitor is drawn
 and hit-tested at that monitor's scale; portals, tiles and the panel use
 the primary's. A DPI change or a new monitor restyles zones, portals and
-the panel on the next frame; tiles already placed keep their bounds, and
-tiles claimed afterwards take the new sizes. Hairlines (the transcript
+the panel on the next frame. Hairlines (the transcript
 divider) round to whole pixels, at least one. Opacity, weights, ratios
 and timing do not scale. Zone boxes are fractions of the display and
 keep their size. A widget box is drawn at `ui.scale` times its configured
@@ -631,8 +626,7 @@ the HUD last read or saved it does nothing, so a panel change that could
 not be saved survives an unrelated edit. A
 table that startup would refuse (an unknown theme, a reserved or malformed
 key) or a file that is not valid TOML keeps the current tokens and is
-reported in `/admin/status` `config_reload`. Tiles claimed after a change
-take the new tile sizes. Still read once at startup: the MCP widget
+reported in `/admin/status` `config_reload`. Still read once at startup: the MCP widget
 transition time and widget text fonts (widgets draw with the bundled
 faces). Other config sections apply after a
 restart (or live from the control panel). Keep config
@@ -788,11 +782,11 @@ These four parameters remain because they control behavior in the shipped bundle
 
 ## Design decisions (T5, 2026-10-02)
 
-1. **Tiles are gRPC only.** MCP loses `create_tile`, `set_content`,
-   `dismiss`, `create_tab`, and `publish_to_element`.
-2. **Tiles take a placement hint.** `ClaimTile` gets a `placement` hint
-   (anchor + size class) that the runtime resolves, in place of `bounds`
-   and `z_order`.
+1. **Public agent-owned tiles are deferred.** The session exposes zones,
+   widgets, uploads, input and events. The deferred tile spec and entry
+   criterion remain in hud-x1wuq.
+2. **Geometry belongs to the runtime.** No public tile placement or mutation
+   route is exposed.
 3. **Lease priority is dropped.** Chrome is structurally above agent
    content, and ties go to claim order.
 4. **Portal tile mutations are internal.** Accent, unread count, composer

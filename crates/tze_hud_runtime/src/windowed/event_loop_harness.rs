@@ -136,7 +136,6 @@ impl WindowedRuntimeState {
             frame_ready_tx: Some(frame_ready_tx),
             frame_presented_tx: None,
             degradation_notices: None,
-            lease_expirations: None,
             compositor: None,
             window_surface: None,
             input_processor: InputProcessor::new(),
@@ -228,10 +227,8 @@ impl SharedStateBuilder {
             safe_mode_atomic,
             active_tab_mirror,
             token_store: tze_hud_protocol::token::TokenStore::new(),
-            freeze_active: false,
             input_capture_tx: None,
             input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
-            tile_placement: Default::default(),
         }
     }
 }
@@ -310,7 +307,6 @@ impl HeadlessEventLoopHarness {
         };
         let scene_handle = {
             let mut shared = state.shared_state.lock().await;
-            shared.tile_placement = tze_hud_config::tile_placement_from_tokens(&global_tokens);
             *shared.scene.lock().await = scene;
             Arc::clone(&shared.scene)
         };
@@ -387,7 +383,6 @@ impl HeadlessEventLoopHarness {
             )),
             ..SessionDeps::new(Arc::clone(&state.shared_state), Arc::clone(&cfg.agents))
         });
-        state.lease_expirations = Some(service.lease_expirations.clone());
         tokio::spawn(
             tonic::transport::Server::builder()
                 .add_service(HudSessionServer::new(service))
@@ -457,7 +452,6 @@ impl HeadlessEventLoopHarness {
                 shared: Arc::clone(&state.shared_state),
                 scene: panel_scene,
                 portals: Some(portals.clone()),
-                lease_expirations: state.lease_expirations.clone(),
                 pairing: pairing.clone(),
                 render_wake: render_wake.clone(),
                 main_wake: state.wake.main_work_notifier(),
@@ -804,7 +798,7 @@ impl HeadlessEventLoopHarness {
         let Ok(mut scene) = state.scene.try_lock() else {
             return false;
         };
-        let expiries = crate::pipeline::sweep_timed_scene_state(&mut scene);
+        crate::pipeline::sweep_timed_scene_state(&mut scene);
         tze_hud_compositor::renderer::hit_regions::populate_notification_hit_regions(
             &mut scene,
             width,
@@ -812,8 +806,7 @@ impl HeadlessEventLoopHarness {
             &std::collections::HashMap::new(),
         );
         // The compositor hands terminal lease transitions to the owning
-        // sessions, which tell their agents (`Reclaimed`).
-        super::publish_lease_expiries(self.app.state.lease_expirations.as_ref(), expiries);
+        // sessions; removal is immediate without agent cooperation.
         settled
     }
 
@@ -988,17 +981,12 @@ impl HeadlessEventLoopHarness {
     pub fn viewer_dismiss_all_tiles(&mut self) {
         let mut scene = self.scene();
         let ids: Vec<SceneId> = scene.tiles.keys().copied().collect();
-        let expiries: Vec<_> = ids
-            .into_iter()
-            .filter_map(|id| {
-                self.app
-                    .state
-                    .portal_projection_driver
-                    .viewer_dismiss_tile(&mut scene, id)
-                    .expiry
-            })
-            .collect();
-        super::publish_lease_expiries(self.app.state.lease_expirations.as_ref(), expiries);
+        for id in ids {
+            self.app
+                .state
+                .portal_projection_driver
+                .viewer_dismiss_tile(&mut scene, id);
+        }
     }
 
     /// Number of tiles on screen (portal surfaces included).
@@ -2330,15 +2318,12 @@ mod tests {
     /// Hovering a tile publishes it as the close-button target (and not while the
     /// pointer is outside the window); a press on the close button, dispatched
     /// through the real pointer-up path, removes the tile on the spot and
-    /// publishes one `Revoked` lease notice for its agent's `Reclaimed{OVERRIDE}`.
+    /// revokes its internal lease.
     #[test]
-    fn viewer_close_button_dismisses_hovered_tile_and_notifies_owner() {
-        use tze_hud_scene::types::{LeaseState, ZoneHitRegion};
+    fn viewer_close_button_dismisses_hovered_tile() {
+        use tze_hud_scene::types::ZoneHitRegion;
 
         let mut harness = HeadlessEventLoopHarness::new();
-        let sender = tze_hud_protocol::session_server::LeaseExpirySender::default();
-        let mut notices = sender.subscribe();
-        harness.app.state.lease_expirations = Some(sender);
         let (lease_id, tile_id) = {
             let shared = harness.app.state.shared_state.blocking_lock();
             let mut scene = shared.scene.blocking_lock();
@@ -2404,18 +2389,12 @@ mod tests {
         harness.drain();
 
         assert_eq!(harness.tile_count(), 0, "dismiss is local and immediate");
-        let notice = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .unwrap()
-            .block_on(async {
-                tokio::time::timeout(std::time::Duration::from_secs(1), notices.recv()).await
-            })
-            .expect("the dismissed tile's owner is notified")
-            .expect("notice");
-        assert_eq!(notice.lease_id, lease_id);
-        assert_eq!(notice.terminal_state, LeaseState::Revoked);
-        assert_eq!(notice.removed_tiles, vec![tile_id]);
+        let shared = harness.app.state.shared_state.blocking_lock();
+        let scene = shared.scene.blocking_lock();
+        assert_eq!(
+            scene.leases.get(&lease_id).unwrap().state,
+            tze_hud_scene::types::LeaseState::Revoked
+        );
     }
 
     /// Install one ordinary focused button (not a portal composer/control) and

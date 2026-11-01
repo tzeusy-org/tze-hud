@@ -1,43 +1,9 @@
-//! E12.1: Multi-agent integration test
+//! Multi-agent zone contention and internal shared-scene coherence.
 //!
-//! End-to-end test: three resident agents connect via gRPC, acquire leases,
-//! publish to zones, create tiles, and coexist without interference.
-//!
-//! ## Test scenario
-//! - Agent A (`agent-weather`): weather dashboard — creates two tiles, updates content.
-//! - Agent B (`agent-notifications`): publishes two notifications to the `notification-area`
-//!   zone (Stack contention policy).
-//! - Agent C (`agent-media`): publishes two subtitles to the `subtitle` zone
-//!   (LatestWins contention policy).
-//!
-//! ## Verifications
-//! 1. Namespace isolation — each agent's tiles are in its own namespace only.
-//! 2. Lease priority ordering — priority-1 (agent-weather) is highest.
-//! 3. Zone contention resolution — notifications stack; subtitles are latest-wins.
-//! 4. Compositor renders ≥ 1 frame without panic; tile count and active-lease count
-//!    match expectations.
-//!
-//! ## JSON Artifacts (per acceptance criteria)
-//! The test emits four structured JSON documents to stdout (prefixed with a tag
-//! so they can be captured by CI tools):
-//! - `ARTIFACT:tile_ownership_map`   — per-agent tile ownership map
-//! - `ARTIFACT:zone_contention_log`  — zone contention resolution log
-//! - `ARTIFACT:namespace_isolation`  — namespace isolation verification report
-//! - `ARTIFACT:frame_rate`           — compositor frame rate measurements
-//!
-//! ## References (validation-framework/spec.md)
-//! - Lines 313–320: V1 Success Criterion — Live Multi-Agent Presence (3 agents, 60fps)
-//! - Lines 335–343: V1 Success Criterion — Security Isolation
-//! - Lines 160–172: Test Scene Registry — `three_agents_contention`
-//!
-//! ## Cross-epic references validated
-//! - Epic 1  (scene graph):    namespace isolation, tile CRUD
-//! - Epic 4  (lease governance): lease priorities, concurrent leases
-//! - Epic 6  (session protocol): multi-agent gRPC connections
-//! - Epic 9  (zone system):    zone contention resolution policies
+//! Three gRPC sessions publish notifications and subtitles. The suite checks
+//! namespace isolation, stack/latest-wins resolution and compositor output.
+//! Internal tile and mutation coverage uses the shared scene directly.
 
-use tze_hud_protocol::proto;
-use tze_hud_protocol::proto::session as session_proto;
 use tze_hud_runtime::HeadlessRuntime;
 use tze_hud_runtime::headless::HeadlessConfig;
 use tze_hud_scene::types::*;
@@ -58,25 +24,6 @@ const DISPLAY_W: u32 = 1920;
 const DISPLAY_H: u32 = 1080;
 
 // ─── Artifact types (JSON output per acceptance criteria) ────────────────────
-
-/// Per-agent tile ownership entry.
-#[derive(Debug, Serialize, Deserialize)]
-struct TileOwnershipEntry {
-    tile_id: String,
-    namespace: String,
-    z_order: u32,
-    lease_id: String,
-    bounds: [f32; 4], // [x, y, w, h]
-}
-
-/// Per-agent tile ownership map artifact.
-#[derive(Debug, Serialize, Deserialize)]
-struct TileOwnershipMap {
-    agent_count: usize,
-    total_tiles: usize,
-    tiles: Vec<TileOwnershipEntry>,
-    namespaces: Vec<String>,
-}
 
 /// Single zone contention event.
 #[derive(Debug, Serialize, Deserialize)]
@@ -99,21 +46,6 @@ struct ZoneContentionLog {
     subtitle_final_count: usize,
     notification_area_policy: String,
     subtitle_policy: String,
-}
-
-/// Single namespace isolation check result.
-#[derive(Debug, Serialize, Deserialize)]
-struct NamespaceIsolationCheck {
-    description: String,
-    passed: bool,
-    detail: String,
-}
-
-/// Namespace isolation verification report artifact.
-#[derive(Debug, Serialize, Deserialize)]
-struct NamespaceIsolationReport {
-    checks: Vec<NamespaceIsolationCheck>,
-    all_passed: bool,
 }
 
 /// Compositor frame rate measurements artifact.
@@ -162,7 +94,7 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
     // ── Phase 1: Connect three agents concurrently ──────────────────────────
 
     // All three connect concurrently.
-    let (mut agent_a, mut agent_b, mut agent_c) = tokio::try_join!(
+    let (agent_a, mut agent_b, mut agent_c) = tokio::try_join!(
         connect_agent(TEST_PSK, grpc_port, "agent-weather"),
         connect_agent(TEST_PSK, grpc_port, "agent-notifications"),
         connect_agent(TEST_PSK, grpc_port, "agent-media"),
@@ -181,49 +113,6 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
         agent_a.namespace, agent_c.namespace,
         "agent-weather and agent-media must have distinct namespaces"
     );
-
-    // ── Phase 2: Agent A creates weather dashboard tiles ────────────────────
-
-    // Current conditions tile
-    let tile_a1_id = claim_tile_via_grpc(
-        &mut agent_a,
-        placement(TileAnchor::TopLeft, TileSize::Large),
-    )
-    .await?;
-    assert!(
-        !tile_a1_id.is_empty(),
-        "agent-weather tile-1 must be created"
-    );
-
-    // Forecast tile (stacks below the first at the same anchor)
-    let tile_a2_id =
-        claim_tile_via_grpc(&mut agent_a, placement(TileAnchor::TopLeft, TileSize::Wide)).await?;
-    assert!(
-        !tile_a2_id.is_empty(),
-        "agent-weather tile-2 must be created"
-    );
-
-    // Verify agent A tiles exist in the scene graph with correct namespace
-    {
-        let state = runtime.shared_state().lock().await;
-        let scene = state.scene.lock().await;
-        let weather_tiles: Vec<_> = scene
-            .tiles
-            .values()
-            .filter(|t| t.namespace == agent_a.namespace)
-            .collect();
-        assert_eq!(
-            weather_tiles.len(),
-            2,
-            "agent-weather must own exactly 2 tiles in the scene"
-        );
-        for tile in &weather_tiles {
-            assert_eq!(
-                tile.namespace, agent_a.namespace,
-                "tile namespace must match agent-weather's authenticated namespace"
-            );
-        }
-    }
 
     // ── Phase 3: Zone contention — agent B publishes to notification-area ───
 
@@ -359,200 +248,10 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
         "agent-weather must have no zone publications"
     );
 
-    // Verify: namespace isolation — the session server derives tile namespace from
-    // the authenticated session, not from client-supplied values. Verify this by
-    // confirming all tiles in the scene are attributed to agent-weather's namespace.
-    // (The session server uses `session.namespace` in CreateTile, so no other agent
-    //  could create a tile attributed to agent-weather even if they used the same lease_id.)
-    {
-        let state = runtime.shared_state().lock().await;
-        let scene = state.scene.lock().await;
-        for tile in scene.tiles.values() {
-            assert_eq!(
-                tile.namespace, agent_a.namespace,
-                "all tiles must belong to agent-weather (the only tile-creating agent); \
-                 found tile with namespace '{}' (expected '{}')",
-                tile.namespace, agent_a.namespace
-            );
-        }
-    }
-
-    // ── Phase 6b: Malformed input and real cross-agent ownership checks ─────
-    //
-    // Agent B remains zone-only, so its empty lease is a malformed-input control.
-    // Present agent A's real ClaimTile lease in the second request: the valid
-    // payload reaches the scene's tile namespace check using B's session identity.
-    // This dev directory proves session-namespace isolation, not paired-PSK mapping.
-    assert!(
-        agent_b.lease_id_bytes.is_empty(),
-        "agent B remains zone-only"
-    );
-    let weather_lease = SceneId::from_uuid(uuid::Uuid::from_bytes(
-        agent_a.lease_id_bytes.as_slice().try_into()?,
-    ));
-    let weather_tile =
-        SceneId::from_uuid(uuid::Uuid::from_bytes(tile_a1_id.as_slice().try_into()?));
-    let foreign_tile_before = {
-        let state = runtime.shared_state().lock().await;
-        let scene = state.scene.lock().await;
-        let tile = &scene.tiles[&weather_tile];
-        assert_eq!(tile.namespace, agent_a.namespace);
-        assert_eq!(
-            tile.lease_id, weather_lease,
-            "use the target's issued lease"
-        );
-        let lease = &scene.leases[&weather_lease];
-        assert_eq!(lease.namespace, agent_a.namespace);
-        assert_eq!(lease.state, LeaseState::Active);
-        assert_ne!(
-            tile.opacity, 0.5,
-            "an accepted adversarial update would change opacity"
-        );
-        tile.clone()
-    };
-
-    let (malformed_input_rejected, cross_agent_mutation_rejected) = {
-        let mut rejected = [false; 2];
-        for (index, (case, lease_id, expected_code)) in [
-            (
-                "empty lease",
-                agent_b.lease_id_bytes.clone(),
-                "INVALID_ARGUMENT",
-            ),
-            ("foreign owner", agent_a.lease_id_bytes.clone(), "NOT_HELD"),
-        ]
-        .into_iter()
-        .enumerate()
-        {
-            let seq = agent_b.next_seq();
-            let batch_id = uuid::Uuid::now_v7().as_bytes().to_vec();
-            agent_b
-                .tx
-                .send(session_proto::ClientMessage {
-                    sequence: seq,
-                    timestamp_wall_us: now_wall_us(),
-                    payload: Some(session_proto::client_message::Payload::MutationBatch(
-                        session_proto::MutationBatch {
-                            batch_id: batch_id.clone(),
-                            lease_id,
-                            mutations: vec![proto::MutationProto {
-                                mutation: Some(proto::mutation_proto::Mutation::UpdateTileOpacity(
-                                    proto::UpdateTileOpacityMutation {
-                                        tile_id: tile_a1_id.clone(),
-                                        opacity: 0.5,
-                                    },
-                                )),
-                            }],
-                            timing: None,
-                        },
-                    )),
-                })
-                .await?;
-            let msg = agent_b
-                .next_server_msg()
-                .await
-                .ok_or("no adversarial result")??;
-            let result = match msg.payload {
-                Some(session_proto::server_message::Payload::RequestResult(result)) => result,
-                other => {
-                    return Err(format!("{case}: expected RequestResult, got {other:?}").into());
-                }
-            };
-            eprintln!(
-                "    {case}: rejected={} (error_code='{}', error_message='{}')",
-                !result.ok, result.code, result.hint
-            );
-            assert_eq!(result.seq, seq, "{case}: correlate the request sequence");
-            assert_eq!(
-                result.batch_id, batch_id,
-                "{case}: correlate the fresh batch"
-            );
-            assert!(!result.ok, "{case}: mutation must be rejected");
-            assert_eq!(
-                result.code, expected_code,
-                "{case}: reject for the real reason"
-            );
-            assert!(result.ids.is_empty(), "{case}: no created IDs on rejection");
-            let foreign_tile_after = {
-                let state = runtime.shared_state().lock().await;
-                let scene = state.scene.lock().await;
-                let lease = &scene.leases[&weather_lease];
-                assert_eq!(lease.namespace, agent_a.namespace);
-                assert_eq!(lease.state, LeaseState::Active);
-                scene.tiles[&weather_tile].clone()
-            };
-            assert_eq!(
-                foreign_tile_after, foreign_tile_before,
-                "{case}: foreign tile unchanged"
-            );
-            rejected[index] = !result.ok;
-        }
-        (rejected[0], rejected[1])
-    };
-    assert!(
-        malformed_input_rejected,
-        "an empty lease must fail as malformed input"
-    );
-
-    assert!(
-        cross_agent_mutation_rejected,
-        "Cross-agent mutation must be rejected: agent-notifications must NOT be allowed to \
-         mutate tiles belonging to agent-weather (namespace isolation enforcement)"
-    );
-
     // ── Phase 7: Compositor frame rendering ─────────────────────────────────
 
     // render_frame records this frame in the collector used by the artifact below.
     let frame = runtime.render_frame().await;
-
-    // Verify the compositor renders correctly with all three agents active.
-    assert!(
-        frame.tile_count >= 2,
-        "compositor must see at least 2 tiles from agent-weather"
-    );
-    assert!(
-        frame.active_leases >= 2,
-        "compositor must see one active lease per claimed tile"
-    );
-
-    // ── Phase 8: Emit JSON artifacts ────────────────────────────────────────
-
-    // Artifact 1: Per-agent tile ownership map
-    let ownership_map = {
-        let state = runtime.shared_state().lock().await;
-        let scene = state.scene.lock().await;
-        let mut entries: Vec<TileOwnershipEntry> = scene
-            .tiles
-            .values()
-            .map(|t| TileOwnershipEntry {
-                tile_id: t.id.to_string(),
-                namespace: t.namespace.clone(),
-                z_order: t.z_order,
-                lease_id: t.lease_id.to_string(),
-                bounds: [t.bounds.x, t.bounds.y, t.bounds.width, t.bounds.height],
-            })
-            .collect();
-        entries.sort_by(|a, b| {
-            a.namespace
-                .cmp(&b.namespace)
-                .then(b.z_order.cmp(&a.z_order))
-        });
-
-        let mut namespaces: Vec<String> = entries.iter().map(|e| e.namespace.clone()).collect();
-        namespaces.sort_unstable();
-        namespaces.dedup();
-
-        TileOwnershipMap {
-            agent_count: 3,
-            total_tiles: entries.len(),
-            namespaces,
-            tiles: entries,
-        }
-    };
-    println!(
-        "ARTIFACT:tile_ownership_map:{}",
-        serde_json::to_string(&ownership_map)?
-    );
 
     // Artifact 2: Zone contention resolution log
     let contention_log = {
@@ -592,115 +291,24 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
         serde_json::to_string(&contention_log)?
     );
 
-    // Artifact 3: Namespace isolation verification report
-    let isolation_checks = vec![
-        NamespaceIsolationCheck {
-            description: "Agent-weather tiles are all in agent-weather namespace".to_string(),
-            passed: {
-                let state = runtime.shared_state().lock().await;
-                state
-                    .scene
-                    .lock()
-                    .await
-                    .tiles
-                    .values()
-                    .filter(|t| t.namespace == agent_a.namespace)
-                    .count()
-                    == 2
-            },
-            detail: format!(
-                "Expected 2 tiles in namespace '{}'; verified via scene graph",
-                agent_a.namespace
-            ),
-        },
-        NamespaceIsolationCheck {
-            description: "Agent-notifications has no tiles (zone-only)".to_string(),
-            passed: b_tile_count == 0,
-            detail: format!(
-                "Namespace '{}' tile count = {} (expected 0)",
-                agent_b.namespace, b_tile_count
-            ),
-        },
-        NamespaceIsolationCheck {
-            description: "Agent-media has no tiles (zone-only)".to_string(),
-            passed: c_tile_count == 0,
-            detail: format!(
-                "Namespace '{}' tile count = {} (expected 0)",
-                agent_c.namespace, c_tile_count
-            ),
-        },
-        NamespaceIsolationCheck {
-            description: "Notification zone publishes are from agent-notifications only"
-                .to_string(),
-            passed: {
-                let state = runtime.shared_state().lock().await;
-                state
-                    .scene
-                    .lock()
-                    .await
-                    .zone_registry
-                    .active_for_zone("notification-area")
-                    .iter()
-                    .all(|r| r.publisher_namespace == agent_b.namespace)
-            },
-            detail: "All notification-area publishes must originate from agent-notifications"
-                .to_string(),
-        },
-        NamespaceIsolationCheck {
-            description: "Subtitle zone publish is from agent-media only".to_string(),
-            passed: {
-                let state = runtime.shared_state().lock().await;
-                state
-                    .scene
-                    .lock()
-                    .await
-                    .zone_registry
-                    .active_for_zone("subtitle")
-                    .iter()
-                    .all(|r| r.publisher_namespace == agent_c.namespace)
-            },
-            detail: "All subtitle publishes must originate from agent-media".to_string(),
-        },
-        NamespaceIsolationCheck {
-            description: "Cross-agent mutation rejected: session server derives namespace \
-                          from authenticated session identity, not from client payload"
-                .to_string(),
-            // Only the valid producer-issued lease case reaches the namespace check.
-            passed: cross_agent_mutation_rejected,
-            detail: format!(
-                "Agent-notifications presented agent-weather's issued lease for its existing tile. \
-                 NOT_HELD rejection and unchanged foreign tile: {cross_agent_mutation_rejected}",
-            ),
-        },
-        NamespaceIsolationCheck {
-            description: "Empty lease rejected as malformed input, separate from ownership"
-                .to_string(),
-            passed: malformed_input_rejected,
-            detail: format!(
-                "Zone-only agent-notifications sent an empty lease. \
-                 INVALID_ARGUMENT rejection and unchanged foreign tile: {malformed_input_rejected}",
-            ),
-        },
-    ];
-    let all_passed = isolation_checks.iter().all(|c| c.passed);
-    let isolation_report = NamespaceIsolationReport {
-        checks: isolation_checks,
-        all_passed,
-    };
-    assert!(
-        all_passed,
-        "Namespace isolation checks failed: {:?}",
-        isolation_report
-            .checks
-            .iter()
-            .filter(|c| !c.passed)
-            .collect::<Vec<_>>()
-    );
-    println!(
-        "ARTIFACT:namespace_isolation:{}",
-        serde_json::to_string(&isolation_report)?
-    );
-
+    {
+        let state = runtime.shared_state().lock().await;
+        let scene = state.scene.lock().await;
+        assert!(
+            scene
+                .zone_registry
+                .active_for_zone("notification-area")
+                .iter()
+                .all(|r| r.publisher_namespace == agent_b.namespace)
+        );
+        assert!(
+            scene
+                .zone_registry
+                .active_for_zone("subtitle")
+                .iter()
+                .all(|r| r.publisher_namespace == agent_c.namespace)
+        );
+    }
     // Artifact 4: Compositor frame rate measurements
     let frame_rate_artifact = FrameRateMeasurements {
         frames_rendered: runtime.telemetry.summary().total_frames,
@@ -725,33 +333,6 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
         let state = runtime.shared_state().lock().await;
         let scene = state.scene.lock().await;
 
-        // agent-weather's leases (one per claimed tile) must still be Active;
-        // zone-only agents hold no lease.
-        let weather_leases: Vec<_> = scene
-            .leases
-            .values()
-            .filter(|l| l.namespace == agent_a.namespace)
-            .collect();
-        assert_eq!(
-            weather_leases.len(),
-            2,
-            "agent-weather holds one lease per tile"
-        );
-        for lease in weather_leases {
-            assert_eq!(
-                lease.state,
-                LeaseState::Active,
-                "agent-weather lease must be Active at end of test"
-            );
-        }
-
-        // Total tile count must be 2 (only agent-weather has tiles)
-        assert_eq!(
-            scene.tiles.len(),
-            2,
-            "total tile count must be 2 (only agent-weather creates tiles)"
-        );
-
         // Scene graph invariants must hold
         let violations = tze_hud_scene::test_scenes::assert_layer0_invariants(&scene);
         assert!(
@@ -768,14 +349,9 @@ async fn test_three_agents_contention() -> Result<(), Box<dyn std::error::Error>
 /// Verify that MCP and gRPC share a single scene graph (hud-bco1).
 ///
 /// Acceptance criteria (from hud-bco1 issue):
-/// - A mutation applied via gRPC (CreateTile via session stream) must be visible
-///   when the scene is read via the `shared_state().scene` Arc — the same Arc
-///   that the MCP server holds.
-/// - A direct mutation to `shared_state().scene` (simulating MCP writes) must
-///   be visible to gRPC queries (SceneSnapshot response reflects the mutation).
-///
-/// This is a headless unit-style integration test that does not require a real
-/// MCP client — it directly exercises the shared `Arc<Mutex<SceneGraph>>`.
+/// The protocol and MCP services share the same scene Arc. This headless
+/// integration test exercises that internal ownership directly: writes through
+/// either clone are visible through the other without a transport round trip.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_grpc_and_mcp_share_single_scene_graph() {
     use tze_hud_runtime::headless::HeadlessConfig;
@@ -889,7 +465,7 @@ async fn test_grpc_and_mcp_share_single_scene_graph() {
         let result = scene.apply_batch(&batch);
         assert!(
             result.applied,
-            "DeleteTile via gRPC-side path must succeed: {:?}",
+            "DeleteTile via internal scene path must succeed: {:?}",
             result.error
         );
     }
@@ -901,7 +477,7 @@ async fn test_grpc_and_mcp_share_single_scene_graph() {
         let scene = state.scene.lock().await;
         assert!(
             !scene.tiles.contains_key(&tile_id),
-            "tile deleted via gRPC-side apply_batch must not be visible via MCP-side read \
+            "tile deleted via internal apply_batch must not be visible via MCP-side read \
              (mutations are immediately visible across protocol boundary)"
         );
         eprintln!("[coherence] PASS: cross-protocol scene coherence verified (one shared Arc)");
@@ -1024,159 +600,4 @@ fn test_latest_wins_two_distinct_publishers() {
         !content_text.contains("Alpha"),
         "agent-alpha's content must have been evicted by LatestWins ('{content_text}')"
     );
-}
-
-// ─── Same-anchor coexistence ─────────────────────────────────────────────────
-
-/// Replace a tile's root with a single text node and wait for the result.
-async fn set_tile_text_via_grpc(
-    session: &mut AgentSession,
-    tile_id: &[u8],
-    content: &str,
-) -> Result<(), Box<dyn std::error::Error>> {
-    let seq = session.next_seq();
-    let text = proto::TextMarkdownNodeProto {
-        content: content.to_string(),
-        bounds: Some(proto::Rect {
-            x: 0.0,
-            y: 0.0,
-            width: 100.0,
-            height: 20.0,
-        }),
-        font_size_px: 14.0,
-        color: Some(proto::Rgba {
-            r: 0.9,
-            g: 0.9,
-            b: 0.9,
-            a: 1.0,
-        }),
-        background: None,
-        color_runs: vec![],
-        overflow: 0,
-    };
-    session
-        .tx
-        .send(session_proto::ClientMessage {
-            sequence: seq,
-            timestamp_wall_us: now_wall_us(),
-            payload: Some(session_proto::client_message::Payload::MutationBatch(
-                session_proto::MutationBatch {
-                    batch_id: uuid::Uuid::now_v7().as_bytes().to_vec(),
-                    lease_id: session.lease_id_bytes.clone(),
-                    mutations: vec![proto::MutationProto {
-                        mutation: Some(proto::mutation_proto::Mutation::SetTileRoot(
-                            proto::SetTileRootMutation {
-                                tile_id: tile_id.to_vec(),
-                                node: Some(proto::NodeProto {
-                                    layout: 0,
-                                    id: Vec::new(),
-                                    data: Some(proto::node_proto::Data::TextMarkdown(text)),
-                                    children: vec![],
-                                }),
-                            },
-                        )),
-                    }],
-                    timing: None,
-                },
-            )),
-        })
-        .await?;
-    match session
-        .next_server_msg()
-        .await
-        .ok_or("no mutation result")??
-        .payload
-    {
-        Some(session_proto::server_message::Payload::RequestResult(r)) if r.ok => Ok(()),
-        other => Err(format!("SetTileRoot rejected: {other:?}").into()),
-    }
-}
-
-/// Three agents claim the same anchor concurrently: the runtime stacks the
-/// tiles without overlap (z-order follows claim order), and all three can
-/// then update their own tile's content at once without interference.
-#[tokio::test]
-async fn test_three_agents_same_anchor_stack_without_overlap_and_update_concurrently()
--> Result<(), Box<dyn std::error::Error>> {
-    let listener = tokio::net::TcpListener::bind("[::1]:0").await?;
-    let grpc_port = listener.local_addr()?.port();
-    let config = HeadlessConfig {
-        width: DISPLAY_W,
-        height: DISPLAY_H,
-        grpc_port,
-        agents: tze_hud_scene::config::AgentDirectory::unrestricted(TEST_PSK),
-        config_toml: None,
-    };
-    let runtime = serialized_headless_init(HeadlessRuntime::new(config)).await?;
-    {
-        let state = runtime.shared_state().lock().await;
-        let mut scene = state.scene.lock().await;
-        let tab_id = scene.create_tab("Stack", 0)?;
-        scene.active_tab = Some(tab_id);
-    }
-    let _server_handle = runtime.start_grpc_server_on_listener(listener);
-
-    let (mut alpha, mut beta, mut gamma) = tokio::try_join!(
-        connect_agent(TEST_PSK, grpc_port, "agent-alpha"),
-        connect_agent(TEST_PSK, grpc_port, "agent-beta"),
-        connect_agent(TEST_PSK, grpc_port, "agent-gamma"),
-    )?;
-    let small = || placement(TileAnchor::BottomLeft, TileSize::Small);
-    let (tile_alpha, tile_beta, tile_gamma) = tokio::try_join!(
-        claim_tile_via_grpc(&mut alpha, small()),
-        claim_tile_via_grpc(&mut beta, small()),
-        claim_tile_via_grpc(&mut gamma, small()),
-    )?;
-
-    {
-        let state = runtime.shared_state().lock().await;
-        let scene = state.scene.lock().await;
-        let mut tiles: Vec<_> = scene.tiles.values().collect();
-        assert_eq!(tiles.len(), 3, "each agent's claim creates one tile");
-        tiles.sort_by_key(|t| t.z_order);
-        assert_eq!(
-            tiles.iter().map(|t| t.z_order).collect::<Vec<_>>(),
-            vec![1, 2, 3],
-            "each claim stacks above the previous one"
-        );
-        for (i, a) in tiles.iter().enumerate() {
-            for b in &tiles[i + 1..] {
-                assert!(
-                    a.bounds.y + a.bounds.height <= b.bounds.y
-                        || b.bounds.y + b.bounds.height <= a.bounds.y,
-                    "tiles claimed at one anchor must not overlap: {:?} vs {:?}",
-                    a.bounds,
-                    b.bounds
-                );
-            }
-        }
-    }
-
-    tokio::try_join!(
-        set_tile_text_via_grpc(&mut alpha, &tile_alpha, "alpha"),
-        set_tile_text_via_grpc(&mut beta, &tile_beta, "beta"),
-        set_tile_text_via_grpc(&mut gamma, &tile_gamma, "gamma"),
-    )?;
-    {
-        let state = runtime.shared_state().lock().await;
-        let scene = state.scene.lock().await;
-        for (id, agent, label) in [
-            (&tile_alpha, &alpha, "alpha"),
-            (&tile_beta, &beta, "beta"),
-            (&tile_gamma, &gamma, "gamma"),
-        ] {
-            let uuid = uuid::Uuid::from_bytes(id.as_slice().try_into()?);
-            let tile = &scene.tiles[&tze_hud_scene::SceneId::from_uuid(uuid)];
-            assert_eq!(tile.namespace, agent.namespace, "{label}: tile namespace");
-            assert!(tile.root_node.is_some(), "{label}: root set by its update");
-        }
-    }
-    // The agent that sets its tile root must not be able to do so on a peer's tile.
-    assert!(
-        set_tile_text_via_grpc(&mut alpha, &tile_gamma, "intrusion")
-            .await
-            .is_err(),
-        "an agent must not replace another agent's tile content"
-    );
-    Ok(())
 }

@@ -1,142 +1,14 @@
 //! Element-store persistence: keep the on-disk element registry in step with
 //! tiles, zones, and widgets as sessions create and publish to them.
 
-use super::now_ms;
 use crate::session::SharedState;
 use tze_hud_scene::SceneId;
-use tze_hud_scene::element_store::{ElementStore, ElementStoreEntry, ElementType};
+use tze_hud_scene::element_store::{ElementStore, ElementType};
 
 /// Captures the data needed to persist the element store outside the shared-state lock.
 pub(super) struct ElementStorePersistRequest {
     pub(super) store: ElementStore,
     pub(super) path: std::path::PathBuf,
-}
-
-/// Update tile entries in the element store and return an optional persistence request.
-pub(super) async fn persist_created_tile_entries(
-    st: &mut SharedState,
-    created_ids: &[SceneId],
-) -> Option<ElementStorePersistRequest> {
-    if created_ids.is_empty() {
-        return None;
-    }
-
-    // `(id, namespace, z_order)` for each just-created tile, plus the ids of
-    // every tile currently live in the scene (needed to tell a recreated portal
-    // member's orphaned entry from a still-live sibling's — hud-08nls).
-    let (created_tiles, live_ids): (
-        Vec<(SceneId, String, u32)>,
-        std::collections::HashSet<SceneId>,
-    ) = {
-        let scene = st.scene.lock().await;
-        let created = created_ids
-            .iter()
-            .filter_map(|id| {
-                scene
-                    .tiles
-                    .get(id)
-                    .map(|tile| (*id, tile.namespace.clone(), tile.z_order))
-            })
-            .collect();
-        let live = scene.tiles.keys().copied().collect();
-        (created, live)
-    };
-
-    if created_tiles.is_empty() {
-        return None;
-    }
-
-    let now = now_ms();
-    let mut changed = false;
-    let recreated: Vec<tze_hud_scene::element_store::RecreatedTile> = created_tiles
-        .iter()
-        .map(
-            |(id, namespace, z_order)| tze_hud_scene::element_store::RecreatedTile {
-                id: *id,
-                namespace: namespace.clone(),
-                z_order: *z_order,
-            },
-        )
-        .collect();
-    for (id, namespace, z_order) in created_tiles {
-        match st.element_store.entries.get_mut(&id) {
-            Some(entry) => {
-                if entry.element_type != ElementType::Tile {
-                    entry.element_type = ElementType::Tile;
-                    changed = true;
-                }
-                if entry.namespace != namespace {
-                    entry.namespace = namespace;
-                    changed = true;
-                }
-                if entry.z_order != z_order {
-                    entry.z_order = z_order;
-                    changed = true;
-                }
-                if entry.created_at == 0 {
-                    entry.created_at = now;
-                    changed = true;
-                }
-                if entry.last_published_at != now {
-                    entry.last_published_at = now;
-                    changed = true;
-                }
-                // A just-published tile is live, so it starts a fresh retention
-                // window; clear any accumulated unseen-restart count (hud-fwgv7).
-                if entry.unseen_restarts != 0 {
-                    entry.unseen_restarts = 0;
-                    changed = true;
-                }
-                if entry.geometry_override.is_some() {
-                    entry.geometry_override = None;
-                    changed = true;
-                }
-            }
-            None => {
-                st.element_store.entries.insert(
-                    id,
-                    ElementStoreEntry {
-                        element_type: ElementType::Tile,
-                        namespace,
-                        created_at: now,
-                        last_published_at: now,
-                        z_order,
-                        unseen_restarts: 0,
-                        geometry_override: None,
-                    },
-                );
-                changed = true;
-            }
-        }
-    }
-
-    // Re-home any durable override whose portal member tile was recreated with a
-    // fresh SceneId (the entries were just inserted above with no override; a
-    // matching orphan hands its override over here). Re-lock viewer geometry for
-    // each adopter so a subsequent adapter `UpdateTileBounds` republish cannot
-    // reposition it before the viewer touches it again (mirrors the bootstrap
-    // re-lock in `tze_hud_runtime::element_store`).
-    let adopted = st
-        .element_store
-        .adopt_orphaned_tile_overrides(&recreated, &live_ids);
-    if !adopted.is_empty() {
-        changed = true;
-        let mut scene = st.scene.lock().await;
-        for id in &adopted {
-            scene.lock_viewer_geometry(*id);
-        }
-    }
-
-    if !changed {
-        return None;
-    }
-
-    st.element_store_path
-        .clone()
-        .map(|path| ElementStorePersistRequest {
-            store: st.element_store.clone(),
-            path,
-        })
 }
 
 /// Serialize and atomically write an [`ElementStore`] to disk.

@@ -44,7 +44,7 @@ async fn make_runtime() -> HeadlessRuntime {
 }
 
 /// Apply a tile-creating `MutationBatch` to the runtime scene and return the
-/// batch_id. Mirrors what the gRPC `handle_mutation_batch` path does under the
+/// batch_id. Uses the runtime internal mutation admission seam under the
 /// scene lock (`scene.apply_batch`).
 async fn apply_create_tile_batch(runtime: &HeadlessRuntime) -> tze_hud_scene::SceneId {
     let state = runtime.shared_state().lock().await;

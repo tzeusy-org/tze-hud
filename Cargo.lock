@@ -2060,13 +2060,9 @@ dependencies = [
  "serde_json",
  "tiktoken-rs",
  "tokio",
- "tokio-stream",
- "tonic",
  "tze_hud_config",
- "tze_hud_protocol",
  "tze_hud_runtime",
  "tze_hud_scene",
- "uuid",
 ]
 
 [[package]]
@@ -3592,7 +3588,6 @@ dependencies = [
  "prost-build",
  "protoc-bin-vendored",
  "serde_json",
- "subtle",
  "tempfile",
  "tokio",
  "tokio-stream",

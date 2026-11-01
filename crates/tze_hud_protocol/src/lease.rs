@@ -22,7 +22,7 @@ pub const DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY: usize = 256;
 
 // ─── Retransmit correlation (RFC 0005 §5.3) ──────────────────────────────────
 
-/// Cached reply to a ClaimTile / Hold / Clear request.
+/// Cached reply to a Hold / Clear request.
 ///
 /// Keyed by the **client sequence number** that carried the original request.
 /// On retransmit the server replays the cached reply without re-applying the
@@ -105,7 +105,6 @@ mod tests {
         let mut cache = LeaseCorrelationCache::new(16);
         let resp = CachedLeaseResponse {
             ok: true,
-            lease_id: vec![0u8; 16],
             ttl_ms: 60_000,
             hint: String::new(),
             code: String::new(),
@@ -126,7 +125,6 @@ mod tests {
                 seq,
                 CachedLeaseResponse {
                     ok: true,
-                    lease_id: vec![seq as u8; 16],
                     ttl_ms: 1000,
                     hint: String::new(),
                     code: String::new(),
@@ -144,7 +142,6 @@ mod tests {
             4,
             CachedLeaseResponse {
                 ok: true,
-                lease_id: vec![4u8; 16],
                 ttl_ms: 1000,
                 hint: String::new(),
                 code: String::new(),
@@ -165,7 +162,6 @@ mod tests {
             1,
             CachedLeaseResponse {
                 ok: true,
-                lease_id: vec![1u8; 16],
                 ttl_ms: 1000,
                 hint: String::new(),
                 code: String::new(),
@@ -187,7 +183,6 @@ mod tests {
             1,
             CachedLeaseResponse {
                 ok: true,
-                lease_id: vec![1u8; 16],
                 ttl_ms: 1000,
                 hint: String::new(),
                 code: String::new(),
@@ -198,7 +193,6 @@ mod tests {
             2,
             CachedLeaseResponse {
                 ok: true,
-                lease_id: vec![2u8; 16],
                 ttl_ms: 1000,
                 hint: String::new(),
                 code: String::new(),
@@ -211,7 +205,6 @@ mod tests {
             1,
             CachedLeaseResponse {
                 ok: false,
-                lease_id: Vec::new(),
                 ttl_ms: 0,
                 hint: "overwritten".to_string(),
                 code: "TEST".to_string(),

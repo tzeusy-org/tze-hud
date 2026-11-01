@@ -3,7 +3,7 @@
 For contributors finding the owner of a behavior before changing it. The
 Windows `tze_hud` app hosts both agent protocols and owns the overlay, scene,
 input and rendering. Agents send intent; they do not run the frame loop.
-The four surfaces and their contracts are in [api.md](api.md); current
+The three surfaces and their contracts are in [api.md](api.md); current
 implementation gaps are in [scope.md](scope.md).
 
 [Observed] This map was checked against `855f8397` on 2026-10-13. Links point
@@ -54,7 +54,7 @@ crates, the canonical app, five examples and a separate integration package.
 | `tze_hud_runtime` | Window/event-loop lifecycle, protocol wiring, portal driver, shell (including the [control panel](../crates/tze_hud_runtime/src/shell/control_panel/mod.rs) model and its sections), deadlines and operator services: [lib.rs](../crates/tze_hud_runtime/src/lib.rs), [windowed](../crates/tze_hud_runtime/src/windowed/mod.rs) |
 | `tze_hud_scene` | Shared scene graph, tiles/nodes/zones, leases, agent identity, the owner's visibility set and per-agent holdings and Clear: [SceneGraph](../crates/tze_hud_scene/src/graph/mod.rs), [visibility](../crates/tze_hud_scene/src/graph/visibility.rs), [agents](../crates/tze_hud_scene/src/graph/agents.rs), [lease](../crates/tze_hud_scene/src/lease/), [config](../crates/tze_hud_scene/src/config/) |
 | `tze_hud_mcp` | Discover, publish, clear, hold and input tools, with caller-scoped authorization and shared errors: [tools.rs](../crates/tze_hud_mcp/src/tools.rs) |
-| `tze_hud_protocol` | Protobuf schemas, resident session lifecycle, atomic mutations, resume and event delivery: [proto](../crates/tze_hud_protocol/proto/), [session_server](../crates/tze_hud_protocol/src/session_server/mod.rs) |
+| `tze_hud_protocol` | Protobuf schemas, resident session lifecycle, zone/widget publication, resource uploads, resume and event delivery: [proto](../crates/tze_hud_protocol/proto/), [session_server](../crates/tze_hud_protocol/src/session_server/mod.rs) |
 | `tze_hud_projection` | `PortalHub` state, pure scene-node renderer and resolved visual tokens: [hub.rs](../crates/tze_hud_projection/src/hub.rs), [render.rs](../crates/tze_hud_projection/src/render.rs), [tokens.rs](../crates/tze_hud_projection/src/tokens.rs) |
 | `tze_hud_input` | Hit testing, focus, pointer/keyboard processing, scrolling and composer editing: [lib.rs](../crates/tze_hud_input/src/lib.rs) |
 | `tze_hud_compositor` | GPU draw/present, text shaping, markdown, widget rasterization, per-display targets and the control panel's layout and drawing: [lib.rs](../crates/tze_hud_compositor/src/lib.rs), [control_panel.rs](../crates/tze_hud_compositor/src/renderer/control_panel.rs) |

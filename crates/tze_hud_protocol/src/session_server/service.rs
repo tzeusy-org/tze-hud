@@ -52,7 +52,6 @@ pub struct HudSessionImpl {
     /// The compositor publishes each `SceneGraph::expire_leases()` result here
     /// after releasing the scene lock. The handler that owns the lease emits
     /// the wire `LeaseResponse` transactionally.
-    pub lease_expirations: super::LeaseExpirySender,
 
     /// Traffic-class-aware sender for runtime-injected input event batches (hud-i6yd.6).
     ///
@@ -125,8 +124,6 @@ impl SessionDeps {
 
 /// Per-session receivers for the runtime → session feeds.
 pub(super) struct RuntimeFeeds {
-    /// Durable lane for terminal lease transitions.
-    pub lease_expiry: super::LeaseExpiryReceiver,
     /// Input events; the per-namespace durable lane is subscribed only after
     /// authentication establishes the namespace.
     pub input_events: super::InputEventSender,
@@ -140,7 +137,6 @@ pub(super) struct RuntimeFeeds {
 impl HudSessionImpl {
     pub(super) fn subscribe_feeds(&self) -> RuntimeFeeds {
         RuntimeFeeds {
-            lease_expiry: self.lease_expirations.subscribe(),
             input_events: self.input_event_tx.clone(),
             element_repositioned: self.element_repositioned_tx.subscribe(),
             frame_presented: self.frame_presented_tx.subscribe(),
@@ -161,7 +157,6 @@ impl HudSessionImpl {
             resource_budget: deps.resource_budget,
             budget_enforcer: deps.budget_enforcer,
             degradation_notices: deps.degradation_notices,
-            lease_expirations: super::LeaseExpirySender::default(),
             input_event_tx: super::InputEventSender::new(super::BROADCAST_CHANNEL_CAPACITY),
             element_repositioned_tx,
             frame_presented_tx,
@@ -181,10 +176,8 @@ impl HudSessionImpl {
             safe_mode_atomic: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
             token_store: crate::token::TokenStore::new(),
-            freeze_active: false,
             input_capture_tx: None,
             input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
-            tile_placement: Default::default(),
         }));
         Self::from_deps(SessionDeps::new(
             state,

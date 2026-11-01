@@ -61,185 +61,10 @@ fn transactional_input_is_not_enqueued_for_an_unrelated_namespace() {
     );
 }
 
-/// A finite lease TTL is reaped by the scene, then the exact terminal result is
-/// delivered once to the still-connected owning agent. This exercises the
-/// production boundary end to end: `expire_leases()` cleanup → durable runtime
-/// bridge → session stream `LeaseResponse(result=EXPIRED)` + state transition.
-#[tokio::test]
-async fn short_ttl_expiry_reaches_owning_connected_agent_once_after_cleanup() {
-    use std::time::Duration;
-
-    let clock = tze_hud_scene::TestClock::new(1_000);
-    let (mut client, server, state, lease_expirations) =
-        setup_test_with_lease_expiry_clock(clock.clone()).await;
-    let (tx, _handshake, mut stream) = handshake(&mut client, "expiry-agent", "test-key").await;
-
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::ClaimTile(ClaimTile {
-            ttl_ms: 1,
-            ..Default::default()
-        })),
-    })
-    .await
-    .unwrap();
-
-    let granted = next_server_msg(&mut stream).await;
-    let (lease_id, tile_id) = match granted.payload {
-        Some(ServerPayload::RequestResult(RequestResult {
-            ok: true,
-            lease_id,
-            ids,
-            ..
-        })) => (
-            bytes_to_scene_id(&lease_id).expect("lease grant must carry a SceneId"),
-            bytes_to_scene_id(&ids[0]).expect("claim must return the tile id"),
-        ),
-        other => panic!("expected a granted ClaimTile, got {other:?}"),
-    };
-
-    let expiry = {
-        let shared = state.lock().await;
-        let mut scene = shared.scene.lock().await;
-        assert_eq!(
-            scene.tile_count(),
-            1,
-            "lease owns one live resource before TTL"
-        );
-
-        clock.advance(2);
-        let mut expiries = scene.expire_leases();
-        assert_eq!(
-            expiries.len(),
-            1,
-            "short TTL must produce one terminal result"
-        );
-        let expiry = expiries.pop().unwrap();
-        assert_eq!(expiry.lease_id, lease_id);
-        assert_eq!(expiry.previous_state, LeaseState::Active);
-        assert_eq!(expiry.terminal_state, LeaseState::Expired);
-        assert_eq!(expiry.removed_tiles, vec![tile_id]);
-        assert_eq!(
-            scene.tile_count(),
-            0,
-            "terminal expiry clears the owned tile"
-        );
-        expiry
-    };
-
-    assert_eq!(
-        lease_expirations.publish(expiry.clone().into()),
-        1,
-        "the connected session handler must receive the terminal result"
-    );
-    assert_eq!(
-        lease_expirations.publish(expiry.into()),
-        1,
-        "the durable fan-out may receive a duplicate runtime notice"
-    );
-
-    let terminal_response = tokio::time::timeout(Duration::from_secs(1), stream.next())
-        .await
-        .expect("terminal LeaseResponse must arrive promptly")
-        .expect("connected stream must remain open")
-        .expect("terminal LeaseResponse must be valid");
-    match terminal_response.payload {
-        Some(ServerPayload::Reclaimed(Reclaimed {
-            lease_id: response_lease_id,
-            why,
-            ..
-        })) => {
-            assert_eq!(response_lease_id, scene_id_to_bytes(lease_id));
-            assert_eq!(why, ReclaimReason::Expired as i32);
-        }
-        other => panic!("expected Reclaimed, got {other:?}"),
-    }
-
-    assert!(
-        tokio::time::timeout(Duration::from_millis(50), stream.next())
-            .await
-            .is_err(),
-        "one terminal lease must emit exactly one response even if its runtime notice is duplicated"
-    );
-
-    drop(tx);
-    server.abort();
-}
-
-/// A viewer dismiss of a tile (hover close button) reclaims its lease with no
-/// agent involvement; the owning connected agent gets exactly one
-/// `Reclaimed{OVERRIDE}` naming the dismissed tile. Real tonic client.
-#[tokio::test]
-async fn viewer_dismiss_tile_pushes_reclaimed_override() {
-    use std::time::Duration;
-
-    let clock = tze_hud_scene::TestClock::new(1_000);
-    let (mut client, server, state, lease_expirations) =
-        setup_test_with_lease_expiry_clock(clock).await;
-    let (tx, _handshake, mut stream) = handshake(&mut client, "dismiss-agent", "test-key").await;
-
-    tx.send(ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::ClaimTile(ClaimTile {
-            ttl_ms: 60_000,
-            ..Default::default()
-        })),
-    })
-    .await
-    .unwrap();
-    let (lease_id, tile_id) = match next_server_msg(&mut stream).await.payload {
-        Some(ServerPayload::RequestResult(RequestResult {
-            ok: true,
-            lease_id,
-            ids,
-            ..
-        })) => (
-            bytes_to_scene_id(&lease_id).expect("lease id"),
-            bytes_to_scene_id(&ids[0]).expect("tile id"),
-        ),
-        other => panic!("expected a granted ClaimTile, got {other:?}"),
-    };
-
-    let expiry = {
-        let shared = state.lock().await;
-        let mut scene = shared.scene.lock().await;
-        let expiry = scene
-            .viewer_dismiss_tile(tile_id)
-            .expect("viewer dismiss reclaims the lease");
-        assert_eq!(expiry.terminal_state, LeaseState::Revoked);
-        assert_eq!(scene.tile_count(), 0, "the tile is gone immediately");
-        expiry
-    };
-    assert_eq!(lease_expirations.publish(expiry.into()), 1);
-
-    let reclaimed = tokio::time::timeout(Duration::from_secs(1), stream.next())
-        .await
-        .expect("Reclaimed must arrive promptly")
-        .expect("stream stays open")
-        .expect("valid message");
-    match reclaimed.payload {
-        Some(ServerPayload::Reclaimed(Reclaimed {
-            surface,
-            why,
-            lease_id: reclaimed_lease,
-        })) => {
-            assert_eq!(why, ReclaimReason::Override as i32);
-            assert_eq!(reclaimed_lease, scene_id_to_bytes(lease_id));
-            assert_eq!(surface, crate::session_server::verbs::tile_surface(tile_id));
-        }
-        other => panic!("expected Reclaimed, got {other:?}"),
-    }
-
-    drop(tx);
-    server.abort();
-}
-
 // ─── DegradationNotice ───────────────────────────────────────────────────────
 
 #[tokio::test]
-async fn new_session_receives_existing_degradation_after_snapshot() {
+async fn new_session_receives_existing_degradation_after_established() {
     let scene = SceneGraph::new(800.0, 600.0);
     let service = HudSessionImpl::new(scene, "test-key");
     service
@@ -267,11 +92,7 @@ async fn new_session_receives_existing_degradation_after_snapshot() {
         messages[0].payload,
         Some(ServerPayload::SessionEstablished(_))
     ));
-    assert!(matches!(
-        messages[1].payload,
-        Some(ServerPayload::SceneSnapshot(_))
-    ));
-    match &messages[2].payload {
+    match &messages[1].payload {
         Some(ServerPayload::DegradationNotice(notice)) => {
             assert_eq!(notice.level, DegradationLevel::RenderingSimplified as i32);
         }
@@ -572,8 +393,6 @@ async fn test_element_repositioned_not_delivered_without_scene_topology_subscrip
             agent_id: "no-topology-agent".to_string(),
             initial_subscriptions: vec![],
             resume_token: Vec::new(),
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
             auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
         })),
     })
@@ -652,7 +471,7 @@ async fn setup_test_with_frame_presented_tx() -> (
 
 /// Handshake requesting `read_telemetry` and subscribing to `TELEMETRY_FRAMES`.
 /// Returns the client-send half and the server->client stream after draining the
-/// SessionEstablished + SceneSnapshot + current DegradationNotice messages.
+/// SessionEstablished + current DegradationNotice messages.
 async fn handshake_telemetry(
     client: &mut HudSessionClient<tonic::transport::Channel>,
     agent_id: &str,
@@ -677,8 +496,6 @@ async fn handshake_telemetry(
             agent_id: agent_id.to_string(),
             initial_subscriptions,
             resume_token: Vec::new(),
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
             auth_credential: Some(crate::auth::psk_credential(psk.to_string())),
         })),
     })

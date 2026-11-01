@@ -43,7 +43,6 @@ impl Verb {
             Verb::Grant(Grant::Zones) => "grant.zones",
             Verb::Grant(Grant::Widgets) => "grant.widgets",
             Verb::Grant(Grant::Portal) => "grant.portal",
-            Verb::Grant(Grant::Tiles) => "grant.tiles",
             Verb::Grant(Grant::Admin) => "grant.admin",
         }
     }
@@ -89,7 +88,6 @@ fn state_line(roster: &[AgentEntry]) -> String {
         plural(sum(|e| e.portals), "portal", "portals"),
         plural(sum(|e| e.holdings.zones), "zone", "zones"),
         plural(sum(|e| e.holdings.widgets), "widget", "widgets"),
-        plural(sum(|e| e.holdings.tiles), "tile", "tiles"),
     ]
     .join(" · ")
 }
@@ -101,7 +99,6 @@ fn holdings_phrase(entry: &AgentEntry) -> Option<String> {
         count(entry.portals, "portal", "portals"),
         count(h.zones, "zone", "zones"),
         count(h.widgets, "widget", "widgets"),
-        count(h.tiles, "tile", "tiles"),
     ]
     .into_iter()
     .flatten()
@@ -132,7 +129,6 @@ fn grant_label(grant: Grant) -> &'static str {
         Grant::Zones => "Zones",
         Grant::Widgets => "Widgets",
         Grant::Portal => "Portal",
-        Grant::Tiles => "Tiles",
         Grant::Admin => "Admin",
     }
 }
@@ -161,7 +157,6 @@ fn grant_detail(grant: Grant, entry: &AgentEntry, on: bool) -> String {
         Grant::Zones => "Publish to every zone",
         Grant::Widgets => "Drive every widget",
         Grant::Portal => "Project a session portal",
-        Grant::Tiles => "Claim and draw its own tiles",
         Grant::Admin => "HUD status and screenshots · widest",
     }
     .to_owned()
@@ -468,7 +463,7 @@ mod tests {
         };
         assert_eq!(
             state_line(&[]),
-            "0 agents · 0 portals · 0 zones · 0 widgets · 0 tiles"
+            "0 agents · 0 portals · 0 zones · 0 widgets"
         );
         let roster = [
             entry("a", 1, 1, 2, 1, 0),
@@ -478,7 +473,7 @@ mod tests {
         ];
         assert_eq!(
             state_line(&roster),
-            "3 agents · 2 portals · 5 zones · 1 widget · 0 tiles"
+            "3 agents · 2 portals · 5 zones · 1 widget"
         );
     }
 }

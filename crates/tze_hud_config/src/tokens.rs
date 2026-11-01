@@ -368,57 +368,6 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Transcript turn separator (divider) thickness in pixels",
         default_value: "2",
     },
-    // Claimed-tile placement (ClaimTile anchor + size class; docs/api.md).
-    CanonicalToken {
-        key: "tile.small.width",
-        description: "Claimed tile width, small size class (px)",
-        default_value: "240",
-    },
-    CanonicalToken {
-        key: "tile.small.height",
-        description: "Claimed tile height, small size class (px)",
-        default_value: "120",
-    },
-    CanonicalToken {
-        key: "tile.medium.width",
-        description: "Claimed tile width, medium size class (px)",
-        default_value: "360",
-    },
-    CanonicalToken {
-        key: "tile.medium.height",
-        description: "Claimed tile height, medium size class (px)",
-        default_value: "220",
-    },
-    CanonicalToken {
-        key: "tile.large.width",
-        description: "Claimed tile width, large size class (px)",
-        default_value: "560",
-    },
-    CanonicalToken {
-        key: "tile.large.height",
-        description: "Claimed tile height, large size class (px)",
-        default_value: "360",
-    },
-    CanonicalToken {
-        key: "tile.wide.width",
-        description: "Claimed tile width, wide size class (px)",
-        default_value: "720",
-    },
-    CanonicalToken {
-        key: "tile.wide.height",
-        description: "Claimed tile height, wide size class (px)",
-        default_value: "120",
-    },
-    CanonicalToken {
-        key: "tile.tall.width",
-        description: "Claimed tile width, tall size class (px)",
-        default_value: "300",
-    },
-    CanonicalToken {
-        key: "tile.tall.height",
-        description: "Claimed tile height, tall size class (px)",
-        default_value: "520",
-    },
     // Agent tile backdrop by root node kind (defaults match the compositor
     // fallbacks).
     CanonicalToken {
@@ -590,16 +539,6 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         key: "system_card.code.font_size_px",
         description: "Pairing code font size on the system card (px)",
         default_value: "40",
-    },
-    CanonicalToken {
-        key: "tile.margin",
-        description: "Inset of claimed tiles from the display edge (px)",
-        default_value: "24",
-    },
-    CanonicalToken {
-        key: "tile.gap",
-        description: "Gap between claimed tiles stacked at one anchor (px)",
-        default_value: "12",
     },
     // Semantic surfaces (tonal elevation, lowest -> highest; hud-h51u7)
     CanonicalToken {

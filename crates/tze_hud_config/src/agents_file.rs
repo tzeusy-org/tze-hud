@@ -395,6 +395,22 @@ mod tests {
                 ConfigErrorCode::InvalidPskHash
             ]
         );
+        for allow in ["[\"tiles\"]", "[\"*\", \"tiles\"]"] {
+            let source = format!(
+                "[agents.a]\npsk_sha256 = \"{}\"\nallow = {allow}\n",
+                hash_psk_hex("test")
+            );
+            let Err(AgentsFileError::Invalid(errors)) =
+                AgentsFile::parse(&source).unwrap().directory()
+            else {
+                panic!("retired tiles entries must fail directory validation: {allow}");
+            };
+            assert!(
+                errors
+                    .iter()
+                    .any(|e| e.code == ConfigErrorCode::UnknownAllowEntry)
+            );
+        }
         assert!(AgentsFile::parse("[agents.a]\npsk = \"plaintext\"\n").is_err());
     }
 
@@ -462,7 +478,7 @@ mod tests {
         assert_eq!(edited.before.agents["a"].allow, ["*", "zone:subtitle"]);
         assert_eq!(
             edited.after.agents["a"].allow,
-            ["widget:*", "portal", "tiles", "zone:subtitle"]
+            ["widget:*", "portal", "zone:subtitle"]
         );
         let saved = std::fs::read_to_string(&path).unwrap();
         assert!(
@@ -511,7 +527,7 @@ mod tests {
         ));
         let grant_missing = AgentChange::Grant {
             agent: "zz".into(),
-            grant: Grant::Tiles,
+            grant: Grant::Widgets,
             on: true,
         };
         assert!(matches!(

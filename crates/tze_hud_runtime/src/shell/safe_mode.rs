@@ -201,11 +201,9 @@ mod tests {
             element_store_path: None,
             safe_mode_atomic: Arc::new(AtomicBool::new(false)),
             active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
-            freeze_active: false,
             token_store: TokenStore::new(),
             input_capture_tx: None,
             input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
-            tile_placement: Default::default(),
         }))
     }
 

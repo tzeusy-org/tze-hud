@@ -4,12 +4,10 @@
 //! Moved from `session_server/mod.rs` as Step SS-4 of the module split
 //! (docs/design/session-server-renderer-module-split-plan.md §3.4).
 
-use super::freeze_queue::SessionFreezeQueue;
 use super::lifecycle::SessionState;
 use super::upload::UploadByteRateLimiter;
-use crate::dedup::DedupWindow;
 use crate::lease::LeaseCorrelationCache;
-use tze_hud_scene::types::{ResourceBudget, SceneId};
+use tze_hud_scene::types::SceneId;
 
 use super::budget_gate::SharedMutationBudgetEnforcer;
 
@@ -22,11 +20,9 @@ pub(super) struct StreamSession {
     pub(super) agent_name: String,
     /// Permissions from the agent's `allow` list, fixed at handshake.
     pub(super) capabilities: Vec<String>,
-    pub(super) lease_ids: Vec<tze_hud_scene::SceneId>,
     pub(super) scene_session_id: SceneId,
     /// Stable ownership across authenticated resumes; physical scene_session_id stays fresh.
     pub(super) publication_origin: SceneId,
-    pub(super) resource_budget: ResourceBudget,
     pub(super) budget_enforcer: Option<SharedMutationBudgetEnforcer>,
     pub(super) subscriptions: Vec<String>,
     pub(super) server_sequence: u64,
@@ -42,24 +38,8 @@ pub(super) struct StreamSession {
     pub(super) last_client_sequence: u64,
 
     /// Whether safe mode is active for this session (RFC 0005 §3.7).
-    /// When true, MutationBatch messages are rejected with SAFE_MODE_ACTIVE.
+    /// When true, Publish messages are rejected with SAFE_MODE_ACTIVE.
     pub(super) safe_mode_active: bool,
-
-    /// Per-session mutation queue for freeze semantics (system-shell/spec.md §Freeze Scene).
-    ///
-    /// When `SharedState.freeze_active` is true, incoming MutationBatch messages
-    /// are enqueued here rather than applied to the scene. On unfreeze, all queued
-    /// mutations are applied in submission order.
-    ///
-    /// The shell owns freeze state transitions; the session server owns the queue.
-    pub(super) freeze_queue: SessionFreezeQueue,
-
-    /// Wall-clock time (UTC µs since epoch) at which this session was opened.
-    /// Used for TIMESTAMP_TOO_OLD validation of TimingHints (RFC 0003 §3.5).
-    pub(super) session_open_at_wall_us: u64,
-
-    /// Per-session MutationBatch deduplication window (RFC 0005 §5.2).
-    pub(super) dedup_window: DedupWindow,
 
     /// Per-session lease-operation correlation cache (RFC 0005 §5.3).
     ///

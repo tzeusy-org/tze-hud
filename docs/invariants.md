@@ -106,10 +106,9 @@ Windows held-press/release acceptance remains separate.
 - `integration` [`shell_dismiss_override_removes_portal_tile`](../tests/integration/text_stream_portal_governance.rs),
   [`shell_status_snapshot_exposes_no_portal_identity_or_transcript`](../tests/integration/text_stream_portal_governance.rs)
 - viewer dismiss (hover close button): `tze_hud_scene`
-  [`viewer_dismiss_tile_revokes_lease_in_any_live_state`](../crates/tze_hud_scene/src/graph/tests.rs); `tze_hud_protocol`
-  [`viewer_dismiss_tile_pushes_reclaimed_override`](../crates/tze_hud_protocol/src/session_server/tests/events.rs); `tze_hud_runtime`
+  [`viewer_dismiss_tile_revokes_lease_in_any_live_state`](../crates/tze_hud_scene/src/graph/tests.rs); `tze_hud_runtime`
   [`viewer_dismiss_portal_detaches_and_next_publish_reattaches`](../crates/tze_hud_runtime/src/portal_projection_driver.rs),
-  [`viewer_close_button_dismisses_hovered_tile_and_notifies_owner`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs); `integration`
+  [`viewer_close_button_dismisses_hovered_tile`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs); `integration`
   [`poc_portal_viewer_dismiss_then_mcp_verbs`](../tests/integration/poc_acceptance.rs);
   `tze_hud_compositor` [`tile_close_button_draw_and_hit_region_share_token_geometry`](../crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs)
 - hung agents (a raw HTTP/2 client that stops reading until the server's send
@@ -117,7 +116,7 @@ Windows held-press/release acceptance remains separate.
   [`poc_override_safe_mode_wins_with_hung_grpc_agent`](../tests/integration/poc_acceptance.rs),
   [`poc_override_exit_safe_mode_with_agent_hung_during_it`](../tests/integration/poc_acceptance.rs); a responsive agent
   is told, [`poc_override_notifies_the_agent`](../tests/integration/poc_acceptance.rs) (`SessionSuspended`,
-  `SessionResumed`, `Reclaimed{OVERRIDE}`)
+  `SessionResumed`)
 - `tze_hud_mcp` [`hud_publish_in_safe_mode_returns_safe_mode_active`](../crates/tze_hud_mcp/src/server/tests.rs),
   [`safe_mode_does_not_regrant_suspended_mcp_lease`](../crates/tze_hud_mcp/src/server/tests.rs),
   [`resume_restores_mcp_publishing`](../crates/tze_hud_mcp/src/server/tests.rs)
@@ -128,8 +127,8 @@ Windows held-press/release acceptance remains separate.
 The control panel's per-agent Clear and Unpair are the same override at agent
 scope: Clear revokes every live lease the agent holds (in any state) with its
 tiles, removes all of its zone and widget publications under any lease or
-none, drops its scheduled content and reclaims its portals, then forwards
-`Reclaimed{OVERRIDE}`; nothing waits on the agent, and its next publish is
+none, drops its scheduled content and reclaims its portals; nothing waits
+on the agent, and its next publish is
 served (portals reattach). Unpair first removes its PSK hash from
 `agents.toml` (so no new request authenticates, and a gRPC handshake that
 authenticated against the old directory is refused when it registers), then
@@ -157,35 +156,30 @@ The driver preserves the first-class surface and focusable composer in
 
 ## 4. Disconnect is not release
 
-A disconnected agent's leases become orphaned (badge shown, content kept) for
+A disconnected agent's leases become orphaned (content kept) for
 a grace period. Reconnecting within the grace period with the resume token
 restores the same surfaces and their budget usage; when the grace period
 ends, the runtime reclaims everything with no agent help. Reclaiming a lease
 clears only the zone and widget publications made under that lease, never the
 rest of the agent's namespace; only the owner's agent-wide Clear (§3) takes
-the whole namespace. Before a gRPC session's first successful tile
-claim, zone and widget publications (including scheduled zone content) carry
-that session's transient origin. A complete successful claim adopts only its
-still-unleased publications into the granted lease; failed claims change no
-publication ownership. Publication-only disconnects use the same finite resume
-grace and idle deadline as orphaned leases. Authenticated resume within grace
-restores the origin; grace expiry reclaims its current content and pending
-publishes without touching concurrent sessions, overwritten content, MCP
-publications, or independently leased content. This origin is in-memory only,
-not a wire or snapshot field.
+the whole namespace. gRPC zone and widget publications (including scheduled
+content) carry an in-memory session origin. Disconnect starts its finite
+grace period and idle deadline; authenticated resume restores that origin.
+Grace expiry reclaims its current and pending content without touching
+concurrent sessions, overwritten content, MCP publications or independently
+leased content. No public scene snapshot exposes that origin or scene nodes.
 
 - `tze_hud_protocol` [`disconnect_transitions_to_orphaned_and_sets_disconnection_badge`](../crates/tze_hud_protocol/tests/lease_governance.rs),
   [`grace_period_expiry_removes_tile_and_nodes`](../crates/tze_hud_protocol/tests/lease_governance.rs)
 - `tze_hud_runtime` [`disconnect_then_reconnect_within_grace_resumes_same_surface_without_duplication`](../crates/tze_hud_runtime/src/portal_projection_driver.rs),
   [`resumed_session_restores_usage_before_accepting_new_mutations`](../crates/tze_hud_runtime/src/mutation_budget_bridge.rs)
-- `tze_hud_protocol` (gRPC session) [`grpc_disconnect_orphans_leases_and_badges_tiles`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs),
-  [`grpc_resume_within_grace_restores_same_lease_and_tile`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs),
-  [`grpc_grace_expiry_reclaims_orphaned_lease_and_rejects_resume`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs)
+- `tze_hud_protocol` (gRPC session) [`grpc_disconnect_orphans_publications_without_touching_peer`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs),
+  [`grpc_resume_within_grace_restores_publication_origin`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs),
+  [`grpc_grace_expiry_reclaims_publications_and_rejects_resume`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs)
 - `tze_hud_runtime` (headless frame sweep) [`render_frame_reclaims_orphaned_lease_after_grace`](../crates/tze_hud_runtime/src/headless.rs)
 - `tze_hud_compositor` (badge draw command) [`orphaned_tile_emits_disconnection_badge_draw_cmd`](../crates/tze_hud_compositor/src/renderer/tests/focus_chrome.rs)
 - `integration` (POC acceptance, over gRPC and MCP with `production.toml`)
-  [`poc_portal_abandoned_is_reclaimed`](../tests/integration/poc_acceptance.rs), [`poc_tile_claim_with_placement_two_round_trips`](../tests/integration/poc_acceptance.rs),
-  [`poc_tile_update_then_orphan_then_reclaim_after_grace`](../tests/integration/poc_acceptance.rs)
+  [`poc_portal_abandoned_is_reclaimed`](../tests/integration/poc_acceptance.rs)
 - `tze_hud_scene` [`tile_lease_reap_keeps_same_namespace_mcp_publications`](../crates/tze_hud_scene/src/graph/spec_scenarios.rs),
   [`revoked_lease_clears_only_its_publications`](../crates/tze_hud_scene/src/graph/spec_scenarios.rs)
 
@@ -270,8 +264,7 @@ change still presents, including after a capture alongside a failed acquire.
 
 ## 10. Owner hiding changes the view, never state
 
-From the control panel the owner can hide portals, zones, widgets or other
-agent tiles, or all of them (Hide all, Alt+H; also how to present a shared
+From the control panel the owner can hide portals, zones, widgets, or all of them (Hide all, Alt+H; also how to present a shared
 screen). Hidden content is not drawn, catches no pointer input, holds no
 keyboard focus (a focused composer blurs), and costs no raster or upload work;
 its fades, reveals and scroll catch-up schedule no frames, and widgets shown

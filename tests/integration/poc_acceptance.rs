@@ -27,7 +27,6 @@ use tze_hud_protocol::proto::session::{self as wire, ClientMessage, ServerMessag
 use tze_hud_runtime::windowed::{HeadlessEventLoopHarness, WindowedConfig};
 use tze_hud_scene::TestClock;
 use tze_hud_scene::lease::ORPHAN_GRACE_PERIOD_MS;
-use tze_hud_scene::placement::TilePlacementTokens;
 
 const PRODUCTION_CONFIG: &str = include_str!("../../app/tze_hud_app/config/production.toml");
 const PORTAL: &str = "portal:claude-main";
@@ -68,7 +67,7 @@ fn runtime_config() -> WindowedConfig {
             .with_agent(
                 "resident",
                 RESIDENT_PSK,
-                &["tiles", "zone:notification-area"],
+                &["zone:status-bar", "zone:notification-area"],
             )
             .directory()
             .expect("valid agents.toml entries")
@@ -115,7 +114,7 @@ fn agents_file() -> tze_hud_config::AgentsFile {
         .with_agent(
             "resident",
             RESIDENT_PSK,
-            &["tiles", "zone:notification-area"],
+            &["zone:status-bar", "zone:notification-area"],
         )
 }
 
@@ -358,13 +357,6 @@ struct Resident {
     namespace: String,
 }
 
-/// What `ClaimTile` returned.
-struct Claimed {
-    tile: Vec<u8>,
-    node: Vec<u8>,
-    lease: Vec<u8>,
-}
-
 fn now_wall_us() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -399,8 +391,6 @@ impl Resident {
             timestamp_wall_us: now_wall_us(),
             payload: Some(ClientPayload::SessionInit(wire::SessionInit {
                 agent_id: agent_id.to_string(),
-                min_protocol_version: tze_hud_protocol::auth::RUNTIME_MIN_VERSION,
-                max_protocol_version: tze_hud_protocol::auth::RUNTIME_MAX_VERSION,
                 auth_credential: Some(tze_hud_protocol::auth::psk_credential(psk.to_string())),
                 ..Default::default()
             })),
@@ -418,9 +408,10 @@ impl Resident {
             other => panic!("expected SessionEstablished, got {other:?}"),
         };
         // The snapshot and degradation level follow in the same round trip.
-        for _ in 0..2 {
-            next_message(&mut stream).await;
-        }
+        assert!(matches!(
+            next_message(&mut stream).await.payload,
+            Some(ServerPayload::DegradationNotice(_))
+        ));
         Ok(Resident {
             tx,
             stream,
@@ -450,63 +441,24 @@ impl Resident {
         }
     }
 
-    /// `ClaimTile` with a placement hint and a one-node text root.
-    async fn claim(
-        &mut self,
-        anchor: wire::TileAnchor,
-        size: wire::TileSize,
-        text: &str,
-    ) -> Claimed {
-        let result = self.request(claim_payload(anchor, size, text)).await;
-        Claimed::from(result)
-    }
-
-    /// Replace the text of a claimed tile's root node.
-    async fn set_text(&mut self, claimed: &Claimed, text: &str) -> wire::RequestResult {
-        self.request(ClientPayload::MutationBatch(wire::MutationBatch {
-            batch_id: uuid::Uuid::now_v7().as_bytes().to_vec(),
-            lease_id: claimed.lease.clone(),
-            mutations: vec![proto::MutationProto {
-                mutation: Some(proto::mutation_proto::Mutation::UpdateNodeContent(
-                    proto::UpdateNodeContentMutation {
-                        tile_id: claimed.tile.clone(),
-                        node_id: claimed.node.clone(),
-                        data: Some(proto::update_node_content_mutation::Data::TextMarkdown(
-                            text_node(text),
-                        )),
-                    },
-                )),
-            }],
-            timing: None,
-        }))
-        .await
+    /// Replace the resident's durable status publication.
+    async fn publish(&mut self, text: &str) -> wire::RequestResult {
+        self.request(resident_publish(text)).await
     }
 }
 
-fn claim_payload(anchor: wire::TileAnchor, size: wire::TileSize, text: &str) -> ClientPayload {
-    ClientPayload::ClaimTile(wire::ClaimTile {
-        placement: Some(wire::TilePlacement {
-            anchor: anchor as i32,
-            size: size as i32,
+fn resident_publish(text: &str) -> ClientPayload {
+    ClientPayload::Publish(wire::Publish {
+        surface: "zone:status-bar".into(),
+        content: Some(proto::ZoneContent {
+            payload: Some(proto::zone_content::Payload::StatusBar(
+                proto::StatusBarPayload {
+                    entries: std::collections::HashMap::from([("resident".into(), text.into())]),
+                },
+            )),
         }),
-        ttl_ms: 600_000,
-        root: Some(proto::NodeProto {
-            data: Some(proto::node_proto::Data::TextMarkdown(text_node(text))),
-            ..Default::default()
-        }),
+        ..Default::default()
     })
-}
-
-impl From<wire::RequestResult> for Claimed {
-    fn from(result: wire::RequestResult) -> Self {
-        assert!(result.ok, "ClaimTile: {result:?}");
-        assert_eq!(result.ids.len(), 2, "tile id, then the root's node id");
-        Claimed {
-            tile: result.ids[0].clone(),
-            node: result.ids[1].clone(),
-            lease: result.lease_id,
-        }
-    }
 }
 
 /// A resident agent whose process has stopped. A raw HTTP/2 client: it
@@ -555,8 +507,6 @@ impl HungAgent {
         agent
             .send_all(vec![ClientPayload::SessionInit(wire::SessionInit {
                 agent_id: "resident".to_string(),
-                min_protocol_version: tze_hud_protocol::auth::RUNTIME_MIN_VERSION,
-                max_protocol_version: tze_hud_protocol::auth::RUNTIME_MAX_VERSION,
                 auth_credential: Some(tze_hud_protocol::auth::psk_credential(
                     RESIDENT_PSK.to_string(),
                 )),
@@ -564,18 +514,12 @@ impl HungAgent {
             })])
             .await;
         agent.replies.body = Some(response.await.expect("response headers").into_body());
-        for _ in 0..3 {
+        for _ in 0..2 {
             agent.replies.next().await; // established, snapshot, degradation level
         }
-        agent
-            .send_all(vec![claim_payload(
-                wire::TileAnchor::TopRight,
-                wire::TileSize::Small,
-                "working",
-            )])
-            .await;
+        agent.send_all(vec![resident_publish("working")]).await;
         match agent.replies.next().await.payload {
-            Some(ServerPayload::RequestResult(result)) => drop(Claimed::from(result)),
+            Some(ServerPayload::RequestResult(result)) => assert!(result.ok, "{result:?}"),
             other => panic!("expected RequestResult, got {other:?}"),
         }
         agent
@@ -662,26 +606,6 @@ impl GrpcReplies {
                 .expect("release capacity");
             self.buf.extend_from_slice(&chunk);
         }
-    }
-}
-
-fn text_node(content: &str) -> proto::TextMarkdownNodeProto {
-    proto::TextMarkdownNodeProto {
-        content: content.to_string(),
-        bounds: Some(proto::Rect {
-            x: 0.0,
-            y: 0.0,
-            width: 200.0,
-            height: 40.0,
-        }),
-        font_size_px: 16.0,
-        color: Some(proto::Rgba {
-            r: 1.0,
-            g: 1.0,
-            b: 1.0,
-            a: 1.0,
-        }),
-        ..Default::default()
     }
 }
 
@@ -790,7 +714,7 @@ async fn poc_portal_viewer_dismiss_then_mcp_verbs() {
         first.body,
         json!({"ok": true, "reattached": false, "pending_input": 0})
     );
-    assert_eq!(poc.hud.tile_count(), 1);
+    assert_eq!(poc.shown("zone:status-bar"), 1);
 
     poc.hud.viewer_dismiss_all_tiles();
     poc.settle().await;
@@ -840,7 +764,7 @@ async fn poc_portal_abandoned_is_reclaimed() {
         )
         .await;
     assert!(attach.model_tokens <= PORTAL_FLOW_BUDGET);
-    assert_eq!(poc.hud.tile_count(), 1);
+    assert_eq!(poc.shown("zone:status-bar"), 1);
 
     // The agent goes silent: no publish, poll, or hold.
     poc.advance(PORTAL_DEGRADE_MS - 1).await;
@@ -1041,123 +965,6 @@ async fn poc_notification_action_reaches_hud_input() {
     }
 }
 
-/// docs/scope.md "Tiles": a resident gRPC agent, authenticated as its own
-/// `agents.toml` identity, gets a placed, filled tile in two round trips, and
-/// the runtime resolves the placement hint (the agent sends no geometry).
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn poc_tile_claim_with_placement_two_round_trips() {
-    let poc = Poc::boot().await;
-
-    // The claude PSK is not the resident's credential.
-    let wrong = Resident::connect(poc.hud.grpc_addr(), "resident", CLAUDE_PSK).await;
-    assert!(
-        wrong.is_err(),
-        "another agent's PSK must not open a session"
-    );
-
-    // Round trip 1: the handshake. Round trip 2: claim and fill.
-    let mut agent = poc.resident().await;
-    assert_eq!(agent.namespace, "resident");
-    let claimed = agent
-        .claim(
-            wire::TileAnchor::BottomLeft,
-            wire::TileSize::Large,
-            "build running",
-        )
-        .await;
-    assert_eq!(
-        agent.round_trips, 2,
-        "init to a filled tile is two round trips"
-    );
-    assert!(!claimed.lease.is_empty());
-
-    assert_eq!(poc.hud.tile_texts(), ["build running"]);
-    let (tokens, window) = (TilePlacementTokens::default(), runtime_config().window);
-    let (width, height) = tokens.size(tze_hud_scene::placement::TileSize::Large);
-    let bounds = poc.hud.tile_bounds();
-    assert_eq!(bounds.len(), 1);
-    assert_eq!(
-        (bounds[0].x, bounds[0].y, bounds[0].width, bounds[0].height),
-        (
-            tokens.margin,
-            window.height as f32 - tokens.margin - height,
-            width,
-            height
-        ),
-        "bottom-left, large, inside the screen margin"
-    );
-
-    // A second claim at the same anchor stacks away from the edge.
-    let second = agent
-        .claim(wire::TileAnchor::BottomLeft, wire::TileSize::Large, "tests")
-        .await;
-    assert_ne!(second.tile, claimed.tile);
-    let mut stacked = poc.hud.tile_bounds();
-    stacked.sort_by(|a, b| a.y.total_cmp(&b.y));
-    assert_eq!(
-        stacked[1].y - (stacked[0].y + stacked[0].height),
-        tokens.gap
-    );
-}
-
-/// docs/scope.md "Tiles": updates show, a dropped session orphans the tile
-/// (content kept, badge shown), and the runtime reclaims it when the grace
-/// period ends, with no agent and no wall clock involved. The same agent's MCP
-/// publication, held under a different lease, survives the reap (#1250).
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn poc_tile_update_then_orphan_then_reclaim_after_grace() {
-    let mut poc = Poc::boot().await;
-    let notice = poc
-        .call_as(
-            RESIDENT_PSK,
-            "hud_publish",
-            json!({"surface": NOTIFICATION, "content": {"title": "Deploy", "body": "finished"}, "ttl_ms": 600_000}),
-        )
-        .await;
-    assert!(
-        notice.model_tokens <= ZONE_PUBLISH_BUDGET,
-        "{}",
-        notice.model_tokens
-    );
-    assert_eq!(poc.shown(NOTIFICATION), 1);
-
-    let mut agent = poc.resident().await;
-    let claimed = agent
-        .claim(
-            wire::TileAnchor::TopRight,
-            wire::TileSize::Medium,
-            "building",
-        )
-        .await;
-    let update = agent.set_text(&claimed, "tests passed").await;
-    assert!(update.ok, "{update:?}");
-    assert_eq!(
-        poc.hud.tile_texts(),
-        ["tests passed"],
-        "the update is on screen"
-    );
-
-    // The agent vanishes: no SessionClose.
-    drop(agent);
-    poc.wait_for("orphan badge", |hud| hud.badged_tile_count() == 1)
-        .await;
-    assert_eq!(
-        poc.hud.tile_texts(),
-        ["tests passed"],
-        "orphaned content is kept"
-    );
-
-    poc.advance(ORPHAN_GRACE_PERIOD_MS - 1).await;
-    assert_eq!(poc.hud.tile_count(), 1, "still within grace");
-    poc.advance(1).await;
-    assert_eq!(poc.hud.tile_count(), 0, "reclaimed when grace ends");
-    assert_eq!(
-        poc.shown(NOTIFICATION),
-        1,
-        "the MCP notification survives the reap"
-    );
-}
-
 impl Poc {
     /// Turn the event loop until the server's send buffer to `agent` is full:
     /// the agent has stopped reading and its next reply blocks its handler.
@@ -1205,7 +1012,7 @@ impl Poc {
 async fn poc_override_safe_mode_wins_with_hung_grpc_agent() {
     let mut poc = Poc::boot().await;
     let hung = HungAgent::connect(poc.hud.grpc_addr()).await;
-    assert_eq!(poc.hud.tile_count(), 1);
+    assert_eq!(poc.shown("zone:status-bar"), 1);
     let big_clear = || {
         ClientPayload::Clear(wire::Clear {
             surface: format!("zone:{}", "z".repeat(2_000)),
@@ -1219,9 +1026,9 @@ async fn poc_override_safe_mode_wins_with_hung_grpc_agent() {
     poc.wait_for("safe mode", |hud| hud.safe_mode_active())
         .await;
     assert_eq!(
-        poc.hud.suspended_lease_count(),
+        poc.shown("zone:status-bar"),
         1,
-        "the hung agent's lease is suspended"
+        "safe mode preserves the held publication"
     );
     let code = poc
         .call_err("hud_publish", json!({"surface": SUBTITLE, "content": "hi"}))
@@ -1234,12 +1041,15 @@ async fn poc_override_safe_mode_wins_with_hung_grpc_agent() {
         .await;
     assert_eq!(poc.hud.suspended_lease_count(), 0);
 
-    poc.hud.viewer_dismiss_all_tiles();
-    assert_eq!(
-        poc.hud.tile_count(),
-        0,
-        "dismiss does not wait for the agent"
-    );
+    // The owner's Clear does not depend on the hung response stream.
+    poc.open_panel().await;
+    poc.click("agents.manage:resident").await;
+    poc.click_confirmed("agents.clear:resident", "Clear resident?")
+        .await;
+    poc.wait_for("the held publication clears", |hud| {
+        hud.zone_publication_count("status-bar") == 0
+    })
+    .await;
     poll.abort();
     flood.abort();
 }
@@ -1256,14 +1066,7 @@ async fn poc_override_exit_safe_mode_with_agent_hung_during_it() {
     poc.wait_for("safe mode", |hud| hud.safe_mode_active())
         .await;
 
-    let write = || {
-        ClientPayload::MutationBatch(wire::MutationBatch {
-            batch_id: uuid::Uuid::now_v7().as_bytes().to_vec(),
-            lease_id: vec![0; 16],
-            mutations: vec![],
-            timing: None,
-        })
-    };
+    let write = || resident_publish("ignored");
     let flood = hung.keep_sending(write);
     poc.wait_until_hung("resident").await;
 
@@ -1287,7 +1090,7 @@ async fn poc_override_clear_and_unpair_with_hung_grpc_agent() {
     )
     .await;
     let hung = HungAgent::connect(poc.hud.grpc_addr()).await;
-    assert_eq!(poc.hud.tile_count(), 1);
+    assert_eq!(poc.shown("zone:status-bar"), 1);
     let flood = hung.keep_sending(|| {
         ClientPayload::Clear(wire::Clear {
             surface: format!("zone:{}", "z".repeat(2_000)),
@@ -1299,8 +1102,10 @@ async fn poc_override_clear_and_unpair_with_hung_grpc_agent() {
     poc.click("agents.manage:resident").await;
     poc.click_confirmed("agents.clear:resident", "Clear resident?")
         .await;
-    poc.wait_for("the hung agent's tile goes", |hud| hud.tile_count() == 0)
-        .await;
+    poc.wait_for("the hung agent's publication goes", |hud| {
+        hud.zone_publication_count("status-bar") == 0
+    })
+    .await;
     assert_eq!(poc.shown(SUBTITLE), 1, "the other agent's content stays");
 
     poc.click_confirmed("agents.unpair:resident", "Unpair resident?")
@@ -1341,7 +1146,7 @@ async fn poc_override_clear_and_unpair_with_hung_grpc_agent() {
 
 /// CP-8 with responsive agents: Clear takes an MCP agent's portal and zone
 /// content and the next publish reattaches; a connected gRPC agent is told
-/// (`Reclaimed{OVERRIDE}`). Withdrawing a grant applies at once; adding one
+/// without waiting for a reply. Withdrawing a grant applies at once; adding one
 /// asks first; the agent's next request honours both.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn poc_panel_clear_reattaches_and_grants_apply_to_the_next_request() {
@@ -1357,16 +1162,15 @@ async fn poc_panel_clear_reattaches_and_grants_apply_to_the_next_request() {
     )
     .await;
     let mut agent = poc.resident().await;
-    let claimed = agent
-        .claim(wire::TileAnchor::TopRight, wire::TileSize::Small, "working")
-        .await;
-    assert_eq!(poc.hud.tile_count(), 2);
+    assert!(agent.publish("working").await.ok);
+    assert_eq!(poc.hud.tile_count(), 1);
+    assert_eq!(poc.shown("zone:status-bar"), 1);
 
     poc.open_panel().await;
     poc.click("agents.manage:claude").await;
     poc.click_confirmed("agents.clear:claude", "Clear claude?")
         .await;
-    poc.wait_for("claude's portal goes", |hud| hud.tile_count() == 1)
+    poc.wait_for("claude's portal goes", |hud| hud.tile_count() == 0)
         .await;
     assert_eq!(poc.shown(SUBTITLE), 0);
     let again = poc
@@ -1380,13 +1184,10 @@ async fn poc_panel_clear_reattaches_and_grants_apply_to_the_next_request() {
     poc.click("agents.manage:resident").await;
     poc.click_confirmed("agents.clear:resident", "Clear resident?")
         .await;
-    match next_message(&mut agent.stream).await.payload {
-        Some(ServerPayload::Reclaimed(reclaimed)) => {
-            assert_eq!(reclaimed.why, wire::ReclaimReason::Override as i32);
-            assert_eq!(reclaimed.lease_id, claimed.lease);
-        }
-        other => panic!("expected Reclaimed, got {other:?}"),
-    }
+    poc.wait_for("resident content clears", |hud| {
+        hud.zone_publication_count("status-bar") == 0
+    })
+    .await;
 
     let zones = "agents.grant.zones:claude";
     let toggle = |on: bool| {
@@ -1435,16 +1236,14 @@ async fn poc_panel_roster_updates_live_without_moving_focus() {
     .await;
 
     let mut agent = poc.resident().await;
-    agent
-        .claim(wire::TileAnchor::TopRight, wire::TileSize::Small, "working")
-        .await;
+    assert!(agent.publish("working").await.ok);
     poc.wait_for("resident shows as connected", move |hud| {
-        detail(hud).as_deref() == Some("Connected · 1 tile")
+        detail(hud).as_deref() == Some("Connected · 1 zone")
     })
     .await;
     poc.wait_for("the header counts it", |hud| {
         hud.control_panel_state_line().as_deref()
-            == Some("1 agent · 0 portals · 0 zones · 0 widgets · 1 tile")
+            == Some("1 agent · 0 portals · 1 zone · 0 widgets")
     })
     .await;
     assert_eq!(poc.hud.control_panel_focus(), focus, "focus did not move");
@@ -1457,7 +1256,7 @@ async fn poc_panel_roster_updates_live_without_moving_focus() {
         agent: "aardvark".into(),
         record: tze_hud_config::AgentRecord {
             psk_sha256: tze_hud_config::agents_file::hash_psk_hex("aardvark-psk"),
-            allow: vec!["tiles".into()],
+            allow: vec!["zone:status-bar".into()],
             paired_at: None,
         },
     });
@@ -1951,21 +1750,19 @@ async fn poc_panel_runtime_rows_apply_save_and_stage_a_restart() {
 
 /// A responsive agent is told what the human did (docs/api.md): safe mode
 /// arrives as `SessionSuspended` and writes are refused with `SAFE_MODE_ACTIVE`
-/// until `SessionResumed`; a viewer dismiss arrives as `Reclaimed{OVERRIDE}`.
+/// until `SessionResumed`; the owner can Clear without waiting for the agent.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn poc_override_notifies_the_agent() {
     let mut poc = Poc::boot().await;
     let mut agent = poc.resident().await;
-    let claimed = agent
-        .claim(wire::TileAnchor::TopRight, wire::TileSize::Small, "working")
-        .await;
+    assert!(agent.publish("working").await.ok);
 
     poc.hud.press_safe_mode_hotkey();
     match next_message(&mut agent.stream).await.payload {
         Some(ServerPayload::SessionSuspended(_)) => {}
         other => panic!("expected SessionSuspended, got {other:?}"),
     }
-    let refused = agent.set_text(&claimed, "ignored").await;
+    let refused = agent.publish("ignored").await;
     assert_eq!(refused.code, "SAFE_MODE_ACTIVE");
 
     poc.hud.press_safe_mode_hotkey();
@@ -1973,19 +1770,20 @@ async fn poc_override_notifies_the_agent() {
         Some(ServerPayload::SessionResumed(_)) => {}
         other => panic!("expected SessionResumed, got {other:?}"),
     }
-    assert!(agent.set_text(&claimed, "back").await.ok);
+    assert!(agent.publish("back").await.ok);
 
-    poc.hud.viewer_dismiss_all_tiles();
-    poc.settle().await;
-    match next_message(&mut agent.stream).await.payload {
-        Some(ServerPayload::Reclaimed(reclaimed)) => {
-            assert_eq!(reclaimed.why, wire::ReclaimReason::Override as i32);
-            assert_eq!(reclaimed.lease_id, claimed.lease);
-            assert!(reclaimed.surface.starts_with("tile:"), "{reclaimed:?}");
-        }
-        other => panic!("expected Reclaimed, got {other:?}"),
-    }
-    assert_eq!(poc.hud.tile_count(), 0);
+    poc.open_panel().await;
+    poc.click("agents.manage:resident").await;
+    poc.click_confirmed("agents.clear:resident", "Clear resident?")
+        .await;
+    poc.wait_for("resident content clears", |hud| {
+        hud.zone_publication_count("status-bar") == 0
+    })
+    .await;
+    assert!(
+        agent.publish("again").await.ok,
+        "Clear leaves the session usable"
+    );
 }
 
 /// §3: agents never learn the panel is open or what the owner hid. Every
@@ -2009,20 +1807,11 @@ async fn poc_agents_see_the_same_with_the_panel_open_or_content_hidden() {
         for publish in &publishes {
             bodies.push(poc.call("hud_publish", publish.clone()).await.body);
         }
-        let mut claimed = agent
-            .request(claim_payload(
-                wire::TileAnchor::TopRight,
-                wire::TileSize::Small,
-                "working",
-            ))
-            .await;
+        let mut published = agent.request(resident_publish("working")).await;
         // Fresh each claim: the echoed sequence, the new ids and lease.
         // Everything else (granted, code, hint, TTL) must not move.
-        assert_eq!(claimed.ids.len(), 2, "{claimed:?}");
-        claimed.seq = 0;
-        claimed.ids.clear();
-        claimed.lease_id.clear();
-        (bodies, claimed)
+        published.seq = 0;
+        (bodies, published)
     };
     // The first publishes attach and create; compare from the second round.
     answers(&mut poc, &mut agent).await;
@@ -2044,7 +1833,6 @@ async fn poc_agents_see_the_same_with_the_panel_open_or_content_hidden() {
         "visibility.portals",
         "visibility.zones",
         "visibility.widgets",
-        "visibility.tiles",
     ] {
         // A class row is on while its class shows.
         poc.click(row).await;

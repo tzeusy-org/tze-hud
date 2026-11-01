@@ -13,11 +13,8 @@ refuses a wrong code): the HUD relaunches itself, the new process (a different
 pid, uptime reset) answers with the same PSK, and the old process exits.
 
 Between the admin checks and the pairing check, the POC stages run: widget
-publish and TTL expiry, notification TTL expiry, a `delay_ms` publish that
-appears on schedule, and a resident tile whose agent process is killed (the
-tile must stay while orphaned and be gone after the 30 s lease grace, seen in a
-fresh session's SceneSnapshot via `poc_demo snapshot`). Every wait polls with a
-hang guard; none assumes exact timing.
+publish and TTL expiry, notification TTL expiry and a `delay_ms` publish that
+appears on schedule. Every wait polls with a hang guard.
 
 `--quiescent-with-content` instead boots a second HUD under
 `--quiescent-efficiency-emit`, publishes held content inside the settle window,
@@ -71,7 +68,6 @@ MIN_CHANGED_PIXELS = 200
 POLL_S = 0.25
 HANG_GUARD_S = 45  # upper bound on any single wait; the expected time is far shorter
 EARLY_SLACK_S = 0.5  # an event may not land earlier than its delay, give or take this
-ORPHAN_GRACE_S = 30  # SceneGraph::DEFAULT_GRACE_PERIOD_MS; not configurable
 TILE_POLL_S = 3.0
 AGENT = "ci-smoke"
 TOOLS = {"hud_surfaces", "hud_publish", "hud_hold", "hud_clear", "hud_input"}
@@ -163,13 +159,6 @@ def assert_not_early(waited_s: float, expected_s: float, what: str) -> None:
     )
 
 
-def parse_tile_count(output: str) -> int:
-    """The `tiles <n>` line of `poc_demo snapshot`."""
-    for line in output.splitlines():
-        parts = line.split()
-        if len(parts) == 2 and parts[0] == "tiles" and parts[1].isdigit():
-            return int(parts[1])
-    raise AssertionError(f"poc_demo snapshot printed no `tiles <n>` line: {output[-300:]!r}")
 
 
 def quiescent_summary(artifact: dict) -> str:
@@ -415,7 +404,7 @@ def run_borrowed(url: str, settle_s: float) -> int:
                 print("FAIL borrowed test-publication cleanup incomplete", file=sys.stderr)
                 result = 1
         for leg in ("owned startup/config/WARP", "pair reopening/wrong-code", "executable restart/health",
-                    "local quiescent-efficiency emit", "resident poc_demo spawn/orphan reclaim",
+                    "local quiescent-efficiency emit",
                     "owned theme/fixture captures"):
             print(f"UNEXECUTED owner-only: {leg}")
     return result
@@ -695,56 +684,8 @@ def _check_delay(smoke: Smoke, evidence: dict | None) -> None:
     )
 
 
-def poc_demo_tiles(poc_demo: Path, psk: str) -> int:
-    """Tiles in a fresh gRPC session's SceneSnapshot (`poc_demo snapshot`)."""
-    done = subprocess.run(
-        [str(poc_demo), "snapshot", "--agent", AGENT],
-        capture_output=True,
-        text=True,
-        timeout=30,
-        env={**os.environ, "TZE_HUD_PSK": psk},
-    )
-    assert done.returncode == 0, f"poc_demo snapshot: exit {done.returncode} {done.stderr.strip()[-300:]}"
-    return parse_tile_count(done.stdout)
 
 
-def check_tile_orphan(smoke: Smoke, poc_demo: Path) -> None:
-    """Kill a resident agent holding a tile: the tile stays while orphaned, then is reclaimed."""
-    before = poc_demo_tiles(poc_demo, smoke.psk)
-    out_path = Path(tempfile.mkdtemp(prefix="tze_hud_tile_")) / "override-hang.log"
-    with open(out_path, "wb") as out:
-        agent = subprocess.Popen(
-            [str(poc_demo), "override-hang", "--agent", AGENT, "--human-wait-s", "600"],
-            stdout=out,
-            stderr=subprocess.STDOUT,
-            env={**os.environ, "TZE_HUD_PSK": smoke.psk},
-        )
-    try:
-        def claimed() -> tuple[bool, str]:
-            text = out_path.read_text(errors="replace")
-            assert agent.poll() is None, f"poc_demo override-hang exited early ({agent.returncode}): {text[-300:]}"
-            return "Not reading the stream" in text, text[-200:]
-
-        wait_until(claimed, what="poc_demo override-hang claiming its tile")
-        killed = time.monotonic()
-        kill_pid(agent.pid)
-    finally:
-        if agent.poll() is None:
-            agent.kill()
-        agent.wait(timeout=10)
-
-    # Disconnect orphans the lease: the tile is kept (badged) for the grace period.
-    orphaned = poc_demo_tiles(poc_demo, smoke.psk)
-    assert orphaned == before + 1, f"tiles {before} -> {orphaned} after the agent was killed; expected the orphan kept"
-    wait_until(
-        lambda: (lambda n: (n == before, n))(poc_demo_tiles(poc_demo, smoke.psk)),
-        what=f"orphaned tile reclaimed (tiles back to {before}) after the {ORPHAN_GRACE_S}s grace",
-        timeout_s=ORPHAN_GRACE_S + HANG_GUARD_S,
-        interval_s=TILE_POLL_S,
-    )
-    waited = time.monotonic() - killed
-    assert_not_early(waited, ORPHAN_GRACE_S, "orphaned tile reclaimed")
-    print(f"ok  killed agent's tile orphaned (kept), then reclaimed after {waited:.1f}s (grace {ORPHAN_GRACE_S}s)")
 
 
 def decode_png_rgba(data: bytes) -> tuple[int, int, bytes]:
@@ -1404,7 +1345,6 @@ def main(argv=None) -> int:
     ap.add_argument("--captures", type=Path, help="owned WARP theme/fixture frames and informational main diff")
     ap.add_argument("--diagnostics", type=Path, help="owned boot-smoke original delayed frames and numeric timing evidence")
     ap.add_argument("--capture-comment", type=Path, help="comment on changed captures after successful artifact upload")
-    ap.add_argument("--poc-demo", type=Path, help="poc_demo.exe: the resident-tile orphan/reclaim step needs it")
     ap.add_argument("--quiescent-with-content", action="store_true", help="run only the held-content idle measurement")
     ap.add_argument("--quiescent-timeout", type=float, default=150, help="hang guard for the 65 s measurement")
     ap.add_argument("--mcp-port", type=int, default=9090)
@@ -1416,8 +1356,8 @@ def main(argv=None) -> int:
             ap.error("--capture-comment cannot launch or attach to a HUD")
         return post_capture_comment(args.capture_comment)
     if args.url:
-        if args.config is not None or args.poc_demo is not None or args.captures or args.diagnostics or args.quiescent_with_content:
-            ap.error("--url cannot use owned --config, --poc-demo, --captures or --quiescent-with-content")
+        if args.config is not None or args.captures or args.diagnostics or args.quiescent_with_content:
+            ap.error("--url cannot use owned --config, --captures or --quiescent-with-content")
         return run_borrowed(args.url, args.settle_s)
     if args.exe is None or args.config is None:
         ap.error("--exe and --config are required for owned smoke/captures")
@@ -1427,8 +1367,6 @@ def main(argv=None) -> int:
         return run_captures(args)
     if args.quiescent_with_content:
         return run_quiescent(args)
-    if args.poc_demo is None:
-        ap.error("--poc-demo is required (unless --quiescent-with-content)")
 
     psk = secrets.token_hex(32)
     config = seed_config(args.config, psk)
@@ -1455,7 +1393,6 @@ def main(argv=None) -> int:
         check_widget(smoke)
         check_notification_ttl(smoke)
         check_delay(smoke, args.diagnostics)
-        check_tile_orphan(smoke, args.poc_demo)
         check_pair(smoke, args.exe)
         restarted_pid = check_restart(smoke, proc)
         return 0

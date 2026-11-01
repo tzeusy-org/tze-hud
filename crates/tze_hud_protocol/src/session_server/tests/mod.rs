@@ -4,16 +4,12 @@ use super::*;
 mod allow;
 mod events;
 mod invariants;
-mod lease;
 mod lifecycle_verbs;
-mod portal;
 mod render_wake;
 mod resource_upload;
 mod resume;
 mod safe_mode;
-mod scene_mutations;
 mod session_handshake;
-mod timing;
 mod widget_publish;
 mod zones;
 
@@ -22,27 +18,6 @@ use crate::proto::session::hud_session_server::HudSessionServer;
 use std::collections::HashMap;
 use tokio_stream::StreamExt;
 use tze_hud_scene::graph::SceneGraph;
-
-/// Load an [`ElementStore`] from a TOML file on disk.
-///
-/// Test-only helper that replaces the former `ElementStore::load_or_default`
-/// method.  Missing files are treated as first boot and return an empty store.
-fn load_element_store_for_test(
-    path: &std::path::Path,
-) -> std::io::Result<tze_hud_scene::element_store::ElementStore> {
-    match std::fs::read_to_string(path) {
-        Ok(content) => toml::from_str(&content).map_err(|err| {
-            std::io::Error::new(
-                std::io::ErrorKind::InvalidData,
-                format!("invalid element_store TOML: {err}"),
-            )
-        }),
-        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-            Ok(tze_hud_scene::element_store::ElementStore::default())
-        }
-        Err(err) => Err(err),
-    }
-}
 
 /// Consume the next message from a stream.
 async fn next_server_msg(
@@ -96,37 +71,6 @@ async fn setup_test() -> (
     (client, handle)
 }
 
-/// Start a connected test server whose scene clock can deterministically cross
-/// a finite lease TTL. The caller receives the same durable runtime-to-session
-/// publisher that the windowed compositor owns in production.
-async fn setup_test_with_lease_expiry_clock(
-    clock: tze_hud_scene::TestClock,
-) -> (
-    HudSessionClient<tonic::transport::Channel>,
-    tokio::task::JoinHandle<()>,
-    Arc<tokio::sync::Mutex<crate::session::SharedState>>,
-    LeaseExpirySender,
-) {
-    let scene = SceneGraph::new_with_clock(800.0, 600.0, Arc::new(clock));
-    let service = HudSessionImpl::new(scene, "test-key");
-    let state = Arc::clone(&service.state);
-    let lease_expirations = service.lease_expirations.clone();
-
-    let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
-    let addr = listener.local_addr().unwrap();
-    let handle = tokio::spawn(async move {
-        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
-        tonic::transport::Server::builder()
-            .add_service(HudSessionServer::new(service))
-            .serve_with_incoming(incoming)
-            .await
-            .unwrap();
-    });
-
-    let client = connect_test_client_with_retry(addr.port()).await;
-    (client, handle, state, lease_expirations)
-}
-
 async fn connect_test_client_with_retry(port: u16) -> HudSessionClient<tonic::transport::Channel> {
     let endpoint = format!("http://[::1]:{port}");
     for attempt in 0..25 {
@@ -141,8 +85,8 @@ async fn connect_test_client_with_retry(port: u16) -> HudSessionClient<tonic::tr
 }
 
 /// Helper: create a bidirectional stream and perform handshake.
-/// Returns the sender and the three ordered handshake messages:
-/// SessionEstablished, SceneSnapshot, and current DegradationNotice.
+/// Returns the sender and the two ordered handshake messages:
+/// SessionEstablished and current DegradationNotice.
 async fn handshake(
     client: &mut HudSessionClient<tonic::transport::Channel>,
     agent_id: &str,
@@ -164,8 +108,6 @@ async fn handshake(
             agent_id: agent_id.to_string(),
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
             resume_token: Vec::new(),
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
             auth_credential: Some(crate::auth::psk_credential(psk.to_string())),
         })),
     })
@@ -174,9 +116,9 @@ async fn handshake(
 
     let mut response_stream = client.session(stream).await.unwrap().into_inner();
 
-    // Collect SessionEstablished, SceneSnapshot, and current degradation state.
+    // Collect SessionEstablished and current degradation state.
     let mut messages = Vec::new();
-    for _ in 0..3 {
+    for _ in 0..2 {
         if let Some(msg) = response_stream.next().await {
             messages.push(msg.unwrap());
         }
@@ -358,8 +300,6 @@ async fn handshake_with_capabilities(
             agent_id: agent_id.to_string(),
             initial_subscriptions: vec![],
             resume_token: Vec::new(),
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
             auth_credential: Some(crate::auth::psk_credential(psk.to_string())),
         })),
     })
@@ -370,7 +310,7 @@ async fn handshake_with_capabilities(
 
     // Collect the full ordered handshake baseline.
     let mut init_messages = Vec::new();
-    for _ in 0..3 {
+    for _ in 0..2 {
         if let Some(msg) = streaming.next().await {
             init_messages.push(msg.unwrap());
         }
@@ -457,17 +397,31 @@ async fn verb_agent(
     (tx, stream, state, server, client)
 }
 
-fn claim(
-    anchor: TileAnchor,
-    size: TileSize,
-    root: Option<crate::proto::NodeProto>,
-) -> ClientPayload {
-    ClientPayload::ClaimTile(ClaimTile {
-        placement: Some(TilePlacement {
-            anchor: anchor as i32,
-            size: size as i32,
-        }),
-        ttl_ms: 60_000,
-        root,
-    })
+/// Start a connected test server whose scene clock can deterministically cross
+/// a finite lease TTL. The caller receives the same durable runtime-to-session
+/// publisher that the windowed compositor owns in production.
+async fn setup_test_with_clock(
+    clock: tze_hud_scene::TestClock,
+) -> (
+    HudSessionClient<tonic::transport::Channel>,
+    tokio::task::JoinHandle<()>,
+    Arc<tokio::sync::Mutex<crate::session::SharedState>>,
+) {
+    let scene = SceneGraph::new_with_clock(800.0, 600.0, Arc::new(clock));
+    let service = HudSessionImpl::new(scene, "test-key");
+    let state = Arc::clone(&service.state);
+
+    let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let handle = tokio::spawn(async move {
+        let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
+        tonic::transport::Server::builder()
+            .add_service(HudSessionServer::new(service))
+            .serve_with_incoming(incoming)
+            .await
+            .unwrap();
+    });
+
+    let client = connect_test_client_with_retry(addr.port()).await;
+    (client, handle, state)
 }

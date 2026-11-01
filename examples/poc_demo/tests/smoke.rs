@@ -3,7 +3,6 @@
 //! would serve them.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use poc_demo::{Result, Target};
@@ -42,13 +41,9 @@ async fn boot() -> HeadlessEventLoopHarness {
 fn target(hud: &HeadlessEventLoopHarness, human_wait: Duration) -> Target {
     Target {
         mcp: hud.mcp_addr().to_string(),
-        grpc: hud.grpc_addr().to_string(),
         mcp_psk: PSK.to_string(),
-        tile_agent: "demo".to_string(),
-        tile_psk: PSK.to_string(),
         pace: Duration::ZERO,
         human_wait,
-        held: None,
     }
 }
 
@@ -109,72 +104,4 @@ async fn zones_and_widgets_run_against_the_shipped_config() {
 
     let t = target(&hud, Duration::ZERO);
     drive(&mut hud, poc_demo::widgets(&t), |_| {}).await;
-}
-
-/// The tile stage ends on `Reclaimed` when the viewer dismisses the tile after
-/// `Hold`, on `NOT_HELD` (or `Reclaimed`) when the dismiss lands any earlier,
-/// and on its own `Clear` when nobody dismisses.
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn tile_stage_ends_on_viewer_dismiss_at_any_point_and_clears_otherwise() {
-    let mut hud = boot().await;
-
-    let held = Arc::new(AtomicBool::new(false));
-    let t = Target {
-        held: Some(held.clone()),
-        ..target(&hud, Duration::from_secs(30))
-    };
-    drive(&mut hud, poc_demo::tile(&t), |hud| {
-        if held.load(Ordering::SeqCst) {
-            hud.viewer_dismiss_all_tiles();
-        }
-    })
-    .await;
-    assert_eq!(hud.tile_count(), 0, "dismiss after Hold reclaimed the tile");
-
-    // Dismissed as soon as the update is on screen: before Hold is acked.
-    let t = target(&hud, Duration::from_secs(30));
-    drive(&mut hud, poc_demo::tile(&t), |hud| {
-        if hud.tile_texts() == ["tests passed"] {
-            hud.viewer_dismiss_all_tiles();
-        }
-    })
-    .await;
-    assert_eq!(
-        hud.tile_count(),
-        0,
-        "an early dismiss is not a stage failure"
-    );
-
-    let t = target(&hud, Duration::ZERO);
-    drive(&mut hud, poc_demo::tile(&t), |_| {}).await;
-    assert_eq!(hud.tile_count(), 0, "the stage cleared its own tile");
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn snapshot_counts_a_held_tile_and_not_a_cleared_one() {
-    let mut hud = boot().await;
-    let held = Arc::new(AtomicBool::new(false));
-    let t = Target {
-        held: Some(held.clone()),
-        ..target(&hud, Duration::from_secs(3))
-    };
-    assert_eq!(poc_demo::tile_count(&t).await.unwrap(), 0);
-    drive(
-        &mut hud,
-        async {
-            let observed = async {
-                while !held.load(Ordering::SeqCst) {
-                    tokio::time::sleep(Duration::from_millis(5)).await;
-                }
-                poc_demo::tile_count(&t).await
-            };
-            let (stage, count) = tokio::join!(poc_demo::tile(&t), observed);
-            stage?;
-            assert_eq!(count?, 1, "the held tile is in a fresh session's snapshot");
-            Ok(())
-        },
-        |_| {},
-    )
-    .await;
-    assert_eq!(poc_demo::tile_count(&t).await.unwrap(), 0);
 }

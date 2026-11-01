@@ -7,7 +7,7 @@ Guidance for Claude Code working in this repository.
 **tze_hud** — a well-designed, extremely performant MCP/gRPC layer that lets
 models generate and manage the real-estate lifecycle of a HUD over the user's
 screen (discover, claim, fill, interact, hold, release, reclaim). Surfaces: a
-session portal, ambient zones, agent-owned tiles, and SVG widgets, on a
+session portal, ambient zones, and SVG widgets, on a
 Windows overlay. Read `docs/vision.md` first, then `docs/api.md`, `docs/invariants.md`, and `docs/scope.md`; use `docs/architecture.md` to locate code owners.
 
 ## Status
@@ -24,7 +24,7 @@ evidence from the outstanding work and Windows owner checks.
 
 - Rust core; Tokio; tonic for gRPC; wgpu + winit for rendering and input; resvg for SVG.
 - Two protocol planes: MCP (JSON-RPC over HTTP) for zone/widget publishing and
-  portal tools; gRPC for resident tiles and streams. No media plane.
+  portal tools; gRPC for resident zone/widget streams. No media plane.
 - Windows is the only deployment target. Linux builds are for headless CI.
   Developing from Windows: `docs/development/windows.md`.
 - TypeScript/browser only for tooling, never in the runtime.

@@ -625,7 +625,7 @@ mod panel_task_tests {
         assert_eq!(
             f.panel.current_closed_notice(),
             Some(tze_hud_compositor::PanelNotice {
-                text: "Zones, widgets and tiles hidden".into(),
+                text: "Zones and widgets hidden".into(),
                 key: "Ctrl+Shift+F11".into(),
             })
         );
