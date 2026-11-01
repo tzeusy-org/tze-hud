@@ -92,6 +92,10 @@ MacBook) under new `target_id` keys.
     artifacts plus `soak_summary.json` under `benchmarks/soak/<timestamp>/`.
   - Needs the benchmark Windows config (`app/tze_hud_app/config/benchmark.toml`)
     and a host-local launch; it has not been ported to the pairing flow yet.
+  - Load optional frame/input measurements from `--live-metrics-artifact <local.json>`.
+    A real soak requires that artifact unless `--allow-missing-live-metrics` is set.
+    Host CPU, memory and GPU sampling is unavailable and reported explicitly;
+    resource drift remains null. The runner does not collect remote artifacts.
 - `scripts/compare_results.py`
   - Compares candidate vs baseline runs from `reference/results.csv`.
   - Reports metric deltas and threshold pass/fail for regression gates.
