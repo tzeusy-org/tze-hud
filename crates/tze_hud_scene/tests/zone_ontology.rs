@@ -1665,72 +1665,43 @@ mod proptests {
     }
 
     proptest! {
-        /// LatestWins invariant: after any sequence of publishes,
-        /// active publication count is always <= 1.
+        /// LatestWins and Replace invariant: after any sequence of publishes,
+        /// active publication count is always <= 1 (same sequence, both policies).
         #[test]
-        fn prop_latest_wins_at_most_one_publication(
+        fn prop_latest_wins_and_replace_at_most_one_publication(
             publishes in prop::collection::vec(
                 (arb_stream_text(), arb_namespace()),
                 0..20usize
             )
         ) {
-            let mut scene = SceneGraph::new(1920.0, 1080.0);
-            scene.register_zone(ZoneDefinition {
-                id: SceneId::new(),
-                name: "lw_zone".to_string(),
-                description: "LatestWins zone".to_string(),
-                geometry_policy: GeometryPolicy::Relative {
-                    x_pct: 0.0, y_pct: 0.0, width_pct: 1.0, height_pct: 0.1,
-                },
-                accepted_media_types: vec![ZoneMediaType::StreamText],
-                rendering_policy: RenderingPolicy::default(),
-                contention_policy: ContentionPolicy::LatestWins,
-                max_publishers: 16,
-                auto_clear_ms: None,
-                layer_attachment: LayerAttachment::Content,
-                ephemeral: false,
-            });
+            for policy in [ContentionPolicy::LatestWins, ContentionPolicy::Replace] {
+                let mut scene = SceneGraph::new(1920.0, 1080.0);
+                scene.register_zone(ZoneDefinition {
+                    id: SceneId::new(),
+                    name: "one_zone".to_string(),
+                    description: "single-publication zone".to_string(),
+                    geometry_policy: GeometryPolicy::Relative {
+                        x_pct: 0.0, y_pct: 0.0, width_pct: 1.0, height_pct: 0.1,
+                    },
+                    accepted_media_types: vec![ZoneMediaType::StreamText],
+                    rendering_policy: RenderingPolicy::default(),
+                    contention_policy: policy,
+                    max_publishers: 16,
+                    auto_clear_ms: None,
+                    layer_attachment: LayerAttachment::Content,
+                    ephemeral: false,
+                });
 
-            for (content, ns) in publishes {
-                let _ = scene.publish_to_zone("lw_zone", content, &ns, None, None, None);
+                for (content, ns) in publishes.iter().cloned() {
+                    let _ = scene.publish_to_zone("one_zone", content, &ns, None, None, None);
+                }
+
+                let count = scene.zone_registry.active_for_zone("one_zone").len();
+                prop_assert!(
+                    count <= 1,
+                    "{:?} must have at most 1 active publication, got {}", policy, count
+                );
             }
-
-            let count = scene.zone_registry.active_for_zone("lw_zone").len();
-            prop_assert!(count <= 1, "LatestWins must have at most 1 active publication, got {}", count);
-        }
-
-        /// Replace invariant: after any sequence of publishes,
-        /// active publication count is always <= 1.
-        #[test]
-        fn prop_replace_at_most_one_publication(
-            publishes in prop::collection::vec(
-                (arb_stream_text(), arb_namespace()),
-                0..20usize
-            )
-        ) {
-            let mut scene = SceneGraph::new(1920.0, 1080.0);
-            scene.register_zone(ZoneDefinition {
-                id: SceneId::new(),
-                name: "rp_zone".to_string(),
-                description: "Replace zone".to_string(),
-                geometry_policy: GeometryPolicy::Relative {
-                    x_pct: 0.0, y_pct: 0.0, width_pct: 1.0, height_pct: 0.1,
-                },
-                accepted_media_types: vec![ZoneMediaType::StreamText],
-                rendering_policy: RenderingPolicy::default(),
-                contention_policy: ContentionPolicy::Replace,
-                max_publishers: 16,
-                auto_clear_ms: None,
-                layer_attachment: LayerAttachment::Content,
-                ephemeral: false,
-            });
-
-            for (content, ns) in publishes {
-                let _ = scene.publish_to_zone("rp_zone", content, &ns, None, None, None);
-            }
-
-            let count = scene.zone_registry.active_for_zone("rp_zone").len();
-            prop_assert!(count <= 1, "Replace must have at most 1 active publication, got {}", count);
         }
 
         /// Stack invariant: after any sequence of publishes,
