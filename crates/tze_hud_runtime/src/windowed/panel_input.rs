@@ -24,9 +24,9 @@ pub(super) struct PanelInputState {
     previous_foreground: Option<isize>,
     /// Target under the left press; a release on the same target clicks.
     pressed: Option<PanelHitTarget>,
-    /// A right, middle or other button went down over the panel: its
-    /// release is the panel's too, wherever it lands.
-    other_pressed: bool,
+    /// Right, middle or other buttons that went down over the panel: each
+    /// one's release is the panel's too, wherever it lands.
+    other_pressed: Vec<winit::event::MouseButton>,
     hovered: Option<PanelHitTarget>,
 }
 
@@ -224,13 +224,23 @@ impl WinitApp {
     /// scene must not see it either (no context menu for a widget under the
     /// panel), including the release of a press that began over it. Returns
     /// true when the panel owns the edge.
-    pub(super) fn panel_other_button(&mut self, pressed: bool, primary: bool) -> bool {
+    pub(super) fn panel_other_button(
+        &mut self,
+        button: winit::event::MouseButton,
+        pressed: bool,
+        primary: bool,
+    ) -> bool {
         let over = self.panel_hit(primary).is_some();
+        let held = &mut self.state.panel_input.other_pressed;
+        let was_held = held.contains(&button);
+        held.retain(|b| *b != button);
         if pressed {
-            self.state.panel_input.other_pressed = over;
+            if over {
+                held.push(button);
+            }
             return over;
         }
-        std::mem::take(&mut self.state.panel_input.other_pressed) || over
+        was_held || over
     }
 
     /// Wheel over the panel scrolls it. Returns true when the panel owns it.
@@ -748,6 +758,63 @@ mod panel_task_tests {
         assert!(f.wakes.load(Ordering::SeqCst) > wakes);
     }
 
+    /// Every panel action logs one line with the row's old and new value,
+    /// whichever section owns it (G6).
+    #[tokio::test]
+    async fn each_action_logs_its_old_and_new_value() {
+        #[derive(Clone, Default)]
+        struct Sink(Arc<std::sync::Mutex<Vec<u8>>>);
+        impl std::io::Write for Sink {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let sink = Sink::default();
+        let writer = sink.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+        // Current-thread runtime: the panel task logs on this thread.
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let f = fixture();
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Panel), |f| f.panel.is_open())
+            .await;
+        let scene = Arc::clone(&f.state.shared_state.lock().await.scene);
+        let hidden = || scene.try_lock().map(|s| s.owner_hidden()).ok();
+        f.send_and_wait(
+            PanelEvent::Click(PanelHitTarget::Row(
+                "visibility.portals".into(),
+                PanelPart::Body,
+            )),
+            // The log line follows the change: wait for both.
+            |_| {
+                hidden().is_some_and(|h| h.portals)
+                    && String::from_utf8_lossy(&sink.0.lock().unwrap())
+                        .contains("control panel: applied")
+            },
+        )
+        .await;
+        let log = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
+        let lines: Vec<_> = log
+            .lines()
+            .filter(|l| l.contains("control panel: applied"))
+            .collect();
+        assert_eq!(lines.len(), 1, "{log}");
+        assert!(
+            lines[0].contains(r#"row="visibility.portals""#)
+                && lines[0].contains(r#"old="on""#)
+                && lines[0].contains(r#"new="off""#),
+            "{}",
+            lines[0]
+        );
+    }
+
     /// The winit-side routing: while the panel is open it owns every key
     /// (typed text searches, Esc closes) and the pointer inside it; a click
     /// is press and release on the same target; outside the panel the
@@ -755,6 +822,7 @@ mod panel_task_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn winit_routing_keys_and_pointer_reach_the_open_panel_only() {
         use crate::windowed::WinitApp;
+        use winit::event::MouseButton::{Middle, Right};
         use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey, SmolStr};
 
         let f = fixture();
@@ -803,15 +871,27 @@ mod panel_task_tests {
         (app.state.cursor_x, app.state.cursor_y) = (tile.x + tile.w / 2.0, tile.y + tile.h / 2.0);
         assert!(app.panel_captures_cursor());
         assert!(
-            app.panel_other_button(true, true),
+            app.panel_other_button(Right, true, true),
             "a right click over the panel never reaches the scene"
         );
-        assert!(app.panel_other_button(false, false), "nor does its release");
         assert!(
-            !app.panel_other_button(true, false),
+            app.panel_other_button(Right, false, false),
+            "nor does its release"
+        );
+        assert!(
+            !app.panel_other_button(Right, true, false),
             "another display's pointer is the scene's"
         );
-        app.panel_other_button(false, false);
+        app.panel_other_button(Right, false, false);
+        // Each button keeps its own press: a middle press over the panel
+        // owns its release even after a right press elsewhere ended.
+        assert!(app.panel_other_button(Middle, true, true));
+        assert!(!app.panel_other_button(Right, true, false));
+        assert!(!app.panel_other_button(Right, false, false));
+        assert!(
+            app.panel_other_button(Middle, false, false),
+            "the middle release stays the panel's"
+        );
         assert!(app.panel_left_button(true, true));
         assert!(app.panel_left_button(false, true));
         wait("3", || app.state.safe_mode_atomic.load(Ordering::Acquire)).await;
@@ -838,8 +918,8 @@ mod panel_task_tests {
         assert!(!app.panel_captures_cursor());
         assert!(!app.cursor_entry_signature().capture);
         assert!(!app.panel_left_button(true, true));
-        assert!(!app.panel_other_button(true, true));
-        assert!(!app.panel_other_button(false, true));
+        assert!(!app.panel_other_button(Right, true, true));
+        assert!(!app.panel_other_button(Right, false, true));
 
         let esc = (
             PhysicalKey::Code(KeyCode::Escape),

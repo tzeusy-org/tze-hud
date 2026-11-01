@@ -412,10 +412,13 @@ working. The new chord is saved to `[runtime]`.
 
 The control panel is a full-width pane over the primary display: a search
 field, quick-action tiles, and section cards of settings that scroll
-vertically. It takes keyboard focus when it opens (if Windows refuses, the
-header says to click it) and returns focus on close. Typing searches every
-row; arrows, Tab, Enter and Space move and act; Esc clears the search, then
-closes. Clicks outside the panel pass through to the desktop. Closing the
+vertically. Its header line counts the agents connected or showing
+something and what they hold ("3 agents · 2 portals · 5 zones · 1 widget ·
+0 tiles") and says "restart pending" while a saved setting waits for a
+restart (Restart now is in System, Alt+8). It takes keyboard focus when it
+opens (if Windows refuses, the header says to click it) and returns focus
+on close. Typing searches every row; arrows, Tab, Enter and Space move and
+act; Esc clears the search, then closes. Clicks outside the panel pass through to the desktop. Closing the
 panel always resumes agents. While paused, the pause tile and row turn
 caution-colored.
 
@@ -473,11 +476,13 @@ The Network card shows the MCP and gRPC ports and Remote agents. A port is
 typed in place (the first key replaces it, Enter saves, Esc cancels) and
 saved to `[runtime]`; it applies at the next start, so the row shows
 "Restart to apply" and the running port, and Restart now counts it.
-Changing the MCP port means paired agents must use the new one. Remote
-agents shows Windows Firewall's verdict for tailnet agents; switching it on
-(asks first) or off runs the same elevated helper as `--allow-remote` /
-`--disallow-remote` (Windows asks for administrator approval) and reads the
-firewall again.
+Changing the MCP port means paired agents must use the new one, so a
+changed value asks first (the first Enter shows the warning, the second
+saves). Remote agents shows Windows Firewall's verdict for tailnet agents;
+switching it on (the panel asks first, since it widens who can connect) or
+off (at once, since it only narrows) runs the same elevated helper as
+`--allow-remote` / `--disallow-remote`, for which Windows asks for
+administrator approval either way, and reads the firewall again.
 
 The Diagnostics card sets the log file's level, zone outlines and the frame
 rate cap (choices from 30 to 240; `[runtime] fps` takes 1-240). Each applies at once and is saved to `[runtime]`; when the

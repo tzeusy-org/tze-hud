@@ -17,7 +17,7 @@ impl<'a> Haystack<'a> {
         let value = match &row.control {
             Control::ReadOnly { text, .. }
             | Control::Stepper { text }
-            | Control::Field { text } => Some(text.as_str()),
+            | Control::Field { text, .. } => Some(text.as_str()),
             Control::Choice { options, selected } => options.get(*selected).map(String::as_str),
             Control::Toggle(_)
             | Control::Grant { .. }
@@ -124,6 +124,7 @@ mod tests {
             "Panel chord",
             Control::Field {
                 text: "Ctrl+Shift+F10".into(),
+                confirm: None,
             },
         );
         assert!(score("f10", &Haystack::of(&row, "Input")).is_some());

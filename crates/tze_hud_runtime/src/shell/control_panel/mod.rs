@@ -381,6 +381,7 @@ pub(crate) fn spawn_control_panel(
             nav: Nav::default(),
             published: None,
             busy: std::collections::HashSet::new(),
+            changes: std::collections::HashMap::new(),
             closed_failure: None,
         }
     };
@@ -446,6 +447,8 @@ struct PanelTask {
     /// Rows whose edit is still running in the background. Kept across
     /// close and reopen so a second edit cannot start beside the first.
     busy: std::collections::HashSet<String>,
+    /// Each running edit's (old, new) value, for its outcome's log line.
+    changes: std::collections::HashMap<String, (String, String)>,
     /// A background edit that failed while the panel was closed, shown on
     /// its row when the panel next opens.
     closed_failure: Option<(String, String)>,
@@ -591,7 +594,13 @@ impl PanelTask {
             );
             return;
         }
-        tracing::info!(row, ?edit, "control panel: applying");
+        let change = self
+            .nav
+            .control(row)
+            .map(|control| (control.value_text(), control.edited_text(&edit)))
+            .unwrap_or_default();
+        tracing::debug!(row, ?edit, "control panel: applying");
+        self.changes.insert(row.to_owned(), change);
         // Isolated: a section that panics fails its row, not the panel.
         let (sections, owned_row) = (Arc::clone(&self.sections), row.to_owned());
         let mut run = tokio::spawn(async move { sections[index].apply(&owned_row, edit).await });
@@ -616,12 +625,14 @@ impl PanelTask {
         }
     }
 
-    /// Log an edit's outcome and show a failure on its row.
+    /// Log an edit's outcome (one line, with the row's value before and what
+    /// the edit set) and show a failure on its row.
     fn applied(&mut self, row: &str, result: Result<(), String>) {
+        let (old, new) = self.changes.remove(row).unwrap_or_default();
         match result {
-            Ok(()) => tracing::info!(row, "control panel: applied"),
+            Ok(()) => tracing::info!(row, old, new, "control panel: applied"),
             Err(message) => {
-                tracing::warn!(row, %message, "control panel: edit failed");
+                tracing::warn!(row, old, new, %message, "control panel: edit failed");
                 let failure = Some((row.to_owned(), message));
                 match self.open.as_mut() {
                     Some(open) => open.error = failure,
@@ -648,30 +659,34 @@ impl PanelTask {
             None => None,
             Some(open) => {
                 let mut rows = Vec::with_capacity(self.sections.len());
+                let mut summaries = Vec::new();
                 for (index, section) in self.sections.iter().enumerate() {
                     // Isolated: a section that panics shows one error row
                     // and the rest of the panel (and any pause) stands.
                     let sections = Arc::clone(&self.sections);
-                    let section_rows = tokio::spawn(async move { sections[index].rows().await })
-                        .await
-                        .unwrap_or_else(|error| {
-                            tracing::error!(
-                                section = section.id(),
-                                %error,
-                                "control panel: section rows failed"
-                            );
-                            vec![
-                                Row::new(
-                                    format!("{}.unavailable", section.id()),
-                                    "This section failed to load",
-                                    row::Control::ReadOnly {
-                                        text: "See the HUD log".to_owned(),
-                                        mono: false,
-                                    },
-                                )
-                                .caution(true),
-                            ]
-                        });
+                    let (section_rows, summary) = tokio::spawn(async move {
+                        let section = &sections[index];
+                        (section.rows().await, section.summary())
+                    })
+                    .await
+                    .unwrap_or_else(|error| {
+                        tracing::error!(
+                            section = section.id(),
+                            %error,
+                            "control panel: section rows failed"
+                        );
+                        let failed = Row::new(
+                            format!("{}.unavailable", section.id()),
+                            "This section failed to load",
+                            row::Control::ReadOnly {
+                                text: "See the HUD log".to_owned(),
+                                mono: false,
+                            },
+                        )
+                        .caution(true);
+                        (vec![failed], None)
+                    });
+                    summaries.extend(summary);
                     let mut section_rows = section_rows;
                     for row in section_rows
                         .iter_mut()
@@ -687,6 +702,7 @@ impl PanelTask {
                 }
                 let ctx = ViewContext {
                     paused: self.deps.pause.is_paused(),
+                    state_line: summaries.join(" · "),
                     pause_chord: self.deps.chords.get().pause.to_string(),
                     connect: open
                         .connect

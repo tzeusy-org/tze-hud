@@ -666,6 +666,11 @@ impl HeadlessEventLoopHarness {
             .clone()
     }
 
+    /// The open control panel's header state line.
+    pub fn control_panel_state_line(&self) -> Option<String> {
+        self.control_panel().current_model().map(|m| m.state_line)
+    }
+
     /// Where keyboard focus is in the open control panel.
     pub fn control_panel_focus(&self) -> Option<tze_hud_compositor::PanelFocus> {
         self.control_panel().current_model().map(|m| m.focus)

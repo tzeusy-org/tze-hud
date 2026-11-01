@@ -175,7 +175,10 @@ impl Section for AppearanceSection {
                     Row::new(
                         format!("{}{key}", Self::FONT_PREFIX),
                         label,
-                        Control::Field { text: family },
+                        Control::Field {
+                            text: family,
+                            confirm: None,
+                        },
                     )
                     .detail(detail)
                     .keywords(&["font", "typeface", "family", "text"]),
@@ -318,6 +321,7 @@ impl Section for TokensSection {
                         key,
                         Control::Field {
                             text: resolved.get(key).cloned().unwrap_or_default(),
+                            confirm: None,
                         },
                     )
                     .detail(detail)
@@ -333,6 +337,7 @@ impl Section for TokensSection {
                         key.clone(),
                         Control::Field {
                             text: table.get(key).cloned().unwrap_or_default(),
+                            confirm: None,
                         },
                     )
                     .detail("Override from the config file · clear it to remove")
@@ -569,7 +574,8 @@ mod tests {
         assert_eq!(
             primary.control,
             Control::Field {
-                text: "#ff0000".into()
+                text: "#ff0000".into(),
+                confirm: None,
             }
         );
         assert!(primary.detail.as_deref().unwrap().starts_with("Override"));

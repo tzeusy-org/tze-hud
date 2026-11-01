@@ -72,6 +72,28 @@ fn count(n: usize, one: &str, many: &str) -> Option<String> {
     }
 }
 
+/// The header's state line: agents connected or showing something, and
+/// what all of them hold ("3 agents · 2 portals · 5 zones · 1 widget ·
+/// 0 tiles"); every count shows, zeros included, so the line does not
+/// change shape.
+fn state_line(roster: &[AgentEntry]) -> String {
+    let plural =
+        |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
+    let active = roster
+        .iter()
+        .filter(|e| e.sessions > 0 || !e.holds_nothing())
+        .count();
+    let sum = |f: fn(&AgentEntry) -> usize| roster.iter().map(f).sum::<usize>();
+    [
+        plural(active, "agent", "agents"),
+        plural(sum(|e| e.portals), "portal", "portals"),
+        plural(sum(|e| e.holdings.zones), "zone", "zones"),
+        plural(sum(|e| e.holdings.widgets), "widget", "widgets"),
+        plural(sum(|e| e.holdings.tiles), "tile", "tiles"),
+    ]
+    .join(" · ")
+}
+
 /// "a portal, 2 zones and 1 widget", or `None` for nothing.
 fn holdings_phrase(entry: &AgentEntry) -> Option<String> {
     let h = entry.holdings;
@@ -287,6 +309,12 @@ impl Section for AgentsSection {
         "agents"
     }
 
+    fn summary(&self) -> Option<String> {
+        self.agents.as_ref()?;
+        let roster = self.roster.lock().unwrap_or_else(|e| e.into_inner());
+        Some(state_line(&roster))
+    }
+
     fn title(&self) -> &'static str {
         "Agents"
     }
@@ -420,5 +448,37 @@ mod tests {
         entry.holdings.zones = 0;
         entry.paired = false;
         assert_eq!(status_line(&entry), "Idle · holds nothing · not paired");
+    }
+
+    /// The header counts agents connected or showing something, and sums
+    /// what they hold; an idle paired agent is not counted.
+    #[test]
+    fn state_line_counts_active_agents_and_what_they_hold() {
+        let entry = |id: &str, sessions, portals, zones, widgets, tiles| AgentEntry {
+            id: id.into(),
+            paired: true,
+            allow: vec![],
+            sessions,
+            portals,
+            holdings: tze_hud_scene::graph::AgentHoldings {
+                zones,
+                widgets,
+                tiles,
+            },
+        };
+        assert_eq!(
+            state_line(&[]),
+            "0 agents · 0 portals · 0 zones · 0 widgets · 0 tiles"
+        );
+        let roster = [
+            entry("a", 1, 1, 2, 1, 0),
+            entry("b", 0, 1, 3, 0, 0),
+            entry("c", 1, 0, 0, 0, 0),
+            entry("idle", 0, 0, 0, 0, 0),
+        ];
+        assert_eq!(
+            state_line(&roster),
+            "3 agents · 2 portals · 5 zones · 1 widget · 0 tiles"
+        );
     }
 }

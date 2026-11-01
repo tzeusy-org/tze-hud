@@ -344,6 +344,7 @@ impl ConnectControl {
                 "Agent name",
                 Control::Field {
                     text: page.name.clone(),
+                    confirm: None,
                 },
             )
             .detail("Lower case, digits and dashes. An existing name gets a new key."),
