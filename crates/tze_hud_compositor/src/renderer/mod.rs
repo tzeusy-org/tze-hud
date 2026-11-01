@@ -700,8 +700,11 @@ pub(crate) struct EncodeSources {
     pub(crate) rr_content: Vec<RoundedRectDrawCmd>,
     pub(crate) rr_post: Vec<RoundedRectDrawCmd>,
     pub(crate) text_items: Vec<TextItem>,
-    /// System card text (primary display only).
+    /// System card text (primary display only), led by the closed panel
+    /// notice's text.
     pub(crate) card_items: Vec<TextItem>,
+    /// How many leading `card_items` are the closed panel notice's.
+    pub(crate) notice_items: usize,
 }
 
 /// The borrowed geometry plan consumed by the actual GPU encoder.
@@ -2471,10 +2474,10 @@ impl Compositor {
         } else {
             vec![]
         };
-        let card_items = if has_text_rasterizer {
+        let (card_items, notice_items) = if has_text_rasterizer {
             self.final_chrome_text_items(sw, sh)
         } else {
-            vec![]
+            (vec![], 0)
         };
         EncodeSources {
             rr_background,
@@ -2482,6 +2485,7 @@ impl Compositor {
             rr_post,
             text_items,
             card_items,
+            notice_items,
         }
     }
 

@@ -24,6 +24,9 @@ pub(super) struct PanelInputState {
     previous_foreground: Option<isize>,
     /// Target under the left press; a release on the same target clicks.
     pressed: Option<PanelHitTarget>,
+    /// A right, middle or other button went down over the panel: its
+    /// release is the panel's too, wherever it lands.
+    other_pressed: bool,
     hovered: Option<PanelHitTarget>,
 }
 
@@ -215,6 +218,19 @@ impl WinitApp {
             panel.send(PanelEvent::Click(pressed));
         }
         true
+    }
+
+    /// A right, middle or other button over the panel does nothing, and the
+    /// scene must not see it either (no context menu for a widget under the
+    /// panel), including the release of a press that began over it. Returns
+    /// true when the panel owns the edge.
+    pub(super) fn panel_other_button(&mut self, pressed: bool, primary: bool) -> bool {
+        let over = self.panel_hit(primary).is_some();
+        if pressed {
+            self.state.panel_input.other_pressed = over;
+            return over;
+        }
+        std::mem::take(&mut self.state.panel_input.other_pressed) || over
     }
 
     /// Wheel over the panel scrolls it. Returns true when the panel owns it.
@@ -671,6 +687,67 @@ mod panel_task_tests {
         );
     }
 
+    /// When Windows refuses the panel keyboard focus the header says so, and
+    /// the chords still close it and resume (CP-1).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn refused_focus_shows_a_notice_and_chords_still_work() {
+        let f = fixture();
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Pause), |f| {
+            f.panel.is_open() && f.paused()
+        })
+        .await;
+        assert_eq!(f.model().unwrap().notice, None);
+        f.send_and_wait(PanelEvent::WindowFocus(false), |f| {
+            f.model().is_some_and(|m| m.notice.is_some())
+        })
+        .await;
+        assert_eq!(
+            f.model().unwrap().notice.as_deref(),
+            Some("Click the panel to type · chords still work")
+        );
+        f.send_and_wait(PanelEvent::WindowFocus(true), |f| {
+            f.model().is_some_and(|m| m.notice.is_none())
+        })
+        .await;
+        f.send_and_wait(PanelEvent::WindowFocus(false), |f| {
+            f.model().is_some_and(|m| m.notice.is_some())
+        })
+        .await;
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Pause), |f| {
+            !f.panel.is_open() && !f.paused()
+        })
+        .await;
+    }
+
+    /// An open, idle panel re-reads its sections once a second but wakes the
+    /// compositor only when something changed: several refresh ticks with
+    /// nothing new draw nothing (CP-11). This fixture has the always-present
+    /// sections only (no agents, runtime or appearance services), so it
+    /// proves the refresh loop and the publish dedupe, not that every
+    /// section's rows are stable between ticks.
+    #[tokio::test(start_paused = true)]
+    async fn an_idle_open_panel_does_not_wake_on_refresh_ticks() {
+        let f = fixture();
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Panel), |f| f.panel.is_open())
+            .await;
+        // Let the first ticks and the opening rebuild settle.
+        tokio::time::sleep(Duration::from_millis(2_500)).await;
+        let wakes = f.wakes.load(Ordering::SeqCst);
+        // Paused time: this sleep runs five refresh intervals.
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert_eq!(
+            f.wakes.load(Ordering::SeqCst),
+            wakes,
+            "refresh ticks with nothing new wake nothing"
+        );
+        // The panel is still live: a real change still wakes it.
+        f.send_and_wait(PanelEvent::Text("p".into()), |f| {
+            f.model().is_some_and(|m| m.query == "p")
+        })
+        .await;
+        assert!(f.wakes.load(Ordering::SeqCst) > wakes);
+    }
+
     /// The winit-side routing: while the panel is open it owns every key
     /// (typed text searches, Esc closes) and the pointer inside it; a click
     /// is press and release on the same target; outside the panel the
@@ -725,6 +802,16 @@ mod panel_task_tests {
             .rect;
         (app.state.cursor_x, app.state.cursor_y) = (tile.x + tile.w / 2.0, tile.y + tile.h / 2.0);
         assert!(app.panel_captures_cursor());
+        assert!(
+            app.panel_other_button(true, true),
+            "a right click over the panel never reaches the scene"
+        );
+        assert!(app.panel_other_button(false, false), "nor does its release");
+        assert!(
+            !app.panel_other_button(true, false),
+            "another display's pointer is the scene's"
+        );
+        app.panel_other_button(false, false);
         assert!(app.panel_left_button(true, true));
         assert!(app.panel_left_button(false, true));
         wait("3", || app.state.safe_mode_atomic.load(Ordering::Acquire)).await;
@@ -751,6 +838,8 @@ mod panel_task_tests {
         assert!(!app.panel_captures_cursor());
         assert!(!app.cursor_entry_signature().capture);
         assert!(!app.panel_left_button(true, true));
+        assert!(!app.panel_other_button(true, true));
+        assert!(!app.panel_other_button(false, true));
 
         let esc = (
             PhysicalKey::Code(KeyCode::Escape),

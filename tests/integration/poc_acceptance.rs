@@ -1941,3 +1941,80 @@ async fn poc_override_notifies_the_agent() {
     }
     assert_eq!(poc.hud.tile_count(), 0);
 }
+
+/// §3: agents never learn the panel is open or what the owner hid. Every
+/// agent-visible answer (discovery, zone, widget and portal publishes, a
+/// resident tile claim's reply, and no unsolicited stream message before
+/// it) reads the same with the panel closed, open, with each surface class
+/// hidden, and with Hide all.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn poc_agents_see_the_same_with_the_panel_open_or_content_hidden() {
+    use tze_hud_compositor::PanelControl;
+
+    let mut poc = Poc::boot_with_agents_file().await;
+    let publishes = [
+        json!({"surface": PORTAL, "content": "Working."}),
+        json!({"surface": SUBTITLE, "content": "hello"}),
+        json!({"surface": "widget:main-gauge", "params": {"level": 0.5}}),
+    ];
+    let mut agent = poc.resident().await;
+    let answers = async |poc: &mut Poc, agent: &mut Resident| {
+        let mut bodies = vec![poc.call("hud_surfaces", json!({})).await.body];
+        for publish in &publishes {
+            bodies.push(poc.call("hud_publish", publish.clone()).await.body);
+        }
+        let mut claimed = agent
+            .request(claim_payload(
+                wire::TileAnchor::TopRight,
+                wire::TileSize::Small,
+                "working",
+            ))
+            .await;
+        // Fresh each claim: the echoed sequence, the new ids and lease.
+        // Everything else (granted, code, hint, TTL) must not move.
+        assert_eq!(claimed.ids.len(), 2, "{claimed:?}");
+        claimed.seq = 0;
+        claimed.ids.clear();
+        claimed.lease_id.clear();
+        bodies.push(json!(format!("{claimed:?}")));
+        bodies
+    };
+    // The first publishes attach and create; compare from the second round.
+    answers(&mut poc, &mut agent).await;
+    let baseline = answers(&mut poc, &mut agent).await;
+
+    poc.open_panel().await;
+    assert_eq!(
+        answers(&mut poc, &mut agent).await,
+        baseline,
+        "panel open, nothing hidden"
+    );
+    let toggle = |row: &'static str, on: bool| {
+        move |hud: &HeadlessEventLoopHarness| {
+            hud.control_panel_row(row)
+                .is_some_and(|item| item.control == PanelControl::Toggle(on))
+        }
+    };
+    for row in [
+        "visibility.portals",
+        "visibility.zones",
+        "visibility.widgets",
+        "visibility.tiles",
+    ] {
+        // A class row is on while its class shows.
+        poc.click(row).await;
+        poc.wait_for("the class hides", toggle(row, false)).await;
+        assert_eq!(
+            answers(&mut poc, &mut agent).await,
+            baseline,
+            "{row} hidden"
+        );
+        poc.click(row).await;
+        poc.wait_for("the class shows again", toggle(row, true))
+            .await;
+    }
+    poc.click("visibility.hide_all").await;
+    poc.wait_for("everything hides", toggle("visibility.hide_all", true))
+        .await;
+    assert_eq!(answers(&mut poc, &mut agent).await, baseline, "Hide all");
+}

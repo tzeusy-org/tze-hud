@@ -306,6 +306,76 @@ async fn hidden_content_is_not_drawn_and_the_closed_notice_is() {
     assert!(zone_vertices(&compositor, &scene) > 0);
 }
 
+/// The closed panel's notice pill shows on screen but never in the admin
+/// capture: a capture with the notice is byte-identical to one without
+/// (docs/invariants.md §3).
+#[tokio::test]
+async fn capture_leaves_the_closed_notice_out() {
+    let (w, h) = (640_u32, 400_u32);
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(w, h).await);
+    let format = wgpu::TextureFormat::Rgba8UnormSrgb;
+    compositor.init_text_renderer(format);
+    let mut scene = red_scene(w as f32, h as f32);
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    compositor.render_frame_headless(&mut scene, &surface);
+    compositor.portal_tile_anim_states.clear();
+
+    let target = crate::FrameTarget::primary(w, h);
+    let capture = |compositor: &mut Compositor, scene: &mut SceneGraph| {
+        let build = compositor.build_windowed_frame(scene, w, h);
+        compositor
+            .capture_windowed_frame(&build, &target, format)
+            .expect("capture")
+            .rgba
+    };
+    let notice_at = |px: &[u8]| crate::test_pixels::pixel_at(px, w, w - 30, h - 24);
+
+    compositor.render_frame_headless(&mut scene, &surface);
+    let bare_screen = surface.read_pixels(&compositor.device);
+    let bare_shot = capture(&mut compositor, &mut scene);
+
+    assert!(compositor.set_closed_notice(Some(crate::PanelNotice {
+        text: "Everything hidden".into(),
+        key: "Ctrl+Shift+F11".into(),
+    })));
+    compositor.render_frame_headless(&mut scene, &surface);
+    let screen = surface.read_pixels(&compositor.device);
+    assert_ne!(
+        notice_at(&screen),
+        notice_at(&bare_screen),
+        "the pill is drawn on screen"
+    );
+    let shot = capture(&mut compositor, &mut scene);
+    assert!(
+        shot == bare_shot,
+        "the capture leaves the pill and its text out"
+    );
+
+    // With a system card up too, the capture keeps the card (its backdrop
+    // and its text) and still leaves only the pill out.
+    let card = crate::renderer::SystemCardModel {
+        kind: crate::renderer::SystemCardKind::Pairing,
+        title: "Pair an agent".into(),
+        lines: vec!["482913".into()],
+    };
+    assert!(compositor.set_closed_notice(None));
+    compositor.set_system_card(Some(card));
+    let card_only = capture(&mut compositor, &mut scene);
+    assert!(card_only != bare_shot, "the card is in the capture");
+    assert!(compositor.set_closed_notice(Some(crate::PanelNotice {
+        text: "Everything hidden".into(),
+        key: "Ctrl+Shift+F11".into(),
+    })));
+    compositor.render_frame_headless(&mut scene, &surface);
+    let both = surface.read_pixels(&compositor.device);
+    assert_ne!(notice_at(&both), notice_at(&bare_screen), "pill on screen");
+    assert!(
+        capture(&mut compositor, &mut scene) == card_only,
+        "card text and backdrop stay; only the pill goes"
+    );
+}
+
 /// A row's status dot (CP-8: an agent's connection) draws before its label:
 /// a filled dot for a live agent and an outline for an idle one, each unlike
 /// the row without one.
