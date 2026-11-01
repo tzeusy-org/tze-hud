@@ -334,13 +334,9 @@ mod tests {
     // ─── Ambient unread-count badge (hud-g1ena.3) ─────────────────────────
 
     #[test]
-    fn badge_hidden_when_redacted() {
+    fn badge_hidden_when_redacted_or_zero() {
         // `None` = the authority's reveal_unread policy withheld the count.
         assert_eq!(jump_to_latest_badge_label(None), None);
-    }
-
-    #[test]
-    fn badge_hidden_when_zero() {
         // A presence engine renders nothing rather than a "0 unread" marker,
         // matching the ambient in-transcript indicator's gating.
         assert_eq!(jump_to_latest_badge_label(Some(0)), None);

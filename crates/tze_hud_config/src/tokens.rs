@@ -1447,15 +1447,11 @@ mod tests {
     // ── Numeric parsing ───────────────────────────────────────────────────────
 
     #[test]
-    fn test_parse_numeric_integer() {
-        let n = parse_numeric("16").unwrap();
-        assert!((n - 16.0).abs() < 1e-4);
-    }
-
-    #[test]
-    fn test_parse_numeric_decimal() {
-        let n = parse_numeric("1.5").unwrap();
-        assert!((n - 1.5).abs() < 1e-4);
+    fn test_parse_numeric_accepts_integer_and_decimal() {
+        for (raw, want) in [("16", 16.0), ("1.5", 1.5)] {
+            let n = parse_numeric(raw).unwrap();
+            assert!((n - want).abs() < 1e-4, "{raw:?} parsed as {n}");
+        }
     }
 
     #[test]
