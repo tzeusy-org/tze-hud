@@ -2544,7 +2544,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 {
                     return;
                 }
-                if button != MouseButton::Left && self.panel_other_button(secondary.is_none()) {
+                if button != MouseButton::Left
+                    && self.panel_other_button(state == ElementState::Pressed, secondary.is_none())
+                {
                     return;
                 }
                 if button == MouseButton::Left {

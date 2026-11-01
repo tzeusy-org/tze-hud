@@ -81,6 +81,8 @@ pub(crate) struct RuntimeControl {
     pub profile: Option<String>,
     /// The window this instance opened ("Overlay · every display").
     pub window: String,
+    /// The window uses the configured width and height (a sized overlay).
+    pub window_sized: bool,
 }
 
 impl RuntimeControl {
@@ -163,9 +165,12 @@ impl RuntimeControl {
         displays.sort();
         let profile = config.profile.clone();
         let window = window_label(cfg);
+        let window_sized =
+            cfg.window.mode == crate::window::WindowMode::Overlay && !cfg.overlay_auto_size;
         Self {
             profile,
             window,
+            window_sized,
             config_path,
             write_widget,
             write_tokens,

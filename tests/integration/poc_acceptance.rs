@@ -1944,8 +1944,9 @@ async fn poc_override_notifies_the_agent() {
 
 /// §3: agents never learn the panel is open or what the owner hid. Every
 /// agent-visible answer (discovery, zone, widget and portal publishes, a
-/// resident tile claim) reads the same with the panel closed, open, with
-/// each surface class hidden, and with Hide all.
+/// resident tile claim's reply, and no unsolicited stream message before
+/// it) reads the same with the panel closed, open, with each surface class
+/// hidden, and with Hide all.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn poc_agents_see_the_same_with_the_panel_open_or_content_hidden() {
     use tze_hud_compositor::PanelControl;
@@ -1962,12 +1963,20 @@ async fn poc_agents_see_the_same_with_the_panel_open_or_content_hidden() {
         for publish in &publishes {
             bodies.push(poc.call("hud_publish", publish.clone()).await.body);
         }
-        let claimed = agent
-            .claim(wire::TileAnchor::TopRight, wire::TileSize::Small, "working")
+        let mut claimed = agent
+            .request(claim_payload(
+                wire::TileAnchor::TopRight,
+                wire::TileSize::Small,
+                "working",
+            ))
             .await;
-        // A claim's lease id is fresh each time; whether it was granted is
-        // what an agent could tell apart.
-        bodies.push(json!({"granted": !claimed.lease.is_empty()}));
+        // Fresh each claim: the echoed sequence, the new ids and lease.
+        // Everything else (granted, code, hint, TTL) must not move.
+        assert_eq!(claimed.ids.len(), 2, "{claimed:?}");
+        claimed.seq = 0;
+        claimed.ids.clear();
+        claimed.lease_id.clear();
+        bodies.push(json!(format!("{claimed:?}")));
         bodies
     };
     // The first publishes attach and create; compare from the second round.

@@ -57,8 +57,10 @@ pub struct LaunchSources {
     pub debug_zones: Source,
     /// `--window-mode` / `TZE_HUD_WINDOW_MODE` (no config key).
     pub window_mode: Source,
-    /// `--width`/`--height` / `TZE_HUD_WINDOW_WIDTH`/`_HEIGHT` (no config key).
-    pub window_size: Source,
+    /// `--width` / `TZE_HUD_WINDOW_WIDTH` (no config key).
+    pub window_width: Source,
+    /// `--height` / `TZE_HUD_WINDOW_HEIGHT` (no config key).
+    pub window_height: Source,
 }
 
 /// The settings that change while the HUD runs: the frame rate cap and the

@@ -24,6 +24,9 @@ pub(super) struct PanelInputState {
     previous_foreground: Option<isize>,
     /// Target under the left press; a release on the same target clicks.
     pressed: Option<PanelHitTarget>,
+    /// A right, middle or other button went down over the panel: its
+    /// release is the panel's too, wherever it lands.
+    other_pressed: bool,
     hovered: Option<PanelHitTarget>,
 }
 
@@ -219,9 +222,15 @@ impl WinitApp {
 
     /// A right, middle or other button over the panel does nothing, and the
     /// scene must not see it either (no context menu for a widget under the
-    /// panel). Returns true when the panel owns it.
-    pub(super) fn panel_other_button(&self, primary: bool) -> bool {
-        self.panel_hit(primary).is_some()
+    /// panel), including the release of a press that began over it. Returns
+    /// true when the panel owns the edge.
+    pub(super) fn panel_other_button(&mut self, pressed: bool, primary: bool) -> bool {
+        let over = self.panel_hit(primary).is_some();
+        if pressed {
+            self.state.panel_input.other_pressed = over;
+            return over;
+        }
+        std::mem::take(&mut self.state.panel_input.other_pressed) || over
     }
 
     /// Wheel over the panel scrolls it. Returns true when the panel owns it.
@@ -712,7 +721,10 @@ mod panel_task_tests {
 
     /// An open, idle panel re-reads its sections once a second but wakes the
     /// compositor only when something changed: several refresh ticks with
-    /// nothing new draw nothing (CP-11).
+    /// nothing new draw nothing (CP-11). This fixture has the always-present
+    /// sections only (no agents, runtime or appearance services), so it
+    /// proves the refresh loop and the publish dedupe, not that every
+    /// section's rows are stable between ticks.
     #[tokio::test(start_paused = true)]
     async fn an_idle_open_panel_does_not_wake_on_refresh_ticks() {
         let f = fixture();
@@ -791,10 +803,15 @@ mod panel_task_tests {
         (app.state.cursor_x, app.state.cursor_y) = (tile.x + tile.w / 2.0, tile.y + tile.h / 2.0);
         assert!(app.panel_captures_cursor());
         assert!(
-            app.panel_other_button(true),
+            app.panel_other_button(true, true),
             "a right click over the panel never reaches the scene"
         );
-        assert!(!app.panel_other_button(false), "nor on another display");
+        assert!(app.panel_other_button(false, false), "nor does its release");
+        assert!(
+            !app.panel_other_button(true, false),
+            "another display's pointer is the scene's"
+        );
+        app.panel_other_button(false, false);
         assert!(app.panel_left_button(true, true));
         assert!(app.panel_left_button(false, true));
         wait("3", || app.state.safe_mode_atomic.load(Ordering::Acquire)).await;
@@ -821,7 +838,8 @@ mod panel_task_tests {
         assert!(!app.panel_captures_cursor());
         assert!(!app.cursor_entry_signature().capture);
         assert!(!app.panel_left_button(true, true));
-        assert!(!app.panel_other_button(true));
+        assert!(!app.panel_other_button(true, true));
+        assert!(!app.panel_other_button(false, true));
 
         let esc = (
             PhysicalKey::Code(KeyCode::Escape),

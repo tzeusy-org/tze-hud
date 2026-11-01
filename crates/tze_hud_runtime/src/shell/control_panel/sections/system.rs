@@ -46,8 +46,15 @@ fn launch_rows(control: &RuntimeControl) -> Vec<Row> {
         );
     }
     let sources = control.sources();
-    let pinned: Vec<String> = [sources.window_mode, sources.window_size]
+    // A size names its source only where the window uses it.
+    let size = if control.window_sized {
+        [sources.window_width, sources.window_height]
+    } else {
+        [Source::Default; 2]
+    };
+    let pinned: Vec<String> = [sources.window_mode]
         .into_iter()
+        .chain(size)
         .filter(|s| s.is_pinned())
         .map(Source::describe)
         .collect();
@@ -356,19 +363,26 @@ mod tests {
             ]
         );
 
-        control.window = "Overlay · 1280×720".into();
         {
             let mut sources = control.sources.lock().unwrap();
             sources.window_mode = Source::Flag("--window-mode");
-            sources.window_size = Source::Env("TZE_HUD_WINDOW_WIDTH");
+            sources.window_width = Source::Env("TZE_HUD_WINDOW_WIDTH");
+            sources.window_height = Source::Flag("--height");
         }
+        assert_eq!(
+            launch(&control)[1].2.as_deref(),
+            Some("Set by --window-mode"),
+            "fullscreen ignores the size, so its sources go unnamed"
+        );
+        control.window = "Overlay · 1280×720".into();
+        control.window_sized = true;
         control.profile = None;
         assert_eq!(
             launch(&control),
             [(
                 "system.window".into(),
                 "Overlay · 1280×720".into(),
-                Some("Set by --window-mode · Set by TZE_HUD_WINDOW_WIDTH".into())
+                Some("Set by --window-mode · Set by TZE_HUD_WINDOW_WIDTH · Set by --height".into())
             )],
             "no profile in config: no row rather than a guess"
         );

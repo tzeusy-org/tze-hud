@@ -494,14 +494,14 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
                 .parse::<u32>()
                 .map_err(|_| format!("TZE_HUD_WINDOW_WIDTH: invalid integer: {v:?}"))?;
             opts.explicit_width = true;
-            opts.sources.window_size = Source::Env("TZE_HUD_WINDOW_WIDTH");
+            opts.sources.window_width = Source::Env("TZE_HUD_WINDOW_WIDTH");
         }
         if let Ok(v) = std::env::var("TZE_HUD_WINDOW_HEIGHT") {
             opts.height = v
                 .parse::<u32>()
                 .map_err(|_| format!("TZE_HUD_WINDOW_HEIGHT: invalid integer: {v:?}"))?;
             opts.explicit_height = true;
-            opts.sources.window_size = Source::Env("TZE_HUD_WINDOW_HEIGHT");
+            opts.sources.window_height = Source::Env("TZE_HUD_WINDOW_HEIGHT");
         }
         if let Ok(v) = std::env::var("TZE_HUD_GRPC_PORT") {
             opts.grpc_port = v
@@ -628,7 +628,7 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
                     .parse::<u32>()
                     .map_err(|_| format!("--width: invalid integer: {val:?}"))?;
                 opts.explicit_width = true;
-                opts.sources.window_size = Source::Flag("--width");
+                opts.sources.window_width = Source::Flag("--width");
             }
             "--height" => {
                 i += 1;
@@ -639,7 +639,7 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
                     .parse::<u32>()
                     .map_err(|_| format!("--height: invalid integer: {val:?}"))?;
                 opts.explicit_height = true;
-                opts.sources.window_size = Source::Flag("--height");
+                opts.sources.window_height = Source::Flag("--height");
             }
             "--grpc-port" => {
                 i += 1;
@@ -1460,7 +1460,8 @@ mod tests {
     fn window_settings_keep_their_source() {
         let opts = parse_with_env(&[], &[]).unwrap();
         assert_eq!(opts.sources.window_mode, Source::Default);
-        assert_eq!(opts.sources.window_size, Source::Default);
+        assert_eq!(opts.sources.window_width, Source::Default);
+        assert_eq!(opts.sources.window_height, Source::Default);
         let opts = parse_with_env(
             &[
                 ("TZE_HUD_WINDOW_MODE", "overlay"),
@@ -1470,13 +1471,22 @@ mod tests {
         )
         .unwrap();
         assert_eq!(opts.sources.window_mode, Source::Env("TZE_HUD_WINDOW_MODE"));
-        assert_eq!(opts.sources.window_size, Source::Flag("--height"));
+        assert_eq!(
+            opts.sources.window_width,
+            Source::Env("TZE_HUD_WINDOW_WIDTH")
+        );
+        assert_eq!(opts.sources.window_height, Source::Flag("--height"));
         let opts = parse_with_env(
-            &[("TZE_HUD_WINDOW_MODE", "overlay")],
-            &["--window-mode", "fullscreen"],
+            &[("TZE_HUD_WINDOW_WIDTH", "1280")],
+            &["--window-mode", "fullscreen", "--width", "1024"],
         )
         .unwrap();
         assert_eq!(opts.sources.window_mode, Source::Flag("--window-mode"));
+        assert_eq!(
+            opts.sources.window_width,
+            Source::Flag("--width"),
+            "a flag beats the variable"
+        );
     }
 
     /// Flag > env > `[runtime]` > default, with each value's source kept for

@@ -101,6 +101,9 @@ pub struct WindowedFrameBuild {
     /// The control panel's rounded shapes (empty while it is closed), drawn in
     /// the same final pass.
     system_card_rounded_rects: Vec<RoundedRectDrawCmd>,
+    /// How many leading `system_card_rounded_rects` are the closed panel
+    /// notice's (0 while the panel is open).
+    notice_shapes: usize,
     /// True while the control panel is open: `/admin/screenshot` then leaves
     /// the final chrome pass out (docs/invariants.md §3).
     control_panel_open: bool,
@@ -703,7 +706,7 @@ impl Compositor {
             self.safe_mode_overlay_vertices(sw, sh)
         };
         let system_card_vertices = self.final_chrome_vertices(sw, sh);
-        let system_card_rounded_rects = self.final_chrome_rounded_rects(sw, sh);
+        let (system_card_rounded_rects, notice_shapes) = self.final_chrome_rounded_rects(sw, sh);
 
         // Populate drag-handle hit regions from the geometry we are about to
         // present so the next input snapshot matches this frame (see the method
@@ -726,6 +729,7 @@ impl Compositor {
             safe_mode_vertices,
             system_card_vertices,
             system_card_rounded_rects,
+            notice_shapes,
             control_panel_open,
             widget_quads,
             frame_start,
@@ -868,14 +872,11 @@ impl Compositor {
             // Without the panel's scrim, show the paused state the usual way.
             tv.safe_mode_vertices =
                 Cow::Owned(self.safe_mode_overlay_vertices(tv.width as f32, tv.height as f32));
-        } else if !include_panel {
-            // Closed: its notice pill is every final-chrome shape and the
-            // leading text; the system card's text stays.
-            tv.system_card_rounded_rects = &[];
-            tv.card_items = tv
-                .card_items
-                .get(build.encode_sources.notice_items..)
-                .unwrap_or(&[]);
+        } else if !include_panel && target.primary {
+            // Closed: its notice pill leads the final-chrome shapes and text;
+            // the system card's stay. (Other displays draw neither.)
+            tv.system_card_rounded_rects = &tv.system_card_rounded_rects[build.notice_shapes..];
+            tv.card_items = &tv.card_items[build.encode_sources.notice_items..];
         }
         let sw = tv.width as f32;
         let sh = tv.height as f32;
@@ -1357,7 +1358,7 @@ impl Compositor {
 
         // System card last, above everything (hud-w5zon).
         let system_card_vertices = self.final_chrome_vertices(sw, sh);
-        let system_card_rounded_rects = self.final_chrome_rounded_rects(sw, sh);
+        let (system_card_rounded_rects, _) = self.final_chrome_rounded_rects(sw, sh);
         self.encode_system_card_pass(
             &mut encoder,
             &frame.view,
