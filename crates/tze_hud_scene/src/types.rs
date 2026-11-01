@@ -1539,6 +1539,69 @@ pub enum GeometryPolicy {
     },
 }
 
+impl GeometryPolicy {
+    /// This box at `factor` times its size. A relative box keeps a display
+    /// edge it is flush with, else grows from its centre, and stays on the
+    /// display. An edge-anchored one keeps its edge and scales its margin,
+    /// dropping the margin once it fills the display. Factors that are not
+    /// positive and finite change nothing.
+    pub fn zoomed(self, factor: f32) -> Self {
+        if !(factor.is_finite() && factor > 0.0) || factor == 1.0 {
+            return self;
+        }
+        // (start, length) as display fractions: a flush edge stays flush,
+        // otherwise the centre stays put.
+        const FLUSH: f32 = 1e-4;
+        let grow = |start: f32, len: f32| {
+            let grown = (len * factor).min(1.0);
+            let start = if start <= FLUSH {
+                0.0
+            } else if start + len >= 1.0 - FLUSH {
+                1.0 - grown
+            } else {
+                start + (len - grown) / 2.0
+            };
+            (start.clamp(0.0, (1.0 - grown).max(0.0)), grown)
+        };
+        match self {
+            GeometryPolicy::Relative {
+                x_pct,
+                y_pct,
+                width_pct,
+                height_pct,
+            } => {
+                let (x_pct, width_pct) = grow(x_pct, width_pct);
+                let (y_pct, height_pct) = grow(y_pct, height_pct);
+                GeometryPolicy::Relative {
+                    x_pct,
+                    y_pct,
+                    width_pct,
+                    height_pct,
+                }
+            }
+            GeometryPolicy::EdgeAnchored {
+                edge,
+                height_pct,
+                width_pct,
+                margin_px,
+            } => {
+                let (height_pct, width_pct) = (height_pct * factor, width_pct * factor);
+                // A box as big as the display has no room for a margin.
+                let fills = match edge {
+                    DisplayEdge::Top | DisplayEdge::Bottom => height_pct >= 1.0,
+                    DisplayEdge::Left | DisplayEdge::Right => width_pct >= 1.0,
+                };
+                GeometryPolicy::EdgeAnchored {
+                    edge,
+                    height_pct: height_pct.min(1.0),
+                    width_pct: width_pct.min(1.0),
+                    margin_px: if fills { 0.0 } else { margin_px * factor },
+                }
+            }
+        }
+    }
+}
+
 /// Resolve geometry with four-tier precedence:
 /// user override > agent-requested > config override > default policy.
 pub fn resolve_geometry_override_chain(
@@ -2474,6 +2537,15 @@ pub struct WidgetRegistry {
     /// lightweight (parameter-only).
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub runtime_svg_handles: HashMap<std::string::String, std::string::String>,
+    /// The owner's zoom (`ui.scale`): every widget box is drawn at this
+    /// multiple of its configured size ([`Self::drawn_geometry`]). Set by
+    /// the runtime; not part of the layout.
+    #[serde(skip, default = "unit_zoom")]
+    pub zoom: f32,
+}
+
+fn unit_zoom() -> f32 {
+    1.0
 }
 
 impl WidgetRegistry {
@@ -2483,7 +2555,23 @@ impl WidgetRegistry {
             instances: HashMap::new(),
             active_publishes: HashMap::new(),
             runtime_svg_handles: HashMap::new(),
+            zoom: unit_zoom(),
         }
+    }
+
+    /// Where `instance` is drawn: its own geometry, else its type's
+    /// default, at the owner's [`Self::zoom`]. Every draw, raster-size and
+    /// hover read of a widget box goes through this; the layout itself
+    /// (`geometry_override`) stays at 100%.
+    pub fn drawn_geometry(&self, instance: &WidgetInstance) -> Option<GeometryPolicy> {
+        instance
+            .geometry_override
+            .or_else(|| {
+                self.definitions
+                    .get(&instance.widget_type_name)
+                    .map(|d| d.default_geometry_policy)
+            })
+            .map(|g| g.zoomed(self.zoom))
     }
 
     fn runtime_svg_key(widget_type_id: &str, svg_filename: &str) -> String {
@@ -3678,6 +3766,151 @@ mod tests {
         assert_eq!(
             registry.resolve_geometry_policy_for_instance("gauge-main", None),
             Some(config_override)
+        );
+    }
+
+    /// Zoom draws a widget box bigger about its centre, kept on the display,
+    /// while the stored layout stays at 100%.
+    #[test]
+    fn widget_boxes_are_drawn_at_the_owners_zoom() {
+        let rel = |x_pct, y_pct, width_pct, height_pct| GeometryPolicy::Relative {
+            x_pct,
+            y_pct,
+            width_pct,
+            height_pct,
+        };
+        let close = |a: GeometryPolicy, b: GeometryPolicy| {
+            let (
+                GeometryPolicy::Relative {
+                    x_pct,
+                    y_pct,
+                    width_pct,
+                    height_pct,
+                },
+                GeometryPolicy::Relative {
+                    x_pct: x2,
+                    y_pct: y2,
+                    width_pct: w2,
+                    height_pct: h2,
+                },
+            ) = (a, b)
+            else {
+                panic!("{a:?} vs {b:?}");
+            };
+            for (u, v) in [(x_pct, x2), (y_pct, y2), (width_pct, w2), (height_pct, h2)] {
+                assert!((u - v).abs() < 1e-6, "{a:?} vs {b:?}");
+            }
+        };
+        // Grows about its centre.
+        close(
+            rel(0.4, 0.4, 0.2, 0.1).zoomed(1.5),
+            rel(0.35, 0.375, 0.3, 0.15),
+        );
+        // A box at the right edge stays on screen.
+        close(
+            rel(0.8, 0.0, 0.2, 0.1).zoomed(1.5),
+            rel(0.7, 0.0, 0.3, 0.15),
+        );
+        // Never more than the display.
+        close(rel(0.1, 0.1, 0.8, 0.8).zoomed(3.0), rel(0.0, 0.0, 1.0, 1.0));
+        // Smaller zooms shrink about the centre.
+        close(
+            rel(0.4, 0.4, 0.2, 0.2).zoomed(0.5),
+            rel(0.45, 0.45, 0.1, 0.1),
+        );
+        // ...but a box in a corner stays in it.
+        close(
+            rel(0.8, 0.0, 0.2, 0.1).zoomed(0.5),
+            rel(0.9, 0.0, 0.1, 0.05),
+        );
+        close(
+            rel(0.0, 0.9, 0.2, 0.1).zoomed(0.5),
+            rel(0.0, 0.95, 0.1, 0.05),
+        );
+        // 1x and nonsense change nothing.
+        let same = rel(0.3, 0.2, 0.1, 0.1);
+        for factor in [1.0, 0.0, -2.0, f32::NAN] {
+            assert_eq!(same.zoomed(factor), same);
+        }
+        assert_eq!(
+            GeometryPolicy::EdgeAnchored {
+                edge: DisplayEdge::Bottom,
+                height_pct: 0.1,
+                width_pct: 0.5,
+                margin_px: 8.0,
+            }
+            .zoomed(2.0),
+            GeometryPolicy::EdgeAnchored {
+                edge: DisplayEdge::Bottom,
+                height_pct: 0.2,
+                width_pct: 1.0,
+                margin_px: 16.0,
+            }
+        );
+
+        // Filling the display leaves no room for the margin.
+        assert_eq!(
+            GeometryPolicy::EdgeAnchored {
+                edge: DisplayEdge::Bottom,
+                height_pct: 0.4,
+                width_pct: 0.5,
+                margin_px: 8.0,
+            }
+            .zoomed(3.0),
+            GeometryPolicy::EdgeAnchored {
+                edge: DisplayEdge::Bottom,
+                height_pct: 1.0,
+                width_pct: 1.0,
+                margin_px: 0.0,
+            }
+        );
+
+        let mut registry = WidgetRegistry::new();
+        registry.register_definition(WidgetDefinition {
+            id: "gauge".to_string(),
+            name: "Gauge".to_string(),
+            description: "test".to_string(),
+            parameter_schema: vec![],
+            layers: vec![],
+            default_geometry_policy: rel(0.4, 0.4, 0.2, 0.1),
+            default_rendering_policy: RenderingPolicy::default(),
+            default_contention_policy: ContentionPolicy::LatestWins,
+            max_publishers: WidgetDefinition::default_max_publishers(),
+            ephemeral: false,
+            hover_behavior: None,
+        });
+        let instance = WidgetInstance {
+            id: SceneId::new(),
+            widget_type_name: "gauge".to_string(),
+            tab_id: SceneId::new(),
+            geometry_override: None,
+            contention_override: None,
+            instance_name: "g".to_string(),
+            current_params: HashMap::new(),
+            auto_clear_ms: None,
+        };
+        assert_eq!(registry.zoom, 1.0, "unzoomed by default");
+        assert_eq!(
+            registry.drawn_geometry(&instance),
+            Some(rel(0.4, 0.4, 0.2, 0.1))
+        );
+        registry.zoom = 1.5;
+        close(
+            registry.drawn_geometry(&instance).unwrap(),
+            rel(0.35, 0.375, 0.3, 0.15),
+        );
+        let placed = WidgetInstance {
+            geometry_override: Some(rel(0.0, 0.0, 0.1, 0.1)),
+            ..instance
+        };
+        close(
+            registry.drawn_geometry(&placed).unwrap(),
+            rel(0.0, 0.0, 0.15, 0.15),
+        );
+        assert_eq!(
+            placed.geometry_override,
+            Some(rel(0.0, 0.0, 0.1, 0.1)),
+            "layout unchanged"
         );
     }
 

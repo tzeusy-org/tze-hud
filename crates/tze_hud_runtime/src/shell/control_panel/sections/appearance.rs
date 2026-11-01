@@ -149,7 +149,7 @@ impl Section for AppearanceSection {
                     },
                 )
                 .detail(format!(
-                    "Applies now · {} · on top of the Windows display scale · Enter resets",
+                    "Applies now · {} · on top of Windows display scaling (widgets: zoom only) · Enter resets",
                     self.tokens.saved_detail()
                 ))
                 .keywords(&[

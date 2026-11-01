@@ -111,10 +111,11 @@ impl super::Compositor {
                 None => continue,
             };
 
-            // Determine pixel geometry from the instance's geometry policy.
-            // Fall back to a sensible default if not set.
-            let (pw, ph) =
-                super::resolve_widget_pixel_size(&instance, &def, self.width, self.height);
+            // Raster at the size the widget is drawn: its box at the zoom.
+            let Some(geometry) = registry.drawn_geometry(&instance) else {
+                continue;
+            };
+            let (pw, ph) = super::resolve_widget_pixel_size(&geometry, self.width, self.height);
             if pw == 0 || ph == 0 {
                 continue;
             }
