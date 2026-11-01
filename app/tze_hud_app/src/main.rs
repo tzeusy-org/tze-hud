@@ -259,7 +259,7 @@ impl Default for StartupOptions {
             explicit_height: false,
             grpc_port: tze_hud_config::DEFAULT_GRPC_PORT,
             mcp_port: tze_hud_config::DEFAULT_MCP_PORT,
-            fps: 60,
+            fps: tze_hud_config::DEFAULT_FPS,
             debug_zones: false,
             sources: Default::default(),
             quiescent_efficiency_emit: None,
@@ -908,7 +908,8 @@ fn init_logging() {
     let file_layer = file.map(|f| {
         // An env filter can be any directive string; the panel's level row
         // then shows it pinned. Otherwise the level is reloadable.
-        let initial = std::env::var("TZE_HUD_FILE_LOG").unwrap_or_else(|_| "info".to_owned());
+        let initial = std::env::var("TZE_HUD_FILE_LOG")
+            .unwrap_or_else(|_| tze_hud_config::DEFAULT_LOG_LEVEL.to_owned());
         let (layer, set_level) = file_log_layer(
             move || tze_hud_runtime::operator::logs::LogWriter(f.clone()),
             &initial,
@@ -1439,7 +1440,8 @@ mod tests {
         }
         let sink = Sink::default();
         let writer = sink.clone();
-        let (layer, set_level) = file_log_layer(move || writer.clone(), "info");
+        let (layer, set_level) =
+            file_log_layer(move || writer.clone(), tze_hud_config::DEFAULT_LOG_LEVEL);
         let subscriber = tracing_subscriber::registry().with(layer);
         let written = || String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
         tracing::subscriber::with_default(subscriber, || {

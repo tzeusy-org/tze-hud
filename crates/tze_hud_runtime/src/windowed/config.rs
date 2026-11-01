@@ -122,7 +122,7 @@ impl Default for WindowedConfig {
             grpc_port: 50051,
             mcp_port: 9090,
             agents: Default::default(),
-            target_fps: 60,
+            target_fps: tze_hud_config::DEFAULT_FPS,
             config_toml: None,
             config_file_path: None,
             debug_zones: false,

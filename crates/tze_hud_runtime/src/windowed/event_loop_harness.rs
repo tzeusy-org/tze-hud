@@ -871,6 +871,9 @@ impl HeadlessEventLoopHarness {
             "Backspace" => NamedKey::Backspace,
             "ArrowDown" => NamedKey::ArrowDown,
             "ArrowUp" => NamedKey::ArrowUp,
+            "ArrowLeft" => NamedKey::ArrowLeft,
+            "ArrowRight" => NamedKey::ArrowRight,
+            "Delete" => NamedKey::Delete,
             "Tab" => NamedKey::Tab,
             other => panic!("panel_press: unsupported key {other}"),
         };

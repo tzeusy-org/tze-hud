@@ -210,6 +210,19 @@ impl RuntimeControl {
         Ok(())
     }
 
+    /// Clear a saved `[runtime]` key (`update` carries `None`): the row is
+    /// back to its default.
+    pub(crate) fn clear(
+        &self,
+        update: RuntimeUpdate,
+        source: impl FnOnce(&mut LaunchSources) -> &mut crate::launch::Source,
+    ) -> Result<(), String> {
+        (self.write)(std::slice::from_ref(&update))?;
+        *source(&mut self.sources.lock().unwrap_or_else(|e| e.into_inner())) =
+            crate::launch::Source::Default;
+        Ok(())
+    }
+
     pub(crate) fn saved(&self) -> Ports {
         *self.saved.lock().unwrap_or_else(|e| e.into_inner())
     }
