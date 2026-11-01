@@ -154,15 +154,13 @@ fn start_enabled_network_services(
         .map_err(|e| format!("windowed runtime: failed to build network Tokio runtime: {e}"))?;
 
     // Loopback plus the local Tailscale addresses, nothing else.
-    let addrs = listen_addrs(&local_ips(), grpc_port);
+    #[cfg(not(test))]
+    let initial_ips = local_ips();
     #[cfg(test)]
-    let addrs = if tailnet_fixture.is_some() {
-        // The injected watcher owns synthetic tailnet discovery. Eager and
-        // deferred startup must not bind the test host's real VPN addresses.
-        listen_addrs(&[], grpc_port)
-    } else {
-        addrs
-    };
+    let initial_ips = tailnet_fixture
+        .as_ref()
+        .map_or_else(local_ips, |fixture| fixture.initial_ips.clone());
+    let addrs = listen_addrs(&initial_ips, grpc_port);
 
     let service = HudSessionImpl::from_deps(SessionDeps {
         resource_budget: runtime_context.resource_budget(),

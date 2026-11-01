@@ -136,6 +136,8 @@ type InjectedBind =
 /// Synthetic tailnet addresses map to owned loopback sockets, never live VPN IPs.
 #[cfg(test)]
 pub(crate) struct TailnetFixture {
+    /// Startup owns only loopback; synthetic served v4 seeds the watcher below.
+    pub(crate) initial_ips: Vec<IpAddr>,
     already_bound: Vec<IpAddr>,
     addresses: tokio::sync::watch::Receiver<Vec<IpAddr>>,
     pub(crate) bind: InjectedBind,
@@ -196,6 +198,7 @@ pub(crate) fn tailnet_fixture() -> (TailnetFixture, TailnetControl) {
     let failing = Arc::clone(&fail);
     let (tx, attempts) = tokio::sync::mpsc::unbounded_channel();
     let fixture = TailnetFixture {
+        initial_ips: Vec::new(),
         already_bound: vec![v4],
         addresses: receiver,
         bind: Arc::new(move |addr| {
