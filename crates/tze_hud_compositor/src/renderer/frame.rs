@@ -850,8 +850,9 @@ impl Compositor {
     /// return the encoder plus the encode time. Shared by the swapchain present
     /// path and the offscreen admin capture so both draw identical pixels.
     ///
-    /// `include_panel: false` (the admin capture) leaves an open control panel
-    /// out, so no image of it can leave the HUD (docs/invariants.md §3).
+    /// `include_panel: false` (the admin capture) leaves the control panel
+    /// out, open or as its closed notice pill, so no image of it can leave the
+    /// HUD (docs/invariants.md §3).
     pub(super) fn encode_windowed_passes(
         &mut self,
         build: &WindowedFrameBuild,
@@ -867,6 +868,14 @@ impl Compositor {
             // Without the panel's scrim, show the paused state the usual way.
             tv.safe_mode_vertices =
                 Cow::Owned(self.safe_mode_overlay_vertices(tv.width as f32, tv.height as f32));
+        } else if !include_panel {
+            // Closed: its notice pill is every final-chrome shape and the
+            // leading text; the system card's text stays.
+            tv.system_card_rounded_rects = &[];
+            tv.card_items = tv
+                .card_items
+                .get(build.encode_sources.notice_items..)
+                .unwrap_or(&[]);
         }
         let sw = tv.width as f32;
         let sh = tv.height as f32;
