@@ -161,5 +161,9 @@ transport without `SessionClose` to exercise orphan grace.
   ambient-background): [references/zone-exemplars.md](references/zone-exemplars.md).
 - Widget reactivity (gauge, status-indicator, progress-bar):
   [references/widget-reactivity-tests.md](references/widget-reactivity-tests.md).
-- Resident gRPC scenario (Presence Card), `hud_grpc_client.py`, and
-  `stress_test_zones.py`: [references/resident-exemplars.md](references/resident-exemplars.md).
+- Resident gRPC scenario (Presence Card) and `hud_grpc_client.py`:
+  [references/resident-exemplars.md](references/resident-exemplars.md).
+- `scripts/stress_test_zones.py` measures paired MCP publishing latency and
+  throughput. Host CPU, memory and GPU telemetry are unavailable and reported as
+  such, with null metric values. For the HUD's process CPU metric, use
+  `hud_admin.py status` separately with an admin-paired key.

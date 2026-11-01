@@ -235,8 +235,16 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
   overrides as startup; see [the reversible Windows helper](operations/windows-install.md#remote-agents).
   This policy-derived result is cached for five seconds, not a network probe.
   `/admin/status` `displays` lists the overlaid monitors, primary first:
-  `{name, x, y, width, height, primary, zones}` in scene pixels (the primary's
-  top-left is 0,0; others may be negative) and the zones configured onto each;
+  `{name, x, y, width, height, primary, zones, window_state}` in scene pixels (the primary's
+  top-left is 0,0; others may be negative) and the zones configured onto each.
+  On Windows, `window_state` samples `{visible, iconic, topmost, cloaked}` from
+  the live HWND (`cloaked: null` if DWM cannot report it); the whole object is
+  `null` outside Windows or when the window is unavailable. Status preserves the
+  observed state and queues a no-activate visibility/topmost reassertion on the
+  window thread when it drifts. Display changes, system resume and console
+  display power-on also trigger that check; there is no per-frame polling.
+  Shell cloaking can remain after reassertion and is still reported; a present
+  counter or compositor screenshot does not establish owner-visible pixels.
   `unplaced_zones` lists `{zone, display, reason}` placements with no overlay
   window, rendering on the primary instead: `reason` is `not_connected`, or
   `overlay_failed` when that monitor's overlay surface was lost and recreated
@@ -481,7 +489,10 @@ the same health handoff as `POST /admin/restart`, and a failed restart keeps
 this instance up and shows why), Install update (asks first; the signed
 update path of `POST /admin/update`, on this build's channel, when this copy
 is installed), Start with Windows (the per-user Run entry; installed copies
-only), Open config file, Open log folder, and the version.
+only), Open config file, Open log folder, the display profile and the window
+(read-only: `[runtime].profile`, and `--window-mode`/`--width`/`--height` or
+their `TZE_HUD_WINDOW_*` variables, each row naming its source; change them
+in the config file or the launch arguments and restart), and the version.
 
 The Layout card shows, per widget, its box as percentages of the display
 ("4%, 8% · 18×12%": x, y, width×height) and how long its content stays up.
@@ -507,17 +518,18 @@ HUD on its next frame and is saved to `[design_tokens]` with the file's
 comments kept; when the save fails (a read-only file) the change lasts the
 session and the row shows the error and the path. The panel keeps its own
 text legible whatever an override does. Zoom steps `ui.scale` by 10%
-(−/+, Ctrl+− and Ctrl+= anywhere in the panel; Enter returns to 100%),
-applies live and saves; the panel itself stays between 0.75x and 3x so
+(−/+, Ctrl+− and Ctrl+= or Ctrl++ anywhere in the panel; Enter returns
+to 100%), resizes zone text and chrome, portals, widgets and the panel, applies live and
+saves; the panel itself stays between 0.75x and 3x so
 it remains readable and on screen.
 
 A row whose value a flag or variable set is read-only and names it ("Set by
 --mcp-port"), because a restart reuses the same arguments and environment.
 
 Agents never see the panel: it is not in the scene, in MCP or gRPC results,
-or in `/admin/screenshot`. An idle open panel draws no frames, except that
-Connect an agent redraws once a second for its countdown. Its layout
-reads `control_panel.inset` and `control_panel.column.min_width` and the
+or in `/admin/screenshot`, open or as its closed notice pill. An idle
+open panel draws no frames, except that Connect an agent redraws once a
+second for its countdown. Its layout reads `control_panel.inset` and `control_panel.column.min_width` and the
 semantic tokens of the active theme.
 
 ## Design tokens and themes
@@ -543,10 +555,12 @@ the primary's. A DPI change or a new monitor restyles zones, portals and
 the panel on the next frame; tiles already placed keep their bounds, and
 tiles claimed afterwards take the new sizes. Hairlines (the transcript
 divider) round to whole pixels, at least one. Opacity, weights, ratios
-and timing do not scale. Zone and widget boxes are fractions of the
-display, so they keep their size; widget SVGs take tokens in their own
-viewBox units, so zoom changes a widget's drag handle but not its
-content. The runtime
+and timing do not scale. Zone boxes are fractions of the display and
+keep their size. A widget box is drawn at `ui.scale` times its configured
+size, grown about its centre and kept on the display (an edge-anchored
+widget keeps its edge); its SVG is rasterized at that size. The layout
+(the Layout card and `geometry`) stays at 100%. A monitor's own scale
+does not resize widgets, since their boxes already follow the display. The runtime
 records the result as `runtime.px_scale` (and `runtime.px_scale@<zone>`
 for a zone on a secondary), which config may not set.
 

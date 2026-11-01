@@ -3110,21 +3110,8 @@ impl WidgetRenderer {
 
             // Resolve pixel geometry from the instance's geometry policy.
             let (raw_x, raw_y, _pw, _ph) =
-                resolve_pixel_geometry(&instance.geometry_override, surf_w, surf_h).unwrap_or_else(
-                    || {
-                        // Fall back to full-screen if geometry not set
-                        let def = registry
-                            .definitions
-                            .get(&instance.widget_type_name)
-                            .map(|d| &d.default_geometry_policy);
-                        if let Some(geo) = def {
-                            resolve_pixel_geometry(&Some(*geo), surf_w, surf_h)
-                                .unwrap_or((0.0, 0.0, surf_w, surf_h))
-                        } else {
-                            (0.0, 0.0, surf_w, surf_h)
-                        }
-                    },
-                );
+                resolve_pixel_geometry(&registry.drawn_geometry(instance), surf_w, surf_h)
+                    .unwrap_or((0.0, 0.0, surf_w, surf_h));
             // Pixel-snap widget quads so text-heavy SVGs remain crisp on screen.
             let (px, py, pw, ph) = snap_composite_rect(
                 raw_x,
@@ -3188,20 +3175,8 @@ impl WidgetRenderer {
                 continue;
             }
             let (raw_x, raw_y, _pw, _ph) =
-                resolve_pixel_geometry(&instance.geometry_override, surf_w, surf_h).unwrap_or_else(
-                    || {
-                        let def = registry
-                            .definitions
-                            .get(&instance.widget_type_name)
-                            .map(|d| &d.default_geometry_policy);
-                        if let Some(geo) = def {
-                            resolve_pixel_geometry(&Some(*geo), surf_w, surf_h)
-                                .unwrap_or((0.0, 0.0, surf_w, surf_h))
-                        } else {
-                            (0.0, 0.0, surf_w, surf_h)
-                        }
-                    },
-                );
+                resolve_pixel_geometry(&registry.drawn_geometry(instance), surf_w, surf_h)
+                    .unwrap_or((0.0, 0.0, surf_w, surf_h));
             quads.push(WidgetDrawQuad {
                 instance_name: instance.instance_name.clone(),
                 raw_x,

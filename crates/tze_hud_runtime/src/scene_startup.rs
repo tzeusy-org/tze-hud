@@ -67,6 +67,7 @@ pub fn run_scene_startup(
     let mut zone_registry = ZoneRegistry::with_defaults();
     crate::appearance::restyle_zones(&mut zone_registry, &global_tokens);
     scene.zone_registry = zone_registry;
+    scene.widget_registry.zoom = tze_hud_config::tokens::ui_scale(&global_tokens);
     tracing::info!(
         zone_count = scene.zone_registry.zones.len(),
         tab_count = tab_map.len(),

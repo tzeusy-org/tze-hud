@@ -3,7 +3,6 @@
 
 from __future__ import annotations
 
-import base64
 import importlib.util
 import json
 import tempfile
@@ -170,10 +169,6 @@ class LiveMetricsArtifactTests(unittest.TestCase):
                 args=Namespace(
                     allow_missing_live_metrics=False,
                     live_metrics_artifact=str(source),
-                    windows_live_metrics_path="",
-                    win_user="hud-user",
-                    win_host="windows-host.example",
-                    ssh_identity="",
                 ),
                 output_root=output_root,
                 dry_run=False,
@@ -185,59 +180,39 @@ class LiveMetricsArtifactTests(unittest.TestCase):
             self.assertTrue(copied.exists())
             self.assertTrue((output_root / widget_soak_runner.LIVE_METRICS_SUMMARY_NAME).exists())
 
-    def test_windows_resource_sampler_matches_isolated_benchmark_process_names(self) -> None:
-        script = widget_soak_runner.windows_resource_sample_script(
-            label="during-1",
-            process_name="tze_hud*",
-            command_match=r"C:\tze_hud\benchmark.toml",
+    def test_missing_live_metrics_source_is_explicit_failure(self) -> None:
+        result = widget_soak_runner.resolve_live_metrics(
+            args=Namespace(allow_missing_live_metrics=False, live_metrics_artifact=""),
+            output_root=Path("unused"),
+            dry_run=False,
         )
+        self.assertTrue(result["required"])
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["collection"], "missing_source")
 
-        self.assertIn("Get-CimInstance Win32_Process", script)
-        self.assertIn("$_.Name -like $processName", script)
-        self.assertIn("[string]$_.CommandLine", script)
-        self.assertIn(r"$processName = 'tze_hud*'", script)
-        self.assertIn(r"$commandMatch = 'C:\tze_hud\benchmark.toml'", script)
-        self.assertIn("command_match_applied", script)
-        self.assertNotIn("command_match = $commandMatch", script)
-        self.assertIn("process_ids", script)
-        self.assertIn("process_names", script)
-        self.assertNotIn("Get-Process -Name 'tze_hud'", script)
+    def test_dry_run_reports_local_artifact_without_loading(self) -> None:
+        with mock.patch.object(widget_soak_runner, "load_live_metrics_artifact") as load:
+            result = widget_soak_runner.resolve_live_metrics(
+                args=Namespace(allow_missing_live_metrics=False, live_metrics_artifact="local.json"),
+                output_root=Path("unused"),
+                dry_run=True,
+            )
+        load.assert_not_called()
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["expected_artifact"], "local.json")
+        self.assertEqual(result["collection"], "dry_run")
 
-    def test_windows_resource_sampler_uses_encoded_powershell(self) -> None:
-        script = widget_soak_runner.windows_resource_sample_script(
-            label="before",
-            process_name="tze_hud_pr650*",
-            command_match="",
+    def test_soak_summary_reports_unavailable_host_metrics(self) -> None:
+        summary = widget_soak_runner.summarize(
+            args=Namespace(target_id="test", targets_file="test.toml", widget_name="progress",
+                           instance_id="progress", duration_s=1, rate_rps=1),
+            root=Path.cwd(), started_at="start", ended_at="end", output_root=Path.cwd(),
+            commands={}, agent_results={}, resource_samples=[], live_metrics={}, dry_run=True,
         )
-
-        encoded = widget_soak_runner.encode_powershell_command(script)
-        decoded = base64.b64decode(encoded).decode("utf-16le")
-
-        self.assertEqual(decoded, script)
-        self.assertIn("$processName = 'tze_hud_pr650*'", decoded)
-
-    def test_windows_resource_sampler_uses_noninteractive_powershell(self) -> None:
-        args = Namespace(
-            sample_windows_resources=True,
-            win_user="hud-user",
-            win_host="windows-host.example",
-            ssh_identity="",
-            windows_process_name="tze_hud*",
-            windows_process_command_match="",
-        )
-
-        with mock.patch.object(widget_soak_runner.subprocess, "run") as run:
-            run.return_value.returncode = 0
-            run.return_value.stdout = json.dumps({"process_count": 0})
-            run.return_value.stderr = ""
-
-            result = widget_soak_runner.sample_windows_resources(args, "before")
-
-        self.assertTrue(result["ok"], result)
-        command = run.call_args.args[0]
-        powershell_command = command[-1]
-        self.assertIn("-NonInteractive", powershell_command)
-        self.assertIn("-EncodedCommand", powershell_command)
+        self.assertEqual(summary["resource_samples"], [])
+        self.assertIsNone(summary["resource_drift"])
+        self.assertEqual(summary["resource_metrics"]["status"], "unavailable")
+        self.assertTrue(summary["resource_metrics"]["reason"])
 
 
 if __name__ == "__main__":

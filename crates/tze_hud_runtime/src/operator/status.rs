@@ -143,6 +143,34 @@ pub fn report_outcome(
     }
 }
 
+/// Native overlay observations, sampled on demand rather than per frame.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct OverlayWindowState {
+    pub visible: bool,
+    pub iconic: bool,
+    pub topmost: bool,
+    /// `None` when DWM cannot report its state.
+    pub cloaked: Option<bool>,
+}
+
+impl OverlayWindowState {
+    #[cfg(any(target_os = "windows", test))]
+    pub(crate) fn needs_reassert(self) -> bool {
+        !self.visible || self.iconic || !self.topmost || self.cloaked == Some(true)
+    }
+}
+
+type WindowStateProbe =
+    Arc<dyn Fn() -> std::collections::HashMap<String, OverlayWindowState> + Send + Sync>;
+static WINDOW_STATE_PROBE: Mutex<Option<WindowStateProbe>> = Mutex::new(None);
+
+/// The window thread installs a probe holding weak window references. The HTTP
+/// thread only reads native state; any repair is queued back to the window thread.
+#[cfg(target_os = "windows")]
+pub(crate) fn set_window_state_probe(probe: WindowStateProbe) {
+    *WINDOW_STATE_PROBE.lock().unwrap_or_else(|e| e.into_inner()) = Some(probe);
+}
+
 /// One overlaid display for `/admin/status`; its list index is the
 /// `/admin/screenshot?display=<i>` index (0 = primary).
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
@@ -156,6 +184,8 @@ pub struct DisplayStatus {
     pub primary: bool,
     /// Zones configured onto this display (`[displays.<NAME>]`).
     pub zones: Vec<String>,
+    /// Null outside Windows, or when the native window is unavailable.
+    pub window_state: Option<OverlayWindowState>,
 }
 
 /// A configured zone placement (`[displays.<NAME>]`) that has no overlay
@@ -198,8 +228,18 @@ pub fn display_name(index: usize) -> Option<String> {
 }
 
 fn displays_json() -> (Value, Value) {
-    let guard = DISPLAYS.lock().unwrap_or_else(|e| e.into_inner());
-    (json!(guard.0), json!(guard.1))
+    let (mut displays, unplaced) = DISPLAYS.lock().unwrap_or_else(|e| e.into_inner()).clone();
+    let probe = WINDOW_STATE_PROBE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .clone();
+    if let Some(probe) = probe {
+        let states = probe();
+        for display in &mut displays {
+            display.window_state = states.get(&display.name).copied();
+        }
+    }
+    (json!(displays), json!(unplaced))
 }
 
 /// `role`'s recorded outcome, `NotApplicable` until one is set.

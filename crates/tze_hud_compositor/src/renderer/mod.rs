@@ -700,8 +700,11 @@ pub(crate) struct EncodeSources {
     pub(crate) rr_content: Vec<RoundedRectDrawCmd>,
     pub(crate) rr_post: Vec<RoundedRectDrawCmd>,
     pub(crate) text_items: Vec<TextItem>,
-    /// System card text (primary display only).
+    /// System card text (primary display only), led by the closed panel
+    /// notice's text.
     pub(crate) card_items: Vec<TextItem>,
+    /// How many leading `card_items` are the closed panel notice's.
+    pub(crate) notice_items: usize,
 }
 
 /// The borrowed geometry plan consumed by the actual GPU encoder.
@@ -2471,10 +2474,10 @@ impl Compositor {
         } else {
             vec![]
         };
-        let card_items = if has_text_rasterizer {
+        let (card_items, notice_items) = if has_text_rasterizer {
             self.final_chrome_text_items(sw, sh)
         } else {
-            vec![]
+            (vec![], 0)
         };
         EncodeSources {
             rr_background,
@@ -2482,6 +2485,7 @@ impl Compositor {
             rr_post,
             text_items,
             card_items,
+            notice_items,
         }
     }
 
@@ -2901,15 +2905,10 @@ fn collect_subtree_node_ids(scene: &SceneGraph, node_id: SceneId, out: &mut Hash
 /// Returns (width, height) in pixels. Returns (0, 0) if the geometry cannot be
 /// resolved (e.g., zero-sized surface or unrecognized policy).
 pub(super) fn resolve_widget_pixel_size(
-    instance: &WidgetInstance,
-    def: &WidgetDefinition,
+    geo: &GeometryPolicy,
     surf_w: u32,
     surf_h: u32,
 ) -> (u32, u32) {
-    let geo = instance
-        .geometry_override
-        .as_ref()
-        .unwrap_or(&def.default_geometry_policy);
     let sw = surf_w as f32;
     let sh = surf_h as f32;
     let (w, h) = match geo {

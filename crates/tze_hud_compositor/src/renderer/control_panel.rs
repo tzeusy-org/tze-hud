@@ -2021,17 +2021,23 @@ impl Compositor {
     }
 
     /// Rounded shapes of the final chrome pass, in `gpu_color` form: the
-    /// panel's while it is open, else its notice pill (if any).
+    /// panel's while it is open, else its notice pill (if any). The count is
+    /// how many leading shapes are the notice's, which the admin capture
+    /// leaves out.
     pub(super) fn final_chrome_rounded_rects(
         &mut self,
         sw: f32,
         sh: f32,
-    ) -> Vec<RoundedRectDrawCmd> {
-        let shapes = match self.ensure_control_panel_layout(sw, sh) {
-            Some(layout) => layout.shapes.clone(),
-            None => self.closed_notice_draw(sw, sh).0,
+    ) -> (Vec<RoundedRectDrawCmd>, usize) {
+        let (shapes, notice) = match self.ensure_control_panel_layout(sw, sh) {
+            Some(layout) => (layout.shapes.clone(), 0),
+            None => {
+                let shapes = self.closed_notice_draw(sw, sh).0;
+                let notice = shapes.len();
+                (shapes, notice)
+            }
         };
-        shapes
+        let cmds = shapes
             .iter()
             .map(|shape| RoundedRectDrawCmd {
                 x: shape.rect.x,
@@ -2051,20 +2057,25 @@ impl Compositor {
                     height: c.h,
                 }),
             })
-            .collect()
+            .collect();
+        (cmds, notice)
     }
 
     /// Text of the final chrome pass: the panel's while it is open, else the
-    /// panel notice's and the system card's.
-    pub(super) fn final_chrome_text_items(&mut self, sw: f32, sh: f32) -> Vec<TextItem> {
+    /// panel notice's and the system card's. The count is how many leading
+    /// items belong to the notice, which the admin capture leaves out.
+    pub(super) fn final_chrome_text_items(&mut self, sw: f32, sh: f32) -> (Vec<TextItem>, usize) {
         if self.control_panel.is_none() {
             let mut items = self.closed_notice_draw(sw, sh).1;
+            let notice = items.len();
             items.extend(self.system_card_text_items(sw, sh));
-            return items;
+            return (items, notice);
         }
-        self.ensure_control_panel_layout(sw, sh)
+        let items = self
+            .ensure_control_panel_layout(sw, sh)
             .map(|layout| layout.texts.clone())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        (items, 0)
     }
 }
 

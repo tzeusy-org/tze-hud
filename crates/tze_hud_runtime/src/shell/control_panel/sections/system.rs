@@ -9,6 +9,7 @@ use tze_hud_compositor::{PanelBadge, PanelTone};
 
 use super::super::row::{BoxFuture, Control, Edit, Row, Section};
 use super::super::runtime::RuntimeControl;
+use crate::launch::Source;
 use crate::operator::handoff::RestartError;
 use crate::operator::status::build_label;
 use crate::operator::update::Outcome;
@@ -24,12 +25,75 @@ pub(crate) struct SystemSection {
     checked: Mutex<Option<std::time::Instant>>,
 }
 
+/// What this instance was launched with and cannot change while it runs: the
+/// display profile (`[runtime].profile`, which config must set) and the
+/// window. Each names where its value came from; change them in the config
+/// file or the launch arguments, then restart.
+fn launch_rows(control: &RuntimeControl) -> Vec<Row> {
+    let mut rows = Vec::new();
+    if let Some(profile) = &control.profile {
+        rows.push(
+            Row::new(
+                SystemSection::PROFILE,
+                "Display profile",
+                Control::ReadOnly {
+                    text: profile.clone(),
+                    mono: true,
+                },
+            )
+            .detail(Source::Config.describe())
+            .keywords(&["profile", "runtime.profile", "budget"]),
+        );
+    }
+    let sources = control.sources();
+    // A size names its source only where the window uses it.
+    let size = if control.window_sized {
+        [sources.window_width, sources.window_height]
+    } else {
+        [Source::Default; 2]
+    };
+    let pinned: Vec<String> = [sources.window_mode]
+        .into_iter()
+        .chain(size)
+        .filter(|s| s.is_pinned())
+        .map(Source::describe)
+        .collect();
+    let source = if pinned.is_empty() {
+        Source::Default.describe()
+    } else {
+        pinned.join(" · ")
+    };
+    rows.push(
+        Row::new(
+            SystemSection::WINDOW,
+            "Window",
+            Control::ReadOnly {
+                text: control.window.clone(),
+                mono: false,
+            },
+        )
+        .detail(source)
+        .keywords(&[
+            "window",
+            "mode",
+            "overlay",
+            "fullscreen",
+            "size",
+            "width",
+            "height",
+        ]),
+    );
+    rows
+}
+
 impl SystemSection {
     pub(crate) const RESTART: &'static str = "system.restart";
     pub(crate) const UPDATE: &'static str = "system.update";
     pub(crate) const AUTOSTART: &'static str = "system.autostart";
     pub(crate) const OPEN_CONFIG: &'static str = "system.open_config";
     pub(crate) const OPEN_LOGS: &'static str = "system.open_logs";
+    pub(crate) const PROFILE: &'static str = "system.profile";
+    pub(crate) const WINDOW: &'static str = "system.window";
 
     pub(crate) fn new(control: Option<RuntimeControl>) -> Self {
         Self {
@@ -143,6 +207,7 @@ impl SystemSection {
             .detail(control.log_dir.display().to_string())
             .keywords(&["logs", "log", "folder", "diagnostics"]),
         );
+        rows.extend(launch_rows(control));
         rows
     }
 
@@ -250,5 +315,76 @@ impl Section for SystemSection {
                 .unwrap_or_else(|e| Err(e.to_string()));
             *self.autostart.lock().unwrap_or_else(|e| e.into_inner()) = Some(state);
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::{Arc, Mutex};
+
+    use super::*;
+    use crate::shell::control_panel::runtime::tests::fake;
+
+    fn launch(control: &RuntimeControl) -> Vec<(String, String, Option<String>)> {
+        launch_rows(control)
+            .into_iter()
+            .map(|row| {
+                let Control::ReadOnly { text, .. } = row.control else {
+                    panic!("{} is read-only", row.id)
+                };
+                (row.id.to_string(), text, row.detail)
+            })
+            .collect()
+    }
+
+    /// The profile and the window show read-only, each with where its value
+    /// came from (CP: every launch tunable is visible).
+    #[test]
+    fn launch_rows_show_profile_and_window_with_their_source() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut control = fake(
+            &dir.path().join("tze_hud.toml"),
+            Arc::new(Mutex::new(Vec::new())),
+            None,
+        );
+        assert_eq!(
+            launch(&control),
+            [
+                (
+                    "system.profile".into(),
+                    "full-display".into(),
+                    Some("Saved to config".into())
+                ),
+                (
+                    "system.window".into(),
+                    "Fullscreen".into(),
+                    Some("Default".into())
+                ),
+            ]
+        );
+
+        {
+            let mut sources = control.sources.lock().unwrap();
+            sources.window_mode = Source::Flag("--window-mode");
+            sources.window_width = Source::Env("TZE_HUD_WINDOW_WIDTH");
+            sources.window_height = Source::Flag("--height");
+        }
+        assert_eq!(
+            launch(&control)[1].2.as_deref(),
+            Some("Set by --window-mode"),
+            "fullscreen ignores the size, so its sources go unnamed"
+        );
+        control.window = "Overlay · 1280×720".into();
+        control.window_sized = true;
+        control.profile = None;
+        assert_eq!(
+            launch(&control),
+            [(
+                "system.window".into(),
+                "Overlay · 1280×720".into(),
+                Some("Set by --window-mode · Set by TZE_HUD_WINDOW_WIDTH · Set by --height".into())
+            )],
+            "no profile in config: no row rather than a guess"
+        );
     }
 }

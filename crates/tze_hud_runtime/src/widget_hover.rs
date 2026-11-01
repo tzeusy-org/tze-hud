@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use tze_hud_scene::graph::SceneGraph;
-use tze_hud_scene::types::{DisplayEdge, GeometryPolicy, WidgetDefinition, WidgetInstance};
+use tze_hud_scene::types::{DisplayEdge, GeometryPolicy};
 
 use crate::window::HitRegion;
 
@@ -78,7 +78,10 @@ pub fn build_hover_trackers(
             continue;
         };
 
-        let Some((x, y, w, h)) = resolve_widget_geometry(instance, definition, surf_w, surf_h)
+        let Some((x, y, w, h)) = scene
+            .widget_registry
+            .drawn_geometry(instance)
+            .and_then(|g| resolve_widget_geometry(&g, surf_w, surf_h))
         else {
             continue;
         };
@@ -166,15 +169,10 @@ pub fn next_hover_deadline(trackers: &HashMap<String, WidgetHoverTracker>) -> Op
 }
 
 fn resolve_widget_geometry(
-    instance: &WidgetInstance,
-    definition: &WidgetDefinition,
+    policy: &GeometryPolicy,
     surf_w: f32,
     surf_h: f32,
 ) -> Option<(f32, f32, f32, f32)> {
-    let policy = instance
-        .geometry_override
-        .as_ref()
-        .unwrap_or(&definition.default_geometry_policy);
     let (x, y, w, h) = match policy {
         GeometryPolicy::Relative {
             x_pct,
@@ -326,6 +324,28 @@ mod tests {
         );
         assert_eq!(third.len(), 1, "must hide on leave");
         assert_eq!(third[0].value, 0.0);
+    }
+
+    /// Hover follows the widget as zoom draws it (`drawn_geometry`).
+    #[test]
+    fn hover_regions_follow_zoom() {
+        let mut scene = build_test_scene();
+        let region = |scene: &SceneGraph| {
+            build_hover_trackers(scene, 1920.0, 1080.0, &HashMap::new())["main-status"]
+                .region
+                .clone()
+        };
+        let one = region(&scene);
+        scene.widget_registry.zoom = 1.5;
+        let zoomed = region(&scene);
+        assert!(
+            (zoomed.width - one.width * 1.5).abs() < 0.01,
+            "{one:?} -> {zoomed:?}"
+        );
+        assert!(
+            (zoomed.height - one.height * 1.5).abs() < 0.01,
+            "{one:?} -> {zoomed:?}"
+        );
     }
 
     #[test]

@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import base64
 import datetime as dt
 import json
 import os
@@ -29,7 +28,7 @@ REQUIRED_INPUT_BUCKETS = (
     "input_to_scene_commit",
     "input_to_next_present",
 )
-DEFAULT_WINDOWS_PROCESS_NAME = "tze_hud*"
+RESOURCE_METRICS_UNAVAILABLE = "Host CPU, memory and GPU sampling is not supported by this tool."
 
 
 def utc_now_iso() -> str:
@@ -50,96 +49,6 @@ def parse_agents(raw: str) -> list[str]:
 def binary_path(root: Path) -> Path:
     suffix = ".exe" if os.name == "nt" else ""
     return root / "target" / "release" / f"widget_publish_load_harness{suffix}"
-
-
-def powershell_single_quote(value: str) -> str:
-    return "'" + value.replace("'", "''") + "'"
-
-
-def encode_powershell_command(script: str) -> str:
-    return base64.b64encode(script.encode("utf-16le")).decode("ascii")
-
-
-def windows_resource_sample_script(
-    *,
-    label: str,
-    process_name: str,
-    command_match: str,
-) -> str:
-    label_literal = powershell_single_quote(label)
-    process_name_literal = powershell_single_quote(process_name)
-    command_match_literal = powershell_single_quote(command_match)
-    return f"""
-$processName = {process_name_literal}
-$commandMatch = {command_match_literal}
-$candidates = @(Get-CimInstance Win32_Process -ErrorAction SilentlyContinue | Where-Object {{
-    $_.Name -like $processName -and (
-        [string]::IsNullOrWhiteSpace($commandMatch) -or
-        ([string]$_.CommandLine).IndexOf($commandMatch, [System.StringComparison]::OrdinalIgnoreCase) -ge 0
-    )
-}})
-$ids = @($candidates | ForEach-Object {{ [int]$_.ProcessId }})
-$p = @($ids | ForEach-Object {{ Get-Process -Id $_ -ErrorAction SilentlyContinue }})
-$gpu = $null
-try {{
-    $gpu = (nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader,nounits 2>$null | Select-Object -First 1)
-}} catch {{}}
-[pscustomobject]@{{
-    label = {label_literal}
-    timestamp_utc = (Get-Date).ToUniversalTime().ToString('o')
-    process_name_filter = $processName
-    command_match_applied = -not [string]::IsNullOrWhiteSpace($commandMatch)
-    process_count = ($p | Measure-Object).Count
-    process_ids = @($p | ForEach-Object {{ $_.Id }})
-    process_names = @($p | ForEach-Object {{ $_.ProcessName }})
-    cpu_seconds_total = ($p | Measure-Object CPU -Sum).Sum
-    working_set_bytes_total = ($p | Measure-Object WorkingSet64 -Sum).Sum
-    private_memory_bytes_total = ($p | Measure-Object PrivateMemorySize64 -Sum).Sum
-    gpu_csv = $gpu
-}} | ConvertTo-Json -Compress
-""".strip()
-
-
-def sample_windows_resources(args: argparse.Namespace, label: str) -> dict[str, Any]:
-    if not args.sample_windows_resources:
-        return {"enabled": False, "label": label}
-
-    ssh_target = f"{args.win_user}@{args.win_host}"
-    script = windows_resource_sample_script(
-        label=label,
-        process_name=getattr(args, "windows_process_name", DEFAULT_WINDOWS_PROCESS_NAME),
-        command_match=getattr(args, "windows_process_command_match", ""),
-    )
-    cmd = [
-        "ssh",
-        "-o",
-        "BatchMode=yes",
-    ]
-    if args.ssh_identity:
-        cmd.extend(["-i", args.ssh_identity])
-    cmd.extend(
-        [
-            ssh_target,
-            "powershell -NoProfile -NonInteractive -ExecutionPolicy Bypass "
-            f"-EncodedCommand {encode_powershell_command(script)}",
-        ]
-    )
-    try:
-        result = subprocess.run(cmd, check=False, capture_output=True, text=True, timeout=30)
-        if result.returncode != 0:
-            return {
-                "enabled": True,
-                "label": label,
-                "ok": False,
-                "returncode": result.returncode,
-                "stderr": result.stderr.strip(),
-            }
-        parsed = json.loads(result.stdout)
-        parsed["enabled"] = True
-        parsed["ok"] = True
-        return parsed
-    except Exception as exc:  # noqa: BLE001
-        return {"enabled": True, "label": label, "ok": False, "error": str(exc)}
 
 
 def build_harness(root: Path, skip_build: bool) -> Path:
@@ -442,26 +351,6 @@ def copy_local_live_metrics_artifact(path: Path, output_root: Path) -> Path:
     return dest
 
 
-def fetch_windows_live_metrics(args: argparse.Namespace, output_root: Path) -> Path | None:
-    if not args.windows_live_metrics_path:
-        return None
-
-    dest = output_root / LIVE_METRICS_COPY_NAME
-    ssh_target = f"{args.win_user}@{args.win_host}"
-    remote_path = args.windows_live_metrics_path.replace("\\", "/")
-    remote = f"{ssh_target}:{remote_path}"
-    cmd = [
-        "scp",
-        "-o",
-        "BatchMode=yes",
-    ]
-    if args.ssh_identity:
-        cmd.extend(["-i", args.ssh_identity])
-    cmd.extend([remote, str(dest)])
-    subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=60)
-    return dest
-
-
 def resolve_live_metrics(
     *,
     args: argparse.Namespace,
@@ -476,12 +365,12 @@ def resolve_live_metrics(
     }
     if dry_run:
         result["collection"] = "dry_run"
-        result["expected_artifact"] = args.live_metrics_artifact or args.windows_live_metrics_path
+        result["expected_artifact"] = args.live_metrics_artifact
         return result
 
     try:
-        source_path = fetch_windows_live_metrics(args, output_root)
-        if source_path is None and args.live_metrics_artifact:
+        source_path = None
+        if args.live_metrics_artifact:
             source_path = copy_local_live_metrics_artifact(
                 Path(args.live_metrics_artifact), output_root
             )
@@ -489,7 +378,7 @@ def resolve_live_metrics(
             result.update(
                 {
                     "collection": "missing_source",
-                    "error": "no --live-metrics-artifact or --windows-live-metrics-path was provided",
+                    "error": "no --live-metrics-artifact was provided",
                 }
             )
             return result
@@ -553,20 +442,6 @@ def summarize(
             "returncode": artifact.get("returncode"),
         }
 
-    drift = None
-    ok_samples = [s for s in resource_samples if s.get("ok")]
-    if len(ok_samples) >= 2:
-        first = ok_samples[0]
-        last = ok_samples[-1]
-        drift = {
-            "working_set_bytes_delta": (last.get("working_set_bytes_total") or 0)
-            - (first.get("working_set_bytes_total") or 0),
-            "private_memory_bytes_delta": (last.get("private_memory_bytes_total") or 0)
-            - (first.get("private_memory_bytes_total") or 0),
-            "cpu_seconds_delta": (last.get("cpu_seconds_total") or 0)
-            - (first.get("cpu_seconds_total") or 0),
-        }
-
     return {
         "schema_version": 1,
         "kind": "widget_publish_three_agent_soak",
@@ -589,7 +464,8 @@ def summarize(
         "metrics_by_agent": metrics_by_agent,
         "live_metrics": live_metrics,
         "resource_samples": resource_samples,
-        "resource_drift": drift,
+        "resource_drift": None,
+        "resource_metrics": {"status": "unavailable", "reason": RESOURCE_METRICS_UNAVAILABLE},
         "commands": {
             agent_id: [repo_relative_path(part, root) for part in command]
             for agent_id, command in commands.items()
@@ -630,44 +506,16 @@ def main() -> int:
         help="Local JSON artifact containing live compositor frame/input metrics to embed in soak_summary.json.",
     )
     parser.add_argument(
-        "--windows-live-metrics-path",
-        default="",
-        help="Remote Windows JSON artifact path to copy into the soak output and parse after the run.",
-    )
-    parser.add_argument(
         "--allow-missing-live-metrics",
         action="store_true",
         help="Do not fail a real soak when live frame/input metrics cannot be collected.",
     )
-    parser.add_argument("--sample-windows-resources", action="store_true")
-    parser.add_argument(
-        "--windows-process-name",
-        default=DEFAULT_WINDOWS_PROCESS_NAME,
-        help=(
-            "PowerShell wildcard used to select HUD processes for resource sampling. "
-            "Defaults to tze_hud* so production and isolated benchmark executables match."
-        ),
-    )
-    parser.add_argument(
-        "--windows-process-command-match",
-        default="",
-        help=(
-            "Optional case-insensitive command-line substring required for Windows resource "
-            "sampling, for example C:\\tze_hud\\benchmark.toml."
-        ),
-    )
-    parser.add_argument("--resource-sample-interval-s", type=float, default=300.0)
-    parser.add_argument("--win-user", default="hud-user")
-    parser.add_argument("--win-host", default="windows-host.example")
-    parser.add_argument("--ssh-identity", default="")
     args = parser.parse_args()
 
     if args.duration_s <= 0:
         raise SystemExit("--duration-s must be > 0")
     if args.rate_rps <= 0:
         raise SystemExit("--rate-rps must be > 0")
-    if args.resource_sample_interval_s < 0:
-        raise SystemExit("--resource-sample-interval-s must be >= 0")
 
     agents = parse_agents(args.agent_ids)
     root = repo_root()
@@ -733,7 +581,7 @@ def main() -> int:
         for agent_id in agents
     }
 
-    resource_samples = [sample_windows_resources(args, "before")]
+    print(f"Host telemetry unavailable: {RESOURCE_METRICS_UNAVAILABLE}")
     processes: dict[str, subprocess.Popen[Any]] = {}
     log_handles: list[Any] = []
     interrupted = False
@@ -749,20 +597,8 @@ def main() -> int:
             log_handles.remove(stdout)
             log_handles.remove(stderr)
 
-        next_resource_sample = (
-            time.monotonic() + args.resource_sample_interval_s
-            if args.sample_windows_resources and args.resource_sample_interval_s > 0
-            else None
-        )
-        resource_sample_index = 1
         while any(proc.poll() is None for proc in processes.values()):
             time.sleep(2.0)
-            if next_resource_sample is not None and time.monotonic() >= next_resource_sample:
-                resource_samples.append(
-                    sample_windows_resources(args, f"during-{resource_sample_index}")
-                )
-                resource_sample_index += 1
-                next_resource_sample += args.resource_sample_interval_s
     except KeyboardInterrupt:
         interrupted = True
         for proc in processes.values():
@@ -784,7 +620,6 @@ def main() -> int:
                     proc.kill()
                     proc.wait(timeout=10)
 
-    resource_samples.append(sample_windows_resources(args, "after"))
     live_metrics = resolve_live_metrics(args=args, output_root=output_root, dry_run=False)
     agent_results: dict[str, dict[str, Any]] = {}
     exit_code = 0
@@ -815,7 +650,7 @@ def main() -> int:
         output_root=output_root,
         commands=commands,
         agent_results=agent_results,
-        resource_samples=resource_samples,
+        resource_samples=[],
         live_metrics=live_metrics,
         dry_run=False,
     )
