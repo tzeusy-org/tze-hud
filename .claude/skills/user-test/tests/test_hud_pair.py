@@ -188,6 +188,10 @@ class AdapterProcess:
     def __init__(self, home, *, host=None, config=".mcp.json", short=None, stall=None):
         project = SCRIPTS.parents[3]
         self.home = home
+        self.short = short
+        self.ready_complete = False
+        self.short_deadline_marker = home / "enable-short-request-deadline"
+        self.short_deadline_marker.unlink(missing_ok=True)
         self.env = {**os.environ, "HOME": str(home), "CLAUDE_PROJECT_DIR": str(project)}
         self.env.pop("HUD_HOST", None)
         if host is not None:
@@ -195,9 +199,24 @@ class AdapterProcess:
         entry = json.loads((project / config).read_text())["mcpServers"]["tze-hud"]
         command = [entry["command"], *entry["args"]]
         if short is not None or stall is not None:
-            inject = {k: v for k, v in {"REQUEST_SECONDS": short, "OUTPUT_STALL_SECONDS": stall}.items() if v is not None}
-            code = ("import runpy,sys; m=runpy.run_path(sys.argv[1],run_name='adapter_fixture'); "
-                    f"m['main'].__globals__.update({inject!r}); sys.argv=sys.argv[:1]; raise SystemExit(m['main']())")
+            inject = {"OUTPUT_STALL_SECONDS": stall} if stall is not None else {}
+            code_lines = [
+                "import os,runpy,sys",
+                "m=runpy.run_path(sys.argv[1],run_name='adapter_fixture')",
+                f"m['main'].__globals__.update({inject!r})",
+            ]
+            if short is not None:
+                code_lines.extend([
+                    f"marker={str(self.short_deadline_marker)!r}",
+                    "original_frames=m['Adapter'].frames",
+                    "def apply_short_deadline(self):",
+                    "    if os.path.exists(marker):",
+                    f"        m['main'].__globals__['REQUEST_SECONDS']={short!r}",
+                    "    return original_frames(self)",
+                    "m['Adapter'].frames=apply_short_deadline",
+                ])
+            code_lines.extend(["sys.argv=sys.argv[:1]", "raise SystemExit(m['main']())"])
+            code = "\n".join(code_lines)
             command = [sys.executable, "-u", "-c", code, str(SCRIPTS / "hud_mcp_stdio.py")]
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                         env=self.env, bufsize=0, start_new_session=True)
@@ -263,7 +282,13 @@ class AdapterProcess:
         self.send("notifications/initialized")
         self.send("ping", 2)
         assert self.receive() == {"jsonrpc": "2.0", "id": 2, "result": {}}
+        self.ready_complete = True
         return result
+
+    def enable_short_request_deadline(self):
+        assert self.short is not None
+        assert self.ready_complete, "adapter must finish readiness before shortening its request deadline"
+        self.short_deadline_marker.touch()
 
     def stop(self, sig=None):
         self.sample()
@@ -1005,9 +1030,10 @@ def test_mcp_headers_needs_a_bare_host(hud, monkeypatch):
     FakeHud.release = threading.Event()
     FakeHud.modes[60] = "trickle"
     # The production 60s admission/expiry is exercised by the clock above.
-    # Use the same loop with a short private budget for real HTTP/worker cleanup.
+    # Let normal readiness finish before shortening the private request budget.
     with AdapterProcess(home, short=0.3) as adapter:
         adapter.ready()
+        adapter.enable_short_request_deadline()
         adapter.send("ping", 60)
         wait_request(60)
         adapter.sample()
