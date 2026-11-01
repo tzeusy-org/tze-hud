@@ -133,7 +133,7 @@ impl AgentsFile {
                     errors.push(ConfigError {
                         code: ConfigErrorCode::UnknownAllowEntry,
                         field_path: format!("agents.{agent_id}.allow"),
-                        expected: "zone:<name|*>, widget:<name|*>, portal, tiles, or *".into(),
+                        expected: "zone:<name|*>, widget:<name|*>, portal, admin, or *".into(),
                         got: entry.clone(),
                         hint,
                     });
@@ -451,7 +451,7 @@ mod tests {
             &path,
             format!(
                 "# my agents\n[agents.a] # laptop\npsk_sha256 = \"{hash}\"\nallow = [\"*\"] # all\n\n\
-                 [agents.b]\npsk_sha256 = \"{other}\"\nallow = [\"tiles\"]\n"
+                 [agents.b]\npsk_sha256 = \"{other}\"\nallow = [\"portal\"]\n"
             ),
         )
         .unwrap();
