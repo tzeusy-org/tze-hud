@@ -678,6 +678,64 @@ mod panel_task_tests {
         );
     }
 
+    /// When Windows refuses the panel keyboard focus the header says so, and
+    /// the chords still close it and resume (CP-1).
+    #[tokio::test(flavor = "multi_thread")]
+    async fn refused_focus_shows_a_notice_and_chords_still_work() {
+        let f = fixture();
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Pause), |f| {
+            f.panel.is_open() && f.paused()
+        })
+        .await;
+        assert_eq!(f.model().unwrap().notice, None);
+        f.send_and_wait(PanelEvent::WindowFocus(false), |f| {
+            f.model().is_some_and(|m| m.notice.is_some())
+        })
+        .await;
+        assert_eq!(
+            f.model().unwrap().notice.as_deref(),
+            Some("Click the panel to type · chords still work")
+        );
+        f.send_and_wait(PanelEvent::WindowFocus(true), |f| {
+            f.model().is_some_and(|m| m.notice.is_none())
+        })
+        .await;
+        f.send_and_wait(PanelEvent::WindowFocus(false), |f| {
+            f.model().is_some_and(|m| m.notice.is_some())
+        })
+        .await;
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Pause), |f| {
+            !f.panel.is_open() && !f.paused()
+        })
+        .await;
+    }
+
+    /// An open, idle panel re-reads its sections once a second but wakes the
+    /// compositor only when something changed: several refresh ticks with
+    /// nothing new draw nothing (CP-11).
+    #[tokio::test(start_paused = true)]
+    async fn an_idle_open_panel_does_not_wake_on_refresh_ticks() {
+        let f = fixture();
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Panel), |f| f.panel.is_open())
+            .await;
+        // Let the first ticks and the opening rebuild settle.
+        tokio::time::sleep(Duration::from_millis(2_500)).await;
+        let wakes = f.wakes.load(Ordering::SeqCst);
+        // Paused time: this sleep runs five refresh intervals.
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        assert_eq!(
+            f.wakes.load(Ordering::SeqCst),
+            wakes,
+            "refresh ticks with nothing new wake nothing"
+        );
+        // The panel is still live: a real change still wakes it.
+        f.send_and_wait(PanelEvent::Text("p".into()), |f| {
+            f.model().is_some_and(|m| m.query == "p")
+        })
+        .await;
+        assert!(f.wakes.load(Ordering::SeqCst) > wakes);
+    }
+
     /// The winit-side routing: while the panel is open it owns every key
     /// (typed text searches, Esc closes) and the pointer inside it; a click
     /// is press and release on the same target; outside the panel the

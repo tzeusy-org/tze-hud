@@ -94,7 +94,9 @@ Windows held-press/release acceptance remains separate.
   runtime, never the winit loop or an agent)
   [`pause_chord_pauses_opens_and_second_press_resumes_and_closes`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
   [`panel_chord_opens_running_and_escape_closes_and_resumes`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
-  [`winit_routing_keys_and_pointer_reach_the_open_panel_only`](../crates/tze_hud_runtime/src/windowed/panel_input.rs);
+  [`winit_routing_keys_and_pointer_reach_the_open_panel_only`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
+  [`refused_focus_shows_a_notice_and_chords_still_work`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
+  [`an_idle_open_panel_does_not_wake_on_refresh_ticks`](../crates/tze_hud_runtime/src/windowed/panel_input.rs);
   agents never see the panel:
   `tze_hud_compositor` [`panel_draws_over_the_frame_and_capture_leaves_it_out`](../crates/tze_hud_compositor/src/renderer/tests/control_panel.rs),
   [`capture_leaves_the_closed_notice_out`](../crates/tze_hud_compositor/src/renderer/tests/control_panel.rs)
