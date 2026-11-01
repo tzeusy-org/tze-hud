@@ -88,11 +88,128 @@ trait AddressChanges {
 /// failed startup/handoff binds. `bound` contains successful listeners only.
 /// Register before taking the first snapshot so startup changes cannot be lost.
 /// No timer is armed when all current addresses are served (or none exist).
-pub async fn watch_for_tailnet(bound: Vec<IpAddr>, bind: impl FnMut(IpAddr) -> bool) {
+pub(crate) async fn watch_for_tailnet(
+    bound: Vec<IpAddr>,
+    bind: impl FnMut(IpAddr) -> bool,
+    #[cfg(test)] fixture: Option<TailnetFixture>,
+) {
+    #[cfg(test)]
+    if let Some(mut fixture) = fixture {
+        let snapshot = fixture.addresses.clone();
+        let bound = bound.into_iter().chain(fixture.already_bound).collect();
+        maintain_tailnet_listeners(
+            bound,
+            &mut fixture.addresses,
+            || snapshot.borrow().clone(),
+            bind,
+        )
+        .await;
+        return;
+    }
     match address_changes::Notifications::new() {
         Ok(mut changes) => maintain_tailnet_listeners(bound, &mut changes, local_ips, bind).await,
         Err(e) => tracing::error!(error = %e, "cannot watch local address changes"),
     }
+}
+
+/// Bind a non-inheritable, nonblocking socket before transport-specific adoption.
+pub(crate) fn bind_listener(
+    addr: SocketAddr,
+    #[cfg(test)] injected: Option<&InjectedBind>,
+) -> std::io::Result<std::net::TcpListener> {
+    #[cfg(test)]
+    if let Some(bind) = injected {
+        let listener = bind(addr)?;
+        listener.set_nonblocking(true)?;
+        return Ok(listener);
+    }
+    let listener = std::net::TcpListener::bind(addr)?;
+    listener.set_nonblocking(true)?;
+    Ok(listener)
+}
+
+#[cfg(test)]
+type InjectedBind =
+    std::sync::Arc<dyn Fn(SocketAddr) -> std::io::Result<std::net::TcpListener> + Send + Sync>;
+
+/// Inject events/outcomes at the actual MCP/gRPC listener-management callers.
+/// Synthetic tailnet addresses map to owned loopback sockets, never live VPN IPs.
+#[cfg(test)]
+pub(crate) struct TailnetFixture {
+    already_bound: Vec<IpAddr>,
+    addresses: tokio::sync::watch::Receiver<Vec<IpAddr>>,
+    pub(crate) bind: InjectedBind,
+}
+
+#[cfg(test)]
+impl AddressChanges for tokio::sync::watch::Receiver<Vec<IpAddr>> {
+    async fn changed(&mut self) -> std::io::Result<()> {
+        tokio::sync::watch::Receiver::changed(self)
+            .await
+            .map_err(std::io::Error::other)
+    }
+}
+
+#[cfg(test)]
+pub(crate) struct TailnetControl {
+    pub(crate) addresses: tokio::sync::watch::Sender<Vec<IpAddr>>,
+    pub(crate) fail: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    attempts: tokio::sync::mpsc::UnboundedReceiver<(IpAddr, Option<SocketAddr>)>,
+    pub(crate) v4: IpAddr,
+    pub(crate) v6: IpAddr,
+}
+
+#[cfg(test)]
+impl TailnetControl {
+    pub(crate) async fn next_attempt(&mut self) -> (IpAddr, Option<SocketAddr>) {
+        tokio::time::timeout(Duration::from_secs(5), self.attempts.recv())
+            .await
+            .expect("listener manager did not consume the address event")
+            .expect("listener manager exited")
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn tailnet_fixture() -> (TailnetFixture, TailnetControl) {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    let v4 = "100.100.1.2".parse().unwrap();
+    let v6 = "fd7a:115c:a1e0::1".parse().unwrap();
+    let (addresses, receiver) = tokio::sync::watch::channel(vec![v4]);
+    let fail = Arc::new(AtomicBool::new(true));
+    let failing = Arc::clone(&fail);
+    let (tx, attempts) = tokio::sync::mpsc::unbounded_channel();
+    let fixture = TailnetFixture {
+        already_bound: vec![v4],
+        addresses: receiver,
+        bind: Arc::new(move |addr| {
+            let result = if failing.load(Ordering::Acquire) {
+                Err(std::io::Error::from(std::io::ErrorKind::AddrNotAvailable))
+            } else {
+                std::net::TcpListener::bind(if addr.is_ipv6() {
+                    "[::1]:0"
+                } else {
+                    "127.0.0.1:0"
+                })
+            };
+            tx.send((
+                addr.ip(),
+                result.as_ref().ok().map(|l| l.local_addr().unwrap()),
+            ))
+            .unwrap();
+            result
+        }),
+    };
+    (
+        fixture,
+        TailnetControl {
+            addresses,
+            fail,
+            attempts,
+            v4,
+            v6,
+        },
+    )
 }
 
 async fn maintain_tailnet_listeners(

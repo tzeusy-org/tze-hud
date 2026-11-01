@@ -103,6 +103,8 @@ pub(super) fn start_network_services_with_render_wake(
         bind_gate,
         #[cfg(test)]
         None,
+        #[cfg(test)]
+        None,
     )
 }
 
@@ -114,6 +116,7 @@ fn start_network_services_on_listener(
     agents: SharedAgents,
     shared_state: Arc<Mutex<SharedState>>,
     runtime_context: SharedRuntimeContext,
+    tailnet_fixture: Option<crate::net_addrs::TailnetFixture>,
 ) -> Result<NetworkServices, Box<dyn std::error::Error>> {
     let grpc_port = listener.local_addr()?.port();
     listener.set_nonblocking(true)?;
@@ -125,10 +128,12 @@ fn start_network_services_on_listener(
         tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         None,
         Some(listener),
+        tailnet_fixture,
     )
 }
 
 #[allow(clippy::type_complexity)]
+#[cfg_attr(test, allow(clippy::too_many_arguments))] // Test-only address source injection.
 fn start_enabled_network_services(
     grpc_port: u16,
     agents: SharedAgents,
@@ -137,6 +142,7 @@ fn start_enabled_network_services(
     render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
     bind_gate: Option<crate::operator::handoff::BindGate>,
     #[cfg(test)] fixture_listener: Option<std::net::TcpListener>,
+    #[cfg(test)] tailnet_fixture: Option<crate::net_addrs::TailnetFixture>,
 ) -> Result<NetworkServices, Box<dyn std::error::Error>> {
     // Build the multi-thread Tokio runtime for network tasks.
     let network_rt = NetworkRuntime::new()
@@ -237,9 +243,15 @@ fn start_enabled_network_services(
                 Err(e) => tracing::error!(error = %e, "gRPC: failed to adopt bound listener into Tokio runtime"),
             }
         }
+        #[cfg(test)]
+        let injected = tailnet_fixture.as_ref().map(|fixture| fixture.bind.clone());
         let watcher = tokio::spawn(watch_for_tailnet(bound, move |ip| {
             let addr = std::net::SocketAddr::new(ip, grpc_port);
-            match bind_nonblocking(addr).and_then(tokio::net::TcpListener::from_std) {
+            match crate::net_addrs::bind_listener(
+                addr,
+                #[cfg(test)]
+                injected.as_ref(),
+            ).and_then(tokio::net::TcpListener::from_std) {
                 Ok(l) => {
                     tracing::info!(addr = %addr, "gRPC listener bound (address change/retry)");
                     tokio::spawn(accept_into(l, conn_tx.clone()));
@@ -250,7 +262,10 @@ fn start_enabled_network_services(
                     false
                 }
             }
-        }));
+        },
+        #[cfg(test)]
+        tailnet_fixture,
+        ));
         tonic::transport::Server::builder()
             .add_service(HudSessionServer::new(service))
             .serve_with_incoming(tokio_stream::wrappers::ReceiverStream::new(conn_rx))
@@ -303,9 +318,11 @@ async fn bind_after_handoff(
 }
 
 fn bind_nonblocking(addr: std::net::SocketAddr) -> std::io::Result<std::net::TcpListener> {
-    let l = std::net::TcpListener::bind(addr)?;
-    l.set_nonblocking(true)?;
-    Ok(l)
+    crate::net_addrs::bind_listener(
+        addr,
+        #[cfg(test)]
+        None,
+    )
 }
 
 /// Accept connections on `listener` and forward them to the gRPC server until
@@ -626,8 +643,14 @@ mod tests {
             _degradation_notices,
             lease_expirations,
             grpc_addrs,
-        ) = start_network_services_on_listener(listener, Default::default(), shared_state, ctx)
-            .expect("start_network_services should not error for a valid port");
+        ) = start_network_services_on_listener(
+            listener,
+            Default::default(),
+            shared_state,
+            ctx,
+            None,
+        )
+        .expect("start_network_services should not error for a valid port");
         assert!(
             rt.is_some(),
             "non-zero grpc_port must create a NetworkRuntime"
@@ -668,9 +691,14 @@ mod tests {
             .expect("failed to allocate ephemeral listener for loopback bind test");
         let shared_state = make_shared_state();
         let ctx: SharedRuntimeContext = Arc::new(RuntimeContext::headless_default());
-        let (rt, handles, _, _, _, _, _, grpc_addrs) =
-            start_network_services_on_listener(listener, Default::default(), shared_state, ctx)
-                .expect("loopback startup must adopt the owned ephemeral listener");
+        let (rt, handles, _, _, _, _, _, grpc_addrs) = start_network_services_on_listener(
+            listener,
+            Default::default(),
+            shared_state,
+            ctx,
+            None,
+        )
+        .expect("loopback startup must adopt the owned ephemeral listener");
         assert!(rt.is_some(), "loopback bind must create a NetworkRuntime");
         assert!(!handles.is_empty(), "loopback bind must spawn task handles");
         rt.as_ref().unwrap().rt.block_on(async {
@@ -693,15 +721,22 @@ mod tests {
         let old = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = old.local_addr().unwrap().port();
         let gate = crate::operator::handoff::BindGate::closed();
-        let (rt, handles, _, _, _, _, _, _) = start_network_services_with_render_wake(
+        let (fixture, mut control) = crate::net_addrs::tailnet_fixture();
+        let (rt, handles, _, _, _, _, _, reported) = start_enabled_network_services(
             port,
             Default::default(),
             make_shared_state(),
             Arc::new(RuntimeContext::headless_default()),
             tze_hud_scene::render_wake::RenderWakeNotifier::default(),
             Some(gate.clone()),
+            None,
+            Some(fixture),
         )
         .expect("deferred start must not need the port");
+        assert!(
+            reported.is_empty(),
+            "planned handoff binds must not be advertised"
+        );
         let reachable = || std::net::TcpStream::connect(("127.0.0.1", port)).is_ok();
         gate.open();
         // Still the old listener's: nothing of ours is accepting yet.
@@ -717,6 +752,50 @@ mod tests {
             );
             std::thread::sleep(std::time::Duration::from_millis(50));
         }
+        rt.as_ref().unwrap().rt.block_on(async {
+            control
+                .addresses
+                .send(vec![control.v4, control.v6])
+                .unwrap();
+            assert_eq!(control.next_attempt().await, (control.v6, None));
+            control
+                .fail
+                .store(false, std::sync::atomic::Ordering::Release);
+            control
+                .addresses
+                .send(vec![control.v4, control.v6])
+                .unwrap();
+            let (requested, late) = control.next_attempt().await;
+            assert_eq!(requested, control.v6);
+            let late = late.expect("late v6 must bind");
+            assert!(late.is_ipv6());
+            let mut client =
+                tze_hud_protocol::proto::session::hud_session_client::HudSessionClient::connect(
+                    format!("http://{late}"),
+                )
+                .await
+                .expect("late v6 must feed the same real gRPC server");
+            let response = client
+                .session(tokio_stream::iter([
+                    tze_hud_protocol::proto::session::ClientMessage::default(),
+                ]))
+                .await
+                .expect("late listener must dispatch the session RPC")
+                .into_inner()
+                .message()
+                .await
+                .unwrap()
+                .unwrap();
+            assert!(
+                matches!(
+                    response.payload,
+                    Some(
+                        tze_hud_protocol::proto::session::server_message::Payload::SessionError(_)
+                    )
+                ),
+                "the real session handler must reject the missing handshake"
+            );
+        });
         for h in handles {
             h.abort();
         }

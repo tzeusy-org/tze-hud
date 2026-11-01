@@ -139,6 +139,31 @@ pub async fn start_mcp_http_server_with_render_wake(
     portal_ingress_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
     safe_mode: Arc<std::sync::atomic::AtomicBool>,
 ) -> std::io::Result<(tokio::task::JoinHandle<()>, Vec<SocketAddr>)> {
+    start_mcp_http_server_inner(
+        scene,
+        config,
+        shutdown,
+        portals,
+        render_wake,
+        portal_ingress_wake,
+        safe_mode,
+        #[cfg(test)]
+        None,
+    )
+    .await
+}
+
+#[cfg_attr(test, allow(clippy::too_many_arguments))] // Test-only address source injection.
+async fn start_mcp_http_server_inner(
+    scene: Arc<Mutex<SceneGraph>>,
+    config: McpServerConfig,
+    shutdown: ShutdownToken,
+    portals: Option<tze_hud_mcp::PortalHandle>,
+    render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
+    portal_ingress_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
+    safe_mode: Arc<std::sync::atomic::AtomicBool>,
+    #[cfg(test)] mut tailnet_fixture: Option<crate::net_addrs::TailnetFixture>,
+) -> std::io::Result<(tokio::task::JoinHandle<()>, Vec<SocketAddr>)> {
     // The first address is loopback and must bind; a Tailscale address that
     // fails to bind is skipped with a warning. A handed-over instance binds
     // later, from the accept task (see `bind_gate`).
@@ -149,10 +174,13 @@ pub async fn start_mcp_http_server_with_render_wake(
             // Bound through std, whose sockets are not inheritable on Windows:
             // a restart's child process must not keep this listening socket
             // (and so the port) alive after this process exits.
-            match std::net::TcpListener::bind(addr).and_then(|l| {
-                l.set_nonblocking(true)?;
-                TcpListener::from_std(l)
-            }) {
+            match crate::net_addrs::bind_listener(
+                *addr,
+                #[cfg(test)]
+                None,
+            )
+            .and_then(TcpListener::from_std)
+            {
                 Ok(l) => listeners.push(l),
                 Err(e) if i == 0 => return Err(e),
                 Err(e) => {
@@ -217,6 +245,8 @@ pub async fn start_mcp_http_server_with_render_wake(
             Arc::clone(&admin),
             shutdown.clone(),
             config.late_tailnet_port,
+            #[cfg(test)]
+            tailnet_fixture.take(),
         )));
     }
     for (listener, addr) in listeners.into_iter().zip(local_addrs.iter().copied()) {
@@ -232,7 +262,14 @@ pub async fn start_mcp_http_server_with_render_wake(
     if config.bind_gate.is_none()
         && let Some(port) = config.late_tailnet_port
     {
-        loops.push(spawn_tailnet_watcher(port, server, admin, shutdown));
+        loops.push(spawn_tailnet_watcher(
+            port,
+            server,
+            admin,
+            shutdown,
+            #[cfg(test)]
+            tailnet_fixture,
+        ));
     }
 
     let handle = tokio::spawn(async move {
@@ -251,8 +288,11 @@ fn spawn_tailnet_watcher(
     server: Arc<McpServer>,
     admin: Arc<StatusSource>,
     shutdown: ShutdownToken,
+    #[cfg(test)] fixture: Option<crate::net_addrs::TailnetFixture>,
 ) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
+        #[cfg(test)]
+        let injected = fixture.as_ref().map(|fixture| fixture.bind.clone());
         let bound = admin
             .binds
             .lock()
@@ -260,37 +300,45 @@ fn spawn_tailnet_watcher(
             .iter()
             .map(|a| a.ip())
             .collect();
-        let watcher = crate::net_addrs::watch_for_tailnet(bound, |ip| {
-            let addr = SocketAddr::new(ip, port);
-            match std::net::TcpListener::bind(addr).and_then(|l| {
-                l.set_nonblocking(true)?;
-                TcpListener::from_std(l)
-            }) {
-                Ok(listener) => {
-                    let local = listener
-                        .local_addr()
-                        .expect("bound listener has an address");
-                    tracing::info!(addr = %local, "MCP HTTP listener bound (address change/retry)");
-                    admin
-                        .binds
-                        .lock()
-                        .unwrap_or_else(|e| e.into_inner())
-                        .push(local);
-                    tokio::spawn(run_accept_loop(
-                        listener,
-                        Arc::clone(&server),
-                        Arc::clone(&admin),
-                        shutdown.clone(),
-                        local,
-                    ));
-                    true
+        let watcher = crate::net_addrs::watch_for_tailnet(
+            bound,
+            |ip| {
+                let addr = SocketAddr::new(ip, port);
+                match crate::net_addrs::bind_listener(
+                    addr,
+                    #[cfg(test)]
+                    injected.as_ref(),
+                )
+                .and_then(TcpListener::from_std)
+                {
+                    Ok(listener) => {
+                        let local = listener
+                            .local_addr()
+                            .expect("bound listener has an address");
+                        tracing::info!(addr = %local, "MCP HTTP listener bound (address change/retry)");
+                        admin
+                            .binds
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .push(local);
+                        tokio::spawn(run_accept_loop(
+                            listener,
+                            Arc::clone(&server),
+                            Arc::clone(&admin),
+                            shutdown.clone(),
+                            local,
+                        ));
+                        true
+                    }
+                    Err(e) => {
+                        tracing::warn!(addr = %addr, error = %e, "MCP HTTP: failed to bind Tailscale address");
+                        false
+                    }
                 }
-                Err(e) => {
-                    tracing::warn!(addr = %addr, error = %e, "MCP HTTP: failed to bind Tailscale address");
-                    false
-                }
-            }
-        });
+            },
+            #[cfg(test)]
+            fixture,
+        );
         tokio::select! {
             _ = watcher => {}
             _ = wait_shutdown(&shutdown) => {}
@@ -309,6 +357,7 @@ async fn run_deferred_listeners(
     admin: Arc<StatusSource>,
     shutdown: ShutdownToken,
     late_tailnet_port: Option<u16>,
+    #[cfg(test)] tailnet_fixture: Option<crate::net_addrs::TailnetFixture>,
 ) {
     use crate::operator::handoff::{BIND_RETRY, retry_bind};
     if !gate.wait().await {
@@ -347,7 +396,14 @@ async fn run_deferred_listeners(
         }
     }
     if let Some(port) = late_tailnet_port {
-        loops.push(spawn_tailnet_watcher(port, server, admin, shutdown));
+        loops.push(spawn_tailnet_watcher(
+            port,
+            server,
+            admin,
+            shutdown,
+            #[cfg(test)]
+            tailnet_fixture,
+        ));
     }
     for l in loops {
         let _ = l.await;
@@ -1266,8 +1322,8 @@ mod tests {
                 "127.0.0.1:0".parse().unwrap(),
                 "127.0.0.2:0".parse().unwrap(),
             ],
-            late_tailnet_port: None,
-            agents: tze_hud_scene::config::AgentDirectory::unrestricted("test-key").shared(),
+            late_tailnet_port: Some(9090),
+            agents: admin_source(std::env::temp_dir().join("no-log")).agents,
             presents: None,
             capture: None,
             restart: None,
@@ -1276,19 +1332,69 @@ mod tests {
             pairing: None,
         };
         let shutdown = ShutdownToken::new();
-        let (handle, addrs) = start_mcp_http_server(make_scene(), config, shutdown.clone(), None)
-            .await
-            .expect("bind");
+        let (fixture, mut control) = crate::net_addrs::tailnet_fixture();
+        let (handle, addrs) = start_mcp_http_server_inner(
+            make_scene(),
+            config,
+            shutdown.clone(),
+            None,
+            tze_hud_scene::render_wake::RenderWakeNotifier::default(),
+            tze_hud_scene::render_wake::RenderWakeNotifier::default(),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            Some(fixture),
+        )
+        .await
+        .expect("bind");
         assert_eq!(addrs.len(), 2);
 
         let body = r#"{"jsonrpc":"2.0","method":"tools/list","params":{},"id":1}"#;
-        for addr in addrs {
-            let resp = http_post(addr, body, Some("test-key")).await;
+        for addr in &addrs {
+            let resp = http_post(*addr, body, Some("root-psk")).await;
             assert!(
                 resp.contains("HTTP/1.1 200") && resp.contains("\"result\""),
                 "tools/list on {addr} failed: {resp}"
             );
         }
+
+        // The production watcher already has v4 in its successful seed. A
+        // later v6 first fails, then recovers on an injected address event.
+        control
+            .addresses
+            .send(vec![control.v4, control.v6])
+            .unwrap();
+        assert_eq!(control.next_attempt().await, (control.v6, None));
+        let status_request = "GET /admin/status HTTP/1.1\r\nAuthorization: Bearer root-psk\r\n\r\n";
+        let status = http_raw(addrs[0], status_request).await;
+        let status: serde_json::Value =
+            serde_json::from_str(status.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(
+            status["binds"].as_array().unwrap().len(),
+            2,
+            "failed late bind advertised"
+        );
+        control
+            .fail
+            .store(false, std::sync::atomic::Ordering::Release);
+        control
+            .addresses
+            .send(vec![control.v4, control.v6])
+            .unwrap();
+        let (requested, late) = control.next_attempt().await;
+        assert_eq!(requested, control.v6);
+        let late = late.expect("late v6 must bind");
+        assert!(late.is_ipv6());
+        let response = http_post(late, body, Some("root-psk")).await;
+        assert!(response.contains("HTTP/1.1 200") && response.contains("hud_publish"));
+        let status = http_raw(late, status_request).await;
+        let status: serde_json::Value =
+            serde_json::from_str(status.split("\r\n\r\n").nth(1).unwrap()).unwrap();
+        assert_eq!(status["binds"].as_array().unwrap().len(), 3);
+        assert!(
+            status["binds"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!(late.to_string()))
+        );
 
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
         handle.await.expect("task");
