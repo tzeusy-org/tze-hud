@@ -119,8 +119,9 @@ including a second Tailscale address family appearing later. Failed Tailscale
 binds (including after restart/update handoff) retry every 10 seconds for the
 first five minutes of listener management, then every 60 seconds, only while
 an address is still local and unbound. There is no steady-state polling timer.
-Status and pairing advertise successful MCP binds; deferred startup advertises
-no listener until its port binds.
+Status advertises successful MCP binds; pairing selects each transport's
+successful listeners independently (`grpc` is `null` when disabled or not yet
+bound). Deferred startup advertises no listener until its port binds.
 
 The HUD reads the firewall policy (no admin needed) when the pairing card opens
 and when `/admin/status` is requested, never per frame, and reports

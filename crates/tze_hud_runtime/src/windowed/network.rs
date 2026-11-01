@@ -72,6 +72,7 @@ pub(super) fn start_network_services(
         runtime_context,
         tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         None,
+        Arc::default(),
     )
 }
 
@@ -83,6 +84,7 @@ pub(super) fn start_network_services_with_render_wake(
     runtime_context: SharedRuntimeContext,
     render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
     bind_gate: Option<crate::operator::handoff::BindGate>,
+    grpc_binds: Arc<std::sync::Mutex<Vec<std::net::SocketAddr>>>,
 ) -> Result<NetworkServices, Box<dyn std::error::Error>> {
     if grpc_port == 0 {
         tracing::info!(
@@ -101,6 +103,7 @@ pub(super) fn start_network_services_with_render_wake(
         runtime_context,
         render_wake,
         bind_gate,
+        grpc_binds,
         #[cfg(test)]
         None,
         #[cfg(test)]
@@ -127,6 +130,7 @@ fn start_network_services_on_listener(
         runtime_context,
         tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         None,
+        Arc::default(),
         Some(listener),
         tailnet_fixture,
     )
@@ -141,6 +145,7 @@ fn start_enabled_network_services(
     runtime_context: SharedRuntimeContext,
     render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
     bind_gate: Option<crate::operator::handoff::BindGate>,
+    grpc_binds: Arc<std::sync::Mutex<Vec<std::net::SocketAddr>>>,
     #[cfg(test)] fixture_listener: Option<std::net::TcpListener>,
     #[cfg(test)] tailnet_fixture: Option<crate::net_addrs::TailnetFixture>,
 ) -> Result<NetworkServices, Box<dyn std::error::Error>> {
@@ -237,7 +242,9 @@ fn start_enabled_network_services(
             // `from_std` requires a Tokio reactor, so it runs inside the task.
             match tokio::net::TcpListener::from_std(l) {
                 Ok(l) => {
-                    bound.push(l.local_addr().expect("bound listener has an address").ip());
+                    let local = l.local_addr().expect("bound listener has an address");
+                    bound.push(local.ip());
+                    grpc_binds.lock().unwrap_or_else(|e| e.into_inner()).push(local);
                     tokio::spawn(accept_into(l, conn_tx.clone()));
                 }
                 Err(e) => tracing::error!(error = %e, "gRPC: failed to adopt bound listener into Tokio runtime"),
@@ -253,7 +260,9 @@ fn start_enabled_network_services(
                 injected.as_ref(),
             ).and_then(tokio::net::TcpListener::from_std) {
                 Ok(l) => {
-                    tracing::info!(addr = %addr, "gRPC listener bound (address change/retry)");
+                    let local = l.local_addr().expect("bound listener has an address");
+                    tracing::info!(addr = %local, "gRPC listener bound (address change/retry)");
+                    grpc_binds.lock().unwrap_or_else(|e| e.into_inner()).push(local);
                     tokio::spawn(accept_into(l, conn_tx.clone()));
                     true
                 }
@@ -722,6 +731,7 @@ mod tests {
         let port = old.local_addr().unwrap().port();
         let gate = crate::operator::handoff::BindGate::closed();
         let (fixture, mut control) = crate::net_addrs::tailnet_fixture();
+        let grpc_binds: Arc<std::sync::Mutex<Vec<std::net::SocketAddr>>> = Arc::default();
         let (rt, handles, _, _, _, _, _, reported) = start_enabled_network_services(
             port,
             Default::default(),
@@ -729,6 +739,7 @@ mod tests {
             Arc::new(RuntimeContext::headless_default()),
             tze_hud_scene::render_wake::RenderWakeNotifier::default(),
             Some(gate.clone()),
+            Arc::clone(&grpc_binds),
             None,
             Some(fixture),
         )
@@ -737,6 +748,7 @@ mod tests {
             reported.is_empty(),
             "planned handoff binds must not be advertised"
         );
+        assert!(grpc_binds.lock().unwrap().is_empty());
         let reachable = || std::net::TcpStream::connect(("127.0.0.1", port)).is_ok();
         gate.open();
         // Still the old listener's: nothing of ours is accepting yet.
@@ -758,6 +770,10 @@ mod tests {
                 .send(vec![control.v4, control.v6])
                 .unwrap();
             assert_eq!(control.next_attempt().await, (control.v6, None));
+            assert_eq!(
+                grpc_binds.lock().unwrap().as_slice(),
+                &[std::net::SocketAddr::from(([127, 0, 0, 1], port))]
+            );
             control
                 .fail
                 .store(false, std::sync::atomic::Ordering::Release);
@@ -793,6 +809,7 @@ mod tests {
                 ),
                 "the real session handler must reject the missing handshake"
             );
+            assert!(grpc_binds.lock().unwrap().contains(&late));
         });
         for h in handles {
             h.abort();

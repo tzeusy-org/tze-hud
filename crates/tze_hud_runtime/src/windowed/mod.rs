@@ -3040,6 +3040,10 @@ impl WindowedRuntime {
             Arc::clone(&runtime_context),
             render_wake.clone(),
             bind_gate.clone(),
+            pairing
+                .as_ref()
+                .map(|pairing| pairing.grpc_binds())
+                .unwrap_or_default(),
         )?;
 
         // ── MCP HTTP server ────────────────────────────────────────────────────

@@ -66,7 +66,10 @@ source links when implementation changes the status.
   static address selection remains a separate gate. Existing MCP fan-out and
   gRPC handoff fixtures additionally inject a late v6 address and failed-then-
   successful bind, then connect to the real transport over IPv6 loopback;
-  MCP also verifies that status lists only successful binds.
+  MCP also verifies that status lists only successful binds. Pairing uses each
+  transport's successful bind list independently, with `grpc: null` before a
+  gRPC listener is adopted; the pairing fixture covers unavailable and later
+  successful gRPC addresses.
   This source/automated evidence does not establish Windows owner acceptance.
   [Unknown] Owner-host acceptance remains unverified in this refresh;
   `hud-i2e10.13`, `hud-lgb6c.3`, and `hud-jm8nq.18` are still open.
