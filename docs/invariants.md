@@ -257,6 +257,17 @@ its tests are deterministic and never sleep.
   and lease grace all advanced by one `TestClock`) [`poc_portal_abandoned_is_reclaimed`](../tests/integration/poc_acceptance.rs),
   [`poc_zone_notification_ttl_disappears_unattended`](../tests/integration/poc_acceptance.rs), [`poc_zone_delay_ms_appears_on_schedule`](../tests/integration/poc_acceptance.rs)
 
+An admin screenshot builds and reads back without advancing the last-rendered
+scene/geometry ledger or primary presentation counters. An ordinary scene
+change still presents, including after a capture alongside a failed acquire.
+
+- `tze_hud_runtime` [`building_an_idle_frame_leaves_the_idle_gate_inputs_unchanged`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs)
+  drives the real endpoint/inbox, frame build, idle ledger and main-thread
+  present accounting with a fixed clock and queue synchronization. Only GPU
+  readback and swapchain operations are synthetic here; actual capture pixels
+  remain covered by compositor `capture_windowed_frame_reads_back_the_built_frame`
+  in [surface.rs](../crates/tze_hud_compositor/src/renderer/tests/surface.rs).
+
 ## 10. Owner hiding changes the view, never state
 
 From the control panel the owner can hide portals, zones, widgets or other

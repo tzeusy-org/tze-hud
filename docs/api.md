@@ -258,7 +258,9 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
   `?display=<i>` indexes `displays` (default 0, the primary; 404
   `NO_SUCH_DISPLAY` for an index not in `displays`, or one whose overlay closed
   since `displays` was read; indexes shift on hot-plug, so re-read status). One render on request, no cost
-  while idle, never cached, one at a time (429 `BUSY`), 503 `UNAVAILABLE` after
+  while idle, never cached. Capture does not advance the last-rendered scene or
+  geometry ledger or the primary acquisition/submission/present counters; an
+  unpresented scene change still needs its ordinary frame. One at a time (429 `BUSY`), 503 `UNAVAILABLE` after
   3 s or without a display, 422 `TOO_LARGE` past 8192 px per side, 16 Mpx, or a 32 MiB PNG. It
   is not exposed through MCP tools or gRPC.
   `POST /admin/restart` (POST only; 405 otherwise) relaunches the HUD with its
