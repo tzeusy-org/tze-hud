@@ -86,8 +86,10 @@ class QuiescentEfficiencyLaunchContractTests(unittest.TestCase):
         self.assertNotIn("Write-Host $admissionText", validation[:validation.index(receipt_print)])
 
     def test_fast_ci_runs_the_startup_atomicity_contract(self) -> None:
+        # CI discovers every scripts/ci/test_*.py, this file included.
+        self.assertTrue(Path(__file__).name.startswith("test_"))
         self.assertIn(
-            "python3 scripts/ci/test_run_quiescent_efficiency_script.py",
+            "python3 -m unittest discover -s scripts/ci",
             self.workflow,
         )
         self.assertIn(

@@ -25,7 +25,7 @@
 #   just ci        # full local gate sweep (see the `ci` recipe; no Windows-only jobs)
 #
 # GPU tests (compositor render tests + runtime pixel_readback) already run inside
-# `just test` and therefore `just ci`, as they do in the blocking CI test-unit job
+# `just test` and therefore `just ci`, as they do in the blocking CI `test` job
 # (the explicit feature enables tze_hud_runtime/dev-mode, so pixel_readback
 # is built and run). `just test-gpu` runs just that GPU subset and fails if the
 # llvmpipe ICD is missing (the strict GPU lane).
@@ -77,7 +77,7 @@ untracked-evidence:
 check:
     {{cargo}} check --workspace
 
-# cargo fmt --check: formatting gate (mirror CI fmt job)
+# cargo fmt --check: formatting gate (mirror CI static job)
 fmt:
     {{cargo}} fmt --check
 
@@ -86,7 +86,7 @@ fmt-fix:
     {{py}} scripts/cargo_source_guard.py --refuse-frozen-helper
     cargo fmt
 
-# cargo clippy: lint gate — all targets, deny warnings (mirror CI clippy job)
+# cargo clippy: lint gate — all targets, deny warnings (mirror CI clippy job, first step)
 clippy:
     {{cargo}} clippy --workspace --all-targets -- -D warnings
 
@@ -104,7 +104,7 @@ pre-push-check:
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 
-# Unit and crate tests — excludes integration package (mirror CI test-unit job)
+# Unit and crate tests — excludes integration package (mirror CI test job, nextest step)
 # Includes the GPU compositor tests and runtime pixel_readback (the latter via
 # the explicit tze_hud_runtime/dev-mode feature). Requires Mesa llvmpipe (libvulkan1 +
 # mesa-vulkan-drivers).
@@ -142,13 +142,13 @@ idle-efficiency-checker:
     python3 scripts/ci/test_check_idle_efficiency.py
     python3 scripts/ci/test_run_quiescent_efficiency_script.py
 
-# Integration headless suites (mirror CI test-integration job)
+# Integration headless suites (mirror CI test job, integration step)
 # Runs every integration target.
 test-integration:
     if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
     HEADLESS_FORCE_SOFTWARE=1 {{cargo}} test -p integration --tests
 
-# Pure-Python suites (mirror CI user-test-python-suite job and scripts/ci tests)
+# Pure-Python suites (mirror CI static job; scripts/ci discovery includes the idle-efficiency contracts)
 # Needs scripts/requirements-dev.txt; `just bootstrap` installs it into .venv.
 test-python:
     {{py}} -m pytest \
@@ -158,7 +158,7 @@ test-python:
         -q
     {{py}} -m unittest discover -s scripts/ci
 
-# Deterministic LLM-facing token-footprint gate (mirror CI test-integration job)
+# Deterministic LLM-facing token-footprint gate (mirror CI test job, last step)
 token-footprint:
     mkdir -p test_results/token-footprint
     if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
@@ -175,7 +175,7 @@ token-footprint:
         --baseline scripts/ci/token_footprint_baseline.json \
         --output test_results/token-footprint/gate-report.json
 
-# vertical_slice production config boot (also runs in CI test-unit)
+# vertical_slice production config boot (also runs in the CI test job)
 production-boot:
     if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
     HEADLESS_FORCE_SOFTWARE=1 \
@@ -184,7 +184,7 @@ production-boot:
             --test production_boot \
             -- --nocapture
 
-# Canonical app production config boot (also runs in CI test-unit)
+# Canonical app production config boot (also runs in the CI test job)
 canonical-app-boot:
     if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
     HEADLESS_FORCE_SOFTWARE=1 \
@@ -195,7 +195,7 @@ canonical-app-boot:
 
 # ── Static analysis ──────────────────────────────────────────────────────────
 
-# Verify dev-mode is not enabled in any package's default build, incl. the release binary closure (mirror CI dev-mode-guard job)
+# Verify dev-mode is not enabled in any package's default build, incl. the release binary closure (mirror CI static job)
 # Cargo metadata only; the release build is covered by windows.yml.
 dev-mode-guard:
     {{cargo}} metadata --format-version 1 --no-deps \
@@ -210,7 +210,7 @@ deps-unused:
 # and exits 0 (so `just ci` still runs on machines without it); CI always has
 # the tool, so these remain blocking there.
 
-# clippy on the windows-gnu cross-target (mirror CI clippy-windows-gnu job).
+# clippy on the windows-gnu cross-target (mirror CI clippy job, second step).
 # Needs `rustup target add x86_64-pc-windows-gnu`; no MinGW compiler for lint.
 # The portable blake3 backend is scoped to this command. build-windows still needs MinGW.
 clippy-windows-gnu:
@@ -226,7 +226,7 @@ clippy-windows-gnu:
         --target x86_64-pc-windows-gnu \
         -- -D warnings
 
-# Dependency advisory/license policy (mirror CI cargo-deny job).
+# Dependency advisory/license policy (mirror CI static job; advisories are non-blocking on PR and queue runs).
 cargo-deny:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -276,6 +276,6 @@ dev-run dev_dir host="":
 # are tool-gated: they print "SKIPPED: <reason>" and pass when their tool
 # (windows-gnu Rust target or cargo-deny) is absent.
 # Excluded by design: the Windows-only jobs (windows.yml) and weekly perf lanes.
-# Boot and pixel-readback tests run in CI test-unit; focused recipes remain local.
-# Runs in the same logical order as CI: fast-fail gates first, then tests.
-ci: untracked-evidence check fmt clippy clippy-windows-gnu cargo-deny deps-unused dev-mode-guard idle-efficiency-checker test test-integration test-python token-footprint production-boot canonical-app-boot
+# Boot and pixel-readback tests run in the CI test job; focused recipes remain local.
+# Runs in CI job order: static, clippy (which subsumes `check`), then tests.
+ci: untracked-evidence fmt dev-mode-guard deps-unused cargo-deny test-python clippy clippy-windows-gnu test test-integration token-footprint production-boot canonical-app-boot
