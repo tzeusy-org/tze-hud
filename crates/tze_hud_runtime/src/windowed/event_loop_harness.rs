@@ -33,7 +33,9 @@
 //! deadlock this harness is meant to avoid. It drives only the parts of the
 //! state machine that are GPU-independent (input/keyboard dispatch, portal/
 //! composer routing over the shared scene). The window, surface, and compositor
-//! fields are left `None`.
+//! fields are left `None`. The capture-accounting gate additionally uses a
+//! headless compositor for real frame builds, substituting only GPU readback
+//! and swapchain operations through production-used frame/present seams.
 //!
 //! ## Networked mode (POC acceptance)
 //!
@@ -1175,6 +1177,193 @@ mod tests {
     use tze_hud_protocol::proto::input_envelope::Event as ProtoInputEvent;
     use tze_hud_protocol::proto::{CommandAction, CommandSource};
     use tze_hud_scene::MonoUs;
+
+    /// Real frame builds and runtime accounting; only offscreen readback and
+    /// swapchain acquire/submit/present are synthetic. GPU pixels and PNG have
+    /// their own dedicated compositor/operator gates.
+    struct CaptureRenderHarness {
+        events: HeadlessEventLoopHarness,
+        compositor: tze_hud_compositor::Compositor,
+        frames: super::super::frame_work::WindowedFrameWork,
+        pending_texture: bool,
+    }
+
+    impl CaptureRenderHarness {
+        fn turn(&mut self, primary_succeeds: bool) -> bool {
+            use super::super::frame_work::RenderTriggers;
+            use tze_hud_compositor::renderer::frame::WindowedPresentOutcome;
+
+            assert!(self.events.tick());
+            let mut scene = self.events.scene();
+            self.compositor.prime_markdown_cache(&scene);
+            self.compositor.prime_truncation_cache(&scene);
+            let prepared = self.frames.prepare(
+                &mut self.compositor,
+                &mut scene,
+                (320, 200),
+                &self.events.app.state.capture_inbox,
+                RenderTriggers::default(),
+                |needs_render| {
+                    super::super::displays::frame_plan(
+                        needs_render,
+                        std::iter::empty(),
+                        std::time::Instant::now(),
+                    )
+                },
+            );
+            let versions = (scene.version, scene.geometry_epoch);
+            drop(scene);
+            if prepared.render.is_some() {
+                let mut telemetry = tze_hud_telemetry::FrameTelemetry::new(1);
+                telemetry.stage7_gpu_submit_us = u64::from(primary_succeeds);
+                self.pending_texture = primary_succeeds;
+                self.frames.record_primary_submission(
+                    &WindowedPresentOutcome {
+                        telemetry,
+                        surface_acquired: primary_succeeds,
+                        gpu_submitted: primary_succeeds,
+                    },
+                    versions,
+                );
+            }
+            if let Some(capture) = prepared.capture {
+                capture.finish_with(|build, display| {
+                    assert!(display.is_none());
+                    let (width, height) = build.size();
+                    Ok(tze_hud_compositor::CapturedFrame {
+                        width,
+                        height,
+                        rgba: [12, 34, 56, 255].repeat(width as usize * height as usize),
+                    })
+                });
+            }
+            self.events
+                .app
+                .maybe_present_frame_with(|| Some(std::mem::take(&mut self.pending_texture)));
+            prepared.plan.full
+        }
+    }
+
+    /// Moves the former compositor build-only gate onto the runtime's actual
+    /// capture drain, idle ledger, submission counters and main-thread present
+    /// consumer. A failed ordinary acquire exposes capture advancing the ledger
+    /// even when copying the already-presented version would look harmless.
+    #[tokio::test]
+    async fn building_an_idle_frame_leaves_the_idle_gate_inputs_unchanged() {
+        use crate::operator::screenshot::capture_channel;
+        use tze_hud_scene::clock::TestClock;
+
+        let _gpu = crate::test_support::lock_headless_runtime().await;
+        let mut compositor = tze_hud_compositor::Compositor::new_headless(320, 200)
+            .await
+            .expect("software compositor for real frame builds");
+        compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+        let mut events = HeadlessEventLoopHarness::new();
+        events.app.state.config.window.width = 320;
+        events.app.state.config.window.height = 200;
+        *events.scene() = SceneGraph::new_with_clock(320.0, 200.0, Arc::new(TestClock::new(1_000)));
+        let queued = Arc::new(tokio::sync::Notify::new());
+        let (endpoint, inbox) = capture_channel({
+            let queued = Arc::clone(&queued);
+            let wake = events.app.state.wake.clone();
+            move || {
+                wake.compositor()
+                    .notify(crate::idle_efficiency::RuntimeWakeupSource::OperatorCapture);
+                queued.notify_one();
+            }
+        });
+        events.app.state.capture_inbox = inbox;
+        let frames = super::super::frame_work::WindowedFrameWork::new(
+            events.app.state.wake.clone(),
+            events.app.state.frame_ready_tx.as_ref().unwrap().clone(),
+        );
+        let mut runtime = CaptureRenderHarness {
+            events,
+            compositor,
+            frames,
+            pending_texture: false,
+        };
+        assert!(runtime.turn(true), "startup presents once");
+        let versions = runtime.frames.last_rendered();
+        let counters = runtime.events.app.state.wake.counters().snapshot();
+        assert_eq!(
+            (
+                counters.surface_acquisitions,
+                counters.gpu_queue_submissions,
+                counters.presents
+            ),
+            (1, 1, 1)
+        );
+
+        for changed_scene in [false, true] {
+            if changed_scene {
+                let mut scene = runtime.events.scene();
+                scene.create_tab("ordinary change", 0).unwrap();
+                scene.bump_geometry_epoch();
+            }
+            let scene_versions = {
+                let scene = runtime.events.scene();
+                assert!(!runtime.compositor.has_inflight_animation(&scene));
+                (scene.version, scene.geometry_epoch)
+            };
+            let capture = tokio::spawn({
+                let endpoint = endpoint.clone();
+                async move { endpoint.capture_frame(0).await }
+            });
+            // Endpoint enqueues before notifying; no yield/sleep or wall-clock
+            // guess can race the production inbox drain.
+            queued.notified().await;
+            assert_eq!(runtime.turn(false), changed_scene);
+            let (frame, permit) = capture.await.unwrap().unwrap();
+            assert_eq!((frame.width, frame.height), (320, 200));
+            assert_eq!(frame.rgba, [12, 34, 56, 255].repeat(320 * 200));
+            drop(permit);
+            assert_eq!(
+                runtime.frames.last_rendered(),
+                versions,
+                "capture cannot consume an unpresented change"
+            );
+            assert_eq!(
+                runtime.events.app.state.wake.counters().snapshot(),
+                counters,
+                "capture cannot acquire, submit or present the primary"
+            );
+            let scene = runtime.events.scene();
+            assert_eq!(
+                (scene.version, scene.geometry_epoch),
+                scene_versions,
+                "building a capture must not mutate idle inputs"
+            );
+            assert!(!runtime.compositor.has_inflight_animation(&scene));
+        }
+        assert!(
+            runtime.turn(true),
+            "ordinary change still needs its successful present"
+        );
+        let scene = runtime.events.scene();
+        assert_eq!(
+            runtime.frames.last_rendered(),
+            (scene.version, scene.geometry_epoch)
+        );
+        drop(scene);
+        let counters = runtime.events.app.state.wake.counters().snapshot();
+        assert_eq!(
+            (
+                counters.surface_acquisitions,
+                counters.gpu_queue_submissions,
+                counters.presents
+            ),
+            (2, 2, 2)
+        );
+        assert!(
+            !runtime.turn(true),
+            "successful present restores static idle"
+        );
+        assert_eq!(
+            runtime.events.app.state.wake.counters().snapshot(),
+            counters
+        );
+    }
 
     fn character(ch: &str, ts: u64) -> PendingKeyboardEvent {
         PendingKeyboardEvent::Character(RawCharacterEvent {

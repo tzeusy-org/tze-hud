@@ -3054,6 +3054,16 @@ impl WinitApp {
     /// that `present()` runs on the main thread, and ensuring we present the
     /// texture the compositor actually rendered into.
     pub(super) fn maybe_present_frame(&mut self) {
+        let surface = self.state.window_surface.clone();
+        self.maybe_present_frame_with(|| surface.map(|surface| surface.present_pending_texture()));
+    }
+
+    /// Keep signal consumption and actual-present accounting on the production
+    /// path while the headless harness substitutes only the swapchain operation.
+    pub(super) fn maybe_present_frame_with(
+        &mut self,
+        present_primary: impl FnOnce() -> Option<bool>,
+    ) {
         if self.state.frame_ready_rx.has_changed().unwrap_or(false) {
             // Acknowledge the signal.
             let _ = self.state.frame_ready_rx.borrow_and_update();
@@ -3061,11 +3071,11 @@ impl WinitApp {
             // Secondary overlays first: they never carry the primary's
             // present accounting.
             let secondary_presented = self.present_secondaries();
-            if let Some(surface) = &self.state.window_surface {
+            if let Some(presented) = present_primary() {
                 // Present under the same mutex that guards pending swapchain
                 // ownership so acquire/present cannot interleave into a
                 // double-acquire validation error on some backends.
-                if surface.present_pending_texture() {
+                if presented {
                     self.state.wake.counters().record_present();
                     if let Some(measurement) = self.state.quiescent_efficiency.as_mut() {
                         measurement.record_first_present(Instant::now());
