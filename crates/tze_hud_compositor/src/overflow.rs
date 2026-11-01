@@ -1317,9 +1317,11 @@ mod tests {
     use glyphon::FontSystem;
     use proptest::prelude::*;
 
-    /// Helper: create a fresh FontSystem for testing.
+    /// Helper: a fresh FontSystem over the bundled faces production renders
+    /// with. `FontSystem::new()` scans every system font directory (~20 ms per
+    /// call in debug, per proptest case) and makes metrics host-dependent.
     fn make_font_system() -> FontSystem {
-        FontSystem::new()
+        crate::fonts::bundled_font_system()
     }
 
     fn base_attrs() -> Attrs<'static> {
