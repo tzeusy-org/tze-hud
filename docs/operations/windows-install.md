@@ -114,6 +114,13 @@ The HUD listens on loopback and on each Tailscale address of the machine
 (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`), on the MCP/pairing port (9090) and the
 gRPC port (50051). It never binds a wildcard address. Agents on other tailnet
 machines reach it only if Windows Firewall lets inbound TCP to those ports in.
+Both transports keep following Windows address-change notifications after startup,
+including a second Tailscale address family appearing later. Failed Tailscale
+binds (including after restart/update handoff) retry every 10 seconds for the
+first five minutes of listener management, then every 60 seconds, only while
+an address is still local and unbound. There is no steady-state polling timer.
+Status and pairing advertise successful MCP binds; deferred startup advertises
+no listener until its port binds.
 
 The HUD reads the firewall policy (no admin needed) when the pairing card opens
 and when `/admin/status` is requested, never per frame, and reports

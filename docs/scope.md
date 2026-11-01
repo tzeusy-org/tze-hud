@@ -58,6 +58,13 @@ source links when implementation changes the status.
   [restart handoff](../crates/tze_hud_runtime/src/operator/handoff.rs),
   [signed update](../crates/tze_hud_runtime/src/operator/update.rs), and
   [firewall diagnostics/helper](../crates/tze_hud_runtime/src/firewall.rs).
+  Both transports use the shared [listener manager](../crates/tze_hud_runtime/src/net_addrs.rs)
+  to follow every later Tailscale address via OS notifications and retry only
+  missing binds, including failed restart/update handoff binds. The deterministic
+  `listener_lifecycle_follows_changes_and_retries_only_missing_binds` gate covers
+  address events, partial failures, deduplication and absence of idle polling;
+  static address selection and live transport fixtures remain separate gates.
+  This source/automated evidence does not establish Windows owner acceptance.
   [Unknown] Owner-host acceptance remains unverified in this refresh;
   `hud-i2e10.13`, `hud-lgb6c.3`, and `hud-jm8nq.18` are still open.
 - **T7 — portal [Observed].** MCP tools now share

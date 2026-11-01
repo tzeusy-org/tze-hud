@@ -9,7 +9,7 @@ use tze_hud_protocol::session_server::{HudSessionImpl, SessionDeps};
 use tze_hud_scene::config::SharedAgents;
 
 use super::WindowedConfig;
-use crate::net_addrs::{listen_addrs, local_ips, tailnet_addrs, watch_for_tailnet};
+use crate::net_addrs::{listen_addrs, local_ips, watch_for_tailnet};
 use crate::runtime_context::{RuntimeContext, SharedRuntimeContext};
 use crate::threads::NetworkRuntime;
 
@@ -185,8 +185,7 @@ fn start_enabled_network_services(
         std_listeners.push(listener);
     }
     // A handed-over instance binds later, once the old one has let go (the
-    // spawned task below waits on the gate); until then the planned addresses
-    // stand in for the bound ones.
+    // spawned task below waits on the gate). Report no binds until then.
     if bind_gate.is_none() {
         for (i, addr) in addrs.iter().enumerate() {
             #[cfg(test)]
@@ -209,24 +208,17 @@ fn start_enabled_network_services(
             }
         }
     }
-    let grpc_bound_addrs = if bind_gate.is_some() {
-        addrs.clone()
-    } else {
-        std_listeners
-            .iter()
-            .map(std::net::TcpListener::local_addr)
-            .collect::<std::io::Result<Vec<_>>>()
-            .map_err(|e| format!("windowed runtime: failed to read gRPC local_addr: {e}"))?
-    };
-    let has_tailnet =
-        !tailnet_addrs(&grpc_bound_addrs.iter().map(|a| a.ip()).collect::<Vec<_>>()).is_empty();
+    let grpc_bound_addrs = std_listeners
+        .iter()
+        .map(std::net::TcpListener::local_addr)
+        .collect::<std::io::Result<Vec<_>>>()
+        .map_err(|e| format!("windowed runtime: failed to read gRPC local_addr: {e}"))?;
 
     // One accept task per listener feeds a single stream into the server, so
     // listeners can be added later (a Tailscale address that appears after
     // startup) without restarting it.
     let (conn_tx, conn_rx) =
         tokio::sync::mpsc::channel::<std::io::Result<tokio::net::TcpStream>>(64);
-    let accept_tx = conn_tx.clone();
     let handle = network_rt.rt.spawn(async move {
         if let Some(gate) = bind_gate {
             match bind_after_handoff(&gate, &addrs).await {
@@ -234,16 +226,31 @@ fn start_enabled_network_services(
                 None => return,
             }
         }
+        let mut bound = Vec::new();
         for l in std_listeners {
             // `from_std` requires a Tokio reactor, so it runs inside the task.
             match tokio::net::TcpListener::from_std(l) {
                 Ok(l) => {
-                    tokio::spawn(accept_into(l, accept_tx.clone()));
+                    bound.push(l.local_addr().expect("bound listener has an address").ip());
+                    tokio::spawn(accept_into(l, conn_tx.clone()));
                 }
                 Err(e) => tracing::error!(error = %e, "gRPC: failed to adopt bound listener into Tokio runtime"),
             }
         }
-        drop(accept_tx);
+        let watcher = tokio::spawn(watch_for_tailnet(bound, move |ip| {
+            let addr = std::net::SocketAddr::new(ip, grpc_port);
+            match bind_nonblocking(addr).and_then(tokio::net::TcpListener::from_std) {
+                Ok(l) => {
+                    tracing::info!(addr = %addr, "gRPC listener bound (address change/retry)");
+                    tokio::spawn(accept_into(l, conn_tx.clone()));
+                    true
+                }
+                Err(e) => {
+                    tracing::warn!(addr = %addr, error = %e, "gRPC: failed to bind Tailscale address");
+                    false
+                }
+            }
+        }));
         tonic::transport::Server::builder()
             .add_service(HudSessionServer::new(service))
             .serve_with_incoming(tokio_stream::wrappers::ReceiverStream::new(conn_rx))
@@ -251,28 +258,8 @@ fn start_enabled_network_services(
             .unwrap_or_else(|e| {
                 tracing::error!(error = %e, "gRPC server exited with error");
             });
+        watcher.abort();
     });
-    if has_tailnet {
-        drop(conn_tx);
-    } else {
-        network_rt
-            .rt
-            .spawn(watch_for_tailnet(move |ip| {
-                let addr = std::net::SocketAddr::new(ip, grpc_port);
-                match bind_nonblocking(addr).and_then(tokio::net::TcpListener::from_std) {
-                    Ok(l) => {
-                        tracing::info!(addr = %addr, "gRPC listener bound (Tailscale address appeared)");
-                        tokio::spawn(accept_into(l, conn_tx.clone()));
-                        true
-                    }
-                    Err(e) => {
-                        tracing::warn!(addr = %addr, error = %e, "gRPC: failed to bind Tailscale address");
-                        false
-                    }
-                }
-            }));
-    }
-
     tracing::info!(grpc_addrs = ?grpc_bound_addrs, "windowed runtime: gRPC server task spawned");
 
     Ok((
@@ -290,7 +277,7 @@ fn start_enabled_network_services(
 /// Wait for the takeover, then bind every address (retrying while the old
 /// instance releases them). The loopback address must bind or the gate fails
 /// (shutting this instance down); a Tailscale address that never binds is
-/// skipped. `None` when the takeover failed.
+/// retried by the address manager. `None` when the takeover failed.
 async fn bind_after_handoff(
     gate: &crate::operator::handoff::BindGate,
     addrs: &[std::net::SocketAddr],
