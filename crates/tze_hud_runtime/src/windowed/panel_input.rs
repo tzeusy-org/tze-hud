@@ -835,17 +835,32 @@ mod panel_task_tests {
         assert_eq!(*edits.lock().unwrap(), [Edit::Preview(1), Edit::Revert]);
         assert!(f.panel.is_open(), "the Esc reverted; it did not close");
 
-        // Two steps and Enter while the first still runs: each step lands
-        // and Enter keeps what the section shows, in order.
+        // Three steps and Enter while the first still runs: the waiting
+        // steps merge into one restyle (key repeat), then Enter keeps what
+        // the section shows, in order.
         edits.lock().unwrap().clear();
-        for key in [PanelKey::Right, PanelKey::Right, PanelKey::Enter] {
+        for key in [
+            PanelKey::Right,
+            PanelKey::Right,
+            PanelKey::Right,
+            PanelKey::Enter,
+        ] {
             assert!(f.panel.send(PanelEvent::Key(key)));
         }
         settled(3).await;
         assert_eq!(
             *edits.lock().unwrap(),
-            [Edit::Preview(1), Edit::Preview(1), Edit::Keep]
+            [Edit::Preview(1), Edit::Preview(2), Edit::Keep]
         );
+
+        // Steps then Esc while busy: the waiting steps are dropped.
+        edits.lock().unwrap().clear();
+        for key in [PanelKey::Right, PanelKey::Right, PanelKey::Escape] {
+            assert!(f.panel.send(PanelEvent::Key(key)));
+        }
+        settled(2).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(*edits.lock().unwrap(), [Edit::Preview(1), Edit::Revert]);
     }
 
     /// Every panel action logs one line with the row's old and new value,

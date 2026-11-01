@@ -650,10 +650,19 @@ impl PanelTask {
         };
         if self.busy.contains(row) {
             if self.nav.previews.iter().any(|r| r == row) || edit == Edit::Revert {
-                self.after_busy
-                    .entry(row.to_owned())
-                    .or_default()
-                    .push_back(edit);
+                let queue = self.after_busy.entry(row.to_owned()).or_default();
+                match (queue.back_mut(), edit) {
+                    // Key repeat: one restyle for all the steps queued.
+                    (Some(Edit::Preview(m)), Edit::Preview(n)) => *m += n,
+                    // A revert makes previews still waiting moot.
+                    (_, Edit::Revert) => {
+                        while matches!(queue.back(), Some(Edit::Preview(_))) {
+                            queue.pop_back();
+                        }
+                        queue.push_back(Edit::Revert);
+                    }
+                    (_, edit) => queue.push_back(edit),
+                }
                 return;
             }
             tracing::info!(

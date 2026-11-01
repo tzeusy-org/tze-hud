@@ -426,8 +426,8 @@ clicking it, or Delete on the row (not while typing in a field or the
 search), puts the default back live and removes the key from the config
 file. Visibility, Appearance, Advanced tokens, Input and Diagnostics rows
 offer it; ports and widget boxes take a typed value. Clicks outside the
-panel pass through to the desktop. Closing the panel always resumes agents. While paused, the
-pause tile and row turn caution-colored.
+panel pass through to the desktop. Closing the panel always resumes
+agents. While paused, the pause tile and row turn caution-colored.
 
 The Visibility card hides portals, zones, widgets or other agent tiles for
 the session; the Hide all tile (Alt+H) hides all of them and, when everything
