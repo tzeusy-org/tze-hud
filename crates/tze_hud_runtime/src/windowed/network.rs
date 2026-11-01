@@ -155,6 +155,14 @@ fn start_enabled_network_services(
 
     // Loopback plus the local Tailscale addresses, nothing else.
     let addrs = listen_addrs(&local_ips(), grpc_port);
+    #[cfg(test)]
+    let addrs = if tailnet_fixture.is_some() {
+        // The injected watcher owns synthetic tailnet discovery. Eager and
+        // deferred startup must not bind the test host's real VPN addresses.
+        listen_addrs(&[], grpc_port)
+    } else {
+        addrs
+    };
 
     let service = HudSessionImpl::from_deps(SessionDeps {
         resource_budget: runtime_context.resource_budget(),
