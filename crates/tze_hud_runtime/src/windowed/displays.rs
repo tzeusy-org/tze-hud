@@ -1266,6 +1266,9 @@ pub(super) fn spawn_display_change_watcher(dirty: DisplaysDirty, wake: impl Fn()
                 watch.dirty.store(true, Ordering::Release);
                 (watch.wake)();
             }
+            if msg == WM_POWERBROADCAST {
+                return LRESULT(1);
+            }
         }
         // SAFETY: default handling for everything else.
         unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
