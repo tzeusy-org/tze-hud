@@ -527,9 +527,9 @@ A row whose value a flag or variable set is read-only and names it ("Set by
 --mcp-port"), because a restart reuses the same arguments and environment.
 
 Agents never see the panel: it is not in the scene, in MCP or gRPC results,
-or in `/admin/screenshot`, open or as its closed notice pill. An idle open panel draws no frames, except that
-Connect an agent redraws once a second for its countdown. Its layout
-reads `control_panel.inset` and `control_panel.column.min_width` and the
+or in `/admin/screenshot`, open or as its closed notice pill. An idle
+open panel draws no frames, except that Connect an agent redraws once a
+second for its countdown. Its layout reads `control_panel.inset` and `control_panel.column.min_width` and the
 semantic tokens of the active theme.
 
 ## Design tokens and themes
