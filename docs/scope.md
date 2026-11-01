@@ -94,6 +94,12 @@ source links when implementation changes the status.
   Stable-key integration (`hud-avr7s.2`), mixed-DPI sizing (`hud-670ds`), and
   global `ui.scale` (`hud-h51u7.3`) remain open. The vision describes their
   intended end state, not current deployment guarantees.
+  Overlay sleep/wake recovery (`hud-jm8nq.25`) reports native visibility, iconic,
+  topmost and DWM cloaking state per display, and requests no-activate reassertion
+  on display/resume/power-on events or a status observation of drift. The decision
+  has deterministic unit coverage. The owner's overnight monitor sleep/wake check
+  remains pending; source checks do not establish that the original invisible
+  overlay failure was repaired.
 - **T10 — visuals [Observed].**
   [`resolve_config_tokens`](../crates/tze_hud_config/src/themes.rs) selects
   Tonal Glass, Blueprint or Classic at startup; [font loading](api.md#fonts)
