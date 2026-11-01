@@ -7,12 +7,12 @@ use super::*;
 ///
 /// This was the flicker source: the output pane is a full-content `Clip` node,
 /// so before the cache every scroll frame rebuilt+shaped the whole transcript
-/// through `shape_until_scroll`. Measured over a small and a ~64KiB transcript
-/// so the win is visible at both sizes. GPU builds the compositor;
-/// `render_frame_headless` is used (no pixel readback → no llvmpipe deadlock).
+/// through `shape_until_scroll`. Pinned over a small and a ~64KiB transcript.
+/// GPU builds the compositor; `render_frame_headless` is used (no pixel
+/// readback → no llvmpipe deadlock). The counters are the contract; frame
+/// timings belong to the benchmark tier, not this unit test.
 #[tokio::test]
-async fn scroll_reshape_bench_hud991cj() {
-    use std::time::Instant;
+async fn scroll_reshape_reuse_hud991cj() {
     use tze_hud_scene::types::{
         FontFamily, NodeData, Rect, TextAlign, TextMarkdownNode, TextOverflow,
     };
@@ -31,7 +31,6 @@ async fn scroll_reshape_bench_hud991cj() {
     // A small transcript and a ~64KiB transcript (45 B/line × 1440 ≈ 63 KiB, just under MAX_MARKDOWN_BYTES).
     for (label, repeat) in [("small", 12usize), ("64KiB", 1440usize)] {
         let content = line.repeat(repeat);
-        let content_bytes = content.len();
         // Laid out far taller than the 256px tile so the pane is scrollable
         // (windowed by offset, not truncated).
         let make_node = |text: String| Node {
@@ -87,26 +86,24 @@ async fn scroll_reshape_bench_hud991cj() {
         assert!(compositor.take_work_counts().is_none());
 
         // ── REST: re-render the identical scene; shaped buffer is reused. ──
-        const REST_FRAMES: u64 = 30;
+        const REST_FRAMES: u64 = 3;
         let before_rest = compositor.text_shape_call_count();
-        let rest_start = Instant::now();
         for _ in 0..REST_FRAMES {
             let _ = compositor.render_frame_headless(&mut scene, &surface);
         }
-        let rest_elapsed = rest_start.elapsed();
         let rest_reshapes = compositor.text_shape_call_count() - before_rest;
 
         // ── SCROLL: bump the offset each frame; shape inputs unchanged. ──
-        const SCROLL_FRAMES: u64 = 30;
+        // Reaches the same 1200px maximum offset as the former 30-frame loop, in
+        // 120px steps.
+        const SCROLL_FRAMES: u64 = 10;
         let before_scroll = compositor.text_shape_call_count();
-        let scroll_start = Instant::now();
         for i in 1..=SCROLL_FRAMES {
             scene
-                .set_tile_scroll_offset_local(tile_id, 0.0, i as f32 * 40.0)
+                .set_tile_scroll_offset_local(tile_id, 0.0, i as f32 * 120.0)
                 .unwrap();
             let _ = compositor.render_frame_headless(&mut scene, &surface);
         }
-        let scroll_elapsed = scroll_start.elapsed();
         let scroll_reshapes = compositor.text_shape_call_count() - before_scroll;
 
         // ── APPEND: change content once → exactly one re-shape (one item). ──
@@ -117,17 +114,6 @@ async fn scroll_reshape_bench_hud991cj() {
         let before_append = compositor.text_shape_call_count();
         let _ = compositor.render_frame_headless(&mut scene, &surface);
         let append_reshapes = compositor.text_shape_call_count() - before_append;
-
-        eprintln!(
-            "hud-991cj bench [{label}] bytes={content_bytes} | \
-             rest: {rest_reshapes} reshapes {:.3} ms/frame | \
-             scroll: {scroll_reshapes} reshapes {:.3} ms/frame | \
-             append: {append_reshapes} reshape ({:?} rest, {:?} scroll)",
-            rest_elapsed.as_secs_f64() * 1000.0 / REST_FRAMES as f64,
-            scroll_elapsed.as_secs_f64() * 1000.0 / SCROLL_FRAMES as f64,
-            rest_elapsed,
-            scroll_elapsed,
-        );
 
         // Steady-state (rest) and pure scroll reuse the shaped buffer: 0 re-shapes.
         assert_eq!(
@@ -148,7 +134,7 @@ async fn scroll_reshape_bench_hud991cj() {
 
 /// Shared test helper: build a scrollable single-tile scene whose root is a
 /// markdown transcript of `repeat` copies of a fixed 45-byte line, mirroring
-/// `scroll_reshape_bench_hud991cj`'s scenario shape (hud-u4lq2).
+/// `scroll_reshape_reuse_hud991cj`'s scenario shape (hud-u4lq2).
 fn hud_u4lq2_scenario_scene(repeat: usize) -> SceneGraph {
     use tze_hud_scene::types::{
         FontFamily, NodeData, Rect, TextAlign, TextMarkdownNode, TextOverflow,
@@ -242,7 +228,7 @@ async fn markdown_primer_landing_converges_on_render_path_hud_u4lq2() {
 
 /// hud-u4lq2 regression (the confirmed bug): reuse ONE `Compositor` across a
 /// "small" (inline, under `INLINE_PARSE_BYTE_THRESHOLD`) scenario THEN a
-/// "64KiB" scenario, exactly mirroring `scroll_reshape_bench_hud991cj`'s
+/// "64KiB" scenario, exactly mirroring `scroll_reshape_reuse_hud991cj`'s
 /// shared-compositor-across-scenarios shape.
 ///
 /// # Root cause (confirmed via direct instrumentation of `publish_if_newer`)
