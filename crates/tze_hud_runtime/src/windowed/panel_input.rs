@@ -24,9 +24,9 @@ pub(super) struct PanelInputState {
     previous_foreground: Option<isize>,
     /// Target under the left press; a release on the same target clicks.
     pressed: Option<PanelHitTarget>,
-    /// A right, middle or other button went down over the panel: its
-    /// release is the panel's too, wherever it lands.
-    other_pressed: bool,
+    /// Right, middle or other buttons that went down over the panel: each
+    /// one's release is the panel's too, wherever it lands.
+    other_pressed: Vec<winit::event::MouseButton>,
     hovered: Option<PanelHitTarget>,
 }
 
@@ -224,13 +224,23 @@ impl WinitApp {
     /// scene must not see it either (no context menu for a widget under the
     /// panel), including the release of a press that began over it. Returns
     /// true when the panel owns the edge.
-    pub(super) fn panel_other_button(&mut self, pressed: bool, primary: bool) -> bool {
+    pub(super) fn panel_other_button(
+        &mut self,
+        button: winit::event::MouseButton,
+        pressed: bool,
+        primary: bool,
+    ) -> bool {
         let over = self.panel_hit(primary).is_some();
+        let held = &mut self.state.panel_input.other_pressed;
+        let was_held = held.contains(&button);
+        held.retain(|b| *b != button);
         if pressed {
-            self.state.panel_input.other_pressed = over;
+            if over {
+                held.push(button);
+            }
             return over;
         }
-        std::mem::take(&mut self.state.panel_input.other_pressed) || over
+        was_held || over
     }
 
     /// Wheel over the panel scrolls it. Returns true when the panel owns it.
@@ -807,6 +817,7 @@ mod panel_task_tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn winit_routing_keys_and_pointer_reach_the_open_panel_only() {
         use crate::windowed::WinitApp;
+        use winit::event::MouseButton::{Middle, Right};
         use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey, SmolStr};
 
         let f = fixture();
@@ -855,15 +866,27 @@ mod panel_task_tests {
         (app.state.cursor_x, app.state.cursor_y) = (tile.x + tile.w / 2.0, tile.y + tile.h / 2.0);
         assert!(app.panel_captures_cursor());
         assert!(
-            app.panel_other_button(true, true),
+            app.panel_other_button(Right, true, true),
             "a right click over the panel never reaches the scene"
         );
-        assert!(app.panel_other_button(false, false), "nor does its release");
         assert!(
-            !app.panel_other_button(true, false),
+            app.panel_other_button(Right, false, false),
+            "nor does its release"
+        );
+        assert!(
+            !app.panel_other_button(Right, true, false),
             "another display's pointer is the scene's"
         );
-        app.panel_other_button(false, false);
+        app.panel_other_button(Right, false, false);
+        // Each button keeps its own press: a middle press over the panel
+        // owns its release even after a right press elsewhere ended.
+        assert!(app.panel_other_button(Middle, true, true));
+        assert!(!app.panel_other_button(Right, true, false));
+        assert!(!app.panel_other_button(Right, false, false));
+        assert!(
+            app.panel_other_button(Middle, false, false),
+            "the middle release stays the panel's"
+        );
         assert!(app.panel_left_button(true, true));
         assert!(app.panel_left_button(false, true));
         wait("3", || app.state.safe_mode_atomic.load(Ordering::Acquire)).await;
@@ -890,8 +913,8 @@ mod panel_task_tests {
         assert!(!app.panel_captures_cursor());
         assert!(!app.cursor_entry_signature().capture);
         assert!(!app.panel_left_button(true, true));
-        assert!(!app.panel_other_button(true, true));
-        assert!(!app.panel_other_button(false, true));
+        assert!(!app.panel_other_button(Right, true, true));
+        assert!(!app.panel_other_button(Right, false, true));
 
         let esc = (
             PhysicalKey::Code(KeyCode::Escape),

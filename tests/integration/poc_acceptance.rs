@@ -1992,8 +1992,7 @@ async fn poc_agents_see_the_same_with_the_panel_open_or_content_hidden() {
         claimed.seq = 0;
         claimed.ids.clear();
         claimed.lease_id.clear();
-        bodies.push(json!(format!("{claimed:?}")));
-        bodies
+        (bodies, claimed)
     };
     // The first publishes attach and create; compare from the second round.
     answers(&mut poc, &mut agent).await;
