@@ -564,51 +564,85 @@ fn windows_overlay_minimized(
     iconic || (outer_position == Some((-32000, -32000)) && (spec.x, spec.y) != (-32000, -32000))
 }
 
+/// Obtain the native handle on the window thread: winit intentionally refuses
+/// its safe raw-handle API on the HTTP thread.
+#[cfg(target_os = "windows")]
+fn overlay_hwnd(window: &Window) -> Option<windows::Win32::Foundation::HWND> {
+    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    let handle = window.window_handle().ok()?;
+    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
+        return None;
+    };
+    Some(windows::Win32::Foundation::HWND(
+        handle.hwnd.get() as *mut std::ffi::c_void
+    ))
+}
+
+/// Read-only native queries may run on any thread while a strong window
+/// reference keeps this HWND alive. DWM failure remains unknown.
+#[cfg(target_os = "windows")]
+fn native_overlay_window_state(
+    hwnd: windows::Win32::Foundation::HWND,
+) -> crate::operator::status::OverlayWindowState {
+    use windows::Win32::Graphics::Dwm::{DWMWA_CLOAKED, DwmGetWindowAttribute};
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GWL_EXSTYLE, GetWindowLongW, IsIconic, IsWindowVisible, WS_EX_TOPMOST,
+    };
+    let mut cloaked = 0u32;
+    // SAFETY: the caller holds the window alive; the output buffer is a DWORD.
+    unsafe {
+        let cloak_result = DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_CLOAKED,
+            (&mut cloaked as *mut u32).cast(),
+            std::mem::size_of::<u32>() as u32,
+        );
+        crate::operator::status::OverlayWindowState {
+            visible: IsWindowVisible(hwnd).as_bool(),
+            iconic: IsIconic(hwnd).as_bool(),
+            topmost: GetWindowLongW(hwnd, GWL_EXSTYLE) as u32 & WS_EX_TOPMOST.0 != 0,
+            cloaked: cloak_result.ok().map(|()| cloaked != 0),
+        }
+    }
+}
+
 /// The caller owns this winit window and runs on its event-loop thread.
 #[cfg(target_os = "windows")]
-fn restore_overlay_window(window: &Window, spec: &MonitorSpec) {
-    use std::ffi::c_void;
-    use windows::Win32::Foundation::HWND;
+fn reassert_overlay_window(window: &Window, spec: Option<&MonitorSpec>) {
     use windows::Win32::UI::WindowsAndMessaging::{
-        SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos, ShowWindow,
+        HWND_TOPMOST, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
+        ShowWindow,
     };
-    use winit::raw_window_handle::{HasWindowHandle, RawWindowHandle};
-
-    let Ok(handle) = window.window_handle() else {
-        tracing::warn!(overlay = %spec.name, "minimized overlay window handle unavailable");
+    let Some(hwnd) = overlay_hwnd(window) else {
+        tracing::warn!(window = ?window.id(), "overlay window handle unavailable");
         return;
     };
-    let RawWindowHandle::Win32(handle) = handle.as_raw() else {
-        return;
+    let (x, y, width, height, flags) = if let Some(spec) = spec {
+        let (Ok(width), Ok(height)) = (i32::try_from(spec.width), i32::try_from(spec.height))
+        else {
+            tracing::warn!(overlay = %spec.name, "overlay monitor size is not representable");
+            return;
+        };
+        (spec.x, spec.y, width, height, SWP_NOACTIVATE)
+    } else {
+        (0, 0, 0, 0, SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE)
     };
-    let (Ok(width), Ok(height)) = (i32::try_from(spec.width), i32::try_from(spec.height)) else {
-        tracing::warn!(overlay = %spec.name, "minimized overlay monitor size is not representable");
-        return;
-    };
-    let hwnd = HWND(handle.hwnd.get() as *mut c_void);
     // SAFETY: a live HWND owned by this event-loop thread. ShowWindow's BOOL
     // reports prior visibility, not success. SW_RESTORE (including winit's
     // set_minimized(false)) activates the window, so it must not be used here.
     // These undecorated, non-resizable overlays have no frame to add to the
-    // monitor-native rectangle. Keep their existing topmost order and focus.
+    // monitor-native rectangle. Reassert topmost without changing focus. A
+    // shell-cloaked window may remain cloaked; status keeps that fact visible.
     let result = unsafe {
         let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
-        SetWindowPos(
-            hwnd,
-            None,
-            spec.x,
-            spec.y,
-            width,
-            height,
-            SWP_NOACTIVATE | SWP_NOZORDER,
-        )
+        SetWindowPos(hwnd, HWND_TOPMOST, x, y, width, height, flags)
     };
     match result {
         Ok(()) => {
-            tracing::info!(overlay = %spec.name, "requested minimized overlay restore without activation")
+            tracing::info!(window = ?window.id(), "requested overlay visibility and topmost reassertion without activation")
         }
         Err(error) => {
-            tracing::warn!(overlay = %spec.name, %error, "minimized overlay restore positioning failed")
+            tracing::warn!(window = ?window.id(), %error, "overlay visibility reassertion failed")
         }
     }
 }
@@ -704,6 +738,21 @@ impl super::WinitApp {
                 (spec, Vec::new())
             }
         };
+
+        #[cfg(target_os = "windows")]
+        if self.state.effective_mode == crate::window::WindowMode::Overlay {
+            for window in std::iter::once(&primary_window)
+                .chain(self.state.secondaries.iter().map(|s| &s.window))
+            {
+                if let Some(state) = overlay_hwnd(window)
+                    .map(native_overlay_window_state)
+                    .filter(|s| s.needs_reassert())
+                {
+                    tracing::warn!(window = ?window.id(), ?state, "overlay native visibility drift");
+                    reassert_overlay_window(window, None);
+                }
+            }
+        }
 
         let first_sync = self
             .state
@@ -886,7 +935,7 @@ impl super::WinitApp {
             windows_overlay_minimized(window.is_minimized().unwrap_or(false), position, spec);
         match overlay_recovery(minimized, position, (size.width, size.height), spec) {
             OverlayRecovery::Restore => {
-                restore_overlay_window(window, spec);
+                reassert_overlay_window(window, Some(spec));
                 self.state.displays_dirty.store(true, Ordering::Release);
                 true
             }
@@ -933,7 +982,7 @@ impl super::WinitApp {
             };
             let OverlayRecovery::Refit((x, y), (width, height)) = recovery else {
                 #[cfg(target_os = "windows")]
-                restore_overlay_window(window, spec);
+                reassert_overlay_window(window, Some(spec));
                 continue;
             };
             tracing::info!(
@@ -1044,6 +1093,7 @@ impl super::WinitApp {
             height: primary.height,
             primary: true,
             zones: zones_on(&primary.name),
+            window_state: None,
         }];
         status.extend(specs.iter().map(|m| {
             let (x, y) = m.scene_origin(primary);
@@ -1055,6 +1105,7 @@ impl super::WinitApp {
                 height: m.height,
                 primary: false,
                 zones: zones_on(&m.name),
+                window_state: None,
             }
         }));
         let mut connected: Vec<&str> = vec![primary.name.as_str()];
@@ -1081,6 +1132,49 @@ impl super::WinitApp {
                     "zone placed on a display whose overlay kept failing; it renders on the primary"
                 ),
             }
+        }
+        #[cfg(target_os = "windows")]
+        {
+            // Weak references do not keep removed windows alive. Each request
+            // reports the observed state before scheduling a main-thread repair.
+            let windows: Vec<_> = self
+                .state
+                .window
+                .iter()
+                .map(|window| (primary.name.clone(), window))
+                .chain(
+                    self.state
+                        .secondaries
+                        .iter()
+                        .map(|display| (display.spec.name.clone(), &display.window)),
+                )
+                .filter_map(|(name, window)| {
+                    Some((
+                        name,
+                        Arc::downgrade(window),
+                        overlay_hwnd(window)?.0 as usize,
+                    ))
+                })
+                .collect();
+            let dirty = Arc::clone(&self.state.displays_dirty);
+            let wake = self.state.wake.clone();
+            let overlay = self.state.effective_mode == crate::window::WindowMode::Overlay;
+            crate::operator::status::set_window_state_probe(Arc::new(move || {
+                let states: std::collections::HashMap<_, _> = windows
+                    .iter()
+                    .filter_map(|(name, window, handle)| {
+                        let _window = window.upgrade()?;
+                        let hwnd =
+                            windows::Win32::Foundation::HWND(*handle as *mut std::ffi::c_void);
+                        Some((name.clone(), native_overlay_window_state(hwnd)))
+                    })
+                    .collect();
+                if overlay && states.values().any(|state| state.needs_reassert()) {
+                    dirty.store(true, Ordering::Release);
+                    wake.notify_main(crate::idle_efficiency::RuntimeWakeupSource::Resize);
+                }
+                states
+            }));
         }
         crate::operator::status::set_displays(status, unplaced);
         self.publish_display_scales(primary, &specs);
@@ -1183,7 +1277,7 @@ pub(super) fn take_dirty(flag: &DisplaysDirty) -> bool {
     flag.swap(false, Ordering::AcqRel)
 }
 
-/// Watch for `WM_DISPLAYCHANGE` (monitor added, removed or re-moded) on a
+/// Watch for display changes, system resume and console display power-on on a
 /// hidden top-level window owned by a dedicated thread, blocked in
 /// `GetMessageW` (zero idle cost). Each change sets `dirty` and calls `wake`.
 ///
@@ -1192,11 +1286,18 @@ pub(super) fn take_dirty(flag: &DisplaysDirty) -> bool {
 /// down; the OS reclaims them at exit.
 #[cfg(target_os = "windows")]
 pub(super) fn spawn_display_change_watcher(dirty: DisplaysDirty, wake: impl Fn() + Send + 'static) {
-    use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, WPARAM};
+    use windows::Win32::System::Power::{
+        POWERBROADCAST_SETTING, RegisterPowerSettingNotification,
+        UnregisterPowerSettingNotification,
+    };
+    use windows::Win32::System::SystemServices::GUID_CONSOLE_DISPLAY_STATE;
     use windows::Win32::UI::WindowsAndMessaging::{
-        CreateWindowExW, DefWindowProcW, DispatchMessageW, GWLP_USERDATA, GetMessageW,
-        GetWindowLongPtrW, MSG, RegisterClassW, SetWindowLongPtrW, WINDOW_EX_STYLE,
-        WM_DISPLAYCHANGE, WNDCLASSW, WS_OVERLAPPED,
+        CreateWindowExW, DEVICE_NOTIFY_WINDOW_HANDLE, DefWindowProcW, DispatchMessageW,
+        GWLP_USERDATA, GetMessageW, GetWindowLongPtrW, MSG, PBT_APMRESUMEAUTOMATIC,
+        PBT_APMRESUMECRITICAL, PBT_APMRESUMESUSPEND, PBT_POWERSETTINGCHANGE, RegisterClassW,
+        SetWindowLongPtrW, WINDOW_EX_STYLE, WM_DISPLAYCHANGE, WM_POWERBROADCAST, WNDCLASSW,
+        WS_OVERLAPPED,
     };
     use windows::core::w;
 
@@ -1211,13 +1312,34 @@ pub(super) fn spawn_display_change_watcher(dirty: DisplaysDirty, wake: impl Fn()
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> LRESULT {
-        if msg == WM_DISPLAYCHANGE {
+        let resumed = msg == WM_POWERBROADCAST
+            && matches!(
+                wparam.0 as u32,
+                PBT_APMRESUMEAUTOMATIC | PBT_APMRESUMESUSPEND | PBT_APMRESUMECRITICAL
+            );
+        let display_on = if msg == WM_POWERBROADCAST
+            && wparam.0 as u32 == PBT_POWERSETTINGCHANGE
+            && lparam.0 != 0
+        {
+            // SAFETY: Windows supplies this structure for PBT_POWERSETTINGCHANGE;
+            // the GUID carries a DWORD. Read it unaligned from the byte payload.
+            let setting = unsafe { &*(lparam.0 as *const POWERBROADCAST_SETTING) };
+            setting.PowerSetting == GUID_CONSOLE_DISPLAY_STATE
+                && setting.DataLength == std::mem::size_of::<u32>() as u32
+                && unsafe { std::ptr::read_unaligned(setting.Data.as_ptr().cast::<u32>()) } == 1
+        } else {
+            false
+        };
+        if msg == WM_DISPLAYCHANGE || resumed || display_on {
             // SAFETY: GWLP_USERDATA holds the leaked `Watch` set right after
             // CreateWindowExW, or 0 before then.
             let watch = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const Watch;
             if let Some(watch) = unsafe { watch.as_ref() } {
                 watch.dirty.store(true, Ordering::Release);
                 (watch.wake)();
+            }
+            if msg == WM_POWERBROADCAST {
+                return LRESULT(1);
             }
         }
         // SAFETY: default handling for everything else.
@@ -1266,10 +1388,22 @@ pub(super) fn spawn_display_change_watcher(dirty: DisplaysDirty, wake: impl Fn()
             }));
             // SAFETY: the pointer stays valid for the thread's (process's) life.
             unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, watch as isize) };
+            // SAFETY: the recipient is this thread's live hidden top-level window.
+            let power_notification = unsafe {
+                RegisterPowerSettingNotification(HANDLE(hwnd.0), &GUID_CONSOLE_DISPLAY_STATE,
+                    DEVICE_NOTIFY_WINDOW_HANDLE)
+            };
+            if let Err(error) = &power_notification {
+                tracing::warn!(%error, "console display power notifications unavailable");
+            }
             let mut msg = MSG::default();
             // SAFETY: valid out-pointer; 0 (WM_QUIT) or -1 (error) ends the loop.
             while unsafe { GetMessageW(&mut msg, None, 0, 0) }.0 > 0 {
                 unsafe { DispatchMessageW(&msg) };
+            }
+            if let Ok(notification) = power_notification {
+                // SAFETY: registration belongs to this thread and is no longer used.
+                let _ = unsafe { UnregisterPowerSettingNotification(notification) };
             }
         });
     if let Err(error) = spawned {
@@ -1562,7 +1696,7 @@ mod tests {
 
     /// The sizes Windows left the overlays at during the owner's replug.
     #[test]
-    fn overlays_resized_off_their_monitor_are_refitted() {
+    fn overlay_geometry_and_visibility_recovery() {
         let d8 = spec("DISPLAY8", 17, -2160);
         assert_eq!(overlay_refit(Some((17, -2160)), (3840, 2160), &d8), None);
         for drifted in [(3862, 2182), (237, 39)] {
@@ -1622,6 +1756,35 @@ mod tests {
             overlay_recovery(false, Some((17, -2160)), (3840, 2160), &d8),
             OverlayRecovery::Matched,
             "the restored native rectangle needs no more work"
+        );
+        use crate::operator::status::OverlayWindowState;
+        let healthy = OverlayWindowState {
+            visible: true,
+            iconic: false,
+            topmost: true,
+            cloaked: Some(false),
+        };
+        for (visible, iconic, topmost, cloaked, expected) in [
+            (true, false, true, Some(false), false),
+            (false, false, true, Some(false), true),
+            (true, true, true, Some(false), true),
+            (true, false, false, Some(false), true),
+            (true, false, true, Some(true), true),
+            (true, false, true, None, false),
+        ] {
+            let state = OverlayWindowState {
+                visible,
+                iconic,
+                topmost,
+                cloaked,
+            };
+            assert_eq!(state.needs_reassert(), expected, "{state:?}");
+        }
+        assert_eq!(
+            serde_json::to_value(healthy).unwrap(),
+            serde_json::json!({
+                "visible": true, "iconic": false, "topmost": true, "cloaked": false,
+            })
         );
         let sentinel_monitor = spec("DISPLAY9", -32000, -32000);
         assert!(!windows_overlay_minimized(

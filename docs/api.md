@@ -235,8 +235,16 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
   overrides as startup; see [the reversible Windows helper](operations/windows-install.md#remote-agents).
   This policy-derived result is cached for five seconds, not a network probe.
   `/admin/status` `displays` lists the overlaid monitors, primary first:
-  `{name, x, y, width, height, primary, zones}` in scene pixels (the primary's
-  top-left is 0,0; others may be negative) and the zones configured onto each;
+  `{name, x, y, width, height, primary, zones, window_state}` in scene pixels (the primary's
+  top-left is 0,0; others may be negative) and the zones configured onto each.
+  On Windows, `window_state` samples `{visible, iconic, topmost, cloaked}` from
+  the live HWND (`cloaked: null` if DWM cannot report it); the whole object is
+  `null` outside Windows or when the window is unavailable. Status preserves the
+  observed state and queues a no-activate visibility/topmost reassertion on the
+  window thread when it drifts. Display changes, system resume and console
+  display power-on also trigger that check; there is no per-frame polling.
+  Shell cloaking can remain after reassertion and is still reported; a present
+  counter or compositor screenshot does not establish owner-visible pixels.
   `unplaced_zones` lists `{zone, display, reason}` placements with no overlay
   window, rendering on the primary instead: `reason` is `not_connected`, or
   `overlay_failed` when that monitor's overlay surface was lost and recreated
