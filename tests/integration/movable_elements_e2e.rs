@@ -804,9 +804,14 @@ async fn agent_receives_element_repositioned_event_with_old_and_new_geometry() {
     let mut stream = client.session(stream).await.unwrap().into_inner();
 
     // Drain SessionEstablished + current DegradationNotice.
-    stream.next().await;
-    stream.next().await;
-    stream.next().await;
+    assert!(matches!(
+        stream.next().await.unwrap().unwrap().payload,
+        Some(ServerPayload::SessionEstablished(_))
+    ));
+    assert!(matches!(
+        stream.next().await.unwrap().unwrap().payload,
+        Some(ServerPayload::DegradationNotice(_))
+    ));
 
     // Give the session handler time to complete subscription.
     tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;
