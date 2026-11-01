@@ -792,7 +792,12 @@ mod panel_task_tests {
                 "visibility.portals".into(),
                 PanelPart::Body,
             )),
-            |_| hidden().is_some_and(|h| h.portals),
+            // The log line follows the change: wait for both.
+            |_| {
+                hidden().is_some_and(|h| h.portals)
+                    && String::from_utf8_lossy(&sink.0.lock().unwrap())
+                        .contains("control panel: applied")
+            },
         )
         .await;
         let log = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();

@@ -247,8 +247,8 @@ impl Section for SystemSection {
 
     fn summary(&self) -> Option<String> {
         let control = self.control.as_ref()?;
-        (control.restart.is_some() && !control.pending().is_empty())
-            .then(|| "restart pending".to_owned())
+        // Also without Restart now: the owner must then restart by hand.
+        (!control.pending().is_empty()).then(|| "restart pending".to_owned())
     }
 
     fn title(&self) -> &'static str {
@@ -392,5 +392,23 @@ mod tests {
             )],
             "no profile in config: no row rather than a guess"
         );
+    }
+
+    /// The header says "restart pending" while a saved port differs from
+    /// the running one, also when this copy has no Restart now (the owner
+    /// then restarts by hand).
+    #[test]
+    fn summary_flags_a_pending_restart_without_restart_now() {
+        let dir = tempfile::tempdir().unwrap();
+        let control = fake(
+            &dir.path().join("tze_hud.toml"),
+            Arc::new(Mutex::new(Vec::new())),
+            None,
+        );
+        assert!(control.restart.is_none());
+        let section = SystemSection::new(Some(control.clone()));
+        assert_eq!(section.summary(), None);
+        control.saved.lock().unwrap().grpc = 50061;
+        assert_eq!(section.summary().as_deref(), Some("restart pending"));
     }
 }

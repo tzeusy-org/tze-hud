@@ -545,7 +545,7 @@ pub fn set_widget(
 mod tests {
     use super::*;
 
-    /// Token, runtime and widget edits from many threads at once all land,
+    /// A runtime edit that starts while a token edit is mid-save still lands,
     /// and the owner's comments survive (one writer at a time).
     #[test]
     fn concurrent_writers_lose_no_update() {
@@ -556,31 +556,29 @@ mod tests {
             "# mine\n[runtime]\nprofile = \"full-display\" # keep\n\n[design_tokens]\n",
         )
         .unwrap();
-        // Each thread writes one token at its own default value.
-        let tokens = &crate::tokens::CANONICAL_TOKENS[..16];
+        // Writer A has read the file and holds its edit when writer B starts;
+        // A then waits before its rename. Without one writer at a time, B
+        // reads the old text and A's rename drops B's change every run.
+        let (mid_save, started) = std::sync::mpsc::channel();
         std::thread::scope(|scope| {
-            for token in tokens {
-                let path = &path;
-                scope.spawn(move || {
-                    let update = TokenUpdate::Set(token.default_value.to_owned());
-                    set_design_tokens(path, &[(token.key, update)]).unwrap();
-                });
-            }
             let path = &path;
             scope.spawn(move || {
-                set_runtime(path, &[RuntimeUpdate::Fps(Some(30))]).unwrap();
+                set_design_tokens_with(
+                    path,
+                    &[("theme", TokenUpdate::Set("classic".into()))],
+                    |from, to| {
+                        mid_save.send(()).unwrap();
+                        std::thread::sleep(std::time::Duration::from_millis(200));
+                        std::fs::rename(from, to)
+                    },
+                )
+                .unwrap();
             });
+            started.recv().unwrap();
+            set_runtime(path, &[RuntimeUpdate::Fps(Some(30))]).unwrap();
         });
         let out = std::fs::read_to_string(&path).unwrap();
-        let saved: toml::Value = toml::from_str(&out).unwrap();
-        for token in tokens {
-            assert_eq!(
-                saved["design_tokens"][token.key].as_str(),
-                Some(token.default_value),
-                "{} lost:\n{out}",
-                token.key
-            );
-        }
+        assert!(out.contains("theme = \"classic\""), "{out}");
         assert!(out.contains("fps = 30"), "{out}");
         assert!(out.contains("# mine") && out.contains("# keep"), "{out}");
     }

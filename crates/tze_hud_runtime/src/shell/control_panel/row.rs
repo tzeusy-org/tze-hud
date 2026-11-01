@@ -205,7 +205,8 @@ pub(crate) trait Section: Send + Sync {
 
     /// A few words for the panel header's state line ("3 agents · 2 portals",
     /// "restart pending"), from state the section already holds; read on
-    /// every rebuild, so it must not lock or block.
+    /// every rebuild, so it may take a short lock but must not await or do
+    /// I/O.
     fn summary(&self) -> Option<String> {
         None
     }

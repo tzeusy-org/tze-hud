@@ -851,20 +851,22 @@ pub(crate) fn on_key(
             PanelFocus::Row(id) => {
                 if let Some((editing, text)) = open.editing.take() {
                     if editing == id {
-                        let edit = Edit::Text(text);
-                        let asks = nav.control(&id).and_then(|c| c.confirm_for(&edit));
-                        if asks.is_some() && open.confirming.as_deref() != Some(id.as_str()) {
+                        let asks = nav
+                            .control(&id)
+                            .and_then(|c| c.confirm_for(&Edit::Text(text.clone())))
+                            .is_some();
+                        if asks && open.confirming.as_deref() != Some(id.as_str()) {
                             // Keep the typed value; the next Enter saves it.
-                            let Edit::Text(text) = edit else {
-                                unreachable!()
-                            };
                             open.editing = Some((id.clone(), text));
                             open.confirming = Some(id);
                             return Vec::new();
                         }
                         open.confirming = None;
                         open.error = None;
-                        return vec![Effect::Apply { row: id, edit }];
+                        return vec![Effect::Apply {
+                            row: id,
+                            edit: Edit::Text(text),
+                        }];
                     }
                 }
                 return act(open, nav, &id, Gesture::Activate);
