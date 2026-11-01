@@ -93,6 +93,25 @@ def test_poll_prints_ndjson_and_acks_on_next_call(capsys):
     assert json.loads(capsys.readouterr().out.strip()) == item
 
 
+def test_poll_with_ack_stops_at_first_reply(capsys):
+    """A background waiter (--rounds N --ack) must exit on the first reply."""
+    item = {"id": "i1", "s": "portal:s1", "text": "yes"}
+    calls = run(
+        ["poll", "--wait-ms", "10", "--rounds", "5", "--ack"],
+        [
+            tool_response({"items": [], "remaining": 0}),
+            tool_response({"items": [item], "remaining": 0}),
+            tool_response({"items": [], "remaining": 0}),
+        ],
+    )
+    assert [c[1]["arguments"] for c in calls] == [
+        {"wait_ms": 10, "max_items": calls[0][1]["arguments"]["max_items"]},
+        {"wait_ms": 10, "max_items": calls[0][1]["arguments"]["max_items"]},
+        {"ack": ["i1"]},
+    ]
+    assert json.loads(capsys.readouterr().out.strip()) == item
+
+
 def test_poll_without_input_exits_3():
     with pytest.raises(SystemExit) as exit_info:
         run(["poll", "--wait-ms", "10"], [tool_response({"items": [], "remaining": 0})])

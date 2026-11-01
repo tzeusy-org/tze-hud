@@ -90,7 +90,7 @@ def call_tool(name, arguments, *, timeout=None):
 
 
 def emit(value):
-    print(json.dumps(value, separators=(",", ":")))
+    print(json.dumps(value, separators=(",", ":")), flush=True)
 
 
 def cmd_surfaces(_args):
@@ -140,7 +140,7 @@ def cmd_poll(args):
             emit(item)
         got += len(items)
         ack = [item["id"] for item in items] if args.ack else []
-        if items and not args.ack:
+        if items:
             break
     if ack:
         call_tool("hud_input", {"ack": ack})
