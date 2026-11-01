@@ -84,6 +84,9 @@ pub struct McpServerConfig {
     /// First-run pairing behind `POST /pair`; the route answers
     /// `PAIRING_CLOSED` without one.
     pub pairing: Option<Arc<crate::pairing::Pairing>>,
+
+    /// Live design tokens: `/admin/status` reports their last config reload.
+    pub appearance: Option<Arc<crate::Appearance>>,
 }
 
 /// Start the MCP HTTP server on the calling Tokio runtime.
@@ -188,6 +191,7 @@ pub async fn start_mcp_http_server_with_render_wake(
         restart: config.restart.clone(),
         update: config.update.clone(),
         pairing: config.pairing.clone(),
+        appearance: config.appearance.clone(),
         firewall: match &config.pairing {
             Some(pairing) => pairing.firewall(),
             None => Arc::new(crate::firewall::FirewallProbe::system(
@@ -664,6 +668,7 @@ mod tests {
 
     fn make_config(port: u16, psk: &str) -> McpServerConfig {
         McpServerConfig {
+            appearance: None,
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
                 &Default::default(),
                 "motion.state.ms",
@@ -761,6 +766,7 @@ mod tests {
             perms(&["*"]),
         );
         StatusSource {
+            appearance: None,
             agents: dir.shared(),
             binds: Arc::new(std::sync::Mutex::new(vec![
                 "127.0.0.1:9090".parse().unwrap(),
@@ -1026,6 +1032,7 @@ mod tests {
             "cpu_pct_avg",
             "last_update",
             "last_restart",
+            "config_reload",
         ] {
             assert!(v.get(key).is_some(), "missing {key}: {text}");
         }
@@ -1243,6 +1250,7 @@ mod tests {
     #[tokio::test]
     async fn mcp_http_tools_list_on_every_listener() {
         let config = McpServerConfig {
+            appearance: None,
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
                 &Default::default(),
                 "motion.state.ms",
@@ -1285,6 +1293,7 @@ mod tests {
     async fn mcp_http_only_loopback_bind_failure_is_fatal() {
         let agents = tze_hud_scene::config::AgentDirectory::unrestricted("k").shared();
         let cfg = |addrs: [&str; 2]| McpServerConfig {
+            appearance: None,
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
                 &Default::default(),
                 "motion.state.ms",

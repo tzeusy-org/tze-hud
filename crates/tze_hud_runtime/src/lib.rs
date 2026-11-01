@@ -37,6 +37,8 @@
 //! (in `tests/` directories) require `features = ["dev-mode"]` explicitly.
 //!
 pub(crate) mod agent_store;
+pub(crate) mod appearance;
+pub use appearance::Appearance;
 pub(crate) mod channels;
 pub(crate) mod degradation;
 pub mod diag;

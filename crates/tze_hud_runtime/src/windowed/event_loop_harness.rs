@@ -173,6 +173,9 @@ impl WindowedRuntimeState {
             zone_press: None,
             primary_drag_gesture: None,
             global_tokens: HashMap::new(),
+            appearance: None,
+            tokens_seen: 0,
+            _config_watch: None,
             element_repositioned_tx: None,
             input_event_tx: None,
             pending_blur_delivery_context: None,
@@ -287,14 +290,15 @@ impl HeadlessEventLoopHarness {
             cfg.window.height as f32,
             Arc::clone(&clock),
         );
-        let global_tokens = match cfg.config_toml.as_deref() {
-            Some(toml_src) => {
-                let raw: tze_hud_config::raw::RawConfig = toml::from_str(toml_src)?;
+        let raw: Option<tze_hud_config::raw::RawConfig> =
+            cfg.config_toml.as_deref().map(toml::from_str).transpose()?;
+        let global_tokens = match &raw {
+            Some(raw) => {
                 let config_parent = cfg
                     .config_file_path
                     .as_deref()
                     .and_then(|p| std::path::Path::new(p).parent());
-                crate::scene_startup::run_scene_startup(&raw, config_parent, &mut scene)
+                crate::scene_startup::run_scene_startup(raw, config_parent, &mut scene)
                     .global_tokens
             }
             None => {
@@ -330,6 +334,7 @@ impl HeadlessEventLoopHarness {
         });
         state.pairing = pairing.clone();
         let mcp_config = crate::mcp::McpServerConfig {
+            appearance: None,
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
                 &global_tokens,
                 "motion.state.ms",
@@ -396,6 +401,15 @@ impl HeadlessEventLoopHarness {
             render_wake.clone(),
         ));
         let panel_scene = Arc::clone(&state.shared_state.lock().await.scene);
+        let appearance = Arc::new(crate::appearance::Appearance::for_startup(
+            raw.as_ref(),
+            cfg.config_file_path.as_deref().map(std::path::Path::new),
+            global_tokens.clone(),
+            Arc::clone(&panel_scene),
+            render_wake.clone(),
+            state.wake.main_work_notifier(),
+        ));
+        state.appearance = Some(Arc::clone(&appearance));
         let clipboard: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
         let effects: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
         let deps = crate::shell::control_panel::ControlPanelDeps {
@@ -452,6 +466,7 @@ impl HeadlessEventLoopHarness {
                 pairing.as_ref().map(|p| p.firewall()),
                 Arc::clone(&effects),
             )),
+            appearance: Some(appearance),
             render_wake,
             main_wake: state.wake.main_work_notifier(),
         };
@@ -629,6 +644,11 @@ impl HeadlessEventLoopHarness {
             .clone()
     }
 
+    /// A design token as the main thread draws with it now (after `tick`).
+    pub fn design_token(&self, key: &str) -> Option<String> {
+        self.app.state.global_tokens.get(key).cloned()
+    }
+
     /// The frame rate cap and zone outlines the compositor would use now.
     pub fn live_settings(&self) -> (u32, bool) {
         (
@@ -765,6 +785,7 @@ impl HeadlessEventLoopHarness {
     /// Returns `false` when a lock was busy and part of the turn was deferred;
     /// call again.
     pub fn tick(&mut self) -> bool {
+        self.app.sync_design_tokens();
         let settled = !self.app.settle_scene_work().is_deferred();
         let (width, height) = (
             self.app.state.config.window.width as f32,

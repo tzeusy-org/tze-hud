@@ -17,8 +17,14 @@ use tze_hud_scene::config::ChordRole;
 use crate::raw::{RawConfig, RawDesignTokens};
 use crate::themes::{THEME_KEY, validate_theme};
 
-/// Keys the settings card may write.
-pub const WRITABLE_KEYS: [&str; 4] = [THEME_KEY, "font.sans", "font.mono", "font.serif"];
+/// Whether the control panel may write `[design_tokens] key`: the theme,
+/// the font roles (`font.serif` is a role without a canonical default) and
+/// every canonical token.
+pub fn is_writable_token(key: &str) -> bool {
+    key == THEME_KEY || key == FONT_SERIF || crate::tokens::canonical_token(key).is_some()
+}
+
+const FONT_SERIF: &str = "font.serif";
 
 /// What to do with one `[design_tokens]` key.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -80,36 +86,58 @@ impl From<std::io::Error> for ConfigWriteError {
 
 /// Check every update; no I/O.
 fn validate(updates: &[(&str, TokenUpdate)]) -> Result<(), ConfigWriteError> {
-    for (key, update) in updates {
-        if !WRITABLE_KEYS.contains(key) {
-            return Err(ConfigWriteError::UnknownKey((*key).to_owned()));
-        }
-        let TokenUpdate::Set(value) = update else {
-            continue;
+    updates
+        .iter()
+        .try_for_each(|(key, update)| check_token_update(key, update))
+}
+
+/// Check one update without touching the file. Any key may be removed (so
+/// "Reset all" also clears hand-written overrides such as `portal.*`
+/// colors); only [`is_writable_token`] keys may be set, and only to a value
+/// of their kind.
+pub fn check_token_update(key: &str, update: &TokenUpdate) -> Result<(), ConfigWriteError> {
+    let TokenUpdate::Set(value) = update else {
+        return Ok(());
+    };
+    if !is_writable_token(key) {
+        return Err(ConfigWriteError::UnknownKey(key.to_owned()));
+    }
+    if key == THEME_KEY {
+        let raw = RawConfig {
+            design_tokens: Some(RawDesignTokens(
+                [(THEME_KEY.to_owned(), value.clone())].into(),
+            )),
+            ..RawConfig::default()
         };
-        if *key == THEME_KEY {
-            let raw = RawConfig {
-                design_tokens: Some(RawDesignTokens(
-                    [(THEME_KEY.to_owned(), value.clone())].into(),
-                )),
-                ..RawConfig::default()
-            };
-            let mut errors = Vec::new();
-            validate_theme(&raw, &mut errors);
-            if let Some(e) = errors.into_iter().next() {
-                return Err(ConfigWriteError::InvalidValue {
-                    key: (*key).to_owned(),
-                    expected: e.expected,
-                    got: e.got,
-                });
-            }
-        } else if value.trim().is_empty() || value.chars().any(char::is_control) {
+        let mut errors = Vec::new();
+        validate_theme(&raw, &mut errors);
+        if let Some(e) = errors.into_iter().next() {
             return Err(ConfigWriteError::InvalidValue {
-                key: (*key).to_owned(),
+                key: key.to_owned(),
+                expected: e.expected,
+                got: e.got,
+            });
+        }
+    } else if value.chars().any(char::is_control) {
+        return Err(ConfigWriteError::InvalidValue {
+            key: key.to_owned(),
+            expected: "text without control characters".to_owned(),
+            got: format!("{value:?}"),
+        });
+    } else if key == FONT_SERIF {
+        if value.trim().is_empty() {
+            return Err(ConfigWriteError::InvalidValue {
+                key: key.to_owned(),
                 expected: "a non-empty font family name".to_owned(),
                 got: format!("{value:?}"),
             });
         }
+    } else if let Err(expected) = crate::tokens::validate_canonical_value(key, value) {
+        return Err(ConfigWriteError::InvalidValue {
+            key: key.to_owned(),
+            expected,
+            got: format!("{value:?}"),
+        });
     }
     Ok(())
 }
@@ -573,6 +601,43 @@ mod tests {
         }
         let entries = std::fs::read_dir(dir.path()).unwrap().count();
         assert_eq!(entries, 1, "no temp file left behind");
+    }
+
+    /// Any canonical token is writable with a value of its kind; a wrong
+    /// kind or an unknown key writes nothing.
+    #[test]
+    fn canonical_tokens_are_writable_and_checked_by_kind() {
+        let got = run(DOC, &[set("color.text.primary", "#112233")]).unwrap();
+        let parsed: toml::Table = toml::from_str(&got).unwrap();
+        assert_eq!(
+            parsed["design_tokens"]["color.text.primary"].as_str(),
+            Some("#112233")
+        );
+        let got = run(DOC, &[set("font.serif", "Georgia")]).unwrap();
+        assert!(got.contains("\"font.serif\" = \"Georgia\""), "{got}");
+        for bad in [
+            set("color.text.primary", "blue"),
+            set("not.a.token", "1"),
+            set("font.serif", " "),
+        ] {
+            assert!(run(DOC, &[bad.clone()]).is_err(), "{bad:?}");
+        }
+    }
+
+    /// A hand-written override the panel cannot set can still be removed.
+    #[test]
+    fn any_override_can_be_removed() {
+        let src = DOC.replace(
+            "\"space.md\" = \"12\"\n",
+            "\"space.md\" = \"12\"\n\"portal.header.text_color\" = \"#00000000\"\n",
+        );
+        let key = "portal.header.text_color".to_owned();
+        assert!(
+            run(&src, &[set(&key, "#ffffffff")]).is_err(),
+            "not settable"
+        );
+        let got = run(&src, &[(key, TokenUpdate::Remove)]).unwrap();
+        assert!(!got.contains("portal.header"), "{got}");
     }
 
     #[test]

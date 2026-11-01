@@ -281,6 +281,9 @@ pub(crate) struct ControlPanelDeps {
     /// Launch settings, restart, update and the rest of Network,
     /// Diagnostics and System (`None`: those show only the version).
     pub runtime: Option<RuntimeControl>,
+    /// Live theme, fonts and tokens (`None`: no Appearance or Advanced
+    /// tokens cards).
+    pub appearance: Option<Arc<crate::appearance::Appearance>>,
     /// Wakes the compositor (and the winit loop) after a publish.
     pub render_wake: RenderWakeNotifier,
     /// Wakes only the winit loop (new geometry changes pointer capture).
@@ -299,6 +302,14 @@ pub(crate) fn default_sections(deps: &ControlPanelDeps) -> Vec<Box<dyn Section>>
             Arc::clone(&deps.scene),
             deps.render_wake.clone(),
         )),
+    ];
+    if let Some(appearance) = &deps.appearance {
+        sections.push(Box::new(sections::AppearanceSection::new(
+            Arc::clone(appearance),
+            deps.runtime.as_ref().and_then(|r| r.write_tokens.clone()),
+        )));
+    }
+    sections.extend::<[Box<dyn Section>; 2]>([
         Box::new(sections::LayoutSection::new(
             Arc::clone(&deps.scene),
             deps.render_wake.clone(),
@@ -316,12 +327,18 @@ pub(crate) fn default_sections(deps: &ControlPanelDeps) -> Vec<Box<dyn Section>>
                 .filter(|r| r.config_path.is_some())
                 .map(|r| r.write.clone()),
         )),
-    ];
+    ]);
     if let Some(runtime) = &deps.runtime {
         sections.push(Box::new(sections::NetworkSection::new(runtime.clone())));
         sections.push(Box::new(sections::DiagnosticsSection::new(runtime.clone())));
     }
     sections.push(Box::new(sections::SystemSection::new(deps.runtime.clone())));
+    if let Some(appearance) = &deps.appearance {
+        sections.push(Box::new(sections::TokensSection::new(
+            Arc::clone(appearance),
+            deps.runtime.as_ref().and_then(|r| r.write_tokens.clone()),
+        )));
+    }
     sections
 }
 

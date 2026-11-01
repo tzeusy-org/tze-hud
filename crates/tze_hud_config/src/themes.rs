@@ -171,6 +171,20 @@ pub fn resolve_config_tokens(config_tokens: &DesignTokenMap) -> DesignTokenMap {
     resolve_tokens(&theme, &overrides)
 }
 
+/// Check a whole `[design_tokens]` table the way config loading does (key
+/// syntax, reserved keys, the theme name): the live-reload path refuses
+/// what a restart would refuse. Returns the first problem as a sentence.
+pub fn check_design_tokens(config_tokens: &DesignTokenMap) -> Result<(), String> {
+    let raw = RawConfig {
+        design_tokens: Some(crate::raw::RawDesignTokens(config_tokens.clone())),
+        ..RawConfig::default()
+    };
+    let mut errors = Vec::new();
+    crate::tokens::validate_design_tokens(&raw, &mut errors);
+    validate_theme(&raw, &mut errors);
+    errors.into_iter().next().map_or(Ok(()), |e| Err(e.hint))
+}
+
 /// Validate `[design_tokens] theme`: it must name a built-in theme.
 pub fn validate_theme(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
     let Some(name) = raw

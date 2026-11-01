@@ -494,6 +494,21 @@ save fails the change lasts the session and the row says so. A
 `[displays.<NAME>]` table's zones show read-only until monitor names are
 stable across reboots.
 
+The Appearance card picks the theme (Left/Right, or Alt+T from anywhere in
+the panel, steps through them) and the sans, mono and serif fonts (type a
+family name; an empty value gives the theme's). Advanced tokens lists every
+canonical token with its value and where it comes from (the theme, the
+canonical default, or an override); typing a value of the token's kind
+overrides it, an empty value removes the override, and "Reset all
+overrides" removes every override but the theme. Overrides of other keys
+written in the file (such as `portal.*` colors) are listed after the
+canonical tokens and can only be cleared. Each change restyles the
+HUD on its next frame and is saved to `[design_tokens]` with the file's
+comments kept; when the save fails (a read-only file) the change lasts the
+session and the row shows the error and the path. The panel keeps its own
+text legible whatever an override does. Zoom (`ui.scale`) waits for
+logical-dp sizing (`hud-h51u7.3`).
+
 A row whose value a flag or variable set is read-only and names it ("Set by
 --mcp-port"), because a restart reuses the same arguments and environment.
 
@@ -541,9 +556,23 @@ theme = "tonal-glass"              # unset means tonal-glass
 Tokens resolve in three layers, each winning over the one before:
 canonical defaults, then the selected theme, then the other
 `[design_tokens]` entries. `tze_hud_config::themes::resolve_config_tokens`
-does this as a pure function, so a later live theme swap can run it
-again. An unknown theme name fails config validation with
-`UnknownTheme`, and the error lists the available themes. Keep config
+does this as a pure function. An unknown theme name fails config validation
+with `UnknownTheme`, and the error lists the available themes.
+
+**Live changes.** Editing `[design_tokens]` in the running HUD's config file
+(or using the control panel's Appearance and Advanced tokens cards) restyles
+it without a restart: zones, widgets (their SVGs re-resolve), portals and
+the panel take the new tokens on the next frame. The HUD watches the
+config's folder (no polling) and applies an edit 250 ms after the last
+write (at most 2 s after the first). A file whose table is unchanged since
+the HUD last read or saved it does nothing, so a panel change that could
+not be saved survives an unrelated edit. A
+table that startup would refuse (an unknown theme, a reserved or malformed
+key) or a file that is not valid TOML keeps the current tokens and is
+reported in `/admin/status` `config_reload`. Still read once at startup:
+tile placement, the MCP widget transition time, and widget text fonts
+(widgets draw with the bundled faces). Other config sections apply after a
+restart (or live from the control panel). Keep config
 overrides for values specific to one deployment. The visual design
 belongs in a theme.
 

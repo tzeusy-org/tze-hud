@@ -319,6 +319,7 @@ mod calibration {
             update: None,
             bind_gate: None,
             pairing: None,
+            appearance: None,
         };
         let (server_task, addresses) =
             start_mcp_http_server(scene, config, shutdown.clone(), Some(portals.clone())).await?;
