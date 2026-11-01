@@ -76,6 +76,27 @@ zones and widgets (`docs/api.md`):
 Errors are tool results with `isError: true` and `{"code", "hint"}`. Portal
 rejections use the same codes (`docs/api.md` lists them all).
 
+## Waiting for a human reply
+
+Each `hud_input` call from the model is a full model request: the payload is
+~10-25 tokens, but the request re-reads the whole conversation. Polling every
+30 s while the human is away costs a context read per poll. When a reply may
+take more than a poll or two, wait in a background process instead, so the
+model makes no requests until input arrives:
+
+```bash
+# Claude Code: run with run_in_background; it exits (and wakes you) on the
+# first reply, or after rounds x 30 s with exit 3.
+HUD_HOST=<host> python3 .claude/skills/hud-projection/scripts/portal_client.py \
+  poll --wait-ms 30000 --rounds 120 --ack
+```
+
+- Each round polls, so the waiter also keeps the portal from degrading.
+- `--ack` acks what it prints; read the replies from its output. Don't also
+  poll from the model while it runs, or the two consumers race for items.
+- Exit 3 means no reply within the window: republish or wait again.
+- It uses the same PSK as the MCP adapter, so it sees the same portal.
+
 ## Connect
 
 Set `HUD_HOST` to the HUD's host. The client derives `http://$HUD_HOST:9090/mcp`
@@ -101,7 +122,7 @@ python3 $CLIENT surfaces
 python3 $CLIENT clear   --id my-session
 ```
 
-`poll --ack` acks every item it prints.
+`poll` stops at the first batch of input; `--ack` acks every item it prints.
 
 ## Optional Claude Code mirroring
 
