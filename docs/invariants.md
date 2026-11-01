@@ -99,7 +99,8 @@ Windows held-press/release acceptance remains separate.
   [`an_idle_open_panel_does_not_wake_on_refresh_ticks`](../crates/tze_hud_runtime/src/windowed/panel_input.rs);
   agents never see the panel:
   `tze_hud_compositor` [`panel_draws_over_the_frame_and_capture_leaves_it_out`](../crates/tze_hud_compositor/src/renderer/tests/control_panel.rs),
-  [`capture_leaves_the_closed_notice_out`](../crates/tze_hud_compositor/src/renderer/tests/control_panel.rs)
+  [`capture_leaves_the_closed_notice_out`](../crates/tze_hud_compositor/src/renderer/tests/control_panel.rs),
+  `integration` [`poc_agents_see_the_same_with_the_panel_open_or_content_hidden`](../tests/integration/poc_acceptance.rs)
 - `tze_hud_config` [`safe_mode_hotkey_defaults_overrides_and_rejects_garbage`](../crates/tze_hud_config/src/tests.rs),
   [`hud_chords_must_be_distinct`](../crates/tze_hud_config/src/tests.rs)
 - `integration` [`shell_dismiss_override_removes_portal_tile`](../tests/integration/text_stream_portal_governance.rs),
@@ -284,7 +285,9 @@ zone is shown again.
 - `tze_hud_compositor` [`hidden_content_is_not_drawn_and_the_closed_notice_is`](../crates/tze_hud_compositor/src/renderer/tests/control_panel.rs),
   [`hidden_widgets_do_no_raster_work_and_draw_nothing`](../crates/tze_hud_compositor/tests/widget_raster_count.rs),
   [`hidden_content_animations_schedule_no_frames`](../crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs),
-  [`hidden_notification_sets_no_fade_deadline`](../crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs)
+  [`hidden_notification_sets_no_fade_deadline`](../crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs),
+  [`capture_leaves_the_closed_notice_out`](../crates/tze_hud_compositor/src/renderer/tests/control_panel.rs)
+- `integration` [`poc_agents_see_the_same_with_the_panel_open_or_content_hidden`](../tests/integration/poc_acceptance.rs)
 
 ## Deferred ideas (notes, not code)
 
