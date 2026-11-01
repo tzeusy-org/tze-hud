@@ -711,7 +711,7 @@ async fn poc_portal_viewer_dismiss_then_mcp_verbs() {
         first.body,
         json!({"ok": true, "reattached": false, "pending_input": 0})
     );
-    assert_eq!(poc.shown("zone:status-bar"), 1);
+    assert_eq!(poc.hud.tile_count(), 1);
 
     poc.hud.viewer_dismiss_all_tiles();
     poc.settle().await;
@@ -761,7 +761,7 @@ async fn poc_portal_abandoned_is_reclaimed() {
         )
         .await;
     assert!(attach.model_tokens <= PORTAL_FLOW_BUDGET);
-    assert_eq!(poc.shown("zone:status-bar"), 1);
+    assert_eq!(poc.hud.tile_count(), 1);
 
     // The agent goes silent: no publish, poll, or hold.
     poc.advance(PORTAL_DEGRADE_MS - 1).await;
