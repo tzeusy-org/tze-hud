@@ -380,7 +380,13 @@ mod address_changes {
             if result < 0 {
                 return Err(std::io::Error::last_os_error());
             }
-            tokio::io::unix::AsyncFd::new(fd).map(Self)
+            // SAFETY: OwnedFd keeps this descriptor open and unchanged until
+            // AsyncFd drops it. Only incoming notifications need readiness.
+            unsafe {
+                tokio::io::unix::AsyncFd::register_with_interest(fd, tokio::io::Interest::READABLE)
+            }
+            .map(Self)
+            .map_err(Into::into)
         }
     }
 
