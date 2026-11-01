@@ -575,11 +575,6 @@ fn native_overlay_window_state(
 
 /// The caller owns this winit window and runs on its event-loop thread.
 #[cfg(target_os = "windows")]
-fn restore_overlay_window(window: &Window, spec: &MonitorSpec) {
-    reassert_overlay_window(window, Some(spec));
-}
-
-#[cfg(target_os = "windows")]
 fn reassert_overlay_window(window: &Window, spec: Option<&MonitorSpec>) {
     use windows::Win32::UI::WindowsAndMessaging::{
         HWND_TOPMOST, SW_SHOWNOACTIVATE, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SetWindowPos,
@@ -880,7 +875,7 @@ impl super::WinitApp {
             windows_overlay_minimized(window.is_minimized().unwrap_or(false), position, spec);
         match overlay_recovery(minimized, position, (size.width, size.height), spec) {
             OverlayRecovery::Restore => {
-                restore_overlay_window(window, spec);
+                reassert_overlay_window(window, Some(spec));
                 self.state.displays_dirty.store(true, Ordering::Release);
                 true
             }
@@ -927,7 +922,7 @@ impl super::WinitApp {
             };
             let OverlayRecovery::Refit((x, y), (width, height)) = recovery else {
                 #[cfg(target_os = "windows")]
-                restore_overlay_window(window, spec);
+                reassert_overlay_window(window, Some(spec));
                 continue;
             };
             tracing::info!(
