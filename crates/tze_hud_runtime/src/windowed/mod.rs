@@ -862,6 +862,14 @@ impl WinitApp {
         self.state
             .portal_projection_driver
             .apply_token_map(self.state.global_tokens.clone());
+        // Tiles claimed from now on take the new sizes.
+        if let Some(rt) = &self.state.network_rt {
+            let placement = tze_hud_config::tile_placement_from_tokens(&map);
+            let shared = Arc::clone(&self.state.shared_state);
+            rt.rt.spawn(async move {
+                shared.lock().await.tile_placement = placement;
+            });
+        }
         tracing::debug!(
             token_count = self.state.global_tokens.len(),
             "windowed: live design tokens taken"
@@ -1252,6 +1260,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             y: 0,
                             width: cfg_width,
                             height: cfg_height,
+                            scale: 1.0,
                         }
                     }
                 };

@@ -2582,8 +2582,10 @@ impl TextItem {
     ///
     /// `x`, `y`, `w`, `h` are the zone geometry in physical pixels.
     /// `opacity` is the current zone animation opacity (1.0 = fully opaque).
+    /// `scale` (px per dp) sizes the 8 dp margin and 16 dp font fallbacks.
     ///
     /// [`RenderingPolicy`]: tze_hud_scene::types::RenderingPolicy
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn from_zone_policy(
         text: &str,
         x: f32,
@@ -2592,14 +2594,25 @@ impl TextItem {
         h: f32,
         policy: &RenderingPolicy,
         opacity: f32,
+        scale: f32,
     ) -> Self {
         // Margin: prefer margin_horizontal/margin_vertical; fall back to margin_px;
-        // then fall back to 8px.  Per spec §Extended RenderingPolicy: margin_horizontal
+        // then fall back to 8 dp.  Per spec §Extended RenderingPolicy: margin_horizontal
         // "overrides margin_px for the horizontal axis. When None, falls back to margin_px."
-        let margin_h = policy.margin_horizontal.or(policy.margin_px).unwrap_or(8.0);
-        let margin_v = policy.margin_vertical.or(policy.margin_px).unwrap_or(8.0);
+        // Policy fields are already pixels; only the dp fallbacks need `scale`.
+        let margin_h = policy
+            .margin_horizontal
+            .or(policy.margin_px)
+            .unwrap_or(8.0 * scale);
+        let margin_v = policy
+            .margin_vertical
+            .or(policy.margin_px)
+            .unwrap_or(8.0 * scale);
 
-        let font_size_px = policy.font_size_px.unwrap_or(16.0).clamp(6.0, 200.0);
+        let font_size_px = policy
+            .font_size_px
+            .unwrap_or(16.0 * scale)
+            .clamp(6.0, 200.0);
         let font_family = policy.font_family.unwrap_or(FontFamily::SystemSansSerif);
         // font_weight: use policy value clamped to CSS weight range [100, 900]; default 400.
         let font_weight = policy.font_weight.unwrap_or(400).clamp(100, 900);
@@ -3711,8 +3724,9 @@ mod tests {
             ),
         ];
         for (name, policy, opacity, check) in cases {
-            let item =
-                TextItem::from_zone_policy("text", 100.0, 200.0, 400.0, 100.0, &policy, opacity);
+            let item = TextItem::from_zone_policy(
+                "text", 100.0, 200.0, 400.0, 100.0, &policy, opacity, 1.0,
+            );
             // Wrap so a failing row names itself.
             let r = std::panic::catch_unwind(|| check(&item));
             assert!(r.is_ok(), "from_zone_policy case failed: {name}");

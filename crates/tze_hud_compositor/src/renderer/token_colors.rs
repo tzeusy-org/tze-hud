@@ -5,6 +5,7 @@
 //! Rust's module-privacy rules require them.
 
 use std::collections::HashMap;
+use tze_hud_config::tokens::px_scale;
 
 use tze_hud_scene::types::*;
 
@@ -508,13 +509,15 @@ pub(super) fn resolve_scroll_indicator_tokens(
         .get("portal.scroll_indicator.width_px")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(defaults.width_px);
+        .unwrap_or(defaults.width_px)
+        * px_scale(token_map);
 
     let min_thumb_height_px = token_map
         .get("portal.scroll_indicator.min_height_px")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(defaults.min_thumb_height_px);
+        .unwrap_or(defaults.min_thumb_height_px)
+        * px_scale(token_map);
 
     tze_hud_input::ScrollIndicatorTokens {
         color_r,
@@ -555,19 +558,22 @@ pub(super) fn resolve_jump_to_latest_tokens(
         .get("portal.jump_to_latest.width_px")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(defaults.width_px);
+        .unwrap_or(defaults.width_px)
+        * px_scale(token_map);
 
     let height_px = token_map
         .get("portal.jump_to_latest.height_px")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(defaults.height_px);
+        .unwrap_or(defaults.height_px)
+        * px_scale(token_map);
 
     let margin_px = token_map
         .get("portal.jump_to_latest.margin_px")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v >= 0.0)
-        .unwrap_or(defaults.margin_px);
+        .unwrap_or(defaults.margin_px)
+        * px_scale(token_map);
 
     // Unread-count badge text color: "portal.jump_to_latest.text_color" as
     // #RRGGBB[AA] (hud-g1ena.3). `JumpToLatestTokens::text_*` carry STRAIGHT
@@ -596,7 +602,8 @@ pub(super) fn resolve_jump_to_latest_tokens(
         .get("portal.jump_to_latest.text_size_px")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(defaults.text_size_px);
+        .unwrap_or(defaults.text_size_px)
+        * px_scale(token_map);
 
     tze_hud_input::JumpToLatestTokens {
         color_r,
@@ -634,6 +641,7 @@ pub(super) fn resolve_transcript_max_measure_px(token_map: &HashMap<String, Stri
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v >= 0.0)
         .unwrap_or(0.0)
+        * px_scale(token_map)
 }
 
 /// Resolved focus-ring visual tokens (linear sRGB color + width in px).
@@ -669,7 +677,8 @@ pub(super) fn resolve_focus_ring_tokens(token_map: &HashMap<String, String>) -> 
         .get("portal.focus_ring.width_px")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(tze_hud_input::DEFAULT_FOCUS_RING_WIDTH_PX);
+        .unwrap_or(tze_hud_input::DEFAULT_FOCUS_RING_WIDTH_PX)
+        * px_scale(token_map);
 
     FocusRingTokens { color, width_px }
 }
@@ -734,7 +743,8 @@ pub(super) fn resolve_resize_grip_tokens(token_map: &HashMap<String, String>) ->
         .get("portal.window.resize_grip.size_px")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(RESIZE_GRIP_DEFAULT_SIZE_PX);
+        .unwrap_or(RESIZE_GRIP_DEFAULT_SIZE_PX)
+        * px_scale(token_map);
 
     ResizeGripTokens {
         color,
@@ -798,6 +808,7 @@ pub(super) fn resolve_disconnect_badge_tokens(
             .and_then(|v| v.parse::<f32>().ok())
             .filter(|v| v.is_finite() && *v >= min)
             .unwrap_or(default)
+            * px_scale(token_map)
     };
     DisconnectBadgeTokens {
         color: color.to_array(),
@@ -881,7 +892,8 @@ pub(super) fn resolve_viewer_echo_tokens(token_map: &HashMap<String, String>) ->
         .and_then(|v| v.trim_end_matches("px").parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v > 0.0)
         .unwrap_or(VIEWER_ECHO_DEFAULT_FONT_SIZE_PX)
-        .clamp(6.0, 200.0);
+        .clamp(6.0, 200.0)
+        * px_scale(token_map);
 
     let timestamp_color = resolve_token_color(token_map, "portal.viewer_echo.timestamp_color")
         .map(crate::text::rgba_to_srgb_u8)
@@ -959,6 +971,7 @@ pub(super) fn resolve_tile_spacing_tokens(
             .and_then(|v| v.parse::<f32>().ok())
             .filter(|v| v.is_finite() && *v >= 0.0)
             .unwrap_or(default)
+            * px_scale(token_map)
     };
 
     TileSpacingTokens {
@@ -1002,6 +1015,7 @@ pub(super) fn resolve_section_gap_px(token_map: &HashMap<String, String>) -> f32
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v >= 0.0)
         .unwrap_or(SECTION_GAP_DEFAULT_PX)
+        * px_scale(token_map)
 }
 
 /// Bounds of a notification's dismiss ×: top-right, inset from the card's
@@ -1014,15 +1028,16 @@ pub(super) fn notification_dismiss_bounds(
     slot_y: f32,
     w: f32,
     effective_slot_h: f32,
+    scale: f32,
 ) -> Rect {
-    let top = NOTIFICATION_ACTION_INSET_PX.min((effective_slot_h - 1.0).max(0.0));
+    let inset = NOTIFICATION_ACTION_INSET_PX * scale;
+    let size = NOTIFICATION_DISMISS_BUTTON_SIZE_PX * scale;
+    let top = inset.min((effective_slot_h - 1.0).max(0.0));
     Rect::new(
-        x + w - NOTIFICATION_ACTION_INSET_PX - NOTIFICATION_DISMISS_BUTTON_SIZE_PX,
+        x + w - inset - size,
         slot_y + top,
-        NOTIFICATION_DISMISS_BUTTON_SIZE_PX,
-        NOTIFICATION_DISMISS_BUTTON_SIZE_PX
-            .min(effective_slot_h - top)
-            .max(1.0),
+        size,
+        size.min(effective_slot_h - top).max(1.0),
     )
 }
 
@@ -1046,13 +1061,14 @@ pub(super) const NOTIFICATION_ACTION_ROW_GAP_PX: f32 = 4.0;
 /// buttons, and the bottom inset that keeps them inside the card. Zero
 /// without actions, so plain notifications keep their height. Slot height
 /// adds it; text bounds subtract it.
-pub(super) fn notification_action_row_reserve(payload: &NotificationPayload) -> f32 {
+pub(super) fn notification_action_row_reserve(payload: &NotificationPayload, scale: f32) -> f32 {
     if payload.actions.is_empty() {
         0.0
     } else {
-        NOTIFICATION_ACTION_ROW_GAP_PX
+        (NOTIFICATION_ACTION_ROW_GAP_PX
             + NOTIFICATION_ACTION_BUTTON_H_PX
-            + NOTIFICATION_ACTION_INSET_PX
+            + NOTIFICATION_ACTION_INSET_PX)
+            * scale
     }
 }
 
@@ -1068,6 +1084,7 @@ pub(super) fn notification_stack_gap(token_map: &HashMap<String, String>) -> f32
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v >= 0.0)
         .unwrap_or(NOTIFICATION_STACK_GAP_DEFAULT_PX)
+        * px_scale(token_map)
 }
 
 /// Bounds of each notification action button, left to right.
@@ -1082,22 +1099,22 @@ pub(super) fn notification_action_button_bounds(
     zw: f32,
     effective_slot_h: f32,
     n_actions: usize,
+    scale: f32,
 ) -> Vec<Rect> {
     if n_actions == 0 {
         return Vec::new();
     }
-    let btn_w = (zw - NOTIFICATION_ACTION_INSET_PX * 2.0).max(1.0) / n_actions as f32;
-    let action_y = (slot_y + effective_slot_h
-        - NOTIFICATION_ACTION_INSET_PX
-        - NOTIFICATION_ACTION_BUTTON_H_PX)
-        .max(slot_y);
+    let inset = NOTIFICATION_ACTION_INSET_PX * scale;
+    let button_h = NOTIFICATION_ACTION_BUTTON_H_PX * scale;
+    let btn_w = (zw - inset * 2.0).max(1.0) / n_actions as f32;
+    let action_y = (slot_y + effective_slot_h - inset - button_h).max(slot_y);
     (0..n_actions)
         .map(|i| {
             Rect::new(
-                zx + NOTIFICATION_ACTION_INSET_PX + i as f32 * btn_w,
+                zx + inset + i as f32 * btn_w,
                 action_y,
                 btn_w,
-                NOTIFICATION_ACTION_BUTTON_H_PX.min(effective_slot_h),
+                button_h.min(effective_slot_h),
             )
         })
         .collect()
@@ -1152,7 +1169,8 @@ pub(super) fn resolve_notification_action_tokens(
         .and_then(|v| v.trim_end_matches("px").parse::<f32>().ok())
         .filter(|v| v.is_finite())
         .unwrap_or(NOTIFICATION_ACTION_DEFAULT_FONT_SIZE_PX)
-        .clamp(6.0, 200.0);
+        .clamp(6.0, 200.0)
+        * px_scale(token_map);
     let font_weight = token_map
         .get("typography.notification.action.font_weight")
         .and_then(|v| v.parse::<u16>().ok())
@@ -1200,6 +1218,7 @@ pub(super) fn resolve_tile_close_tokens(token_map: &HashMap<String, String>) -> 
             .and_then(|v| v.trim_end_matches("px").parse::<f32>().ok())
             .filter(|v| v.is_finite() && *v >= min)
             .unwrap_or(default)
+            * px_scale(token_map)
     };
     TileCloseTokens {
         size_px: px("tile.close_button.size_px", TILE_CLOSE_DEFAULT_SIZE_PX, 1.0),
@@ -1448,7 +1467,8 @@ pub(super) fn resolve_composer_overlay_tokens(
         .get("portal.composer.font_size")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|&v| v.is_finite() && v > 0.0)
-        .unwrap_or(COMPOSER_OVERLAY_DEFAULT_FONT_SIZE_PX);
+        .unwrap_or(COMPOSER_OVERLAY_DEFAULT_FONT_SIZE_PX)
+        * px_scale(token_map);
 
     // Max visible line count before internal scroll. Clamp to at least 1 so a
     // stray `0`/negative token cannot degenerate the box to zero height.
@@ -1466,7 +1486,8 @@ pub(super) fn resolve_composer_overlay_tokens(
         .get("portal.spacing.content_inset_px")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|&v| v.is_finite() && v >= 0.0)
-        .unwrap_or(COMPOSER_OVERLAY_DEFAULT_CONTENT_INSET_PX);
+        .unwrap_or(COMPOSER_OVERLAY_DEFAULT_CONTENT_INSET_PX)
+        * px_scale(token_map);
 
     // Caret quad width (default 1.5px). Reject non-finite / non-positive
     // overrides so a malformed token cannot collapse the caret to invisible.
@@ -1474,7 +1495,8 @@ pub(super) fn resolve_composer_overlay_tokens(
         .get("portal.composer.caret_width_px")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|&v| v.is_finite() && v > 0.0)
-        .unwrap_or(COMPOSER_OVERLAY_DEFAULT_CARET_WIDTH_PX);
+        .unwrap_or(COMPOSER_OVERLAY_DEFAULT_CARET_WIDTH_PX)
+        * px_scale(token_map);
 
     // Vertical anchor (default: Bottom — the bottom-chat strip). Only an explicit
     // `top` (case-insensitive) selects the top-anchored exemplar input pane; any

@@ -68,9 +68,15 @@ impl Compositor {
         Rect::new(x, y, w, h)
     }
 
-    fn drag_handle_bounds(element_bounds: Rect, style: DragHandleStyle, sw: f32, sh: f32) -> Rect {
-        let w = style.width_dp.max(1.0).min(sw.max(1.0));
-        let h = style.height_dp.max(1.0).min(sh.max(1.0));
+    fn drag_handle_bounds(
+        element_bounds: Rect,
+        style: DragHandleStyle,
+        scale: f32,
+        sw: f32,
+        sh: f32,
+    ) -> Rect {
+        let w = (style.width_dp * scale).max(1.0).min(sw.max(1.0));
+        let h = (style.height_dp * scale).max(1.0).min(sh.max(1.0));
         let x = (element_bounds.x + (element_bounds.width - w) * 0.5).clamp(0.0, (sw - w).max(0.0));
         let y = (element_bounds.y - h * 0.5).clamp(0.0, (sh - h).max(0.0));
         Rect::new(x, y, w, h)
@@ -83,6 +89,7 @@ impl Compositor {
         sh: f32,
     ) -> Vec<DragHandleEntry> {
         let style = DragHandleStyle::default();
+        let scale = tze_hud_config::tokens::px_scale(&self.token_map);
         let mut entries: Vec<DragHandleEntry> = Vec::new();
 
         // Portal frame tiles get a full-width HEADER BAND drag handle instead of
@@ -95,7 +102,8 @@ impl Compositor {
             .get(tze_hud_scene::types::PORTAL_HEADER_DRAG_BAND_TOKEN)
             .and_then(|v| v.parse::<f32>().ok())
             .filter(|v| v.is_finite() && *v > 0.0)
-            .unwrap_or(tze_hud_scene::types::PORTAL_HEADER_DRAG_BAND_PX_DEFAULT);
+            .unwrap_or(tze_hud_scene::types::PORTAL_HEADER_DRAG_BAND_PX_DEFAULT)
+            * scale;
         let band_rects: std::collections::HashMap<SceneId, Rect> = scene
             .portal_header_band_anchors(band_h)
             .into_iter()
@@ -119,7 +127,7 @@ impl Compositor {
                 });
                 continue;
             }
-            let bounds = Self::drag_handle_bounds(tile.bounds, style, sw, sh);
+            let bounds = Self::drag_handle_bounds(tile.bounds, style, scale, sw, sh);
             entries.push(DragHandleEntry {
                 element_id: tile.id,
                 element_kind: DragHandleElementKind::Tile,
@@ -153,7 +161,7 @@ impl Compositor {
             }
             let (x, y, w, h) = Self::resolve_zone_geometry(&zone_def.geometry_policy, sw, sh);
             let element_bounds_zone = Rect::new(x, y, w, h);
-            let bounds = Self::drag_handle_bounds(element_bounds_zone, style, sw, sh);
+            let bounds = Self::drag_handle_bounds(element_bounds_zone, style, scale, sw, sh);
             let interaction_id = format!("drag-handle:{}", Self::scene_id_hex(zone_def.id));
             entries.push(DragHandleEntry {
                 element_id: zone_def.id,
@@ -202,7 +210,7 @@ impl Compositor {
             };
             let (x, y, w, h) = Self::resolve_widget_geometry(instance, definition, sw, sh);
             let element_bounds_widget = Rect::new(x, y, w, h);
-            let bounds = Self::drag_handle_bounds(element_bounds_widget, style, sw, sh);
+            let bounds = Self::drag_handle_bounds(element_bounds_widget, style, scale, sw, sh);
             let element_id = Self::synthetic_widget_element_id(instance_name);
             let interaction_id = format!("drag-handle:{}", Self::scene_id_hex(element_id));
             entries.push(DragHandleEntry {

@@ -1069,6 +1069,36 @@ impl Default for PortalPartTokens {
 
 // ── Resolution ────────────────────────────────────────────────────────────────
 
+impl PortalPartTokens {
+    /// These tokens with every logical (dp) size in physical px at `scale`
+    /// px per dp. Opacity, colors and timing are unchanged.
+    fn in_px(mut self, scale: f32) -> Self {
+        for size in [
+            &mut self.header_font_size_px,
+            &mut self.composer_font_size_px,
+            &mut self.transcript_font_size_px,
+            &mut self.disconnect_badge_width_px,
+            &mut self.lifecycle_accent_width_px,
+            &mut self.collapsed_font_size_px,
+            &mut self.window_min_width_px,
+            &mut self.window_min_height_px,
+            &mut self.window_resize_step_px,
+            &mut self.window_resize_affordance_px,
+            &mut self.scroll_indicator_width_px,
+            &mut self.scroll_indicator_min_height_px,
+            &mut self.focus_ring_width_px,
+            &mut self.resize_grip_size_px,
+            &mut self.content_inset_px,
+            &mut self.header_height_px,
+            &mut self.section_gap_px,
+            &mut self.transcript_max_measure_px,
+        ] {
+            *size *= scale;
+        }
+        self
+    }
+}
+
 /// Resolve `PortalPartTokens` from a three-layer resolved design token map.
 ///
 /// Missing or unparseable portal tokens fall back to the hardcoded defaults
@@ -1171,7 +1201,7 @@ pub fn resolve_portal_tokens(token_map: &DesignTokenMap) -> PortalPartTokens {
         };
     }
 
-    PortalPartTokens {
+    let tokens = PortalPartTokens {
         frame_background: resolve_color!(PORTAL_TOKEN_FRAME_BACKGROUND, defaults.frame_background),
         frame_opacity: resolve_f32!(PORTAL_TOKEN_FRAME_OPACITY, defaults.frame_opacity),
         frame_border_color: resolve_color!(
@@ -1411,7 +1441,8 @@ pub fn resolve_portal_tokens(token_map: &DesignTokenMap) -> PortalPartTokens {
             PORTAL_TOKEN_TRANSCRIPT_MAX_MEASURE_PX,
             defaults.transcript_max_measure_px
         ),
-    }
+    };
+    tokens.in_px(crate::tokens::px_scale(token_map))
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────

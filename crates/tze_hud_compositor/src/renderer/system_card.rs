@@ -61,6 +61,7 @@ fn px_token(tokens: &HashMap<String, String>, key: &str, default: f32) -> f32 {
         .and_then(|v| v.trim_end_matches("px").parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v >= 0.0)
         .unwrap_or(default)
+        * tze_hud_config::tokens::px_scale(tokens)
 }
 
 pub(super) fn system_card_layout(
@@ -160,7 +161,7 @@ pub(super) fn system_card_layout(
             ..Default::default()
         };
         texts.push(TextItem::from_zone_policy(
-            text, text_x, line_y, text_w, box_h, &policy, 1.0,
+            text, text_x, line_y, text_w, box_h, &policy, 1.0, 1.0,
         ));
         line_y += box_h;
     };

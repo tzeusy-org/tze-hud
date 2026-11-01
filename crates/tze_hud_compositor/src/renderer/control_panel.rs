@@ -57,8 +57,6 @@ pub struct ControlPanelModel {
     pub hover: Option<PanelHitTarget>,
     /// Body scroll offset in px; the layout clamps it to the content.
     pub scroll_px: f32,
-    /// Panel zoom (1.0 = token sizes). Clamped to a legible range.
-    pub scale: f32,
 }
 
 /// What the scrolling body shows.
@@ -340,8 +338,9 @@ struct PanelStyle {
     readout: TypeStyle,
 }
 
-/// Legible zoom range for the panel.
-const SCALE_RANGE: (f32, f32) = (0.75, 2.0);
+/// Legible range of px per dp for the panel: `ui.scale` × the monitor's
+/// scale, kept readable and on screen.
+const SCALE_RANGE: (f32, f32) = (0.75, 3.0);
 /// WCAG AA for body text; a pair below it falls back to the defaults.
 const MIN_TEXT_CONTRAST: f32 = 4.5;
 
@@ -609,7 +608,7 @@ impl Painter<'_, '_> {
             margin_px: Some(0.0),
             ..Default::default()
         };
-        let mut item = TextItem::from_zone_policy(text, x, y, w, ty.line, &policy, 1.0);
+        let mut item = TextItem::from_zone_policy(text, x, y, w, ty.line, &policy, 1.0, 1.0);
         item.line_height_multiplier = ty.line / ty.size;
         item.clip_pixel_x = visible.x;
         item.clip_pixel_y = visible.y;
@@ -1170,7 +1169,7 @@ pub(super) fn control_panel_layout(
     sh: f32,
     measure: &mut Measure<'_>,
 ) -> ControlPanelLayout {
-    let style = PanelStyle::resolve(tokens, model.scale);
+    let style = PanelStyle::resolve(tokens, tze_hud_config::tokens::px_scale(tokens));
     let s = style.clone();
     let mut p = Painter {
         style,
@@ -1826,7 +1825,7 @@ pub(super) fn closed_notice_layout(
     sh: f32,
     measure: &mut Measure<'_>,
 ) -> (Vec<PanelShape>, Vec<TextItem>) {
-    let style = PanelStyle::resolve(tokens, 1.0);
+    let style = PanelStyle::resolve(tokens, tze_hud_config::tokens::px_scale(tokens));
     let s = style.clone();
     let mut p = Painter {
         style,
@@ -2133,7 +2132,6 @@ mod tests {
             focus: PanelFocus::Search,
             hover: None,
             scroll_px: 0.0,
-            scale: 1.0,
         }
     }
 
@@ -2378,8 +2376,8 @@ mod tests {
         assert_eq!(PanelStyle::resolve(&HashMap::new(), 1.5).body.size, 21.0);
         assert_eq!(
             PanelStyle::resolve(&HashMap::new(), 50.0).body.size,
-            28.0,
-            "scale clamps to 2x"
+            42.0,
+            "scale clamps to 3x"
         );
         let tiny = HashMap::from([("type.body.m.size".to_string(), "3".to_string())]);
         assert_eq!(PanelStyle::resolve(&tiny, 1.0).body.size, 12.0);

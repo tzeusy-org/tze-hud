@@ -476,7 +476,6 @@ pub(crate) fn build(
         focus: open.focus.clone(),
         hover: open.hover.clone(),
         scroll_px: open.scroll,
-        scale: 1.0,
     };
     (model, nav)
 }
@@ -522,7 +521,6 @@ fn build_connect(open: &mut Open, view: &ConnectView) -> (ControlPanelModel, Nav
         focus: open.focus.clone(),
         hover: open.hover.clone(),
         scroll_px: open.scroll,
-        scale: 1.0,
     };
     (model, nav)
 }

@@ -49,7 +49,6 @@ fn panel() -> ControlPanelModel {
         focus: PanelFocus::Search,
         hover: None,
         scroll_px: 0.0,
-        scale: 1.0,
     }
 }
 

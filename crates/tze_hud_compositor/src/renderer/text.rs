@@ -95,6 +95,7 @@ impl super::Compositor {
     /// - `zx`, `zy`, `zw` — zone pixel bounds (x, y, width).
     /// - `policy` — the zone's `RenderingPolicy`.
     /// - `opacity` — current animation opacity.
+    #[allow(clippy::too_many_arguments)]
     fn status_bar_icon_text_items(
         sorted: &[(&String, &String)],
         key_icon_map: &HashMap<String, String>,
@@ -103,9 +104,10 @@ impl super::Compositor {
         zw: f32,
         policy: &RenderingPolicy,
         opacity: f32,
+        scale: f32,
     ) -> Vec<TextItem> {
         const STATUS_BAR_MAX_ENTRIES: usize = 8;
-        let slot_h = Self::stack_slot_height(policy);
+        let slot_h = Self::stack_slot_height(policy, scale);
 
         sorted
             .iter()
@@ -115,7 +117,7 @@ impl super::Compositor {
                 let entry_y = zy + i as f32 * slot_h;
                 let has_icon = key_icon_map.contains_key(k.as_str());
                 let icon_inset = if has_icon {
-                    ICON_SIZE_PX + ICON_TEXT_GAP_PX
+                    (ICON_SIZE_PX + ICON_TEXT_GAP_PX) * scale
                 } else {
                     0.0
                 };
@@ -141,6 +143,7 @@ impl super::Compositor {
                     slot_h,
                     policy,
                     opacity,
+                    scale,
                 )
             })
             .collect()
@@ -241,8 +244,9 @@ impl super::Compositor {
         h: f32,
         policy: &RenderingPolicy,
         opacity: f32,
+        scale: f32,
     ) -> TextItem {
-        let mut item = TextItem::from_zone_policy(text, x, y, w, h, policy, opacity);
+        let mut item = TextItem::from_zone_policy(text, x, y, w, h, policy, opacity, scale);
         if policy.stream_tail_anchored == Some(true) {
             item.viewport = crate::overflow::TruncationViewport::TailAnchored;
         }
@@ -292,6 +296,8 @@ impl super::Compositor {
                 Some(z) => z,
                 None => continue,
             };
+            let zone_tokens = self.zone_tokens(zone_name);
+            let scale = tze_hud_config::tokens::px_scale(zone_tokens);
             let policy = &zone_def.rendering_policy;
             // Truncation (and thus anchoring) only applies to Ellipsis overflow.
             if policy.overflow != Some(TextOverflow::Ellipsis) {
@@ -313,6 +319,7 @@ impl super::Compositor {
                                 effective_slot_h,
                                 policy,
                                 1.0,
+                                scale,
                             ));
                         }
                     }
@@ -324,7 +331,7 @@ impl super::Compositor {
                     for record in publishes.iter().rev() {
                         if let ZoneContent::StreamText(text) = &record.content {
                             items.push(Self::zone_stream_text_item(
-                                text, zx, zy, zw, zh, policy, 1.0,
+                                text, zx, zy, zw, zh, policy, 1.0, scale,
                             ));
                             break;
                         }
@@ -458,6 +465,8 @@ impl super::Compositor {
                 Some(z) => z,
                 None => continue,
             };
+            let zone_tokens = self.zone_tokens(zone_name);
+            let scale = tze_hud_config::tokens::px_scale(zone_tokens);
 
             // Resolve zone geometry to pixel bounds.
             let (zx, zy, zw, zh) = self.zone_geometry(zone_name, &zone_def.geometry_policy, sw, sh);
@@ -529,8 +538,9 @@ impl super::Compositor {
                         .get("typography.notification.dismiss.font_size_px")
                         .and_then(|v| v.trim_end_matches("px").parse::<f32>().ok())
                         .unwrap_or(NOTIFICATION_DISMISS_FONT_SIZE_PX)
-                        .clamp(6.0, 200.0);
-                    let action_tokens = resolve_notification_action_tokens(&self.token_map);
+                        .clamp(6.0, 200.0)
+                        * scale;
+                    let action_tokens = resolve_notification_action_tokens(zone_tokens);
                     let (notif_action_font_size_px, notif_action_font_weight) =
                         (action_tokens.font_size_px, action_tokens.font_weight);
                     let notif_dismiss_font_weight = self
@@ -557,6 +567,7 @@ impl super::Compositor {
                                     effective_slot_h,
                                     policy,
                                     effective_opacity,
+                                    scale,
                                 ));
                             }
                             ZoneContent::Notification(payload) => {
@@ -586,21 +597,24 @@ impl super::Compositor {
                                 let inset_h = policy
                                     .margin_horizontal
                                     .or(policy.margin_px)
-                                    .unwrap_or(NOTIFICATION_INSET);
+                                    .unwrap_or(NOTIFICATION_INSET * scale);
                                 // Vertical inset: policy margin_vertical > margin_px > 9px
                                 let inset_v = policy
                                     .margin_vertical
                                     .or(policy.margin_px)
-                                    .unwrap_or(NOTIFICATION_INSET);
+                                    .unwrap_or(NOTIFICATION_INSET * scale);
                                 // If a cached icon texture exists, inset text to the right of it.
                                 let icon_width_reserved = parse_notification_icon(&payload.icon)
                                     .filter(|id| self.image_texture_cache.contains_key(id))
-                                    .map(|_| NOTIFICATION_ICON_SIZE_PX + NOTIFICATION_ICON_GAP_PX)
+                                    .map(|_| {
+                                        (NOTIFICATION_ICON_SIZE_PX + NOTIFICATION_ICON_GAP_PX)
+                                            * scale
+                                    })
                                     .unwrap_or(0.0);
                                 // Font size: policy explicit > typography.body.size token > 16px
-                                let font_size_px = policy.font_size_px.unwrap_or_else(|| {
-                                    Self::resolve_body_font_size(&self.token_map)
-                                });
+                                let font_size_px = policy
+                                    .font_size_px
+                                    .unwrap_or_else(|| Self::resolve_body_font_size(zone_tokens));
                                 // Font family: policy explicit > SystemSansSerif default
                                 let font_family = policy
                                     .font_family
@@ -610,7 +624,7 @@ impl super::Compositor {
                                     .text_color
                                     .map(crate::text::rgba_to_srgb_u8)
                                     .unwrap_or_else(|| {
-                                        Self::resolve_text_primary_color(&self.token_map)
+                                        Self::resolve_text_primary_color(zone_tokens)
                                     });
                                 let color = crate::text::apply_opacity_to_color(
                                     base_color,
@@ -636,9 +650,11 @@ impl super::Compositor {
                                     // The × sits NOTIFICATION_ACTION_INSET_PX in
                                     // from the right edge; text keeps its own
                                     // right inset_h, so reserve the difference.
-                                    NOTIFICATION_DISMISS_BUTTON_SIZE_PX
-                                        + NOTIFICATION_DISMISS_GAP_PX
+                                    (NOTIFICATION_DISMISS_BUTTON_SIZE_PX
+                                        + NOTIFICATION_DISMISS_GAP_PX)
+                                        * scale
                                         + (super::token_colors::NOTIFICATION_ACTION_INSET_PX
+                                            * scale
                                             - inset_h)
                                             .max(0.0)
                                 };
@@ -653,7 +669,7 @@ impl super::Compositor {
 
                                 // Text stops above the action row (hud-mskx5).
                                 let text_slot_h = (effective_slot_h
-                                    - notification_action_row_reserve(payload))
+                                    - notification_action_row_reserve(payload, scale))
                                 .max(1.0);
                                 if payload.title.is_empty() {
                                     // ── Single-line rendering (backward-compatible) ──
@@ -703,8 +719,9 @@ impl super::Compositor {
                                         effective_opacity,
                                     ));
                                     // Body line (regular weight, 0.85× size)
-                                    let body_top =
-                                        content_top + title_line_h + NOTIFICATION_INTER_LINE_GAP;
+                                    let body_top = content_top
+                                        + title_line_h
+                                        + NOTIFICATION_INTER_LINE_GAP * scale;
                                     // Remaining slot height available for body (down to inset bottom)
                                     let body_bounds_h =
                                         ((slot_y + text_slot_h - inset_v) - body_top).max(1.0);
@@ -736,6 +753,7 @@ impl super::Compositor {
                                             zw,
                                             effective_slot_h,
                                             n_actions,
+                                            scale,
                                         ),
                                     ) {
                                         items.push(Self::make_zone_text_item(
@@ -767,6 +785,7 @@ impl super::Compositor {
                                         slot_y,
                                         zw,
                                         effective_slot_h,
+                                        scale,
                                     );
                                     let dismiss_color = crate::text::apply_opacity_to_color(
                                         base_color,
@@ -835,6 +854,7 @@ impl super::Compositor {
                                 zh,
                                 policy,
                                 anim_opacity,
+                                scale,
                             ));
                         } else {
                             // Icons configured for current entries: render each as an
@@ -847,6 +867,7 @@ impl super::Compositor {
                                 zw,
                                 policy,
                                 anim_opacity,
+                                scale,
                             ));
                         }
                     } else {
@@ -862,6 +883,7 @@ impl super::Compositor {
                                         zh,
                                         policy,
                                         anim_opacity,
+                                        scale,
                                     ));
                                     break;
                                 }
@@ -872,7 +894,9 @@ impl super::Compositor {
                                         parse_notification_icon(&payload.icon)
                                             .filter(|id| self.image_texture_cache.contains_key(id))
                                             .map(|_| {
-                                                NOTIFICATION_ICON_SIZE_PX + NOTIFICATION_ICON_GAP_PX
+                                                (NOTIFICATION_ICON_SIZE_PX
+                                                    + NOTIFICATION_ICON_GAP_PX)
+                                                    * scale
                                             })
                                             .unwrap_or(0.0);
                                     if icon_width_reserved > 0.0 {
@@ -883,13 +907,15 @@ impl super::Compositor {
                                         let margin_h = policy
                                             .margin_horizontal
                                             .or(policy.margin_px)
-                                            .unwrap_or(NOTIFICATION_INSET);
+                                            .unwrap_or(NOTIFICATION_INSET * scale);
                                         let margin_v = policy
                                             .margin_vertical
                                             .or(policy.margin_px)
-                                            .unwrap_or(NOTIFICATION_INSET);
-                                        let font_size_px =
-                                            policy.font_size_px.unwrap_or(16.0).clamp(6.0, 200.0);
+                                            .unwrap_or(NOTIFICATION_INSET * scale);
+                                        let font_size_px = policy
+                                            .font_size_px
+                                            .unwrap_or(16.0 * scale)
+                                            .clamp(6.0, 200.0);
                                         let font_family = policy.font_family.unwrap_or(
                                             tze_hud_scene::types::FontFamily::SystemSansSerif,
                                         );
@@ -945,6 +971,7 @@ impl super::Compositor {
                                             zh,
                                             policy,
                                             anim_opacity,
+                                            scale,
                                         ));
                                     }
                                     break;
@@ -992,6 +1019,7 @@ impl super::Compositor {
                                     zh,
                                     policy,
                                     anim_opacity,
+                                    scale,
                                 ));
                                 // Only render the most-recent StreamText publish.
                                 break;
@@ -1002,7 +1030,10 @@ impl super::Compositor {
                                 // to the right of the icon (icon_size + gap px).
                                 let icon_width_reserved = parse_notification_icon(&payload.icon)
                                     .filter(|id| self.image_texture_cache.contains_key(id))
-                                    .map(|_| NOTIFICATION_ICON_SIZE_PX + NOTIFICATION_ICON_GAP_PX)
+                                    .map(|_| {
+                                        (NOTIFICATION_ICON_SIZE_PX + NOTIFICATION_ICON_GAP_PX)
+                                            * scale
+                                    })
                                     .unwrap_or(0.0);
                                 if icon_width_reserved > 0.0 {
                                     // Build TextItem manually to apply icon offset.
@@ -1013,13 +1044,15 @@ impl super::Compositor {
                                     let margin_h = policy
                                         .margin_horizontal
                                         .or(policy.margin_px)
-                                        .unwrap_or(NOTIFICATION_INSET);
+                                        .unwrap_or(NOTIFICATION_INSET * scale);
                                     let margin_v = policy
                                         .margin_vertical
                                         .or(policy.margin_px)
-                                        .unwrap_or(NOTIFICATION_INSET);
-                                    let font_size_px =
-                                        policy.font_size_px.unwrap_or(16.0).clamp(6.0, 200.0);
+                                        .unwrap_or(NOTIFICATION_INSET * scale);
+                                    let font_size_px = policy
+                                        .font_size_px
+                                        .unwrap_or(16.0 * scale)
+                                        .clamp(6.0, 200.0);
                                     let font_family = policy.font_family.unwrap_or(
                                         tze_hud_scene::types::FontFamily::SystemSansSerif,
                                     );
@@ -1073,6 +1106,7 @@ impl super::Compositor {
                                         zh,
                                         policy,
                                         anim_opacity,
+                                        scale,
                                     ));
                                 }
                                 // Only render the most-recent publish.
@@ -1105,6 +1139,7 @@ impl super::Compositor {
                                         zh,
                                         policy,
                                         anim_opacity,
+                                        scale,
                                     ));
                                 } else {
                                     // Icons configured for current entries: per-entry TextItems.
@@ -1116,6 +1151,7 @@ impl super::Compositor {
                                         zw,
                                         policy,
                                         anim_opacity,
+                                        scale,
                                     ));
                                 }
                                 // Only render the most-recent StatusBar publish.
@@ -1312,6 +1348,7 @@ impl super::Compositor {
             .and_then(|v| v.trim_end_matches("px").parse::<f32>().ok())
             .unwrap_or(16.0)
             .clamp(6.0, 200.0)
+            * tze_hud_config::tokens::px_scale(token_map)
     }
 
     /// Recursively collect `TextItem`s from a node and its children.
@@ -1364,7 +1401,8 @@ impl super::Compositor {
             .and_then(|v| v.parse::<f32>().ok())
             .filter(|v| v.is_finite() && *v > 0.0)
             .unwrap_or(tze_hud_scene::types::PORTAL_TEXT_MAX_FONT_PX_DEFAULT);
-        (min, max)
+        let scale = tze_hud_config::tokens::px_scale(&self.token_map);
+        (min * scale, max * scale)
     }
 
     #[allow(clippy::only_used_in_recursion)]

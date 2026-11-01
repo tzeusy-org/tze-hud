@@ -118,6 +118,12 @@ pub fn parse_theme(src: &str) -> Result<DesignTokenMap, Vec<String>> {
     let mut errors: Vec<String> = map
         .iter()
         .filter_map(|(key, value)| {
+            if key == crate::tokens::UI_SCALE_KEY {
+                // The owner's preference, not a theme value.
+                return Some(format!(
+                    "{key:?} = {value:?}: themes may not set ui.scale; it belongs in [design_tokens]"
+                ));
+            }
             validate_theme_value(key, value)
                 .err()
                 .map(|expected| format!("{key:?} = {value:?}: expected {expected}"))

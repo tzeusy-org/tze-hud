@@ -94,7 +94,6 @@ pub(crate) enum Control {
         selected: usize,
     },
     /// A number shown as `text`: Left/Right or −/+ step it.
-    #[cfg_attr(not(test), expect(dead_code, reason = "first row: zoom, hud-vniri.5"))]
     Stepper { text: String },
     /// A button. `confirm` asks once before acting (destructive or
     /// trust-widening actions).

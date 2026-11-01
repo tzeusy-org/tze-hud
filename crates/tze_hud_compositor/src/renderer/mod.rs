@@ -345,6 +345,10 @@ pub struct Compositor {
     /// Populated by calling `set_token_map` with the global token map from
     /// scene startup.
     pub token_map: HashMap<String, String>,
+    /// `token_map` as seen by each zone on a secondary monitor at another
+    /// scale ([`tze_hud_config::tokens::secondary_zone_tokens`]); rebuilt by
+    /// `set_token_map`. Read through [`Compositor::zone_tokens`].
+    secondary_zone_tokens: HashMap<String, HashMap<String, String>>,
     /// Startup-resolved zone curves and fallback exit span, never parsed per frame.
     zone_motion: easing::ZoneMotion,
     /// Decoded RGBA image bytes indexed by `ResourceId`.
@@ -947,6 +951,7 @@ impl Compositor {
             scroll_smoothing_enabled: false,
             last_scroll_smooth_at: None,
             token_map: HashMap::new(),
+            secondary_zone_tokens: HashMap::new(),
             zone_motion: easing::ZoneMotion::from_token_map(&HashMap::new()),
             markdown_primer: crate::markdown::MarkdownPrimer::new(),
             node_key_cache: HashMap::new(),
@@ -1290,6 +1295,7 @@ impl Compositor {
             scroll_smoothing_enabled: true,
             last_scroll_smooth_at: None,
             token_map: HashMap::new(),
+            secondary_zone_tokens: HashMap::new(),
             zone_motion: easing::ZoneMotion::from_token_map(&HashMap::new()),
             markdown_primer: crate::markdown::MarkdownPrimer::new(),
             node_key_cache: HashMap::new(),
@@ -1675,6 +1681,14 @@ impl Compositor {
     /// At render time the compositor looks up `color.severity.{info,warning,critical}`
     /// to derive alert-banner backdrop colors, falling back to hardcoded constants
     /// when a key is absent or unparseable.
+    /// The tokens `zone` draws with: its monitor's px per dp when it is
+    /// placed on a secondary at another scale, else `token_map`.
+    pub(crate) fn zone_tokens(&self, zone: &str) -> &HashMap<String, String> {
+        self.secondary_zone_tokens
+            .get(zone)
+            .unwrap_or(&self.token_map)
+    }
+
     pub fn set_token_map(&mut self, map: HashMap<String, String>) {
         self.zone_motion = easing::ZoneMotion::from_token_map(&map);
         // `font.sans` / `font.mono` / `font.serif` (and the runtime-set fonts
@@ -1713,6 +1727,7 @@ impl Compositor {
         self.truncation_cache_scene_version = u64::MAX;
         self.truncation_cache_scene_instance = None;
 
+        self.secondary_zone_tokens = tze_hud_config::tokens::secondary_zone_tokens(&map);
         self.token_map = map;
         // The panel is token-styled: re-lay it out on the next frame.
         self.control_panel_layout = None;

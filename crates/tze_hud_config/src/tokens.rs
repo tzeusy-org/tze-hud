@@ -14,6 +14,7 @@
 //! | `CONFIG_INVALID_TOKEN_KEY` | Key in `[design_tokens]` does not match the required pattern |
 //! | `TOKEN_VALUE_PARSE_ERROR` | A token value string could not be parsed into the expected format |
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 
 use tze_hud_scene::config::{ConfigError, ConfigErrorCode};
@@ -837,6 +838,13 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Narrowest control panel section column; as many as fit are used (px)",
         default_value: "360",
     },
+    // Global UI scale
+    CanonicalToken {
+        key: UI_SCALE_KEY,
+        description: "Global UI scale: multiplies every logical (dp) size on top of each \
+                      monitor's Windows scale factor (0.5–3.0; config only, not themes)",
+        default_value: "1",
+    },
     // Type scale (family / size / line height / weight)
     CanonicalToken {
         key: "font.sans",
@@ -1153,6 +1161,12 @@ pub(crate) fn validate_canonical_value(key: &str, value: &str) -> Result<(), Str
             parse_color_hex(value).is_some(),
             "a color #RRGGBB or #RRGGBBAA".into(),
         )
+    } else if key == UI_SCALE_KEY {
+        let (lo, hi) = UI_SCALE_RANGE;
+        (
+            parse_numeric(value).is_some_and(|n| (lo..=hi).contains(&n)),
+            format!("a number from {lo} to {hi}"),
+        )
     } else if parse_numeric(token.default_value).is_some() {
         (parse_numeric(value).is_some(), "a finite number".into())
     } else {
@@ -1168,7 +1182,118 @@ pub(crate) fn validate_canonical_value(key: &str, value: &str) -> Result<(), Str
 ///
 /// - `runtime.fonts_dir`: absolute `<config dir>/fonts` when it exists
 ///   (`tze_hud_compositor::fonts::RUNTIME_FONTS_DIR_KEY`).
-pub const RESERVED_RUNTIME_TOKEN_KEYS: &[&str] = &["runtime.fonts_dir"];
+/// - `runtime.px_scale` ([`PX_SCALE_KEY`]): physical px per logical dp.
+///
+/// Every `runtime.px_scale@<zone>` key ([`ZONE_PX_SCALE_PREFIX`]) is
+/// reserved too ([`is_reserved_runtime_key`]).
+pub const RESERVED_RUNTIME_TOKEN_KEYS: &[&str] = &["runtime.fonts_dir", PX_SCALE_KEY];
+
+/// Whether the runtime, not config, sets `key`.
+pub fn is_reserved_runtime_key(key: &str) -> bool {
+    RESERVED_RUNTIME_TOKEN_KEYS.contains(&key) || key.starts_with(ZONE_PX_SCALE_PREFIX)
+}
+
+// ─── Logical sizes ────────────────────────────────────────────────────────────
+
+/// The owner's global UI scale, a `[design_tokens]` key (themes may not set
+/// it): every logical size is multiplied by it on top of the monitor's
+/// Windows scale factor.
+pub const UI_SCALE_KEY: &str = "ui.scale";
+
+/// The values [`UI_SCALE_KEY`] may take.
+pub const UI_SCALE_RANGE: (f32, f32) = (0.5, 3.0);
+
+/// Physical px per logical dp for the display a token map draws on: the
+/// monitor's scale factor × `ui.scale`. Set by the runtime
+/// ([`set_px_scale`]); absent means 1.
+pub const PX_SCALE_KEY: &str = "runtime.px_scale";
+
+/// Prefix of the px per dp of a zone placed on a secondary monitor:
+/// `runtime.px_scale@<zone>` overrides [`PX_SCALE_KEY`] for that zone
+/// ([`set_zone_px_scale`], [`for_zone`]).
+pub const ZONE_PX_SCALE_PREFIX: &str = "runtime.px_scale@";
+
+/// The map's `ui.scale`, clamped to [`UI_SCALE_RANGE`]; 1 when unset.
+pub fn ui_scale(tokens: &DesignTokenMap) -> f32 {
+    let (lo, hi) = UI_SCALE_RANGE;
+    tokens
+        .get(UI_SCALE_KEY)
+        .and_then(|v| parse_numeric(v))
+        .map_or(1.0, |n| n.clamp(lo, hi))
+}
+
+/// Physical px per logical dp ([`PX_SCALE_KEY`]); 1 when unset.
+pub fn px_scale(tokens: &DesignTokenMap) -> f32 {
+    tokens
+        .get(PX_SCALE_KEY)
+        .and_then(|v| parse_numeric(v))
+        .filter(|n| *n > 0.0)
+        .unwrap_or(1.0)
+}
+
+/// Record that `tokens` draw on a monitor with Windows scale factor
+/// `monitor_scale`: [`PX_SCALE_KEY`] becomes `monitor_scale × ui.scale`.
+pub fn set_px_scale(tokens: &mut DesignTokenMap, monitor_scale: f64) {
+    let px = monitor_px_scale(tokens, monitor_scale);
+    tokens.insert(PX_SCALE_KEY.to_owned(), px);
+}
+
+/// Record that `zone` is placed on a monitor with Windows scale factor
+/// `monitor_scale`, other than the one [`PX_SCALE_KEY`] describes.
+pub fn set_zone_px_scale(tokens: &mut DesignTokenMap, zone: &str, monitor_scale: f64) {
+    let px = monitor_px_scale(tokens, monitor_scale);
+    tokens.insert(format!("{ZONE_PX_SCALE_PREFIX}{zone}"), px);
+}
+
+/// `monitor_scale × ui.scale`, spelled for the token map; a bogus monitor
+/// scale counts as 1.
+fn monitor_px_scale(tokens: &DesignTokenMap, monitor_scale: f64) -> String {
+    let monitor = if monitor_scale.is_finite() && monitor_scale > 0.0 {
+        monitor_scale as f32
+    } else {
+        1.0
+    };
+    (monitor * ui_scale(tokens)).to_string()
+}
+
+/// [`for_zone`] for every zone placed on a secondary monitor at a scale
+/// other than the primary's, keyed by zone name: built once per token
+/// change so frames don't copy the map.
+pub fn secondary_zone_tokens(tokens: &DesignTokenMap) -> HashMap<String, DesignTokenMap> {
+    tokens
+        .keys()
+        .filter_map(|key| key.strip_prefix(ZONE_PX_SCALE_PREFIX))
+        .filter_map(|zone| match for_zone(tokens, zone) {
+            Cow::Owned(map) => Some((zone.to_owned(), map)),
+            Cow::Borrowed(_) => None,
+        })
+        .collect()
+}
+
+/// The tokens `zone` draws with: `tokens` itself, or, for a zone on a
+/// secondary monitor, a copy whose [`PX_SCALE_KEY`] is that monitor's.
+/// Every size read for a zone goes through this, so its text, chrome and
+/// hit regions share one scale.
+pub fn for_zone<'a>(tokens: &'a DesignTokenMap, zone: &str) -> Cow<'a, DesignTokenMap> {
+    match tokens.get(&format!("{ZONE_PX_SCALE_PREFIX}{zone}")) {
+        Some(px) if tokens.get(PX_SCALE_KEY) != Some(px) => {
+            let mut on_its_monitor = tokens.clone();
+            on_its_monitor.insert(PX_SCALE_KEY.to_owned(), px.clone());
+            Cow::Owned(on_its_monitor)
+        }
+        _ => Cow::Borrowed(tokens),
+    }
+}
+
+/// The logical size token `key` (or `default` dp when absent or not a
+/// number) in physical px: the one place a dp size becomes pixels.
+pub fn token_px(tokens: &DesignTokenMap, key: &str, default: f32) -> f32 {
+    tokens
+        .get(key)
+        .and_then(|v| parse_numeric(v))
+        .unwrap_or(default)
+        * px_scale(tokens)
+}
 
 /// Validate the `[design_tokens]` section of a `RawConfig`.
 ///
@@ -1180,16 +1305,32 @@ pub(crate) fn validate_design_tokens(raw: &RawConfig, errors: &mut Vec<ConfigErr
         return;
     };
     for key in tokens.0.keys() {
-        if RESERVED_RUNTIME_TOKEN_KEYS.contains(&key.as_str()) {
+        if is_reserved_runtime_key(key) {
             errors.push(ConfigError {
                 code: ConfigErrorCode::InvalidTokenKey,
                 field_path: format!("design_tokens.{key}"),
                 expected: "a design token, not a runtime-reserved key".into(),
                 got: key.clone(),
-                hint: format!(
-                    "{key:?} is set by the runtime; put font files in a `fonts` \
-                     directory beside the config file instead"
-                ),
+                hint: if key.starts_with(PX_SCALE_KEY) {
+                    format!("{key:?} is set by the runtime; set \"ui.scale\" to resize the HUD")
+                } else {
+                    format!(
+                        "{key:?} is set by the runtime; put font files in a `fonts` \
+                         directory beside the config file instead"
+                    )
+                },
+            });
+            continue;
+        }
+        if key == UI_SCALE_KEY
+            && let Err(expected) = validate_canonical_value(key, &tokens.0[key])
+        {
+            errors.push(ConfigError {
+                code: ConfigErrorCode::TokenValueParseError,
+                field_path: format!("design_tokens.{key}"),
+                expected,
+                got: tokens.0[key].clone(),
+                hint: "e.g. \"ui.scale\" = \"1.25\" makes everything a quarter bigger".into(),
             });
             continue;
         }
@@ -1476,6 +1617,72 @@ mod tests {
     }
 
     // ── validate_design_tokens ────────────────────────────────────────────────
+
+    #[test]
+    fn ui_scale_is_config_only_and_ranged() {
+        use crate::raw::RawDesignTokens;
+        let check = |pairs: &[(&str, &str)]| {
+            let raw = RawConfig {
+                design_tokens: Some(RawDesignTokens(
+                    pairs
+                        .iter()
+                        .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                        .collect(),
+                )),
+                ..Default::default()
+            };
+            let mut errors = Vec::new();
+            validate_design_tokens(&raw, &mut errors);
+            errors
+        };
+        assert!(check(&[(UI_SCALE_KEY, "1.25")]).is_empty());
+        for bad in ["0.4", "3.5", "big"] {
+            let errors = check(&[(UI_SCALE_KEY, bad)]);
+            assert_eq!(errors.len(), 1, "{bad}");
+            assert_eq!(errors[0].code, ConfigErrorCode::TokenValueParseError);
+        }
+        for key in [PX_SCALE_KEY, "runtime.px_scale@subtitle"] {
+            let errors = check(&[(key, "2")]);
+            assert_eq!(errors[0].code, ConfigErrorCode::InvalidTokenKey);
+            assert!(errors[0].hint.contains("ui.scale"), "{}", errors[0].hint);
+        }
+        assert!(crate::themes::parse_theme("\"ui.scale\" = \"1.25\"").is_err());
+    }
+
+    #[test]
+    fn px_scale_is_monitor_times_ui_scale() {
+        let mut tokens = DesignTokenMap::from([(UI_SCALE_KEY.to_owned(), "1.25".to_owned())]);
+        assert_eq!(px_scale(&tokens), 1.0, "unset means 1");
+        set_px_scale(&mut tokens, 1.5);
+        assert_eq!(px_scale(&tokens), 1.875);
+        assert_eq!(
+            token_px(&tokens, "space.m", 12.0),
+            22.5,
+            "absent: the default dp"
+        );
+        tokens.insert("space.m".into(), "8".into());
+        assert_eq!(token_px(&tokens, "space.m", 12.0), 15.0);
+        set_px_scale(&mut tokens, f64::NAN);
+        assert_eq!(px_scale(&tokens), 1.25, "a bogus monitor scale counts as 1");
+    }
+
+    /// A zone on a secondary monitor reads that monitor's px per dp; every
+    /// other zone shares the map itself; config may not set either key.
+    #[test]
+    fn zones_on_a_secondary_draw_at_its_scale() {
+        let mut tokens = DesignTokenMap::from([(UI_SCALE_KEY.to_owned(), "1.25".to_owned())]);
+        set_px_scale(&mut tokens, 1.5);
+        set_zone_px_scale(&mut tokens, "subtitle", 1.0);
+        let subtitle = for_zone(&tokens, "subtitle");
+        assert!(matches!(subtitle, Cow::Owned(_)));
+        assert_eq!(px_scale(&subtitle), 1.25);
+        assert_eq!(token_px(&subtitle, "space.m", 8.0), 10.0);
+        assert!(matches!(for_zone(&tokens, "status-bar"), Cow::Borrowed(_)));
+        let cached = secondary_zone_tokens(&tokens);
+        assert_eq!(cached.keys().collect::<Vec<_>>(), ["subtitle"]);
+        assert_eq!(cached["subtitle"], *subtitle);
+        assert_eq!(px_scale(&for_zone(&tokens, "status-bar")), 1.875);
+    }
 
     #[test]
     fn test_validate_rejects_runtime_reserved_key() {

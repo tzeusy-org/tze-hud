@@ -26,7 +26,7 @@ use winit::monitor::MonitorHandle;
 use winit::window::{Window, WindowAttributes, WindowId, WindowLevel};
 
 /// A connected monitor in physical desktop pixels.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct MonitorSpec {
     /// Normalized OS name (`DISPLAY6`); see [`tze_hud_compositor::normalize_display_name`].
     pub name: String,
@@ -34,9 +34,18 @@ pub(super) struct MonitorSpec {
     pub y: i32,
     pub width: u32,
     pub height: u32,
+    /// Windows scale factor (1.5 at 150%): physical px per logical dp
+    /// before `ui.scale`.
+    pub scale: f64,
 }
 
 impl MonitorSpec {
+    /// Same monitor at the same place and size, whatever its scale.
+    pub(super) fn same_place(&self, other: &Self) -> bool {
+        (&self.name, self.x, self.y, self.width, self.height)
+            == (&other.name, other.x, other.y, other.width, other.height)
+    }
+
     fn from_handle(index: usize, monitor: &MonitorHandle) -> Option<Self> {
         let size = monitor.size();
         if size.width == 0 || size.height == 0 {
@@ -53,6 +62,7 @@ impl MonitorSpec {
             y: position.y,
             width: size.width,
             height: size.height,
+            scale: monitor.scale_factor(),
         })
     }
 
@@ -118,6 +128,29 @@ pub(super) fn plan_secondary_changes(
         .cloned()
         .collect();
     (remove, add)
+}
+
+/// Each monitor's scale factor for appearance: the primary's, and that of
+/// every zone placed on a connected secondary.
+pub(super) fn display_scales(
+    primary: &MonitorSpec,
+    secondaries: &[MonitorSpec],
+    zone_displays: &HashMap<String, String>,
+) -> crate::appearance::DisplayScales {
+    let zones = zone_displays
+        .iter()
+        .filter_map(|(zone, display)| {
+            let display = tze_hud_compositor::normalize_display_name(display);
+            secondaries
+                .iter()
+                .find(|m| m.name == display)
+                .map(|m| (zone.clone(), m.scale))
+        })
+        .collect();
+    crate::appearance::DisplayScales {
+        primary: primary.scale,
+        zones,
+    }
 }
 
 /// The compositor-facing layout: every display in scene pixels plus the
@@ -666,6 +699,7 @@ impl super::WinitApp {
                     y: 0,
                     width: size.width.max(1),
                     height: size.height.max(1),
+                    scale: primary_window.scale_factor(),
                 };
                 (spec, Vec::new())
             }
@@ -677,9 +711,16 @@ impl super::WinitApp {
             .lock()
             .map_or(true, |t| t.generation == 0);
         let previous = self.state.primary_monitor.replace(primary.clone());
-        let primary_changed = multi && previous.as_ref() != Some(&primary);
-        if primary_changed && !first_sync {
-            tracing::info!(primary = %primary.name, "primary monitor changed; moving the primary overlay");
+        let primary_moved = multi && previous.as_ref().is_some_and(|p| !p.same_place(&primary));
+        // A DPI change is a change in any mode: sizes follow the scale.
+        let primary_rescaled = previous.as_ref().map(|p| p.scale) != Some(primary.scale);
+        let primary_changed = primary_moved || (multi && previous.is_none()) || primary_rescaled;
+        if !first_sync {
+            if primary_moved {
+                tracing::info!(primary = %primary.name, "primary monitor changed; moving the primary overlay");
+            } else if primary_rescaled {
+                tracing::info!(primary = %primary.name, scale = primary.scale, "primary monitor scale changed");
+            }
         }
         // Windows whose surface the compositor lost for good: close them and
         // let the diff below recreate them, a bounded number of times. A
@@ -733,6 +774,19 @@ impl super::WinitApp {
             .into_iter()
             .filter(|m| !self.overlay_disabled(&m.name))
             .collect();
+        // A secondary whose scale alone changed keeps its window (winit
+        // follows the DPI); only its sizes are re-derived.
+        let mut rescaled = false;
+        for shown in &mut self.state.secondaries {
+            if let Some(now) = desired
+                .iter()
+                .find(|d| d.same_place(&shown.spec) && d.scale != shown.spec.scale)
+            {
+                tracing::info!(display = %now.name, scale = now.scale, "secondary monitor scale changed");
+                shown.spec.scale = now.scale;
+                rescaled = true;
+            }
+        }
         // A moved primary origin shifts every secondary's scene origin.
         let origin_moved = previous.is_some_and(|p| (p.x, p.y) != (primary.x, primary.y));
         let current: Vec<MonitorSpec> = self
@@ -746,7 +800,13 @@ impl super::WinitApp {
         } else {
             plan_secondary_changes(&current, &desired)
         };
-        if remove.is_empty() && add.is_empty() && !primary_changed && !first_sync && !lost_any {
+        if remove.is_empty()
+            && add.is_empty()
+            && !primary_changed
+            && !first_sync
+            && !lost_any
+            && !rescaled
+        {
             if multi {
                 self.refit_overlay_windows(&primary_window, &primary);
             }
@@ -941,6 +1001,22 @@ impl super::WinitApp {
     }
 
     /// Hand the current windows to the compositor thread and `/admin/status`.
+    /// Tell appearance each monitor's scale, so sizes are dp on every
+    /// monitor. Applied on the network runtime; the restyle arrives like any
+    /// live token change.
+    fn publish_display_scales(&self, primary: &MonitorSpec, secondaries: &[MonitorSpec]) {
+        let (Some(appearance), Some(rt)) = (&self.state.appearance, &self.state.network_rt) else {
+            return;
+        };
+        let scales = display_scales(primary, secondaries, &self.state.zone_displays);
+        let appearance = Arc::clone(appearance);
+        rt.rt.spawn(async move {
+            if let Err(error) = appearance.set_display_scales(scales).await {
+                tracing::warn!(%error, "appearance: display scale not applied");
+            }
+        });
+    }
+
     fn publish_displays(&mut self, primary: &MonitorSpec) {
         let specs: Vec<MonitorSpec> = self
             .state
@@ -1007,6 +1083,7 @@ impl super::WinitApp {
             }
         }
         crate::operator::status::set_displays(status, unplaced);
+        self.publish_display_scales(primary, &specs);
         {
             let mut targets = self
                 .state
@@ -1211,6 +1288,7 @@ mod tests {
             y,
             width: 3840,
             height: 2160,
+            scale: 1.5,
         }
     }
 
@@ -1259,6 +1337,34 @@ mod tests {
         assert_eq!(add, desired);
         let (remove, add) = plan_secondary_changes(&current, &current);
         assert!(remove.is_empty() && add.is_empty(), "no change, no work");
+    }
+
+    /// Zones on a connected secondary get its scale; zones on the primary,
+    /// or on a monitor that is not connected, share the primary's.
+    #[test]
+    fn display_scales_follow_each_zones_monitor() {
+        let (mut primary, mut secondaries) = rig();
+        primary.scale = 1.25;
+        secondaries[1].scale = 2.0;
+        let zones = HashMap::from([
+            ("subtitle".to_string(), r"\\.\display8".to_string()),
+            ("status-bar".to_string(), "DISPLAY9".to_string()),
+        ]);
+        let scales = display_scales(&primary, &secondaries, &zones);
+        assert_eq!(scales.primary, 1.25);
+        assert_eq!(scales.zones, HashMap::from([("subtitle".to_string(), 2.0)]));
+    }
+
+    /// A DPI change alone is the same place: the window is kept.
+    #[test]
+    fn a_scale_change_is_not_a_move() {
+        let before = spec("DISPLAY6", 3857, -1079);
+        let after = MonitorSpec {
+            scale: 2.0,
+            ..before.clone()
+        };
+        assert!(before.same_place(&after));
+        assert!(!before.same_place(&spec("DISPLAY6", 3840, 0)));
     }
 
     #[test]

@@ -353,6 +353,11 @@ impl MarkdownTokens {
                     tokens.separator_thickness_px = t;
                 }
             }
+            // A hairline: dp × px per dp, whole pixels, never thinner than one.
+            tokens.separator_thickness_px = (tokens.separator_thickness_px
+                * tze_hud_config::tokens::px_scale(map))
+            .round()
+            .max(1.0);
         }
 
         tokens

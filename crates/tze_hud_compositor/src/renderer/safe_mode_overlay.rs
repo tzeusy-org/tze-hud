@@ -37,12 +37,12 @@ pub(super) fn safe_mode_overlay_rects(
             .unwrap_or(Rgba::WHITE)
             .to_array()
     };
-    let banner_h = token_map
+    let banner_dp = token_map
         .get("safe_mode.banner.height_px")
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(BANNER_DEFAULT_HEIGHT_PX)
-        .min(h);
+        .unwrap_or(BANNER_DEFAULT_HEIGHT_PX);
+    let banner_h = (banner_dp * tze_hud_config::tokens::px_scale(token_map)).min(h);
     vec![
         OverlayRect {
             x: 0.0,

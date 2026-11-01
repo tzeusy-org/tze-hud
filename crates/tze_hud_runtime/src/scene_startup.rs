@@ -15,11 +15,10 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use tze_hud_config::policy_builder::build_all_effective_policies;
 use tze_hud_config::raw::RawConfig;
 use tze_hud_config::themes::resolve_config_tokens;
 use tze_hud_config::tokens::DesignTokenMap;
-use tze_hud_scene::types::{RenderingPolicy, ZoneRegistry};
+use tze_hud_scene::types::ZoneRegistry;
 
 use crate::widget_startup::init_widget_registry;
 
@@ -50,6 +49,9 @@ pub fn run_scene_startup(
         .unwrap_or_default();
     let mut global_tokens = resolve_config_tokens(&config_tokens);
     resolve_font_dir(&mut global_tokens, config_parent);
+    // Monitor scale is not known yet: `ui.scale` alone until the windows
+    // report theirs (`Appearance::set_display_scales`).
+    tze_hud_config::tokens::set_px_scale(&mut global_tokens, 1.0);
     tracing::info!(
         token_count = global_tokens.len(),
         "scene_startup: design tokens loaded"
@@ -63,16 +65,7 @@ pub fn run_scene_startup(
         init_widget_registry(scene, raw, config_parent, &tab_map, &global_tokens);
 
     let mut zone_registry = ZoneRegistry::with_defaults();
-    let zone_defaults: HashMap<String, RenderingPolicy> = zone_registry
-        .zones
-        .iter()
-        .map(|(name, def)| (name.clone(), def.rendering_policy.clone()))
-        .collect();
-    for (zone_name, policy) in build_all_effective_policies(&zone_defaults, &global_tokens) {
-        if let Some(zone_def) = zone_registry.zones.get_mut(&zone_name) {
-            zone_def.rendering_policy = policy;
-        }
-    }
+    crate::appearance::restyle_zones(&mut zone_registry, &global_tokens);
     scene.zone_registry = zone_registry;
     tracing::info!(
         zone_count = scene.zone_registry.zones.len(),
@@ -247,10 +240,9 @@ mod tests {
         let mut scene = make_scene();
         let result = run_scene_startup(&raw, None, &mut scene);
 
-        assert_eq!(
-            result.global_tokens,
-            tze_hud_config::themes::resolve_config_tokens(&DesignTokenMap::new()),
-        );
+        let mut expected = tze_hud_config::themes::resolve_config_tokens(&DesignTokenMap::new());
+        tze_hud_config::tokens::set_px_scale(&mut expected, 1.0);
+        assert_eq!(result.global_tokens, expected);
         assert_eq!(
             result.global_tokens.get("color.text.primary"),
             tze_hud_config::themes::builtin_theme(tze_hud_config::themes::DEFAULT_THEME)
