@@ -296,7 +296,8 @@ pub struct Pairing {
     state: Mutex<PairingState>,
     agents: Arc<AgentStore>,
     card: SystemCardHandle,
-    grpc_port: u16,
+    /// Successfully adopted gRPC listeners, updated after handoff and late binds.
+    grpc_binds: Arc<Mutex<Vec<SocketAddr>>>,
     clock: Arc<dyn PairClock>,
     /// Addresses the HTTP port is bound on; shared with `/admin/status`.
     binds: Arc<Mutex<Vec<SocketAddr>>>,
@@ -372,7 +373,7 @@ impl Pairing {
             state: Mutex::new(state),
             agents,
             card,
-            grpc_port,
+            grpc_binds: Arc::default(),
             clock,
             firewall: Arc::new(crate::firewall::FirewallProbe::system(
                 Arc::clone(&binds),
@@ -408,6 +409,12 @@ impl Pairing {
             binds.extend_from_slice(initial);
         }
         Arc::clone(&self.binds)
+    }
+
+    /// The gRPC server records actual listeners here; the configured port alone
+    /// cannot establish that a listener exists on the MCP endpoint's address.
+    pub(crate) fn grpc_binds(&self) -> Arc<Mutex<Vec<SocketAddr>>> {
+        Arc::clone(&self.grpc_binds)
     }
 
     /// The address to hand out: the Tailscale one if bound, else the first.
@@ -702,13 +709,13 @@ impl Pairing {
         let binds = self.binds.lock().unwrap_or_else(|e| e.into_inner());
         let host =
             Self::endpoint(&binds).unwrap_or_else(|| SocketAddr::from(([127, 0, 0, 1], 9090)));
-        let grpc = SocketAddr::new(host.ip(), self.grpc_port);
+        let grpc = Self::endpoint(&self.grpc_binds.lock().unwrap_or_else(|e| e.into_inner()));
         Response::json(
             serde_json::json!({
                 "agent": agent,
                 "psk": psk,
                 "mcp": format!("http://{host}/mcp"),
-                "grpc": grpc.to_string(),
+                "grpc": grpc.map(|addr| addr.to_string()),
             })
             .to_string(),
         )
@@ -997,7 +1004,20 @@ pub(crate) mod tests {
         assert_eq!(psk.len(), 64);
         assert_eq!(body["agent"], "claude");
         assert_eq!(body["mcp"], "http://127.0.0.1:9090/mcp");
-        assert_eq!(body["grpc"], "127.0.0.1:50051");
+        assert!(body["grpc"].is_null(), "no gRPC listener has bound yet");
+        // A successful MCP bind says nothing about the gRPC sibling. Pairing
+        // reports only the listener state supplied by the gRPC server.
+        let grpc_binds = rig.pairing.grpc_binds();
+        for (bound, expected) in [
+            (vec!["127.0.0.1:50051"], "127.0.0.1:50051"),
+            (
+                vec!["127.0.0.1:50051", "[fd7a:115c:a1e0::1]:50051"],
+                "[fd7a:115c:a1e0::1]:50051",
+            ),
+        ] {
+            *grpc_binds.lock().unwrap() = bound.iter().map(|addr| addr.parse().unwrap()).collect();
+            assert_eq!(json(&rig.pairing.success("claude", psk))["grpc"], expected);
+        }
 
         // The PSK authenticates; agents.toml holds the hash, not the PSK.
         assert!(rig.agents.load().resolve(psk, "").is_ok());

@@ -213,6 +213,10 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
   -> {"agent":"claude","psk":"<64 hex>","mcp":"http://100.x.y.z:9090/mcp","grpc":"100.x.y.z:50051"}
   ```
 
+  The endpoints come from each transport's successful listeners. `grpc` is
+  `null` while gRPC is disabled or has not bound yet (including during handoff);
+  an MCP bind alone does not advertise the corresponding gRPC address.
+
   `agent` is `[a-z0-9-]{1,32}`; re-pairing an existing id rotates its key. The
   new agent gets `allow = ["*"]`; add `"admin": true` to also get `admin`,
   except with a code from Connect an agent (`403 NOT_ADMIN`, code not spent). The

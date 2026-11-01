@@ -58,6 +58,19 @@ source links when implementation changes the status.
   [restart handoff](../crates/tze_hud_runtime/src/operator/handoff.rs),
   [signed update](../crates/tze_hud_runtime/src/operator/update.rs), and
   [firewall diagnostics/helper](../crates/tze_hud_runtime/src/firewall.rs).
+  Both transports use the shared [listener manager](../crates/tze_hud_runtime/src/net_addrs.rs)
+  to follow every later Tailscale address via OS notifications and retry only
+  missing binds, including failed restart/update handoff binds. The deterministic
+  `listener_lifecycle_follows_changes_and_retries_only_missing_binds` gate covers
+  address events, partial failures, deduplication and absence of idle polling;
+  static address selection remains a separate gate. Existing MCP fan-out and
+  gRPC handoff fixtures additionally inject a late v6 address and failed-then-
+  successful bind, then connect to the real transport over IPv6 loopback;
+  MCP also verifies that status lists only successful binds. Pairing uses each
+  transport's successful bind list independently, with `grpc: null` before a
+  gRPC listener is adopted; the pairing fixture covers unavailable and later
+  successful gRPC addresses.
+  This source/automated evidence does not establish Windows owner acceptance.
   [Unknown] Owner-host acceptance remains unverified in this refresh;
   `hud-i2e10.13`, `hud-lgb6c.3`, and `hud-jm8nq.18` are still open.
 - **T7 — portal [Observed].** MCP tools now share
