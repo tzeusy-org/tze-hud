@@ -19,12 +19,12 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 
 use tokio::sync::Mutex;
-use tze_hud_config::policy_builder::build_all_effective_policies;
+use tze_hud_config::policy_builder::build_effective_policy;
 use tze_hud_config::themes::{check_design_tokens, resolve_config_tokens};
 use tze_hud_config::tokens::DesignTokenMap;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::render_wake::RenderWakeNotifier;
-use tze_hud_scene::types::{RenderingPolicy, ZoneRegistry};
+use tze_hud_scene::types::ZoneRegistry;
 
 /// The resolved tokens now, and the `[design_tokens]` table they came from.
 pub(crate) struct LiveTokens {
@@ -115,6 +115,28 @@ pub struct Appearance {
     file_table: std::sync::Mutex<DesignTokenMap>,
     /// File reloads attempted, changed or not.
     reloads: AtomicU64,
+    /// The monitors' Windows scale factors, for dp → px.
+    scales: std::sync::Mutex<DisplayScales>,
+    /// The latest monitor report not yet applied.
+    newest_scales: std::sync::Mutex<Option<DisplayScales>>,
+}
+
+/// The Windows scale factor of each monitor the HUD draws on: the primary's
+/// sizes every surface but the zones placed on another monitor.
+#[derive(Clone, Debug, PartialEq)]
+pub(crate) struct DisplayScales {
+    pub primary: f64,
+    /// Zones placed on a secondary monitor → that monitor's scale.
+    pub zones: HashMap<String, f64>,
+}
+
+impl Default for DisplayScales {
+    fn default() -> Self {
+        Self {
+            primary: 1.0,
+            zones: HashMap::new(),
+        }
+    }
 }
 
 impl std::fmt::Debug for Appearance {
@@ -141,6 +163,8 @@ impl Appearance {
             applying: Mutex::new(()),
             reload: std::sync::Mutex::new(None),
             reloads: AtomicU64::new(0),
+            scales: std::sync::Mutex::new(DisplayScales::default()),
+            newest_scales: std::sync::Mutex::new(None),
         }
     }
 
@@ -180,22 +204,88 @@ impl Appearance {
         if table == self.live.table() {
             return Ok(false);
         }
-        let mut resolved = resolve_config_tokens(&table);
+        self.restyle(table).await
+    }
+
+    /// The monitors' scale factors changed (startup, a DPI change, a monitor
+    /// plugged in): re-derive every size. Returns whether anything changed.
+    ///
+    /// Reports may overlap: whichever call takes the lock applies the newest
+    /// one, and a later call finds nothing left to do.
+    pub(crate) async fn set_display_scales(&self, scales: DisplayScales) -> Result<bool, String> {
+        *self.newest_scales.lock().unwrap_or_else(|e| e.into_inner()) = Some(scales);
+        let _one_at_a_time = self.applying.lock().await;
+        let Some(scales) = self
+            .newest_scales
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
+        else {
+            return Ok(false);
+        };
+        let previous = std::mem::replace(
+            &mut *self.scales.lock().unwrap_or_else(|e| e.into_inner()),
+            scales.clone(),
+        );
+        if previous == scales {
+            return Ok(false);
+        }
+        tracing::info!(?scales, "appearance: display scale changed");
+        let outcome = self.restyle(self.live.table()).await;
+        if outcome.is_err() {
+            // Not applied: the same report again must retry.
+            *self.scales.lock().unwrap_or_else(|e| e.into_inner()) = previous;
+        }
+        outcome
+    }
+
+    fn scales(&self) -> DisplayScales {
+        self.scales
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// `table` resolved for drawing: tokens, the fonts directory, the
+    /// primary monitor's px per dp and that of each zone placed on a
+    /// secondary monitor.
+    fn resolve(&self, table: &DesignTokenMap) -> DesignTokenMap {
+        let mut resolved = resolve_config_tokens(table);
         crate::scene_startup::resolve_font_dir(&mut resolved, self.config_parent.as_deref());
-        if resolved == *self.live.resolved() {
+        let scales = self.scales();
+        tze_hud_config::tokens::set_px_scale(&mut resolved, scales.primary);
+        for (zone, scale) in &scales.zones {
+            tze_hud_config::tokens::set_zone_px_scale(&mut resolved, zone, *scale);
+        }
+        resolved
+    }
+
+    /// Restyle with `table` under the current display scales.
+    async fn restyle(&self, table: DesignTokenMap) -> Result<bool, String> {
+        let resolved = self.resolve(&table);
+        let previous = self.live.resolved();
+        if resolved == *previous {
             // Only the table's spelling changed (e.g. an override equal to
             // the theme's value): nothing to repaint.
             self.live.respell(table);
             return Ok(true);
         }
+        // Widget SVGs take tokens as viewBox units, never px: a change of
+        // scale alone leaves them as they are.
+        let svgs_changed = without_scales(&resolved) != without_scales(&previous);
+        drop(previous);
         // Bundles are files: read them off the async workers.
-        let roots = self.bundle_roots.clone();
-        let tokens = resolved.clone();
-        let svgs = tokio::task::spawn_blocking(move || {
-            crate::widget_startup::widget_svg_assets(&roots, &tokens)
-        })
-        .await
-        .map_err(|e| format!("Widget bundles could not be re-read: {e}"))?;
+        let svgs = if svgs_changed {
+            let roots = self.bundle_roots.clone();
+            let tokens = resolved.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::widget_startup::widget_svg_assets(&roots, &tokens)
+            })
+            .await
+            .map_err(|e| format!("Widget bundles could not be re-read: {e}"))?
+        } else {
+            Vec::new()
+        };
         {
             let mut scene = self.scene.lock().await;
             restyle_zones(&mut scene.zone_registry, &resolved);
@@ -289,19 +379,26 @@ impl Appearance {
     }
 }
 
-/// Re-derive every built-in zone's rendering policy from `tokens`, as
-/// startup does.
+/// Re-derive every built-in zone's rendering policy from `tokens`, sized
+/// for the monitor it is placed on ([`tze_hud_config::tokens::for_zone`]).
 pub(crate) fn restyle_zones(registry: &mut ZoneRegistry, tokens: &DesignTokenMap) {
-    let defaults: HashMap<String, RenderingPolicy> = ZoneRegistry::with_defaults()
-        .zones
-        .into_iter()
-        .map(|(name, def)| (name, def.rendering_policy))
-        .collect();
-    for (zone, policy) in build_all_effective_policies(&defaults, tokens) {
-        if let Some(def) = registry.zones.get_mut(&zone) {
-            def.rendering_policy = policy;
-        }
+    for (zone, def) in ZoneRegistry::with_defaults().zones {
+        let Some(target) = registry.zones.get_mut(&zone) else {
+            continue;
+        };
+        let on_its_monitor = tze_hud_config::tokens::for_zone(tokens, &zone);
+        target.rendering_policy =
+            build_effective_policy(&zone, &def.rendering_policy, &on_its_monitor);
     }
+}
+
+/// `tokens` without the runtime's px-per-dp keys.
+fn without_scales(tokens: &DesignTokenMap) -> DesignTokenMap {
+    tokens
+        .iter()
+        .filter(|(k, _)| !k.starts_with(tze_hud_config::tokens::PX_SCALE_KEY))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
 }
 
 /// Watches the config file and applies `[design_tokens]` edits
@@ -452,7 +549,9 @@ mod tests {
         let blueprint = table(&[("theme", "blueprint")]);
         assert_eq!(appearance.apply(blueprint.clone()).await, Ok(true));
         let map = appearance.live.if_changed(&mut seen).expect("changed");
-        assert_eq!(*map, resolve_config_tokens(&blueprint));
+        let mut expected = resolve_config_tokens(&blueprint);
+        tze_hud_config::tokens::set_px_scale(&mut expected, 1.0);
+        assert_eq!(*map, expected);
         assert!(appearance.live.if_changed(&mut seen).is_none(), "once");
         {
             let mut scene = appearance.scene.lock().await;
@@ -476,6 +575,129 @@ mod tests {
             .unwrap_err();
         assert!(err.contains("set by the runtime"), "{err}");
         assert_eq!(appearance.live.table(), blueprint, "kept");
+    }
+
+    /// Sizes are dp: a 150% primary makes zone text 1.5x, `ui.scale`
+    /// multiplies on top, and a zone on a secondary monitor takes that
+    /// monitor's scale (AC2).
+    #[tokio::test]
+    async fn sizes_follow_each_monitors_scale_and_ui_scale() {
+        let on_secondary_again = || DisplayScales {
+            primary: 1.5,
+            zones: HashMap::from([("subtitle".to_owned(), 1.0)]),
+        };
+        let mut scene = SceneGraph::new(800.0, 600.0);
+        scene.zone_registry = ZoneRegistry::with_defaults();
+        let appearance = appearance(scene);
+        let font = |a: &Appearance, zone: &str| {
+            let scene = a.scene.try_lock().expect("idle");
+            scene.zone_registry.zones[zone]
+                .rendering_policy
+                .font_size_px
+                .expect("font")
+        };
+        let base = table(&[]);
+        appearance
+            .apply(table(&[("theme", "classic")]))
+            .await
+            .unwrap();
+        appearance.apply(base.clone()).await.unwrap();
+        let (subtitle, notes) = (
+            font(&appearance, "subtitle"),
+            font(&appearance, "notification-area"),
+        );
+
+        let on_secondary = DisplayScales {
+            primary: 1.5,
+            zones: HashMap::from([("subtitle".to_owned(), 1.0)]),
+        };
+        assert_eq!(
+            appearance.set_display_scales(on_secondary.clone()).await,
+            Ok(true)
+        );
+        assert_eq!(font(&appearance, "notification-area"), notes * 1.5);
+        assert_eq!(
+            font(&appearance, "subtitle"),
+            subtitle,
+            "its own monitor's scale"
+        );
+        assert_eq!(
+            tze_hud_config::tokens::px_scale(&appearance.live.resolved()),
+            1.5
+        );
+        assert_eq!(
+            appearance.set_display_scales(on_secondary).await,
+            Ok(false),
+            "unchanged"
+        );
+
+        // Only the secondary's scale moves: the new map is published (which
+        // wakes the compositor) without re-reading widget bundles, whose
+        // SVGs never see px.
+        let mut seen = 0;
+        appearance.live.if_changed(&mut seen);
+        appearance
+            .scene
+            .lock()
+            .await
+            .drain_pending_widget_svg_assets();
+        let secondary_dpi = DisplayScales {
+            primary: 1.5,
+            zones: HashMap::from([("subtitle".to_owned(), 2.0)]),
+        };
+        assert_eq!(appearance.set_display_scales(secondary_dpi).await, Ok(true));
+        let map = appearance.live.if_changed(&mut seen).expect("published");
+        assert_eq!(
+            tze_hud_config::tokens::px_scale(&tze_hud_config::tokens::for_zone(&map, "subtitle")),
+            2.0
+        );
+        assert_eq!(font(&appearance, "subtitle"), subtitle * 2.0);
+        assert!(
+            appearance
+                .scene
+                .lock()
+                .await
+                .drain_pending_widget_svg_assets()
+                .is_empty(),
+            "no widget re-raster for a scale change"
+        );
+        appearance
+            .set_display_scales(on_secondary_again())
+            .await
+            .unwrap();
+
+        appearance
+            .apply(table(&[("ui.scale", "1.25")]))
+            .await
+            .unwrap();
+        assert_eq!(font(&appearance, "notification-area"), notes * 1.875);
+        assert_eq!(font(&appearance, "subtitle"), subtitle * 1.25);
+    }
+
+    /// Overlapping monitor reports apply the newest one, once.
+    #[tokio::test]
+    async fn overlapping_display_reports_apply_the_newest() {
+        let appearance = appearance(SceneGraph::new(800.0, 600.0));
+        let older = DisplayScales {
+            primary: 1.25,
+            ..DisplayScales::default()
+        };
+        let newer = DisplayScales {
+            primary: 2.0,
+            ..DisplayScales::default()
+        };
+        let busy = appearance.applying.lock().await;
+        let (first, second, ()) = tokio::join!(
+            appearance.set_display_scales(older),
+            appearance.set_display_scales(newer.clone()),
+            async { drop(busy) },
+        );
+        assert_eq!((first, second), (Ok(true), Ok(false)));
+        assert_eq!(appearance.scales(), newer);
+        assert_eq!(
+            tze_hud_config::tokens::px_scale(&appearance.live.resolved()),
+            2.0
+        );
     }
 
     /// A reload reports refusals and real changes in status; an unchanged

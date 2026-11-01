@@ -1194,3 +1194,108 @@ async fn tile_close_button_draw_and_hit_region_share_token_geometry() {
         "the rest of the tile is unchanged"
     );
 }
+
+/// Zoom (`ui.scale`) and the monitor scale reach hit testing through
+/// `runtime.px_scale`: at 1.5 and 1.875 px per dp every dismiss and action
+/// region's top and height (so the stack slot pitch), and the dismiss
+/// button's size and right inset, are exactly that multiple of their 1x
+/// values (hud-h51u7.3 AC1,
+/// AC3). A zone on a secondary monitor uses that monitor's scale. Pure
+/// geometry: runs without a GPU.
+#[test]
+fn zone_hit_regions_and_slot_pitch_scale_with_px_scale() {
+    use tze_hud_config::tokens::PX_SCALE_KEY;
+    use tze_hud_scene::types::NotificationAction;
+    const ZONE_RIGHT: f32 = 1920.0 * 0.75 + 1920.0 * 0.24;
+
+    /// Every region as (right inset, top, width, height), top to bottom.
+    fn regions(tokens: &[(&str, &str)]) -> Vec<[f32; 4]> {
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        scene.create_tab("Main", 0).unwrap();
+        scene.register_zone(tze_hud_scene::types::ZoneDefinition {
+            id: SceneId::new(),
+            name: "notif".to_string(),
+            description: "Stack zone".to_string(),
+            geometry_policy: tze_hud_scene::types::GeometryPolicy::Relative {
+                x_pct: 0.75,
+                y_pct: 0.0,
+                width_pct: 0.24,
+                height_pct: 0.60,
+            },
+            accepted_media_types: vec![tze_hud_scene::types::ZoneMediaType::ShortTextWithIcon],
+            // No sizes: the 16 dp font and 8 dp margin fallbacks apply.
+            rendering_policy: tze_hud_scene::types::RenderingPolicy::default(),
+            contention_policy: ContentionPolicy::Stack { max_depth: 5 },
+            max_publishers: 8,
+            auto_clear_ms: None,
+            layer_attachment: tze_hud_scene::types::LayerAttachment::Chrome,
+            ephemeral: false,
+        });
+        let action = |label: &str| NotificationAction {
+            label: label.to_string(),
+            callback_id: label.to_lowercase(),
+        };
+        for (text, actions) in [
+            ("first", vec![action("Open"), action("Snooze")]),
+            ("second", Vec::new()),
+        ] {
+            scene
+                .publish_to_zone(
+                    "notif",
+                    ZoneContent::Notification(NotificationPayload {
+                        text: text.to_string(),
+                        icon: String::new(),
+                        urgency: 1,
+                        ttl_ms: None,
+                        title: String::new(),
+                        actions,
+                    }),
+                    "agent-a",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+        let tokens: HashMap<String, String> = tokens
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect();
+        super::super::hit_regions::populate_notification_hit_regions(
+            &mut scene, 1920.0, 1080.0, &tokens,
+        );
+        let mut out: Vec<[f32; 4]> = scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .map(|r| {
+                let b = r.bounds;
+                [ZONE_RIGHT - (b.x + b.width), b.y, b.width, b.height]
+            })
+            .collect();
+        out.sort_by(|a, b| a[1].total_cmp(&b[1]).then(a[0].total_cmp(&b[0])));
+        out
+    }
+
+    let one = regions(&[(PX_SCALE_KEY, "1")]);
+    assert_eq!(one.len(), 4, "two dismisses and two actions: {one:?}");
+    for factor in [1.5f32, 1.875] {
+        let scaled = regions(&[(PX_SCALE_KEY, &factor.to_string())]);
+        assert_eq!(scaled.len(), one.len());
+        for (r1, rs) in one.iter().zip(&scaled) {
+            // Action buttons split the zone's width (a display fraction),
+            // so only the square dismiss button's width and right inset
+            // scale.
+            let dismiss = r1[2] == r1[3];
+            let horizontal = if dismiss { &[0, 2][..] } else { &[] };
+            for &i in [1, 3].iter().chain(horizontal) {
+                assert!(
+                    (rs[i] - r1[i] * factor).abs() < 0.01,
+                    "at {factor}x: {rs:?} is not {r1:?} x {factor}"
+                );
+            }
+        }
+    }
+    let secondary = regions(&[(PX_SCALE_KEY, "1.5"), ("runtime.px_scale@notif", "1")]);
+    assert_eq!(secondary, one, "a 1x secondary ignores the 1.5x primary");
+}

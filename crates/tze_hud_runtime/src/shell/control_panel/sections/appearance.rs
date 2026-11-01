@@ -6,7 +6,9 @@
 use std::sync::Arc;
 
 use tze_hud_config::themes::{THEME_KEY, builtin_theme, builtin_theme_names, selected_theme_name};
-use tze_hud_config::tokens::{CANONICAL_TOKENS, DesignTokenMap};
+use tze_hud_config::tokens::{
+    CANONICAL_TOKENS, DesignTokenMap, UI_SCALE_KEY, UI_SCALE_RANGE, ui_scale,
+};
 use tze_hud_config::{ConfigWriteError, TokenUpdate};
 
 use super::super::row::{BoxFuture, Control, Edit, Row, Section};
@@ -65,7 +67,10 @@ impl Tokens {
                 e => e.to_string(),
             })?;
         }
-        self.appearance.apply(table).await?;
+        if !self.appearance.apply(table).await? {
+            // Already in effect (e.g. Zoom held at its limit): nothing to save.
+            return Ok(());
+        }
         tracing::info!(?updates, "control panel: design tokens changed");
         let Some(save) = &self.save else {
             return Ok(());
@@ -98,6 +103,9 @@ pub(crate) struct AppearanceSection {
 
 impl AppearanceSection {
     const THEME: &'static str = "appearance.theme";
+    const ZOOM: &'static str = "appearance.zoom";
+    /// One Ctrl+− / Ctrl+= step of `ui.scale`.
+    const ZOOM_STEP: f32 = 0.1;
     const FONT_PREFIX: &'static str = "appearance.";
 
     pub(crate) fn new(appearance: Arc<Appearance>, save: Option<TokenWriter>) -> Self {
@@ -133,6 +141,20 @@ impl Section for AppearanceSection {
                 )
                 .detail(format!("Applies now · {}", self.tokens.saved_detail()))
                 .keywords(&["theme", "color", "colour", "look", "style", "dark"]),
+                Row::new(
+                    Self::ZOOM,
+                    "Zoom",
+                    Control::Stepper {
+                        text: format!("{:.0}%", ui_scale(&table) * 100.0),
+                    },
+                )
+                .detail(format!(
+                    "Applies now · {} · on top of the Windows display scale · Enter resets",
+                    self.tokens.saved_detail()
+                ))
+                .keywords(&[
+                    "zoom", "scale", "size", "bigger", "smaller", "dpi", "ui.scale",
+                ]),
             ];
             for (key, label) in FONTS {
                 let set = table.get(key);
@@ -167,6 +189,26 @@ impl Section for AppearanceSection {
         Box::pin(async move {
             let described = format!("{edit:?}");
             let unsupported = || format!("{row} does not support {described}");
+            if row == Self::ZOOM {
+                let update = match edit {
+                    // Enter: back to 100%.
+                    Edit::Activate => TokenUpdate::Remove,
+                    Edit::Step(n) => {
+                        let (lo, hi) = UI_SCALE_RANGE;
+                        let next = (ui_scale(&self.tokens.table()) + n as f32 * Self::ZOOM_STEP)
+                            .clamp(lo, hi);
+                        // Whole percents, so steps never drift (1.1, not 1.1000001).
+                        let next = (next * 100.0).round() / 100.0;
+                        if (next - 1.0).abs() < f32::EPSILON {
+                            TokenUpdate::Remove
+                        } else {
+                            TokenUpdate::Set(next.to_string())
+                        }
+                    }
+                    _ => return Err(unsupported()),
+                };
+                return self.tokens.change(&[(UI_SCALE_KEY, update)]).await;
+            }
             if row == Self::THEME {
                 let Edit::Choose(i) = edit else {
                     return Err(unsupported());
@@ -387,6 +429,61 @@ mod tests {
     fn theme_names_read_as_titles() {
         assert_eq!(theme_title("tonal-glass"), "Tonal Glass");
         assert_eq!(theme_title("classic"), "Classic");
+    }
+
+    /// Zoom steps `ui.scale` by 10% within its range, restyles at once,
+    /// saves, and Enter returns to 100%.
+    #[tokio::test]
+    async fn zoom_steps_ui_scale_live_and_saves() {
+        let (appearance, _, saved) = sections(Some(Ok(())));
+        let zoom = |rows: &[Row]| row(rows, "appearance.zoom").control.clone();
+        assert_eq!(
+            zoom(&appearance.rows().await),
+            Control::Stepper {
+                text: "100%".into()
+            }
+        );
+        for _ in 0..2 {
+            appearance
+                .apply("appearance.zoom", Edit::Step(1))
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            zoom(&appearance.rows().await),
+            Control::Stepper {
+                text: "120%".into()
+            }
+        );
+        let px = tze_hud_config::tokens::px_scale(&appearance.tokens.appearance.live.resolved());
+        assert!((px - 1.2).abs() < 1e-6, "every size follows: {px}");
+        for _ in 0..40 {
+            appearance
+                .apply("appearance.zoom", Edit::Step(1))
+                .await
+                .unwrap();
+        }
+        assert_eq!(
+            zoom(&appearance.rows().await),
+            Control::Stepper {
+                text: "300%".into()
+            },
+            "clamped to the range"
+        );
+        appearance
+            .apply("appearance.zoom", Edit::Activate)
+            .await
+            .unwrap();
+        assert!(
+            !appearance.tokens.table().contains_key("ui.scale"),
+            "Enter resets"
+        );
+        let saved = saved.lock().unwrap();
+        assert_eq!(saved[0], r#"[("ui.scale", Set("1.1"))]"#);
+        assert_eq!(saved[1], r#"[("ui.scale", Set("1.2"))]"#);
+        assert_eq!(saved.last().unwrap(), r#"[("ui.scale", Remove)]"#);
+        // 110% to 300% is 20 saves, then Enter's: none once clamped.
+        assert_eq!(saved.len(), 21, "{saved:?}");
     }
 
     /// The theme and a font apply live and save; clearing a font gives the

@@ -395,10 +395,11 @@ async fn notification_action_row_is_reserved_below_the_text() {
                 &policy,
                 NOTIFICATION_BODY_SCALE,
                 NOTIFICATION_INTER_LINE_GAP,
+                1.0,
             )
         };
         if title.is_empty() {
-            assert_eq!(h(&plain), Compositor::stack_slot_height(&policy));
+            assert_eq!(h(&plain), Compositor::stack_slot_height(&policy, 1.0));
         }
         assert_eq!(
             h(&with_actions),
@@ -1659,7 +1660,7 @@ fn test_from_zone_policy_reads_all_policy_fields() {
         ..Default::default()
     };
 
-    let item = TextItem::from_zone_policy("test", 0.0, 0.0, 400.0, 100.0, &policy, 1.0);
+    let item = TextItem::from_zone_policy("test", 0.0, 0.0, 400.0, 100.0, &policy, 1.0, 1.0);
     assert_eq!(item.font_size_px, 28.0);
     assert_eq!(item.font_family, FontFamily::SystemMonospace);
     assert_eq!(item.alignment, TextAlign::Center);

@@ -329,10 +329,17 @@ pub(crate) fn populate_notification_hit_regions_in(
         }
 
         let policy = &zone_def.rendering_policy;
+        let zone_tokens = tze_hud_config::tokens::for_zone(token_map, zone_name);
+        let scale = tze_hud_config::tokens::px_scale(&zone_tokens);
         let (zx, zy, zw, zh) =
             super::zone_geometry_in(layout, zone_name, &zone_def.geometry_policy, sw, sh);
-        let layout =
-            Compositor::zone_slot_layout_with_tokens(token_map, zone_name, publishes, policy, zh);
+        let layout = Compositor::zone_slot_layout_with_tokens(
+            &zone_tokens,
+            zone_name,
+            publishes,
+            policy,
+            zh,
+        );
 
         for (pub_idx, slot_y, effective_slot_h) in layout.iter_visible(zy) {
             let record = &publishes[pub_idx];
@@ -344,7 +351,8 @@ pub(crate) fn populate_notification_hit_regions_in(
 
             // ── Dismiss (×) button ────────────────────────────────────────
             // Top-right corner of the slot; same bounds the renderer draws.
-            let dismiss_bounds = notification_dismiss_bounds(zx, slot_y, zw, effective_slot_h);
+            let dismiss_bounds =
+                notification_dismiss_bounds(zx, slot_y, zw, effective_slot_h, scale);
             let dismiss_id = notification_dismiss_interaction_id(zone_name, record);
             scene.overlay.zone_hit_regions.push(ZoneHitRegion {
                 zone_name: zone_name.clone(),
@@ -360,8 +368,14 @@ pub(crate) fn populate_notification_hit_regions_in(
             // ── Action buttons ────────────────────────────────────────────
             let n_actions = n_payload.actions.len().min(MAX_NOTIFICATION_ACTIONS);
             if n_actions > 0 {
-                let action_rects =
-                    notification_action_button_bounds(zx, slot_y, zw, effective_slot_h, n_actions);
+                let action_rects = notification_action_button_bounds(
+                    zx,
+                    slot_y,
+                    zw,
+                    effective_slot_h,
+                    n_actions,
+                    scale,
+                );
 
                 for (action, action_bounds) in n_payload.actions.iter().zip(action_rects) {
                     let action_id =

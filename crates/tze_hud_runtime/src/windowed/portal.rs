@@ -219,11 +219,15 @@ impl InputHistorySeedMetrics {
             .and_then(|value| value.parse::<f32>().ok())
             .filter(|value| value.is_finite() && *value > 0.0)
             .unwrap_or(tze_hud_scene::types::PORTAL_TEXT_MAX_FONT_PX_DEFAULT);
+        let px_per_dp = tze_hud_config::tokens::px_scale(token_map);
+        let (min, max) = (min * px_per_dp, max * px_per_dp);
         let (min, max) = if min <= max { (min, max) } else { (max, min) };
+        // The compositor draws the history font in px: dp × px per dp.
+        let base_font_px = INPUT_HISTORY_APPROX_FONT_SIZE_PX * px_per_dp;
         let effective_font_px = if (scale - 1.0).abs() < f32::EPSILON {
-            INPUT_HISTORY_APPROX_FONT_SIZE_PX
+            base_font_px
         } else {
-            (INPUT_HISTORY_APPROX_FONT_SIZE_PX * scale).clamp(min, max)
+            (base_font_px * scale).clamp(min, max)
         };
         let effective_font_ratio = effective_font_px / INPUT_HISTORY_APPROX_FONT_SIZE_PX;
         Self {

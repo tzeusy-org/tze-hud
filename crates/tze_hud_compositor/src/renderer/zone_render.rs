@@ -107,6 +107,8 @@ impl Compositor {
                 Some(z) => z,
                 None => continue,
             };
+            let zone_tokens = self.zone_tokens(zone_name);
+            let scale = tze_hud_config::tokens::px_scale(zone_tokens);
             // Layer filter: skip zones that don't match the requested layer.
             if let Some(required_layer) = only_layer {
                 if zone_def.layer_attachment != required_layer {
@@ -203,7 +205,7 @@ impl Compositor {
                                 // a backdrop is enabled; skip entirely when backdrop is None.
                                 if policy.backdrop.is_some() {
                                     let severity_color =
-                                        urgency_to_severity_color(n.urgency, &self.token_map);
+                                        urgency_to_severity_color(n.urgency, zone_tokens);
                                     Some(severity_color)
                                 } else {
                                     None
@@ -217,7 +219,7 @@ impl Compositor {
                                 // border) when a backdrop is enabled; skip entirely when None.
                                 if policy.backdrop.is_some() {
                                     let mut color =
-                                        urgency_to_notification_color(n.urgency, &self.token_map);
+                                        urgency_to_notification_color(n.urgency, zone_tokens);
                                     color.a = NOTIFICATION_BACKDROP_OPACITY;
                                     Some(color)
                                 } else {
@@ -269,19 +271,21 @@ impl Compositor {
                                     let inset_h = policy
                                         .margin_horizontal
                                         .or(policy.margin_px)
-                                        .unwrap_or(NOTIFICATION_INSET);
+                                        .unwrap_or(NOTIFICATION_INSET * scale);
                                     let icon_x = x + inset_h;
                                     // Centred on the text, above any action row.
-                                    let text_slot_h =
-                                        effective_slot_h - notification_action_row_reserve(payload);
+                                    let text_slot_h = effective_slot_h
+                                        - notification_action_row_reserve(payload, scale);
                                     let icon_y = slot_y
-                                        + (text_slot_h - NOTIFICATION_ICON_SIZE_PX).max(0.0) * 0.5;
+                                        + (text_slot_h - (NOTIFICATION_ICON_SIZE_PX * scale))
+                                            .max(0.0)
+                                            * 0.5;
                                     textured_cmds.push(TexturedDrawCmd {
                                         resource_id: icon_id,
                                         x: icon_x,
                                         y: icon_y,
-                                        w: NOTIFICATION_ICON_SIZE_PX,
-                                        h: NOTIFICATION_ICON_SIZE_PX,
+                                        w: (NOTIFICATION_ICON_SIZE_PX * scale),
+                                        h: (NOTIFICATION_ICON_SIZE_PX * scale),
                                         uv_rect: [0.0, 0.0, 1.0, 1.0],
                                         tint: [1.0, 1.0, 1.0, combined_opacity],
                                     });
@@ -335,7 +339,7 @@ impl Compositor {
                             // is enabled; skip entirely when backdrop is None.
                             if policy.backdrop.is_some() {
                                 let severity_color =
-                                    urgency_to_severity_color(n.urgency, &self.token_map);
+                                    urgency_to_severity_color(n.urgency, zone_tokens);
                                 Some(severity_color)
                             } else {
                                 None
@@ -349,7 +353,7 @@ impl Compositor {
                             // border) when a backdrop is enabled; skip entirely when None.
                             if policy.backdrop.is_some() {
                                 let mut color =
-                                    urgency_to_notification_color(n.urgency, &self.token_map);
+                                    urgency_to_notification_color(n.urgency, zone_tokens);
                                 color.a = NOTIFICATION_BACKDROP_OPACITY;
                                 Some(color)
                             } else {
@@ -396,16 +400,16 @@ impl Compositor {
                                 let inset_h = policy
                                     .margin_horizontal
                                     .or(policy.margin_px)
-                                    .unwrap_or(NOTIFICATION_INSET);
+                                    .unwrap_or(NOTIFICATION_INSET * scale);
                                 let icon_x = x + inset_h;
-                                let icon_y = y + (h - NOTIFICATION_ICON_SIZE_PX) * 0.5;
+                                let icon_y = y + (h - (NOTIFICATION_ICON_SIZE_PX * scale)) * 0.5;
                                 let eff_opacity = anim_opacity.clamp(0.0, 1.0);
                                 textured_cmds.push(TexturedDrawCmd {
                                     resource_id: icon_id,
                                     x: icon_x,
                                     y: icon_y,
-                                    w: NOTIFICATION_ICON_SIZE_PX,
-                                    h: NOTIFICATION_ICON_SIZE_PX,
+                                    w: (NOTIFICATION_ICON_SIZE_PX * scale),
+                                    h: (NOTIFICATION_ICON_SIZE_PX * scale),
                                     uv_rect: [0.0, 0.0, 1.0, 1.0],
                                     tint: [1.0, 1.0, 1.0, eff_opacity],
                                 });
@@ -432,9 +436,11 @@ impl Compositor {
                             .iter()
                             .any(|(k, _)| policy.key_icon_map.contains_key(k.as_str()));
                         if has_any_icon {
-                            let slot_h = Self::stack_slot_height(policy);
-                            let margin_h =
-                                policy.margin_horizontal.or(policy.margin_px).unwrap_or(8.0);
+                            let slot_h = Self::stack_slot_height(policy, scale);
+                            let margin_h = policy
+                                .margin_horizontal
+                                .or(policy.margin_px)
+                                .unwrap_or(8.0 * scale);
 
                             for (row, (k, _v)) in sorted.iter().enumerate() {
                                 let svg_path = match policy.key_icon_map.get(k.as_str()) {
@@ -451,13 +457,13 @@ impl Compositor {
                                 // Position: vertically centered within the entry's slot.
                                 let icon_x = x + margin_h;
                                 let icon_y =
-                                    y + row as f32 * slot_h + (slot_h - ICON_SIZE_PX) * 0.5;
+                                    y + row as f32 * slot_h + (slot_h - ICON_SIZE_PX * scale) * 0.5;
                                 textured_cmds.push(TexturedDrawCmd {
                                     resource_id,
                                     x: icon_x,
                                     y: icon_y,
-                                    w: ICON_SIZE_PX,
-                                    h: ICON_SIZE_PX,
+                                    w: ICON_SIZE_PX * scale,
+                                    h: ICON_SIZE_PX * scale,
                                     uv_rect: [0.0, 0.0, 1.0, 1.0],
                                     tint: [1.0, 1.0, 1.0, anim_opacity.clamp(0.0, 1.0)],
                                 });
@@ -577,15 +583,21 @@ impl Compositor {
     ///
     /// Used by both `collect_text_items` and `render_zone_content` so both code
     /// paths stay consistent.
-    pub(crate) fn stack_slot_height(policy: &RenderingPolicy) -> f32 {
-        const SLOT_BASELINE_GAP: f32 = 4.0;
-        let font_size_px = policy.font_size_px.unwrap_or(16.0).clamp(6.0, 200.0);
+    pub(crate) fn stack_slot_height(policy: &RenderingPolicy, scale: f32) -> f32 {
+        let slot_baseline_gap = 4.0 * scale;
+        let font_size_px = policy
+            .font_size_px
+            .unwrap_or(16.0 * scale)
+            .clamp(6.0, 200.0);
         // Use line_height (font_size × 1.4) to match cosmic-text layout in
         // prepare_text_items. Previously this used font_size_px directly, which
         // produced bounds too small for one line of text to render.
         let line_height = font_size_px * 1.4;
-        let margin_v = policy.margin_vertical.or(policy.margin_px).unwrap_or(8.0);
-        (line_height + 2.0 * margin_v + SLOT_BASELINE_GAP).max(1.0)
+        let margin_v = policy
+            .margin_vertical
+            .or(policy.margin_px)
+            .unwrap_or(8.0 * scale);
+        (line_height + 2.0 * margin_v + slot_baseline_gap).max(1.0)
     }
 
     /// Compute the per-slot height for a single notification publication.
@@ -614,13 +626,15 @@ impl Compositor {
         policy: &RenderingPolicy,
         notification_body_scale: f32,
         notification_inter_line_gap: f32,
+        scale: f32,
     ) -> f32 {
-        notification_action_row_reserve(payload)
+        notification_action_row_reserve(payload, scale)
             + Self::notification_text_slot_height(
                 payload,
                 policy,
                 notification_body_scale,
                 notification_inter_line_gap,
+                scale,
             )
     }
 
@@ -630,20 +644,27 @@ impl Compositor {
         policy: &RenderingPolicy,
         notification_body_scale: f32,
         notification_inter_line_gap: f32,
+        scale: f32,
     ) -> f32 {
         if payload.title.is_empty() {
-            return Self::stack_slot_height(policy);
+            return Self::stack_slot_height(policy, scale);
         }
-        const SLOT_BASELINE_GAP: f32 = 4.0;
-        let font_size_px = policy.font_size_px.unwrap_or(16.0).clamp(6.0, 200.0);
+        let slot_baseline_gap = 4.0 * scale;
+        let font_size_px = policy
+            .font_size_px
+            .unwrap_or(16.0 * scale)
+            .clamp(6.0, 200.0);
         let title_line_h = font_size_px * 1.4;
         let body_line_h = title_line_h * notification_body_scale;
-        let margin_v = policy.margin_vertical.or(policy.margin_px).unwrap_or(8.0);
+        let margin_v = policy
+            .margin_vertical
+            .or(policy.margin_px)
+            .unwrap_or(8.0 * scale);
         (title_line_h
             + notification_inter_line_gap
             + body_line_h
             + 2.0 * margin_v
-            + SLOT_BASELINE_GAP)
+            + slot_baseline_gap)
             .max(1.0)
     }
 
@@ -660,6 +681,7 @@ impl Compositor {
         policy: &RenderingPolicy,
         notification_body_scale: f32,
         notification_inter_line_gap: f32,
+        scale: f32,
     ) -> Vec<f32> {
         ordered
             .iter()
@@ -669,8 +691,9 @@ impl Compositor {
                     policy,
                     notification_body_scale,
                     notification_inter_line_gap,
+                    scale,
                 ),
-                _ => Self::stack_slot_height(policy),
+                _ => Self::stack_slot_height(policy, scale),
             })
             .collect()
     }
@@ -696,7 +719,13 @@ impl Compositor {
         policy: &RenderingPolicy,
         zh: f32,
     ) -> super::ZoneSlotLayout {
-        Self::zone_slot_layout_with_tokens(&self.token_map, zone_name, publishes, policy, zh)
+        Self::zone_slot_layout_with_tokens(
+            self.zone_tokens(zone_name),
+            zone_name,
+            publishes,
+            policy,
+            zh,
+        )
     }
 
     /// [`Self::zone_slot_layout`] without a compositor, so GPU-free hit-region
@@ -727,7 +756,8 @@ impl Compositor {
             &ordered_refs,
             policy,
             notif_body_scale,
-            NOTIFICATION_INTER_LINE_GAP,
+            NOTIFICATION_INTER_LINE_GAP * tze_hud_config::tokens::px_scale(token_map),
+            tze_hud_config::tokens::px_scale(token_map),
         );
         // Alert banners stack flush as one strip; notification cards are
         // separated by a token gap so consecutive cards never touch.

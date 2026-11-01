@@ -366,7 +366,6 @@ impl super::Compositor {
             chrome: Vec::new(),
         };
         let degraded = self.degradation_policy.level >= tze_hud_scene::DegradationLevel::Simplified;
-        let action_tokens = resolve_notification_action_tokens(&self.token_map);
 
         if !scene.zones_shown() {
             return result;
@@ -379,6 +378,9 @@ impl super::Compositor {
                 Some(z) => z,
                 None => continue,
             };
+            let zone_tokens = self.zone_tokens(zone_name);
+            let scale = tze_hud_config::tokens::px_scale(zone_tokens);
+            let action_tokens = resolve_notification_action_tokens(zone_tokens);
             let policy = &zone_def.rendering_policy;
             // Backdrop drawn by the SDF pass (else by the flat pass, square).
             let sdf_radius = match policy.backdrop_radius {
@@ -434,8 +436,7 @@ impl super::Compositor {
                         let ZoneContent::Notification(payload) = &record.content else {
                             continue;
                         };
-                        let mut outline =
-                            resolve_notification_control_color(policy, &self.token_map);
+                        let mut outline = resolve_notification_control_color(policy, zone_tokens);
                         outline.a *= opacity;
                         let chrome_state = |id: String| {
                             scene
@@ -447,7 +448,8 @@ impl super::Compositor {
                         };
                         // Dismiss control outline, filled while hovered/pressed.
                         if pushed && notification_cards {
-                            let b = notification_dismiss_bounds(x, slot_y, w, effective_slot_h);
+                            let b =
+                                notification_dismiss_bounds(x, slot_y, w, effective_slot_h, scale);
                             let state = chrome_state(notification_dismiss_interaction_id(
                                 zone_name, record,
                             ));
@@ -472,6 +474,7 @@ impl super::Compositor {
                                     w,
                                     effective_slot_h,
                                     n_actions,
+                                    scale,
                                 ))
                         {
                             let state = chrome_state(notification_action_interaction_id(

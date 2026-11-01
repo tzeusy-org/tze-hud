@@ -5,8 +5,6 @@
 //! the global design tokens (`[design_tokens]` merged over canonical fallbacks).
 //! The result is immutable after startup.
 
-use std::collections::HashMap;
-
 use tze_hud_scene::types::{FontFamily, RenderingPolicy, Rgba, TextAlign, TextOverflow};
 
 use crate::tokens::{
@@ -267,7 +265,9 @@ pub fn apply_token_defaults_for_zone(
 // ─── Effective policy constructor ─────────────────────────────────────────────
 
 /// Construct the effective `RenderingPolicy` for a zone type: the zone default
-/// with token-derived defaults filling every `None` field.
+/// with token-derived defaults filling every `None` field, then every size
+/// converted from logical dp to physical px at the map's
+/// [`px_scale`](crate::tokens::px_scale) (monitor scale × `ui.scale`).
 pub fn build_effective_policy(
     zone_name: &str,
     zone_default: &RenderingPolicy,
@@ -275,26 +275,25 @@ pub fn build_effective_policy(
 ) -> RenderingPolicy {
     let mut policy = zone_default.clone();
     apply_token_defaults_for_zone(zone_name, &mut policy, tokens);
+    scale_policy_sizes(&mut policy, crate::tokens::px_scale(tokens));
     policy
 }
 
-/// Build effective rendering policies for all built-in zone types.
-///
-/// Returns a `HashMap<zone_name, effective_RenderingPolicy>` that can be used
-/// to patch `ZoneRegistry::with_defaults()` after construction.
-pub fn build_all_effective_policies(
-    zone_defaults: &HashMap<String, RenderingPolicy>,
-    tokens: &DesignTokenMap,
-) -> HashMap<String, RenderingPolicy> {
-    zone_defaults
-        .iter()
-        .map(|(zone_name, zone_default)| {
-            (
-                zone_name.clone(),
-                build_effective_policy(zone_name, zone_default, tokens),
-            )
-        })
-        .collect()
+/// Multiply every size field of `policy` (dp) by `scale` (px per dp).
+fn scale_policy_sizes(policy: &mut RenderingPolicy, scale: f32) {
+    for size in [
+        &mut policy.font_size_px,
+        &mut policy.margin_px,
+        &mut policy.outline_width,
+        &mut policy.margin_horizontal,
+        &mut policy.margin_vertical,
+        &mut policy.backdrop_radius,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        *size *= scale;
+    }
 }
 
 // ─── Tests ────────────────────────────────────────────────────────────────────
@@ -488,6 +487,39 @@ mod tests {
         );
         assert_eq!(policy.transition_in_ms, Some(320));
         assert_eq!(policy.transition_out_ms, Some(0));
+
+        // Sizes are dp: at a 150% monitor they are 1.5x, and ui.scale 1.25
+        // multiplies on top (1.875x). Opacity and timing do not scale.
+        let at = |ui_scale: &str| {
+            let mut tokens = resolve_tokens(
+                &DesignTokenMap::new(),
+                &DesignTokenMap::from([(crate::tokens::UI_SCALE_KEY.into(), ui_scale.into())]),
+            );
+            crate::tokens::set_px_scale(&mut tokens, 1.5);
+            build_effective_policy("notification-area", &RenderingPolicy::default(), &tokens)
+        };
+        let base = build_effective_policy(
+            "notification-area",
+            &RenderingPolicy::default(),
+            &default_tokens(),
+        );
+        for (ui_scale, factor) in [("1", 1.5), ("1.25", 1.875)] {
+            let scaled = at(ui_scale);
+            for (name, dp, px) in [
+                ("font", base.font_size_px, scaled.font_size_px),
+                ("h margin", base.margin_horizontal, scaled.margin_horizontal),
+                ("v margin", base.margin_vertical, scaled.margin_vertical),
+                ("radius", base.backdrop_radius, scaled.backdrop_radius),
+            ] {
+                let (dp, px) = (dp.unwrap(), px.unwrap());
+                assert!(
+                    (px - dp * factor).abs() < 1e-3,
+                    "{name} at {ui_scale}: {dp} -> {px}"
+                );
+            }
+            assert_eq!(scaled.backdrop_opacity, base.backdrop_opacity);
+            assert_eq!(scaled.transition_in_ms, base.transition_in_ms);
+        }
     }
 
     #[test]
@@ -608,6 +640,20 @@ pub fn tile_placement_from_tokens(
     if let Some(g) = token_f32(tokens, "tile.gap").filter(|v| *v >= 0.0) {
         t.gap = g;
     }
+    // Logical dp to physical px.
+    let scale = crate::tokens::px_scale(tokens);
+    for slot in [
+        &mut t.small,
+        &mut t.medium,
+        &mut t.large,
+        &mut t.wide,
+        &mut t.tall,
+    ] {
+        slot.0 *= scale;
+        slot.1 *= scale;
+    }
+    t.margin *= scale;
+    t.gap *= scale;
     t
 }
 

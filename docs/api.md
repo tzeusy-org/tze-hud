@@ -506,8 +506,10 @@ canonical tokens and can only be cleared. Each change restyles the
 HUD on its next frame and is saved to `[design_tokens]` with the file's
 comments kept; when the save fails (a read-only file) the change lasts the
 session and the row shows the error and the path. The panel keeps its own
-text legible whatever an override does. Zoom (`ui.scale`) waits for
-logical-dp sizing (`hud-h51u7.3`).
+text legible whatever an override does. Zoom steps `ui.scale` by 10%
+(−/+, Ctrl+− and Ctrl+= anywhere in the panel; Enter returns to 100%),
+applies live and saves; the panel itself stays between 0.75x and 3x so
+it remains readable and on screen.
 
 A row whose value a flag or variable set is read-only and names it ("Set by
 --mcp-port"), because a restart reuses the same arguments and environment.
@@ -526,6 +528,27 @@ once at startup and applied through `RenderingPolicy`, widget
 `{{token.key}}` placeholders, and the compositor token map. The
 canonical keys, their descriptions, and their defaults are in
 `CANONICAL_TOKENS` (`crates/tze_hud_config/src/tokens.rs`).
+
+**Sizes are logical (dp).** Every size token (font sizes, spacing,
+radii, strokes, tile sizes, portal and panel chrome, in canonical and
+`portal.*` keys alike) is drawn at the monitor's Windows scale factor ×
+`ui.scale` physical pixels: at 150% a 16 dp body is 24 px, and
+`"ui.scale" = "1.25"` makes it 30 px. `ui.scale` is a `[design_tokens]`
+value (quoted, like every token) from 0.5 to 3.0, default 1; a value
+outside that range fails config validation with `TokenValueParseError`,
+and a theme that sets it is invalid, because it is the owner's preference
+rather than part of a look. A zone placed on a secondary monitor is drawn
+and hit-tested at that monitor's scale; portals, tiles and the panel use
+the primary's. A DPI change or a new monitor restyles zones, portals and
+the panel on the next frame; tiles already placed keep their bounds, and
+tiles claimed afterwards take the new sizes. Hairlines (the transcript
+divider) round to whole pixels, at least one. Opacity, weights, ratios
+and timing do not scale. Zone and widget boxes are fractions of the
+display, so they keep their size; widget SVGs take tokens in their own
+viewBox units, so zoom changes a widget's drag handle but not its
+content. The runtime
+records the result as `runtime.px_scale` (and `runtime.px_scale@<zone>`
+for a zone on a secondary), which config may not set.
 
 Widget bundles resolve placeholders at load in their SVG layers and in
 two `widget.toml` places: discrete `value_map` values (e.g. a status
@@ -569,9 +592,10 @@ the HUD last read or saved it does nothing, so a panel change that could
 not be saved survives an unrelated edit. A
 table that startup would refuse (an unknown theme, a reserved or malformed
 key) or a file that is not valid TOML keeps the current tokens and is
-reported in `/admin/status` `config_reload`. Still read once at startup:
-tile placement, the MCP widget transition time, and widget text fonts
-(widgets draw with the bundled faces). Other config sections apply after a
+reported in `/admin/status` `config_reload`. Tiles claimed after a change
+take the new tile sizes. Still read once at startup: the MCP widget
+transition time and widget text fonts (widgets draw with the bundled
+faces). Other config sections apply after a
 restart (or live from the control panel). Keep config
 overrides for values specific to one deployment. The visual design
 belongs in a theme.
@@ -606,7 +630,7 @@ selection highlight. Portal sizes,
 fonts, numeric defaults and behavior are unchanged. Explicit `[design_tokens]`
 color overrides still take precedence.
 
-**Semantic families** (Tonal Glass values; sizes are logical px):
+**Semantic families** (Tonal Glass values; sizes are dp):
 
 | Family | Keys |
 |---|---|

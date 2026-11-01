@@ -544,12 +544,14 @@ fn test_notification_slot_height_two_line_exceeds_single_line() {
         &policy,
         NOTIFICATION_BODY_SCALE,
         NOTIFICATION_INTER_LINE_GAP,
+        1.0,
     );
     let h_two_line = Compositor::notification_slot_height(
         &two_line,
         &policy,
         NOTIFICATION_BODY_SCALE,
         NOTIFICATION_INTER_LINE_GAP,
+        1.0,
     );
 
     assert!(
@@ -558,7 +560,7 @@ fn test_notification_slot_height_two_line_exceeds_single_line() {
     );
 
     // Single-line == stack_slot_height
-    let h_stack = Compositor::stack_slot_height(&policy);
+    let h_stack = Compositor::stack_slot_height(&policy, 1.0);
     assert!(
         (h_single - h_stack).abs() < 0.01,
         "single-line notification_slot_height ({h_single:.2}) must equal stack_slot_height ({h_stack:.2})"
@@ -716,6 +718,7 @@ async fn test_rounded_notification_backdrop_uses_two_line_slot_height() {
         &policy,
         NOTIFICATION_BODY_SCALE,
         NOTIFICATION_INTER_LINE_GAP,
+        1.0,
     );
     let actual_h = rr.chrome[0].height;
     assert!(

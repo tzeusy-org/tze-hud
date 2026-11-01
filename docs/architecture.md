@@ -86,7 +86,11 @@ edits to `[design_tokens]` in the config file (watched by
 [`appearance::watch`](../crates/tze_hud_runtime/src/appearance.rs)), go
 through `Appearance::apply`: it restyles zones and re-resolves widget SVGs
 in the scene and publishes the new token map in `LiveTokens`, which the
-compositor and main thread take on their next turn. MCP and
+compositor and main thread take on their next turn. The windows report each
+monitor's scale factor to `Appearance::set_display_scales`; the token map
+carries `runtime.px_scale` (monitor scale × `ui.scale`), and every size read
+multiplies by it (`tze_hud_config::tokens::token_px`, the policy builder,
+the compositor's token resolvers). MCP and
 gRPC share [`SharedAgents`](../crates/tze_hud_scene/src/config/agents.rs).
 Network listeners bind loopback and local Tailscale-interface addresses
 ([`net_addrs`](../crates/tze_hud_runtime/src/net_addrs.rs)).
