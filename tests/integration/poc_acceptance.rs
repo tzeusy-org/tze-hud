@@ -1685,9 +1685,39 @@ async fn poc_panel_appearance_restyles_live_and_saves() {
     let key = "color.backdrop.default";
     assert_ne!(theme("tonal-glass")[key], theme("classic")[key]);
 
-    // Click (or Alt+T) moves to the next theme: tonal-glass → classic.
-    poc.click("appearance.theme").await;
-    poc.wait_for("the HUD draws with classic, saved", |hud| {
+    // A key previews the next theme (tonal-glass → classic) without
+    // saving it; Enter keeps it.
+    poc.hud.panel_type("theme");
+    poc.wait_for("the theme row has focus", |hud| {
+        hud.control_panel_focus()
+            == Some(tze_hud_compositor::PanelFocus::Row(
+                "appearance.theme".into(),
+            ))
+    })
+    .await;
+    poc.hud.panel_press("ArrowRight");
+    poc.wait_for("the HUD previews classic", |hud| {
+        hud.design_token(key).as_deref() == Some(theme("classic")[key].as_str())
+    })
+    .await;
+    assert!(
+        !saved().contains("theme = \"classic\""),
+        "a preview saves nothing"
+    );
+    poc.hud.panel_press("Enter");
+    poc.wait_for("classic is kept and saved", |_| {
+        saved().contains("theme = \"classic\"")
+    })
+    .await;
+    // Leaving a preview (Esc clears the search, which moves focus) puts
+    // the kept theme back.
+    poc.hud.panel_press("ArrowRight");
+    poc.wait_for("the next theme previews", |hud| {
+        hud.design_token(key).as_deref() != Some(theme("classic")[key].as_str())
+    })
+    .await;
+    poc.hud.panel_press("Escape");
+    poc.wait_for("back to classic, still saved", |hud| {
         hud.design_token(key).as_deref() == Some(theme("classic")[key].as_str())
             && saved().contains("theme = \"classic\"")
     })

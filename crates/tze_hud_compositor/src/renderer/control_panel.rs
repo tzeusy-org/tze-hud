@@ -121,6 +121,9 @@ pub struct PanelItem {
     /// A status dot before the label: `Success` filled (e.g. connected),
     /// `Muted` an outline (offline). `None`: no dot.
     pub status: Option<PanelTone>,
+    /// The value differs from its default: a `Reset` link before the badge
+    /// and control puts it back (rows only, not tiles).
+    pub reset: bool,
 }
 
 /// The control drawn at the right of an item.
@@ -187,6 +190,8 @@ pub enum PanelPart {
     Decrement,
     /// The + button of a stepper, or the › of a choice.
     Increment,
+    /// The `Reset` link of a changed row.
+    Reset,
 }
 
 /// What a pointer position on the panel addresses.
@@ -678,6 +683,38 @@ impl Painter<'_, '_> {
         rect.x
     }
 
+    /// A `Reset` link ending at `right`; returns its left edge.
+    fn reset_link(
+        &mut self,
+        right: f32,
+        cy: f32,
+        target: PanelHitTarget,
+        clip: Option<PanelRect>,
+    ) -> f32 {
+        let s = self.style.clone();
+        let ty = s.label_s;
+        let w = self.width("Reset", ty, false) + s.space_xs * 2.0;
+        let rect = PanelRect {
+            x: right - w,
+            y: cy - (ty.line + s.space_xs) / 2.0,
+            w,
+            h: ty.line + s.space_xs,
+        };
+        self.text(
+            "Reset",
+            rect.x,
+            cy,
+            w,
+            ty,
+            s.primary,
+            false,
+            Align::Center,
+            clip,
+        );
+        self.hit(target, rect, clip);
+        rect.x
+    }
+
     /// A round − or + button centred on `cx`.
     fn round_button(
         &mut self,
@@ -888,6 +925,9 @@ impl Painter<'_, '_> {
         );
         if let Some(badge) = &item.badge {
             right = self.badge(badge, right - s.space_s, cy, clip);
+        }
+        if item.reset {
+            right = self.reset_link(right - s.space_s, cy, target(PanelPart::Reset), clip);
         }
         if let Some(shortcut) = &item.shortcut {
             let w = self.width(shortcut, s.label_s, true) + 2.0;
@@ -2095,6 +2135,7 @@ mod tests {
             shortcut: None,
             emphasis: PanelTone::Normal,
             status: None,
+            reset: false,
         }
     }
 
@@ -2340,6 +2381,54 @@ mod tests {
         assert_eq!(
             g.hit(tile.x + 4.0, tile.y + 4.0),
             Some(PanelHitTarget::Tile(0, PanelPart::Body))
+        );
+    }
+
+    /// A changed row draws a `Reset` link left of its control, with its own
+    /// hit; an unchanged row has none.
+    #[test]
+    fn a_changed_row_has_a_reset_link_beside_its_control() {
+        let zoom = |reset| PanelItem {
+            reset,
+            ..item(
+                "appearance.zoom",
+                "Zoom",
+                PanelControl::Stepper("120%".into()),
+            )
+        };
+        let hits = |reset| {
+            let m = model(PanelBody::Sections(vec![PanelSection {
+                id: "appearance".into(),
+                title: "Appearance".into(),
+                key: None,
+                items: vec![zoom(reset)],
+            }]));
+            layout(&m, 1600.0, 900.0).geometry
+        };
+        let reset = PanelHitTarget::Row("appearance.zoom".into(), PanelPart::Reset);
+        assert!(!hits(false).hits.iter().any(|h| h.target == reset));
+        let g = hits(true);
+        let link = g
+            .hits
+            .iter()
+            .find(|h| h.target == reset)
+            .expect("reset hit")
+            .rect;
+        let minus = g
+            .hits
+            .iter()
+            .find(|h| {
+                h.target == PanelHitTarget::Row("appearance.zoom".into(), PanelPart::Decrement)
+            })
+            .unwrap()
+            .rect;
+        assert!(
+            link.x + link.w <= minus.x,
+            "the link sits left of the stepper"
+        );
+        assert_eq!(
+            g.hit(link.x + link.w / 2.0, link.y + link.h / 2.0),
+            Some(reset)
         );
     }
 

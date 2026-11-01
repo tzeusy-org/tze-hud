@@ -89,6 +89,7 @@ pub(super) fn panel_key(
         NamedKey::Space if !ctrl && !alt => PanelKey::Space,
         NamedKey::Escape => PanelKey::Escape,
         NamedKey::Backspace => PanelKey::Backspace,
+        NamedKey::Delete => PanelKey::Delete,
         NamedKey::Home => PanelKey::Home,
         NamedKey::End => PanelKey::End,
         NamedKey::PageUp => PanelKey::PageUp,
@@ -422,6 +423,12 @@ mod panel_task_tests {
     }
 
     fn fixture() -> Fixture {
+        fixture_with(default_sections)
+    }
+
+    fn fixture_with(
+        sections: impl FnOnce(&ControlPanelDeps) -> Vec<Box<dyn crate::shell::control_panel::Section>>,
+    ) -> Fixture {
         let state = WindowedRuntimeState::new_headless();
         let wakes = Arc::new(AtomicUsize::new(0));
         let w = Arc::clone(&wakes);
@@ -445,7 +452,7 @@ mod panel_task_tests {
             render_wake,
             main_wake: Default::default(),
         };
-        let sections = default_sections(&deps);
+        let sections = sections(&deps);
         let panel = spawn_control_panel(
             &tokio::runtime::Handle::current(),
             deps,
@@ -756,6 +763,104 @@ mod panel_task_tests {
         })
         .await;
         assert!(f.wakes.load(Ordering::SeqCst) > wakes);
+    }
+
+    /// A theme preview slower than the panel waits (a heavy restyle): the
+    /// steps, Enter and Esc sent while it runs queue and apply in order,
+    /// never dropped as a second edit of a busy row.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn edits_behind_a_slow_preview_apply_in_order() {
+        use crate::shell::control_panel::row::{BoxFuture, Control, Edit, Row, Section};
+        use std::sync::Mutex;
+
+        #[derive(Clone, Default)]
+        struct SlowTheme(Arc<Mutex<Vec<Edit>>>);
+        impl Section for SlowTheme {
+            fn id(&self) -> &'static str {
+                "look"
+            }
+            fn title(&self) -> &'static str {
+                "Look"
+            }
+            fn rows(&self) -> BoxFuture<'_, Vec<Row>> {
+                Box::pin(async {
+                    vec![
+                        Row::new(
+                            "look.theme",
+                            "Theme",
+                            Control::Choice {
+                                options: vec!["a".into(), "b".into()],
+                                selected: 0,
+                            },
+                        )
+                        .previews(),
+                    ]
+                })
+            }
+            fn apply<'a>(&'a self, _: &'a str, edit: Edit) -> BoxFuture<'a, Result<(), String>> {
+                Box::pin(async move {
+                    if matches!(edit, Edit::Preview(_)) {
+                        tokio::time::sleep(Duration::from_millis(400)).await;
+                    }
+                    self.0.lock().unwrap().push(edit);
+                    Ok(())
+                })
+            }
+        }
+        let theme = SlowTheme::default();
+        let edits = Arc::clone(&theme.0);
+        let f = fixture_with(move |_| vec![Box::new(theme)]);
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Panel), |f| f.panel.is_open())
+            .await;
+        f.send_and_wait(PanelEvent::Key(PanelKey::Down), |f| {
+            f.model()
+                .is_some_and(|m| m.focus == PanelFocus::Row("look.theme".into()))
+        })
+        .await;
+        let settled = |n: usize| {
+            let edits = Arc::clone(&edits);
+            async move {
+                for _ in 0..300 {
+                    if edits.lock().unwrap().len() >= n {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            }
+        };
+        assert!(f.panel.send(PanelEvent::Key(PanelKey::Right)));
+        // Esc while the preview still runs.
+        assert!(f.panel.send(PanelEvent::Key(PanelKey::Escape)));
+        settled(2).await;
+        assert_eq!(*edits.lock().unwrap(), [Edit::Preview(1), Edit::Revert]);
+        assert!(f.panel.is_open(), "the Esc reverted; it did not close");
+
+        // Three steps and Enter while the first still runs: the waiting
+        // steps merge into one restyle (key repeat), then Enter keeps what
+        // the section shows, in order.
+        edits.lock().unwrap().clear();
+        for key in [
+            PanelKey::Right,
+            PanelKey::Right,
+            PanelKey::Right,
+            PanelKey::Enter,
+        ] {
+            assert!(f.panel.send(PanelEvent::Key(key)));
+        }
+        settled(3).await;
+        assert_eq!(
+            *edits.lock().unwrap(),
+            [Edit::Preview(1), Edit::Preview(2), Edit::Keep]
+        );
+
+        // Steps then Esc while busy: the waiting steps are dropped.
+        edits.lock().unwrap().clear();
+        for key in [PanelKey::Right, PanelKey::Right, PanelKey::Escape] {
+            assert!(f.panel.send(PanelEvent::Key(key)));
+        }
+        settled(2).await;
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        assert_eq!(*edits.lock().unwrap(), [Edit::Preview(1), Edit::Revert]);
     }
 
     /// Every panel action logs one line with the row's old and new value,
