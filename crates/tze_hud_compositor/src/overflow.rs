@@ -1440,60 +1440,50 @@ mod tests {
         }
     }
 
-    /// When text is truncated, the result ends with the ellipsis character.
+    /// Text too wide for a 60px box is truncated to a result that ends with
+    /// the ellipsis and is shorter than the original plus the ellipsis; an
+    /// unbroken token's single-line result re-measures within the box (no
+    /// partially visible glyph). Random
+    /// widths are covered by `proptest_truncated_always_ends_with_ellipsis`
+    /// and `proptest_truncated_result_fits_within_bounds`.
     #[test]
-    fn truncated_text_ends_with_ellipsis() {
+    fn truncated_text_ends_with_ellipsis_and_fits() {
         let mut fs = make_font_system();
-        // Very narrow box: 60px wide — any non-trivial text will be truncated.
-        let long = "This is a long sentence that surely does not fit in sixty pixels.";
-        let result = truncate_for_ellipsis(long, base_attrs(), 60.0, 100.0, 16.0, 22.4, &mut fs);
-        if result.was_truncated {
+        let bounds_w = 60.0;
+        let font_size = 16.0;
+        let line_h = 22.4;
+        for long in [
+            "This is a long sentence that surely does not fit in sixty pixels.",
+            "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        ] {
+            let result = truncate_for_ellipsis(
+                long,
+                base_attrs(),
+                bounds_w,
+                100.0,
+                font_size,
+                line_h,
+                &mut fs,
+            );
+            assert!(
+                result.was_truncated,
+                "{long:?} must not fit in {bounds_w}px"
+            );
             assert!(
                 result.text.ends_with(ELLIPSIS),
                 "truncated text must end with '…'; got: {:?}",
                 result.text
             );
-        }
-    }
-
-    /// Truncated result must be strictly shorter than the original text.
-    #[test]
-    fn truncated_text_is_shorter() {
-        let mut fs = make_font_system();
-        let long = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"; // 37 'A's
-        let result = truncate_for_ellipsis(long, base_attrs(), 60.0, 100.0, 16.0, 22.4, &mut fs);
-        if result.was_truncated {
             assert!(
                 result.text.len() < long.len() + ELLIPSIS.len(),
-                "truncated text must be shorter than original + ellipsis; got {} chars",
-                result.text.chars().count()
+                "truncated text must be shorter than original + ellipsis; got {:?}",
+                result.text
             );
-        }
-    }
-
-    /// No glyph is partially visible: result text does not exceed bounds_width
-    /// when shaped.
-    ///
-    /// This is a structural guarantee: we trust our measurement. The test
-    /// below verifies that the returned text re-measures as fitting.
-    #[test]
-    fn truncated_text_remeasures_within_width() {
-        let mut fs = make_font_system();
-        let long = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"; // long enough to need truncation at 60px
-        let bounds_w = 60.0;
-        let font_size = 16.0;
-        let line_h = 22.4;
-        let result = truncate_for_ellipsis(
-            long,
-            base_attrs(),
-            bounds_w,
-            100.0,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-        if result.was_truncated {
-            // Re-measure the first line of the result.
+            if long.contains(' ') {
+                // The sentence word-wraps into several lines; only the
+                // unbroken token's result is a single line to re-measure.
+                continue;
+            }
             let measured_w = measure_single_line(
                 &result.text,
                 base_attrs(),
@@ -2966,7 +2956,8 @@ mod tests {
 
     // ── Task 3.2: property-based tests for truncate_tail_anchored (hud-347b4) ──
     //
-    // These proptests verify the four core invariants of tail-anchored truncation:
+    // These proptests verify the core invariants of tail-anchored truncation
+    // (1–3b share one generator and one proptest):
     //
     //   1. Tail content always visible — the LAST line(s) of the input always
     //      appear in the output when truncation occurs.
@@ -2981,8 +2972,7 @@ mod tests {
     // path (hud-676 semantics) under tail-anchored truncation.
     //
     // Configuration mirrors the existing proptest! blocks above: 32 cases, same
-    // source_file annotation.  FontSystem is not Send so each closure owns its
-    // own instance.
+    // source_file annotation.  Each case builds its own (bundled) FontSystem.
 
     proptest! {
         #![proptest_config(proptest::test_runner::Config {
@@ -2991,141 +2981,37 @@ mod tests {
             ..proptest::test_runner::Config::default()
         })]
 
-        /// Invariant 1 — Tail content is always visible.
+        /// Invariants 1–3b over one multi-line generator (hud-347b4).
         ///
-        /// For any multi-line input that gets truncated, the LAST line of the
-        /// original text must appear in the result.  The newest content (tail)
-        /// is the whole point of tail-anchored mode.
+        /// For `n_lines` distinct lines in a box `max_lines` lines tall:
+        ///
+        /// - 1: when truncated, the LAST line of the original text is visible —
+        ///   the newest content (tail) is the whole point of tail-anchored mode;
+        /// - 2: when truncated, the result STARTS with ELLIPSIS (the omission
+        ///   indicator mirrors head-anchored's trailing ellipsis);
+        /// - 3: when truncated, the result is shorter than the original plus
+        ///   the `"…\n"` overhead, or truncation gained nothing;
+        /// - 3b (defect #1 regression guard): the result never has more than
+        ///   `max_lines` logical lines. Before the fix the ellipsis was
+        ///   prepended on top of `max_lines` content runs (`max_lines + 1`).
+        ///
+        /// `max_lines` ranges over 2..8 so the "exactly one line over" boxes the
+        /// former per-invariant tests used (`n_lines - 1`) stay in the space.
         #[test]
-        fn proptest_tail_anchored_last_line_always_visible(
+        fn proptest_tail_anchored_vertical_truncation_invariants(
             n_lines in 3usize..8usize,
+            max_lines in 2usize..8usize,
             width_px in 200.0_f32..600.0_f32,
         ) {
             let mut fs = make_font_system();
             let font_size = 14.0_f32;
             let line_h = font_size * 1.4;
-            // Build `n_lines` lines; the last one is the "newest" content we guard.
             let lines: Vec<String> = (0..n_lines)
+                // Short enough that no line word-wraps at 200px, so "last
+                // source line" and "last visual line" coincide.
                 .map(|i| format!("Content line number {i}"))
                 .collect();
             let last_line = lines.last().unwrap().clone();
-            let text = lines.join("\n");
-
-            // Constrain height so that at most n_lines-1 lines fit — forcing truncation.
-            let bounds_h = line_h * ((n_lines - 1) as f32) + 1.0;
-
-            let result = truncate_tail_anchored(
-                &text, base_attrs(), width_px, bounds_h, font_size, line_h, &mut fs,
-            );
-
-            if result.was_truncated {
-                prop_assert!(
-                    result.text.contains(&last_line),
-                    "tail-anchored: last line must be visible after truncation; \
-                     last_line={last_line:?} result={:?}",
-                    result.text,
-                );
-            }
-        }
-
-        /// Invariant 2 — Leading ellipsis when leading lines are omitted.
-        ///
-        /// Whenever `truncate_tail_anchored` sets `was_truncated = true` due to
-        /// vertical overflow (more lines than fit), the result must START with
-        /// ELLIPSIS — the signal that leading content has been omitted.
-        ///
-        /// This is the mirror of the head-anchored invariant (result ends with
-        /// ELLIPSIS); for tail-anchored the omission indicator is at the front.
-        #[test]
-        fn proptest_tail_anchored_truncated_starts_with_ellipsis(
-            n_lines in 3usize..8usize,
-            width_px in 200.0_f32..600.0_f32,
-        ) {
-            let mut fs = make_font_system();
-            let font_size = 14.0_f32;
-            let line_h = font_size * 1.4;
-            let lines: Vec<String> = (0..n_lines)
-                .map(|i| format!("Line {i} of streamed transcript content"))
-                .collect();
-            let text = lines.join("\n");
-
-            // Force truncation: only n_lines-1 lines fit vertically.
-            let bounds_h = line_h * ((n_lines - 1) as f32) + 1.0;
-
-            let result = truncate_tail_anchored(
-                &text, base_attrs(), width_px, bounds_h, font_size, line_h, &mut fs,
-            );
-
-            if result.was_truncated {
-                prop_assert!(
-                    result.text.starts_with(ELLIPSIS),
-                    "tail-anchored truncated result must START with '…' (leading-ellipsis \
-                     omission indicator); was_truncated=true but result does not begin with \
-                     ELLIPSIS; n_lines={n_lines} width={width_px} result={:?}",
-                    result.text,
-                );
-            }
-        }
-
-        /// Invariant 3 — Result is strictly shorter than original + ellipsis overhead.
-        ///
-        /// When truncation occurs the result's byte length must be strictly less
-        /// than `original.len() + ELLIPSIS.len() + 1` (the "+1" accounts for the
-        /// newline separator between the ellipsis line and the visible tail).
-        /// If the result were as long or longer the caller would have gained nothing
-        /// from truncation.
-        #[test]
-        fn proptest_tail_anchored_result_shorter_when_truncated(
-            n_lines in 3usize..8usize,
-            width_px in 200.0_f32..600.0_f32,
-        ) {
-            let mut fs = make_font_system();
-            let font_size = 14.0_f32;
-            let line_h = font_size * 1.4;
-            let lines: Vec<String> = (0..n_lines)
-                .map(|i| format!("Transcript line {i} with some content"))
-                .collect();
-            let text = lines.join("\n");
-
-            // Force truncation: only n_lines-1 lines fit vertically.
-            let bounds_h = line_h * ((n_lines - 1) as f32) + 1.0;
-
-            let result = truncate_tail_anchored(
-                &text, base_attrs(), width_px, bounds_h, font_size, line_h, &mut fs,
-            );
-
-            if result.was_truncated {
-                // The result is the ELLIPSIS header + "\n" + visible tail.
-                // Even with the overhead it must be shorter than the original.
-                let overhead = ELLIPSIS.len() + 1; // "…\n"
-                prop_assert!(
-                    result.text.len() < text.len() + overhead,
-                    "tail-anchored truncated result must be shorter than original + ellipsis overhead; \
-                     result.len()={} original.len()={} overhead={overhead}; \
-                     n_lines={n_lines} width={width_px} result={:?}",
-                    result.text.len(), text.len(), result.text,
-                );
-            }
-        }
-
-        /// Invariant 3b — Line count fits within max_lines (defect #1 regression guard).
-        ///
-        /// When truncation occurs the result must have at most `max_lines` logical
-        /// lines.  Before the fix, the ellipsis was prepended as an extra line on
-        /// top of `max_lines` content runs, yielding `max_lines + 1` lines.  This
-        /// property asserts the invariant across a range of inputs and box heights.
-        #[test]
-        fn proptest_tail_anchored_line_count_fits_within_max_lines(
-            n_lines in 3usize..8usize,
-            max_lines in 2usize..5usize,
-            width_px in 200.0_f32..600.0_f32,
-        ) {
-            let mut fs = make_font_system();
-            let font_size = 14.0_f32;
-            let line_h = font_size * 1.4;
-            let lines: Vec<String> = (0..n_lines)
-                .map(|i| format!("Proptest line {i} for line-count invariant"))
-                .collect();
             let text = lines.join("\n");
 
             // Box height: exactly `max_lines` lines, plus a tiny fractional
@@ -3136,7 +3022,6 @@ mod tests {
                 &text, base_attrs(), width_px, bounds_h, font_size, line_h, &mut fs,
             );
 
-            // Logical-line count must never exceed max_lines.
             let logical_line_count = result.text.split('\n').count();
             prop_assert!(
                 logical_line_count <= max_lines,
@@ -3145,6 +3030,36 @@ mod tests {
                  n_lines={n_lines} width={width_px} result={:?}",
                 result.text,
             );
+
+            if result.was_truncated {
+                prop_assert!(
+                    result.text.contains(&last_line),
+                    "tail-anchored: last line must be visible after truncation; \
+                     last_line={last_line:?} result={:?}",
+                    result.text,
+                );
+                prop_assert!(
+                    result.text.starts_with(ELLIPSIS),
+                    "tail-anchored truncated result must START with '…' (leading-ellipsis \
+                     omission indicator); n_lines={n_lines} max_lines={max_lines} \
+                     width={width_px} result={:?}",
+                    result.text,
+                );
+                let overhead = ELLIPSIS.len() + 1; // "…\n"
+                prop_assert!(
+                    result.text.len() < text.len() + overhead,
+                    "tail-anchored truncated result must be shorter than original + ellipsis overhead; \
+                     result.len()={} original.len()={} overhead={overhead}; \
+                     n_lines={n_lines} width={width_px} result={:?}",
+                    result.text.len(), text.len(), result.text,
+                );
+            } else {
+                prop_assert!(
+                    n_lines <= max_lines,
+                    "{n_lines} lines in a {max_lines}-line box must truncate; result={:?}",
+                    result.text,
+                );
+            }
         }
 
         /// Invariant 4 — Grapheme-cluster integrity.
@@ -3698,56 +3613,5 @@ mod tests {
             );
             assert_eq!(win_tail.was_truncated, full_tail.was_truncated);
         }
-    }
-
-    /// A ~64 KiB transcript truncated through the windowed fallback yields the
-    /// same visible result as shaping the whole input. This correctness
-    /// comparison does not establish warm-path latency conformance.
-    #[test]
-    fn windowed_fallback_matches_full_input_on_large_transcript() {
-        let text = transcript(64 * 1024 / 40); // ~64 KiB transcript, far above bound
-        assert!(text.len() > 8 * DEFAULT_MAX_TRUNCATION_INPUT_BYTES);
-        let font_size = 14.0_f32;
-        let line_h = font_size * 1.4;
-        let bounds_w = 400.0_f32;
-        let bounds_h = line_h * 5.0;
-        let mut fs = make_font_system();
-
-        // Full-input truncation (no windowing): shapes the entire transcript.
-        let full = truncate_for_ellipsis(
-            &text,
-            base_attrs(),
-            bounds_w,
-            bounds_h,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-
-        // Windowed truncation through the fallback: shapes only the window.
-        let input = viewport_adjacent_input(
-            &text,
-            bounds_h,
-            line_h,
-            TruncationViewport::HeadAnchored,
-            DEFAULT_MAX_TRUNCATION_INPUT_BYTES,
-            TRUNCATION_OVERSCAN_LINES,
-        );
-        let windowed = truncate_for_ellipsis(
-            input,
-            base_attrs(),
-            bounds_w,
-            bounds_h,
-            font_size,
-            line_h,
-            &mut fs,
-        );
-
-        assert!(windowed.was_truncated, "large transcript must be truncated");
-        // Correctness: windowing did not change the visible result.
-        assert_eq!(
-            windowed.text, full.text,
-            "windowed result must stay byte-identical to the full-input result"
-        );
     }
 }
