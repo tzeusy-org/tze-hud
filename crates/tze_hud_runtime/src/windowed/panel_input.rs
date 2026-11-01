@@ -748,6 +748,58 @@ mod panel_task_tests {
         assert!(f.wakes.load(Ordering::SeqCst) > wakes);
     }
 
+    /// Every panel action logs one line with the row's old and new value,
+    /// whichever section owns it (G6).
+    #[tokio::test]
+    async fn each_action_logs_its_old_and_new_value() {
+        #[derive(Clone, Default)]
+        struct Sink(Arc<std::sync::Mutex<Vec<u8>>>);
+        impl std::io::Write for Sink {
+            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(buf);
+                Ok(buf.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let sink = Sink::default();
+        let writer = sink.clone();
+        let subscriber = tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .with_ansi(false)
+            .finish();
+        // Current-thread runtime: the panel task logs on this thread.
+        let _guard = tracing::subscriber::set_default(subscriber);
+
+        let f = fixture();
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Panel), |f| f.panel.is_open())
+            .await;
+        let scene = Arc::clone(&f.state.shared_state.lock().await.scene);
+        let hidden = || scene.try_lock().map(|s| s.owner_hidden()).ok();
+        f.send_and_wait(
+            PanelEvent::Click(PanelHitTarget::Row(
+                "visibility.portals".into(),
+                PanelPart::Body,
+            )),
+            |_| hidden().is_some_and(|h| h.portals),
+        )
+        .await;
+        let log = String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
+        let lines: Vec<_> = log
+            .lines()
+            .filter(|l| l.contains("control panel: applied"))
+            .collect();
+        assert_eq!(lines.len(), 1, "{log}");
+        assert!(
+            lines[0].contains(r#"row="visibility.portals""#)
+                && lines[0].contains(r#"old="on""#)
+                && lines[0].contains(r#"new="off""#),
+            "{}",
+            lines[0]
+        );
+    }
+
     /// The winit-side routing: while the panel is open it owns every key
     /// (typed text searches, Esc closes) and the pointer inside it; a click
     /// is press and release on the same target; outside the panel the

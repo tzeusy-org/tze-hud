@@ -96,7 +96,10 @@ impl Section for InputSection {
                     };
                     let text = self.chords.get().get(role).to_string();
                     let control = if self.chords.rebind.is_some() {
-                        Control::Field { text }
+                        Control::Field {
+                            text,
+                            confirm: None,
+                        }
                     } else {
                         Control::ReadOnly { text, mono: true }
                     };

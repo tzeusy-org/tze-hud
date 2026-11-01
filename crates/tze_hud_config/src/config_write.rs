@@ -457,13 +457,21 @@ fn set_design_tokens_with(
     edit_with(config_path, |src| apply(src, updates), rename)
 }
 
+/// Serializes this process's config writers. Each edit reads the file,
+/// changes its text and renames a new copy over it; two at once (a slow
+/// font change still saving while the next edit lands) would each start from
+/// the same text and the later rename would drop the other's change.
+static WRITER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
 /// Read the config, edit its text with `edit`, and replace it atomically
-/// when anything changed.
+/// when anything changed, holding [`WRITER`] throughout.
 fn edit_with(
     config_path: &Path,
     edit: impl FnOnce(&str) -> Result<String, ConfigWriteError>,
     rename: impl FnOnce(&Path, &Path) -> std::io::Result<()>,
 ) -> Result<(), ConfigWriteError> {
+    // A writer that panicked left the file whole (the rename is atomic).
+    let _writer = WRITER.lock().unwrap_or_else(|e| e.into_inner());
     let locked = |e: ConfigWriteError| match e {
         ConfigWriteError::ReadOnlyOrLocked(_) => {
             ConfigWriteError::ReadOnlyOrLocked(config_path.to_owned())
@@ -536,6 +544,46 @@ pub fn set_widget(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Token, runtime and widget edits from many threads at once all land,
+    /// and the owner's comments survive (one writer at a time).
+    #[test]
+    fn concurrent_writers_lose_no_update() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tze_hud.toml");
+        std::fs::write(
+            &path,
+            "# mine\n[runtime]\nprofile = \"full-display\" # keep\n\n[design_tokens]\n",
+        )
+        .unwrap();
+        // Each thread writes one token at its own default value.
+        let tokens = &crate::tokens::CANONICAL_TOKENS[..16];
+        std::thread::scope(|scope| {
+            for token in tokens {
+                let path = &path;
+                scope.spawn(move || {
+                    let update = TokenUpdate::Set(token.default_value.to_owned());
+                    set_design_tokens(path, &[(token.key, update)]).unwrap();
+                });
+            }
+            let path = &path;
+            scope.spawn(move || {
+                set_runtime(path, &[RuntimeUpdate::Fps(Some(30))]).unwrap();
+            });
+        });
+        let out = std::fs::read_to_string(&path).unwrap();
+        let saved: toml::Value = toml::from_str(&out).unwrap();
+        for token in tokens {
+            assert_eq!(
+                saved["design_tokens"][token.key].as_str(),
+                Some(token.default_value),
+                "{} lost:\n{out}",
+                token.key
+            );
+        }
+        assert!(out.contains("fps = 30"), "{out}");
+        assert!(out.contains("# mine") && out.contains("# keep"), "{out}");
+    }
 
     fn set(k: &str, v: &str) -> (String, TokenUpdate) {
         (k.to_owned(), TokenUpdate::Set(v.to_owned()))

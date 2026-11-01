@@ -229,6 +229,7 @@ impl Section for LayoutSection {
                         format!("{} position and size", widget.name),
                         Control::Field {
                             text: describe(widget.geometry),
+                            confirm: None,
                         },
                     )
                     .detail(format!(

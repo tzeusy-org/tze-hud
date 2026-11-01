@@ -129,7 +129,13 @@ impl Poc {
     async fn boot_with_agents_file() -> Self {
         let dir = tempfile::tempdir().expect("scratch dir");
         let path = dir.path().join("agents.toml");
-        tze_hud_config::agents_file::save_atomic(&path, &agents_file()).expect("agents.toml");
+        for (agent, record) in agents_file().agents {
+            tze_hud_config::agents_file::edit(
+                &path,
+                &tze_hud_config::AgentChange::Pair { agent, record },
+            )
+            .expect("agents.toml");
+        }
         Self::boot_with(Some((dir, path))).await
     }
 
@@ -1436,6 +1442,11 @@ async fn poc_panel_roster_updates_live_without_moving_focus() {
         detail(hud).as_deref() == Some("Connected · 1 tile")
     })
     .await;
+    poc.wait_for("the header counts it", |hud| {
+        hud.control_panel_state_line().as_deref()
+            == Some("1 agent · 0 portals · 0 zones · 0 widgets · 1 tile")
+    })
+    .await;
     assert_eq!(poc.hud.control_panel_focus(), focus, "focus did not move");
 
     // A hand edit to agents.toml adds a row above the focused one, then
@@ -1860,6 +1871,11 @@ async fn poc_panel_runtime_rows_apply_save_and_stage_a_restart() {
             item.detail.as_deref() == Some("Applies 1 change · agent content clears")
                 && item.badge.as_ref().is_some_and(|b| b.text == "gRPC port")
         })
+    })
+    .await;
+    poc.wait_for("the header says a restart is pending", |hud| {
+        hud.control_panel_state_line()
+            .is_some_and(|line| line.contains("restart pending"))
     })
     .await;
 

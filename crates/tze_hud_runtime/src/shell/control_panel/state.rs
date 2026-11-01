@@ -195,6 +195,8 @@ pub(crate) struct SectionRows {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct ViewContext {
     pub paused: bool,
+    /// The header's state line: each section's summary, joined.
+    pub state_line: String,
     /// The pause chord as shown on its tile (e.g. `Ctrl+Shift+F12`).
     pub pause_chord: String,
     /// Connect an agent as it stands, while its page is open.
@@ -220,7 +222,7 @@ impl Nav {
         self.rows.iter().position(|(r, _)| r == id)
     }
 
-    fn control(&self, id: &str) -> Option<&Control> {
+    pub(super) fn control(&self, id: &str) -> Option<&Control> {
         self.rows
             .iter()
             .find(|(r, _)| r == id)
@@ -256,7 +258,7 @@ fn item_for(row: &Row, open: &Open, context: Option<&str>) -> PanelItem {
         }
         Control::Stepper { text } => PanelControl::Stepper(text.clone()),
         Control::Action { .. } => PanelControl::Action,
-        Control::Field { text } => PanelControl::Value {
+        Control::Field { text, .. } => PanelControl::Value {
             text: match &open.editing {
                 Some((id, typed)) if *id == row.id => format!("{typed}▏"),
                 _ => text.clone(),
@@ -305,8 +307,15 @@ fn item_for(row: &Row, open: &Open, context: Option<&str>) -> PanelItem {
 }
 
 /// The question a row awaiting confirmation shows: what its confirmed edit
-/// (activate, or switch on) would ask.
+/// (activate, switch on, or save a changed field) would ask.
 fn pending_question(control: &Control) -> Option<&str> {
+    if let Control::Field {
+        confirm: Some(question),
+        ..
+    } = control
+    {
+        return Some(question);
+    }
     [Edit::Activate, Edit::Set(true)]
         .into_iter()
         .find_map(|edit| control.confirm_for(&edit))
@@ -469,7 +478,7 @@ pub(crate) fn build(
             .then(|| "Click the panel to type · chords still work".to_owned()),
         tiles,
         chips,
-        state_line: String::new(),
+        state_line: ctx.state_line.clone(),
         body,
         hints,
         hint_end: hint_end.into(),
@@ -686,6 +695,8 @@ pub(crate) fn on_key(
     match key {
         PanelKey::Escape => {
             if open.editing.take().is_some() {
+                // Cancelling the edit cancels its confirmation too.
+                open.confirming = None;
             } else if !open.query.is_empty() {
                 open.query.clear();
                 // On Connect, back to the name the card asks for.
@@ -840,11 +851,20 @@ pub(crate) fn on_key(
             PanelFocus::Row(id) => {
                 if let Some((editing, text)) = open.editing.take() {
                     if editing == id {
+                        let edit = Edit::Text(text);
+                        let asks = nav.control(&id).and_then(|c| c.confirm_for(&edit));
+                        if asks.is_some() && open.confirming.as_deref() != Some(id.as_str()) {
+                            // Keep the typed value; the next Enter saves it.
+                            let Edit::Text(text) = edit else {
+                                unreachable!()
+                            };
+                            open.editing = Some((id.clone(), text));
+                            open.confirming = Some(id);
+                            return Vec::new();
+                        }
+                        open.confirming = None;
                         open.error = None;
-                        return vec![Effect::Apply {
-                            row: id,
-                            edit: Edit::Text(text),
-                        }];
+                        return vec![Effect::Apply { row: id, edit }];
                     }
                 }
                 return act(open, nav, &id, Gesture::Activate);
@@ -1119,6 +1139,7 @@ mod tests {
             open,
             &sections(),
             &ViewContext {
+                state_line: String::new(),
                 connect: None,
                 paused: false,
                 pause_chord: "Ctrl+Shift+F12".into(),
@@ -1131,6 +1152,71 @@ mod tests {
             row: row.into(),
             edit,
         }]
+    }
+
+    /// A field with a question (the MCP port) asks it before saving a changed
+    /// value: the first Enter shows it and keeps the typed text, the second
+    /// saves; Esc cancels both; the same value saves at once.
+    #[test]
+    fn a_confirmed_field_asks_once_before_saving_a_change() {
+        let rows = vec![SectionRows {
+            id: "network",
+            title: "Network",
+            rows: vec![Row::new(
+                "network.mcp_port",
+                "MCP port",
+                Control::Field {
+                    text: "9090".into(),
+                    confirm: Some("Change the MCP port?".into()),
+                },
+            )],
+        }];
+        let ctx = ViewContext {
+            state_line: String::new(),
+            connect: None,
+            paused: false,
+            pause_chord: "Ctrl+Shift+F12".into(),
+        };
+        let shown = |open: &mut Open| {
+            let (model, nav) = build(open, &rows, &ctx);
+            let PanelBody::Sections(sections) = &model.body else {
+                panic!("sections expected")
+            };
+            (sections[0].items[0].clone(), nav)
+        };
+        let mut open = Open::new(PANEL);
+        open.focus = PanelFocus::Row("network.mcp_port".into());
+        let (_, nav) = shown(&mut open);
+
+        on_text(&mut open, &nav, "9191");
+        assert!(
+            on_key(&mut open, &nav, PanelKey::Enter, None).is_empty(),
+            "the first Enter writes nothing"
+        );
+        let (item, nav) = shown(&mut open);
+        assert_eq!(item.detail.as_deref(), Some("Change the MCP port?"));
+        assert_eq!(item.detail_tone, PanelTone::Danger);
+        assert_eq!(
+            on_key(&mut open, &nav, PanelKey::Enter, None),
+            apply("network.mcp_port", Edit::Text("9191".into())),
+            "the second Enter saves what was typed"
+        );
+        assert_eq!(open.confirming, None);
+
+        on_text(&mut open, &nav, "9292");
+        assert!(on_key(&mut open, &nav, PanelKey::Enter, None).is_empty());
+        assert!(on_key(&mut open, &nav, PanelKey::Escape, None).is_empty());
+        assert_eq!(
+            (open.editing.clone(), open.confirming.clone()),
+            (None, None)
+        );
+
+        on_text(&mut open, &nav, "9090");
+        assert_eq!(
+            on_key(&mut open, &nav, PanelKey::Enter, None),
+            apply("network.mcp_port", Edit::Text("9090".into())),
+            "an unchanged value does not ask"
+        );
     }
 
     /// A field row takes typing while focused: the first key replaces the
@@ -1148,12 +1234,14 @@ mod tests {
                     "MCP port",
                     Control::Field {
                         text: "9090".into(),
+                        confirm: None,
                     },
                 ),
                 Row::new("network.remote", "Remote agents", Control::Toggle(false)),
             ],
         }];
         let ctx = ViewContext {
+            state_line: String::new(),
             connect: None,
             paused: false,
             pause_chord: "Ctrl+Shift+F12".into(),
@@ -1404,6 +1492,7 @@ mod tests {
                     "Agent name",
                     Control::Field {
                         text: String::new(),
+                        confirm: None,
                     },
                 ),
                 Row::new(
@@ -1420,6 +1509,7 @@ mod tests {
                 open,
                 &sections(),
                 &ViewContext {
+                    state_line: String::new(),
                     connect: Some(view.clone()),
                     paused: false,
                     pause_chord: "Ctrl+Shift+F12".into(),

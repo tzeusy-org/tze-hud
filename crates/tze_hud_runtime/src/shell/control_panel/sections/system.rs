@@ -245,6 +245,12 @@ impl Section for SystemSection {
         "system"
     }
 
+    fn summary(&self) -> Option<String> {
+        let control = self.control.as_ref()?;
+        (control.restart.is_some() && !control.pending().is_empty())
+            .then(|| "restart pending".to_owned())
+    }
+
     fn title(&self) -> &'static str {
         "System"
     }
