@@ -306,7 +306,7 @@ impl HeadlessEventLoopHarness {
             }
         };
         let scene_handle = {
-            let mut shared = state.shared_state.lock().await;
+            let shared = state.shared_state.lock().await;
             *shared.scene.lock().await = scene;
             Arc::clone(&shared.scene)
         };
