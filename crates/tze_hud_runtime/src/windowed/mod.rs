@@ -2544,6 +2544,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 {
                     return;
                 }
+                if button != MouseButton::Left && self.panel_other_button(secondary.is_none()) {
+                    return;
+                }
                 if button == MouseButton::Left {
                     // Consume pending old loss before binding a newer Down.
                     self.drain_chrome_capture_cancellation();

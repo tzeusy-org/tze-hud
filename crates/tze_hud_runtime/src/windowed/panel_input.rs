@@ -217,6 +217,13 @@ impl WinitApp {
         true
     }
 
+    /// A right, middle or other button over the panel does nothing, and the
+    /// scene must not see it either (no context menu for a widget under the
+    /// panel). Returns true when the panel owns it.
+    pub(super) fn panel_other_button(&self, primary: bool) -> bool {
+        self.panel_hit(primary).is_some()
+    }
+
     /// Wheel over the panel scrolls it. Returns true when the panel owns it.
     pub(super) fn panel_wheel(&mut self, dy: f32, primary: bool) -> bool {
         if self.panel_hit(primary).is_none() {
@@ -725,6 +732,11 @@ mod panel_task_tests {
             .rect;
         (app.state.cursor_x, app.state.cursor_y) = (tile.x + tile.w / 2.0, tile.y + tile.h / 2.0);
         assert!(app.panel_captures_cursor());
+        assert!(
+            app.panel_other_button(true),
+            "a right click over the panel never reaches the scene"
+        );
+        assert!(!app.panel_other_button(false), "nor on another display");
         assert!(app.panel_left_button(true, true));
         assert!(app.panel_left_button(false, true));
         wait("3", || app.state.safe_mode_atomic.load(Ordering::Acquire)).await;
@@ -751,6 +763,7 @@ mod panel_task_tests {
         assert!(!app.panel_captures_cursor());
         assert!(!app.cursor_entry_signature().capture);
         assert!(!app.panel_left_button(true, true));
+        assert!(!app.panel_other_button(true));
 
         let esc = (
             PhysicalKey::Code(KeyCode::Escape),
