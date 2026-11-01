@@ -408,6 +408,9 @@ pub const DEFAULT_GRPC_PORT: u16 = 50051;
 /// Highest `[runtime] fps`.
 pub const MAX_FPS: u32 = 240;
 
+/// The frame rate cap when nothing sets one.
+pub const DEFAULT_FPS: u32 = 60;
+
 /// Validate `[runtime]` beyond the profile: chords parse and are distinct,
 /// ports differ, fps and log level are in range.
 pub(crate) fn validate_runtime(runtime: &crate::raw::RawRuntime, errors: &mut Vec<ConfigError>) {

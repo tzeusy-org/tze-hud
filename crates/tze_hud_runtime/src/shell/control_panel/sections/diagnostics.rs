@@ -2,7 +2,7 @@
 //! Each applies at once and is saved to `[runtime]`; a value a flag or
 //! variable set is shown read-only, naming it.
 
-use tze_hud_config::{DEFAULT_LOG_LEVEL, LOG_LEVELS, RuntimeUpdate};
+use tze_hud_config::{DEFAULT_FPS, DEFAULT_LOG_LEVEL, LOG_LEVELS, RuntimeUpdate};
 
 use super::super::row::{BoxFuture, Control, Edit, Row, Section};
 use super::super::runtime::RuntimeControl;
@@ -10,11 +10,6 @@ use crate::launch::Source;
 
 /// Frame rate caps offered (the running one is added when it is not here).
 const FPS_CHOICES: [u32; 6] = [30, 60, 90, 120, 144, 240];
-
-/// The frame rate cap when nothing sets one.
-fn default_fps() -> u32 {
-    crate::windowed::WindowedConfig::default().target_fps
-}
 
 pub(crate) struct DiagnosticsSection {
     control: RuntimeControl,
@@ -84,7 +79,7 @@ impl Section for DiagnosticsSection {
                     },
                 )
                 .detail(sources.log_level.describe())
-                .resettable(sources.log_level == Source::Config),
+                .resettable(level != DEFAULT_LOG_LEVEL),
             }
             .keywords(&[
                 "log",
@@ -110,7 +105,7 @@ impl Section for DiagnosticsSection {
                     Control::Toggle(outlines),
                 )
                 .detail("Tint every zone's bounds")
-                .resettable(sources.debug_zones == Source::Config)
+                .resettable(outlines)
             }
             .keywords(&["debug", "zones", "debug-zones", "geometry", "bounds"]);
 
@@ -128,7 +123,7 @@ impl Section for DiagnosticsSection {
                     },
                 )
                 .detail(sources.fps.describe())
-                .resettable(sources.fps == Source::Config)
+                .resettable(fps != DEFAULT_FPS)
             }
             .keywords(&["fps", "frames", "refresh", "rate", "performance"]);
 
@@ -182,7 +177,7 @@ impl Section for DiagnosticsSection {
                     )
                 }
                 (Self::FPS, Edit::Reset) if !sources.fps.is_pinned() => {
-                    self.control.live.set_fps(default_fps());
+                    self.control.live.set_fps(DEFAULT_FPS);
                     self.saved(self.control.clear(RuntimeUpdate::Fps(None), |s| &mut s.fps))
                 }
                 (_, edit) => Err(format!("{row} does not support {edit:?}")),

@@ -507,9 +507,11 @@ pub(crate) fn build(
     if !nav.sections.is_empty() && query.is_empty() {
         hints.push("Alt+1–9 jump".into());
     }
-    if open
-        .focused_row(&nav)
-        .is_some_and(|id| nav.resettable.iter().any(|r| r == id))
+    if query.is_empty()
+        && open.editing.is_none()
+        && open
+            .focused_row(&nav)
+            .is_some_and(|id| nav.resettable.iter().any(|r| r == id))
     {
         hints.push("Del reset".into());
     }
@@ -695,9 +697,9 @@ fn act(open: &mut Open, nav: &Nav, id: &str, gesture: Gesture, by: By) -> Vec<Ef
         return Vec::new();
     };
     let edit = match edit {
-        Edit::Choose(n) if previews && by == By::Key => {
+        Edit::Choose(_) if previews && by == By::Key => {
             open.preview = Some(id.to_owned());
-            Edit::Preview(n)
+            Edit::Preview(if gesture == Gesture::Left { -1 } else { 1 })
         }
         edit => {
             if previews {
@@ -767,7 +769,11 @@ pub(crate) fn on_key(
     }
     if !matches!(
         key,
-        PanelKey::Enter | PanelKey::Space | PanelKey::Backspace | PanelKey::Escape
+        PanelKey::Enter
+            | PanelKey::Space
+            | PanelKey::Backspace
+            | PanelKey::Delete
+            | PanelKey::Escape
     ) {
         open.editing = None;
     }
@@ -930,7 +936,7 @@ pub(crate) fn on_key(
             }
             PanelFocus::Tile(i) => {
                 let id = nav.tiles[i].clone();
-                if let Some(keep) = keep_preview(open, nav, &id) {
+                if let Some(keep) = keep_preview(open, &id) {
                     return keep;
                 }
                 return act(open, nav, &id, Gesture::Activate, By::Key);
@@ -956,7 +962,7 @@ pub(crate) fn on_key(
                         }];
                     }
                 }
-                if let Some(keep) = keep_preview(open, nav, &id) {
+                if let Some(keep) = keep_preview(open, &id) {
                     return keep;
                 }
                 return act(open, nav, &id, Gesture::Activate, By::Key);
@@ -975,7 +981,12 @@ pub(crate) fn on_key(
             }
         }
         PanelKey::Delete => {
-            if let Some(id) = open.focused_row(nav).map(str::to_owned) {
+            // Not while typing (a field or the search): Delete there must
+            // never reset a row the owner did not pick.
+            if open.editing.is_none()
+                && open.query.is_empty()
+                && let Some(id) = open.focused_row(nav).map(str::to_owned)
+            {
                 return reset(open, nav, &id);
             }
         }
@@ -1034,18 +1045,16 @@ pub(crate) fn reveal_focus(open: &mut Open, geometry: &ControlPanelGeometry) -> 
     true
 }
 
-/// Enter on a row showing a preview keeps the shown option.
-fn keep_preview(open: &mut Open, nav: &Nav, id: &str) -> Option<Vec<Effect>> {
+/// Enter on a row showing a preview keeps the shown option (the section
+/// knows which: the row may not show it yet while it restyles).
+fn keep_preview(open: &mut Open, id: &str) -> Option<Vec<Effect>> {
     if open.preview.as_deref() != Some(id) {
         return None;
     }
     open.preview = None;
-    let Some(Control::Choice { selected, .. }) = nav.control(id) else {
-        return Some(Vec::new());
-    };
     Some(vec![Effect::Apply {
         row: id.to_owned(),
-        edit: Edit::Choose(*selected),
+        edit: Edit::Keep,
     }])
 }
 
@@ -1938,13 +1947,16 @@ mod tests {
         assert_eq!(open.left_preview(&nav), None, "still on the row");
         assert_eq!(
             on_key(&mut open, &nav, PanelKey::Enter, None),
-            apply("look.theme", Edit::Choose(1)),
-            "Enter keeps the option showing"
+            apply("look.theme", Edit::Keep),
+            "Enter keeps the option showing, whichever the section shows"
         );
         assert_eq!(open.preview, None);
 
-        // Esc restores.
-        on_key(&mut open, &nav, PanelKey::Left, None);
+        // Esc restores; Left steps back.
+        assert_eq!(
+            on_key(&mut open, &nav, PanelKey::Left, None),
+            apply("look.theme", Edit::Preview(-1))
+        );
         assert_eq!(
             on_key(&mut open, &nav, PanelKey::Escape, None),
             apply("look.theme", Edit::Revert)
@@ -1991,6 +2003,36 @@ mod tests {
         open.focus = PanelFocus::Row("look.plain".into());
         let (model, nav) = built_with(&mut open, &preview_sections(0));
         assert!(!model.hints.iter().any(|h| h == "Del reset"));
+        assert!(on_key(&mut open, &nav, PanelKey::Delete, None).is_empty());
+
+        // Never while typing: in a field, Delete keeps the typed text and
+        // resets nothing.
+        let mut field_sections = preview_sections(0);
+        field_sections[0].rows.push(
+            Row::new(
+                "look.font",
+                "Font",
+                Control::Field {
+                    text: "Plex".into(),
+                    confirm: None,
+                },
+            )
+            .resettable(true),
+        );
+        open.focus = PanelFocus::Row("look.font".into());
+        let (_, nav) = built_with(&mut open, &field_sections);
+        on_text(&mut open, &nav, "Seg");
+        let (model, _) = built_with(&mut open, &field_sections);
+        assert!(!model.hints.iter().any(|h| h == "Del reset"));
+        assert!(on_key(&mut open, &nav, PanelKey::Delete, None).is_empty());
+        assert_eq!(open.editing, Some(("look.font".into(), "Seg".into())));
+        // Nor in the search: type-to-search focused a result the owner did
+        // not pick.
+        open.editing = None;
+        open.focus = PanelFocus::Search;
+        on_text(&mut open, &nav, "zoom");
+        let (_, nav) = built_with(&mut open, &field_sections);
+        assert_eq!(open.focus, PanelFocus::Row("look.zoom".into()));
         assert!(on_key(&mut open, &nav, PanelKey::Delete, None).is_empty());
     }
 

@@ -36,8 +36,8 @@ pub use config_write::{
     is_writable_token, set_design_tokens, set_runtime, set_widget,
 };
 pub use loader::{
-    DEFAULT_GRPC_PORT, DEFAULT_LOG_LEVEL, DEFAULT_MCP_PORT, LOG_LEVELS, MAX_FPS, TzeHudConfig,
-    runtime_section,
+    DEFAULT_FPS, DEFAULT_GRPC_PORT, DEFAULT_LOG_LEVEL, DEFAULT_MCP_PORT, LOG_LEVELS, MAX_FPS,
+    TzeHudConfig, runtime_section,
 };
 pub use policy_builder::{
     apply_token_defaults_for_zone, build_effective_policy, tile_placement_from_tokens,

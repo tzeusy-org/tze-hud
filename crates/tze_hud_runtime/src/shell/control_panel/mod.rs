@@ -456,10 +456,10 @@ struct PanelTask {
     /// Rows whose edit is still running in the background. Kept across
     /// close and reopen so a second edit cannot start beside the first.
     busy: std::collections::HashSet<String>,
-    /// A previewing row's latest edit (keep, revert, another preview), run
-    /// once its still-running edit finishes: dropping it would leave an
-    /// unsaved theme on screen or lose the one kept.
-    after_busy: std::collections::HashMap<String, Edit>,
+    /// A previewing row's edits (more steps, keep, revert) sent while its
+    /// last one still runs, in order: dropping one would leave an unsaved
+    /// theme on screen or lose the one kept.
+    after_busy: std::collections::HashMap<String, std::collections::VecDeque<Edit>>,
     /// Each running edit's (old, new) value, for its outcome's log line.
     changes: std::collections::HashMap<String, (String, String)>,
     /// A background edit that failed while the panel was closed, shown on
@@ -473,7 +473,11 @@ impl PanelTask {
             (PanelEvent::Applied { row, result }, _) => {
                 self.busy.remove(&row);
                 self.applied(&row, result);
-                match self.after_busy.remove(&row) {
+                let next = self.after_busy.get_mut(&row).and_then(|q| q.pop_front());
+                if self.after_busy.get(&row).is_some_and(|q| q.is_empty()) {
+                    self.after_busy.remove(&row);
+                }
+                match next {
                     Some(edit) => vec![Effect::Apply { row, edit }],
                     None => Vec::new(),
                 }
@@ -512,7 +516,9 @@ impl PanelTask {
                         Vec::new()
                     }
                     PanelEvent::Geometry => {
-                        if let Some(g) = &geometry {
+                        if open.reveal
+                            && let Some(g) = &geometry
+                        {
                             state::reveal_focus(open, g);
                         }
                         Vec::new()
@@ -644,7 +650,10 @@ impl PanelTask {
         };
         if self.busy.contains(row) {
             if self.nav.previews.iter().any(|r| r == row) || edit == Edit::Revert {
-                self.after_busy.insert(row.to_owned(), edit);
+                self.after_busy
+                    .entry(row.to_owned())
+                    .or_default()
+                    .push_back(edit);
                 return;
             }
             tracing::info!(

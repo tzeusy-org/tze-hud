@@ -259,7 +259,7 @@ impl Default for StartupOptions {
             explicit_height: false,
             grpc_port: tze_hud_config::DEFAULT_GRPC_PORT,
             mcp_port: tze_hud_config::DEFAULT_MCP_PORT,
-            fps: 60,
+            fps: tze_hud_config::DEFAULT_FPS,
             debug_zones: false,
             sources: Default::default(),
             quiescent_efficiency_emit: None,

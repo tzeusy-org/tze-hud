@@ -160,10 +160,8 @@ impl Control {
             (_, Edit::Step(n)) => format!("{n:+} step"),
             (_, Edit::Text(text)) => text.clone(),
             (_, Edit::Reset) => "default".to_owned(),
-            (Self::Choice { options, .. }, Edit::Preview(n)) => {
-                format!("preview {}", options.get(*n).map_or("?", String::as_str))
-            }
-            (_, Edit::Preview(n)) => format!("preview option {n}"),
+            (_, Edit::Preview(n)) => format!("preview {n:+}"),
+            (_, Edit::Keep) => "the previewed option".to_owned(),
             (_, Edit::Revert) => "saved value".to_owned(),
         }
     }
@@ -206,8 +204,12 @@ pub(crate) enum Edit {
     Text(String),
     /// Back to the default (the row offered `Reset`).
     Reset,
-    /// Show option `n` of a previewing choice without saving it.
-    Preview(usize),
+    /// Show the option `n` steps from the one showing (negative: back) of a
+    /// previewing choice, without saving it. Relative, so a step sent while
+    /// the last one is still restyling lands on the next option.
+    Preview(i32),
+    /// Save the option the preview is showing.
+    Keep,
     /// Drop a preview: back to the saved option.
     Revert,
 }

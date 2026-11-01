@@ -765,11 +765,11 @@ mod panel_task_tests {
         assert!(f.wakes.load(Ordering::SeqCst) > wakes);
     }
 
-    /// A theme preview slower than the panel waits (a heavy restyle) still
-    /// reverts: an Esc that arrives while it runs is kept and applied after
-    /// it, never dropped as a second edit of a busy row.
+    /// A theme preview slower than the panel waits (a heavy restyle): the
+    /// steps, Enter and Esc sent while it runs queue and apply in order,
+    /// never dropped as a second edit of a busy row.
     #[tokio::test(flavor = "multi_thread")]
-    async fn a_revert_behind_a_slow_preview_still_applies() {
+    async fn edits_behind_a_slow_preview_apply_in_order() {
         use crate::shell::control_panel::row::{BoxFuture, Control, Edit, Row, Section};
         use std::sync::Mutex;
 
@@ -817,17 +817,35 @@ mod panel_task_tests {
                 .is_some_and(|m| m.focus == PanelFocus::Row("look.theme".into()))
         })
         .await;
+        let settled = |n: usize| {
+            let edits = Arc::clone(&edits);
+            async move {
+                for _ in 0..300 {
+                    if edits.lock().unwrap().len() >= n {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            }
+        };
         assert!(f.panel.send(PanelEvent::Key(PanelKey::Right)));
         // Esc while the preview still runs.
         assert!(f.panel.send(PanelEvent::Key(PanelKey::Escape)));
-        for _ in 0..200 {
-            if edits.lock().unwrap().len() == 2 {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(10)).await;
-        }
+        settled(2).await;
         assert_eq!(*edits.lock().unwrap(), [Edit::Preview(1), Edit::Revert]);
         assert!(f.panel.is_open(), "the Esc reverted; it did not close");
+
+        // Two steps and Enter while the first still runs: each step lands
+        // and Enter keeps what the section shows, in order.
+        edits.lock().unwrap().clear();
+        for key in [PanelKey::Right, PanelKey::Right, PanelKey::Enter] {
+            assert!(f.panel.send(PanelEvent::Key(key)));
+        }
+        settled(3).await;
+        assert_eq!(
+            *edits.lock().unwrap(),
+            [Edit::Preview(1), Edit::Preview(1), Edit::Keep]
+        );
     }
 
     /// Every panel action logs one line with the row's old and new value,

@@ -109,6 +109,23 @@ enum Save {
     Always,
 }
 
+/// Whether the table's override of `key` differs from the value it would
+/// have unset (the theme's, else the canonical default): only then does the
+/// row differ from its default and offer Reset.
+fn overrides_default(table: &DesignTokenMap, key: &str) -> bool {
+    let Some(set) = table.get(key) else {
+        return false;
+    };
+    let theme = builtin_theme(selected_theme_name(table)).unwrap_or_default();
+    let unset = theme.get(key).map(String::as_str).or_else(|| {
+        CANONICAL_TOKENS
+            .iter()
+            .find(|t| t.key == key)
+            .map(|t| t.default_value)
+    });
+    unset != Some(set.as_str())
+}
+
 /// The update that puts `key` back to `value` (`None`: unset).
 fn restore(value: Option<String>) -> TokenUpdate {
     value.map_or(TokenUpdate::Remove, TokenUpdate::Set)
@@ -167,8 +184,15 @@ impl AppearanceSection {
                 .ok_or("No such theme")
         };
         match edit {
-            Edit::Preview(i) => {
-                let update = theme(i)?;
+            Edit::Preview(step) => {
+                // From the theme showing now: steps queue behind a slow
+                // restyle and still walk one theme each.
+                let names: Vec<&str> = builtin_theme_names().collect();
+                let table = self.tokens.table();
+                let showing = selected_theme_name(&table);
+                let at = names.iter().position(|t| *t == showing).unwrap_or(0) as i64;
+                let n = names.len() as i64;
+                let update = theme((at + i64::from(step)).rem_euclid(n) as usize)?;
                 self.before_preview
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
@@ -179,7 +203,17 @@ impl AppearanceSection {
                 Some(before) => self.tokens.show(&[(THEME_KEY, restore(before))]).await,
                 None => Ok(()),
             },
-            // Keeping a preview saves the theme already showing.
+            // Enter keeps the theme the preview shows: save it as it is.
+            Edit::Keep => {
+                if self.end_preview().is_none() {
+                    return Ok(());
+                }
+                let showing = selected_theme_name(&self.tokens.table()).to_owned();
+                self.tokens
+                    .change_with(&[(THEME_KEY, TokenUpdate::Set(showing))], Save::Always)
+                    .await
+            }
+            // A click picks a theme outright, ending any preview.
             Edit::Choose(i) => {
                 let save = match self.end_preview() {
                     Some(_) => Save::Always,
@@ -254,7 +288,7 @@ impl Section for AppearanceSection {
                 .keywords(&[
                     "zoom", "scale", "size", "bigger", "smaller", "dpi", "ui.scale",
                 ])
-                .resettable(table.contains_key(UI_SCALE_KEY)),
+                .resettable((ui_scale(&table) - 1.0).abs() > f32::EPSILON),
             ];
             for (key, label) in FONTS {
                 let set = table.get(key);
@@ -282,7 +316,7 @@ impl Section for AppearanceSection {
                     )
                     .detail(detail)
                     .keywords(&["font", "typeface", "family", "text"])
-                    .resettable(set.is_some()),
+                    .resettable(overrides_default(&table, key)),
                 );
             }
             rows
@@ -421,7 +455,7 @@ impl Section for TokensSection {
                     )
                     .detail(detail)
                     .keywords(&["token", "design token", "advanced"])
-                    .resettable(table.contains_key(key)),
+                    .resettable(overrides_default(&table, key)),
                 );
             }
             // Hand-written overrides of keys the panel does not set (e.g.
@@ -612,7 +646,9 @@ mod tests {
     async fn a_theme_preview_restyles_without_saving_until_kept() {
         let (appearance, _, saved) = sections(Some(Ok(())));
         let themes: Vec<&str> = builtin_theme_names().collect();
-        let other = themes.iter().position(|t| *t != DEFAULT_THEME).unwrap();
+        let d = themes.iter().position(|t| *t == DEFAULT_THEME).unwrap();
+        let next = |k: usize| themes[(d + k) % themes.len()];
+        assert!(themes.len() >= 3, "two steps land on a third theme");
         let theme_row = |rows: Vec<Row>| {
             rows.into_iter()
                 .find(|r| r.id == "appearance.theme")
@@ -621,10 +657,10 @@ mod tests {
         let live = |a: &AppearanceSection| a.tokens.table().get(THEME_KEY).cloned();
 
         appearance
-            .apply("appearance.theme", Edit::Preview(other))
+            .apply("appearance.theme", Edit::Preview(1))
             .await
             .unwrap();
-        assert_eq!(live(&appearance).as_deref(), Some(themes[other]));
+        assert_eq!(live(&appearance).as_deref(), Some(next(1)));
         let row = theme_row(appearance.rows().await);
         assert!(row.previews);
         assert!(!row.reset, "Reset follows the saved theme, not the preview");
@@ -636,17 +672,21 @@ mod tests {
             .unwrap();
         assert_eq!(live(&appearance), None, "back to the unset theme");
 
+        // Steps walk from the theme showing; Keep saves what shows.
+        for _ in 0..2 {
+            appearance
+                .apply("appearance.theme", Edit::Preview(1))
+                .await
+                .unwrap();
+        }
+        assert_eq!(live(&appearance).as_deref(), Some(next(2)));
         appearance
-            .apply("appearance.theme", Edit::Preview(other))
-            .await
-            .unwrap();
-        appearance
-            .apply("appearance.theme", Edit::Choose(other))
+            .apply("appearance.theme", Edit::Keep)
             .await
             .unwrap();
         assert_eq!(
             saved.lock().unwrap().as_slice(),
-            [format!(r#"[("theme", Set("{}"))]"#, themes[other])],
+            [format!(r#"[("theme", Set("{}"))]"#, next(2))],
             "keeping the shown preview saves it"
         );
         assert!(theme_row(appearance.rows().await).reset);
@@ -655,7 +695,13 @@ mod tests {
             .apply("appearance.theme", Edit::Revert)
             .await
             .unwrap();
-        assert_eq!(live(&appearance).as_deref(), Some(themes[other]));
+        assert_eq!(live(&appearance).as_deref(), Some(next(2)));
+        // Keep without a preview saves nothing more.
+        appearance
+            .apply("appearance.theme", Edit::Keep)
+            .await
+            .unwrap();
+        assert_eq!(saved.lock().unwrap().len(), 1);
 
         appearance
             .apply("appearance.theme", Edit::Reset)
@@ -794,5 +840,27 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    /// An override equal to the value it would have unset is not a change:
+    /// no Reset. A different one is.
+    #[test]
+    fn only_an_override_off_its_default_offers_reset() {
+        let key = "color.text.primary";
+        let mut table = DesignTokenMap::new();
+        assert!(!overrides_default(&table, key));
+        let theme = builtin_theme(selected_theme_name(&table)).unwrap_or_default();
+        let unset = theme.get(key).cloned().unwrap_or_else(|| {
+            CANONICAL_TOKENS
+                .iter()
+                .find(|t| t.key == key)
+                .unwrap()
+                .default_value
+                .to_owned()
+        });
+        table.insert(key.to_owned(), unset);
+        assert!(!overrides_default(&table, key));
+        table.insert(key.to_owned(), "#123456".to_owned());
+        assert!(overrides_default(&table, key));
     }
 }

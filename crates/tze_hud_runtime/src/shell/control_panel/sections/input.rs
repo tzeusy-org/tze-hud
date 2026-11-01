@@ -92,6 +92,8 @@ impl Section for InputSection {
                     let status = hotkey(role);
                     let chord = self.chords.get().get(role);
                     let changed = chord != HudChords::default().get(role);
+                    // Inferred, not read from the file: a changed chord with
+                    // a writer was saved (a failed save says so on the row).
                     let source = match (changed, &self.save) {
                         (false, _) => "Default",
                         (true, Some(_)) => "Saved to config",

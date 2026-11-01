@@ -421,11 +421,12 @@ restart (Restart now is in System, Alt+8). It takes keyboard focus when it
 opens (if Windows refuses, the header says to click it) and returns focus
 on close. Typing searches every row; arrows, Tab, Enter and Space move and
 act; Esc clears the search, then closes. A row whose value differs from
-its default shows Reset: clicking it, or Delete on the row, puts the
-default back (live, and the key leaves the config file). Visibility,
-Appearance, Advanced tokens, Input and Diagnostics rows offer it; ports and
-widget boxes take a typed value. Clicks outside the panel pass through to
-the desktop. Closing the panel always resumes agents. While paused, the
+its default (an override that matches the theme does not) shows Reset:
+clicking it, or Delete on the row (not while typing in a field or the
+search), puts the default back live and removes the key from the config
+file. Visibility, Appearance, Advanced tokens, Input and Diagnostics rows
+offer it; ports and widget boxes take a typed value. Clicks outside the
+panel pass through to the desktop. Closing the panel always resumes agents. While paused, the
 pause tile and row turn caution-colored.
 
 The Visibility card hides portals, zones, widgets or other agent tiles for
@@ -474,7 +475,8 @@ key. Enter (or Copy) puts it on the clipboard, first issuing a new code if the
 shown one was used, expired or has under a minute left; the card then says it
 is waiting, that the agent paired once it has, or that the copied code no
 longer works. When Windows Firewall blocks tailnet agents, the Network row
-links to Network › Remote agents: Enter on it leaves the card at that row. Clicking the name edits it; only Enter copies. New code replaces
+links to Network › Remote agents: Enter on it leaves the card at that row.
+Clicking the name edits it; only Enter copies. New code replaces
 the code. Esc goes back to the sections. While the card is up, the system card
 stays away, even for a code replaced after wrong guesses; once it is left, a
 replacement shows on the system card again.
@@ -493,8 +495,9 @@ administrator approval either way, and reads the firewall again.
 
 The Diagnostics card sets the log file's level, zone outlines and the frame
 rate cap (choices from 30 to 240; `[runtime] fps` takes 1-240). Each applies at once and is saved to `[runtime]`; when the
-save fails the change stays for the session and the row says so. Reset
-returns a saved row to its default (info, off, 60) and removes its key. The cap
+save fails the change stays for the session and the row says so. A row
+off its default (info, off, 60) has Reset, which returns it there and
+removes its key. The cap
 paces frames; load shedding keeps the startup rate.
 
 The System card has Restart now (asks first; it lists what it applies, uses
