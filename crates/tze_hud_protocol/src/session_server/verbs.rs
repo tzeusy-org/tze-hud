@@ -50,7 +50,7 @@ pub(super) fn fail(seq: u64, code: &str, hint: impl Into<String>) -> RequestResu
 }
 
 /// Keep the rejection reason and add the next action for its existing category.
-/// Mutation replays pass the same cached reason through this deterministic map.
+/// Request replays pass the same cached reason through this deterministic map.
 fn rejection_hint(code: &str, reason: String) -> String {
     let action = match code {
         "INVALID_ARGUMENT" => "Correct the rejected request fields and resend as a new request",
@@ -80,9 +80,7 @@ fn rejection_hint(code: &str, reason: String) -> String {
         "TIMESTAMP_EXPIRY_BEFORE_PRESENT" => {
             "Set expiry after presentation or remove expiry, then resend as a new request"
         }
-        "UNAVAILABLE" => {
-            "Wait for capacity before retrying; use a new batch_id for a cached rejection"
-        }
+        "UNAVAILABLE" => "Wait for capacity before retrying with a new request sequence",
         _ => "Retry as a new request; if the failure persists, report it to the operator",
     };
     format!("{reason}; {action}")

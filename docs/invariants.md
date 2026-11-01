@@ -23,8 +23,7 @@ dashboard: an agent can say "show this for 8 seconds" in one call.
 - `tze_hud_compositor` [`test_publication_ttl_ms_uses_expires_at_wall_us`](../crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs),
   [`hold_moves_the_fade_deadline_and_ttl_zero_never_fades`](../crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs)
 - `tze_hud_protocol` (gRPC session) [`grpc_zone_publish_ttl_sets_expiry_and_is_swept`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs),
-  [`grpc_zone_publish_expires_at_is_swept`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs), [`grpc_zone_publish_present_at_is_held_until_due`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs),
-  [`grpc_batch_present_at_holds_content_until_due`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs), [`grpc_batch_expires_at_sweeps_tile`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs)
+  [`grpc_zone_publish_expires_at_is_swept`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs), [`grpc_zone_publish_present_at_is_held_until_due`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs)
 - `integration` (POC acceptance, MCP end to end) [`poc_zone_notification_ttl_disappears_unattended`](../tests/integration/poc_acceptance.rs),
   [`poc_zone_delay_ms_appears_on_schedule`](../tests/integration/poc_acceptance.rs)
 

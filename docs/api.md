@@ -144,8 +144,8 @@ portal is degraded after 30 s with no publish, poll, or hold, and reclaimed
 **`hud_clear`** `{surface*}` releases a zone publication, a widget
 instance, or a portal (detach). On a zone it also cancels the caller's own
 delayed publishes that haven't presented yet; other agents' are untouched.
-The gRPC `Hold` and `Clear` behave the same on zones. A `ClearZone` inside a
-mutation batch clears only active publications and never cancels pending ones.
+The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
+`ClearZone` mutation clears only active publications and never cancels pending ones.
 
 **`hud_input`** `{ack?: [input_id], wait_ms?, max_items?}`
 
@@ -317,7 +317,7 @@ unknown PSK) is a JSON-RPC error.
 | `TIMESTAMP_TOO_FUTURE` | `delay_ms` beyond the scheduling horizon |
 | `TIMESTAMP_TOO_OLD` | gRPC timing hint further in the past than the staleness window |
 | `TIMESTAMP_EXPIRY_BEFORE_PRESENT` | gRPC `expires_at_us` is not after `present_at_us` |
-| `BUDGET_EXCEEDED` | gRPC batch or claim over the session's resource budget, or a portal rate limit or full input queue; the hint names the next call |
+| `BUDGET_EXCEEDED` | A portal rate limit or full input queue; the hint names the next call |
 | `UNAVAILABLE` | The portal service isn't running or the HUD is unavailable |
 | `INTERNAL` | Runtime fault |
 
