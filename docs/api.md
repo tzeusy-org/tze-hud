@@ -507,8 +507,9 @@ HUD on its next frame and is saved to `[design_tokens]` with the file's
 comments kept; when the save fails (a read-only file) the change lasts the
 session and the row shows the error and the path. The panel keeps its own
 text legible whatever an override does. Zoom steps `ui.scale` by 10%
-(−/+, Ctrl+− and Ctrl+= anywhere in the panel; Enter returns to 100%),
-applies live and saves; the panel itself stays between 0.75x and 3x so
+(−/+, Ctrl+− and Ctrl+= or Ctrl++ anywhere in the panel; Enter returns
+to 100%), resizes zone text and chrome, portals, widgets and the panel, applies live and
+saves; the panel itself stays between 0.75x and 3x so
 it remains readable and on screen.
 
 A row whose value a flag or variable set is read-only and names it ("Set by
@@ -543,10 +544,12 @@ the primary's. A DPI change or a new monitor restyles zones, portals and
 the panel on the next frame; tiles already placed keep their bounds, and
 tiles claimed afterwards take the new sizes. Hairlines (the transcript
 divider) round to whole pixels, at least one. Opacity, weights, ratios
-and timing do not scale. Zone and widget boxes are fractions of the
-display, so they keep their size; widget SVGs take tokens in their own
-viewBox units, so zoom changes a widget's drag handle but not its
-content. The runtime
+and timing do not scale. Zone boxes are fractions of the display and
+keep their size. A widget box is drawn at `ui.scale` times its configured
+size, grown about its centre and kept on the display (an edge-anchored
+widget keeps its edge); its SVG is rasterized at that size. The layout
+(the Layout card and `geometry`) stays at 100%. A monitor's own scale
+does not resize widgets, since their boxes already follow the display. The runtime
 records the result as `runtime.px_scale` (and `runtime.px_scale@<zone>`
 for a zone on a secondary), which config may not set.
 

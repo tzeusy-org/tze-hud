@@ -29,19 +29,6 @@ use super::draw_cmds::DragHandleEntry;
 use crate::pipeline::{RectVertex, RoundedRectDrawCmd, rect_vertices};
 
 impl Compositor {
-    fn resolve_widget_geometry(
-        instance: &WidgetInstance,
-        definition: &WidgetDefinition,
-        sw: f32,
-        sh: f32,
-    ) -> (f32, f32, f32, f32) {
-        let policy = instance
-            .geometry_override
-            .as_ref()
-            .unwrap_or(&definition.default_geometry_policy);
-        Self::resolve_zone_geometry(policy, sw, sh)
-    }
-
     fn synthetic_widget_element_id(instance_name: &str) -> SceneId {
         let key = format!("widget:{instance_name}");
         let rid = ResourceId::of(key.as_bytes());
@@ -200,15 +187,10 @@ impl Compositor {
             {
                 continue;
             }
-            let definition = match scene
-                .widget_registry
-                .definitions
-                .get(&instance.widget_type_name)
-            {
-                Some(d) => d,
-                None => continue,
+            let Some(geometry) = scene.widget_registry.drawn_geometry(instance) else {
+                continue;
             };
-            let (x, y, w, h) = Self::resolve_widget_geometry(instance, definition, sw, sh);
+            let (x, y, w, h) = Self::resolve_zone_geometry(&geometry, sw, sh);
             let element_bounds_widget = Rect::new(x, y, w, h);
             let bounds = Self::drag_handle_bounds(element_bounds_widget, style, scale, sw, sh);
             let element_id = Self::synthetic_widget_element_id(instance_name);

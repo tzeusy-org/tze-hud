@@ -289,6 +289,8 @@ impl Appearance {
         {
             let mut scene = self.scene.lock().await;
             restyle_zones(&mut scene.zone_registry, &resolved);
+            // Widget boxes are display fractions: zoom alone resizes them.
+            scene.widget_registry.zoom = tze_hud_config::tokens::ui_scale(&resolved);
             for (widget_type, file, bytes) in svgs {
                 scene.enqueue_widget_svg_asset(&widget_type, &file, bytes);
             }
@@ -672,6 +674,8 @@ mod tests {
             .unwrap();
         assert_eq!(font(&appearance, "notification-area"), notes * 1.875);
         assert_eq!(font(&appearance, "subtitle"), subtitle * 1.25);
+        // Widget boxes (display fractions) follow zoom, not the monitor.
+        assert_eq!(appearance.scene.lock().await.widget_registry.zoom, 1.25);
     }
 
     /// Overlapping monitor reports apply the newest one, once.

@@ -2901,15 +2901,10 @@ fn collect_subtree_node_ids(scene: &SceneGraph, node_id: SceneId, out: &mut Hash
 /// Returns (width, height) in pixels. Returns (0, 0) if the geometry cannot be
 /// resolved (e.g., zero-sized surface or unrecognized policy).
 pub(super) fn resolve_widget_pixel_size(
-    instance: &WidgetInstance,
-    def: &WidgetDefinition,
+    geo: &GeometryPolicy,
     surf_w: u32,
     surf_h: u32,
 ) -> (u32, u32) {
-    let geo = instance
-        .geometry_override
-        .as_ref()
-        .unwrap_or(&def.default_geometry_policy);
     let sw = surf_w as f32;
     let sh = surf_h as f32;
     let (w, h) = match geo {
