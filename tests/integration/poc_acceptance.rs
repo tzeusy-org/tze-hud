@@ -26,7 +26,6 @@ use tze_hud_protocol::proto::session::server_message::Payload as ServerPayload;
 use tze_hud_protocol::proto::session::{self as wire, ClientMessage, ServerMessage};
 use tze_hud_runtime::windowed::{HeadlessEventLoopHarness, WindowedConfig};
 use tze_hud_scene::TestClock;
-use tze_hud_scene::lease::ORPHAN_GRACE_PERIOD_MS;
 
 const PRODUCTION_CONFIG: &str = include_str!("../../app/tze_hud_app/config/production.toml");
 const PORTAL: &str = "portal:claude-main";
@@ -354,7 +353,6 @@ struct Resident {
     stream: tonic::Streaming<ServerMessage>,
     sequence: u64,
     round_trips: usize,
-    namespace: String,
 }
 
 fn now_wall_us() -> u64 {
@@ -375,8 +373,8 @@ async fn next_message(stream: &mut tonic::Streaming<ServerMessage>) -> ServerMes
 }
 
 impl Resident {
-    /// The handshake: `SessionInit` out, `SessionEstablished`, the snapshot,
-    /// and the degradation level back. Errors with the `SessionError` code.
+    /// The handshake: `SessionInit` out, `SessionEstablished` and the current
+    /// degradation level back. Errors with the `SessionError` code.
     async fn connect(
         addr: std::net::SocketAddr,
         agent_id: &str,
@@ -402,12 +400,12 @@ impl Resident {
             .await
             .expect("open session")
             .into_inner();
-        let namespace = match next_message(&mut stream).await.payload {
-            Some(ServerPayload::SessionEstablished(e)) => e.namespace,
+        match next_message(&mut stream).await.payload {
+            Some(ServerPayload::SessionEstablished(_)) => {}
             Some(ServerPayload::SessionError(e)) => return Err(e.code),
             other => panic!("expected SessionEstablished, got {other:?}"),
         };
-        // The snapshot and degradation level follow in the same round trip.
+        // The current degradation level follows in the same round trip.
         assert!(matches!(
             next_message(&mut stream).await.payload,
             Some(ServerPayload::DegradationNotice(_))
@@ -417,7 +415,6 @@ impl Resident {
             stream,
             sequence: 1,
             round_trips: 1,
-            namespace,
         })
     }
 
@@ -462,7 +459,7 @@ fn resident_publish(text: &str) -> ClientPayload {
 }
 
 /// A resident agent whose process has stopped. A raw HTTP/2 client: it
-/// handshakes and claims a tile, and from then on never reads (or releases
+/// handshakes and publishes durable status, and from then on never reads (or releases
 /// flow-control capacity for) another reply, so the server's sends to it block
 /// once the stream window and its send buffer fill.
 struct HungAgent {
@@ -515,7 +512,7 @@ impl HungAgent {
             .await;
         agent.replies.body = Some(response.await.expect("response headers").into_body());
         for _ in 0..2 {
-            agent.replies.next().await; // established, snapshot, degradation level
+            agent.replies.next().await; // established, current degradation level
         }
         agent.send_all(vec![resident_publish("working")]).await;
         match agent.replies.next().await.payload {
