@@ -167,6 +167,22 @@ impl TailnetControl {
             .expect("listener manager did not consume the address event")
             .expect("listener manager exited")
     }
+
+    pub(crate) async fn next_bound(&mut self, expected: IpAddr) -> SocketAddr {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            // OS events may coalesce or arrive while the first snapshot is read.
+            // Drain earlier failures without mistaking one for this recovery.
+            while let Some((requested, bound)) = self.attempts.recv().await {
+                assert_eq!(requested, expected);
+                if let Some(bound) = bound {
+                    return bound;
+                }
+            }
+            panic!("listener manager exited before binding");
+        })
+        .await
+        .expect("listener manager did not recover the late bind")
+    }
 }
 
 #[cfg(test)]

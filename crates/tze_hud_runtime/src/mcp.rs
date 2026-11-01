@@ -1379,9 +1379,7 @@ mod tests {
             .addresses
             .send(vec![control.v4, control.v6])
             .unwrap();
-        let (requested, late) = control.next_attempt().await;
-        assert_eq!(requested, control.v6);
-        let late = late.expect("late v6 must bind");
+        let late = control.next_bound(control.v6).await;
         assert!(late.is_ipv6());
         let response = http_post(late, body, Some("root-psk")).await;
         assert!(response.contains("HTTP/1.1 200") && response.contains("hud_publish"));

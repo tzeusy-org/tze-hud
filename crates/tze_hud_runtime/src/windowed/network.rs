@@ -765,9 +765,7 @@ mod tests {
                 .addresses
                 .send(vec![control.v4, control.v6])
                 .unwrap();
-            let (requested, late) = control.next_attempt().await;
-            assert_eq!(requested, control.v6);
-            let late = late.expect("late v6 must bind");
+            let late = control.next_bound(control.v6).await;
             assert!(late.is_ipv6());
             let mut client =
                 tze_hud_protocol::proto::session::hud_session_client::HudSessionClient::connect(
