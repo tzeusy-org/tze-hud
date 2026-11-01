@@ -489,7 +489,10 @@ the same health handoff as `POST /admin/restart`, and a failed restart keeps
 this instance up and shows why), Install update (asks first; the signed
 update path of `POST /admin/update`, on this build's channel, when this copy
 is installed), Start with Windows (the per-user Run entry; installed copies
-only), Open config file, Open log folder, and the version.
+only), Open config file, Open log folder, the display profile and the window
+(read-only: `[runtime].profile`, and `--window-mode`/`--width`/`--height` or
+their `TZE_HUD_WINDOW_*` variables, each row naming its source; change them
+in the config file or the launch arguments and restart), and the version.
 
 The Layout card shows, per widget, its box as percentages of the display
 ("4%, 8% · 18×12%": x, y, width×height) and how long its content stays up.

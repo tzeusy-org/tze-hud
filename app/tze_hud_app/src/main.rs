@@ -487,18 +487,21 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
         // Apply environment variables first (lowest priority).
         if let Ok(v) = std::env::var("TZE_HUD_WINDOW_MODE") {
             opts.window_mode = parse_window_mode(&v)?;
+            opts.sources.window_mode = Source::Env("TZE_HUD_WINDOW_MODE");
         }
         if let Ok(v) = std::env::var("TZE_HUD_WINDOW_WIDTH") {
             opts.width = v
                 .parse::<u32>()
                 .map_err(|_| format!("TZE_HUD_WINDOW_WIDTH: invalid integer: {v:?}"))?;
             opts.explicit_width = true;
+            opts.sources.window_size = Source::Env("TZE_HUD_WINDOW_WIDTH");
         }
         if let Ok(v) = std::env::var("TZE_HUD_WINDOW_HEIGHT") {
             opts.height = v
                 .parse::<u32>()
                 .map_err(|_| format!("TZE_HUD_WINDOW_HEIGHT: invalid integer: {v:?}"))?;
             opts.explicit_height = true;
+            opts.sources.window_size = Source::Env("TZE_HUD_WINDOW_HEIGHT");
         }
         if let Ok(v) = std::env::var("TZE_HUD_GRPC_PORT") {
             opts.grpc_port = v
@@ -614,6 +617,7 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
                     "--window-mode requires an argument: fullscreen | overlay".to_string()
                 })?;
                 opts.window_mode = parse_window_mode(val)?;
+                opts.sources.window_mode = Source::Flag("--window-mode");
             }
             "--width" => {
                 i += 1;
@@ -624,6 +628,7 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
                     .parse::<u32>()
                     .map_err(|_| format!("--width: invalid integer: {val:?}"))?;
                 opts.explicit_width = true;
+                opts.sources.window_size = Source::Flag("--width");
             }
             "--height" => {
                 i += 1;
@@ -634,6 +639,7 @@ fn parse_options(args: &[String]) -> Result<StartupOptions, String> {
                     .parse::<u32>()
                     .map_err(|_| format!("--height: invalid integer: {val:?}"))?;
                 opts.explicit_height = true;
+                opts.sources.window_size = Source::Flag("--height");
             }
             "--grpc-port" => {
                 i += 1;
@@ -1446,6 +1452,31 @@ mod tests {
         let log = written();
         assert!(!log.contains("hidden at"), "{log}");
         assert!(log.contains("shown at debug"), "{log}");
+    }
+
+    /// The window's mode and size keep where they came from for the
+    /// control panel's System card: a flag over a variable over the default.
+    #[test]
+    fn window_settings_keep_their_source() {
+        let opts = parse_with_env(&[], &[]).unwrap();
+        assert_eq!(opts.sources.window_mode, Source::Default);
+        assert_eq!(opts.sources.window_size, Source::Default);
+        let opts = parse_with_env(
+            &[
+                ("TZE_HUD_WINDOW_MODE", "overlay"),
+                ("TZE_HUD_WINDOW_WIDTH", "1280"),
+            ],
+            &["--height", "720"],
+        )
+        .unwrap();
+        assert_eq!(opts.sources.window_mode, Source::Env("TZE_HUD_WINDOW_MODE"));
+        assert_eq!(opts.sources.window_size, Source::Flag("--height"));
+        let opts = parse_with_env(
+            &[("TZE_HUD_WINDOW_MODE", "overlay")],
+            &["--window-mode", "fullscreen"],
+        )
+        .unwrap();
+        assert_eq!(opts.sources.window_mode, Source::Flag("--window-mode"));
     }
 
     /// Flag > env > `[runtime]` > default, with each value's source kept for

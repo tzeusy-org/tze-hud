@@ -77,6 +77,10 @@ pub(crate) struct RuntimeControl {
     pub open: Opener,
     pub log_dir: PathBuf,
     pub log_level: LogLevel,
+    /// `[runtime].profile` as the config holds it.
+    pub profile: Option<String>,
+    /// The window this instance opened ("Overlay · every display").
+    pub window: String,
 }
 
 impl RuntimeControl {
@@ -157,7 +161,11 @@ impl RuntimeControl {
             .map(|(name, table)| (name, table.zones))
             .collect();
         displays.sort();
+        let profile = config.profile.clone();
+        let window = window_label(cfg);
         Self {
+            profile,
+            window,
             config_path,
             write_widget,
             write_tokens,
@@ -231,6 +239,17 @@ fn open_in_explorer(path: &Path) -> Result<(), String> {
         .map_err(|e| format!("could not start Explorer: {e}"))
 }
 
+/// The window mode and, when it applies, the size: fullscreen covers the
+/// monitor and an auto-sized overlay covers every display.
+fn window_label(cfg: &crate::windowed::WindowedConfig) -> String {
+    use crate::window::WindowMode;
+    match cfg.window.mode {
+        WindowMode::Fullscreen => "Fullscreen".to_owned(),
+        WindowMode::Overlay if cfg.overlay_auto_size => "Overlay · every display".to_owned(),
+        WindowMode::Overlay => format!("Overlay · {}×{}", cfg.window.width, cfg.window.height),
+    }
+}
+
 /// The install layout, when `exe` is the installed copy.
 fn installed(exe: Option<&Path>, paths: Option<InstallPaths>) -> Option<InstallPaths> {
     paths.filter(|p| exe.is_some_and(|exe| crate::operator::install::same_path(exe, &p.exe)))
@@ -263,6 +282,20 @@ pub(crate) mod tests {
         assert!(control.pending().is_empty());
         let control = RuntimeControl::system(&cfg(false), live(), None, None, None);
         assert_eq!(control.pending(), ["MCP port"]);
+    }
+
+    /// Fullscreen covers the monitor, an auto-sized overlay every display; a
+    /// sized overlay shows its size.
+    #[test]
+    fn window_label_names_the_mode_and_any_size() {
+        use crate::window::WindowMode;
+        let mut cfg = crate::windowed::WindowedConfig::default();
+        assert_eq!(window_label(&cfg), "Fullscreen");
+        cfg.window.mode = WindowMode::Overlay;
+        assert_eq!(window_label(&cfg), "Overlay · every display");
+        cfg.overlay_auto_size = false;
+        (cfg.window.width, cfg.window.height) = (1280, 720);
+        assert_eq!(window_label(&cfg), "Overlay · 1280×720");
     }
 
     /// Update and autostart are offered only by the installed copy.
