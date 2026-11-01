@@ -41,7 +41,6 @@ use tonic::{Request, Response, Status};
 use tze_hud_resource::{
     ResourceError as StoreResourceError, ResourceStored as StoreResourceStored,
 };
-use tze_hud_scene::types::*;
 
 // ─── Submodules (SS-1..SS-7h) ────────────────────────────────────────────────
 

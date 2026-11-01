@@ -18,6 +18,10 @@ use crate::proto::session::hud_session_server::HudSessionServer;
 use std::collections::HashMap;
 use tokio_stream::StreamExt;
 use tze_hud_scene::graph::SceneGraph;
+use tze_hud_scene::types::{
+    GeometryPolicy, ImageFitMode, Node, NodeData, PortalSurface, Rect, ResourceBudget, ResourceId,
+    SceneId, StaticImageNode, ZoneContent, ZoneRegistry,
+};
 
 /// Consume the next message from a stream.
 async fn next_server_msg(
