@@ -15,13 +15,14 @@ pub(super) struct Haystack<'a> {
 impl<'a> Haystack<'a> {
     pub(super) fn of(row: &'a Row, section: &'a str) -> Self {
         let value = match &row.control {
-            Control::ReadOnly { text, .. } | Control::Stepper { text } => Some(text.as_str()),
+            Control::ReadOnly { text, .. }
+            | Control::Stepper { text }
+            | Control::Field { text } => Some(text.as_str()),
             Control::Choice { options, selected } => options.get(*selected).map(String::as_str),
             Control::Toggle(_)
             | Control::Grant { .. }
             | Control::Disclosure { .. }
-            | Control::Action { .. }
-            | Control::Field { .. } => None,
+            | Control::Action { .. } => None,
         };
         Self {
             label: &row.label,
@@ -112,5 +113,20 @@ mod tests {
             "config-key words split on _ and ."
         );
         assert!(score("f12", &h).is_some(), "values are searchable");
+    }
+
+    /// An editable field is found by the value it holds: a chord, a font, a
+    /// port (CP-3 searches values too).
+    #[test]
+    fn field_values_are_searchable() {
+        let row = Row::new(
+            "input.panel_chord",
+            "Panel chord",
+            Control::Field {
+                text: "Ctrl+Shift+F10".into(),
+            },
+        );
+        assert!(score("f10", &Haystack::of(&row, "Input")).is_some());
+        assert!(score("f11", &Haystack::of(&row, "Input")).is_none());
     }
 }
