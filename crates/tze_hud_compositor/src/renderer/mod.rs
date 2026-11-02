@@ -852,17 +852,29 @@ impl Compositor {
     /// "When set, the wgpu adapter selection MUST request a software fallback
     /// (force_fallback_adapter = true)."
     pub async fn new_headless(width: u32, height: u32) -> Result<Self, CompositorError> {
+        let diagnostic_started = std::time::Instant::now();
+        let phase = |name: &str| {
+            eprintln!(
+                "[DEBUG-hud-vlvu6] pid={} compositor {} {:.6}s",
+                std::process::id(),
+                name,
+                diagnostic_started.elapsed().as_secs_f64()
+            );
+        };
+        phase("enter");
         // Check HEADLESS_FORCE_SOFTWARE env var (spec line 409: "conventionally
         // named HEADLESS_FORCE_SOFTWARE").
         let force_software = std::env::var("HEADLESS_FORCE_SOFTWARE")
             .map(|v| v.trim() == "1")
             .unwrap_or(false);
 
+        phase("instance-begin");
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::all(),
             ..Default::default()
         });
 
+        phase("instance-done");
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::LowPower,
@@ -871,6 +883,7 @@ impl Compositor {
             })
             .await
             .ok_or(CompositorError::NoAdapter)?;
+        phase("adapter-done");
         let adapter_info = CompositorAdapterInfo::from(adapter.get_info());
 
         let (device, queue) = adapter
@@ -886,6 +899,7 @@ impl Compositor {
             .await
             .map_err(|e| CompositorError::DeviceCreation(e.to_string()))?;
 
+        phase("device-done");
         let pipeline = Self::create_pipeline(&device);
         let clear_pipeline =
             Self::create_clear_pipeline(&device, wgpu::TextureFormat::Rgba8UnormSrgb);
@@ -911,6 +925,7 @@ impl Compositor {
             ..Default::default()
         });
 
+        phase("pipelines-done-return");
         Ok(Self {
             device,
             queue,

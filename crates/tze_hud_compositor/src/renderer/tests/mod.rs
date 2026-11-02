@@ -122,13 +122,33 @@ async fn make_compositor_and_surface(w: u32, h: u32) -> Option<(Compositor, Head
         eprintln!("SKIPPED (no GPU) reason: TZE_HUD_SKIP_GPU_TESTS=1 is set");
         return None;
     }
+    let diagnostic_started = std::time::Instant::now();
+    eprintln!(
+        "[DEBUG-hud-vlvu6] pid={} compositor-helper admission-begin",
+        std::process::id()
+    );
     let built = {
         let _guard = GPU_INIT_MUTEX.lock().await;
+        eprintln!(
+            "[DEBUG-hud-vlvu6] pid={} compositor-helper admission-acquired {:.6}s",
+            std::process::id(),
+            diagnostic_started.elapsed().as_secs_f64()
+        );
         Compositor::new_headless(w, h).await
     };
+    eprintln!(
+        "[DEBUG-hud-vlvu6] pid={} compositor-helper constructor-returned {:.6}s",
+        std::process::id(),
+        diagnostic_started.elapsed().as_secs_f64()
+    );
     match built {
         Ok(compositor) => {
             let surface = HeadlessSurface::new(&compositor.device, w, h);
+            eprintln!(
+                "[DEBUG-hud-vlvu6] pid={} compositor-helper surface-done-return {:.6}s",
+                std::process::id(),
+                diagnostic_started.elapsed().as_secs_f64()
+            );
             Some((compositor, surface))
         }
         Err(CompositorError::NoAdapter) => {

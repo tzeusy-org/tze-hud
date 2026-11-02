@@ -23,6 +23,16 @@ pub(crate) async fn lock_headless_runtime() -> MutexGuard<'static, ()> {
 /// call this while already holding `lock_headless_runtime`: the gate is not
 /// reentrant. Production builds never compile this module.
 pub(crate) async fn serialized_headless_init<F: Future>(init: F) -> F::Output {
+    let diagnostic_started = std::time::Instant::now();
+    eprintln!(
+        "[DEBUG-hud-vlvu6] pid={} admission begin",
+        std::process::id()
+    );
     let _guard = lock_headless_runtime().await;
+    eprintln!(
+        "[DEBUG-hud-vlvu6] pid={} admission acquired {:.6}s",
+        std::process::id(),
+        diagnostic_started.elapsed().as_secs_f64()
+    );
     init.await
 }

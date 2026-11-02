@@ -778,6 +778,16 @@ async fn test_texture_upload_p99_within_budget() {
     /// discarding 1 outlier rather than using the raw maximum.
     const UPLOAD_ROUNDS: usize = 100;
 
+    let diagnostic_started = std::time::Instant::now();
+    let phase = |name: &str| {
+        eprintln!(
+            "[DEBUG-hud-vlvu6] pid={} texture-test {} {:.6}s",
+            std::process::id(),
+            name,
+            diagnostic_started.elapsed().as_secs_f64()
+        );
+    };
+    phase("enter");
     let budget_us = test_budget(NOMINAL_BUDGET_US);
 
     let config = HeadlessConfig {
@@ -791,6 +801,7 @@ async fn test_texture_upload_p99_within_budget() {
         .await
         .expect("runtime init");
 
+    phase("runtime-returned");
     // Ensure there is an active tab for tile creation.
     {
         let state = runtime.shared_state().lock().await;
@@ -854,6 +865,7 @@ async fn test_texture_upload_p99_within_budget() {
         }
     }
 
+    phase("setup-warmups-done");
     // ── Measurement rounds ─────────────────────────────────────────────────────
     let mut upload_bucket = LatencyBucket::new("texture_upload");
 
@@ -900,6 +912,7 @@ async fn test_texture_upload_p99_within_budget() {
         upload_bucket.record(start.elapsed().as_micros() as u64);
     }
 
+    phase("measurement-done");
     // Timing assertion: gated — wall-clock budget that caused the
     // recurring flake hud-1aswu.3 on the blocking test-unit lane.
     // Set TZE_HUD_PERF_ASSERT=1 to enable hard p99 assertion on a reference host.
@@ -915,6 +928,9 @@ async fn test_texture_upload_p99_within_budget() {
              set TZE_HUD_PERF_ASSERT=1 to enforce budget"
         );
     }
+    phase("runtime-drop-begin");
+    drop(runtime);
+    phase("runtime-drop-done-body-return");
 }
 
 /// Assert that Stage 6 (Render Encode) p99 is within budget with text rendering
