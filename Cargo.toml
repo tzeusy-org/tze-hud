@@ -87,6 +87,9 @@ bytemuck = { version = "1", features = ["derive"] }
 blake3 = "1"
 getrandom = "0.3"
 arc-swap = "1"
+# Already in the tree through glyphon/cosmic-text; named directly only to give
+# font-system construction a scoped one-thread pool (no global per-core pool).
+rayon = "1"
 # PSK digests in the agents store (only a hash is stored).
 sha2 = "0.10"
 # Image decode for resource validation and integration test helpers.

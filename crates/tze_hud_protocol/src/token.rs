@@ -121,6 +121,9 @@ impl TokenStore {
             publication_origin,
             expires_at_ms: now_ms.saturating_add(grace_period_ms),
         };
+        // Tokens that are never presented again would otherwise stay for the
+        // life of the process; each disconnect sweeps out the expired ones.
+        self.evict_expired(now_ms);
         self.entries.insert(token, entry);
     }
 
@@ -175,8 +178,7 @@ impl TokenStore {
         }
     }
 
-    /// Remove expired entries in token-store fixtures.
-    #[cfg(test)]
+    /// Remove entries whose grace period has elapsed.
     fn evict_expired(&mut self, now_ms: u64) {
         self.entries.retain(|_, e| e.is_valid(now_ms));
     }
@@ -347,9 +349,10 @@ mod tests {
         );
     }
 
-    /// Expired entries are removed by evict_expired.
+    /// A later disconnect sweeps out tokens whose grace has elapsed, so
+    /// never-presented tokens do not accumulate with uptime.
     #[test]
-    fn test_evict_expired() {
+    fn test_insert_evicts_expired_tokens() {
         let mut store = TokenStore::new();
         let now = 1_000_000u64;
 
@@ -363,12 +366,12 @@ mod tests {
 
         assert_eq!(store.len(), 2);
 
-        // Advance time by 10 seconds
-        store.evict_expired(now + 10_000);
+        // Ten seconds later another session disconnects.
+        insert_entry(&mut store, &make_token(), "agent-c", 60_000, now + 10_000);
 
         assert_eq!(
             store.len(),
-            1,
+            2,
             "expired entry for agent-a should be evicted"
         );
 
