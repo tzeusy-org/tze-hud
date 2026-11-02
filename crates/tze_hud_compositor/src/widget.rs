@@ -2997,22 +2997,6 @@ impl WidgetRenderer {
         width: u32,
         height: u32,
     ) {
-        if let Some(entry) = self.textures.get_mut(instance_name)
-            && entry.width == width
-            && entry.height == height
-        {
-            // Same size, same allocation identity: the ledger already holds
-            // this reservation, so nothing is re-charged.
-            write_widget_pixels(queue, &entry.texture, rgba_data, width, height);
-            entry.dirty = false;
-            entry.last_rendered_params = HashMap::new();
-            #[cfg(any(test, feature = "dev-mode"))]
-            {
-                self.rgba_upload_count += 1;
-            }
-            return;
-        }
-
         let allocation_id =
             tze_hud_resource::AllocationId(format!("widget:{instance_name}:{width}x{height}"));
         if let Some(ledger) = &self.resident_ledger
@@ -3027,6 +3011,24 @@ impl WidgetRenderer {
             tracing::warn!(instance_name, "widget raster cache admission denied");
             return;
         }
+        if let Some(entry) = self.textures.get_mut(instance_name)
+            && entry.width == width
+            && entry.height == height
+        {
+            // Same size, same allocation identity: the reservation above was
+            // idempotent, so nothing is re-charged.
+            write_widget_pixels(queue, &entry.texture, rgba_data, width, height);
+            // A ledger installed after this texture was created owns it now.
+            entry.resident_allocation_id = self.resident_ledger.as_ref().map(|_| allocation_id);
+            entry.dirty = false;
+            entry.last_rendered_params = HashMap::new();
+            #[cfg(any(test, feature = "dev-mode"))]
+            {
+                self.rgba_upload_count += 1;
+            }
+            return;
+        }
+
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("widget_tex"),
             size: wgpu::Extent3d {
