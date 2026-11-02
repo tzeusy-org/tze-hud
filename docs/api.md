@@ -195,10 +195,21 @@ Before upgrading an existing `agents.toml`, remove every `tiles` allow entry,
 including one mixed with `*`; the new binary rejects it. Preserve agent ids,
 PSK hashes, `paired_at`, comments and file ACLs. Choose only the zone, widget
 and portal grants the agent needs. Tile-only agents may keep an empty allow
-list or be retired. There is no alias, automatic migration, or grant widening;
-`*` remains an explicit owner choice. Do not add upload, input or telemetry
-permissions as a substitute. Validate the edited file with the new binary and
-restart it before reconnecting agents.
+list or be retired. Zone, widget and portal grants do not restore the former
+`tiles` access to gRPC resource uploads, input/focus events, scene-topology
+events or frame telemetry. Through `agents.toml`, only `*` grants their internal
+permissions (`upload_resource`, `access_input_events`, `read_scene_topology`,
+`read_telemetry`); those names are not valid allow entries. Keeping narrow
+grants means losing that access. Choosing `*` widens access to all non-admin
+surfaces and permissions and must be an explicit owner decision. There is no
+alias, automatic migration, or automatic grant widening.
+
+Validate the edited file with the new binary and restart it before reconnecting
+agents. An invalid or unreadable `agents.toml` exits strict startup with code 1.
+A missing file starts with an empty agent directory; an invalid or unreadable
+file does the same only in debug/dev builds with
+`TZE_HUD_DEV_ALLOW_INSECURE_STARTUP=1`. An empty directory authenticates no
+agents until one is paired.
 
 - The runtime loads `agents.toml` at startup and shares it live between MCP
   and gRPC, so pairing and the control panel's Agents card (unpair, allow
