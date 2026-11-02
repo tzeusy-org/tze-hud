@@ -537,7 +537,7 @@ impl WinitApp {
             };
             // Resolve fallback geometry (agent bounds → config → default policy).
             let fallback = {
-                let Ok(scene) = state.scene.try_lock() else {
+                let Ok(mut scene) = state.scene.try_lock() else {
                     return;
                 };
                 state
@@ -545,6 +545,7 @@ impl WinitApp {
                     .entries
                     .get(&element_id)
                     .map(|entry| {
+                        tze_hud_scene::element_store::clear_live_zone_override(entry, &mut scene);
                         tze_hud_scene::element_store::fallback_geometry_for_element(
                             element_id, entry, &scene,
                         )

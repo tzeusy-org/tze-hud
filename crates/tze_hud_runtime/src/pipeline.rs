@@ -68,6 +68,8 @@ pub struct TileBoundsEntry {
 pub struct DragHandleBoundsEntry {
     /// Display-space drag-handle bounds.
     pub bounds: Rect,
+    /// For the pip resize grip, the diagonal resize cursor of its corner.
+    pub resize_cursor: Option<tze_hud_input::PortalCursor>,
 }
 
 impl HitTestSnapshot {
@@ -105,6 +107,17 @@ impl HitTestSnapshot {
             .filter(|region| region.hit_region.accepts_pointer)
             .map(|region| DragHandleBoundsEntry {
                 bounds: region.bounds,
+                resize_cursor: region.is_resize_grip.then(|| {
+                    // The grip sits in one corner of the element: `╲` for
+                    // top-left/bottom-right, `╱` for the other two.
+                    let left = region.bounds.x <= region.element_bounds.x + 0.5;
+                    let top = region.bounds.y <= region.element_bounds.y + 0.5;
+                    if left == top {
+                        tze_hud_input::PortalCursor::NwseResize
+                    } else {
+                        tze_hud_input::PortalCursor::NeswResize
+                    }
+                }),
             })
             .collect();
         Self {
@@ -139,6 +152,14 @@ impl HitTestSnapshot {
         self.drag_handles
             .iter()
             .any(|handle| handle.bounds.contains_point(x, y))
+    }
+
+    /// The resize cursor when (x, y) is over the pip resize grip.
+    pub fn resize_grip_cursor(&self, x: f32, y: f32) -> Option<tze_hud_input::PortalCursor> {
+        self.drag_handles
+            .iter()
+            .find(|handle| handle.bounds.contains_point(x, y))
+            .and_then(|handle| handle.resize_cursor)
     }
 }
 

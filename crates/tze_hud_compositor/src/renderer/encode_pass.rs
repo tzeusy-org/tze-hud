@@ -398,7 +398,7 @@ impl super::Compositor {
                 continue;
             }
 
-            let (x, y, w, h) = self.zone_geometry(zone_name, &zone_def.geometry_policy, sw, sh);
+            let (x, y, w, h) = self.zone_geometry(scene, zone_name, sw, sh);
             let out = match zone_def.layer_attachment {
                 LayerAttachment::Background => &mut result.background,
                 LayerAttachment::Content => &mut result.content,

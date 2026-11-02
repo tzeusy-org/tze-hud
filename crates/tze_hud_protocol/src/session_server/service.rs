@@ -269,12 +269,13 @@ impl HudSessionImpl {
                 return false;
             }
             // Resolve fallback geometry (agent bounds → config → default policy).
-            let scene = st.scene.lock().await;
+            let mut scene = st.scene.lock().await;
             let fallback = st
                 .element_store
                 .entries
                 .get(&element_id)
                 .map(|entry| {
+                    tze_hud_scene::element_store::clear_live_zone_override(entry, &mut scene);
                     tze_hud_scene::element_store::fallback_geometry_for_element(
                         element_id, entry, &scene,
                     )

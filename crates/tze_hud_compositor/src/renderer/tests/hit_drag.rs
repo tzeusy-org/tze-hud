@@ -1298,3 +1298,121 @@ fn zone_hit_regions_and_slot_pitch_scale_with_px_scale() {
     let secondary = regions(&[(PX_SCALE_KEY, "1.5"), ("runtime.px_scale@notif", "1")]);
     assert_eq!(secondary, one, "a 1x secondary ignores the 1.5x primary");
 }
+
+// ── Pip: image-aspect box and resize grip ─────────────────────────────────
+
+/// The default zones on a 1920x1080 canvas, with `content` published to pip.
+fn pip_scene(content: ZoneContent) -> SceneGraph {
+    let mut scene = SceneGraph::new(1920.0, 1080.0);
+    scene.zone_registry = ZoneRegistry::with_defaults();
+    scene
+        .publish_to_zone(PIP_ZONE, content, "agent-a", None, None, None)
+        .unwrap();
+    scene
+}
+
+/// The pip's (move handle, resize grip) regions after a drag-handle pass.
+fn pip_handles(scene: &SceneGraph) -> (DragHandleHitRegion, DragHandleHitRegion) {
+    let pip_id = scene.zone_registry.zones[PIP_ZONE].id;
+    let mut regions = scene
+        .overlay
+        .drag_handle_hit_regions
+        .iter()
+        .filter(|r| r.element_id == pip_id)
+        .cloned();
+    let (a, b) = (regions.next().unwrap(), regions.next().unwrap());
+    assert!(regions.next().is_none(), "pip gets one handle and one grip");
+    if a.is_resize_grip { (b, a) } else { (a, b) }
+}
+
+fn assert_close(a: f32, b: f32, what: &str) {
+    assert!((a - b).abs() < 0.5, "{what}: {a} vs {b}");
+}
+
+/// A 2:1 image reshapes the pip box to 2:1 — same area, the corner it hugs
+/// (bottom-right) pinned — so the image is drawn unstretched; the resize
+/// grip sits in the corner facing the display centre.
+#[tokio::test]
+async fn pip_box_takes_the_image_aspect_and_gets_a_resize_grip() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    let bytes = [255u8; 4].repeat(16 * 8);
+    let image = ResourceId::of(&bytes);
+    compositor.register_image_bytes(image, std::sync::Arc::from(bytes), 16, 8);
+    let mut scene = pip_scene(ZoneContent::StaticImage(image));
+
+    populate_drag_handles(&compositor, &mut scene, 1920.0, 1080.0);
+    let (handle, grip) = pip_handles(&scene);
+    let r = handle.element_bounds;
+    let (dw, dh) = (1920.0 * 0.22, 1080.0 * 0.26);
+    assert!((r.width / r.height - 2.0).abs() < 1e-3, "2:1 box: {r:?}");
+    assert_close(r.width * r.height, dw * dh, "area kept");
+    assert_close(r.x + r.width, 1920.0 * 0.97, "right edge pinned");
+    assert_close(r.y + r.height, 1080.0 * 0.96, "bottom edge pinned");
+
+    assert!(grip.is_resize_grip && grip.element_bounds == r);
+    assert_eq!((grip.bounds.x, grip.bounds.y), (r.x, r.y), "top-left grip");
+    assert!(grip.interaction_id.starts_with("resize-grip:"));
+}
+
+/// Solid colour keeps the configured box; a viewer override replaces it and
+/// an override already at the image's ratio is drawn exactly as stored.
+#[tokio::test]
+async fn pip_box_follows_the_viewer_override() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    let mut scene = pip_scene(ZoneContent::SolidColor(Rgba::new(1.0, 0.0, 0.0, 1.0)));
+    populate_drag_handles(&compositor, &mut scene, 1920.0, 1080.0);
+    let r = pip_handles(&scene).0.element_bounds;
+    assert_close(r.x, 1920.0 * 0.75, "x");
+    assert_close(r.width, 1920.0 * 0.22, "width");
+    assert_close(r.height, 1080.0 * 0.26, "height");
+
+    let stored = Rect::new(200.0, 100.0, 400.0, 200.0);
+    scene.zone_registry.geometry_overrides.insert(
+        PIP_ZONE.to_string(),
+        rect_to_relative_geometry_policy(stored, 1920.0, 1080.0),
+    );
+    populate_drag_handles(&compositor, &mut scene, 1920.0, 1080.0);
+    let r = pip_handles(&scene).0.element_bounds;
+    assert_close(r.x, 200.0, "override x");
+    assert_close(r.width, 400.0, "override width");
+
+    let bytes = [255u8; 4].repeat(16 * 8);
+    let image = ResourceId::of(&bytes);
+    compositor.register_image_bytes(image, std::sync::Arc::from(bytes), 16, 8);
+    scene
+        .publish_to_zone(
+            PIP_ZONE,
+            ZoneContent::StaticImage(image),
+            "agent-a",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    populate_drag_handles(&compositor, &mut scene, 1920.0, 1080.0);
+    let r = pip_handles(&scene).0.element_bounds;
+    for (a, b, what) in [
+        (r.x, 200.0, "x"),
+        (r.y, 100.0, "y"),
+        (r.width, 400.0, "w"),
+        (r.height, 200.0, "h"),
+    ] {
+        assert_close(a, b, what);
+    }
+}
+
+#[test]
+fn fit_rect_to_aspect_shrinks_to_fit_and_stays_on_screen() {
+    let screen = Rect::new(0.0, 0.0, 1000.0, 500.0);
+    // A 1:4 portrait from a 400x400 box near the top-left: area kept would
+    // be 200x800, taller than the screen, so it shrinks to 125x500 with the
+    // top-left corner pinned.
+    let r = fit_rect_to_aspect(Rect::new(10.0, 10.0, 400.0, 400.0), 0.25, screen);
+    assert_close(r.width, 125.0, "w");
+    assert_close(r.height, 500.0, "h");
+    assert_close(r.x, 10.0, "x");
+    assert_close(r.y, 0.0, "y clamped on screen");
+    // A degenerate ratio leaves the box alone.
+    let b = Rect::new(1.0, 2.0, 3.0, 4.0);
+    assert_eq!(fit_rect_to_aspect(b, 0.0, screen), b);
+}

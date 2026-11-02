@@ -305,7 +305,7 @@ impl super::Compositor {
                 continue;
             }
 
-            let (zx, zy, zw, zh) = self.zone_geometry(zone_name, &zone_def.geometry_policy, sw, sh);
+            let (zx, zy, zw, zh) = self.zone_geometry(scene, zone_name, sw, sh);
 
             match zone_def.contention_policy {
                 ContentionPolicy::Stack { .. } => {
@@ -470,7 +470,7 @@ impl super::Compositor {
             let scale = tze_hud_config::tokens::px_scale(zone_tokens);
 
             // Resolve zone geometry to pixel bounds.
-            let (zx, zy, zw, zh) = self.zone_geometry(zone_name, &zone_def.geometry_policy, sw, sh);
+            let (zx, zy, zw, zh) = self.zone_geometry(scene, zone_name, sw, sh);
 
             let policy = &zone_def.rendering_policy;
 

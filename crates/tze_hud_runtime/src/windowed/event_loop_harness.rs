@@ -183,6 +183,7 @@ impl WindowedRuntimeState {
             pending_blur_delivery_context: None,
             composer_pointer_drag_anchor: None,
             portal_resize_states: HashMap::new(),
+            zone_resize: None,
             consumed_portal_resize_keydowns: HashSet::new(),
             consumed_shell_shortcut_keydowns: HashSet::new(),
             panel_input: crate::windowed::panel_input::PanelInputState::default(),

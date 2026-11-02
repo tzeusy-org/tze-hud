@@ -53,6 +53,9 @@ pub(super) struct DragHandleEntry {
     /// handles yield to interactive controls under the point and render no visual
     /// of their own (the client draws the header) — hud-643dv.
     pub(super) is_header_band: bool,
+    /// When `true`, this entry is the pip zone's resize grip (a square in the
+    /// corner facing the display centre) rather than a move handle.
+    pub(super) is_resize_grip: bool,
 }
 
 /// Compute the UV rectangle and destination rectangle for a given fit mode.

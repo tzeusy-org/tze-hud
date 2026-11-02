@@ -807,6 +807,30 @@ impl ZoneSlotLayout {
     }
 }
 
+/// `r` reshaped to `aspect` (width / height): same area, shrunk to fit
+/// `bounds`, with the corner farthest from the centre of `bounds` (the one
+/// the box hugs) pinned, then kept inside `bounds`. A box that already has
+/// the ratio comes back unchanged, so a stored viewer resize is stable.
+pub(crate) fn fit_rect_to_aspect(r: Rect, aspect: f32, bounds: Rect) -> Rect {
+    if !(aspect.is_finite() && aspect > 0.0 && r.width > 0.0 && r.height > 0.0) {
+        return r;
+    }
+    let area = r.width * r.height;
+    let (w, h) = ((area * aspect).sqrt(), (area / aspect).sqrt());
+    let shrink = (bounds.width / w).min(bounds.height / h).min(1.0);
+    let (w, h) = (w * shrink, h * shrink);
+    let right = r.x + r.width * 0.5 > bounds.x + bounds.width * 0.5;
+    let bottom = r.y + r.height * 0.5 > bounds.y + bounds.height * 0.5;
+    let x = if right { r.x + r.width - w } else { r.x };
+    let y = if bottom { r.y + r.height - h } else { r.y };
+    Rect::new(
+        x.clamp(bounds.x, (bounds.x + bounds.width - w).max(bounds.x)),
+        y.clamp(bounds.y, (bounds.y + bounds.height - h).max(bounds.y)),
+        w,
+        h,
+    )
+}
+
 /// [`Compositor::zone_geometry`] for callers without a compositor (the
 /// GPU-free notification hit-region path).
 pub(crate) fn zone_geometry_in(
@@ -1380,17 +1404,49 @@ impl Compositor {
         self.display_layout = layout;
     }
 
-    /// Resolve a zone's geometry in canvas (scene) pixels: against its
-    /// assigned display when that display is connected, else against the
-    /// canvas `sw`×`sh`.
+    /// Resolve a zone's geometry in canvas (scene) pixels: its viewer
+    /// override or default policy, against its assigned display when that
+    /// display is connected, else against the canvas `sw`×`sh`. The pip box
+    /// then takes the aspect ratio of the image it shows, so the image is
+    /// never stretched.
     pub(super) fn zone_geometry(
         &self,
+        scene: &SceneGraph,
         zone_name: &str,
-        policy: &GeometryPolicy,
         sw: f32,
         sh: f32,
     ) -> (f32, f32, f32, f32) {
-        zone_geometry_in(&self.display_layout, zone_name, policy, sw, sh)
+        let Some(policy) = scene.zone_registry.geometry_policy_for(zone_name) else {
+            return (0.0, 0.0, 0.0, 0.0);
+        };
+        let (x, y, w, h) = zone_geometry_in(&self.display_layout, zone_name, &policy, sw, sh);
+        let Some(aspect) = self.pip_image_aspect(scene, zone_name) else {
+            return (x, y, w, h);
+        };
+        let bounds = self
+            .display_layout
+            .zone_display_rect(zone_name)
+            .unwrap_or(Rect::new(0.0, 0.0, sw, sh));
+        let r = fit_rect_to_aspect(Rect::new(x, y, w, h), aspect, bounds);
+        (r.x, r.y, r.width, r.height)
+    }
+
+    /// Width/height of the image the pip zone shows, when its bytes are
+    /// registered; `None` for any other zone or content.
+    fn pip_image_aspect(&self, scene: &SceneGraph, zone_name: &str) -> Option<f32> {
+        if zone_name != PIP_ZONE {
+            return None;
+        }
+        let latest = scene
+            .zone_registry
+            .active_publishes
+            .get(zone_name)?
+            .last()?;
+        let ZoneContent::StaticImage(id) = &latest.content else {
+            return None;
+        };
+        let &(w, h) = self.image_dims.get(id)?;
+        (w > 0 && h > 0).then(|| w as f32 / h as f32)
     }
 
     /// Record an actual window-surface lifecycle outcome without widening any

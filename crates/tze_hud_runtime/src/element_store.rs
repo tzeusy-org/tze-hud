@@ -219,6 +219,7 @@ pub fn bootstrap_scene_element_store_with_path(
         );
     }
     relock_tiles_with_durable_override(scene, &store);
+    restore_zone_geometry_overrides(scene, &store);
     if changed || gc.mutated || !existed {
         if let Err(err) = persist_element_store_to_path(&store, &path) {
             tracing::warn!(
@@ -250,6 +251,25 @@ fn relock_tiles_with_durable_override(scene: &mut SceneGraph, store: &ElementSto
     for (id, entry) in &store.entries {
         if entry.element_type == ElementType::Tile && entry.geometry_override.is_some() {
             scene.lock_viewer_geometry(*id);
+        }
+    }
+}
+
+/// Place every zone the viewer moved or resized (drag handle, pip resize
+/// grip) where they left it. Runs after reconcile, so zone ids match the
+/// store's.
+fn restore_zone_geometry_overrides(scene: &mut SceneGraph, store: &ElementStore) {
+    let registry = &mut scene.zone_registry;
+    for zone in registry.zones.values() {
+        if let Some(policy) = store
+            .entries
+            .get(&zone.id)
+            .filter(|e| e.element_type == ElementType::Zone)
+            .and_then(|e| e.geometry_override)
+        {
+            registry
+                .geometry_overrides
+                .insert(zone.name.clone(), policy);
         }
     }
 }
@@ -758,5 +778,43 @@ mod tests {
             !scene.is_viewer_geometry_locked(unlocked_tile),
             "a tile with no override must not be locked"
         );
+    }
+
+    /// A zone the viewer moved comes back where they left it after a
+    /// restart, and "Reset to default" returns it to its default policy.
+    #[test]
+    fn zone_override_survives_restart_and_reset_clears_it() {
+        let path = test_path("zone-override");
+        let _ = std::fs::remove_file(&path);
+        let moved = GeometryPolicy::Relative {
+            x_pct: 0.1,
+            y_pct: 0.2,
+            width_pct: 0.5,
+            height_pct: 0.1,
+        };
+
+        let mut first_scene = make_scene_with_zone_and_widget();
+        let mut first = bootstrap_scene_element_store_with_path(&mut first_scene, path.clone());
+        let zone_id = first_scene.zone_registry.zones["subtitle"].id;
+        assert!(first.store.set_geometry_override(zone_id, moved));
+        persist_element_store_to_path(&first.store, &path).expect("persist");
+
+        let mut scene = make_scene_with_zone_and_widget();
+        let mut second = bootstrap_scene_element_store_with_path(&mut scene, path.clone());
+        assert_eq!(
+            scene.zone_registry.geometry_policy_for("subtitle"),
+            Some(moved)
+        );
+
+        second.store.reset_geometry_override(zone_id);
+        tze_hud_scene::element_store::clear_live_zone_override(
+            &second.store.entries[&zone_id],
+            &mut scene,
+        );
+        assert_eq!(
+            scene.zone_registry.geometry_policy_for("subtitle"),
+            Some(scene.zone_registry.zones["subtitle"].geometry_policy)
+        );
+        let _ = std::fs::remove_file(path);
     }
 }

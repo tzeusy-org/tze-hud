@@ -2138,6 +2138,14 @@ pub struct DragHandleHitRegion {
     /// chrome-priority precedence.
     #[serde(default)]
     pub is_header_band: bool,
+    /// Display-space bounds of the element as drawn this frame. A zone's
+    /// drag or resize starts from these (zones are not tiles, and the pip's
+    /// drawn box can differ from its policy when it fits an image).
+    pub element_bounds: Rect,
+    /// When `true`, this is the pip zone's resize grip: dragging it resizes
+    /// the zone with its aspect ratio pinned instead of moving it.
+    #[serde(default)]
+    pub is_resize_grip: bool,
 }
 
 /// Local-first hover/press state for runtime chrome controls: drag handles
@@ -2953,14 +2961,34 @@ pub struct ZoneRegistry {
     /// For Stack: ordered oldest-first, bounded by max_depth.
     /// For MergeByKey: keyed by merge_key, bounded by max_keys.
     pub active_publishes: HashMap<String, Vec<ZonePublishRecord>>,
+    /// Viewer-set geometry per zone name (a drag-handle move or the pip
+    /// resize grip), taking precedence over the zone's default
+    /// `geometry_policy`. Durable copies live in the element store and are
+    /// loaded at startup; "Reset to default" removes the entry.
+    #[serde(default, skip)]
+    pub geometry_overrides: HashMap<String, GeometryPolicy>,
 }
+
+/// The picture-in-picture zone: the one zone with a resize grip, and whose
+/// box takes the aspect ratio of the image it shows.
+pub const PIP_ZONE: &str = "pip";
 
 impl ZoneRegistry {
     pub fn new() -> Self {
         Self {
             zones: HashMap::new(),
             active_publishes: HashMap::new(),
+            geometry_overrides: HashMap::new(),
         }
+    }
+
+    /// The geometry a zone is placed with now: the viewer's override, else
+    /// the zone's default policy.
+    pub fn geometry_policy_for(&self, zone_name: &str) -> Option<GeometryPolicy> {
+        self.geometry_overrides
+            .get(zone_name)
+            .copied()
+            .or_else(|| self.zones.get(zone_name).map(|z| z.geometry_policy))
     }
 
     /// Create a registry pre-populated with the default v1 zones.
