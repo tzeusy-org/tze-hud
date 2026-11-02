@@ -540,7 +540,7 @@ mod panel_task_tests {
         // `if !control_panel_open() { press_control_panel_hotkey() }` decision.
         // None means the continuation must still wait; Some(false) skips open.
         let continue_after_resume = || {
-            if !f.paused() {
+            if !f.paused() && !f.panel.is_open() {
                 Some(!f.panel.is_open())
             } else {
                 None
