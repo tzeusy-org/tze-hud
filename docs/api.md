@@ -381,8 +381,10 @@ Handshake and resume send no scene content, foreign portal transcript or draft.
   clearing, human override and lease/session-origin reclamation (invariant 4);
   Hold does not make a lease immortal. There is no atomic held mode on Publish.
 - **Runtime-internal mutations.** `MutationBatch` / `TimingHints` containers
-  and `MutationProto` 1, 10 and 13–17 remain internal scene contracts. No public
-  session route dispatches them. Native portal rendering stays in-process.
+  and `MutationProto` fields 1, 2 and 6–12 remain internal scene contracts.
+  Portal-only fields 13–17 and their names are reserved; their messages and
+  converters are removed. No public session route dispatches internal mutations.
+  Native portal rendering uses checked direct scene methods in-process.
 
 ## Configuration
 

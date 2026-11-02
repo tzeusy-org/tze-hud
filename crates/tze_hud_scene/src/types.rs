@@ -258,9 +258,8 @@ impl Rgba {
 /// edge to signal the portal's lifecycle state (active / waiting-for-input /
 /// blocked / degraded / detached). Stored as overlay state keyed by tile id
 /// (see [`crate::graph::overlay`]) rather than as a scene node, so it survives
-/// `SetTileRoot`/`PublishToTile` content republishes and is updated via the
-/// coalescible StateStream `SetTileLifecycleAccent` mutation — never a
-/// per-republish `AddNode` (hud-m48i0 / hud-mzk74).
+/// tile-root content republishes and is updated via the native driver's checked
+/// direct accent setter without per-republish `AddNode` work.
 ///
 /// Color and width are token-resolved by the producer (the portal adapter
 /// reads `portal.lifecycle.*` design tokens); no literal visual value lives in
@@ -286,10 +285,9 @@ pub struct LifecycleAccent {
 // The part set and its cross-map to the Phase-0 raw tiles is defined by the
 // `text-portal` component type (component-shape-language delta, hud-2ey2w). This
 // schema carries no transcript history and adds no transport: a portal surface is
-// declared over an existing lease-governed tile via the Transactional
-// `SetPortalSurface` mutation and its lifecycle/display state is patched via the
-// coalescible StateStream `UpdatePortalSurfaceState` mutation. Per-part layout,
-// styling, and rendering are owned by the renderer promotion beads (hud-s4lrw);
+// declared over an existing lease-governed tile via `set_portal_surface` and its
+// lifecycle/display state is patched via `update_portal_surface_state`.
+// Per-part layout, styling, and rendering are owned by the renderer promotion beads (hud-s4lrw);
 // this type deliberately holds only the declarative surface contract.
 
 /// Peer class of the party on the far side of a portal's text stream

@@ -132,24 +132,20 @@ pub struct RuntimeOverlayState {
     pub tile_unread_counts: HashMap<SceneId, usize>,
     /// Runtime-owned lifecycle-affordance accents per tile.
     ///
-    /// Set by the [`SceneMutation::SetTileLifecycleAccent`] apply path (driven by
-    /// the coalescible StateStream `SetTileLifecycleAccent` wire mutation) and
-    /// read by the compositor, which paints a token-colored left-edge bar.
+    /// Set by the native portal driver's checked direct method and read by the
+    /// compositor, which paints a token-colored left-edge bar.
     ///
     /// Lives here, keyed by tile id, rather than as a scene node so it survives
     /// `SetTileRoot`/`PublishToTile` content republishes (which replace the whole
     /// node tree). This is what keeps lifecycle-visible portals coalescible —
     /// the accent is never re-added as a per-republish `AddNode` (hud-m48i0).
     ///
-    /// [`SceneMutation::SetTileLifecycleAccent`]: crate::mutation::SceneMutation::SetTileLifecycleAccent
-    ///
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
     pub tile_lifecycle_accents: HashMap<SceneId, LifecycleAccent>,
     /// Runtime-owned composer interaction hit-region specs per tile (hud-iofav).
     ///
-    /// Set by the [`SceneMutation::SetTileComposerInteraction`] apply path (driven
-    /// by the coalescible StateStream `SetTileComposerInteraction` wire mutation).
+    /// Set by the native portal driver's checked direct composer method.
     /// The scene derives a [`crate::types::HitRegionNode`] child of the tile root
     /// from this spec and RE-ATTACHES it after every `SetTileRoot`/`PublishToTile`
     /// content republish — which replaces the whole node tree and would otherwise
@@ -163,8 +159,6 @@ pub struct RuntimeOverlayState {
     /// The derived hit region stays a real scene node so `hit_test`, focus, and the
     /// `ComposerDraftManager` operate unchanged — it is synthesized server-side as a
     /// derived consequence of this overlay, not as an inbound `AddNode`.
-    ///
-    /// [`SceneMutation::SetTileComposerInteraction`]: crate::mutation::SceneMutation::SetTileComposerInteraction
     ///
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
@@ -184,21 +178,13 @@ pub struct RuntimeOverlayState {
     /// First-class text-stream portal surface descriptors, keyed by host tile id
     /// (hud-tc153).
     ///
-    /// Declared by the Transactional [`SceneMutation::SetPortalSurface`] apply
-    /// path and patched by the coalescible StateStream
-    /// [`SceneMutation::UpdatePortalSurfaceState`] path. Lives here, keyed by tile
-    /// id, rather than as a scene node so it survives `SetTileRoot`/`PublishToTile`
-    /// transcript republishes that replace the tile's node tree — the same
-    /// coalescing rationale as [`tile_lifecycle_accents`](Self::tile_lifecycle_accents).
+    /// Declared and patched by the native portal driver's checked direct methods.
+    /// Lives here, keyed by tile id, so it survives transcript-root republishes
+    /// that replace the tile's node tree.
     ///
-    /// The descriptor is adapter-driven metadata (like the lifecycle accent). It is
-    /// `#[serde(skip)]` here, but is included in the full scene snapshot as
-    /// [`SceneGraphSnapshot::portal_surfaces`](crate::types::SceneGraphSnapshot::portal_surfaces)
-    /// so a reconnecting session recovers its declared surfaces from the snapshot
-    /// rather than re-declaring blindly (hud-ruynm reconnect parity).
-    ///
-    /// [`SceneMutation::SetPortalSurface`]: crate::mutation::SceneMutation::SetPortalSurface
-    /// [`SceneMutation::UpdatePortalSurfaceState`]: crate::mutation::SceneMutation::UpdatePortalSurfaceState
+    /// Included in the internal full scene snapshot as
+    /// [`SceneGraphSnapshot::portal_surfaces`](crate::types::SceneGraphSnapshot::portal_surfaces).
+    /// No public session snapshot route exposes this descriptor.
     ///
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
@@ -653,8 +639,7 @@ impl SceneGraph {
 
     /// Patch the lifecycle and/or display state of an existing portal surface.
     ///
-    /// This is the coalescible StateStream update path: a `None` field is left
-    /// unchanged. Errors if no portal surface has been declared on `tile_id`.
+    /// A `None` field is left unchanged. Errors if no portal surface has been declared on `tile_id`.
     /// Bumps `scene.version` only when a field actually changes.
     ///
     /// Enforces the same namespace + live lease gate as
@@ -732,7 +717,7 @@ impl SceneGraph {
     /// a removed node would dangle. Rather than leave stale `SceneId`s that
     /// consumers cannot resolve, this nulls them back to "not yet materialized"
     /// (`node = None`); the owning adapter re-binds them on its next
-    /// `SetPortalSurface`. Bumps `scene.version` only when a reference is actually
+    /// `set_portal_surface`. Bumps `scene.version` only when a reference is actually
     /// pruned. Called by the tile-root replacement path (hud-tc153 review P2).
     pub(crate) fn revalidate_portal_surface_part_nodes(&mut self, tile_id: SceneId) {
         // Collect the stale node refs first to avoid borrowing `self` mutably and

@@ -70,9 +70,9 @@ pub const DEFAULT_AUTO_UNFREEZE_MS: u64 = 5 * 60 * 1_000;
 /// operations contained in the batch:
 ///
 /// - Any structural / identity-changing mutation (`CreateTile`, `DeleteTile`,
-///   `CreateTab`, `SwitchActiveTab`, `SetPortalSurface`) → **Transactional**.
+///   `CreateTab`, `SwitchActiveTab`) → **Transactional**.
 /// - Content / state mutations (`SetTileRoot`, `AddNode`, `UpdateTileBounds`,
-///   `PublishToZone`, `ClearZone`, `UpdatePortalSurfaceState`) → **StateStream**.
+///   `PublishToZone`, `ClearZone`) → **StateStream**.
 /// - Ephemeral batches are not currently expressed at the `MutationBatch`
 ///   level; this variant is reserved for future use.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -569,31 +569,20 @@ impl Default for FreezeManager {
 ///
 /// The caller passes a slice of mutation kind strings. The recognised
 /// transactional kinds are:
-/// `"create_tile"`, `"delete_tile"`, `"create_tab"`, `"switch_active_tab"`,
-/// `"set_portal_surface"`.
-///
-/// Everything else is classified as StateStream. This mirrors the authoritative
-/// protocol-layer classifier
-/// (`tze_hud_protocol::session_server::traffic::classify_inbound_batch`) for the
-/// structural-vs-coalescible split: `set_portal_surface` declares the first-class
-/// portal surface (identity + parts) and must never be evicted under freeze
-/// pressure, while `update_portal_surface_state` is a coalescible lifecycle/display
-/// patch (StateStream).
+/// `"create_tile"`, `"delete_tile"`, `"create_tab"`, `"switch_active_tab"`.
+/// Everything else is classified as StateStream. These generic queue helpers
+/// are not the native portal admission path; checked scene methods reject
+/// updates while the portal lease is suspended.
 pub fn classify_mutation_batch(mutation_kinds: &[&str]) -> MutationTrafficClass {
     let mut highest = MutationTrafficClass::Ephemeral;
     for kind in mutation_kinds {
         match *kind {
-            "create_tile" | "delete_tile" | "create_tab" | "switch_active_tab"
-            | "set_portal_surface" => {
+            "create_tile" | "delete_tile" | "create_tab" | "switch_active_tab" => {
                 // Transactional is the highest class — short-circuit.
                 return MutationTrafficClass::Transactional;
             }
-            "set_tile_root"
-            | "add_node"
-            | "update_tile_bounds"
-            | "publish_to_zone"
-            | "clear_zone"
-            | "update_portal_surface_state" => {
+            "set_tile_root" | "add_node" | "update_tile_bounds" | "publish_to_zone"
+            | "clear_zone" => {
                 highest = MutationTrafficClass::StateStream;
             }
             _ => {
@@ -967,33 +956,12 @@ mod tests {
     }
 
     #[test]
-    fn test_classify_set_portal_surface_is_transactional() {
-        // The first-class portal surface DECLARATION is structural (identity +
-        // parts) and must never be evicted under freeze pressure — parity with
-        // the authoritative protocol classifier (classify_inbound_batch).
-        assert_eq!(
-            classify_mutation_batch(&["set_portal_surface"]),
-            MutationTrafficClass::Transactional,
-        );
-    }
-
-    #[test]
-    fn test_classify_update_portal_surface_state_is_state_stream() {
-        // The lifecycle/display PATCH is a coalescible content update.
-        assert_eq!(
-            classify_mutation_batch(&["update_portal_surface_state"]),
-            MutationTrafficClass::StateStream,
-        );
-    }
-
-    #[test]
     fn test_all_transactional_kinds() {
         let kinds = [
             "create_tile",
             "delete_tile",
             "create_tab",
             "switch_active_tab",
-            "set_portal_surface",
         ];
         for kind in &kinds {
             assert_eq!(
