@@ -288,7 +288,9 @@ def check_notification_error_result(measurement, baseline, report):
         reasons = _validate_operation(transaction, f"{name}.transaction")
         reasons.extend(_validate_operation_total(transaction, f"{name}.transaction"))
         reasons.extend(_validate_counts(candidate.get("result_text"), f"{name}.result_text"))
-    ceiling = baseline.get("budgets", {}).get("flows", {}).get("error")
+    budgets = baseline.get("budgets")
+    flows = budgets.get("flows") if isinstance(budgets, dict) else None
+    ceiling = flows.get("error") if isinstance(flows, dict) else None
     if not isinstance(ceiling, int) or isinstance(ceiling, bool) or ceiling < 0:
         reasons.append("missing or invalid error result ceiling")
     if reasons:

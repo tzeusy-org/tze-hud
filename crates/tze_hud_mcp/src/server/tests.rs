@@ -407,7 +407,7 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
         )
     };
     for delay_ms in [0, 1000] {
-        let (server, _, a, b) = two_agents();
+        let (server, _, a, b) = two_agents_for_zones(&["subtitle", "notification-area"]);
         let wakes = Arc::new(AtomicUsize::new(0));
         let observed = wakes.clone();
         let server = server.with_render_wake_notifier(
@@ -769,18 +769,22 @@ async fn delayed_notification_expiry_matches_immediate() {
     }
 }
 
-/// Two agents that may both publish subtitles and notifications, with their bearers.
+/// Two agents that may both use `zone:subtitle`, with their bearers.
 fn two_agents() -> (McpServer, TestClock, CallerContext, CallerContext) {
+    two_agents_for_zones(&["subtitle"])
+}
+
+fn two_agents_for_zones(zones: &[&str]) -> (McpServer, TestClock, CallerContext, CallerContext) {
     let clock = TestClock::new(1_000);
     let mut agents = AgentDirectory::default();
     for (id, key) in [("a", "a-key"), ("b", "b-key")] {
         agents.insert(
             id,
             hash_psk(key),
-            vec![
-                "publish_zone:subtitle".to_string(),
-                "publish_zone:notification-area".to_string(),
-            ],
+            zones
+                .iter()
+                .map(|zone| format!("publish_zone:{zone}"))
+                .collect(),
         );
     }
     let server = McpServer::new(scene(&clock)).with_config(McpConfig::with_agents(agents.shared()));

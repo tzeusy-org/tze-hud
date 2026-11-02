@@ -216,6 +216,15 @@ class GateTests(unittest.TestCase):
         report = checker.compare(fixture(), baseline)
         self.assertEqual(report["status"], "baseline_incompatible")
         self.assertIn("budgets", " ".join(report["incompatibilities"]))
+        for budgets in [None, [], {"flows": None}, {"flows": []}, {}]:
+            with self.subTest(malformed_budgets=budgets):
+                baseline["budgets"] = budgets
+                report = checker.compare(fixture(), baseline)
+                original = report["incompatibilities"].copy()
+                checker.check_notification_error_result(fixture(), baseline, report)
+                self.assertEqual(report["status"], "baseline_incompatible")
+                self.assertEqual(report["incompatibilities"][:len(original)], original)
+                self.assertIn("missing or invalid error result ceiling", report["incompatibilities"])
 
     def test_unapproved_baseline_fails_closed(self):
         report = checker.compare(fixture(), fixture())
