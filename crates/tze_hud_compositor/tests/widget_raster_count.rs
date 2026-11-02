@@ -887,8 +887,8 @@ fn overlapping_gauges_frame(
 }
 
 /// Every widget shares one z-order, so overlapping widgets stack by instance
-/// name, the same on every frame and every run, whatever order they were
-/// registered in.
+/// name on every frame and every run, independent of the instance map's
+/// iteration order (a `HashMap`, reseeded per scene).
 #[tokio::test]
 async fn overlapping_widgets_stack_by_instance_name() {
     if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {

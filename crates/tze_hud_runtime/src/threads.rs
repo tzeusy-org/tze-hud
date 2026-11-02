@@ -221,9 +221,10 @@ pub struct NetworkRuntime {
     pub rt: Runtime,
 }
 
-/// Network worker threads. A handful of trusted agents publishing small
-/// payloads never saturates two workers; tokio's default (one per logical CPU)
-/// only adds parked threads, 16+ on a desktop.
+/// Network worker threads. A handful of trusted agents never saturates two
+/// workers as long as CPU-heavy work (resource hashing and decode) goes to
+/// `spawn_blocking`; tokio's default (one per logical CPU) only adds parked
+/// threads, 16+ on a desktop.
 const NETWORK_WORKER_THREADS: usize = 2;
 
 impl NetworkRuntime {

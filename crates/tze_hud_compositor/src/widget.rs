@@ -3030,7 +3030,7 @@ impl WidgetRenderer {
         }
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("widget_tex"),
+            label: Some(&format!("widget_tex_{instance_name}")),
             size: wgpu::Extent3d {
                 width,
                 height,
@@ -3055,7 +3055,7 @@ impl WidgetRenderer {
 
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("widget_bg"),
+            label: Some(&format!("widget_bg_{instance_name}")),
             layout: &self.texture_bind_group_layout,
             entries: &[
                 wgpu::BindGroupEntry {
