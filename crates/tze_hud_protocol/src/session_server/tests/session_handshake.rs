@@ -1106,8 +1106,9 @@ async fn test_psk_with_capability_allows_input_events_subscription() {
 }
 
 /// Removed client requests (subscription change, input focus/capture, widget
-/// asset register, element listing) are reserved field numbers: a peer that
-/// still sends one decodes to an empty payload and gets a correlated rejection.
+/// asset register, element listing, mutation batches and tile claims) are reserved
+/// field numbers: a peer that still sends one decodes to an empty payload and
+/// gets a correlated rejection.
 #[tokio::test]
 async fn removed_client_request_numbers_decode_to_empty_payload() {
     use prost::Message;
@@ -1124,6 +1125,69 @@ async fn removed_client_request_numbers_decode_to_empty_payload() {
             "field {field} must not map to a payload"
         );
         removed.push(msg);
+    }
+
+    // Retired internal portal operations must also disappear when nested in the
+    // removed public MutationBatch envelope (ClientMessage tag 20). Build the old
+    // wire bytes explicitly: the retired generated types intentionally no longer exist.
+    let mut retired_fields = Vec::new();
+    for field in 13u64..=17 {
+        let mut body = vec![0x0a, 0x10]; // former tile_id, 16 bytes
+        body.extend_from_slice(&[1; 16]);
+        match field {
+            13 => body.extend_from_slice(&[0x1d, 0, 0, 0x80, 0x40]), // width_px = 4
+            14 | 17 => body.extend_from_slice(&[0x12, 0]),           // surface / composer
+            15 | 16 => body.extend_from_slice(&[0x10, 3]),           // lifecycle / unread count
+            _ => unreachable!(),
+        }
+        let mut mutation_wire = Vec::new();
+        prost::encoding::encode_varint(field << 3 | 2, &mut mutation_wire);
+        prost::encoding::encode_varint(body.len() as u64, &mut mutation_wire);
+        mutation_wire.extend_from_slice(&body);
+        let decoded = crate::proto::MutationProto::decode(mutation_wire.as_slice()).unwrap();
+        assert!(decoded.mutation.is_none(), "retired tag {field} is unknown");
+
+        let mut batch_wire = vec![0x1a]; // MutationBatch.mutations = 3
+        prost::encoding::encode_varint(mutation_wire.len() as u64, &mut batch_wire);
+        batch_wire.extend_from_slice(&mutation_wire);
+        let mut request_wire = vec![0x08, 0x07];
+        prost::encoding::encode_varint(20 << 3 | 2, &mut request_wire);
+        prost::encoding::encode_varint(batch_wire.len() as u64, &mut request_wire);
+        request_wire.extend_from_slice(&batch_wire);
+        let request = ClientMessage::decode(request_wire.as_slice()).unwrap();
+        assert!(request.payload.is_none());
+        removed.push(request);
+        retired_fields.extend_from_slice(&mutation_wire);
+    }
+
+    // Unrelated internal fields retain their typed values, including alongside
+    // unknown retired operations. This is decoder coverage, not a public route.
+    use crate::proto::mutation_proto::Mutation;
+    for mutation in [
+        Mutation::CreateTile(crate::proto::CreateTileMutation {
+            tab_id: vec![2; 16],
+            z_order: 7,
+            ..Default::default()
+        }),
+        Mutation::PublishToTile(crate::proto::PublishToTileMutation {
+            element_id: vec![3; 16],
+            ..Default::default()
+        }),
+    ] {
+        let retained = crate::proto::MutationProto {
+            mutation: Some(mutation),
+        };
+        let wire = retained.encode_to_vec();
+        assert_eq!(
+            crate::proto::MutationProto::decode(wire.as_slice()).unwrap(),
+            retained
+        );
+        let mut mixed = wire;
+        mixed.extend_from_slice(&retired_fields);
+        assert_eq!(
+            crate::proto::MutationProto::decode(mixed.as_slice()).unwrap(),
+            retained
+        );
     }
 
     let (mut client, _server, state) = setup_test_with_state().await;

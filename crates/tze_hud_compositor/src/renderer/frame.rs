@@ -325,10 +325,9 @@ impl Compositor {
             // ── Lifecycle affordance accent (hud-m48i0) ────────────────────
             // A token-colored bar along the tile's left edge signalling the
             // portal's lifecycle state. Painted from runtime overlay state
-            // (`tile_lifecycle_accents`) — set via the coalescible StateStream
-            // `SetTileLifecycleAccent` mutation — so it survives the transcript's
-            // `PublishToTile` content republishes and never rides a per-republish
-            // `AddNode`. Geometry-only; carries no transcript content (redaction
+            // (`tile_lifecycle_accents`) set by the native driver's checked
+            // direct accent method, so it survives transcript-root republishes
+            // without per-republish `AddNode` work. Geometry-only; carries no transcript content (redaction
             // is enforced at the producer: a redacted viewer gets no accent). The
             // color is token-resolved upstream — no literal visual value here.
             if let Some(accent) = scene.tile_lifecycle_accent(tile.id) {

@@ -400,7 +400,7 @@ fn build_context_and_hint(
             None,
         ),
         ValidationError::PortalSurfaceNotFound { tile_id } => (
-            json!({ "field": "tile_id", "value": tile_id.to_string(), "constraint": "a portal surface must be declared (SetPortalSurface) before it can be updated" }),
+            json!({ "field": "tile_id", "value": tile_id.to_string(), "constraint": "a portal surface must be declared before it can be updated" }),
             Some(json!({ "action": "set_portal_surface", "tile_id": tile_id.to_string() })),
         ),
         ValidationError::DuplicateId { id } => (

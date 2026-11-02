@@ -212,60 +212,6 @@ pub enum SceneMutation {
         offset_x: f32,
         offset_y: f32,
     },
-    /// Set (or clear) the lifecycle-affordance accent for a tile. Coalescible
-    /// StateStream tile-update (RFC 0005 §3.3 MutationBatch, client→server §3.1):
-    /// reflects the portal's lifecycle
-    /// state and is updated on transition, never re-added per content republish
-    /// (hud-m48i0). `accent = None` clears it (e.g. lifecycle redacted/absent).
-    SetTileLifecycleAccent {
-        tile_id: SceneId,
-        accent: Option<LifecycleAccent>,
-    },
-    /// Set (or clear) the ambient unread-output count a tile's jump-to-latest
-    /// pill MAY carry as a badge (hud-g1ena.3). Coalescible StateStream
-    /// tile-update (RFC 0005 §3.3), mirroring `SetTileLifecycleAccent`: it
-    /// reflects runtime-owned unread state, is refreshed each portal drain, and
-    /// is stored as overlay state keyed by `tile_id` so it survives transcript
-    /// republishes. `count = 0` clears the badge. This is the bridged-transport
-    /// counterpart of the in-process driver's direct `set_tile_unread_count`
-    /// call, giving a bridged portal's pill the same badge (hud-hwk2m).
-    SetTileUnreadCount { tile_id: SceneId, count: usize },
-    /// Set (or clear) the composer interaction hit region an interaction-enabled
-    /// portal exposes over its host tile (hud-iofav). Coalescible StateStream
-    /// tile-update (RFC 0005 §3.3), mirroring `SetTileLifecycleAccent`: the spec is
-    /// stored as overlay state keyed by `tile_id` and the scene derives a
-    /// hit-region child of the tile root from it, re-attaching that node after each
-    /// transcript republish — so an interaction-enabled portal's streaming publish
-    /// never rides a per-republish `AddNode` (which would flip the batch
-    /// Transactional, hud-mzk74). `region = None` clears it (interaction disabled).
-    SetTileComposerInteraction {
-        tile_id: SceneId,
-        region: Option<HitRegionNode>,
-    },
-    // ── Portal surface (RFC 0013 §7.2 promotion; hud-tc153) ───────────────
-    /// Declare or replace the first-class portal surface descriptor over a tile.
-    ///
-    /// Transactional (RFC 0005 §3.1): establishes the promoted surface — its
-    /// identity, lifecycle/display state, and the eight named parts — as one
-    /// governed object in place of the ad-hoc six-tile raw assembly. The
-    /// descriptor is stored as runtime overlay state keyed by `tile_id` so it
-    /// survives transcript republishes (`SetTileRoot`/`PublishToTile`). Requires
-    /// `modify_own_tiles`; each materialized part node must belong to `tile_id`.
-    SetPortalSurface {
-        tile_id: SceneId,
-        surface: PortalSurface,
-    },
-    /// Patch the lifecycle and/or display state of an existing portal surface.
-    ///
-    /// Coalescible StateStream tile-update (RFC 0005 §3.3): a `None` field is
-    /// left unchanged; the surface's parts and identity are untouched, so a
-    /// frequent lifecycle/collapse transition never re-sends the whole surface
-    /// (mirrors the `SetTileLifecycleAccent` coalescing rationale, hud-mzk74).
-    UpdatePortalSurfaceState {
-        tile_id: SceneId,
-        lifecycle: Option<PortalLifecycleState>,
-        display_state: Option<PortalDisplayState>,
-    },
 }
 
 impl SceneMutation {
@@ -287,11 +233,6 @@ impl SceneMutation {
             SceneMutation::ClearWidget { .. } => "ClearWidget",
             SceneMutation::RegisterTileScroll { .. } => "RegisterTileScroll",
             SceneMutation::SetScrollOffset { .. } => "SetScrollOffset",
-            SceneMutation::SetTileLifecycleAccent { .. } => "SetTileLifecycleAccent",
-            SceneMutation::SetTileUnreadCount { .. } => "SetTileUnreadCount",
-            SceneMutation::SetTileComposerInteraction { .. } => "SetTileComposerInteraction",
-            SceneMutation::SetPortalSurface { .. } => "SetPortalSurface",
-            SceneMutation::UpdatePortalSurfaceState { .. } => "UpdatePortalSurfaceState",
         }
     }
 }
@@ -602,11 +543,7 @@ impl SceneGraph {
             | SceneMutation::AddNode { tile_id, .. }
             | SceneMutation::UpdateNodeContent { tile_id, .. }
             | SceneMutation::RegisterTileScroll { tile_id, .. }
-            | SceneMutation::SetScrollOffset { tile_id, .. }
-            | SceneMutation::SetTileLifecycleAccent { tile_id, .. }
-            | SceneMutation::SetTileUnreadCount { tile_id, .. }
-            | SceneMutation::SetPortalSurface { tile_id, .. }
-            | SceneMutation::UpdatePortalSurfaceState { tile_id, .. } => {
+            | SceneMutation::SetScrollOffset { tile_id, .. } => {
                 tiles.get(tile_id).map(|t| t.lease_id)
             }
             // Tab and zone mutations: no per-mutation lease check at Stage 1.
@@ -891,64 +828,6 @@ impl SceneGraph {
                 self.set_tile_scroll_offset_local(*tile_id, *offset_x, *offset_y)?;
                 Ok(vec![])
             }
-            // ── Lifecycle affordance accent ──────────────────────────────
-            SceneMutation::SetTileLifecycleAccent { tile_id, accent } => {
-                // Checked variants enforce namespace isolation + live
-                // lease/`ModifyOwnTiles` capability, matching the sibling content
-                // mutations above (`SetTileRoot`, `UpdateTileInputMode`). `apply_batch`
-                // Stage-1 already rejects a non-Active lease here, but routing through
-                // the checked path keeps this arm defense-in-depth consistent and
-                // closes the accent-overlay lease-suspension escape (hud-a745w).
-                match accent {
-                    Some(a) => self.set_tile_lifecycle_accent_checked(*tile_id, *a, namespace)?,
-                    None => self.clear_tile_lifecycle_accent_checked(*tile_id, namespace)?,
-                }
-                Ok(vec![])
-            }
-            // ── Ambient unread-output count (jump-to-latest badge) ────────
-            SceneMutation::SetTileUnreadCount { tile_id, count } => {
-                // Checked path enforces namespace isolation + live lease +
-                // `ModifyOwnTiles`, matching the sibling `SetTileLifecycleAccent`
-                // and portal-surface arms (hud-a745w). A same-namespace session
-                // whose `ModifyOwnTiles` was revoked (lease still Active) must not
-                // keep mutating tile UI state — `apply_batch` Stage 1 only checks
-                // lease liveness, not the capability.
-                self.set_tile_unread_count_checked(*tile_id, *count, namespace)?;
-                Ok(vec![])
-            }
-            // ── Composer interaction hit region (hud-iofav) ──────────────
-            SceneMutation::SetTileComposerInteraction { tile_id, region } => {
-                // Checked path enforces namespace isolation + live lease +
-                // `ModifyOwnTiles`, matching the sibling `SetTileLifecycleAccent`
-                // and `SetTileUnreadCount` arms (hud-a745w): a suspended/orphaned/
-                // expired or capability-revoked lease must not attach the composer
-                // node or bump `scene.version`. The derived hit region is runtime
-                // overlay state, not a published element, so no `pending_touch_ids`
-                // entry — the co-travelling `PublishToTile` content mutation's
-                // repaint carries it.
-                match region {
-                    Some(r) => {
-                        self.set_tile_composer_interaction_checked(*tile_id, r.clone(), namespace)?
-                    }
-                    None => self.clear_tile_composer_interaction_checked(*tile_id, namespace)?,
-                }
-                Ok(vec![])
-            }
-            // ── Portal surface (RFC 0013 §7.2 promotion) ─────────────────
-            SceneMutation::SetPortalSurface { tile_id, surface } => {
-                // Checked path enforces namespace isolation + live
-                // lease/ModifyOwnTiles capability (hud-tc153 review P1).
-                self.set_portal_surface(*tile_id, surface.clone(), namespace)?;
-                Ok(vec![])
-            }
-            SceneMutation::UpdatePortalSurfaceState {
-                tile_id,
-                lifecycle,
-                display_state,
-            } => {
-                self.update_portal_surface_state(*tile_id, *lifecycle, *display_state, namespace)?;
-                Ok(vec![])
-            }
         }
     }
 
@@ -1009,10 +888,8 @@ mod tests {
 
     #[test]
     fn set_tile_unread_count_mutation_updates_overlay_and_enforces_namespace() {
-        // hud-hwk2m: the wire `SetTileUnreadCount` mutation (what a bridged portal
-        // sends to carry the jump-to-latest pill badge) must land on the runtime
-        // overlay the compositor reads (`tile_unread_count`), with namespace
-        // isolation matching the sibling content mutations.
+        // The native checked setter updates the compositor overlay and enforces
+        // namespace and lease admission before changing state.
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let tab_id = scene.create_tab("Main", 0).unwrap();
         let lease_id = scene.grant_lease("agent", 60_000);
@@ -1037,21 +914,17 @@ mod tests {
 
         // Set the badge count. A count CHANGE must bump `scene.version` so a
         // count-only update re-arms the idle present-gate and the badge repaints
-        // (mirrors SetTileLifecycleAccent).
+        // (mirrors the lifecycle accent).
         let version_before = scene.version;
         assert!(
             scene
-                .apply_batch(&make_batch_with_lease(
-                    "agent",
-                    lease_id,
-                    vec![SceneMutation::SetTileUnreadCount { tile_id, count: 5 }],
-                ))
-                .applied
+                .set_tile_unread_count_checked(tile_id, 5, "agent")
+                .is_ok()
         );
         assert_eq!(
             scene.tile_unread_count(tile_id),
             5,
-            "the wire mutation must land on the compositor-read overlay"
+            "the direct write must land on the compositor-read overlay"
         );
         assert!(
             scene.version > version_before,
@@ -1063,12 +936,8 @@ mod tests {
         let version_steady = scene.version;
         assert!(
             scene
-                .apply_batch(&make_batch_with_lease(
-                    "agent",
-                    lease_id,
-                    vec![SceneMutation::SetTileUnreadCount { tile_id, count: 5 }],
-                ))
-                .applied
+                .set_tile_unread_count_checked(tile_id, 5, "agent")
+                .is_ok()
         );
         assert_eq!(
             scene.version, version_steady,
@@ -1078,12 +947,8 @@ mod tests {
         // Count 0 clears the badge.
         assert!(
             scene
-                .apply_batch(&make_batch_with_lease(
-                    "agent",
-                    lease_id,
-                    vec![SceneMutation::SetTileUnreadCount { tile_id, count: 0 }],
-                ))
-                .applied
+                .set_tile_unread_count_checked(tile_id, 0, "agent")
+                .is_ok()
         );
         assert_eq!(
             scene.tile_unread_count(tile_id),
@@ -1095,27 +960,30 @@ mod tests {
         // count untouched.
         assert!(
             scene
-                .apply_batch(&make_batch_with_lease(
-                    "agent",
-                    lease_id,
-                    vec![SceneMutation::SetTileUnreadCount { tile_id, count: 3 }],
-                ))
-                .applied
+                .set_tile_unread_count_checked(tile_id, 3, "agent")
+                .is_ok()
         );
-        assert!(
-            !scene
-                .apply_batch(&make_batch(
-                    "intruder",
-                    vec![SceneMutation::SetTileUnreadCount { tile_id, count: 99 }],
-                ))
-                .applied,
-            "a cross-namespace badge write must be rejected"
-        );
+        let version_before_reject = scene.version;
+        assert!(matches!(
+            scene.set_tile_unread_count_checked(tile_id, 99, "intruder"),
+            Err(ValidationError::NamespaceMismatch { .. })
+        ));
         assert_eq!(
             scene.tile_unread_count(tile_id),
             3,
             "a rejected cross-namespace write must not change the count"
         );
+        assert_eq!(scene.version, version_before_reject);
+        scene.suspend_lease(&lease_id, scene.now_millis()).unwrap();
+        let version_suspended = scene.version;
+        assert!(matches!(
+            scene.set_tile_unread_count_checked(tile_id, 99, "agent"),
+            Err(ValidationError::InvalidField { field, .. }) if field == "lease_state"
+        ));
+        assert_eq!(scene.tile_unread_count(tile_id), 3);
+        assert_eq!(scene.version, version_suspended);
+        scene.revoke_lease(lease_id).unwrap();
+        assert_eq!(scene.tile_unread_count(tile_id), 0);
     }
 
     #[test]
@@ -1224,15 +1092,13 @@ mod tests {
             color: Rgba::new(0.1, 0.2, 0.3, 1.0),
             width_px: 4.0,
         };
-        let set = make_batch(
-            "agent",
-            vec![SceneMutation::SetTileLifecycleAccent {
-                tile_id,
-                accent: Some(accent),
-            }],
-        );
+
         let v_before_set = scene.version;
-        assert!(scene.apply_batch(&set).applied);
+        assert!(
+            scene
+                .set_tile_lifecycle_accent_checked(tile_id, accent, "agent")
+                .is_ok()
+        );
         assert_eq!(scene.tile_lifecycle_accent(tile_id), Some(accent));
         assert!(
             scene.version > v_before_set,
@@ -1242,29 +1108,36 @@ mod tests {
         // Redundant set (same accent) is a no-op for the present-gate: version
         // must NOT change, so a steady-state portal stays idle.
         let v_before_redundant = scene.version;
-        let set_same = make_batch(
-            "agent",
-            vec![SceneMutation::SetTileLifecycleAccent {
-                tile_id,
-                accent: Some(accent),
-            }],
+
+        assert!(
+            scene
+                .set_tile_lifecycle_accent_checked(tile_id, accent, "agent")
+                .is_ok()
         );
-        assert!(scene.apply_batch(&set_same).applied);
         assert_eq!(
             scene.version, v_before_redundant,
             "re-publishing the same accent must not bump version (keeps idle idle)"
         );
 
+        // A different accent replaces the previous value and invalidates the frame.
+        let latest = LifecycleAccent {
+            width_px: 6.0,
+            ..accent
+        };
+        let v_before_change = scene.version;
+        scene
+            .set_tile_lifecycle_accent_checked(tile_id, latest, "agent")
+            .unwrap();
+        assert_eq!(scene.tile_lifecycle_accent(tile_id), Some(latest));
+        assert!(scene.version > v_before_change);
+
         // Clear: None removes it and bumps version (the redaction-CLEAR path).
-        let clear = make_batch(
-            "agent",
-            vec![SceneMutation::SetTileLifecycleAccent {
-                tile_id,
-                accent: None,
-            }],
-        );
         let v_before_clear = scene.version;
-        assert!(scene.apply_batch(&clear).applied);
+        assert!(
+            scene
+                .clear_tile_lifecycle_accent_checked(tile_id, "agent")
+                .is_ok()
+        );
         assert_eq!(scene.tile_lifecycle_accent(tile_id), None);
         assert!(
             scene.version > v_before_clear,
@@ -1273,28 +1146,23 @@ mod tests {
 
         // Clearing again (nothing stored) must NOT bump version.
         let v_before_noop_clear = scene.version;
-        let clear_noop = make_batch(
-            "agent",
-            vec![SceneMutation::SetTileLifecycleAccent {
-                tile_id,
-                accent: None,
-            }],
+
+        assert!(
+            scene
+                .clear_tile_lifecycle_accent_checked(tile_id, "agent")
+                .is_ok()
         );
-        assert!(scene.apply_batch(&clear_noop).applied);
         assert_eq!(
             scene.version, v_before_noop_clear,
             "clearing an absent accent must not bump version"
         );
 
         // Cleanup: deleting the tile drops any accent overlay state.
-        let set_again = make_batch(
-            "agent",
-            vec![SceneMutation::SetTileLifecycleAccent {
-                tile_id,
-                accent: Some(accent),
-            }],
+        assert!(
+            scene
+                .set_tile_lifecycle_accent_checked(tile_id, accent, "agent")
+                .is_ok()
         );
-        assert!(scene.apply_batch(&set_again).applied);
         assert_eq!(scene.tile_lifecycle_accent(tile_id), Some(accent));
         let delete = make_batch("agent", vec![SceneMutation::DeleteTile { tile_id }]);
         assert!(scene.apply_batch(&delete).applied);
@@ -1386,7 +1254,7 @@ mod tests {
     }
 
     /// The interaction-path regression guard for hud-iofav (the missing counterpart
-    /// to the hud-mzk74 non-interactive tests): a `SetTileComposerInteraction`
+    /// to the non-interactive tests): the checked composer setter
     /// attaches a composer hit-region node under the tile root, and that node —
     /// with `accepts_composer_input` and click-to-focus `accepts_pointer` — SURVIVES
     /// consecutive transcript republishes (each `SetTileRoot` replaces the whole
@@ -1398,14 +1266,11 @@ mod tests {
         let (mut scene, tile_id) = transcript_scene_with_tile("render 1");
 
         // Enable interaction: the composer hit region attaches under the root.
-        let enable = make_batch(
-            "agent",
-            vec![SceneMutation::SetTileComposerInteraction {
-                tile_id,
-                region: Some(composer_region()),
-            }],
+        assert!(
+            scene
+                .set_tile_composer_interaction_checked(tile_id, composer_region(), "agent")
+                .is_ok()
         );
-        assert!(scene.apply_batch(&enable).applied);
 
         let (composer_id_1, hr1) =
             composer_child(&scene, tile_id).expect("composer hit region must attach on enable");
@@ -1414,7 +1279,7 @@ mod tests {
             "attached composer must accept composer input"
         );
         assert!(
-            hr1.accepts_pointer,
+            hr1.accepts_pointer && hr1.accepts_focus,
             "attached composer must accept pointer (click-to-focus, hud-v4k1h)"
         );
         assert_eq!(hr1.interaction_id, "portal-42-composer");
@@ -1433,15 +1298,9 @@ mod tests {
         // Republish the transcript root twice (consecutive streaming renders). Each
         // republish replaces the whole node tree; the composer must be re-derived.
         for (i, text) in ["render 2", "render 3"].iter().enumerate() {
-            let republish = make_batch(
-                "agent",
-                vec![SceneMutation::SetTileRoot {
-                    tile_id,
-                    node: transcript_root(text),
-                    descendants: vec![],
-                }],
-            );
-            assert!(scene.apply_batch(&republish).applied);
+            scene
+                .set_tile_root_tree_checked(tile_id, transcript_root(text), vec![], "agent")
+                .unwrap();
 
             // The transcript content updated…
             let root_id = scene.tiles.get(&tile_id).unwrap().root_node.unwrap();
@@ -1455,7 +1314,7 @@ mod tests {
             let (composer_id, hr) = composer_child(&scene, tile_id)
                 .unwrap_or_else(|| panic!("composer hit region must survive republish {}", i + 2));
             assert!(
-                hr.accepts_composer_input,
+                hr.accepts_composer_input && hr.accepts_pointer && hr.accepts_focus,
                 "composer must still accept composer input after republish {}",
                 i + 2
             );
@@ -1472,14 +1331,11 @@ mod tests {
         }
 
         // Disable interaction: the derived composer node is detached.
-        let disable = make_batch(
-            "agent",
-            vec![SceneMutation::SetTileComposerInteraction {
-                tile_id,
-                region: None,
-            }],
+        assert!(
+            scene
+                .clear_tile_composer_interaction_checked(tile_id, "agent")
+                .is_ok()
         );
-        assert!(scene.apply_batch(&disable).applied);
         assert!(
             composer_child(&scene, tile_id).is_none(),
             "disabling interaction must detach the composer hit region"
@@ -1490,7 +1346,7 @@ mod tests {
         );
     }
 
-    /// A `SetTileComposerInteraction` authored by an agent that does NOT own the
+    /// A checked composer write by an agent that does not own the
     /// tile must be rejected (lease/namespace gate), leaving no composer node
     /// attached — mirroring the accent's cross-namespace guard (hud-a745w).
     #[test]
@@ -1498,25 +1354,34 @@ mod tests {
         let (mut scene, tile_id) = transcript_scene_with_tile("render 1");
         // A different namespace with its own lease must not attach a composer.
         let _intruder = scene.grant_lease("intruder", 60_000);
-        let hostile = make_batch(
-            "intruder",
-            vec![SceneMutation::SetTileComposerInteraction {
-                tile_id,
-                region: Some(composer_region()),
-            }],
-        );
-        let result = scene.apply_batch(&hostile);
+
+        let version_before = scene.version;
+        let nodes_before = scene.nodes.len();
+        let result =
+            scene.set_tile_composer_interaction_checked(tile_id, composer_region(), "intruder");
         assert!(
-            !result.applied,
+            result.is_err(),
             "cross-namespace composer interaction must be rejected"
         );
+        assert!(matches!(
+            result,
+            Err(ValidationError::NamespaceMismatch { .. })
+        ));
         assert!(
             composer_child(&scene, tile_id).is_none(),
             "a rejected composer interaction must not attach a hit region"
         );
+        assert_eq!(scene.version, version_before);
+        assert_eq!(scene.nodes.len(), nodes_before);
+        assert!(
+            !scene
+                .overlay
+                .tile_composer_interactions
+                .contains_key(&tile_id)
+        );
     }
 
-    /// A `SetTileLifecycleAccent` authored by an agent that does NOT own the tile
+    /// A checked accent write by an agent that does not own the tile
     /// must be rejected with `NamespaceMismatch` and must not mutate the accent
     /// overlay state — the accent is a per-tile visual owned by the tile's
     /// namespace, exactly like every other tile mutation (hud-m48i0).
@@ -1538,30 +1403,32 @@ mod tests {
         let tile_id = scene.apply_batch(&create).created_ids[0];
 
         // Intruder (a different namespace) tries to set the accent on owner's tile.
-        let intruder = make_batch(
+
+        let version_before = scene.version;
+        let nodes_before = scene.nodes.len();
+        let result = scene.set_tile_lifecycle_accent_checked(
+            tile_id,
+            LifecycleAccent {
+                color: Rgba::new(0.9, 0.1, 0.1, 1.0),
+                width_px: 4.0,
+            },
             "intruder",
-            vec![SceneMutation::SetTileLifecycleAccent {
-                tile_id,
-                accent: Some(LifecycleAccent {
-                    color: Rgba::new(0.9, 0.1, 0.1, 1.0),
-                    width_px: 4.0,
-                }),
-            }],
         );
-        let result = scene.apply_batch(&intruder);
         assert!(
-            !result.applied,
+            result.is_err(),
             "cross-namespace accent write must be rejected"
         );
-        let rej = result
-            .rejection
-            .expect("a structured rejection must be present");
-        assert_eq!(rej.errors[0].code, ValidationErrorCode::NamespaceMismatch);
+        assert!(matches!(
+            result,
+            Err(ValidationError::NamespaceMismatch { .. })
+        ));
         assert_eq!(
             scene.tile_lifecycle_accent(tile_id),
             None,
             "rejected cross-namespace write must not mutate accent overlay state"
         );
+        assert_eq!(scene.version, version_before);
+        assert_eq!(scene.nodes.len(), nodes_before);
     }
 
     // ── Portal surface (RFC 0013 §7.2 promotion; hud-tc153) ──────────────────
@@ -1608,7 +1475,7 @@ mod tests {
     }
 
     /// The Phase-0 raw-tile assembly is expressible via the promoted surface:
-    /// a `SetPortalSurface` declaring all eight named parts lands in overlay
+    /// `set_portal_surface` declaring all eight named parts lands in overlay
     /// state, bumps `scene.version`, and reads back verbatim.
     #[test]
     fn set_portal_surface_expresses_all_eight_parts() {
@@ -1641,16 +1508,12 @@ mod tests {
         };
 
         let v_before = scene.version;
-        let set = make_batch(
-            "agent",
-            vec![SceneMutation::SetPortalSurface {
-                tile_id,
-                surface: surface.clone(),
-            }],
-        );
+
         assert!(
-            scene.apply_batch(&set).applied,
-            "SetPortalSurface must apply"
+            scene
+                .set_portal_surface(tile_id, surface.clone(), "agent")
+                .is_ok(),
+            "direct portal declaration must apply"
         );
         assert_eq!(scene.portal_surface(tile_id), Some(&surface));
         assert!(
@@ -1660,11 +1523,8 @@ mod tests {
 
         // Redundant re-declare of the same surface is a version no-op (idle stays idle).
         let v_before_redundant = scene.version;
-        let set_same = make_batch(
-            "agent",
-            vec![SceneMutation::SetPortalSurface { tile_id, surface }],
-        );
-        assert!(scene.apply_batch(&set_same).applied);
+
+        assert!(scene.set_portal_surface(tile_id, surface, "agent").is_ok());
         assert_eq!(scene.version, v_before_redundant);
 
         // Cleanup on tile deletion.
@@ -1677,35 +1537,38 @@ mod tests {
         );
     }
 
-    /// `UpdatePortalSurfaceState` coalesces: a `None` field is left unchanged and
+    /// `update_portal_surface_state` patches: a `None` field is left unchanged and
     /// a redundant patch does not bump `scene.version`.
     #[test]
     fn update_portal_surface_state_patches_and_coalesces() {
         let (mut scene, tile_id, _root_id) = portal_scene_with_tile();
-        let set = make_batch(
-            "agent",
-            vec![SceneMutation::SetPortalSurface {
-                tile_id,
-                surface: PortalSurface {
-                    lifecycle: PortalLifecycleState::Active,
-                    display_state: PortalDisplayState::Expanded,
-                    ..Default::default()
-                },
-            }],
+
+        assert!(
+            scene
+                .set_portal_surface(
+                    tile_id,
+                    PortalSurface {
+                        lifecycle: PortalLifecycleState::Active,
+                        display_state: PortalDisplayState::Expanded,
+                        ..Default::default()
+                    },
+                    "agent"
+                )
+                .is_ok()
         );
-        assert!(scene.apply_batch(&set).applied);
 
         // Patch only display_state; lifecycle (None) is left unchanged.
-        let patch = make_batch(
-            "agent",
-            vec![SceneMutation::UpdatePortalSurfaceState {
-                tile_id,
-                lifecycle: None,
-                display_state: Some(PortalDisplayState::Collapsed),
-            }],
-        );
         let v_before = scene.version;
-        assert!(scene.apply_batch(&patch).applied);
+        assert!(
+            scene
+                .update_portal_surface_state(
+                    tile_id,
+                    None,
+                    Some(PortalDisplayState::Collapsed),
+                    "agent"
+                )
+                .is_ok()
+        );
         let s = scene.portal_surface(tile_id).unwrap();
         assert_eq!(
             s.lifecycle,
@@ -1724,37 +1587,58 @@ mod tests {
 
         // Redundant patch (same values) is a version no-op.
         let v_before_redundant = scene.version;
-        let patch_same = make_batch(
-            "agent",
-            vec![SceneMutation::UpdatePortalSurfaceState {
-                tile_id,
-                lifecycle: None,
-                display_state: Some(PortalDisplayState::Collapsed),
-            }],
+
+        assert!(
+            scene
+                .update_portal_surface_state(
+                    tile_id,
+                    None,
+                    Some(PortalDisplayState::Collapsed),
+                    "agent"
+                )
+                .is_ok()
         );
-        assert!(scene.apply_batch(&patch_same).applied);
         assert_eq!(scene.version, v_before_redundant);
+        scene
+            .update_portal_surface_state(
+                tile_id,
+                Some(PortalLifecycleState::Blocked),
+                None,
+                "agent",
+            )
+            .unwrap();
+        let latest = scene.portal_surface(tile_id).unwrap();
+        assert_eq!(latest.lifecycle, PortalLifecycleState::Blocked);
+        assert_eq!(latest.display_state, PortalDisplayState::Collapsed);
+        let version_noop = scene.version;
+        scene
+            .update_portal_surface_state(tile_id, None, None, "agent")
+            .unwrap();
+        assert_eq!(scene.version, version_noop);
     }
 
     /// Patching a tile that has no declared portal surface is rejected with
-    /// `PortalSurfaceNotFound` (you must `SetPortalSurface` first).
+    /// `PortalSurfaceNotFound` (you must `set_portal_surface` first).
     #[test]
     fn update_portal_surface_state_requires_prior_surface() {
         let (mut scene, tile_id, _root_id) = portal_scene_with_tile();
-        let patch = make_batch(
+
+        let version_before = scene.version;
+        let nodes_before = scene.nodes.len();
+        let result = scene.update_portal_surface_state(
+            tile_id,
+            Some(PortalLifecycleState::Blocked),
+            None,
             "agent",
-            vec![SceneMutation::UpdatePortalSurfaceState {
-                tile_id,
-                lifecycle: Some(PortalLifecycleState::Blocked),
-                display_state: None,
-            }],
         );
-        let result = scene.apply_batch(&patch);
-        assert!(!result.applied);
-        assert_eq!(
-            result.rejection.unwrap().errors[0].code,
-            ValidationErrorCode::PortalSurfaceNotFound
-        );
+        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(ValidationError::PortalSurfaceNotFound { .. })
+        ));
+        assert_eq!(scene.version, version_before);
+        assert_eq!(scene.nodes.len(), nodes_before);
+        assert!(scene.portal_surface(tile_id).is_none());
     }
 
     /// A portal part referencing a node that is not in the host tile's tree is
@@ -1762,46 +1646,47 @@ mod tests {
     #[test]
     fn set_portal_surface_rejects_foreign_part_node() {
         let (mut scene, tile_id, _root_id) = portal_scene_with_tile();
-        let set = make_batch(
+
+        let version_before = scene.version;
+        let nodes_before = scene.nodes.len();
+        let result = scene.set_portal_surface(
+            tile_id,
+            PortalSurface {
+                parts: vec![PortalPart {
+                    kind: PortalPartKind::Transcript,
+                    bounds: Rect::new(0.0, 0.0, 400.0, 300.0),
+                    node: Some(SceneId::new()), // not in the tile
+                }],
+                ..Default::default()
+            },
             "agent",
-            vec![SceneMutation::SetPortalSurface {
-                tile_id,
-                surface: PortalSurface {
-                    parts: vec![PortalPart {
-                        kind: PortalPartKind::Transcript,
-                        bounds: Rect::new(0.0, 0.0, 400.0, 300.0),
-                        node: Some(SceneId::new()), // not in the tile
-                    }],
-                    ..Default::default()
-                },
-            }],
         );
-        let result = scene.apply_batch(&set);
-        assert!(!result.applied);
-        assert_eq!(
-            result.rejection.unwrap().errors[0].code,
-            ValidationErrorCode::InvalidPortalSurface
-        );
+        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(ValidationError::InvalidPortalSurface { .. })
+        ));
+        assert_eq!(scene.version, version_before);
+        assert_eq!(scene.nodes.len(), nodes_before);
+        assert!(scene.portal_surface(tile_id).is_none());
     }
 
-    /// Cross-namespace `SetPortalSurface` is rejected and mutates no overlay state.
+    /// Cross-namespace `set_portal_surface` is rejected and mutates no overlay state.
     #[test]
     fn set_portal_surface_rejects_cross_namespace() {
         let (mut scene, tile_id, _root_id) = portal_scene_with_tile();
-        let intruder = make_batch(
-            "intruder",
-            vec![SceneMutation::SetPortalSurface {
-                tile_id,
-                surface: PortalSurface::default(),
-            }],
-        );
-        let result = scene.apply_batch(&intruder);
-        assert!(!result.applied);
-        assert_eq!(
-            result.rejection.unwrap().errors[0].code,
-            ValidationErrorCode::NamespaceMismatch
-        );
-        assert_eq!(scene.portal_surface(tile_id), None);
+
+        let version_before = scene.version;
+        let nodes_before = scene.nodes.len();
+        let result = scene.set_portal_surface(tile_id, PortalSurface::default(), "intruder");
+        assert!(result.is_err());
+        assert!(matches!(
+            result,
+            Err(ValidationError::NamespaceMismatch { .. })
+        ));
+        assert_eq!(scene.version, version_before);
+        assert_eq!(scene.nodes.len(), nodes_before);
+        assert!(scene.portal_surface(tile_id).is_none());
     }
 
     /// hud-tc153 review P2: the descriptor survives a content republish, but a
@@ -1813,21 +1698,22 @@ mod tests {
         let (mut scene, tile_id, root_id) = portal_scene_with_tile();
 
         // Declare a surface whose transcript part points at the current root node.
-        let declare = make_batch(
-            "agent",
-            vec![SceneMutation::SetPortalSurface {
-                tile_id,
-                surface: PortalSurface {
-                    parts: vec![PortalPart {
-                        kind: PortalPartKind::Transcript,
-                        bounds: Rect::new(0.0, 0.0, 400.0, 300.0),
-                        node: Some(root_id),
-                    }],
-                    ..Default::default()
-                },
-            }],
+        assert!(
+            scene
+                .set_portal_surface(
+                    tile_id,
+                    PortalSurface {
+                        parts: vec![PortalPart {
+                            kind: PortalPartKind::Transcript,
+                            bounds: Rect::new(0.0, 0.0, 400.0, 300.0),
+                            node: Some(root_id),
+                        }],
+                        ..Default::default()
+                    },
+                    "agent"
+                )
+                .is_ok()
         );
-        assert!(scene.apply_batch(&declare).applied);
         assert_eq!(
             scene.portal_surface(tile_id).unwrap().parts[0].node,
             Some(root_id),
@@ -1846,15 +1732,9 @@ mod tests {
             }),
         };
         let new_root_id = new_root.id;
-        let republish = make_batch(
-            "agent",
-            vec![SceneMutation::SetTileRoot {
-                tile_id,
-                node: new_root,
-                descendants: vec![],
-            }],
-        );
-        assert!(scene.apply_batch(&republish).applied);
+        scene
+            .set_tile_root_tree_checked(tile_id, new_root, vec![], "agent")
+            .unwrap();
 
         // The descriptor survives, but the dangling ref to the removed old root is
         // pruned to None (not left pointing at a node no longer in the graph, and
@@ -1877,34 +1757,36 @@ mod tests {
     #[test]
     fn set_portal_surface_rejects_negative_part_bounds() {
         let (mut scene, tile_id, _root_id) = portal_scene_with_tile();
-        let set = make_batch(
+
+        let version_before = scene.version;
+        let nodes_before = scene.nodes.len();
+        let result = scene.set_portal_surface(
+            tile_id,
+            PortalSurface {
+                parts: vec![PortalPart {
+                    kind: PortalPartKind::Frame,
+                    bounds: Rect::new(0.0, 0.0, -10.0, 20.0),
+                    node: None,
+                }],
+                ..Default::default()
+            },
             "agent",
-            vec![SceneMutation::SetPortalSurface {
-                tile_id,
-                surface: PortalSurface {
-                    parts: vec![PortalPart {
-                        kind: PortalPartKind::Frame,
-                        bounds: Rect::new(0.0, 0.0, -10.0, 20.0),
-                        node: None,
-                    }],
-                    ..Default::default()
-                },
-            }],
         );
-        let result = scene.apply_batch(&set);
         assert!(
-            !result.applied,
+            result.is_err(),
             "negative-extent part bounds must be rejected"
         );
-        assert_eq!(
-            result.rejection.unwrap().errors[0].code,
-            ValidationErrorCode::InvalidPortalSurface
-        );
+        assert!(matches!(
+            result,
+            Err(ValidationError::InvalidPortalSurface { .. })
+        ));
         assert_eq!(
             scene.portal_surface(tile_id),
             None,
             "rejected write must not store overlay state"
         );
+        assert_eq!(scene.version, version_before);
+        assert_eq!(scene.nodes.len(), nodes_before);
     }
 
     #[test]

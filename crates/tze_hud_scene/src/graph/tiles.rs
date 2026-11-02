@@ -432,7 +432,7 @@ impl SceneGraph {
         // Replacing the root subtree removes the previous node tree, so any portal
         // surface part still pointing at a removed node would dangle. Prune those
         // stale refs back to `None` (the adapter re-binds on its next
-        // SetPortalSurface) so consumers never resolve a stale SceneId
+        // set_portal_surface) so consumers never resolve a stale SceneId
         // (hud-tc153 review P2).
         self.revalidate_portal_surface_part_nodes(tile_id);
 
@@ -467,7 +467,7 @@ impl SceneGraph {
     /// root are both present — a fresh hit-region node is synthesized and attached
     /// under the root. Called after each root replacement
     /// ([`set_tile_root_impl`](Self::set_tile_root_impl)) and by the
-    /// `SetTileComposerInteraction` apply path.
+    /// checked direct composer setter.
     ///
     /// The derived node is a real scene node so `hit_test`, focus acquisition, and
     /// the `ComposerDraftManager` all operate unchanged.
@@ -491,7 +491,7 @@ impl SceneGraph {
 
         // Fast path: the current derived node is still valid (present and parented
         // by the current root) — leave it in place. This makes the second call in a
-        // render batch (the `SetTileComposerInteraction` mutation, after the
+        // render pass (the checked direct composer setter, after the
         // `PublishToTile` reattach) a no-op when the spec did not change.
         if let Some(&current) = self.overlay.tile_composer_nodes.get(&tile_id) {
             let valid = self.nodes.contains_key(&current)

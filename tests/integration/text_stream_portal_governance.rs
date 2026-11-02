@@ -13,7 +13,7 @@ use std::sync::Arc;
 
 use tze_hud_runtime::{
     ChromeState, EnqueueResult, FreezeQueue, MutationTrafficClass, QueuedMutation,
-    classify_mutation_batch, collect_diagnostic,
+    collect_diagnostic,
 };
 use tze_hud_scene::{
     Clock, SceneGraph, SceneId, TestClock, ZONE_TILE_Z_MIN,
@@ -24,6 +24,7 @@ use tze_hud_scene::{
         PortalPart, PortalPartKind, PortalPeerClass, PortalSurface, Rect, Rgba, SolidColorNode,
         TextAlign, TextMarkdownNode, TextOverflow,
     },
+    validation::ValidationError,
 };
 
 const DISPLAY_W: f32 = 1920.0;
@@ -416,22 +417,15 @@ fn first_class_surface(transcript_node: SceneId) -> PortalSurface {
 }
 
 /// Same headless portal scene as `create_portal_scene`, but with a first-class
-/// `PortalSurface` declared over the host tile via `SetPortalSurface`.
+/// `PortalSurface` declared over the host tile via `set_portal_surface`.
 fn create_first_class_portal_scene(
     ttl_ms: u64,
 ) -> (SceneGraph, TestClock, SceneId, SceneId, SceneId) {
     let (mut scene, clock, tab_id, lease_id, tile_id) = create_portal_scene(ttl_ms);
     let transcript_node = transcript_node_id(&scene, tile_id);
-    let set = scene.apply_batch(&make_batch(
-        "portal-gov",
-        lease_id,
-        vec![SceneMutation::SetPortalSurface {
-            tile_id,
-            surface: first_class_surface(transcript_node),
-        }],
-    ));
+    let set = scene.set_portal_surface(tile_id, first_class_surface(transcript_node), "portal-gov");
     assert!(
-        set.applied,
+        set.is_ok(),
         "first-class portal surface declaration must apply"
     );
     assert!(
@@ -499,34 +493,29 @@ fn orphaned_first_class_surface_freezes_and_grace_expiry_prunes_surface() {
     );
 
     // An orphaned lease must reject further surface mutations of BOTH shapes
-    // (structural declare + coalescible state patch), and freeze the descriptor
+    // (declaration + state patch), and freeze the descriptor
     // at its last coherent state.
-    let patch_rejected = scene.apply_batch(&make_batch(
+    let descriptor_before = scene.portal_surface(tile_id).unwrap().clone();
+    let version_before = scene.version;
+    let patch_rejected = scene.update_portal_surface_state(
+        tile_id,
+        Some(PortalLifecycleState::Blocked),
+        None,
         "portal-gov",
-        lease_id,
-        vec![SceneMutation::UpdatePortalSurfaceState {
-            tile_id,
-            lifecycle: Some(PortalLifecycleState::Blocked),
-            display_state: None,
-        }],
-    ));
+    );
     assert!(
-        !patch_rejected.applied,
-        "orphaned lease must reject UpdatePortalSurfaceState"
+        matches!(patch_rejected, Err(ValidationError::InvalidField { field, .. }) if field == "lease_state"),
+        "orphaned lease must reject portal state patch"
     );
     let transcript_node = transcript_node_id(&scene, tile_id);
-    let declare_rejected = scene.apply_batch(&make_batch(
-        "portal-gov",
-        lease_id,
-        vec![SceneMutation::SetPortalSurface {
-            tile_id,
-            surface: first_class_surface(transcript_node),
-        }],
-    ));
+    let declare_rejected =
+        scene.set_portal_surface(tile_id, first_class_surface(transcript_node), "portal-gov");
     assert!(
-        !declare_rejected.applied,
-        "orphaned lease must reject SetPortalSurface"
+        matches!(declare_rejected, Err(ValidationError::InvalidField { field, .. }) if field == "lease_state"),
+        "orphaned lease must reject portal declaration"
     );
+    assert_eq!(scene.portal_surface(tile_id), Some(&descriptor_before));
+    assert_eq!(scene.version, version_before);
     assert_eq!(
         scene
             .portal_surface(tile_id)
@@ -562,33 +551,28 @@ fn safe_mode_suspend_blocks_first_class_surface_mutations_until_resume() {
     assert_eq!(scene.leases[&lease_id].state, LeaseState::Suspended);
 
     // Both surface mutation shapes are blocked while safe mode holds the lease.
-    let patch_rejected = scene.apply_batch(&make_batch(
+    let descriptor_before = scene.portal_surface(tile_id).unwrap().clone();
+    let version_before = scene.version;
+    let patch_rejected = scene.update_portal_surface_state(
+        tile_id,
+        Some(PortalLifecycleState::Blocked),
+        Some(PortalDisplayState::Collapsed),
         "portal-gov",
-        lease_id,
-        vec![SceneMutation::UpdatePortalSurfaceState {
-            tile_id,
-            lifecycle: Some(PortalLifecycleState::Blocked),
-            display_state: Some(PortalDisplayState::Collapsed),
-        }],
-    ));
+    );
     assert!(
-        !patch_rejected.applied,
-        "suspended lease must reject UpdatePortalSurfaceState"
+        matches!(patch_rejected, Err(ValidationError::InvalidField { field, .. }) if field == "lease_state"),
+        "suspended lease must reject portal state patch"
     );
     let transcript_node = transcript_node_id(&scene, tile_id);
-    let declare_rejected = scene.apply_batch(&make_batch(
-        "portal-gov",
-        lease_id,
-        vec![SceneMutation::SetPortalSurface {
-            tile_id,
-            surface: first_class_surface(transcript_node),
-        }],
-    ));
+    let declare_rejected =
+        scene.set_portal_surface(tile_id, first_class_surface(transcript_node), "portal-gov");
     assert!(
-        !declare_rejected.applied,
-        "suspended lease must reject SetPortalSurface"
+        matches!(declare_rejected, Err(ValidationError::InvalidField { field, .. }) if field == "lease_state"),
+        "suspended lease must reject portal declaration"
     );
     let frozen = scene.portal_surface(tile_id).expect("surface present");
+    assert_eq!(scene.portal_surface(tile_id), Some(&descriptor_before));
+    assert_eq!(scene.version, version_before);
     assert_eq!(frozen.lifecycle, PortalLifecycleState::Active);
     assert_eq!(frozen.display_state, PortalDisplayState::Expanded);
 
@@ -596,17 +580,14 @@ fn safe_mode_suspend_blocks_first_class_surface_mutations_until_resume() {
     scene
         .resume_lease(&lease_id, clock.now_millis() + 1)
         .expect("resume lease");
-    let accepted = scene.apply_batch(&make_batch(
+    let accepted = scene.update_portal_surface_state(
+        tile_id,
+        Some(PortalLifecycleState::WaitingForInput),
+        None,
         "portal-gov",
-        lease_id,
-        vec![SceneMutation::UpdatePortalSurfaceState {
-            tile_id,
-            lifecycle: Some(PortalLifecycleState::WaitingForInput),
-            display_state: None,
-        }],
-    ));
+    );
     assert!(
-        accepted.applied,
+        accepted.is_ok(),
         "surface updates must resume after safe mode exit"
     );
     assert_eq!(
@@ -617,96 +598,32 @@ fn safe_mode_suspend_blocks_first_class_surface_mutations_until_resume() {
         PortalLifecycleState::WaitingForInput,
         "resumed patch must land"
     );
-}
-
-#[test]
-fn freeze_path_governs_first_class_surface_via_generic_queue() {
-    // Derive the traffic class through the REAL classifier rather than hardcoding
-    // it — a hardcoded `Transactional` label would let this test pass even if the
-    // classifier routed `set_portal_surface` as an evictable state-stream (which
-    // would silently drop a surface DECLARATION under freeze pressure). The
-    // classifier is the contract boundary; assert it, then feed its verdict into
-    // the queue.
-    let declare_class = classify_mutation_batch(&["set_portal_surface"]);
-    assert_eq!(
-        declare_class,
-        MutationTrafficClass::Transactional,
-        "SetPortalSurface (structural declare) must classify Transactional so it \
-         is never evicted under freeze pressure"
-    );
-    let patch_class = classify_mutation_batch(&["update_portal_surface_state"]);
-    assert_eq!(
-        patch_class,
-        MutationTrafficClass::StateStream,
-        "UpdatePortalSurfaceState (lifecycle/display patch) must classify \
-         StateStream so it stays on the coalescible path"
-    );
-
-    // `SetPortalSurface` is Transactional; it must ride the same generic freeze
-    // queue as any transactional batch and overflow into a generic backpressure
-    // signal — not a portal-specific one.
-    let mut queue = FreezeQueue::new(1);
-    let first = queue.enqueue(QueuedMutation {
-        batch_id: b"set-portal-surface-1".to_vec(),
-        original_batch_id: b"set-portal-surface-1".to_vec(),
-        traffic_class: declare_class,
-        coalesce_key: None,
-        submitted_at_wall_us: 1,
-        payload: b"SetPortalSurface".to_vec(),
-    });
-    assert!(matches!(
-        first,
-        EnqueueResult::Queued | EnqueueResult::QueuedWithPressure
-    ));
-    let overflow = queue.enqueue(QueuedMutation {
-        batch_id: b"set-portal-surface-2".to_vec(),
-        original_batch_id: b"set-portal-surface-2".to_vec(),
-        traffic_class: declare_class,
-        coalesce_key: None,
-        submitted_at_wall_us: 2,
-        payload: b"SetPortalSurface".to_vec(),
-    });
+    let version_after = scene.version;
+    let descriptor_after = scene.portal_surface(tile_id).unwrap().clone();
+    scene
+        .update_portal_surface_state(
+            tile_id,
+            Some(PortalLifecycleState::WaitingForInput),
+            None,
+            "portal-gov",
+        )
+        .unwrap();
+    scene
+        .set_portal_surface(tile_id, descriptor_after.clone(), "portal-gov")
+        .unwrap();
+    assert_eq!(scene.version, version_after);
     assert!(
-        matches!(overflow, EnqueueResult::BackpressureRequired { .. }),
-        "surface declare overflow must produce generic backpressure"
+        scene
+            .update_portal_surface_state(tile_id, None, None, "intruder")
+            .is_err()
     );
-
-    // `UpdatePortalSurfaceState` is a coalescible StateStream patch; under freeze
-    // it must coalesce latest-wins on the generic queue, exactly like the
-    // lifecycle accent / unread-count paths — no portal-specific freeze channel.
-    let mut coalescing = FreezeQueue::new(4);
-    let key = "portal-surface-state:tile-fc".to_string();
-    let queued = coalescing.enqueue(QueuedMutation {
-        batch_id: b"update-state-1".to_vec(),
-        original_batch_id: b"update-state-1".to_vec(),
-        traffic_class: patch_class,
-        coalesce_key: Some(key.clone()),
-        submitted_at_wall_us: 3,
-        payload: b"lifecycle=Blocked".to_vec(),
-    });
-    assert!(matches!(
-        queued,
-        EnqueueResult::Queued | EnqueueResult::QueuedWithPressure
-    ));
-    let coalesced = coalescing.enqueue(QueuedMutation {
-        batch_id: b"update-state-2".to_vec(),
-        original_batch_id: b"update-state-2".to_vec(),
-        traffic_class: patch_class,
-        coalesce_key: Some(key),
-        submitted_at_wall_us: 4,
-        payload: b"lifecycle=WaitingForInput".to_vec(),
-    });
     assert!(
-        matches!(coalesced, EnqueueResult::Coalesced),
-        "surface state patches must coalesce latest-wins on the generic freeze queue"
+        scene
+            .set_portal_surface(tile_id, descriptor_after.clone(), "intruder")
+            .is_err()
     );
-
-    // No portal- or surface-specific freeze signal was minted for the promotion.
-    let proto = include_str!("../../crates/tze_hud_protocol/proto/session.proto");
-    assert!(
-        !proto.contains("PORTAL_FREEZE") && !proto.contains("SURFACE_FREEZE"),
-        "protocol must not expose a portal/surface-specific freeze signal"
-    );
+    assert_eq!(scene.portal_surface(tile_id), Some(&descriptor_after));
+    assert_eq!(scene.version, version_after);
 }
 
 #[test]
