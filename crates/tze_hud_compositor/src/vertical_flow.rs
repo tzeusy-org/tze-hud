@@ -429,7 +429,7 @@ mod tests {
 
     #[test]
     fn measure_child_height_is_at_least_one_line_even_when_empty() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let child = FlowChild {
             content: "",
             wrap_width: 200.0,
@@ -448,7 +448,7 @@ mod tests {
 
     #[test]
     fn measure_child_height_grows_when_content_wraps_to_more_lines() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let narrow = FlowChild {
             content: "the quick brown fox jumps over the lazy dog again and again",
             wrap_width: 60.0,
@@ -531,7 +531,7 @@ mod tests {
 
     #[test]
     fn measure_child_height_markdown_matches_independently_shaped_height_for_heading() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let tokens = MarkdownTokens::default();
         // H1 heading (1.75x scale by default) followed by two body lines.
         let content = "# Big Heading\nbody line one\nbody line two";
@@ -560,7 +560,7 @@ mod tests {
         // The bug this bead closes: `line_count * font_size_px * LINE_HEIGHT_MULTIPLIER`
         // assumes every line is the same height, which a heading line violates —
         // it shapes taller than a body line via its `size_scale`d per-span metrics.
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let tokens = MarkdownTokens::default();
         let content = "# Big Heading\nbody line one";
         let child = FlowChild {
@@ -593,7 +593,7 @@ mod tests {
         // wrapping to 1 line and 2, the markdown path (which wraps the STRIPPED
         // text) must measure fewer lines than the plain-text path (which would
         // wrap the RAW source, exactly the pre-fix bug).
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let tokens = MarkdownTokens::default();
         let content = "**bold** `code` [a link](https://example.com/x) plain";
         let narrow_wrap = 260.0;
@@ -641,7 +641,7 @@ mod tests {
         // plain-text LINE_HEIGHT_MULTIPLIER constant. If measure_child_height's
         // markdown branch ever fell back to the constant (the pre-fix bug), this
         // height would not match the independently-shaped expectation below.
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let tokens = MarkdownTokens {
             line_height_multiplier: 2.2,
             ..MarkdownTokens::default()
@@ -680,7 +680,7 @@ mod tests {
 
     #[test]
     fn measure_child_height_markdown_multi_paragraph_grows_with_content() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let tokens = MarkdownTokens::default();
         let one_paragraph = "First paragraph of turn content.";
         let three_paragraphs = "First paragraph of turn content.\n\nSecond paragraph, more content here.\n\nThird paragraph closes the turn.";
@@ -712,7 +712,7 @@ mod tests {
         // color-run construction. Height itself is only loosely asserted
         // (non-degenerate); the primary contract here is "does not panic and
         // stays finite/positive" across every styled-run kind at once.
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let tokens = MarkdownTokens::default();
         let content = "**bold** and *italic* and `inline code` and [a link](https://x.example) and normal text too";
         let child = FlowChild {
@@ -735,7 +735,7 @@ mod tests {
 
     #[test]
     fn measure_child_height_markdown_degenerate_inputs_stay_finite_and_nan_safe() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let tokens = MarkdownTokens::default();
         let cases: [(&str, f32, f32, f32); 5] = [
             // (content, wrap_width, font_size_px, vertical_padding)
@@ -780,7 +780,7 @@ mod tests {
         // wrapping to 1 line and 2 at this width (same fixture shape as the
         // hud-3xdlf strips-vs-raw test, but this time asserting RawWithColorRuns
         // matches the RAW (longer) wrap, not the stripped one.
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let tokens = MarkdownTokens::default();
         let content = "**bold** `code` [a link](https://example.com/x) plain";
         let wrap_width = 260.0;
@@ -819,7 +819,7 @@ mod tests {
         // branch. Monospace glyphs are typically wider than sans-serif at the
         // same font_size_px, so the same content/width should wrap to a
         // different (here: taller/more-lines) result under Monospace.
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let content = "the quick brown fox jumps over the lazy dog and then some more words";
         let wrap_width = 220.0;
 
@@ -855,7 +855,7 @@ mod tests {
         // multiplier. A raw-mode measurement against a token set that diverges
         // from the default must NOT move — proving raw mode genuinely ignores
         // the tokens it's never even given.
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let content = "one line only, no wrap";
         let child = FlowChild {
             content,
@@ -891,7 +891,7 @@ mod tests {
         // exactly: a node WITH a non-empty color run takes RawWithColorRuns
         // (raw, unstripped measurement); a node WITHOUT one takes Markdown
         // (parsed/stripped measurement, using the real tokens passed in).
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         // A MarkdownTokens whose line-height diverges sharply from the
         // default, so the two branches produce OBSERVABLY different heights
         // for byte-identical content — this is the concrete regression this
@@ -968,7 +968,7 @@ mod tests {
     fn resolve_tile_flow_offsets_empty_for_all_absolute() {
         // Behavior-preserving: no VerticalFlow node → empty map → render path
         // falls back to each child's own bounds.y (byte-identical).
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let a = text_node("one", 0.0, 300.0);
         let b = text_node("two", 40.0, 300.0);
         let map = scene_map(vec![a, b]);
@@ -982,7 +982,7 @@ mod tests {
 
     #[test]
     fn resolve_tile_flow_offsets_stacks_flow_children_from_parent_top() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let c0 = text_node("assistant turn", 0.0, 300.0);
         let c1 = text_node("tool: output line one\nand a second line", 0.0, 300.0);
         let c2 = text_node("assistant again", 0.0, 300.0);
@@ -1041,7 +1041,7 @@ mod tests {
 
     #[test]
     fn resolve_tile_flow_offsets_performs_zero_parse_on_cache_hit() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let (c0, c1, p0, p1, tokens) = flow_markdown_scene();
         let (id0, id1) = (c0.id, c1.id);
         let mut parent = text_node("", 0.0, 200.0);
@@ -1065,7 +1065,7 @@ mod tests {
 
     #[test]
     fn resolve_tile_flow_offsets_parses_once_per_child_on_cache_miss() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let (c0, c1, _p0, _p1, tokens) = flow_markdown_scene();
         let (id0, id1) = (c0.id, c1.id);
         let mut parent = text_node("", 0.0, 200.0);
@@ -1085,7 +1085,7 @@ mod tests {
 
     #[test]
     fn cached_flow_height_equals_reparse_fallback_height() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let node = text_node(
             "# Heading\nwith **bold**, `code`, and a longer paragraph that wraps across lines",
             0.0,

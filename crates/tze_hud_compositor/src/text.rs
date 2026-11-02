@@ -3925,7 +3925,7 @@ mod tests {
     /// content — mirroring `cache_hit_after_prime` in `markdown.rs`.
     #[test]
     fn truncation_cache_hit_after_prime() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let mut cache = TruncationCache::new();
 
         let content =
@@ -3992,7 +3992,7 @@ mod tests {
     /// Different geometry produces a separate cache entry.
     #[test]
     fn truncation_cache_different_geometry_different_entry() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let mut cache = TruncationCache::new();
 
         let content = "Hello world this is a somewhat long string";
@@ -4095,7 +4095,7 @@ mod tests {
     /// length is unchanged — proving no shaping occurred for the new geometry.
     #[test]
     fn truncation_stale_by_content_serves_deferred_geometry_miss() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let mut cache = TruncationCache::new();
 
         let content = "A streaming transcript line long enough to require ellipsis truncation";
@@ -4171,7 +4171,7 @@ mod tests {
     /// geometry, so the freshest available truncation is reused on a later miss.
     #[test]
     fn truncation_stale_by_content_tracks_latest_primed_geometry() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let mut cache = TruncationCache::new();
 
         let content = "Another long transcript line that overflows narrow tiles and truncates";
@@ -4244,7 +4244,7 @@ mod tests {
     /// stale fallback (no dangling key pointing at an evicted entry).
     #[test]
     fn truncation_stale_index_pruned_on_evict() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let mut cache = TruncationCache::new();
 
         let family = FontFamily::SystemSansSerif;
@@ -4323,7 +4323,7 @@ mod tests {
     /// pays only O(1) for a lookup, not O(n) for shaping.
     #[test]
     fn truncation_cache_zero_work_on_unchanged_scene() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let mut cache = TruncationCache::new();
 
         let content = "Transcript line that is long enough to require ellipsis truncation here";
@@ -4393,7 +4393,7 @@ mod tests {
     /// evict_except removes entries not in the live set.
     #[test]
     fn truncation_cache_evict_removes_stale_entries() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let mut cache = TruncationCache::new();
 
         let family = FontFamily::SystemSansSerif;
@@ -4464,7 +4464,7 @@ mod tests {
     /// clear() empties the cache entirely.
     #[test]
     fn truncation_cache_clear_empties_all_entries() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let mut cache = TruncationCache::new();
 
         let family = FontFamily::SystemSansSerif;
@@ -4528,7 +4528,7 @@ mod tests {
     /// a resize, the overflow contract is re-applied to the new bounds.
     #[test]
     fn intermediate_resize_geometry_re_resolves_truncation() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let mut cache = TruncationCache::new();
 
         // Long content that will overflow a narrow box but fits a wide one.
@@ -4638,7 +4638,7 @@ mod tests {
     /// cache is primed for.
     #[test]
     fn sequence_of_intermediate_geometries_all_independently_cached() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         let mut cache = TruncationCache::new();
 
         // Content long enough to overflow at mid and narrow widths.
@@ -5654,7 +5654,7 @@ mod tests {
     /// catching the regression directly at the call site.
     #[test]
     fn regression_708b_effective_key_uses_bold_weight_and_truncates_more() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
 
         // Content long enough to overflow at both weight 400 and 700 in a
         // narrow box, with the cut-point differing between the two weights.
@@ -6039,7 +6039,7 @@ mod tests {
         // Attrs, Buffer, Family, Metrics, Shaping, Wrap are imported via `use super::*`
         // (they come from the top-level `use glyphon::{...}` in text.rs).
 
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
 
         // The plain text item (markdown already stripped).
         // "hello " = 6 bytes, "code" = 4 bytes (bytes 6..10), " world" = 6 bytes.
@@ -6214,7 +6214,7 @@ mod tests {
     /// CPU `FontSystem` (no GPU).
     #[test]
     fn multiline_selection_fills_interior_line_width() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         // Narrow width forces one 4-char word per visual line: "aaaa"/"bbbb"/"cccc".
         let text: Arc<str> = Arc::from("aaaa bbbb cccc");
         let font_size = 16.0_f32;
@@ -6339,7 +6339,7 @@ mod tests {
     /// (`line_byte_offsets`) keeps the per-line quads correct (hud-scgyw).
     #[test]
     fn multiline_selection_across_hard_newline_fills_interior() {
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
         // Three hard lines; a wide box so nothing SOFT-wraps — the line breaks are
         // the '\n's at bytes 2 and 5.
         let text: Arc<str> = Arc::from("aa\nbb\ncc");
@@ -6489,7 +6489,7 @@ mod tests {
         // The cache at the configured bound must shape exactly that window:
         // priming the FULL content at bound 1024 yields the same truncation
         // result as priming the windowed slice directly at an unbounded cache.
-        let mut fs = FontSystem::new();
+        let mut fs = crate::fonts::bundled_font_system();
 
         let key_full =
             TruncationKey::new(&content, bounds_w, bounds_h, font_size, family, weight, vp);

@@ -375,13 +375,9 @@ mod tests {
     }
 
     #[test]
-    fn snap_to_grid_zero_cell_passthrough() {
+    fn snap_to_grid_zero_cell_or_display_passthrough() {
         let p = snap_to_grid(100.0, 1920.0, 0.0);
         assert_eq!(p, 100.0, "zero snap_pct must return position unchanged");
-    }
-
-    #[test]
-    fn snap_to_grid_zero_display_passthrough() {
         let p = snap_to_grid(100.0, 0.0, 0.02);
         assert_eq!(p, 100.0, "zero display dim must return position unchanged");
     }

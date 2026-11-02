@@ -3,9 +3,9 @@
 //! subscribed to the event's category (`INPUT_EVENTS` or `FOCUS_EVENTS`), with
 //! every field intact.
 //!
-//! One row per event kind in [`cases`]; three behaviors checked for each row:
-//! delivered intact, withheld from an unsubscribed agent, withheld from another
-//! namespace. Headless: no display server or GPU. The windowed runtime's
+//! One row per event kind in [`cases`]; two tests cover three behaviors for
+//! each row: delivered intact and withheld from another namespace (one test),
+//! and withheld from an unsubscribed agent. Headless: no display server or GPU. The windowed runtime's
 //! producers (`dispatch_*_event`) are covered in `tze_hud_runtime`/`tze_hud_input`.
 
 use std::time::Duration;
@@ -367,25 +367,6 @@ async fn next_batch(stream: &mut Stream, who: &str) -> EventBatch {
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
-/// A subscribed agent receives the injected event with every field (including
-/// the empty-vs-16-byte `node_id` encoding) unchanged.
-#[tokio::test]
-async fn subscribed_agent_receives_event_intact() {
-    let (mut client, _server, input_event_tx) = start_server().await;
-    for case in cases() {
-        let agent = format!("deliver-{}", case.name);
-        let (_tx, mut stream) = connect(&mut client, &agent, &[case.category]).await;
-        let sent = batch_for(&case);
-        let _ = input_event_tx.send((agent.clone(), sent.clone()));
-        let got = next_batch(&mut stream, case.name).await;
-        assert_eq!(
-            got.events, sent.events,
-            "{}: event must round-trip",
-            case.name
-        );
-    }
-}
-
 /// An agent without the event's category subscription receives nothing.
 #[tokio::test]
 async fn unsubscribed_agent_receives_nothing() {
@@ -398,8 +379,9 @@ async fn unsubscribed_agent_receives_nothing() {
     }
 }
 
-/// A batch addressed to one namespace reaches that agent only, even when another
-/// agent holds the same subscription.
+/// A batch addressed to one namespace reaches that subscribed agent with every
+/// field (including the empty-vs-16-byte `node_id` encoding) unchanged, and
+/// reaches no other agent, even one holding the same subscription.
 #[tokio::test]
 async fn event_reaches_owning_namespace_only() {
     let (mut client, _server, input_event_tx) = start_server().await;
@@ -413,7 +395,7 @@ async fn event_reaches_owning_namespace_only() {
         let got = next_batch(&mut owner_stream, case.name).await;
         assert_eq!(
             got.events, sent.events,
-            "{}: owner must get the event",
+            "{}: owner must get the event intact",
             case.name
         );
         assert_nothing_delivered(&tx_b, &mut other_stream, &other).await;

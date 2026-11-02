@@ -137,32 +137,22 @@ mod tests {
 
     // ── HitRegion ────────────────────────────────────────────────────────────
 
+    /// `contains` is half-open: interior and the top-left corner are inside;
+    /// every side outside and the bottom-right boundary are not.
     #[test]
-    fn hit_region_contains_interior_point() {
+    fn hit_region_contains_is_half_open() {
         let r = HitRegion::new(10.0, 20.0, 100.0, 50.0);
-        assert!(r.contains(60.0, 40.0));
-    }
-
-    #[test]
-    fn hit_region_does_not_contain_exterior_point() {
-        let r = HitRegion::new(10.0, 20.0, 100.0, 50.0);
-        assert!(!r.contains(5.0, 40.0)); // left of region
-        assert!(!r.contains(115.0, 40.0)); // right of region
-        assert!(!r.contains(60.0, 15.0)); // above region
-        assert!(!r.contains(60.0, 75.0)); // below region
-    }
-
-    #[test]
-    fn hit_region_top_left_inclusive() {
-        let r = HitRegion::new(10.0, 20.0, 100.0, 50.0);
-        assert!(r.contains(10.0, 20.0), "top-left corner is inclusive");
-    }
-
-    #[test]
-    fn hit_region_bottom_right_exclusive() {
-        let r = HitRegion::new(10.0, 20.0, 100.0, 50.0);
-        // x=110, y=70 are exactly at width/height boundary (exclusive).
-        assert!(!r.contains(110.0, 70.0), "boundary is exclusive");
+        for (x, y, inside, what) in [
+            (60.0, 40.0, true, "interior"),
+            (10.0, 20.0, true, "top-left corner (inclusive)"),
+            (110.0, 70.0, false, "bottom-right boundary (exclusive)"),
+            (5.0, 40.0, false, "left of region"),
+            (115.0, 40.0, false, "right of region"),
+            (60.0, 15.0, false, "above region"),
+            (60.0, 75.0, false, "below region"),
+        ] {
+            assert_eq!(r.contains(x, y), inside, "{what} ({x}, {y})");
+        }
     }
 
     // ── should_capture_pointer_event ─────────────────────────────────────────

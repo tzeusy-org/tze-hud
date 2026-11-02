@@ -72,16 +72,6 @@ fn snapshot_determinism_simple_scene() {
 // ── Checksum integrity ────────────────────────────────────────────────────────
 
 #[test]
-fn snapshot_checksum_is_verifiable() {
-    let scene = simple_scene();
-    let snap = scene.take_snapshot(WALL_US, MONO_US);
-    assert!(
-        snap.verify_checksum(),
-        "freshly computed snapshot must pass checksum verification"
-    );
-}
-
-#[test]
 fn snapshot_checksum_changes_when_content_mutated() {
     let scene = simple_scene();
     let snap = scene.take_snapshot(WALL_US, MONO_US);
@@ -115,39 +105,30 @@ fn snapshot_checksum_is_not_over_itself() {
 
 // ── Round-trip: deserialize → re-serialize → byte equality ───────────────────
 
+/// A fresh snapshot verifies its own checksum, and deserialize → re-serialize
+/// is byte-identical and still verifies, for empty and populated scenes.
 #[test]
-fn snapshot_roundtrip_empty_scene() {
-    let scene = empty_scene();
-    let original = scene.take_snapshot(WALL_US, MONO_US);
-    let json1 = original.to_json().unwrap();
+fn snapshot_roundtrip_is_byte_identical_and_verifies() {
+    for (label, scene) in [("empty", empty_scene()), ("simple", simple_scene())] {
+        let original = scene.take_snapshot(WALL_US, MONO_US);
+        assert!(
+            original.verify_checksum(),
+            "freshly computed {label} snapshot must pass checksum verification"
+        );
+        let json1 = original.to_json().unwrap();
 
-    let deserialized = SceneGraphSnapshot::from_json(&json1).unwrap();
-    let json2 = deserialized.to_json().unwrap();
+        let deserialized = SceneGraphSnapshot::from_json(&json1).unwrap();
+        let json2 = deserialized.to_json().unwrap();
 
-    assert_eq!(
-        json1, json2,
-        "round-trip must produce byte-identical output"
-    );
-    assert!(
-        deserialized.verify_checksum(),
-        "deserialized snapshot must pass checksum"
-    );
-}
-
-#[test]
-fn snapshot_roundtrip_simple_scene() {
-    let scene = simple_scene();
-    let original = scene.take_snapshot(WALL_US, MONO_US);
-    let json1 = original.to_json().unwrap();
-
-    let deserialized = SceneGraphSnapshot::from_json(&json1).unwrap();
-    let json2 = deserialized.to_json().unwrap();
-
-    assert_eq!(
-        json1, json2,
-        "round-trip must produce byte-identical output"
-    );
-    assert!(deserialized.verify_checksum());
+        assert_eq!(
+            json1, json2,
+            "{label} round-trip must produce byte-identical output"
+        );
+        assert!(
+            deserialized.verify_checksum(),
+            "deserialized {label} snapshot must pass checksum"
+        );
+    }
 }
 
 // ── All test scenes produce valid snapshots ───────────────────────────────────
@@ -525,36 +506,20 @@ mod proptest_suite {
     }
 
     proptest! {
-        /// WHEN a random valid scene is serialized twice
-        /// THEN both serializations must be byte-identical.
+        /// WHEN a random valid scene is snapshotted
+        /// THEN the checksum verifies, a second snapshot is byte-identical with
+        /// the same checksum, and a JSON round-trip re-serializes byte-identically.
         #[test]
-        fn prop_snapshot_determinism(tile_count in 0usize..=50) {
+        fn prop_snapshot_deterministic_verifiable_and_roundtrips(tile_count in 0usize..=50) {
             let g = build_scene_with_tiles(tile_count);
             let s1 = g.take_snapshot(WALL_US, MONO_US);
             let s2 = g.take_snapshot(WALL_US, MONO_US);
-            prop_assert_eq!(s1.to_json().unwrap(), s2.to_json().unwrap());
-            prop_assert_eq!(s1.checksum, s2.checksum);
-        }
-
-        /// WHEN a snapshot is round-tripped through JSON
-        /// THEN re-serialization must produce byte-identical output.
-        #[test]
-        fn prop_snapshot_roundtrip(tile_count in 0usize..=50) {
-            let g = build_scene_with_tiles(tile_count);
-            let snap = g.take_snapshot(WALL_US, MONO_US);
-            let json1 = snap.to_json().unwrap();
+            prop_assert!(s1.verify_checksum());
+            let json1 = s1.to_json().unwrap();
+            prop_assert_eq!(&json1, &s2.to_json().unwrap());
+            prop_assert_eq!(&s1.checksum, &s2.checksum);
             let deser = SceneGraphSnapshot::from_json(&json1).unwrap();
-            let json2 = deser.to_json().unwrap();
-            prop_assert_eq!(json1, json2);
-        }
-
-        /// WHEN a fresh snapshot is taken
-        /// THEN the embedded checksum must be valid.
-        #[test]
-        fn prop_snapshot_checksum_valid(tile_count in 0usize..=50) {
-            let g = build_scene_with_tiles(tile_count);
-            let snap = g.take_snapshot(WALL_US, MONO_US);
-            prop_assert!(snap.verify_checksum());
+            prop_assert_eq!(json1, deser.to_json().unwrap());
         }
     }
 }
