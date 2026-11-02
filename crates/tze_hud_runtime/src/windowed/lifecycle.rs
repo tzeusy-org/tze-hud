@@ -33,8 +33,8 @@ use super::input_dispatch::{
 use super::keyboard::ComposerDeliveryContext;
 use super::portal::{
     DragReleasedData, PortalResizePointerOutcome, PrimaryDragGesture,
-    apply_drag_handle_pointer_event, apply_portal_resize_pointer_event, drag_feedback_target,
-    reconcile_drag_feedback,
+    apply_drag_handle_pointer_event, apply_portal_resize_pointer_event,
+    apply_zone_resize_pointer_event, drag_feedback_target, reconcile_drag_feedback,
 };
 use super::{WindowedQuiescentEfficiencyConfig, WinitApp};
 
@@ -2799,7 +2799,7 @@ impl WinitApp {
                     }
                     reconcile_drag_feedback(&self.state.input_processor, &mut scene);
                 }
-                drag_released = apply_drag_handle_pointer_event(
+                let dragged = apply_drag_handle_pointer_event(
                     &mut self.state.input_processor,
                     &pointer_event,
                     &result.hit,
@@ -2848,6 +2848,18 @@ impl WinitApp {
                     resize_step_px: portal_part.window_resize_step_px,
                     affordance_px: portal_part.window_resize_affordance_px,
                 };
+                // The pip resize grip: aspect-locked, persisted like a drag.
+                let resized = apply_zone_resize_pointer_event(
+                    &mut self.state.zone_resize,
+                    &pointer_event,
+                    &result.hit,
+                    &mut scene,
+                    display_w,
+                    display_h,
+                    portal_tokens.min_width_px,
+                    portal_tokens.min_height_px,
+                );
+                drag_released = dragged.or(resized);
                 portal_resize_outcome = apply_portal_resize_pointer_event(
                     &pointer_event,
                     &mut self.state.portal_resize_states,

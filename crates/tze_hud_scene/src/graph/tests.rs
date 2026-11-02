@@ -3834,6 +3834,8 @@ fn push_drag_handle(scene: &mut SceneGraph, element_id: SceneId, bounds: Rect, i
             },
             tab_order: 0,
             is_header_band: is_band,
+            element_bounds: bounds,
+            is_resize_grip: false,
         });
 }
 
@@ -4330,6 +4332,8 @@ fn populate_live_drag_handles(scene: &mut SceneGraph) {
                 },
                 tab_order,
                 is_header_band: is_band,
+                element_bounds: bounds,
+                is_resize_grip: false,
             });
     }
 }

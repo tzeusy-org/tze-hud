@@ -137,6 +137,8 @@ pub(super) fn scene_with_drag_handle_tile(
             },
             tab_order: 0,
             is_header_band: false,
+            element_bounds: Rect::new(initial_x, initial_y, tile_w, tile_h),
+            is_resize_grip: false,
         });
 
     (scene, tile_id, element_id, interaction_id)

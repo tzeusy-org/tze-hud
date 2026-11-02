@@ -74,6 +74,9 @@ otherwise. Scheduled zone publications count as held before presentation;
   whose every value is a string; an empty string removes that entry.
   Notification TTL belongs at the publish's top-level `ttl_ms`; an inner
   `content.ttl_ms` is rejected with a hint to move it.
+- `zone:pip` takes the aspect ratio of the image it shows: the box keeps
+  its area and the corner nearest the screen edge, stays on screen, and the
+  image fills it unstretched (no letterbox). A solid colour keeps the box.
 - `zone:ambient-background` draws its fill or image at most
   `opacity.ambient.max` (0.9 by default) opaque, so the desktop under the
   overlay always shows through.
@@ -387,6 +390,15 @@ renaming their zone values. Tabs and their widgets remain configurable
 control panel's Layout card writes);
 `[displays.<NAME>].zones` remains the supported way to assign built-in zones
 to a display.
+
+The viewer places zones, not the config. A shown zone's drag handle moves
+it; the `pip` zone also has a resize grip in its corner facing the display
+centre, which scales it with its width/height ratio pinned and the opposite
+corner fixed (the `portal.window.min_*` tokens set the smallest size). Both
+are saved as the zone's override in `element_store.toml`, not the config
+file, and restored at startup; right-clicking the handle offers "Reset to
+default", which returns the zone to its built-in box. Zones assigned to
+another display have no handle.
 
 `[runtime]` also holds the launch settings the control panel edits:
 `mcp_port` (default 9090) and `grpc_port` (50051), 0 disabling either and

@@ -388,6 +388,21 @@ pub const ZERO_GEOMETRY_POLICY: GeometryPolicy = GeometryPolicy::Relative {
     height_pct: 0.0,
 };
 
+/// Drop the live viewer geometry of a zone whose element-store override was
+/// just cleared ("Reset to default"), so it returns to its default policy.
+/// No-op for tiles and widgets.
+pub fn clear_live_zone_override(entry: &ElementStoreEntry, scene: &mut crate::graph::SceneGraph) {
+    if entry.element_type == ElementType::Zone
+        && scene
+            .zone_registry
+            .geometry_overrides
+            .remove(&entry.namespace)
+            .is_some()
+    {
+        scene.bump_geometry_epoch();
+    }
+}
+
 /// Resolve the fallback geometry for an element after its user override has
 /// been cleared (or when no override is present).
 ///

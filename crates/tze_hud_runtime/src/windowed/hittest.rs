@@ -510,7 +510,7 @@ impl WinitApp {
         let portal_part = tze_hud_config::resolve_portal_tokens(&self.state.global_tokens);
         let affordance_px = portal_part.window_resize_affordance_px;
 
-        let desired = portal_hover_cursor(
+        let mut desired = portal_hover_cursor(
             x,
             y,
             focused_portal,
@@ -519,6 +519,15 @@ impl WinitApp {
             active_edge,
             drag_active,
         );
+        // The pip resize grip shows its diagonal cursor instead of the move
+        // hand, and keeps it for the whole resize.
+        if self.state.zone_resize.is_some() {
+            desired = self.state.cursor_tracker.current();
+        } else if matches!(desired, PortalCursor::Grab | PortalCursor::Default)
+            && let Some(cursor) = snapshot.resize_grip_cursor(x, y)
+        {
+            desired = cursor;
+        }
 
         if let Some(next) = self.state.cursor_tracker.update(desired) {
             if let Some(window) = &self.state.window {

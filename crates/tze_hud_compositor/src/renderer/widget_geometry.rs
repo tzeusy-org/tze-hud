@@ -14,8 +14,11 @@
 //! - `scene_id_hex` — format a `SceneId` as a lowercase hex string.
 //! - `drag_handle_bounds` — compute the drag-handle rect for an element given
 //!   its bounds and the configured `DragHandleStyle`.
+//! - `resize_grip_bounds` — the pip resize grip's square in the corner facing
+//!   the display centre.
 //! - `collect_drag_handle_entries` — build the full `Vec<DragHandleEntry>` for
-//!   the current frame covering tiles and zones (widgets get none).
+//!   the current frame covering tiles and zones plus the pip resize grip
+//!   (widgets get none).
 //! - `drag_highlight_cmds` — SDF border commands for the active-drag highlight.
 //! - `append_drag_handle_vertices` — emit GPU vertices for all drag handles.
 
@@ -61,6 +64,35 @@ impl Compositor {
         Rect::new(x, y, w, h)
     }
 
+    /// The pip resize grip: a square, twice the move handle's height, inside
+    /// the element's corner nearest the display centre — the corner with room
+    /// to grow — so the opposite corner stays pinned while resizing.
+    fn resize_grip_bounds(
+        element_bounds: Rect,
+        style: DragHandleStyle,
+        scale: f32,
+        sw: f32,
+        sh: f32,
+    ) -> Rect {
+        let side = (style.height_dp * 2.0 * scale)
+            .max(1.0)
+            .min(element_bounds.width.max(1.0))
+            .min(element_bounds.height.max(1.0));
+        let center_x = element_bounds.x + element_bounds.width * 0.5;
+        let center_y = element_bounds.y + element_bounds.height * 0.5;
+        let x = if center_x > sw * 0.5 {
+            element_bounds.x
+        } else {
+            element_bounds.x + element_bounds.width - side
+        };
+        let y = if center_y > sh * 0.5 {
+            element_bounds.y
+        } else {
+            element_bounds.y + element_bounds.height - side
+        };
+        Rect::new(x, y, side, side)
+    }
+
     pub(super) fn collect_drag_handle_entries(
         &self,
         scene: &SceneGraph,
@@ -103,6 +135,7 @@ impl Compositor {
                     interaction_id,
                     style,
                     is_header_band: true,
+                    is_resize_grip: false,
                 });
                 continue;
             }
@@ -115,6 +148,7 @@ impl Compositor {
                 interaction_id,
                 style,
                 is_header_band: false,
+                is_resize_grip: false,
             });
         }
 
@@ -138,19 +172,32 @@ impl Compositor {
             if self.display_layout.zone_display_rect(zone_name).is_some() {
                 continue;
             }
-            let (x, y, w, h) = Self::resolve_zone_geometry(&zone_def.geometry_policy, sw, sh);
+            let (x, y, w, h) = self.zone_geometry(scene, zone_name, sw, sh);
             let element_bounds_zone = Rect::new(x, y, w, h);
             let bounds = Self::drag_handle_bounds(element_bounds_zone, style, scale, sw, sh);
-            let interaction_id = format!("drag-handle:{}", Self::scene_id_hex(zone_def.id));
+            let id_hex = Self::scene_id_hex(zone_def.id);
             entries.push(DragHandleEntry {
                 element_id: zone_def.id,
                 element_kind: DragHandleElementKind::Zone,
                 bounds,
                 element_bounds: element_bounds_zone,
-                interaction_id,
+                interaction_id: format!("drag-handle:{id_hex}"),
                 style,
                 is_header_band: false,
+                is_resize_grip: false,
             });
+            if zone_name.as_str() == PIP_ZONE {
+                entries.push(DragHandleEntry {
+                    element_id: zone_def.id,
+                    element_kind: DragHandleElementKind::Zone,
+                    bounds: Self::resize_grip_bounds(element_bounds_zone, style, scale, sw, sh),
+                    element_bounds: element_bounds_zone,
+                    interaction_id: format!("resize-grip:{id_hex}"),
+                    style,
+                    is_header_band: false,
+                    is_resize_grip: true,
+                });
+            }
         }
 
         // Widgets get no handle: widget geometry is set from the control
