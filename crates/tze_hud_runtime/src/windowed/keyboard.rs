@@ -16,14 +16,8 @@ use super::input_dispatch::{
 use super::lifecycle::{INTERACTION_LOCK_BUDGET, spin_acquire};
 use crate::shell::{ChromeShortcut, ChromeTab, handle_shortcut};
 
-pub(super) struct ComposerDeliveryContext {
-    pub(super) namespace: String,
-    pub(super) node_id_bytes: [u8; 16],
-    pub(super) tile_id: tze_hud_scene::SceneId,
-}
-
-pub(super) enum ComposerDeliveryContextLookup {
-    Ready(ComposerDeliveryContext),
+pub(super) enum ComposerTargetLookup {
+    Ready(tze_hud_scene::SceneId),
     Busy,
     Unavailable,
 }
@@ -519,8 +513,7 @@ impl WinitApp {
     /// event is first offered to the `ComposerDraftManager` via
     /// `route_key_down_to_composer`.  If the manager consumes the event
     /// (`consumed = true`), it is NOT forwarded to the agent as a raw
-    /// `KeyDownEvent`.  Any transactional batch returned (submit / cancel) is
-    /// handed to `deliver_composer_batch` for future downstream delivery.
+    /// `KeyDownEvent`. Submitted text routes directly to the native portal.
     /// Public Stage-1 entry for an OS key-down event.
     ///
     /// Applies the early gates that MUST run on the OS-event path — safe-mode
@@ -799,20 +792,16 @@ impl WinitApp {
 
         // ── Composer draft intercept (§4.4) ──────────────────────────────
         if self.state.input_processor.is_composer_active() {
-            let delivery_context = match self.composer_delivery_context_for_tab(tab_id) {
-                ComposerDeliveryContextLookup::Ready(context) => Some(context),
-                ComposerDeliveryContextLookup::Busy => {
+            let history_tile_id = match self.composer_target_for_tab(tab_id) {
+                ComposerTargetLookup::Ready(tile_id) => Some(tile_id),
+                ComposerTargetLookup::Busy => {
                     self.state
                         .pending_keyboard_events
                         .push_back(PendingKeyboardEvent::KeyDown(raw.clone()));
                     return;
                 }
-                ComposerDeliveryContextLookup::Unavailable => None,
+                ComposerTargetLookup::Unavailable => None,
             };
-            // Captured before `delivery_context` is moved into
-            // `route_and_deliver_composer_batch` below (hud-qbcp8: input-
-            // history reset-to-tail needs the tile id after that move).
-            let history_tile_id = delivery_context.as_ref().map(|c| c.tile_id);
             // Soft-wrap vertical caret movement (hud-21o6x): for ArrowUp/ArrowDown,
             // hand the input layer the compositor's latest wrapped-line layout so
             // the caret can step between visual rows. Read the reverse channel only
@@ -847,26 +836,25 @@ impl WinitApp {
             // Capture the input-started-at instant for local-ack latency
             // measurement on the composer keystroke path (hud-r3ax6 / hud-o9ybl).
             let composer_input_started = Instant::now();
-            let (consumed, batch) = self.state.input_processor.route_key_down_to_composer(
+            let (consumed, outcome) = self.state.input_processor.route_key_down_to_composer(
                 &raw.key_code,
                 &raw.key,
                 raw.modifiers.shift,
                 raw.modifiers.ctrl,
                 raw.modifiers.alt,
             );
-            // Track whether this keystroke submitted or cancelled the composer so
-            // we can suppress the push below (clear must win over push; hud-r3ax6).
-            let mut key_down_is_terminal = false;
-            if let Some(b) = batch {
-                let is_submission = b.submission.is_some();
-                key_down_is_terminal = b.cancel.is_some() || is_submission;
-                if let Some(context) = delivery_context {
-                    self.route_and_deliver_composer_batch(context, b);
-                }
-                if key_down_is_terminal {
-                    // Submit or cancel: clear the local echo overlay.
-                    self.clear_local_composer_echo();
-                }
+            let key_down_is_terminal = matches!(
+                outcome,
+                tze_hud_input::ComposerOutcome::Submitted(_)
+                    | tze_hud_input::ComposerOutcome::Cancelled
+            );
+            if let tze_hud_input::ComposerOutcome::Submitted(text) = outcome
+                && let Some(tile_id) = history_tile_id
+            {
+                self.submit_composer_reply(tile_id, text);
+            }
+            if key_down_is_terminal {
+                self.clear_local_composer_echo();
             }
             if consumed {
                 tracing::debug!(
@@ -874,7 +862,7 @@ impl WinitApp {
                     "composer: KeyDown consumed by draft manager"
                 );
                 // Push updated draft snapshot for local echo rendering (hud-r3ax6).
-                // Guard: do NOT push after a terminal batch — clear must win.
+                // Guard: do NOT push after a terminal outcome — clear must win.
                 if !key_down_is_terminal {
                     self.push_local_composer_echo(composer_input_started);
                     // hud-qbcp8: typing should not leave the input-pane history
@@ -1031,8 +1019,6 @@ impl WinitApp {
                 reverse,
                 "tab focus traversal: focus gained"
             );
-            // A new focus-gain clears any stale blur delivery context.
-            self.state.pending_blur_delivery_context = None;
         }
         if let Some((ev, ns)) = &transition.lost {
             tracing::debug!(
@@ -1042,17 +1028,6 @@ impl WinitApp {
                 reason = ?ev.reason,
                 "tab focus traversal: focus lost"
             );
-            // Capture the composer delivery context while namespace + node_id +
-            // tile_id are all still known, so a blur-triggered terminal draft
-            // batch can still be delivered at the next settle (§4.3 flush
-            // guarantee on blur).
-            if let Some(node_id) = ev.node_id {
-                self.state.pending_blur_delivery_context = Some(ComposerDeliveryContext {
-                    namespace: ns.clone(),
-                    node_id_bytes: *node_id.as_uuid().as_bytes(),
-                    tile_id: ev.tile_id,
-                });
-            }
             composer_focus_lost = true;
         }
 
@@ -1254,17 +1229,7 @@ impl WinitApp {
 
         // Mirror the pointer / Tab transition broadcast (locks already released).
         let mut composer_focus_lost = false;
-        if transition.gained.is_some() {
-            self.state.pending_blur_delivery_context = None;
-        }
-        if let Some((ev, ns)) = &transition.lost {
-            if let Some(node_id) = ev.node_id {
-                self.state.pending_blur_delivery_context = Some(ComposerDeliveryContext {
-                    namespace: ns.clone(),
-                    node_id_bytes: *node_id.as_uuid().as_bytes(),
-                    tile_id: ev.tile_id,
-                });
-            }
+        if transition.lost.is_some() {
             composer_focus_lost = true;
         }
         tracing::debug!("portal recovery: focus redirected to composer");
@@ -1694,41 +1659,23 @@ impl WinitApp {
         // below, leaking input to the agent while the composer is focused
         // (hud-60hgf).
         if self.state.input_processor.is_composer_active() {
-            let delivery_context = match self.composer_delivery_context_for_tab(tab_id) {
-                ComposerDeliveryContextLookup::Ready(context) => Some(context),
-                ComposerDeliveryContextLookup::Busy => {
+            let history_tile_id = match self.composer_target_for_tab(tab_id) {
+                ComposerTargetLookup::Ready(tile_id) => Some(tile_id),
+                ComposerTargetLookup::Busy => {
                     self.state
                         .pending_keyboard_events
                         .push_back(PendingKeyboardEvent::Character(raw.clone()));
                     return;
                 }
-                ComposerDeliveryContextLookup::Unavailable => None,
+                ComposerTargetLookup::Unavailable => None,
             };
-            // Captured before `delivery_context` is moved into
-            // `route_and_deliver_composer_batch` below (hud-qbcp8: input-
-            // history reset-to-tail needs the tile id after that move).
-            let history_tile_id = delivery_context.as_ref().map(|c| c.tile_id);
             // Capture the input-started-at instant for local-ack latency
             // measurement (hud-r3ax6 / hud-o9ybl).
             let composer_input_started = Instant::now();
-            let (outcome, batch) = self
+            let outcome = self
                 .state
                 .input_processor
                 .route_character_to_composer(&raw.character);
-            // Track whether this character event submitted or cancelled the composer
-            // so we can suppress the push below (clear must win; hud-r3ax6).
-            let mut char_is_terminal = false;
-            if let Some(b) = batch {
-                let is_submission = b.submission.is_some();
-                char_is_terminal = b.cancel.is_some() || is_submission;
-                if char_is_terminal {
-                    // Submit or cancel: clear the local echo overlay.
-                    self.clear_local_composer_echo();
-                }
-                if let Some(context) = delivery_context {
-                    self.route_and_deliver_composer_batch(context, b);
-                }
-            }
             // Truncate for debug logs: raw.character carries clipboard text and
             // can be arbitrarily large.  Formatting is lazy (tracing skips it
             // below info in production), but defensive truncation avoids
@@ -1743,14 +1690,9 @@ impl WinitApp {
                 // Push the updated draft snapshot for local echo rendering
                 // (hud-r3ax6).  This is the Stage 2 "local feedback" path;
                 // no adapter round-trip.
-                // Guard: do NOT push after a terminal batch — clear must win.
-                if !char_is_terminal {
-                    self.push_local_composer_echo(composer_input_started);
-                    // hud-qbcp8: typing should not leave the input-pane history
-                    // scrolled away from the viewer's own live draft.
-                    if let Some(tile_id) = history_tile_id {
-                        self.reset_input_history_scroll_to_tail(tile_id);
-                    }
+                self.push_local_composer_echo(composer_input_started);
+                if let Some(tile_id) = history_tile_id {
+                    self.reset_input_history_scroll_to_tail(tile_id);
                 }
             } else {
                 // EditOutcome::Unchanged: the draft was not mutated (e.g. the
@@ -1798,50 +1740,6 @@ impl WinitApp {
             self.state
                 .pending_keyboard_events
                 .push_back(PendingKeyboardEvent::Character(raw.clone()));
-        }
-    }
-
-    /// Flush coalesced composer draft notifications at the frame settle point.
-    ///
-    /// Should be called once per frame / per settle window after all key events
-    /// for the current batch have been drained.  Guarantees the terminal draft
-    /// state is delivered even when keystrokes arrived in a burst (spec §4.3
-    /// flush guarantee).
-    ///
-    /// The `DraftNotificationBatch` returned by the input processor is encoded
-    /// as proto messages and broadcast on the `INPUT_EVENTS` channel to the
-    /// owning adapter namespace.
-    pub(super) fn flush_composer_draft_at_settle(&mut self) {
-        // Resolve delivery context.  Two cases:
-        //
-        // 1. Normal path (keystroke / timer settle): the composer node is still
-        //    focused, so composer_delivery_context() resolves namespace + node_id
-        //    from the live focus state.
-        //
-        // 2. Blur path: a focus-lost transition happened earlier this frame
-        //    (process_with_focus cleared focused_node and stored the terminal
-        //    batch in pending_flushed_batch).  composer_delivery_context()
-        //    returns None because focused_node is None.  We fall back to
-        //    pending_blur_delivery_context which was captured at blur time and
-        //    consume it here so it is not reused across frames.
-        //
-        // This two-path resolution upholds the §4.3 flush guarantee on blur.
-        let ctx = match self.composer_delivery_context() {
-            ComposerDeliveryContextLookup::Ready(context) => Some(context),
-            ComposerDeliveryContextLookup::Busy => {
-                match self.state.pending_blur_delivery_context.take() {
-                    Some(context) => Some(context),
-                    None => return,
-                }
-            }
-            ComposerDeliveryContextLookup::Unavailable => {
-                self.state.pending_blur_delivery_context.take()
-            }
-        };
-        if let Some(batch) = self.state.input_processor.try_flush_composer_draft() {
-            if let Some(context) = ctx {
-                self.route_and_deliver_composer_batch(context, batch);
-            }
         }
     }
 
@@ -1979,65 +1877,31 @@ impl WinitApp {
         Some(scene.tiles.get(&tile_id).map(|tile| tile.namespace.clone()))
     }
 
-    /// Resolve the delivery context for the currently focused composer region.
-    ///
-    /// `Busy` means a required lock was momentarily unavailable; callers must
-    /// retry later without consuming the draft event.
-    ///
-    /// Used by `dispatch_key_down_event`, `dispatch_character_event`, and
-    /// `flush_composer_draft_at_settle` to supply the delivery context to
-    /// `deliver_composer_batch` and the projection-authority input bridge.
-    /// Resolve the scene `tile_id` owning the currently focused composer,
-    /// without resolving the agent namespace (hud-sq2ss).
-    ///
-    /// Mirrors the `composer_focused_node()` + `focus_manager` lookup half of
-    /// [`Self::composer_delivery_context_for_tab`], but skips the
-    /// `namespace_for_keyboard_tile` scene lock that lookup also does — callers
-    /// that only need the tile id for a reset-to-tail (not for routing a batch
-    /// to an agent) should use this instead of paying for a namespace resolve
-    /// they will not use.
-    ///
-    /// Returns `None` if no composer is focused, there is no active tab, or the
-    /// focus owner is not a tile (all "nothing to reset" cases, not errors).
+    /// Resolve the focused composer's tile without taking scene locks.
     pub(super) fn composer_focused_tile_id(&self) -> Option<tze_hud_scene::SceneId> {
         self.state.input_processor.composer_focused_node()?;
         let tab_id = self.active_tab_for_keyboard_dispatch().flatten()?;
         self.state.focus_manager.current_owner(tab_id).tile_id()
     }
 
-    pub(super) fn composer_delivery_context(&self) -> ComposerDeliveryContextLookup {
-        match self.active_tab_for_keyboard_dispatch() {
-            Some(Some(tab_id)) => self.composer_delivery_context_for_tab(tab_id),
-            Some(None) => ComposerDeliveryContextLookup::Unavailable,
-            None => ComposerDeliveryContextLookup::Busy,
-        }
-    }
-
-    pub(super) fn composer_delivery_context_for_tab(
+    pub(super) fn composer_target_for_tab(
         &self,
         tab_id: tze_hud_scene::SceneId,
-    ) -> ComposerDeliveryContextLookup {
-        let Some(node_id) = self.state.input_processor.composer_focused_node() else {
-            return ComposerDeliveryContextLookup::Unavailable;
+    ) -> ComposerTargetLookup {
+        let Some(_) = self.state.input_processor.composer_focused_node() else {
+            return ComposerTargetLookup::Unavailable;
         };
-        let node_id_bytes = *node_id.as_uuid().as_bytes();
 
         // The focus manager's active tab holds the authoritative FocusOwner.
         // For a composer region the owner is FocusOwner::Node { tile_id, .. };
         // from the tile_id we can look up the agent namespace.
         let Some(tile_id) = self.state.focus_manager.current_owner(tab_id).tile_id() else {
-            return ComposerDeliveryContextLookup::Unavailable;
+            return ComposerTargetLookup::Unavailable;
         };
         match self.namespace_for_keyboard_tile(tile_id) {
-            Some(Some(namespace)) => {
-                ComposerDeliveryContextLookup::Ready(ComposerDeliveryContext {
-                    namespace,
-                    node_id_bytes,
-                    tile_id,
-                })
-            }
-            Some(None) => ComposerDeliveryContextLookup::Unavailable,
-            None => ComposerDeliveryContextLookup::Busy,
+            Some(Some(_)) => ComposerTargetLookup::Ready(tile_id),
+            Some(None) => ComposerTargetLookup::Unavailable,
+            None => ComposerTargetLookup::Busy,
         }
     }
 }
@@ -2365,7 +2229,6 @@ mod tests {
     use super::super::portal::PortalProjectionDrain;
     use super::super::test_support::{
         make_windowed_keyboard_test_app, portal_scene_with_control, portal_scene_with_focus,
-        viewer_echo_context,
     };
     use std::sync::Arc;
     use tze_hud_input::{FocusManager, InputProcessor, RawKeyUpEvent};
@@ -3156,15 +3019,17 @@ mod tests {
         let (mut app, _input_event_rx) =
             make_windowed_keyboard_test_app(scene, focus_manager, processor);
 
-        // Seed an overflowing history and scroll away from the tail (same setup
-        // as `resubmitting_after_scroll_back_snaps_history_to_tail`).
-        let text = (0..20)
-            .map(|i| format!("line {i}"))
-            .collect::<Vec<_>>()
-            .join("\n");
-        let mut batch = tze_hud_input::DraftNotificationBatch::new();
-        batch.record_submission(tze_hud_input::DraftSubmission { text, sequence: 1 });
-        app.route_and_deliver_composer_batch(viewer_echo_context(tile_id), batch);
+        // Native history reports its content growth through the input processor.
+        {
+            let shared = app.state.shared_state.try_lock().unwrap();
+            let mut scene = shared.scene.try_lock().unwrap();
+            scene
+                .register_tile_scroll_config(tile_id, tze_hud_scene::TileScrollConfig::vertical())
+                .unwrap();
+            app.state
+                .input_processor
+                .notify_tile_content_appended(tile_id, 630.0, 200.0, 21.0, &mut scene);
+        }
         {
             let shared = app.state.shared_state.try_lock().unwrap();
             let mut scene = shared.scene.try_lock().unwrap();
@@ -3202,7 +3067,7 @@ mod tests {
     }
 
     /// A hub-backed portal's submission routes to the portal hub, so the
-    /// raw-tile echo path is skipped. The common batch submission reset must
+    /// raw-tile echo path is skipped. The direct submission reset must
     /// reveal the reply at the tail before the hub echo paints during settle.
     #[test]
     fn authority_attached_submit_snaps_scrolled_back_history_to_tail() {
@@ -3325,7 +3190,7 @@ mod tests {
         }
 
         // Submit with Enter. The submission routes to the authority (echo path
-        // skipped), so the common batch submission reset must pin the tail.
+        // skipped), so the direct submission reset must pin the tail.
         clock.advance_us(1);
         app.dispatch_key_down_event_inner(
             &RawKeyDownEvent {
@@ -3338,11 +3203,37 @@ mod tests {
             Some(tab_id),
         );
 
+        let ready = handle.input_notify("test-agent").unwrap();
+        let mut notified = std::pin::pin!(ready.notified());
+        assert!(!notified.as_mut().enable());
+        for key in ["Enter", "Space", "Enter", "Escape"] {
+            app.dispatch_key_down_event_inner(
+                &RawKeyDownEvent {
+                    key_code: key.into(),
+                    key: key.into(),
+                    modifiers: tze_hud_input::KeyboardModifiers::NONE,
+                    repeat: false,
+                    timestamp_mono_us: tze_hud_scene::MonoUs(3),
+                },
+                Some(tab_id),
+            );
+        }
+        assert_eq!(
+            app.state
+                .input_processor
+                .composer_draft_snapshot()
+                .unwrap()
+                .0,
+            ""
+        );
+        assert!(matches!(
+            *app.state.local_composer_state.lock().unwrap(),
+            Some(None)
+        ));
+        app.submit_composer_reply(SceneId::new(), "not a portal".into());
         assert!(
-            app.state.viewer_echo_queue.lock().unwrap().is_empty(),
-            "an authority-attached submission must NOT enqueue a raw-tile echo — \
-             confirming the tail reset came from the common submission path, \
-             not append_raw_tile_viewer_echo"
+            !notified.as_mut().enable(),
+            "repeat/whitespace/cancel/nonportal signal no accepted input"
         );
         let shared = app.state.shared_state.try_lock().unwrap();
         let scene = shared.scene.try_lock().unwrap();
@@ -3353,7 +3244,7 @@ mod tests {
         );
         drop(scene);
         drop(shared);
-        // Execute the actual production settle order: composer flush, deferred
+        // Execute the actual production settle order: deferred
         // keyboard work, then portal drain in this same Winit maintenance turn.
         assert!(matches!(
             app.settle_scene_work(),
@@ -3361,7 +3252,6 @@ mod tests {
                 scene_changed: true
             }
         ));
-        assert!(app.state.viewer_echo_queue.lock().unwrap().is_empty());
         {
             let hub = handle.hub.lock().unwrap();
             let portal = hub
@@ -3416,16 +3306,8 @@ mod tests {
 
         // A known portal whose hub is unavailable must not fall back to a raw
         // success echo. Register readiness before the refusal, as a real poll does.
-        let ready = handle.input_notify("test-agent").unwrap();
-        let mut notified = std::pin::pin!(ready.notified());
-        assert!(!notified.as_mut().enable());
         let limit = handle.hub.lock().unwrap().limits().input_item_bytes;
-        let mut refused = tze_hud_input::DraftNotificationBatch::new();
-        refused.record_submission(tze_hud_input::DraftSubmission {
-            text: "x".repeat(limit + 1),
-            sequence: 2,
-        });
-        app.route_and_deliver_composer_batch(viewer_echo_context(tile_id), refused);
+        app.submit_composer_reply(tile_id, "x".repeat(limit + 1));
         {
             let hub = handle.hub.lock().unwrap();
             let portal = hub
@@ -3441,19 +3323,13 @@ mod tests {
             !notified.as_mut().enable(),
             "cap refusal never signals accepted input"
         );
-        assert!(app.state.viewer_echo_queue.lock().unwrap().is_empty());
         let hub = Arc::clone(&handle.hub);
         let _ = std::thread::spawn(move || {
             let _guard = hub.lock().unwrap();
             panic!("poison hub fixture");
         })
         .join();
-        let mut batch = tze_hud_input::DraftNotificationBatch::new();
-        batch.record_submission(tze_hud_input::DraftSubmission {
-            text: "refused-known-portal".to_string(),
-            sequence: 2,
-        });
-        app.route_and_deliver_composer_batch(viewer_echo_context(tile_id), batch);
+        app.submit_composer_reply(tile_id, "refused-known-portal".into());
         {
             let hub = handle.hub.lock().err().unwrap().into_inner();
             let portal = hub
@@ -3468,10 +3344,6 @@ mod tests {
         assert!(
             !notified.as_mut().enable(),
             "refusal does not notify accepted input"
-        );
-        assert!(
-            app.state.viewer_echo_queue.lock().unwrap().is_empty(),
-            "a known portal refusal must not author a raw success echo"
         );
     }
 

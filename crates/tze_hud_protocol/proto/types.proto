@@ -121,13 +121,9 @@ message HitRegionNodeProto {
   // When true, runtime pointer capture acquired by this region is released on
   // the matching PointerUp.
   bool release_on_up = 6;
-  // When true, keystroke events targeting this focused node are intercepted by
-  // the runtime's ComposerDraftManager and routed into a ComposerDraft buffer
-  // instead of being forwarded to the owning agent as raw key events.
-  // The adapter receives coalesced DraftStateNotification messages and a final
-  // transactional DraftSubmission on Enter/submit.
-  // Source: spec §4.1 (hud-5jbra.4 / hud-qwqxy).
-  bool accepts_composer_input = 7;
+  // Composer input is authored only by the native portal renderer.
+  reserved 7;
+  reserved "accepts_composer_input";
 }
 
 // How image content is fitted within the node bounds.

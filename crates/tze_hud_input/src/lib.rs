@@ -108,9 +108,9 @@ pub use command::{
     RawCommandEvent,
 };
 pub use composer_draft::{
-    ComposerDraft, ComposerDraftManager, ComposerInputBoxGeometry, ComposerVisualLayout,
-    ComposerVisualLine, DEFAULT_DRAFT_CAP, DraftCancel, DraftNotificationBatch, DraftScheduler,
-    DraftStateNotification, DraftSubmission, EditOutcome, MAX_DRAFT_BYTES, Selection,
+    ComposerDraft, ComposerDraftManager, ComposerInputBoxGeometry, ComposerOutcome,
+    ComposerVisualLayout, ComposerVisualLine, DEFAULT_DRAFT_CAP, EditOutcome, MAX_DRAFT_BYTES,
+    Selection,
 };
 pub use focus::{
     FocusGainedEvent, FocusLostEvent, FocusLostReason, FocusManager, FocusRequest, FocusResult,
@@ -357,17 +357,6 @@ pub struct InputProcessor {
     ///
     /// Spec: §4.1 — runtime-owned draft attached to focused composer regions.
     composer_draft_manager: ComposerDraftManager,
-    /// Holds the batch flushed during a focus-lost transition (blur) so it can
-    /// be drained on the next [`Self::try_flush_composer_draft`] call at the
-    /// frame settle point.
-    ///
-    /// This bridge is necessary because `on_focus_lost` drains the scheduler
-    /// immediately (blur is a settle point), but the caller's settle loop runs
-    /// after `process_with_focus` returns.  Without this field the terminal
-    /// draft state at blur would be permanently lost.
-    ///
-    /// Cleared on focus-gained so stale state never leaks across boundaries.
-    pending_flushed_batch: Option<DraftNotificationBatch>,
 }
 
 impl InputProcessor {
@@ -384,7 +373,6 @@ impl InputProcessor {
             capture: capture::PointerCaptureManager::new(),
             scroll_state: ScrollState::new(),
             composer_draft_manager: ComposerDraftManager::new(),
-            pending_flushed_batch: None,
         }
     }
 
@@ -748,9 +736,7 @@ impl InputProcessor {
     /// keep `hit_region_states.focused` and composer activation/flush in sync.
     ///
     /// - The node that lost focus has its `focused` flag cleared; if it was the
-    ///   active composer region, `on_focus_lost` flushes any pending draft state
-    ///   (blur is a settle point) into `pending_flushed_batch` for the next
-    ///   `try_flush_composer_draft`.
+    ///   active composer region, `on_focus_lost` retains its unsent local draft.
     /// - The node that gained focus has its `focused` flag set; if it accepts
     ///   composer input, the draft manager is activated via `on_focus_gained`
     ///   (`suspended = false`; safe-mode governance is applied separately), and
@@ -768,7 +754,7 @@ impl InputProcessor {
                     state.focused = false;
                 }
                 if self.composer_draft_manager.focused_node() == Some(lost_node_id) {
-                    self.pending_flushed_batch = self.composer_draft_manager.on_focus_lost();
+                    self.composer_draft_manager.on_focus_lost();
                 }
             }
         }
@@ -900,17 +886,8 @@ impl InputProcessor {
     /// Route a raw key-down event to the composer draft manager if a composer
     /// region is focused.
     ///
-    /// Returns `(consumed, Option<DraftNotificationBatch>)`.
-    /// - `consumed = true` means the keystroke was handled by the draft buffer
-    ///   and MUST NOT be forwarded to the agent as a raw `KeyDownEvent`.
-    /// - The returned `DraftNotificationBatch` is `Some` only on transactional
-    ///   events (submit / cancel); the normal coalesced delivery path is driven
-    ///   by [`Self::try_flush_composer_draft`] at the frame settle point.
-    ///
-    /// If no composer region is focused, returns `(false, None)` and the caller
-    /// SHOULD forward the event to the agent via the normal keyboard path.
-    ///
-    /// Spec: §4.2, §4.4 (editing keystrokes are never forwarded as raw key events).
+    /// The consumed flag prevents editing keys from reaching the agent.
+    /// Terminal outcomes return exact submitted text or local cancellation.
     pub fn route_key_down_to_composer(
         &mut self,
         key_code: &str,
@@ -918,7 +895,7 @@ impl InputProcessor {
         shift: bool,
         ctrl: bool,
         alt: bool,
-    ) -> (bool, Option<DraftNotificationBatch>) {
+    ) -> (bool, ComposerOutcome) {
         self.composer_draft_manager
             .route_key_down(key_code, key, shift, ctrl, alt)
     }
@@ -934,19 +911,16 @@ impl InputProcessor {
     /// Route a post-IME character event to the composer draft manager if a
     /// composer region is focused.
     ///
-    /// Returns `(EditOutcome, Option<DraftNotificationBatch>)`.
+    /// Returns local edit detail, including capacity and suspension.
     /// When the manager is active (`accepts_composer_input` region focused),
     /// the character is inserted into the draft buffer and MUST NOT be forwarded
     /// to the agent as a raw `CharacterEvent`.
     ///
-    /// If no composer region is focused, returns `(EditOutcome::Unchanged, None)`
+    /// If no composer region is focused, returns `EditOutcome::Unchanged`
     /// and the caller SHOULD forward the character to the agent.
     ///
     /// Spec: §4.1 — keystroke routing into the runtime-owned draft buffer.
-    pub fn route_character_to_composer(
-        &mut self,
-        character: &str,
-    ) -> (EditOutcome, Option<DraftNotificationBatch>) {
+    pub fn route_character_to_composer(&mut self, character: &str) -> EditOutcome {
         self.composer_draft_manager.route_character(character)
     }
 
@@ -969,49 +943,6 @@ impl InputProcessor {
             .route_pointer_selection(anchor, cursor)
     }
 
-    /// Flush pending coalesced draft notifications at a frame settle point.
-    ///
-    /// Must be called once per frame (or per settle window) to guarantee the
-    /// terminal draft state is delivered to downstream consumers.  The
-    /// `DraftScheduler` inside `ComposerDraftManager` coalesces rapid keystrokes
-    /// into a single latest-snapshot; this call forces delivery of any pending
-    /// coalesced state.
-    ///
-    /// Also drains the `pending_flushed_batch` produced by a blur transition
-    /// (stored by `process_with_focus` when focus leaves a composer region).
-    /// The two batches are merged: if the manager's batch contains a cancel, any
-    /// `latest`/`submission` in the pending batch are cleared to avoid delivering
-    /// contradictory state alongside a cancel event.
-    ///
-    /// Returns `Some(batch)` when there is pending state to deliver, `None` when
-    /// the draft has been idle since the last flush (no-op coalescing window).
-    ///
-    /// Spec: §4.3 — flush guarantee for the coalesced state-stream delivery.
-    pub fn try_flush_composer_draft(&mut self) -> Option<DraftNotificationBatch> {
-        let manager_batch = self.composer_draft_manager.try_flush();
-        match (self.pending_flushed_batch.take(), manager_batch) {
-            (Some(mut pending), Some(manager)) => {
-                // A cancel from the manager supersedes any accumulated latest/submission
-                // in the pending (blur) batch; discard those to avoid contradictory state.
-                if let Some(cancel) = manager.cancel {
-                    pending.latest = None;
-                    pending.submission = None;
-                    pending.cancel = Some(cancel);
-                } else {
-                    if let Some(latest) = manager.latest {
-                        pending.latest = Some(latest);
-                    }
-                    if let Some(sub) = manager.submission {
-                        pending.submission = Some(sub);
-                    }
-                }
-                Some(pending)
-            }
-            (Some(pending), None) => Some(pending),
-            (None, manager_batch) => manager_batch,
-        }
-    }
-
     /// Move focus off a tile that left the scene (lease revocation, expiry, or
     /// an agent clearing its portal) and deactivate a composer whose node went
     /// with it, so [`Self::is_composer_active`] turns `false`. The draft is
@@ -1025,11 +956,7 @@ impl InputProcessor {
     ) -> FocusTransition {
         let transition = focus_manager.clear_focus_on_missing_tile(tab_id, scene);
         self.apply_focus_transition_side_effects(&transition, scene);
-        if let Some(node_id) = self.composer_draft_manager.focused_node()
-            && !scene.nodes.contains_key(&node_id)
-        {
-            let _ = self.composer_draft_manager.on_focus_lost();
-        }
+        self.composer_draft_manager.retain_existing_nodes(scene);
         transition
     }
 
@@ -4174,7 +4101,7 @@ mod tests {
 
         // A subsequent character key edits the draft (the composer is now the
         // keystroke sink — §4.1 keystroke routing).
-        let (outcome, _batch) = processor.route_character_to_composer("x");
+        let outcome = processor.route_character_to_composer("x");
         assert_eq!(
             outcome,
             EditOutcome::Mutated,
@@ -4295,7 +4222,7 @@ mod tests {
         );
 
         // The character that triggered recovery now edits the draft.
-        let (outcome, _batch) = processor.route_character_to_composer("h");
+        let outcome = processor.route_character_to_composer("h");
         assert_eq!(outcome, EditOutcome::Mutated);
         assert_eq!(
             processor.composer_draft_snapshot().map(|s| s.0),
@@ -4422,7 +4349,7 @@ mod tests {
     /// Spec §4.1, §4.3: characters routed into draft buffer; adapter receives a
     /// coalesced state-stream notification (not per-keystroke events).
     #[test]
-    fn composer_character_routing_fills_draft_and_flushes_notification() {
+    fn composer_character_routing_fills_local_draft() {
         let (mut scene, tab_id, _tile_id, _composer_id, _plain_id) = setup_composer_scene();
         let mut processor = InputProcessor::new();
         let mut fm = FocusManager::new();
@@ -4440,9 +4367,9 @@ mod tests {
         assert!(processor.is_composer_active());
 
         // Route three characters — no flush yet.
-        let (outcome_h, _) = processor.route_character_to_composer("h");
-        let (outcome_i, _) = processor.route_character_to_composer("i");
-        let (outcome_excl, _) = processor.route_character_to_composer("!");
+        let outcome_h = processor.route_character_to_composer("h");
+        let outcome_i = processor.route_character_to_composer("i");
+        let outcome_excl = processor.route_character_to_composer("!");
 
         assert_eq!(outcome_h, EditOutcome::Mutated);
         assert_eq!(outcome_i, EditOutcome::Mutated);
@@ -4456,22 +4383,8 @@ mod tests {
             "draft buffer must contain all inserted characters"
         );
 
-        // Flush at settle point — must deliver the coalesced notification.
-        let batch = processor
-            .try_flush_composer_draft()
-            .expect("flush at settle must produce a batch when edits are pending");
-
-        let notif = batch
-            .latest
-            .expect("batch must contain a state notification");
-        assert_eq!(
-            notif.text, "hi!",
-            "notification text must match draft buffer"
-        );
-        assert_eq!(notif.cursor, 3, "cursor at end of text");
-        assert!(!notif.at_capacity, "draft not at capacity");
-        assert_eq!(batch.submission, None, "no submission yet");
-        assert_eq!(batch.cancel, None, "no cancel yet");
+        let (text, cursor, _, at_capacity, _, _) = processor.composer_draft_snapshot().unwrap();
+        assert_eq!((text.as_str(), cursor, at_capacity), ("hi!", 3, false));
     }
 
     /// hud-cpjqe: a portal header BAND drags on the first pointer-move with NO
@@ -4579,13 +4492,12 @@ mod tests {
         let mut processor = InputProcessor::new();
 
         // No focus at all — manager is idle.
-        let (outcome, batch) = processor.route_character_to_composer("a");
+        let outcome = processor.route_character_to_composer("a");
         assert_eq!(
             outcome,
             EditOutcome::Unchanged,
             "no-op when manager is idle"
         );
-        assert!(batch.is_none(), "no batch when manager is idle");
         assert!(processor.composer_draft_manager.draft().is_none());
     }
 
@@ -4594,7 +4506,7 @@ mod tests {
     /// Spec §4.3: submission is transactional; post-submit clear notification is
     /// emitted in the same batch.
     #[test]
-    fn composer_submit_via_enter_produces_transactional_batch() {
+    fn composer_submit_via_enter_returns_exact_text_and_clears() {
         let (mut scene, tab_id, _tile_id, _composer_id, _plain_id) = setup_composer_scene();
         let mut processor = InputProcessor::new();
         let mut fm = FocusManager::new();
@@ -4621,25 +4533,9 @@ mod tests {
             processor.route_key_down_to_composer("Enter", "Enter", false, false, false);
 
         assert!(consumed, "Enter must be consumed by the composer");
-        let batch = batch_opt.expect("Enter must produce an immediate transactional batch");
-        let sub = batch
-            .submission
-            .as_ref()
-            .expect("batch must contain a DraftSubmission");
-        assert_eq!(sub.text, "send", "submission text must match typed content");
-        // Post-submit clear: latest notification should show empty text.
-        let clear = batch
-            .latest
-            .as_ref()
-            .expect("post-submit clear notification must be present");
-        assert!(
-            clear.text.is_empty(),
-            "post-submit clear must have empty text"
-        );
-        assert!(
-            clear.sequence > sub.sequence,
-            "clear sequence must be > submission sequence"
-        );
+        assert_eq!(batch_opt, ComposerOutcome::Submitted("send".into()));
+        let (text, cursor, anchor, _, _, _) = processor.composer_draft_snapshot().unwrap();
+        assert_eq!((text.as_str(), cursor, anchor), ("", 0, 0));
     }
 
     /// Focus composer → blur → verify on_focus_lost is called and the pending
@@ -4647,8 +4543,8 @@ mod tests {
     ///
     /// Spec §4.3: blur is a settle point; the terminal draft state is delivered.
     #[test]
-    fn composer_focus_lost_on_blur_flushes_pending_state() {
-        let (mut scene, tab_id, tile_id, _composer_id, plain_id) = setup_composer_scene();
+    fn composer_focus_lost_on_blur_preserves_keyed_draft() {
+        let (mut scene, tab_id, tile_id, composer_id, plain_id) = setup_composer_scene();
         let mut processor = InputProcessor::new();
         let mut fm = FocusManager::new();
         fm.add_tab(tab_id);
@@ -4702,20 +4598,11 @@ mod tests {
             "manager must be deactivated after blurring the composer region"
         );
 
-        // Spec §4.3: blur is a settle point.  The terminal draft state ("z")
-        // typed before the blur must be delivered via the next flush call —
-        // this is the core guarantee that process_with_focus stores the
-        // on_focus_lost() batch in pending_flushed_batch.
-        let flush_batch = processor
-            .try_flush_composer_draft()
-            .expect("flush at settle must deliver the batch from the blur transition");
-        let notif = flush_batch
-            .latest
-            .expect("batch must contain a state notification for the typed text");
-        assert_eq!(
-            notif.text, "z",
-            "flushed notification must carry the draft text that was pending at blur"
-        );
+        // The blur keeps one keyed local draft, including caret/anchor.
+        scene.tiles.get_mut(&tile_id).unwrap().root_node = Some(composer_id);
+        processor.process_with_focus(&down_composer, &mut scene, &mut fm, tab_id);
+        let (text, cursor, anchor, _, _, _) = processor.composer_draft_snapshot().unwrap();
+        assert_eq!((text.as_str(), cursor, anchor), ("z", 1, 1));
     }
 
     /// Verify that `route_key_down_to_composer` does not consume unknown keys
@@ -4743,7 +4630,7 @@ mod tests {
             processor.route_key_down_to_composer("F5", "F5", false, false, false);
 
         assert!(!consumed, "F5 must NOT be consumed by the composer manager");
-        assert!(batch.is_none(), "no batch for an unconsumed key");
+        assert_eq!(batch, ComposerOutcome::Unchanged);
     }
 
     // ── hud-083az: focused-composer multiline paste and pointer selection ─────
@@ -4776,7 +4663,7 @@ mod tests {
 
         // Simulate a multiline clipboard paste (Ctrl+V content).
         let multiline = "hello\nworld";
-        let (outcome, _batch) = processor.route_character_to_composer(multiline);
+        let outcome = processor.route_character_to_composer(multiline);
 
         // The outcome must NOT be Unchanged — callers use Unchanged as the
         // signal to forward the character to the agent stream.
@@ -4842,7 +4729,7 @@ mod tests {
 
         // Attempt to route a string that is pure control characters.
         let ctrl_text = "\x01\x07\x1b";
-        let (outcome, _batch) = processor.route_character_to_composer(ctrl_text);
+        let outcome = processor.route_character_to_composer(ctrl_text);
 
         // The draft must be unchanged — the control chars sanitise to empty,
         // so nothing was inserted.
@@ -4904,10 +4791,7 @@ mod tests {
             consumed,
             "Ctrl+V KeyDown must be consumed by the composer (not forwarded to agent)"
         );
-        assert!(
-            batch.is_none(),
-            "Ctrl+V KeyDown must not produce a draft notification batch"
-        );
+        assert_eq!(batch, ComposerOutcome::Unchanged);
     }
 
     /// Pointer selection routing: a pointer-down on a focused composer node

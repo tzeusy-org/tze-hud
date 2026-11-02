@@ -29,7 +29,6 @@ use super::input_dispatch::{
     dispatch_capture_released_event, dispatch_focus_event, dispatch_pointer_event,
     dispatch_scroll_offset_event, enqueue_input, nanoseconds_since_start,
 };
-use super::keyboard::ComposerDeliveryContext;
 use super::portal::{
     DragReleasedData, PortalResizePointerOutcome, PrimaryDragGesture,
     apply_drag_handle_pointer_event, apply_portal_resize_pointer_event, drag_feedback_target,
@@ -2510,10 +2509,6 @@ impl WinitApp {
                             source = ?ev.source,
                             "click-to-focus: focus gained"
                         );
-                        // A new focus-gain clears any stale blur delivery context
-                        // from a previous composer blur so it cannot leak across
-                        // focus boundaries.
-                        self.state.pending_blur_delivery_context = None;
                     }
                     if let Some((ev, ns)) = &transition.lost {
                         tracing::debug!(
@@ -2523,22 +2518,6 @@ impl WinitApp {
                             reason = ?ev.reason,
                             "click-to-focus: focus lost"
                         );
-                        // Capture the composer delivery context (namespace +
-                        // node_id + tile_id) while all are still known.  If this blur
-                        // triggered a composer flush (InputProcessor stored a
-                        // pending_flushed_batch), composer_focused_node() is now
-                        // None, so composer_delivery_context() can no longer
-                        // resolve the context at flush time.  By stashing it here
-                        // we allow flush_composer_draft_at_settle to deliver the
-                        // terminal draft batch (§4.3 flush guarantee on blur).
-                        if let Some(node_id) = ev.node_id {
-                            self.state.pending_blur_delivery_context =
-                                Some(ComposerDeliveryContext {
-                                    namespace: ns.clone(),
-                                    node_id_bytes: *node_id.as_uuid().as_bytes(),
-                                    tile_id: ev.tile_id,
-                                });
-                        }
                         // Mark that the local echo should be cleared after this
                         // borrow scope ends (cannot call clear_local_composer_echo
                         // here because we hold the shared_state lock).

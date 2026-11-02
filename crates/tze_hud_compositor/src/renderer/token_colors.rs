@@ -886,76 +886,6 @@ pub(super) fn resolve_disconnect_badge_tokens(
     }
 }
 
-/// Resolved visual tokens for the runtime-authored viewer reply echo
-/// (hud-nx7yq.3) — a kind-distinct color plus font size for viewer history lines
-/// rendered above the composer strip on raw-tile portals.
-#[derive(Clone, Copy, Debug)]
-pub(super) struct ViewerEchoTokens {
-    /// Viewer-line text color as sRGB `[r, g, b, a]` u8 (ready for `TextItem`).
-    pub(super) color: [u8; 4],
-    /// Viewer-line font size in physical pixels.
-    pub(super) font_size_px: f32,
-    /// Muted color for the per-message timestamp prefix (hud-7ic89), distinct
-    /// from `color` so the clock reads as ambient metadata rather than message
-    /// body text.
-    pub(super) timestamp_color: [u8; 4],
-    /// Size multiplier applied to the timestamp prefix's `StyledRunItem`,
-    /// relative to `font_size_px` — keeps the clock visually smaller/quieter
-    /// than the message it precedes (hud-7ic89).
-    pub(super) timestamp_font_scale: f32,
-}
-
-/// Default viewer-echo text color: a calm blue (#8AB4F8) distinct from the
-/// near-white transcript body text, so viewer replies read as their own kind.
-const VIEWER_ECHO_DEFAULT_COLOR: [u8; 4] = [0x8A, 0xB4, 0xF8, 0xFF];
-const VIEWER_ECHO_DEFAULT_FONT_SIZE_PX: f32 = 15.0;
-
-/// Default timestamp color: the same dimmed slate (#6B7689) already used as
-/// the composer's empty-draft placeholder default
-/// (`ComposerOverlayTokens::placeholder_color`, `portal.composer.placeholder_color`)
-/// — this namespace has no dedicated muted/secondary-text token yet, so this
-/// reuses the closest existing one rather than inventing a new hardcoded hue.
-const VIEWER_ECHO_DEFAULT_TIMESTAMP_COLOR: [u8; 4] = [0x6B, 0x76, 0x89, 0xFF];
-const VIEWER_ECHO_DEFAULT_TIMESTAMP_FONT_SCALE: f32 = 0.85;
-
-/// Resolve [`ViewerEchoTokens`] from the compositor token map.
-///
-/// Keys follow the portal token namespace (`portal.viewer_echo.*`). The color
-/// falls back to a distinct viewer accent and the font size to a chat-history
-/// default; never hardcoded at the call site.
-#[inline]
-pub(super) fn resolve_viewer_echo_tokens(token_map: &HashMap<String, String>) -> ViewerEchoTokens {
-    let color = resolve_token_color(token_map, "portal.viewer_echo.text_color")
-        .map(crate::text::rgba_to_srgb_u8)
-        .unwrap_or(VIEWER_ECHO_DEFAULT_COLOR);
-
-    let font_size_px = token_map
-        .get("portal.viewer_echo.font_size_px")
-        .and_then(|v| v.trim_end_matches("px").parse::<f32>().ok())
-        .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(VIEWER_ECHO_DEFAULT_FONT_SIZE_PX)
-        .clamp(6.0, 200.0)
-        * px_scale(token_map);
-
-    let timestamp_color = resolve_token_color(token_map, "portal.viewer_echo.timestamp_color")
-        .map(crate::text::rgba_to_srgb_u8)
-        .unwrap_or(VIEWER_ECHO_DEFAULT_TIMESTAMP_COLOR);
-
-    let timestamp_font_scale = token_map
-        .get("portal.viewer_echo.timestamp_font_scale")
-        .and_then(|v| v.parse::<f32>().ok())
-        .filter(|v| v.is_finite() && *v > 0.0)
-        .unwrap_or(VIEWER_ECHO_DEFAULT_TIMESTAMP_FONT_SCALE)
-        .clamp(0.3, 1.0);
-
-    ViewerEchoTokens {
-        color,
-        font_size_px,
-        timestamp_color,
-        timestamp_font_scale,
-    }
-}
-
 /// Resolved compositor-side portal spacing for the tile-render surfaces the
 /// exemplar client never draws itself: the markdown code-panel backdrop geometry,
 /// the glyphon-unavailable text-tile fallback inset, and the unregistered-image
@@ -970,7 +900,7 @@ pub(super) fn resolve_viewer_echo_tokens(token_map: &HashMap<String, String>) ->
 /// directly. This is the runtime-side mirror of the exemplar-local two-pane
 /// geometry keys (`portal.two_pane.*`) being kept out of the runtime's canonical
 /// product vocabulary: the same runtime/exemplar boundary, seen from the other
-/// side. The `portal.viewer_echo.*` / `portal.window.resize_grip.*` resolvers in
+/// side. The `portal.window.resize_grip.*` resolver in
 /// this module follow the same compositor-local pattern.
 ///
 /// Every value is still token-overridable via its `portal.spacing.*` key, and the

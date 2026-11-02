@@ -29,7 +29,7 @@ use super::token_colors::{
     notification_action_button_bounds, notification_action_row_reserve,
     notification_dismiss_bounds, notification_inset, resolve_composer_overlay_tokens,
     resolve_jump_to_latest_tokens, resolve_notification_action_tokens,
-    resolve_scroll_indicator_tokens, resolve_transcript_max_measure_px, resolve_viewer_echo_tokens,
+    resolve_scroll_indicator_tokens, resolve_transcript_max_measure_px,
     urgency_to_on_severity_color,
 };
 
@@ -1274,39 +1274,6 @@ impl super::Compositor {
                 line_height_multiplier: 1.0,
                 viewport: crate::overflow::TruncationViewport::HeadAnchored,
             });
-        }
-
-        // ── Viewer reply echo (hud-nx7yq.3) ──────────────────────────────────
-        // Inject kind-distinct viewer history lines above the composer strip for
-        // any portal tile with retained runtime-authored echoes. Unlike the
-        // composer (single focused tile), echoes may exist on multiple tiles, so
-        // every visible tile is checked. No-op when the store is empty.
-        if !self.viewer_echoes.is_empty() {
-            let viewer_tokens = resolve_viewer_echo_tokens(&self.token_map);
-            for tile in &Self::sort_tiles_with_drag_boost(self.policy_visible_tiles(scene), scene) {
-                // Skip minimized tiles entirely and blend the rest, so viewer
-                // echo history fades with the tile backdrop instead of floating
-                // over a hidden tile (hud-dat3x). Gate the skip on DURABLE
-                // invisibility (scene tile.opacity) — a transient portal fade
-                // still shapes and blends.
-                if self.rendered_tile_opacity(tile, scene) <= TILE_TEXT_OPACITY_EPSILON {
-                    continue;
-                }
-                let tile_opacity = self.tile_effective_opacity(tile, scene);
-                let items_before = items.len();
-                items.extend(self.collect_viewer_echo_text_items(
-                    tile,
-                    scene,
-                    sw,
-                    sh,
-                    &viewer_tokens,
-                ));
-                if tile_opacity < 1.0 {
-                    for item in &mut items[items_before..] {
-                        item.opacity *= tile_opacity;
-                    }
-                }
-            }
         }
 
         // System card text is NOT here: it has its own final overlay layer

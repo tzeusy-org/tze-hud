@@ -157,7 +157,6 @@ mod surface;
 mod text_render;
 mod tile_opacity;
 mod tokens;
-mod viewer_echo;
 mod zone_layers;
 mod zone_notification;
 mod zone_stack;

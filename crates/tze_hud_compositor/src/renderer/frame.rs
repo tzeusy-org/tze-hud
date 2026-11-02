@@ -204,25 +204,13 @@ impl Compositor {
         telemetry.node_count = scene.node_count() as u32;
         telemetry.active_leases = scene.leases.len() as u32;
 
-        // Runtime-authored viewer reply echoes (hud-nx7yq.3): drain any pending
-        // submit-time appends into the per-tile store and prune echoes for tiles
-        // that no longer exist, before the text pass reads them.
-        let queue = std::sync::Arc::clone(&self.viewer_echo_queue);
-        self.viewer_echoes.drain_queue(&queue);
-        self.viewer_echoes
-            .retain_tiles(|tile_id| scene.tiles.contains_key(&tile_id));
-
         // Resolve every resize-sensitive local layout BEFORE any geometry reads
-        // it.  The composer fill and viewer-echo dividers below, plus the later
+        // it.  The composer fill below and the later
         // text pass, must share one same-frame wrapped layout: reflowing only at
         // text collection would leave chrome one frame behind after a resize.
         // These are deliberately once-per-frame measurements, off the transcript
         // hot path.
         self.prime_composer_scroll_offset(scene);
-        // Measure the viewer-echo history wrap (total + per-entry) before the
-        // tile loop so the turn-divider pass can place a token-styled rule on
-        // each entry boundary from the same fresh composer anchor (hud-hsc1t).
-        self.prime_viewer_echo_layout(scene);
         // hud-pd9bp: resolve vertical-flow child offsets once per frame,
         // before the geometry + text passes read them. No-op for Absolute scenes.
         self.prime_vertical_flow_layout(scene);
@@ -439,33 +427,6 @@ impl Compositor {
                 sh,
                 &composer_overlay_tokens,
             );
-
-            // ── Viewer-echo turn dividers (hud-hsc1t) ─────────────────────
-            // A token-styled rule between adjacent runtime-authored viewer
-            // history entries so the pilot-path echo reads as discrete turns
-            // (§Transcript Turn Separators). Shares the portal.divider.* tokens
-            // with the markdown transcript separators; content-free geometry,
-            // so nothing is revealed under redaction. No-op when the store is
-            // empty or the divider token is unset.
-            if !self.viewer_echoes.is_empty() {
-                if let Some(sep_color) = self.markdown_tokens.separator_color {
-                    let tile_opacity = self.tile_effective_opacity(tile, scene);
-                    let divider_color = self.gpu_color(Rgba {
-                        a: sep_color.a * tile_opacity,
-                        ..sep_color
-                    });
-                    for rect in self.collect_viewer_echo_divider_rects(tile, scene) {
-                        Self::append_clipped_rect_vertices(
-                            tile,
-                            rect,
-                            sw,
-                            sh,
-                            divider_color,
-                            &mut vertices,
-                        );
-                    }
-                }
-            }
         }
 
         // ── Resize-grip affordance (vd-crude-resize-handle-grip) ───────────────

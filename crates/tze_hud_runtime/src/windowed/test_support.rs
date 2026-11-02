@@ -1,4 +1,4 @@
-use super::{ComposerDeliveryContext, WindowedConfig, WindowedRuntimeState, WinitApp};
+use super::{WindowedConfig, WindowedRuntimeState, WinitApp};
 use crate::channels::{INPUT_EVENT_CAPACITY, frame_ready_channel};
 use crate::pipeline::FramePipeline;
 use crate::runtime_context::RuntimeContext;
@@ -332,7 +332,6 @@ pub(super) fn make_windowed_keyboard_test_app(
         _config_watch: None,
         element_repositioned_tx: None,
         input_event_tx: Some(input_event_tx),
-        pending_blur_delivery_context: None,
         composer_pointer_drag_anchor: None,
         portal_resize_states: std::collections::HashMap::new(),
         consumed_portal_resize_keydowns: std::collections::HashSet::new(),
@@ -341,8 +340,6 @@ pub(super) fn make_windowed_keyboard_test_app(
         keyboard_activation_nodes: std::collections::HashMap::new(),
         consumed_command_keydowns: std::collections::HashSet::new(),
         local_composer_state: Arc::new(StdMutex::new(None)),
-        viewer_echo_queue: Arc::new(StdMutex::new(Vec::new())),
-        input_history_seed_states: std::collections::HashMap::new(),
         focus_ring_owner_state: Arc::new(StdMutex::new(None)),
         resize_grip_hover_state: Arc::new(StdMutex::new(None)),
         tile_close_hover_state: Arc::new(StdMutex::new(None)),
@@ -519,13 +516,6 @@ pub(super) fn multi_surface_portal_scene() -> (
     )
 }
 
-pub(super) fn viewer_echo_context(tile_id: tze_hud_scene::SceneId) -> ComposerDeliveryContext {
-    ComposerDeliveryContext {
-        namespace: "portal-agent".to_string(),
-        node_id_bytes: [0u8; 16],
-        tile_id,
-    }
-}
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -635,7 +625,7 @@ mod tests {
 
         // (2) The composer intercept applies the keystroke to the draft while the
         // scene lock is held — the echo would render this frame.
-        let (outcome, _batch) = processor.route_character_to_composer("h");
+        let outcome = processor.route_character_to_composer("h");
         assert_eq!(
             outcome,
             tze_hud_input::EditOutcome::Mutated,
@@ -755,7 +745,7 @@ mod tests {
             // active-tab always resolves here (mirror not busy in this test).
             let Some(ch) = queue.pop_front() else { break };
             // Inner-style dispatch: route into the composer draft, NO FIFO guard.
-            let (outcome, _batch) = processor.route_character_to_composer(ch);
+            let outcome = processor.route_character_to_composer(ch);
             assert_eq!(
                 outcome,
                 tze_hud_input::EditOutcome::Mutated,
