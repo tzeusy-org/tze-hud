@@ -420,6 +420,8 @@ mod panel_task_tests {
         state: WindowedRuntimeState,
         panel: ControlPanelHandle,
         wakes: Arc<AtomicUsize>,
+        main_work: RenderWakeNotifier,
+        main_work_calls: Arc<AtomicUsize>,
     }
 
     fn fixture() -> Fixture {
@@ -442,6 +444,13 @@ mod panel_task_tests {
         let render_wake = RenderWakeNotifier::new(move || {
             w.fetch_add(1, Ordering::SeqCst);
         });
+        let main_work_calls = Arc::new(AtomicUsize::new(0));
+        let calls = Arc::clone(&main_work_calls);
+        let real_main_work = state.wake.main_work_notifier();
+        let main_work = RenderWakeNotifier::new(move || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            real_main_work.notify();
+        });
         let deps = ControlPanelDeps {
             scene: Arc::clone(&state.shared_state.try_lock().expect("fresh state").scene),
             pause: PauseControl::new(
@@ -450,7 +459,7 @@ mod panel_task_tests {
                 Arc::clone(&state.safe_mode_atomic),
                 render_wake.clone(),
                 Some(state.portal_projection_driver.portal_handle()),
-                state.wake.main_work_notifier(),
+                main_work.clone(),
             ),
             chords: crate::shell::control_panel::chords::ChordControl::fixed(HudChords::default()),
             pairing: None,
@@ -472,6 +481,8 @@ mod panel_task_tests {
             state,
             panel,
             wakes,
+            main_work,
+            main_work_calls,
         }
     }
 
@@ -698,7 +709,7 @@ mod panel_task_tests {
             Arc::clone(&f.state.safe_mode_atomic),
             Default::default(),
             Some(portals.clone()),
-            f.state.wake.main_work_notifier(),
+            f.main_work.clone(),
         );
         pause.set(true).await;
         let refused = call(
@@ -785,16 +796,16 @@ mod panel_task_tests {
                 "blocked render/cue debt cannot spin on a past deadline"
             );
         }
-        let readiness = f.state.wake.main_work_generation();
+        let readiness = f.main_work_calls.load(Ordering::SeqCst);
         f.send_and_wait(PanelEvent::Chord(ChordRole::Pause), |f| {
             !f.paused() && !f.panel.is_open()
         })
         .await;
-        assert_eq!(f.state.wake.main_work_generation(), readiness + 1);
-        let readiness = f.state.wake.main_work_generation();
+        assert_eq!(f.main_work_calls.load(Ordering::SeqCst), readiness + 1);
+        let readiness = f.main_work_calls.load(Ordering::SeqCst);
         pause.set(false).await;
         assert_eq!(
-            f.state.wake.main_work_generation(),
+            f.main_work_calls.load(Ordering::SeqCst),
             readiness,
             "idempotent exit adds no readiness"
         );
