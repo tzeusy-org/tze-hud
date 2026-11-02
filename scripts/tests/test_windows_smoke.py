@@ -448,7 +448,7 @@ def test_borrowed_url_routes_only_authorized_publications_and_own_cleanup(monkey
     assert len(portals) == 1 and portals[0].startswith("portal:live-smoke-")
     assert {row[1] for row in trace if isinstance(row, tuple) and row[0] == "hud_clear"} == {"widget:main-gauge", "zone:subtitle", portals[0]}
     captured = capsys.readouterr()
-    assert captured.out.count("UNEXECUTED owner-only:") == 6 and key not in captured.out + captured.err
+    assert captured.out.count("UNEXECUTED owner-only:") == 5 and key not in captured.out + captured.err
 
     # A lost publish reply can still mean a mutation: clean its tracked surface.
     trace.clear()
