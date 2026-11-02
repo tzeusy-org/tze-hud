@@ -23,7 +23,7 @@ async fn test_resume_with_token() {
     {
         let st = state.lock().await;
         let mut scene = st.scene.lock().await;
-        let tab = scene.active_tab.unwrap();
+        let tab = scene.create_tab("main", 0).unwrap();
         for secret in ["foreign-transcript-sentinel", "foreign-draft-sentinel"] {
             let lease = scene.grant_lease("foreign-portal", 60_000);
             let tile = scene
