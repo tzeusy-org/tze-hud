@@ -5,7 +5,9 @@ import copy
 import importlib.util
 import json
 import pathlib
+import tempfile
 import unittest
+from unittest import mock
 
 
 SCRIPT = pathlib.Path(__file__).with_name("check_token_footprint.py")
@@ -179,6 +181,34 @@ class GateTests(unittest.TestCase):
             [{"flow": "zone_publish", "budget": 100, "measured": 101}],
         )
 
+        # The action-limit candidate keeps its full request cost, while its
+        # returned error shares the existing 60-token error ceiling.
+        baseline["budgets"]["flows"]["error"] = 60
+        for tokens, expected in [(60, "passed"), (61, "failed"), (None, "failed")]:
+            with self.subTest(error_result_tokens=tokens):
+                measurement = fixture()
+                metric = measurement["flows"]["zone_publish"]["operations"]["zone_publish"]
+                measurement["notification_action_limit_error"] = {
+                    "transaction": copy.deepcopy(metric),
+                    "result_text": {"bytes": 200, "tokens": tokens},
+                }
+                self.assertGreater(metric["model_visible"]["tokens"], 60)
+                report = {"status": "passed", "incompatibilities": [], "budget_violations": []}
+                checker.check_notification_error_result(measurement, baseline, report)
+                self.assertEqual(report["status"], expected)
+        report = {"status": "passed", "incompatibilities": [], "budget_violations": []}
+        checker.check_notification_error_result(fixture(), baseline, report)
+        self.assertEqual(report["status"], "failed")
+        for candidate in [None, {}, {"transaction": {}, "result_text": {"bytes": 20, "tokens": True}}]:
+            with self.subTest(malformed_candidate=candidate):
+                measurement = fixture()
+                measurement["notification_action_limit_error"] = candidate
+                report = {"status": "baseline_incompatible", "incompatibilities": ["original"], "budget_violations": []}
+                checker.check_notification_error_result(measurement, baseline, report)
+                self.assertEqual(report["status"], "baseline_incompatible")
+                self.assertEqual(report["incompatibilities"][0], "original")
+                self.assertGreater(len(report["incompatibilities"]), 1)
+
     def test_missing_budgets_fail_closed(self):
         baseline = fixture()
         approve(baseline)
@@ -286,6 +316,27 @@ class CandidatePacketTests(unittest.TestCase):
         self.assertEqual(report["status"], expected)
         self.assertFalse(report["incompatibilities"])
         self.assertFalse(report["warnings"] or report["regressions"])
+
+        # Synthetic CLI fixture tests wiring; it is not calibration evidence.
+        measurement = copy.deepcopy(self.candidate)
+        measurement["notification_action_limit_error"] = {
+            "transaction": copy.deepcopy(self.candidate["flows"]["error"]["operations"]["hud_publish"]),
+            "result_text": {"bytes": 200, "tokens": 60},
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            measurement_path = pathlib.Path(directory) / "measurement.json"
+            report_path = pathlib.Path(directory) / "report.json"
+            args = [str(SCRIPT), "--measurement", str(measurement_path),
+                    "--baseline", str(self.root / "scripts/ci/token_footprint_baseline.json"),
+                    "--output", str(report_path)]
+            for tokens, exit_code in [(60, 0), (61, 1), (None, 1)]:
+                with self.subTest(cli_error_result_tokens=tokens):
+                    measurement["notification_action_limit_error"]["result_text"]["tokens"] = tokens
+                    measurement_path.write_text(json.dumps(measurement), encoding="utf-8")
+                    with mock.patch("sys.argv", args), mock.patch("sys.stdout"):
+                        self.assertEqual(checker.main(), exit_code)
+                    actual = json.loads(report_path.read_text(encoding="utf-8"))
+                    self.assertEqual(actual["status"], expected if exit_code == 0 else "failed")
 
     def test_owner_approval_makes_candidate_pass(self):
         approved = copy.deepcopy(self.candidate)

@@ -113,7 +113,33 @@ def main():
         {"surface": "zone:subtitles", "content": "hello"},
         expect_error=True,
     )
-    json.dump({"transactions": transactions}, sys.stdout, separators=(",", ":"))
+    limit = int(os.environ["HUD_MAX_NOTIFICATION_ACTIONS"])
+    error = tool(
+        "notification_action_limit_error",
+        "hud_publish",
+        "hud_publish",
+        {
+            "surface": "zone:notification-area",
+            "content": {
+                "body": "Choose",
+                "actions": [{"label": "A", "callback_id": "a"}] * (limit + 1),
+            },
+        },
+        expect_error=True,
+    )
+    if error != {
+        "code": "INVALID_ARGUMENT",
+        "hint": f"notification allows at most {limit} actions",
+    }:
+        raise RuntimeError(f"unexpected notification action-limit error: {error}")
+    # Keep canonical flow accounting intact; this candidate reports both the
+    # full transaction and the bounded result text returned to the model.
+    limit_error = transactions.pop()
+    json.dump(
+        {"transactions": transactions, "notification_action_limit_error": limit_error},
+        sys.stdout,
+        separators=(",", ":"),
+    )
     sys.stdout.write("\n")
 
 

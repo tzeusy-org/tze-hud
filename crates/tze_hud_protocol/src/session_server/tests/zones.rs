@@ -2,7 +2,18 @@ use super::*;
 
 #[tokio::test]
 async fn test_zone_publish_result() {
-    let (mut client, _server) = setup_test().await;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tze_hud_scene::types::MAX_NOTIFICATION_ACTIONS;
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let observed = wakes.clone();
+    let (mut client, server, state) = setup_test_with_state_and_render_wake(
+        tze_hud_scene::render_wake::RenderWakeNotifier::new(move || {
+            observed.fetch_add(1, Ordering::Relaxed);
+        }),
+    )
+    .await;
+    let scene = state.lock().await.scene.clone();
+    scene.lock().await.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
     let (tx, _init_messages, mut stream) =
         handshake(&mut client, "zone-publisher", "test-key").await;
 
@@ -76,6 +87,122 @@ async fn test_zone_publish_result() {
         }
         other => panic!("Expected RequestResult, got: {other:?}"),
     }
+
+    let (other_tx, _, mut other_stream) =
+        handshake(&mut client, "other-publisher", "test-key").await;
+    let foreign = request(
+        &other_tx,
+        &mut other_stream,
+        2,
+        ClientPayload::Publish(Publish {
+            surface: "zone:subtitle".into(),
+            content: Some(crate::proto::ZoneContent {
+                payload: Some(crate::proto::zone_content::Payload::StreamText(
+                    "other holding".into(),
+                )),
+            }),
+            ..Default::default()
+        }),
+    )
+    .await;
+    assert!(foreign.ok, "{foreign:?}");
+    let snapshot = |scene: &SceneGraph| {
+        assert!(
+            scene.pending_actions.is_empty(),
+            "publish must not enqueue input"
+        );
+        (
+            serde_json::to_value(scene).unwrap(),
+            scene
+                .scheduled_batches
+                .iter()
+                .map(|s| (s.present_at_wall_us, s.batch.batch_id))
+                .collect::<Vec<_>>(),
+            scene.next_timed_content_wall_us(),
+        )
+    };
+    let mut seq = 4;
+    for delay_us in [0, 1_000_000] {
+        let publish = |count| {
+            ClientPayload::Publish(Publish {
+                surface: "zone:notification-area".into(),
+                content: Some(crate::proto::ZoneContent {
+                    payload: Some(crate::proto::zone_content::Payload::Notification(
+                        crate::proto::NotificationPayload {
+                            text: "Choose".into(),
+                            actions: (0..count)
+                                .map(|i| crate::proto::NotificationActionProto {
+                                    label: format!("Option {i}"),
+                                    callback_id: format!("answer-{i}"),
+                                })
+                                .collect(),
+                            ..Default::default()
+                        },
+                    )),
+                }),
+                present_at_us: if delay_us == 0 {
+                    0
+                } else {
+                    now_wall_us() + delay_us
+                },
+                ..Default::default()
+            })
+        };
+        // Reject before the caller's first publication, then with own/other state present.
+        for seeded in [false, true] {
+            if seeded {
+                for count in [MAX_NOTIFICATION_ACTIONS - 1, MAX_NOTIFICATION_ACTIONS] {
+                    let result = request(&tx, &mut stream, seq, publish(count)).await;
+                    assert_eq!(result.seq, seq);
+                    assert!(result.ok, "{result:?}");
+                    seq += 1;
+                    let scene = scene.lock().await;
+                    let content = if delay_us == 0 {
+                        &scene.zone_registry.active_publishes["notification-area"]
+                            .last()
+                            .unwrap()
+                            .content
+                    } else {
+                        match &scene.scheduled_batches.last().unwrap().batch.mutations[0] {
+                            tze_hud_scene::mutation::SceneMutation::PublishToZone {
+                                content,
+                                ..
+                            } => content,
+                            _ => panic!("expected zone publication"),
+                        }
+                    };
+                    match content {
+                        tze_hud_scene::types::ZoneContent::Notification(n) => {
+                            assert_eq!(n.actions.len(), count)
+                        }
+                        _ => panic!("expected notification"),
+                    }
+                }
+            }
+            let before = snapshot(&*scene.lock().await);
+            let wake_count = wakes.load(Ordering::Relaxed);
+            for _ in 0..2 {
+                let result =
+                    request(&tx, &mut stream, seq, publish(MAX_NOTIFICATION_ACTIONS + 1)).await;
+                assert_eq!(
+                    (result.seq, result.ok, result.code.as_str()),
+                    (seq, false, "INVALID_ARGUMENT")
+                );
+                assert_eq!(
+                    result.hint,
+                    format!("notification allows at most {MAX_NOTIFICATION_ACTIONS} actions")
+                );
+                seq += 1;
+                assert_eq!(snapshot(&*scene.lock().await), before);
+                assert_eq!(wakes.load(Ordering::Relaxed), wake_count);
+            }
+        }
+        let result = request(&tx, &mut stream, seq, publish(0)).await;
+        assert_eq!(result.seq, seq);
+        assert!(result.ok, "valid publish after rejection: {result:?}");
+        seq += 1;
+    }
+    server.abort();
 }
 
 // ─── Zone publish acknowledgement ────────────────────────────────────────────

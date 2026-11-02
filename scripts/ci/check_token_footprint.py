@@ -272,6 +272,41 @@ def compare(measurement, baseline):
     }
 
 
+def check_notification_error_result(measurement, baseline, report):
+    """Check the executed candidate's result using the existing error ceiling.
+
+    Canonical flow comparison still counts the whole model-visible exchange.
+    This extra candidate also retains those costs, but caller-supplied action
+    lists are unbounded; only its returned error text has the result ceiling.
+    """
+    name = "notification_action_limit_error"
+    candidate = measurement.get(name)
+    if not isinstance(candidate, dict):
+        reasons = [f"missing error candidate: {name}"]
+    else:
+        transaction = candidate.get("transaction")
+        reasons = _validate_operation(transaction, f"{name}.transaction")
+        reasons.extend(_validate_operation_total(transaction, f"{name}.transaction"))
+        reasons.extend(_validate_counts(candidate.get("result_text"), f"{name}.result_text"))
+    ceiling = baseline.get("budgets", {}).get("flows", {}).get("error")
+    if not isinstance(ceiling, int) or isinstance(ceiling, bool) or ceiling < 0:
+        reasons.append("missing or invalid error result ceiling")
+    if reasons:
+        report["incompatibilities"].extend(reasons)
+        if report["status"] in {"passed", "warning"}:
+            report["status"] = "failed"
+    elif candidate["result_text"]["tokens"] > ceiling:
+        report["budget_violations"].append(
+            {
+                "flow": f"{name}.result_text",
+                "budget": ceiling,
+                "measured": candidate["result_text"]["tokens"],
+            }
+        )
+        if report["status"] in {"passed", "warning"}:
+            report["status"] = "failed"
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--measurement", required=True, type=pathlib.Path)
@@ -282,6 +317,7 @@ def main():
     measurement = json.loads(args.measurement.read_text(encoding="utf-8"))
     baseline = json.loads(args.baseline.read_text(encoding="utf-8"))
     report = compare(measurement, baseline)
+    check_notification_error_result(measurement, baseline, report)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2, sort_keys=True))
