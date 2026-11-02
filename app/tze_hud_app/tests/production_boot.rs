@@ -169,7 +169,7 @@ async fn production_config_rejects_unpaired_psk() {
         .expect("bind IPv6 fixture listener");
     let addr = listener.local_addr().expect("fixture listener address");
     let paired = tze_hud_config::AgentsFile::default()
-        .with_agent("paired-agent", "paired-key", &["tiles"])
+        .with_agent("paired-agent", "paired-key", &["zone:subtitle"])
         .directory()
         .expect("paired agent directory");
     let runtime = gpu_init::serialized_headless_init(HeadlessRuntime::new(HeadlessConfig {
@@ -187,8 +187,6 @@ async fn production_config_rejects_unpaired_psk() {
         timestamp_wall_us: 0,
         payload: Some(Request::SessionInit(SessionInit {
             agent_id: "paired-agent".to_string(),
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
             auth_credential: Some(tze_hud_protocol::auth::psk_credential("unpaired-key")),
             ..Default::default()
         })),

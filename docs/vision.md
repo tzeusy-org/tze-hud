@@ -19,7 +19,7 @@ is organized around it:
 | Stage | What the model does | What the runtime guarantees |
 |---|---|---|
 | Discover | List zones, widgets, and its own holdings | Cheap, deterministic answers sized for model context |
-| Claim | Publish to a named zone, or lease a tile region | Admission is immediate and explicit; conflicts resolve by policy, not by the model |
+| Claim | Publish to a named zone or widget, or attach a portal | Admission is immediate and explicit; conflicts resolve by policy, not by the model |
 | Fill / update | Send content or typed parameters | Latest-wins coalescing; work proportional to change; nothing re-rendered needlessly |
 | Interact | Receive input; acknowledge it | Local feedback is instant; the model hears about it afterwards |
 | Hold | Renew, or let TTL run | Leases expire on their own; nothing is held forever by accident |
@@ -33,8 +33,9 @@ Surfaces on that lifecycle, in priority order:
    scrapes a terminal.
 2. **Ambient zones.** Named slots (subtitle, notification, status bar,
    ambient background). One MCP call, no layout knowledge.
-3. **Agent-owned tiles.** Leased regions a resident agent creates and updates
-   over gRPC.
+3. **Considered for later.** Agent-owned tiles: leased regions a resident
+   program composes and updates over gRPC. Removed 2026-10-14 for lack of a
+   user; spec and entry criterion in hud-x1wuq.
 4. **SVG widgets.** User-authored templates with typed parameters (`f32`,
    `color`, `enum`, `string`) the model sets; the runtime rasterizes and
    animates.
@@ -49,7 +50,7 @@ Surfaces on that lifecycle, in priority order:
   small, deterministic calls. Responses carry what the model needs next and
   nothing else.
 - **Two planes, chosen by traffic shape.** MCP for discoverable one-shot calls
-  (zones, widgets, portal); gRPC streams for resident sessions (tiles, input,
+  (zones, widgets, portal); gRPC streams for resident sessions (zones, widgets, input,
   high-rate updates). Message classes stay distinct: transactional (acked),
   state-stream (coalesced), ephemeral (droppable).
 - **Cheap when idle.** An idle HUD costs ~nothing; a busy one costs in

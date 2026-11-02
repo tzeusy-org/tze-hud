@@ -13,7 +13,7 @@ dev-mode = ["tze_hud_compositor/dev-mode", "tze_hud_telemetry/dev-mode"]
 ## Expose `windowed::HeadlessEventLoopHarness` (GPU-free, with live MCP and an
 ## injected clock) and headless gRPC listener adoption for end-to-end fixtures.
 ## Not for production builds.
-test-harness = ["tze_hud_protocol/dev-mode"]
+test-harness = ["tze_hud_protocol/dev-mode", "tze_hud_mcp/test-harness"]
 
 [dependencies]
 tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0" }
@@ -37,7 +37,6 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
 notify = { workspace = true }
-uuid = { workspace = true }
 # Restart handoff nonce (OS CSPRNG) and its constant-time comparison; both are
 # already in the tree via tze_hud_projection / tze_hud_protocol.
 getrandom = { workspace = true }

@@ -20,14 +20,17 @@ import "events.proto";
 
 service HudSession {
   // Primary bidirectional session stream.
-  // All session traffic (handshake, mutations, events, heartbeats,
-  // lease management, subscriptions) flows over this single stream.
+  // All session traffic (handshake, publications, uploads, events,
+  // heartbeats and subscriptions) flows over this single stream.
   rpc Session(stream ClientMessage) returns (stream ServerMessage);
 }
 
 // ─── Client -> Server envelope ────────────────────────────────────────────────
 
 message ClientMessage {
+  // Removed public tile/session surface; never reuse.
+  reserved 20, 40;
+  reserved "mutation_batch", "claim_tile";
   uint64 sequence         = 1;  // Per-direction monotonically increasing, starts at 1
   uint64 timestamp_wall_us = 2; // Sender wall-clock (UTC us since epoch); advisory only
 
@@ -36,9 +39,6 @@ message ClientMessage {
     SessionInit       session_init       = 10;
     SessionResume     session_resume     = 11;
     SessionClose      session_close      = 12;
-
-    // Scene mutations
-    MutationBatch     mutation_batch     = 20;
 
     // Keepalive
     Heartbeat         heartbeat          = 31;
@@ -50,9 +50,8 @@ message ClientMessage {
 
     // Lifecycle verbs (docs/api.md). Each request gets one RequestResult,
     // except publishes to ephemeral zones/widgets (fire-and-forget).
-    ClaimTile claim_tile = 40;  // Lease + tile + initial content, one round trip
     Publish   publish    = 41;  // zone:<name> or widget:<name>
-    Clear     clear      = 42;  // zone:<name>, widget:<name>, or tile:<id> (releases the lease)
+    Clear     clear      = 42;  // zone:<name> or widget:<name>
     Hold      hold       = 43;  // Renew a holding without resending content
   }
 
@@ -69,7 +68,7 @@ message ClientMessage {
   reserved 32;
   reserved "capability_request";
   // Removed in T5 S4b: lease and publish messages replaced by the lifecycle
-  // verbs (ClaimTile grants, Hold renews, Clear releases; Publish).
+  // verbs (Hold renews, Clear releases; Publish).
   reserved 21, 22, 23, 25, 35;
   reserved "lease_request", "lease_renew", "lease_release", "zone_publish",
     "widget_publish";
@@ -84,6 +83,9 @@ message ClientMessage {
 // ─── Server -> Client envelope ────────────────────────────────────────────────
 
 message ServerMessage {
+  // Removed public tile/session surface; never reuse.
+  reserved 30, 54;
+  reserved "scene_snapshot", "reclaimed";
   uint64 sequence         = 1;  // Per-direction monotonically increasing, starts at 1
   uint64 timestamp_wall_us = 2; // Sender wall-clock (UTC us since epoch); advisory only
 
@@ -99,9 +101,6 @@ message ServerMessage {
     // Both are transactional (never dropped).
     SessionSuspended      session_suspended      = 13;
     SessionResumed        session_resumed        = 14;
-
-    // Scene state
-    SceneSnapshot         scene_snapshot         = 30;
 
     // Keepalive
     Heartbeat             heartbeat              = 33;
@@ -124,25 +123,19 @@ message ServerMessage {
     ResourceErrorResponse resource_error_response = 49;
 
     // Element repositioned event — emitted on drag completion or reset-to-default.
-    // Subscription: SCENE_TOPOLOGY (requires allow entry "tiles").
+    // Subscription: SCENE_TOPOLOGY (requires the corresponding event permission).
     // Message class: Transactional (never coalesced or dropped).
     tze_hud.protocol.v1.ElementRepositionedEvent element_repositioned = 51;
 
-    // Frame-present acknowledgment (defined in events.proto) — correlates
-    // accepted MutationBatch.batch_ids to the wall-clock time their composited
-    // frame presented (Stage 7 complete). Enables true mutation-arrival →
-    // on-screen-present latency measurement.
-    // Subscription: TELEMETRY_FRAMES (requires allow entry "tiles").
+    // Frame-present acknowledgment for runtime frame timing. The event remains
+    // available independently of the removed public mutation route.
+    // Subscription: TELEMETRY_FRAMES (requires the corresponding event permission).
     // Message class: State-stream (coalesced/droppable under backpressure).
     tze_hud.protocol.v1.FramePresented frame_presented = 52;
 
-    // The one reply shape for requests (MutationBatch, ClaimTile, Publish,
-    // Clear, Hold). Transactional.
+    // The one reply shape for Publish, Clear and Hold. Transactional.
     RequestResult request_result = 53;
 
-    // The runtime took a holding back (expiry, disconnect grace, human
-    // override). Transactional.
-    Reclaimed reclaimed = 54;
   }
 
   // Field 22 (lease_denial) was removed in the v1 vocabulary rename.
@@ -169,7 +162,7 @@ message ServerMessage {
   reserved "lease_state_change", "scene_delta", "backpressure_signal",
     "runtime_telemetry", "emit_scene_event_result";
   // Removed in T5 S4b: per-request reply messages replaced by RequestResult;
-  // lease terminal pushes replaced by Reclaimed.
+  // lease terminal pushes have also been removed.
   reserved 15, 20, 21, 40, 47;
   reserved "runtime_error", "mutation_result", "lease_response",
     "zone_publish_result", "widget_publish_result";
@@ -187,23 +180,17 @@ message PreSharedKeyCredential {
   string key = 1;  // The pre-shared key value
 }
 
-// Local socket credential — valid only when client connects via Unix domain socket.
-// V1 implementation: accepted unconditionally on loopback connections.
-message LocalSocketCredential {
-  string socket_path = 1;  // Socket path used by the client (for audit logging)
-  string pid_hint    = 2;  // Caller PID hint (advisory, for logging only)
-}
-
-// Authentication credential oneof (RFC 0005 §1.4, DR-SP6).
-// Pre-shared key and local socket are the only credentials. Fields 3 and 4
-// (OAuth token, mTLS) had no verifier and were removed in T8.
+// Authentication credential oneof. Structured pre-shared keys are the only
+// supported credential. Removed alternatives stay reserved.
 message AuthCredential {
+  // Removed public tile/session surface; never reuse.
+  reserved 2;
+  reserved "local_socket";
   reserved 3, 4;
   reserved "oauth_token", "mtls";
 
   oneof credential {
     PreSharedKeyCredential  pre_shared_key    = 1;
-    LocalSocketCredential   local_socket      = 2;
   }
 }
 
@@ -212,6 +199,9 @@ message AuthCredential {
 // First message from client on a new connection.
 // Must arrive within handshake_timeout (default 5000ms) or stream is closed.
 message SessionInit {
+  // Removed public tile/session surface; never reuse.
+  reserved 8, 9;
+  reserved "min_protocol_version", "max_protocol_version";
   string agent_id               = 1;  // Stable agent identifier (e.g. "weather-agent")
 
   // Fields 2 (agent_display_name, never read) and 3 (pre_shared_key, replaced
@@ -234,27 +224,21 @@ message SessionInit {
   reserved 7;
   reserved "agent_timestamp_wall_us";
 
-  // Protocol version negotiation (RFC 0005 §4.1).
-  // version = major * 1000 + minor (e.g. 1000 = v1.0, 1001 = v1.1).
-  // Runtime picks highest mutually supported version; sends UNSUPPORTED_PROTOCOL_VERSION
-  // if no intersection exists.
-  uint32 min_protocol_version   = 8;  // Minimum version agent can speak (0 = unset → treated as 1000)
-  uint32 max_protocol_version   = 9;  // Maximum version agent can speak (0 = unset → treated as 1000)
-
-  // Auth credential. V1 supports PreSharedKeyCredential and LocalSocketCredential.
+  // Structured PSK credential, required for authentication.
   AuthCredential auth_credential = 13;
 }
 
 // First message from client for reconnection within grace period.
 // Alternative to SessionInit when agent has a valid resume token.
 message SessionResume {
+  // Removed public tile/session surface; never reuse.
+  reserved 4;
+  reserved "pre_shared_key";
   string agent_id                   = 1;
   bytes  resume_token               = 2;  // Token from previous SessionEstablished
   uint64 last_seen_server_sequence  = 3;  // Last server sequence the client processed
-  string pre_shared_key             = 4;  // Re-authenticate on resume (deprecated: use auth_credential)
 
   // Structured auth credential for re-authentication (RFC 0005 §6.2).
-  // Takes precedence over pre_shared_key if set.
   AuthCredential auth_credential    = 5;
 }
 
@@ -266,8 +250,11 @@ message SessionClose {
 }
 
 // Server response: session established (handshake accepted).
-// Followed immediately by a SceneSnapshot.
+// Followed immediately by the current DegradationNotice.
 message SessionEstablished {
+  // Removed public tile/session surface; never reuse.
+  reserved 11;
+  reserved "negotiated_protocol_version";
   bytes  session_id               = 1;  // Opaque session identifier (UUIDv7)
   string namespace                = 2;  // Agent's namespace in the scene (RFC 0001 SS1.2)
   // Field 3 (granted_capabilities) removed in T5 S2.
@@ -288,18 +275,13 @@ message SessionEstablished {
   repeated string active_subscriptions = 9;
   repeated string denied_subscriptions = 10;
 
-  // Negotiated protocol version (RFC 0005 §4.1).
-  // Highest mutually supported version: major * 1000 + minor.
-  // 0 = field not set (old server); treat as 1000 (v1.0).
-  uint32 negotiated_protocol_version = 11;
-
   // Field 12 (portal_part_tokens) removed in T5 S5: agents no longer draw the
   // portal, so the runtime no longer ships its resolved portal tokens.
   reserved 12;
   reserved "portal_part_tokens";
 }
 
-// Server response: session error (auth failure, version mismatch, protocol violation, etc.)
+// Server response: session error (auth failure, protocol violation, etc.)
 message SessionError {
   string code    = 1;  // Error code (e.g. "AUTH_FAILED", "DUPLICATE_AGENT_ID")
   string message = 2;  // Human-readable explanation
@@ -307,14 +289,16 @@ message SessionError {
 }
 
 // Server response to a valid SessionResume (RFC 0005 §6.3).
-// Followed immediately by a SceneSnapshot (full snapshot; no delta replay in v1).
+// Followed immediately by the current DegradationNotice.
 // Agents MUST use the subscription state from this message rather than assuming
 // their pre-disconnect subscription set is intact.
 message SessionResumeResult {
+  // Removed public tile/session surface; never reuse.
+  reserved 4;
+  reserved "negotiated_protocol_version";
   bool   accepted                        = 1;   // true = resume accepted; false = rejected
   bytes  new_session_token               = 2;   // New token for this resumed session (opaque bytes, e.g. UUIDv7)
   uint64 new_server_sequence             = 3;   // Current server-side sequence
-  uint32 negotiated_protocol_version     = 4;   // Protocol version in use
   // Field 5 (granted_capabilities) removed in T5 S2.
   reserved 5;
   reserved "granted_capabilities";
@@ -329,8 +313,7 @@ message SessionResumeResult {
 // ─── Safe-mode lifecycle messages (RFC 0005 §3.7) ─────────────────────────────
 
 // Runtime notifies all active sessions that safe mode has been entered.
-// After delivery, all MutationBatch messages from suspended sessions SHALL be
-// rejected with RuntimeError(error_code="SAFE_MODE_ACTIVE"). The session remains
+// While suspended, Publish is rejected with SAFE_MODE_ACTIVE. The session remains
 // open and Heartbeat keepalives continue. Transactional — never dropped.
 message SessionSuspended {
   string reason          = 1;  // Human-readable reason (e.g. "safe_mode_entered")
@@ -338,13 +321,10 @@ message SessionSuspended {
 }
 
 // Runtime notifies all previously suspended sessions that safe mode has exited.
-// After delivery, mutation submission is permitted again. Transactional — never dropped.
+// After delivery, publication is permitted again. Transactional — never dropped.
 message SessionResumed {
   uint64 timestamp_wall_us = 1; // Wall-clock time of resumption (UTC us since epoch)
 }
-
-
-
 
 // ─── Mutation messages ────────────────────────────────────────────────────────
 
@@ -364,7 +344,7 @@ message TimingHints {
   uint64 expires_at_wall_us = 2;
 }
 
-// Atomic batch of scene mutations (RFC 0001 SS4).
+// Internal-only container for scene mutation conversion. No public session route.
 message MutationBatch {
   bytes  batch_id  = 1;  // UUIDv7; deduplication key (RFC 0005 SS5.2)
   bytes  lease_id  = 2;  // Lease under which mutations execute
@@ -372,59 +352,10 @@ message MutationBatch {
   TimingHints timing = 4;  // Optional timing semantics (RFC 0003 §3.5)
 }
 
-
-
-
-
-
-
-
-
 // ─── Lifecycle verbs (docs/api.md) ───────────────────────────────────────────
 //
-// Surfaces are the same strings MCP uses: `zone:<name>`, `widget:<name>`, and
-// `tile:<uuid>` for a tile from ClaimTile. Times are milliseconds (`*_ms`);
-// absolute wall-clock times are UTC µs (`*_us`).
-
-// Where a claimed tile goes. The runtime resolves anchor + size class to a
-// rect from `[design_tokens]` (`tile.*`), stacks tiles that share an anchor,
-// and clamps to the display. Agents never send geometry or z-order.
-enum TileAnchor {
-  TILE_ANCHOR_UNSPECIFIED = 0;  // = TOP_RIGHT
-  TILE_ANCHOR_TOP_LEFT     = 1;
-  TILE_ANCHOR_TOP          = 2;
-  TILE_ANCHOR_TOP_RIGHT    = 3;
-  TILE_ANCHOR_LEFT         = 4;
-  TILE_ANCHOR_CENTER       = 5;
-  TILE_ANCHOR_RIGHT        = 6;
-  TILE_ANCHOR_BOTTOM_LEFT  = 7;
-  TILE_ANCHOR_BOTTOM       = 8;
-  TILE_ANCHOR_BOTTOM_RIGHT = 9;
-}
-
-enum TileSize {
-  TILE_SIZE_UNSPECIFIED = 0;  // = MEDIUM
-  TILE_SIZE_SMALL  = 1;
-  TILE_SIZE_MEDIUM = 2;
-  TILE_SIZE_LARGE  = 3;
-  TILE_SIZE_WIDE   = 4;  // Short and wide (a ticker or status strip)
-  TILE_SIZE_TALL   = 5;  // Narrow and tall (a side panel)
-}
-
-message TilePlacement {
-  TileAnchor anchor = 1;
-  TileSize   size   = 2;
-}
-
-// Claim a tile: grants a lease, creates the tile, and applies `root` (if set)
-// in one round trip. The RequestResult carries ids[0] = tile id, then the ids
-// of the root's nodes in pre-order (client-chosen NodeProto.id values are kept;
-// empty ids are assigned), plus lease_id and ttl_ms.
-message ClaimTile {
-  TilePlacement placement = 1;
-  uint64 ttl_ms = 2;  // 0 = runtime default (60 s)
-  tze_hud.protocol.v1.NodeProto root = 3;  // Optional initial node tree
-}
+// Surfaces use `zone:<name>` and `widget:<name>`. Times are milliseconds
+// (`*_ms`); absolute wall-clock times are UTC microseconds (`*_us`).
 
 // Publish to a zone or widget. Durable surfaces reply with RequestResult;
 // ephemeral ones are fire-and-forget.
@@ -440,43 +371,29 @@ message Publish {
   uint32 transition_ms = 9;  // Widget parameter transition (0 = instant)
 }
 
-// Release a zone publication, a widget publication, or a tile (its lease).
+// Release this namespace's zone or widget publications.
 message Clear {
   string surface = 1;
 }
 
 // Extend a holding without resending content.
 message Hold {
-  string surface = 1;  // zone:<name>, widget:<name>, or tile:<id>
-  uint64 ttl_ms = 2;   // Zones/widgets: 0 = until cleared. Tiles: 0 = default.
+  string surface = 1;  // zone:<name> or widget:<name>
+  uint64 ttl_ms = 2;   // 0 = until cleared (subject to normal session/human reclamation).
 }
 
 // The one reply shape for requests. `seq` echoes the request envelope's
 // sequence. On failure, `code` is from the closed set shared with MCP
 // (docs/api.md) and `hint` names the fix.
 message RequestResult {
+  // Removed public tile/session surface; never reuse.
+  reserved 5, 6, 8;
+  reserved "ids", "lease_id", "batch_id";
   uint64 seq = 1;
   bool   ok = 2;
   string code = 3;
   string hint = 4;
-  repeated bytes ids = 5;  // Created ids (ClaimTile: tile first; MutationBatch: created ids)
-  bytes  lease_id = 6;     // ClaimTile / Hold on a tile
   uint64 ttl_ms = 7;       // Granted or renewed TTL
-  bytes  batch_id = 8;     // MutationBatch: echo of batch_id
-}
-
-enum ReclaimReason {
-  RECLAIM_REASON_UNSPECIFIED = 0;
-  RECLAIM_REASON_EXPIRED      = 1;  // TTL elapsed
-  RECLAIM_REASON_DISCONNECTED = 2;  // Reconnect grace elapsed
-  RECLAIM_REASON_OVERRIDE     = 3;  // Human override or suspension timeout
-}
-
-// Pushed when the runtime takes a holding back. One per reclaimed tile.
-message Reclaimed {
-  string surface = 1;   // tile:<id>; empty if the lease held no tile
-  ReclaimReason why = 2;
-  bytes lease_id = 3;
 }
 
 // ─── Resident scene-resource upload messages ─────────────────────────────────
@@ -569,65 +486,6 @@ message ResourceErrorResponse {
 message Heartbeat {
   uint64 timestamp_mono_us = 1;  // Monotonic clock (us); echoed for RTT calculation
 }
-
-
-
-// ─── Scene state messages ─────────────────────────────────────────────────────
-
-// Full deterministic scene snapshot sent on connect/reconnect (RFC 0001 §4.1, §4.2).
-//
-// The runtime MUST send this after SessionEstablished (new session) and
-// SessionResumeResult (reconnect). Agents MUST discard prior state and apply
-// this snapshot before issuing mutations. Sequence-number resumption starts
-// from the `sequence` field value.
-//
-// Encoding: snapshot_json carries a JSON-serialized SceneGraphSnapshot struct
-// (defined in tze_hud_scene::types). The JSON uses compact (non-pretty)
-// encoding for byte stability and must include all fields from the struct,
-// including tabs (ordered by display_order), tiles, nodes, zone_registry
-// (zone types, instances, active publications — no effective_geometry),
-// and active_tab. BTreeMap iteration order guarantees determinism.
-//
-// Checksum: blake3_checksum (hex) is carried separately for fast validation
-// without deserializing the full JSON payload. The checksum is computed over
-// the JSON bytes with the checksum field set to "". Agents SHOULD verify the
-// checksum before applying the snapshot.
-//
-// V1 constraints (RFC 0001 §4.2, §6, spec lines 324, 342, 360):
-//   - Resources are ephemeral: snapshot references ResourceIds, no blob data.
-//   - Incremental diff is NOT available; snapshot-only reconnect in v1.
-//   - effective_geometry is NOT included (post-v1 per spec line 360).
-message SceneSnapshot {
-  // Full scene topology as canonical compact JSON (SceneGraphSnapshot struct).
-  // Includes: sequence, snapshot_wall_us, snapshot_mono_us, tabs, tiles,
-  // nodes, zone_registry, widget_registry, active_tab, display_area, checksum;
-  // plus portal_surfaces, present ONLY when non-empty (omitted for surface-less
-  // snapshots so the checksum bytes stay identical to pre-field snapshots).
-  // A client MUST treat a missing portal_surfaces key as an empty map, not as a
-  // malformed snapshot.
-  string snapshot_json  = 1;
-
-  // Sequence number at snapshot time (RFC 0001 §3.5).
-  // Agents resume mutation submission from this sequence number.
-  uint64 sequence       = 2;
-
-  // UTC wall-clock at snapshot time (microseconds since Unix epoch).
-  uint64 snapshot_wall_us = 3;
-
-  // Monotonic timestamp at snapshot time (microseconds since process start).
-  uint64 snapshot_mono_us = 4;
-
-  // BLAKE3 checksum of the snapshot_json content (64-char lowercase hex).
-  // Computed with checksum="" in the JSON payload.
-  // Agents SHOULD verify before applying. Mismatch indicates corruption.
-  string blake3_checksum = 5;
-
-  // The field name `version` (previously at tag 2) and `scene_json` (previously
-  // at tag 1) are reserved to prevent accidental reuse of old names that had
-  // different semantics in the pre-spec SceneSnapshot format.
-  reserved "scene_json", "version";
-}
-
 
 // ─── Degradation (RFC 0005 §3.4, §7.1) ───────────────────────────────────────
 

@@ -5,8 +5,14 @@ use super::*;
 async fn test_durable_widget_publish_receives_result() {
     let service = setup_widget_service().await;
     let scene_ref = service.state.lock().await.scene.clone();
+    let clock = tze_hud_scene::TestClock::new(now_ms());
     {
         let mut scene = scene_ref.lock().await;
+        let mut timed = SceneGraph::new_with_clock(800.0, 600.0, Arc::new(clock.clone()));
+        timed.widget_registry = scene.widget_registry.clone();
+        timed.tabs = scene.tabs.clone();
+        timed.active_tab = scene.active_tab;
+        *scene = timed;
         let def = scene.widget_registry.definitions.get_mut("gauge").unwrap();
         def.parameter_schema[0].constraints = Some(tze_hud_scene::WidgetParamConstraints {
             f32_min: Some(0.0),
@@ -25,7 +31,7 @@ async fn test_durable_widget_publish_receives_result() {
     }
     let (mut client, _handle) = setup_widget_test_with_service(service).await;
 
-    let (tx, _init_msgs, mut stream) = handshake_with_capabilities(
+    let (tx, init_msgs, mut stream) = handshake_with_capabilities(
         &mut client,
         "widget-agent",
         "test-key",
@@ -192,6 +198,88 @@ async fn test_durable_widget_publish_receives_result() {
             tze_hud_scene::WidgetParameterValue::F32(level)
         );
     }
+    let origin = match &init_msgs[0].payload {
+        Some(ServerPayload::SessionEstablished(e)) => bytes_to_scene_id(&e.session_id).unwrap(),
+        other => panic!("expected establishment, got {other:?}"),
+    };
+    let held = request(
+        &tx,
+        &mut stream,
+        32,
+        ClientPayload::Hold(Hold {
+            surface: "widget:gauge".into(),
+            ttl_ms: 100,
+        }),
+    )
+    .await;
+    assert!(held.ok);
+    assert_eq!(held.ttl_ms, 100);
+    let finite_expiry = clock.now_us() + 100_000;
+    {
+        let scene = scene_ref.lock().await;
+        let publication = &scene.widget_registry.active_publishes["gauge"][0];
+        assert_eq!(publication.expires_at_wall_us, Some(finite_expiry));
+        assert_eq!(publication.publication_origin, Some(origin));
+    }
+    let mut foreign = client.clone();
+    let (foreign_tx, _, mut foreign_stream) =
+        handshake(&mut foreign, "other-widget-agent", "test-key").await;
+    let rejected = request(
+        &foreign_tx,
+        &mut foreign_stream,
+        2,
+        ClientPayload::Hold(Hold {
+            surface: "widget:gauge".into(),
+            ttl_ms: 0,
+        }),
+    )
+    .await;
+    assert_eq!(rejected.code, "NOT_HELD");
+    assert_eq!(
+        scene_ref.lock().await.widget_registry.active_publishes["gauge"][0].expires_at_wall_us,
+        Some(finite_expiry)
+    );
+    let held = request(
+        &tx,
+        &mut stream,
+        33,
+        ClientPayload::Hold(Hold {
+            surface: "widget:gauge".into(),
+            ttl_ms: 0,
+        }),
+    )
+    .await;
+    assert!(held.ok);
+    assert_eq!(held.ttl_ms, 0);
+    {
+        let mut scene = scene_ref.lock().await;
+        clock.advance(60_000);
+        assert_eq!(scene.drain_expired_widget_publications(), 0);
+        let publication = &scene.widget_registry.active_publishes["gauge"][0];
+        assert_eq!(publication.expires_at_wall_us, None);
+        assert_eq!(publication.publication_origin, Some(origin));
+    }
+    assert!(
+        request(
+            &tx,
+            &mut stream,
+            34,
+            ClientPayload::Clear(Clear {
+                surface: "widget:gauge".into()
+            })
+        )
+        .await
+        .ok
+    );
+    assert!(
+        scene_ref
+            .lock()
+            .await
+            .widget_registry
+            .active_publishes
+            .get("gauge")
+            .is_none_or(Vec::is_empty)
+    );
     drop(tx);
 }
 

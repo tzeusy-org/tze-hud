@@ -13,7 +13,6 @@ async fn test_initial_handshake_failures_carry_recovery_hints() {
         closer: &closer,
         resource_budget: &budget,
         budget_enforcer: None,
-        peer_ip: None,
     };
     for (read, code, message_fragment) in [
         (
@@ -115,7 +114,6 @@ async fn test_session_registration_rejections_carry_recovery_hints() {
                 "rejected-agent".to_string(),
                 Vec::new(),
                 Vec::new(),
-                Vec::new(),
                 DEFAULT_GRACE_PERIOD_MS,
                 0,
             );
@@ -140,7 +138,6 @@ async fn test_session_registration_rejections_carry_recovery_hints() {
             closer: &closer,
             resource_budget: &budget,
             budget_enforcer: Some(&enforcer),
-            peer_ip: None,
         };
         let (tx, mut rx) = tokio::sync::mpsc::channel(16);
         assert!(
@@ -179,11 +176,56 @@ async fn test_session_registration_rejections_carry_recovery_hints() {
 }
 
 #[tokio::test]
-async fn test_handshake_init_established_and_snapshot() {
-    let (mut client, _server) = setup_test().await;
+async fn test_handshake_init_established_and_current_degradation() {
+    use prost::Message;
+    let (mut client, _server, state) = setup_test_with_state().await;
+    // Foreign portal content and an unsent composer draft must never cross
+    // the session boundary, including for an unrestricted paired agent.
+    {
+        let st = state.lock().await;
+        let mut scene = st.scene.lock().await;
+        let tab = scene.create_tab("main", 0).unwrap();
+        for secret in ["foreign-transcript-sentinel", "foreign-draft-sentinel"] {
+            let lease = scene.grant_lease("foreign-portal", 60_000);
+            let tile = scene
+                .create_tile(
+                    tab,
+                    "foreign-portal",
+                    lease,
+                    Rect::new(0.0, 0.0, 100.0, 50.0),
+                    1,
+                )
+                .unwrap();
+            let node = crate::convert::proto_node_to_scene(&crate::proto::NodeProto {
+                data: Some(crate::proto::node_proto::Data::TextMarkdown(
+                    crate::proto::TextMarkdownNodeProto {
+                        content: secret.to_string(),
+                        ..Default::default()
+                    },
+                )),
+                ..Default::default()
+            })
+            .unwrap();
+            scene.set_tile_root(tile, node).unwrap();
+            scene
+                .set_portal_surface(tile, PortalSurface::default(), "foreign-portal")
+                .unwrap();
+        }
+    }
+
     let (_tx, messages, _stream) = handshake(&mut client, "test-agent", "test-key").await;
 
-    assert_eq!(messages.len(), 3);
+    assert_eq!(messages.len(), 2);
+    for message in &messages {
+        let wire = message.encode_to_vec();
+        for secret in ["foreign-transcript-sentinel", "foreign-draft-sentinel"] {
+            assert!(
+                !wire
+                    .windows(secret.len())
+                    .any(|bytes| bytes == secret.as_bytes())
+            );
+        }
+    }
 
     // First message: SessionEstablished
     match &messages[0].payload {
@@ -218,15 +260,7 @@ async fn test_handshake_init_established_and_snapshot() {
         other => panic!("Expected SessionEstablished, got: {other:?}"),
     }
 
-    // Second message: SceneSnapshot
     match &messages[1].payload {
-        Some(ServerPayload::SceneSnapshot(snapshot)) => {
-            assert!(!snapshot.snapshot_json.is_empty());
-        }
-        other => panic!("Expected SceneSnapshot, got: {other:?}"),
-    }
-
-    match &messages[2].payload {
         Some(ServerPayload::DegradationNotice(notice)) => {
             assert_eq!(notice.level, DegradationLevel::Normal as i32);
         }
@@ -251,8 +285,6 @@ async fn test_handshake_auth_failure() {
                 agent_id: "bad-agent".to_string(),
                 initial_subscriptions: Vec::new(),
                 resume_token: Vec::new(),
-                min_protocol_version: 1000,
-                max_protocol_version: 1001,
                 auth_credential: Some(crate::auth::psk_credential("wrong-key".to_string())),
             })),
         })
@@ -598,8 +630,6 @@ async fn test_graceful_disconnect_session_close() {
         ClientPayload::SessionInit(SessionInit {
             agent_id: agent.to_string(),
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
             auth_credential: Some(crate::auth::psk_credential("test-key")),
             ..Default::default()
         })
@@ -640,24 +670,16 @@ async fn test_graceful_disconnect_session_close() {
             other => panic!("expected successful handshake, got {other:?}"),
         };
         assert!(!token.is_empty());
-        for snapshot in [true, false] {
-            let message = tokio::time::timeout(Duration::from_secs(5), stream.next())
-                .await
-                .expect("ordered handshake messages timed out")
-                .unwrap()
-                .unwrap();
-            if snapshot {
-                assert!(matches!(
-                    message.payload,
-                    Some(ServerPayload::SceneSnapshot(_))
-                ));
-            } else {
-                assert!(matches!(
-                    message.payload,
-                    Some(ServerPayload::DegradationNotice(_))
-                ));
-            }
-        }
+        let message = tokio::time::timeout(Duration::from_secs(5), stream.next())
+            .await
+            .expect("current degradation notice timed out")
+            .unwrap()
+            .unwrap();
+        assert!(matches!(
+            message.payload,
+            Some(ServerPayload::DegradationNotice(_))
+        ));
+
         token
     }
 
@@ -943,7 +965,7 @@ async fn test_graceful_disconnect_session_close() {
     }
 }
 
-// ─── Handshake auth, version, capability, subscription ───────────────────────
+// ─── Handshake auth, capability, subscription ───────────────────────
 
 /// Scenario: Structured AuthCredential (PSK) accepted
 /// WHEN agent sends SessionInit with a valid PreSharedKeyCredential in auth_credential,
@@ -962,8 +984,6 @@ async fn test_auth_structured_psk_credential_accepted() {
             agent_id: "psk-agent".to_string(),
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
             auth_credential: Some(crate::proto::session::AuthCredential {
                 credential: Some(
                     crate::proto::session::auth_credential::Credential::PreSharedKey(
@@ -991,341 +1011,36 @@ async fn test_auth_structured_psk_credential_accepted() {
 /// THEN runtime sends SessionError(AUTH_FAILED) and closes stream.
 #[tokio::test]
 async fn test_auth_structured_psk_credential_wrong_key() {
+    use prost::Message;
     let (mut client, _server) = setup_test().await;
-
-    let (tx, rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-
-    tx.send(ClientMessage {
-        sequence: 1,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::SessionInit(SessionInit {
-            agent_id: "bad-psk-agent".to_string(),
-            initial_subscriptions: Vec::new(),
-            resume_token: Vec::new(),
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
-            auth_credential: Some(crate::proto::session::AuthCredential {
-                credential: Some(
-                    crate::proto::session::auth_credential::Credential::PreSharedKey(
-                        crate::proto::session::PreSharedKeyCredential {
-                            key: "wrong-key".to_string(),
-                        },
-                    ),
-                ),
-            }),
-        })),
-    })
-    .await
-    .unwrap();
-
-    let mut response_stream = client.session(stream).await.unwrap().into_inner();
-    let msg = response_stream.next().await.unwrap().unwrap();
-    match &msg.payload {
-        Some(ServerPayload::SessionError(err)) => {
-            assert_eq!(err.code, "AUTH_FAILED");
-        }
-        other => panic!("Expected SessionError(AUTH_FAILED), got: {other:?}"),
-    }
-}
-
-/// Scenario: LocalSocketCredential accepted
-/// WHEN agent sends SessionInit with a valid LocalSocketCredential,
-/// THEN runtime authenticates and proceeds to SessionEstablished.
-#[tokio::test]
-async fn test_auth_local_socket_credential_accepted() {
-    let (mut client, _server) = setup_test().await;
-
-    let (tx, rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-
-    tx.send(ClientMessage {
-        sequence: 1,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::SessionInit(SessionInit {
-            agent_id: "local-agent".to_string(),
-            initial_subscriptions: Vec::new(),
-            resume_token: Vec::new(),
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
-            auth_credential: Some(crate::proto::session::AuthCredential {
-                credential: Some(
-                    crate::proto::session::auth_credential::Credential::LocalSocket(
-                        crate::proto::session::LocalSocketCredential {
-                            socket_path: "/run/tze_hud.sock".to_string(),
-                            pid_hint: "42".to_string(),
-                        },
-                    ),
-                ),
-            }),
-        })),
-    })
-    .await
-    .unwrap();
-
-    let mut response_stream = client.session(stream).await.unwrap().into_inner();
-    let msg = response_stream.next().await.unwrap().unwrap();
-    match &msg.payload {
-        Some(ServerPayload::SessionEstablished(_)) => {}
-        other => panic!("Expected SessionEstablished with LocalSocket cred, got: {other:?}"),
-    }
-}
-
-// ── Wire-level LocalSocket non-loopback rejection ──
-//
-// The gRPC integration tests above always connect from loopback (::1), so
-// peer_ip is always loopback there.  These unit tests call handle_session_init
-// and handle_session_resume directly — bypassing the TCP transport — so we can
-// inject an arbitrary peer_ip and assert AUTH_FAILED on the non-loopback path.
-
-fn local_socket_session_init(agent_id: &str) -> SessionInit {
-    SessionInit {
-        agent_id: agent_id.to_string(),
-        initial_subscriptions: Vec::new(),
-        resume_token: Vec::new(),
-        min_protocol_version: 1000,
-        max_protocol_version: 1001,
-        auth_credential: Some(crate::proto::session::AuthCredential {
-            credential: Some(
-                crate::proto::session::auth_credential::Credential::LocalSocket(
-                    crate::proto::session::LocalSocketCredential {
-                        socket_path: "/run/tze_hud.sock".to_string(),
-                        pid_hint: "42".to_string(),
-                    },
-                ),
-            ),
-        }),
-    }
-}
-
-/// Scenario: LocalSocketCredential + non-loopback peer → wire AUTH_FAILED on init path.
-///
-/// GIVEN a SessionInit carrying a LocalSocketCredential,
-/// WHEN handle_session_init is called with peer_ip = Some(10.0.0.5),
-/// THEN the server message channel receives SessionError { code: "AUTH_FAILED" }
-///      and handle_session_init returns None (session not established).
-///
-/// Security regression gate: a future refactor that removes
-/// the loopback check would cause this test to fail instead of silently breaking.
-#[tokio::test]
-async fn test_handle_session_init_local_socket_non_loopback_auth_failed() {
-    let scene = SceneGraph::new(800.0, 600.0);
-    let service = HudSessionImpl::new(scene, "test-key");
-    let state = service.state.clone();
-
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<ServerMessage, Status>>(16);
-
-    let init = local_socket_session_init("non-loopback-agent");
-    let non_loopback_ip: std::net::IpAddr = "10.0.0.5".parse().unwrap();
-
-    let agents = tze_hud_scene::config::AgentDirectory::unrestricted("test-key");
-    let budget = ResourceBudget::default();
-    let (live_agents, closer) = (agents.clone().shared(), Default::default());
-    let ctx = HandshakeCtx {
-        state: &state,
-        agents: &agents,
-        live_agents: &live_agents,
-        closer: &closer,
-        resource_budget: &budget,
-        budget_enforcer: None,
-        peer_ip: Some(non_loopback_ip),
-    };
-    let session = handle_session_init(ctx, &tx, &init).await;
-
-    assert!(
-        session.is_none(),
-        "handle_session_init must return None for non-loopback LocalSocket peer"
-    );
-
-    let server_msg = rx
-        .recv()
+    let retired_local = AuthCredential::decode(&[0x12, 0][..]).unwrap();
+    for credential in [
+        Some(crate::auth::psk_credential("wrong-key")),
+        Some(crate::auth::psk_credential("")),
+        None,
+        Some(retired_local),
+    ] {
+        let (tx, rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
+        tx.send(ClientMessage {
+            sequence: 1,
+            timestamp_wall_us: now_wall_us(),
+            payload: Some(ClientPayload::SessionInit(SessionInit {
+                agent_id: "bad-psk-agent".to_string(),
+                auth_credential: credential,
+                ..Default::default()
+            })),
+        })
         .await
-        .expect("server must send a message on auth failure")
-        .expect("message must not be a transport error");
-
-    match server_msg.payload {
-        Some(ServerPayload::SessionError(err)) => {
-            assert_eq!(
-                err.code, "AUTH_FAILED",
-                "non-loopback LocalSocket must produce AUTH_FAILED, got: {}",
-                err.code
-            );
-            assert!(
-                err.message.contains("not a loopback address"),
-                "error message must mention loopback, got: {}",
-                err.message
-            );
-            assert!(err.hint.contains("PreSharedKeyCredential"));
-            assert!(err.hint.contains("paired PSK"));
+        .unwrap();
+        let mut stream = client
+            .session(tokio_stream::wrappers::ReceiverStream::new(rx))
+            .await
+            .unwrap()
+            .into_inner();
+        match next_server_msg(&mut stream).await.payload {
+            Some(ServerPayload::SessionError(err)) => assert_eq!(err.code, "AUTH_FAILED"),
+            other => panic!("Expected SessionError(AUTH_FAILED), got: {other:?}"),
         }
-        other => panic!(
-            "Expected SessionError(AUTH_FAILED) for non-loopback LocalSocket init, \
-                 got: {other:?}"
-        ),
-    }
-}
-
-/// Scenario: LocalSocketCredential + non-loopback peer → wire AUTH_FAILED on resume path.
-///
-/// GIVEN a SessionResume carrying a LocalSocketCredential,
-/// WHEN handle_session_resume is called with peer_ip = Some(10.0.0.5),
-/// THEN the server message channel receives SessionError { code: "AUTH_FAILED" }
-///      and handle_session_resume returns None (resume rejected before token check).
-///
-/// Security regression gate for the resume path: the resume path re-
-/// authenticates independently; this test pins it.
-#[tokio::test]
-async fn test_handle_session_resume_local_socket_non_loopback_auth_failed() {
-    let scene = SceneGraph::new(800.0, 600.0);
-    let service = HudSessionImpl::new(scene, "test-key");
-    let state = service.state.clone();
-
-    let (tx, mut rx) = tokio::sync::mpsc::channel::<Result<ServerMessage, Status>>(16);
-
-    // A bogus resume token — auth is checked before the token, so this value is
-    // irrelevant; the test asserts AUTH_FAILED fires before SESSION_GRACE_EXPIRED.
-    let bogus_token = vec![0u8; 16];
-
-    let resume = SessionResume {
-        agent_id: "non-loopback-resume-agent".to_string(),
-        resume_token: bogus_token,
-        last_seen_server_sequence: 0,
-        pre_shared_key: String::new(),
-        auth_credential: Some(crate::proto::session::AuthCredential {
-            credential: Some(
-                crate::proto::session::auth_credential::Credential::LocalSocket(
-                    crate::proto::session::LocalSocketCredential {
-                        socket_path: "/run/tze_hud.sock".to_string(),
-                        pid_hint: "99".to_string(),
-                    },
-                ),
-            ),
-        }),
-    };
-
-    let non_loopback_ip: std::net::IpAddr = "10.0.0.5".parse().unwrap();
-
-    let agents = tze_hud_scene::config::AgentDirectory::unrestricted("test-key");
-    let budget = ResourceBudget::default();
-    let (live_agents, closer) = (agents.clone().shared(), Default::default());
-    let ctx = HandshakeCtx {
-        state: &state,
-        agents: &agents,
-        live_agents: &live_agents,
-        closer: &closer,
-        resource_budget: &budget,
-        budget_enforcer: None,
-        peer_ip: Some(non_loopback_ip),
-    };
-    let session = handle_session_resume(ctx, &tx, &resume).await;
-
-    assert!(
-        session.is_none(),
-        "handle_session_resume must return None for non-loopback LocalSocket peer"
-    );
-
-    let server_msg = rx
-        .recv()
-        .await
-        .expect("server must send a message on auth failure")
-        .expect("message must not be a transport error");
-
-    match server_msg.payload {
-        Some(ServerPayload::SessionError(err)) => {
-            assert_eq!(
-                err.code, "AUTH_FAILED",
-                "non-loopback LocalSocket resume must produce AUTH_FAILED, got: {}",
-                err.code
-            );
-            assert!(err.hint.contains("PreSharedKeyCredential"));
-            assert!(err.hint.contains("paired PSK"));
-        }
-        other => panic!(
-            "Expected SessionError(AUTH_FAILED) for non-loopback LocalSocket resume, \
-                 got: {other:?}"
-        ),
-    }
-}
-
-/// Scenario: Version negotiated successfully
-/// WHEN agent declares min=1000, max=1001 and runtime supports 1000-1001,
-/// THEN SessionEstablished contains negotiated_protocol_version=1001.
-#[tokio::test]
-async fn test_version_negotiation_success() {
-    let (mut client, _server) = setup_test().await;
-
-    let (tx, rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-
-    tx.send(ClientMessage {
-        sequence: 1,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::SessionInit(SessionInit {
-            agent_id: "version-agent".to_string(),
-            initial_subscriptions: Vec::new(),
-            resume_token: Vec::new(),
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
-            auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
-        })),
-    })
-    .await
-    .unwrap();
-
-    let mut response_stream = client.session(stream).await.unwrap().into_inner();
-    let msg = response_stream.next().await.unwrap().unwrap();
-    match &msg.payload {
-        Some(ServerPayload::SessionEstablished(established)) => {
-            assert_eq!(
-                established.negotiated_protocol_version, 1001,
-                "Should pick highest mutual version (1001)"
-            );
-        }
-        other => panic!("Expected SessionEstablished, got: {other:?}"),
-    }
-}
-
-/// Scenario: Version negotiation failure — no mutual version
-/// WHEN agent declares min=2000, max=2001 and runtime only supports 1000-1001,
-/// THEN runtime sends SessionError(code=UNSUPPORTED_PROTOCOL_VERSION) and closes stream.
-#[tokio::test]
-async fn test_version_negotiation_unsupported() {
-    let (mut client, _server) = setup_test().await;
-
-    let (tx, rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
-    let stream = tokio_stream::wrappers::ReceiverStream::new(rx);
-
-    tx.send(ClientMessage {
-        sequence: 1,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::SessionInit(SessionInit {
-            agent_id: "old-agent".to_string(),
-            initial_subscriptions: Vec::new(),
-            resume_token: Vec::new(),
-            min_protocol_version: 2000,
-            max_protocol_version: 2001,
-            auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
-        })),
-    })
-    .await
-    .unwrap();
-
-    let mut response_stream = client.session(stream).await.unwrap().into_inner();
-    let msg = response_stream.next().await.unwrap().unwrap();
-    match &msg.payload {
-        Some(ServerPayload::SessionError(err)) => {
-            assert_eq!(
-                err.code, "UNSUPPORTED_PROTOCOL_VERSION",
-                "Expected UNSUPPORTED_PROTOCOL_VERSION, got: {}",
-                err.code
-            );
-            // Hint should include runtime's supported range
-            assert!(
-                !err.hint.is_empty(),
-                "Hint should contain runtime version range"
-            );
-        }
-        other => panic!("Expected SessionError(UNSUPPORTED_PROTOCOL_VERSION), got: {other:?}"),
     }
 }
 
@@ -1361,8 +1076,6 @@ async fn test_psk_with_capability_allows_input_events_subscription() {
             agent_id: "sub-test-agent".to_string(),
             initial_subscriptions: vec!["INPUT_EVENTS".to_string()],
             resume_token: Vec::new(),
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
             auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
         })),
     })
@@ -1399,7 +1112,7 @@ async fn test_psk_with_capability_allows_input_events_subscription() {
 async fn removed_client_request_numbers_decode_to_empty_payload() {
     use prost::Message;
     let mut removed = Vec::new();
-    for field in [24u64, 27, 28, 29, 34, 39] {
+    for field in [20u64, 24, 27, 28, 29, 34, 39, 40] {
         // tag = field << 3 | length-delimited, then an empty message body.
         let mut wire = vec![0x08, 0x07];
         prost::encoding::encode_varint(field << 3 | 2, &mut wire);
@@ -1416,18 +1129,12 @@ async fn removed_client_request_numbers_decode_to_empty_payload() {
     let (mut client, _server, state) = setup_test_with_state().await;
     let (tx, initial, mut stream) = handshake(&mut client, "empty-payload-agent", "test-key").await;
     let mut server_sequence = initial.last().unwrap().sequence;
-    let (scene_before, scheduled_before, leases_before) = {
+    let (scene_before, scheduled_before) = {
         let state = state.lock().await;
         let scene = state.scene.lock().await;
         (
             serde_json::to_value(&*scene).unwrap(),
             scene.scheduled_batches.len(),
-            state
-                .sessions
-                .session_for_namespace("empty-payload-agent")
-                .unwrap()
-                .lease_ids
-                .clone(),
         )
     };
 
@@ -1519,14 +1226,6 @@ async fn removed_client_request_numbers_decode_to_empty_payload() {
         let scene = state.scene.lock().await;
         assert_eq!(serde_json::to_value(&*scene).unwrap(), scene_before);
         assert_eq!(scene.scheduled_batches.len(), scheduled_before);
-        assert_eq!(
-            state
-                .sessions
-                .session_for_namespace("empty-payload-agent")
-                .unwrap()
-                .lease_ids,
-            leases_before
-        );
     }
 }
 
@@ -1574,8 +1273,6 @@ async fn degradation_notice_send_failure_unregisters_session() {
                 agent_id: "doomed".to_string(),
                 initial_subscriptions: Vec::new(),
                 resume_token: Vec::new(),
-                min_protocol_version: 1000,
-                max_protocol_version: 1001,
                 auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
             })),
         })
@@ -1623,7 +1320,6 @@ async fn test_handshake_unpaired_mid_flight_is_refused_at_registration() {
         closer: &closer,
         resource_budget: &budget,
         budget_enforcer: None,
-        peer_ip: None,
     };
     let (tx, mut rx) = tokio::sync::mpsc::channel(16);
     let init = SessionInit {
@@ -1647,7 +1343,6 @@ async fn test_handshake_unpaired_mid_flight_is_refused_at_registration() {
         closer: &closer,
         resource_budget: &budget,
         budget_enforcer: None,
-        peer_ip: None,
     };
     assert!(handle_session_init(ctx, &tx, &init).await.is_some());
     let st = service.state.lock().await;

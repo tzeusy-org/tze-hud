@@ -3,8 +3,8 @@
 An MCP/gRPC layer that lets models manage the real-estate lifecycle of a HUD
 over the user's screen: claim space, fill it, keep it current, take input,
 and give it back. Surfaces: a session portal (live output plus a reply
-composer), ambient zones (one MCP call to put text on screen), agent-owned
-tiles (gRPC), and SVG widgets, rendered on a Windows overlay. The runtime
+composer), ambient zones (one MCP call to put text on screen),
+and SVG widgets, rendered on a Windows overlay. The runtime
 owns layout, styling, and rendering; models only state intent.
 
 See [vision](docs/vision.md) for intent, [scope](docs/scope.md) for retained
@@ -91,7 +91,7 @@ Live media (GStreamer/WebRTC) is out of scope; see `docs/vision.md`.
 
 ### Demo and Reference Binaries
 - `poc_demo` (`examples/poc_demo/`): The POC demo client; see [Demo](#demo). It drives a *running* `tze_hud`, it is not a runtime itself.
-- `vertical_slice` (`examples/vertical_slice/`): Development reference: a headless resident gRPC agent running the lifecycle verbs (`ClaimTile`, `Publish`, `Hold`, `Clear`). **Not** intended for operations or remote deployment.
+- `vertical_slice` (`examples/vertical_slice/`): Development reference: a headless resident gRPC agent running the lifecycle verbs (`Publish`, `Hold`, `Clear`). **Not** intended for operations or remote deployment.
 - `benchmark` (`examples/benchmark/`): Performance profiling reference.
 - `render_artifacts` (`examples/render_artifacts/`): GPU rendering artifact generation.
 
@@ -99,7 +99,7 @@ Live media (GStreamer/WebRTC) is out of scope; see `docs/vision.md`.
 
 ## Demo
 
-`poc_demo` drives a live app (MCP on `127.0.0.1:9090`, gRPC on `127.0.0.1:50051`)
+`poc_demo` drives a live app (MCP on `127.0.0.1:9090`)
 through each lifecycle stage in one or two calls, narrates every stage in
 `zone:subtitle`, and prints the model-visible tokens each MCP call costs
 (compare `docs/api.md` "Token budgets"). Run the app with
@@ -110,21 +110,14 @@ or file. A PSK is never printed.
 
 ```bash
 export TZE_HUD_PSK_FILE=~/.config/tze-hud/<host>.psk   # from hud_pair.py (a saved POST /pair reply also works); or TZE_HUD_PSK
-# optional: TZE_HUD_TILE_PSK(_FILE) for a separate resident-tile agent, plus --agent <its id>
 cargo run -p poc_demo -- zones           # notification TTL, delay_ms, action press -> hud_input
 cargo run -p poc_demo -- widgets         # typed gauge/progress updates
-cargo run -p poc_demo -- tile            # ClaimTile(placement+root), MutationBatch, Hold, Reclaimed
-cargo run -p poc_demo -- override-hang   # claim a tile, stop reading; press close or the safe-mode chord
-cargo run -p poc_demo -- snapshot        # print `tiles <n>` from a fresh session's SceneSnapshot (CI uses it)
-cargo run -p poc_demo -- all             # all of the above, with the portal step in between
+cargo run -p poc_demo -- all             # zones, widgets and portal instructions
 ```
 
-`override-hang` only idles for `--human-wait-s` with its tile claimed, not reading the stream and not flooding the session; it sets the scene for you to press close or the safe-mode chord and does not itself verify the override (`poc_acceptance`'s `HungAgent` does).
 
-`--mcp`, `--grpc`, `--agent` (the id the tile PSK was paired as, default
-`claude`), `--pace-ms` and `--human-wait-s` are in `--help`. Windows is the
-target; from another machine point `--mcp`/`--grpc` at the HUD's Tailscale
-address.
+`--mcp`, `--pace-ms` and `--human-wait-s` are in `--help`. Windows is the
+target; from another machine point `--mcp` at the HUD's Tailscale address.
 
 **Portal step (not simulated).** The portal demo is a real Claude Code session:
 run the `hud-projection` skill (`.claude/skills/hud-projection/SKILL.md`). Its
@@ -132,7 +125,7 @@ first `hud_publish` to `portal:<id>` attaches, typed replies come back through
 `hud_input`, and `hud_clear` detaches. `poc_demo all` prints this instead of
 faking it.
 
-`cargo test -p poc_demo` runs the zones, widgets and tile stages against the
+`cargo test -p poc_demo` runs the zones and widgets stages against the
 GPU-free headless runtime.
 
 ## 1) Build on Linux / Windows
@@ -354,8 +347,7 @@ cargo run -p vertical_slice
 
 You should see logs for:
 - the session handshake,
-- `ClaimTile` (a filled tile in one round trip),
 - a `Publish` to `zone:status-bar`,
-- `Hold` and `Clear` of the tile.
+- `Hold` and `Clear` of the zone.
 
 **For operational workflows**, use the **canonical runtime app binary** instead. See [Windows install and operation](#12-windows-install-and-operation) and the [Windows-first Quickstart](docs/QUICKSTART.md).

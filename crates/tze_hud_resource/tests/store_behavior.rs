@@ -717,6 +717,18 @@ async fn chunk_protocol_errors_have_stable_codes() {
     for err in [&out_of_order, &unknown, &oversized] {
         assert_eq!(err.wire_code(), "RESOURCE_INVALID_CHUNK");
     }
+    assert!(matches!(out_of_order, ResourceError::InvalidChunk(_)));
+    assert!(matches!(oversized, ResourceError::InvalidChunk(_)));
+    assert!(matches!(unknown, ResourceError::UploadNotFound(_)));
+    for agent in ["a", "no-active-uploads"] {
+        let complete = store
+            .handle_upload_complete(agent, UploadId::from_bytes([99; 16]), &caps(), &unlimited())
+            .await
+            .unwrap_err();
+        assert!(matches!(complete, ResourceError::UploadNotFound(_)));
+        assert_eq!(complete.wire_code(), "RESOURCE_INVALID_CHUNK");
+        assert!(complete.to_string().starts_with("RESOURCE_INVALID_CHUNK:"));
+    }
     // The out-of-order message tells the sender which index to send.
     assert!(out_of_order.to_string().contains("expected chunk index 0"));
     assert_eq!(too_many.wire_code(), "RESOURCE_TOO_MANY_UPLOADS");

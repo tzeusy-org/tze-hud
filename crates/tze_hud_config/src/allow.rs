@@ -6,8 +6,6 @@
 //! - `zone:<name>` or `zone:*` — publish to (and clear) a zone.
 //! - `widget:<name>` or `widget:*` — publish to (and clear) a widget instance.
 //! - `portal` — session-portal projection tools.
-//! - `tiles` — resident tiles: lease, create, mutate, tabs, image upload,
-//!   input/focus subscriptions.
 //! - `admin` — operator endpoints (`/admin/*`). Opt-in: `*` does not grant it.
 //! - `*` — everything else.
 //!
@@ -18,7 +16,7 @@
 /// Validate one allow entry. Returns a hint for an unknown entry.
 pub fn validate_allow_entry(entry: &str) -> Result<(), String> {
     match entry {
-        "*" | "portal" | "tiles" | "admin" => Ok(()),
+        "*" | "portal" | "admin" => Ok(()),
         _ => {
             if let Some(name) = entry
                 .strip_prefix("zone:")
@@ -33,23 +31,11 @@ pub fn validate_allow_entry(entry: &str) -> Result<(), String> {
             }
             Err(format!(
                 "unknown allow entry {entry:?}; valid entries: \"zone:<name|*>\", \
-                 \"widget:<name|*>\", \"portal\", \"tiles\", \"admin\", \"*\""
+                 \"widget:<name|*>\", \"portal\", \"admin\", \"*\""
             ))
         }
     }
 }
-
-/// Permissions granted by the `tiles` entry.
-const TILE_PERMISSIONS: &[&str] = &[
-    "create_tiles",
-    "modify_own_tiles",
-    "manage_tabs",
-    "upload_resource",
-    "register_widget_asset",
-    "read_scene_topology",
-    "access_input_events",
-    "read_telemetry",
-];
 
 /// Expand an allow list into the runtime's internal permission strings.
 ///
@@ -64,7 +50,6 @@ pub fn allow_to_permissions(allow: &[String]) -> Vec<String> {
     for entry in allow {
         match entry.as_str() {
             "*" => push("*"),
-            "tiles" => TILE_PERMISSIONS.iter().for_each(|p| push(p)),
             "portal" => push("resident_mcp"),
             "admin" => push(tze_hud_scene::config::OPERATOR_ADMIN),
             other => {
@@ -88,18 +73,11 @@ pub enum Grant {
     Zones,
     Widgets,
     Portal,
-    Tiles,
     Admin,
 }
 
 impl Grant {
-    pub const ALL: [Grant; 5] = [
-        Grant::Zones,
-        Grant::Widgets,
-        Grant::Portal,
-        Grant::Tiles,
-        Grant::Admin,
-    ];
+    pub const ALL: [Grant; 4] = [Grant::Zones, Grant::Widgets, Grant::Portal, Grant::Admin];
 
     /// The allow entry that grants the whole class.
     pub fn entry(self) -> &'static str {
@@ -107,7 +85,6 @@ impl Grant {
             Grant::Zones => "zone:*",
             Grant::Widgets => "widget:*",
             Grant::Portal => "portal",
-            Grant::Tiles => "tiles",
             Grant::Admin => "admin",
         }
     }
@@ -158,7 +135,6 @@ mod tests {
         for e in [
             "*",
             "portal",
-            "tiles",
             "admin",
             "zone:subtitle",
             "zone:*",
@@ -170,7 +146,8 @@ mod tests {
 
     #[test]
     fn unknown_entries_carry_a_hint() {
-        let hint = validate_allow_entry("create_tiles").unwrap_err();
+        let hint = validate_allow_entry("tiles").unwrap_err();
+        assert!(validate_allow_entry("create_tiles").is_err());
         assert!(hint.contains("valid entries"), "{hint}");
         assert!(
             validate_allow_entry("zone:")
@@ -181,10 +158,11 @@ mod tests {
 
     #[test]
     fn expansion_maps_surfaces_to_permissions() {
-        let p = allow_to_permissions(&["zone:subtitle".into(), "portal".into(), "tiles".into()]);
+        let p = allow_to_permissions(&["zone:subtitle".into(), "portal".into()]);
         assert!(p.contains(&"publish_zone:subtitle".to_string()));
         assert!(p.contains(&"resident_mcp".to_string()));
-        assert!(p.contains(&"create_tiles".to_string()));
+        assert!(!p.contains(&"upload_resource".to_string()));
+        assert!(!p.contains(&"access_input_events".to_string()));
         assert_eq!(allow_to_permissions(&["*".into()]), vec!["*".to_string()]);
         // `admin` is its own permission, never implied by `*`.
         let admin = allow_to_permissions(&["*".into(), "admin".into()]);
@@ -201,22 +179,22 @@ mod tests {
         assert!(!Grant::Admin.granted(&v(&["*"])), "* never grants admin");
 
         let no_zones = with_grant(&star, Grant::Zones, false);
-        assert_eq!(no_zones, v(&["widget:*", "portal", "tiles", "admin"]));
+        assert_eq!(no_zones, v(&["widget:*", "portal", "admin"]));
         assert!(!Grant::Zones.granted(&no_zones));
-        assert!(Grant::Tiles.granted(&no_zones));
+        assert!(Grant::Widgets.granted(&no_zones));
         assert_eq!(
             with_grant(&no_zones, Grant::Zones, true),
-            v(&["widget:*", "portal", "tiles", "admin", "zone:*"])
+            v(&["widget:*", "portal", "admin", "zone:*"])
         );
 
-        let narrow = v(&["zone:subtitle", "tiles"]);
+        let narrow = v(&["zone:subtitle", "widget:gauge"]);
         assert_eq!(
-            with_grant(&narrow, Grant::Tiles, false),
+            with_grant(&v(&["zone:subtitle", "widget:*"]), Grant::Widgets, false),
             v(&["zone:subtitle"])
         );
         assert_eq!(
             with_grant(&narrow, Grant::Zones, true),
-            v(&["zone:subtitle", "tiles", "zone:*"])
+            v(&["zone:subtitle", "widget:gauge", "zone:*"])
         );
         assert_eq!(with_grant(&narrow, Grant::Portal, false), narrow, "no-op");
         assert_eq!(

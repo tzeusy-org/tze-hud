@@ -13,7 +13,6 @@ pub mod error_codes;
 pub mod graph;
 pub mod mutation;
 pub mod perf_budget;
-pub mod placement;
 pub mod render_wake;
 pub mod svg_tokens;
 #[cfg(any(test, feature = "test-support"))]

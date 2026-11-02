@@ -793,8 +793,6 @@ async fn agent_receives_element_repositioned_event_with_old_and_new_geometry() {
             agent_id: "test-agent-notify".to_string(),
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
             resume_token: vec![],
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
             auth_credential: Some(tze_hud_protocol::auth::psk_credential(
                 "test-key".to_string(),
             )),
@@ -805,10 +803,15 @@ async fn agent_receives_element_repositioned_event_with_old_and_new_geometry() {
 
     let mut stream = client.session(stream).await.unwrap().into_inner();
 
-    // Drain SessionEstablished + SceneSnapshot + current DegradationNotice.
-    stream.next().await;
-    stream.next().await;
-    stream.next().await;
+    // Drain SessionEstablished + current DegradationNotice.
+    assert!(matches!(
+        stream.next().await.unwrap().unwrap().payload,
+        Some(ServerPayload::SessionEstablished(_))
+    ));
+    assert!(matches!(
+        stream.next().await.unwrap().unwrap().payload,
+        Some(ServerPayload::DegradationNotice(_))
+    ));
 
     // Give the session handler time to complete subscription.
     tokio::time::sleep(tokio::time::Duration::from_millis(30)).await;

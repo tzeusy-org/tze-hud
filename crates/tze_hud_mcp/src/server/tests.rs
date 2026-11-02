@@ -1677,12 +1677,27 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         )
         .unwrap();
     let other_before = hub.lock().unwrap().get(&other).unwrap().clone();
+    let deadline_probe = handle.observe_input_wait(&key.agent);
+    let deadline_request = json!({
+        "jsonrpc":"2.0", "id":deadline_probe.request_id(), "method":"tools/call",
+        "params":{"name":"hud_input", "arguments":{"wait_ms":350}},
+    })
+    .to_string();
     let empty = tokio::time::timeout(
         std::time::Duration::from_secs(2),
-        call(&server, "hud_input", json!({"wait_ms": 350})),
+        server.dispatch(&deadline_request, &ctx()),
     )
     .await
     .unwrap();
+    let empty: Value = serde_json::from_str(&empty).unwrap();
+    assert_ne!(empty["result"]["isError"], true);
+    let empty: Value =
+        serde_json::from_str(empty["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
+    assert!(!deadline_probe.is_waiting());
+    assert!(
+        deadline_probe.waiting.has_changed().is_err(),
+        "deadline closes the witness"
+    );
     assert_eq!(empty, json!({"items": [], "remaining": 0}));
     assert_eq!(
         ingress.load(Ordering::SeqCst),
@@ -1704,6 +1719,164 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
     use std::future::Future;
     use std::task::{Context, Poll, Waker};
     let mut cx = Context::from_waker(Waker::noop());
+
+    // A witness belongs to one authenticated request and only its armed wait.
+    {
+        let clock = TestClock::new(1_000);
+        let mut agents = AgentDirectory::default();
+        for (id, key) in [
+            ("probe-a", "synthetic-probe-a"),
+            ("probe-b", "synthetic-probe-b"),
+        ] {
+            agents.insert(
+                id,
+                hash_psk(key),
+                vec!["resident_mcp".into(), "publish_zone:subtitle".into()],
+            );
+        }
+        let portals = PortalHandle::new(PortalHub::default(), Arc::new(clock.clone()));
+        let isolated = McpServer::new(scene(&clock))
+            .with_config(McpConfig::with_agents(agents.shared()))
+            .with_portals(portals.clone());
+        let a = CallerContext::with_bearer("synthetic-probe-a");
+        let b = CallerContext::with_bearer("synthetic-probe-b");
+        let request = |id: &str, wait_ms| {
+            json!({
+                "jsonrpc":"2.0", "id":id, "method":"tools/call",
+                "params":{"name":"hud_input", "arguments":{"wait_ms":wait_ms}},
+            })
+            .to_string()
+        };
+        let mut probe = portals.observe_input_wait("probe-a");
+        // Neither another namespace nor another request id can fulfill it.
+        for (caller, id) in [(&b, probe.request_id()), (&a, "unreserved-input-request")] {
+            let body = request(id, 1_000);
+            let mut unrelated = Box::pin(isolated.dispatch(&body, caller));
+            assert!(unrelated.as_mut().poll(&mut cx).is_pending());
+            assert!(!probe.is_waiting());
+            drop(unrelated);
+        }
+        let other_tool = json!({
+            "jsonrpc":"2.0", "id":probe.request_id(), "method":"tools/call",
+            "params":{"name":"hud_surfaces", "arguments":{}},
+        })
+        .to_string();
+        isolated.dispatch(&other_tool, &a).await;
+        assert!(!probe.is_waiting());
+
+        let body = request(probe.request_id(), 1_000);
+        let held_scene = isolated.scene.lock().await;
+        let mut waiting = Box::pin(isolated.dispatch(&body, &a));
+        assert!(waiting.as_mut().poll(&mut cx).is_pending());
+        assert!(
+            !probe.is_waiting(),
+            "scene acquisition precedes queue checks"
+        );
+        drop(held_scene);
+        assert!(waiting.as_mut().poll(&mut cx).is_pending());
+        assert!(
+            probe.is_waiting(),
+            "both empty predicates and Notify are armed"
+        );
+        let held_scene = isolated.scene.lock().await;
+        portals.input_notify("probe-a").unwrap().notify_waiters();
+        assert!(waiting.as_mut().poll(&mut cx).is_pending());
+        assert!(
+            !probe.is_waiting(),
+            "wake clears readiness before rechecking"
+        );
+        drop(held_scene);
+        assert!(waiting.as_mut().poll(&mut cx).is_pending());
+        assert!(probe.is_waiting(), "empty recheck arms the next wait");
+        let wake = isolated
+            .scene
+            .lock()
+            .await
+            .push_pending_action(PendingAction {
+                publisher_namespace: "probe-a".into(),
+                zone_name: "subtitle".into(),
+                kind: PendingActionKind::Callback("probe-ready".into()),
+            });
+        wake.notify();
+        let Poll::Ready(raw) = waiting.as_mut().poll(&mut cx) else {
+            panic!("committed input completes the correlated request");
+        };
+        let response: Value = serde_json::from_str(&raw).unwrap();
+        let input: Value =
+            serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap())
+                .unwrap();
+        assert_eq!(input["items"][0]["action"], "probe-ready");
+        assert!(!probe.is_waiting());
+        assert_eq!(
+            std::pin::pin!(probe.wait_until_waiting())
+                .as_mut()
+                .poll(&mut cx),
+            Poll::Ready(false),
+            "response closes the witness"
+        );
+        drop(waiting);
+        let (acked, error) = call_as(
+            &isolated,
+            &a,
+            "hud_input",
+            json!({"ack":[input["items"][0]["id"]]}),
+        )
+        .await;
+        assert!(!error);
+        assert_eq!(acked, json!({"items":[],"remaining":0}));
+
+        let mut cancelled = portals.observe_input_wait("probe-a");
+        let body = request(cancelled.request_id(), 1_000);
+        let mut waiting = Box::pin(isolated.dispatch(&body, &a));
+        assert!(waiting.as_mut().poll(&mut cx).is_pending());
+        assert!(cancelled.is_waiting());
+        drop(waiting); // Actual dispatch cancellation, not merely HTTP client abort.
+        assert!(!cancelled.is_waiting());
+        assert_eq!(
+            std::pin::pin!(cancelled.wait_until_waiting())
+                .as_mut()
+                .poll(&mut cx),
+            Poll::Ready(false)
+        );
+
+        let mut zero = portals.observe_input_wait("probe-a");
+        let raw = isolated.dispatch(&request(zero.request_id(), 0), &a).await;
+        assert!(!zero.is_waiting());
+        assert_eq!(
+            std::pin::pin!(zero.wait_until_waiting())
+                .as_mut()
+                .poll(&mut cx),
+            Poll::Ready(false),
+            "zero wait cannot arm: {raw}"
+        );
+        let response: Value = serde_json::from_str(&raw).unwrap();
+        assert_ne!(response["result"]["isError"], true, "{raw}");
+
+        let observer = portals.observe_input_wait("probe-a");
+        let body = request(observer.request_id(), 1_000);
+        let mut waiting = Box::pin(isolated.dispatch(&body, &a));
+        assert!(waiting.as_mut().poll(&mut cx).is_pending());
+        assert!(observer.is_waiting());
+        drop(observer);
+        assert!(
+            waiting.as_mut().poll(&mut cx).is_pending(),
+            "observer drop does not cancel dispatch"
+        );
+        drop(waiting);
+        let unclaimed = portals.observe_input_wait("probe-a");
+        let unclaimed_id = unclaimed.request_id().to_owned();
+        drop(unclaimed);
+        assert!(
+            !portals
+                .input_notifiers
+                .wait_probes
+                .lock()
+                .unwrap()
+                .pending
+                .contains_key(&("probe-a".into(), unclaimed_id))
+        );
+    }
+
     let mut waiting = Box::pin(call(&server, "hud_input", json!({"wait_ms": 1500})));
     assert!(waiting.as_mut().poll(&mut cx).is_pending());
     assert_eq!(

@@ -25,7 +25,7 @@ source links when implementation changes the status.
 | Scene graph: tabs, tiles, nodes, zones | `tze_hud_scene` |
 | Session portal + projection | `tze_hud_projection`, `tze_hud_runtime` portal modules, `tze_hud_input` |
 | MCP tools (zones, widgets, portal) | `tze_hud_mcp` |
-| gRPC resident session (tiles, events) | `tze_hud_protocol` |
+| gRPC resident session (zones, widgets, uploads, events) | `tze_hud_protocol` |
 | SVG widgets + asset store | `tze_hud_widget`, `tze_hud_resource` |
 | Config, flat design tokens, built-in themes | `tze_hud_config` |
 | Frame/idle telemetry | `tze_hud_telemetry` |
@@ -40,7 +40,7 @@ source links when implementation changes the status.
 | T2 | Media and cloud relay: GStreamer/`v2_preview` features, media ingress/admission, video surface, media signaling protobuf messages (field numbers reserved), media config and capability, real-decode and v2-preview CI, Python media exemplars | done |
 | T3 | Governance: attention budget, quiet hours, privacy redaction and viewer classes, `[privacy]`/`[degradation]`/`[chrome]` config, admission controller, budget ladder (now plain hard caps), unwired lease state machine and suspension manager, degradation ladder down to one fallback (Normal ↔ Simplified). **Kept** the lease lifecycle (request, TTL, renew, release, revoke, disconnect grace). Capability-scope shrink moved to T5: it changes the session-init and lease wire contract | done |
 | T4 | Scaffolding: `tze_hud_validation`, replay/trace recording, v1-thesis/Layer-4 artifact harness and their CI jobs; component profiles (flat `[design_tokens]` stay; removed profile sections are rejected); sync groups and clock-skew estimation (`compositor_timestamp_wall_us` stays for `present_at`/`expires_at`; wire fields reserved); hardware calibration (tests use a fixed `test_budget` slack; the benchmark keeps its CI factors); test scenes for removed features; reserved mobile display profile; unwired tab-switch trigger; redundant tests | done |
-| T5 | API redesign ([api.md](api.md)): one verb set per lifecycle stage across MCP and gRPC (five MCP tools replace 22; gRPC `ClaimTile`/`Publish`/`Clear`/`Hold`/`Reclaimed`/`RequestResult`); per-agent PSK identity with an `allow` list replaces the capability vocabulary, resident principal, and portal owner token; one shared error-code set with hints; tile placement hints replace agent geometry; token budgets enforced in CI; dead wire removed and reserved; session-server constructors collapsed; invariant 1 and 4 breaks on the gRPC path fixed | done |
+| T5 | API redesign ([api.md](api.md)): one verb set per lifecycle stage across MCP and gRPC (five MCP tools replace 22; gRPC `Publish`/`Clear`/`Hold`/`RequestResult`); per-agent PSK identity with an `allow` list replaces the capability vocabulary, resident principal, and portal owner token; one shared error-code set with hints; geometry remains runtime-owned; token budgets enforced in CI; dead wire removed and reserved; session-server constructors collapsed; invariant 1 and 4 breaks on the gRPC path fixed; owner-directed public tile removal on 2026-10-14 (deferred spec hud-x1wuq) | done |
 | T6 | Windows delivery without SSH, then prove the POC on it. (1) CI builds `x86_64-pc-windows-msvc` natively on a Windows runner, boots it under WARP with an MCP smoke, and publishes minisign-signed releases (rolling `dev` from main, `v*` tags). (2) The exe self-installs per user (`%LOCALAPPDATA%`, `HKCU` Run autostart, no admin). (3) It listens on loopback and the Tailscale address only (owner reaffirmed 2026-10-06: no loopback-only default, no relay). The HUD detects when Windows Firewall blocks tailnet inbound and says so on the pairing card and in `/admin/status`; an opt-in elevated helper adds one program-scoped rule (bead `hud-lgb6c`). (4) First-run pairing: the HUD shows a one-time code, an agent host trades it for a per-agent PSK (`POST /pair`; only a hash is stored); delete `--psk`, the default PSK, and `--bind-all-interfaces`. (5) `/admin/*` operator endpoints (status, logs, screenshot of the HUD's own frame, restart, signed pull-only self-update with health handoff), off the MCP surface. (6) Rewrite `user-test`/`hud-projection` around the paired PSK; delete SSH deploy tooling. Then run POC acceptance on the owner's host; close stale draft PRs | implemented delivery paths; Windows owner acceptance outstanding |
 | T7 | Portal as a runtime feature: projection state lives in the runtime keyed by PSK identity. Delete the external-authority design: owner tokens, audit log, provider-neutral contract, `projection_authority` binary, `resident_grpc` adapter. Fold the `PROJECTION_*` error codes into the shared set. Internal interfaces may break; the MCP surface and token footprint must not regress. Target: portal code (projection, driver, windowed portal, composer) under ~12k lines from ~45k | in progress: shared `PortalHub` and direct scene renderer are live; wire cleanup, rename and owner acceptance remain |
 | T8 | Code and test diet, crate by crate (compositor, runtime, scene, protocol, input first): delete code without a current user, replace oversized test files with behavior tests tied to `invariants.md`, add `tze_hud_resource` tests, a local llvmpipe recipe for compositor tests, and strip pre-reset references (openspec, RFCs, doctrine) from comments and protos | in progress: resource behavior tests and llvmpipe recipes exist; diet and reconciliation continue |
@@ -174,9 +174,6 @@ two calls within its [api.md](api.md) token budget:
   zero widget raster/upload work still leaves full-frame rendering and GPU work.
 - **Widgets:** a typed parameter update re-rasterizes only that widget's SVG
   (the frame is still re-presented in full; no damage tracking).
-- **Tiles:** a gRPC agent claims a tile with a placement hint in two round
-  trips, updates it, and its tile is orphaned on disconnect and reclaimed
-  after grace.
 - **Override:** safe mode and dismiss win with a hung agent.
 - **Idle:** an idle HUD with content on screen uses ~0% CPU and redraws nothing.
 
@@ -186,6 +183,10 @@ Adopt windowed damage tracking only if `hud-w2t3x` / `hud-ddm2g`
 publish-to-present measurements identify full re-present as the bottleneck;
 `hud-ko552`'s historical ~5 µs per `collect_text_items` call measures isolated
 text collection, not a frame or present cost.
+
+Public agent-owned tiles were removed on 2026-10-14 for lack of a user.
+The deferred spec and entry criterion remain in hud-x1wuq; internal scene
+tiles, leases and native portal rendering remain.
 
 ## Merge gate and testability
 

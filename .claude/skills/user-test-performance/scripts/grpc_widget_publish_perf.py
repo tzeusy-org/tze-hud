@@ -160,8 +160,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                     pre_shared_key=session_pb2.PreSharedKeyCredential(key=psk),
                 ),
                 initial_subscriptions=[],
-                min_protocol_version=1000,
-                max_protocol_version=1000,
             )
         )
         established = await client.wait_for_payload("session_established", timeout_s=8.0)

@@ -290,7 +290,7 @@ real `HKCU\...\Run\tze_hud` autostart value. Afterwards, reinstall your HUD
 ```powershell
 cargo build --profile release-dev --locked -p tze_hud_app --bin tze_hud
 cargo build --profile release-dev --locked -p poc_demo --bin poc_demo
-python scripts/ci/windows_smoke.py --exe target/release-dev/tze_hud.exe --poc-demo target/release-dev/poc_demo.exe --config app/tze_hud_app/config/production.toml
+python scripts/ci/windows_smoke.py --exe target/release-dev/tze_hud.exe --config app/tze_hud_app/config/production.toml
 python scripts/ci/windows_install_smoke.py --exe target/release-dev/tze_hud.exe
 ```
 

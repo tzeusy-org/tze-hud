@@ -2,8 +2,7 @@
 //!
 //! Talks to a running app the way an agent would: MCP over HTTP
 //! (`hud_surfaces`, `hud_publish`, `hud_input`, `hud_clear`) for zones and
-//! widgets, and one gRPC `Session` for a resident tile (`ClaimTile` with
-//! placement and root, `MutationBatch`, `Hold`, `Reclaimed`). Each stage is
+//! widgets. Each stage is
 //! narrated in `zone:subtitle`, and every MCP call prints the model-visible
 //! tokens it cost (tool name + arguments + result text, o200k), the number
 //! `docs/api.md` "Token budgets" holds each stage to.
@@ -13,34 +12,16 @@
 //!
 //! PSKs come from the environment or a file and are never printed.
 
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
-use tokio_stream::StreamExt;
-use tokio_stream::wrappers::ReceiverStream;
-use tze_hud_protocol::auth::{RUNTIME_MAX_VERSION, RUNTIME_MIN_VERSION, psk_credential};
-use tze_hud_protocol::proto::session::client_message::Payload as Request;
-use tze_hud_protocol::proto::session::hud_session_client::HudSessionClient;
-use tze_hud_protocol::proto::session::server_message::Payload as Reply;
-use tze_hud_protocol::proto::session::{
-    self as wire, ClaimTile, Clear, ClientMessage, Heartbeat, Hold, MutationBatch, RequestResult,
-    SessionInit, TileAnchor, TilePlacement, TileSize,
-};
-use tze_hud_protocol::proto::{
-    MutationProto, NodeProto, Rect, Rgba, TextMarkdownNodeProto, UpdateNodeContentMutation,
-    mutation_proto, node_proto, update_node_content_mutation,
-};
-
 pub type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
 pub const SUBTITLE: &str = "zone:subtitle";
 
-/// The runtime's default `heartbeat_interval_ms`.
-const HEARTBEAT_INTERVAL: Duration = Duration::from_secs(5);
 pub const NOTIFICATION: &str = "zone:notification-area";
 pub const GAUGE: &str = "widget:main-gauge";
 pub const PROGRESS: &str = "widget:main-progress";
@@ -54,19 +35,11 @@ pub const PORTAL_INSTRUCTIONS: &str = "Portal: not simulated here. In a Claude C
 pub struct Target {
     /// `host:port` of the MCP HTTP listener.
     pub mcp: String,
-    /// `host:port` of the gRPC listener.
-    pub grpc: String,
     pub mcp_psk: String,
-    /// The paired agent id the tile PSK belongs to (the gRPC handshake names it).
-    pub tile_agent: String,
-    pub tile_psk: String,
     /// Pause between steps so a person can watch.
     pub pace: Duration,
-    /// How long a stage waits on a human (notification press, tile dismiss).
+    /// How long a stage waits on a human (notification press).
     pub human_wait: Duration,
-    /// Set once the tile stage's `Hold` is acked, so a driver (a test playing
-    /// the viewer) can act at exactly that point.
-    pub held: Option<Arc<AtomicBool>>,
 }
 
 /// MCP over HTTP: one tool call per connection, tokens counted per call.
@@ -237,338 +210,7 @@ pub async fn widgets(target: &Target) -> Result<()> {
     Ok(())
 }
 
-/// One resident gRPC `Session`.
-pub struct Session {
-    tx: tokio::sync::mpsc::Sender<ClientMessage>,
-    replies: tonic::Streaming<wire::ServerMessage>,
-    sequence: u64,
-}
-
-impl Session {
-    /// Open the stream and handshake: the first round trip.
-    pub async fn connect(grpc: &str, agent: &str, psk: &str) -> Result<Self> {
-        let (tx, rx) = tokio::sync::mpsc::channel(16);
-        let replies = HudSessionClient::connect(format!("http://{grpc}"))
-            .await
-            .map_err(|e| format!("connect to gRPC at {grpc}: {e}"))?
-            .session(ReceiverStream::new(rx))
-            .await?
-            .into_inner();
-        let mut session = Self {
-            tx,
-            replies,
-            sequence: 0,
-        };
-        session
-            .send(Request::SessionInit(SessionInit {
-                agent_id: agent.to_string(),
-                min_protocol_version: RUNTIME_MIN_VERSION,
-                max_protocol_version: RUNTIME_MAX_VERSION,
-                auth_credential: Some(psk_credential(psk)),
-                ..Default::default()
-            }))
-            .await?;
-        loop {
-            match session.next_reply().await? {
-                Reply::SessionEstablished(_) => return Ok(session),
-                Reply::SessionError(e) => {
-                    return Err(format!("{}: is the tile PSK paired? {}", e.code, e.message).into());
-                }
-                _ => {}
-            }
-        }
-    }
-
-    async fn send(&mut self, payload: Request) -> Result<u64> {
-        self.sequence += 1;
-        self.tx
-            .send(ClientMessage {
-                sequence: self.sequence,
-                timestamp_wall_us: 0,
-                payload: Some(payload),
-            })
-            .await?;
-        Ok(self.sequence)
-    }
-
-    async fn next_reply(&mut self) -> Result<Reply> {
-        loop {
-            let message = self.replies.next().await.ok_or("stream closed")??;
-            if let Some(payload) = message.payload {
-                return Ok(payload);
-            }
-        }
-    }
-
-    /// Send a verb and return its `RequestResult`, or its `code: hint`.
-    async fn request(&mut self, payload: Request) -> Result<RequestResult> {
-        let seq = self.send(payload).await?;
-        loop {
-            match self.next_reply().await? {
-                Reply::RequestResult(r) if r.seq == seq => {
-                    return if r.ok {
-                        Ok(r)
-                    } else if r.code == "NOT_HELD" {
-                        // The viewer dismissed the tile before this request landed.
-                        Err(Box::new(Reclaimed(format!(
-                            "{} dismissed: NOT_HELD",
-                            r.hint
-                        ))))
-                    } else {
-                        Err(format!("{}: {}", r.code, r.hint).into())
-                    };
-                }
-                Reply::Reclaimed(r) => {
-                    return Err(Box::new(Reclaimed(format!(
-                        "{} reclaimed: {:?}",
-                        r.surface,
-                        r.why()
-                    ))));
-                }
-                _ => {}
-            }
-        }
-    }
-
-    /// `ClaimTile` with a placement hint and a text root: a visible, filled
-    /// tile in one round trip.
-    async fn claim(&mut self, text: &str) -> Result<Claimed> {
-        let claimed = self
-            .request(Request::ClaimTile(ClaimTile {
-                placement: Some(TilePlacement {
-                    anchor: TileAnchor::TopRight as i32,
-                    size: TileSize::Medium as i32,
-                }),
-                ttl_ms: 60_000,
-                root: Some(text_root(text)),
-            }))
-            .await?;
-        let [tile, node, ..] = claimed.ids.as_slice() else {
-            return Err("ClaimTile returned no tile and root ids".into());
-        };
-        println!("  ClaimTile    {:<26} ttl {} ms", "tile", claimed.ttl_ms);
-        Ok(Claimed {
-            surface: tile_surface(tile),
-            tile: tile.clone(),
-            lease: claimed.lease_id.clone(),
-            node: node.clone(),
-        })
-    }
-}
-
-/// The runtime took the tile back (the viewer dismissed it) while a request
-/// was in flight, or before it was sent.
-#[derive(Debug)]
-struct Reclaimed(String);
-
-impl std::fmt::Display for Reclaimed {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for Reclaimed {}
-
-/// What `ClaimTile` returned.
-struct Claimed {
-    surface: String,
-    tile: Vec<u8>,
-    lease: Vec<u8>,
-    /// The root node's id.
-    node: Vec<u8>,
-}
-
-/// Tile: claim with placement and root (two round trips from init), update the
-/// root, hold, then wait for the runtime's `Reclaimed` (the viewer's close
-/// button) and clear the tile ourselves if none comes.
-pub async fn tile(target: &Target) -> Result<()> {
-    match claim_update_hold(target).await {
-        // The viewer may dismiss at any point; that is the stage working.
-        Err(e) if e.is::<Reclaimed>() => {
-            println!("  Reclaimed    {e}");
-            Ok(())
-        }
-        other => other,
-    }
-}
-
-async fn claim_update_hold(target: &Target) -> Result<()> {
-    let mcp = Mcp(target);
-    mcp.narrate("Tile: a resident agent claims a placed, filled tile in two round trips")
-        .await?;
-    let mut session = Session::connect(&target.grpc, &target.tile_agent, &target.tile_psk).await?;
-    let Claimed {
-        surface,
-        tile,
-        lease,
-        node,
-    } = session.claim("building").await?;
-    tokio::time::sleep(target.pace).await;
-
-    session
-        .request(Request::MutationBatch(MutationBatch {
-            batch_id: uuid::Uuid::now_v7().as_bytes().to_vec(),
-            lease_id: lease,
-            mutations: vec![MutationProto {
-                mutation: Some(mutation_proto::Mutation::UpdateNodeContent(
-                    UpdateNodeContentMutation {
-                        tile_id: tile,
-                        node_id: node,
-                        data: Some(update_node_content_mutation::Data::TextMarkdown(text_node(
-                            "tests passed",
-                        ))),
-                    },
-                )),
-            }],
-            timing: None,
-        }))
-        .await?;
-    println!("  MutationBatch {surface} updated");
-    let held = session
-        .request(Request::Hold(Hold {
-            surface: surface.clone(),
-            // Outlast the wait, so the tile stays while the viewer tries it.
-            ttl_ms: 120_000.max(target.human_wait.as_millis() as u64 + 30_000),
-        }))
-        .await?;
-    println!("  Hold         {surface} ttl {} ms", held.ttl_ms);
-    if let Some(flag) = &target.held {
-        flag.store(true, Ordering::SeqCst);
-    }
-
-    println!(
-        "\nClose the tile with its close button to see Reclaimed ({} s)...",
-        target.human_wait.as_secs()
-    );
-    let reclaimed = tokio::time::timeout(target.human_wait, async {
-        loop {
-            // The runtime drops a session that is silent for three heartbeat
-            // intervals, so keep beating while the viewer decides.
-            match tokio::time::timeout(HEARTBEAT_INTERVAL, session.next_reply()).await {
-                Ok(reply) => {
-                    if let Reply::Reclaimed(r) = reply? {
-                        return Ok::<_, Box<dyn std::error::Error>>(r);
-                    }
-                }
-                Err(_) => {
-                    session
-                        .send(Request::Heartbeat(Heartbeat::default()))
-                        .await?;
-                }
-            }
-        }
-    })
-    .await;
-    match reclaimed {
-        Ok(r) => {
-            let r = r?;
-            println!("  Reclaimed    {} {:?}", r.surface, r.why());
-        }
-        Err(_) => {
-            session.request(Request::Clear(Clear { surface })).await?;
-            println!("  Clear        tile released");
-        }
-    }
-    Ok(())
-}
-
-/// Override: claim a tile, then idle for `human_wait` without reading the
-/// stream or flooding the session. This only sets the scene for a person to
-/// press the tile's close button or the safe-mode chord; it does not verify
-/// the override (`tests/integration/poc_acceptance.rs`'s `HungAgent` backs the
-/// server's send buffer up and asserts it). On exit there is no `SessionClose`,
-/// so the runtime reclaims the orphan after its grace period.
-pub async fn override_hang(target: &Target) -> Result<()> {
-    let mcp = Mcp(target);
-    mcp.narrate(
-        "Override: this agent has hung. Press the tile's close button or the safe-mode chord",
-    )
-    .await?;
-    let mut session = Session::connect(&target.grpc, &target.tile_agent, &target.tile_psk).await?;
-    session.claim("agent hung: not reading").await?;
-    println!(
-        "\nNot reading the stream for {} s; the viewer must win...",
-        target.human_wait.as_secs()
-    );
-    tokio::time::sleep(target.human_wait).await;
-    println!(
-        "  idle time over; exiting without SessionClose: the orphaned tile is reclaimed after grace"
-    );
-    Ok(())
-}
-
-/// Tiles in the `SceneSnapshot` a fresh session is sent on connect.
-pub async fn tile_count(target: &Target) -> Result<usize> {
-    let mut session = Session::connect(&target.grpc, &target.tile_agent, &target.tile_psk).await?;
-    let snapshot = loop {
-        if let Reply::SceneSnapshot(s) = session.next_reply().await? {
-            break s;
-        }
-    };
-    let scene: Value = serde_json::from_str(&snapshot.snapshot_json)?;
-    let tiles = scene["tiles"]
-        .as_object()
-        .ok_or("snapshot has no tiles map")?;
-    Ok(tiles.len())
-}
-
-/// Snapshot: print `tiles <n>`. A driver such as the Windows CI smoke compares
-/// counts before a claim, while the claimant is orphaned, and after the grace
-/// period.
-pub async fn snapshot(target: &Target) -> Result<()> {
-    print!("{}", snapshot_tile_count_output(tile_count(target).await?));
-    Ok(())
-}
-
-/// The complete stdout line consumed by the Windows smoke's tile-count parser.
-fn snapshot_tile_count_output(count: usize) -> String {
-    format!("tiles {count}\n")
-}
-
-/// `tile:<uuid>` from the 16 id bytes a `ClaimTile` reply carries.
-fn tile_surface(id: &[u8]) -> String {
-    let hex: String = id.iter().map(|b| format!("{b:02x}")).collect();
-    format!(
-        "tile:{}-{}-{}-{}-{}",
-        &hex[..8],
-        &hex[8..12],
-        &hex[12..16],
-        &hex[16..20],
-        &hex[20..]
-    )
-}
-
-fn text_node(text: &str) -> TextMarkdownNodeProto {
-    TextMarkdownNodeProto {
-        content: text.to_string(),
-        // Inset within the medium tile (tonal-glass: 540x330 px) and sized for
-        // a 4K panel.
-        bounds: Some(Rect {
-            x: 24.0,
-            y: 20.0,
-            width: 440.0,
-            height: 280.0,
-        }),
-        font_size_px: 24.0,
-        color: Some(Rgba {
-            r: 1.0,
-            g: 1.0,
-            b: 1.0,
-            a: 1.0,
-        }),
-        ..Default::default()
-    }
-}
-
-fn text_root(text: &str) -> NodeProto {
-    NodeProto {
-        data: Some(node_proto::Data::TextMarkdown(text_node(text))),
-        ..Default::default()
-    }
-}
-
-/// The PSK in a credential file's text: the bare key, or the JSON reply of
-/// `POST /pair` (`curl .../pair > file`). Errors never echo the contents.
+/// Parse a credential file without exposing its contents in errors.
 pub fn psk_from_file_text(text: &str) -> Result<String> {
     let psk = if text.trim_start().starts_with('{') {
         serde_json::from_str::<Value>(text)
@@ -587,7 +229,7 @@ pub fn psk_from_file_text(text: &str) -> Result<String> {
 
 #[cfg(test)]
 mod tests {
-    use super::{psk_from_file_text, snapshot_tile_count_output};
+    use super::psk_from_file_text;
 
     #[test]
     fn credential_files_hold_a_bare_psk_or_a_pair_reply() {
@@ -602,18 +244,5 @@ mod tests {
             !err.to_string().contains("secret-looking"),
             "must not echo the file"
         );
-    }
-
-    #[test]
-    fn snapshot_tile_count_output_is_stable() {
-        for (count, expected) in [
-            (0, "tiles 0\n"),
-            (1, "tiles 1\n"),
-            (12_345, "tiles 12345\n"),
-        ] {
-            let output = snapshot_tile_count_output(count);
-            assert_eq!(output.as_bytes(), expected.as_bytes());
-            assert_eq!(output.bytes().filter(|byte| *byte == b'\n').count(), 1);
-        }
     }
 }

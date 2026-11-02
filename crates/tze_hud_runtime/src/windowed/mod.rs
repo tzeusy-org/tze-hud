@@ -278,23 +278,6 @@ fn publish_degradation_transition(
     }
 }
 
-/// Forward terminal scene-lease results after releasing the scene lock.
-///
-/// `SceneGraph::expire_leases()` performs the authoritative transition and
-/// cleanup. This bridge only hands its immutable results to session handlers,
-/// which own the transactional wire responses for connected agents.
-pub(crate) fn publish_lease_expiries(
-    lease_expirations: Option<&tze_hud_protocol::session_server::LeaseExpirySender>,
-    expiries: Vec<tze_hud_scene::types::LeaseExpiry>,
-) {
-    let Some(lease_expirations) = lease_expirations else {
-        return;
-    };
-    for expiry in expiries {
-        let _ = lease_expirations.publish(expiry.into());
-    }
-}
-
 // ─── WindowedRuntime ─────────────────────────────────────────────────────────
 
 /// Shared state passed from the windowed runtime builder to the winit app.
@@ -379,10 +362,6 @@ struct WindowedRuntimeState {
     /// a clone so a runtime mode switch does not sever connected sessions from
     /// later degradation transitions.
     degradation_notices: Option<tze_hud_protocol::session_server::DegradationNoticeSender>,
-    /// Durable runtime-to-session lane for terminal `SceneGraph::expire_leases`
-    /// results. Each compositor generation receives a clone while the runtime
-    /// retains ownership across window/surface recreation.
-    lease_expirations: Option<tze_hud_protocol::session_server::LeaseExpirySender>,
     /// Compositor and surface (Some until compositor thread is spawned and takes the compositor).
     compositor: Option<Compositor>,
     /// The window surface (main thread owns this for the lifetime of the window).
@@ -692,12 +671,10 @@ impl WindowedRuntimeState {
     ) -> (
         Option<tokio::sync::broadcast::Sender<tze_hud_protocol::proto::FramePresented>>,
         Option<tze_hud_protocol::session_server::DegradationNoticeSender>,
-        Option<tze_hud_protocol::session_server::LeaseExpirySender>,
     ) {
         (
             self.frame_presented_tx.clone(),
             self.degradation_notices.clone(),
-            self.lease_expirations.clone(),
         )
     }
 }
@@ -884,14 +861,6 @@ impl WinitApp {
         self.state
             .portal_projection_driver
             .apply_token_map(self.state.global_tokens.clone());
-        // Tiles claimed from now on take the new sizes.
-        if let Some(rt) = &self.state.network_rt {
-            let placement = tze_hud_config::tile_placement_from_tokens(&map);
-            let shared = Arc::clone(&self.state.shared_state);
-            rt.rt.spawn(async move {
-                shared.lock().await.tile_placement = placement;
-            });
-        }
         tracing::debug!(
             token_count = self.state.global_tokens.len(),
             "windowed: live design tokens taken"
@@ -1559,8 +1528,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         // These runtime-owned senders are cloned into each compositor generation.
         // A mode switch joins this thread and calls `resumed()` again against the
         // same connected gRPC session, so taking them would drop later delivery.
-        let (frame_presented_tx, degradation_notices, lease_expirations) =
-            self.state.compositor_runtime_senders();
+        let (frame_presented_tx, degradation_notices) = self.state.compositor_runtime_senders();
         let shutdown = self.state.shutdown.clone();
         let terminal_surface_recovery_failed = self.state.terminal_surface_recovery_failed.clone();
         let compositor_wake = self.state.wake.clone();
@@ -1852,8 +1820,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         // ── Timed-content sweep (invariants 1 and 4) ──────
                         // Expired publications, tiles, and leases MUST be
                         // cleared before the next frame.
-                        let terminal_lease_expiries =
-                            crate::pipeline::sweep_timed_scene_state(&mut scene);
+                        crate::pipeline::sweep_timed_scene_state(&mut scene);
 
                         let applied_degradation_level = degradation_controller.level();
                         compositor
@@ -1955,10 +1922,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                 .chain(card_frame.wake_at_wall_us)
                                 .min();
                             drop(scene);
-                            publish_lease_expiries(
-                                lease_expirations.as_ref(),
-                                terminal_lease_expiries,
-                            );
                             if let Some(build) = render
                                 && displays::present_to_secondaries(
                                     &mut compositor,
@@ -2062,10 +2025,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             // interaction path's `spin_acquire` (12ms budget) no
                             // longer times out and drops drag-move samples.
                             drop(scene);
-                            publish_lease_expiries(
-                                lease_expirations.as_ref(),
-                                terminal_lease_expiries,
-                            );
 
                             // ── Stage 6–7: Present lock-free ──────────────────
                             let present_outcome = compositor.present_windowed_frame_to(
@@ -2926,10 +2885,8 @@ impl WindowedRuntime {
             safe_mode_atomic: Arc::clone(&safe_mode_atomic),
             active_tab_mirror: Arc::clone(&active_tab_mirror),
             token_store: TokenStore::new(),
-            freeze_active: false,
             input_capture_tx: Some(input_capture_tx),
             input_capture_wake: wake.main_work_notifier(),
-            tile_placement: tze_hud_config::tile_placement_from_tokens(&startup_compositor_tokens),
         }));
 
         let (frame_ready_tx, frame_ready_rx) = frame_ready_channel();
@@ -3010,7 +2967,6 @@ impl WindowedRuntime {
             input_event_tx,
             frame_presented_tx,
             degradation_notices,
-            lease_expirations,
             grpc_bound_addrs,
         ) = start_network_services_with_render_wake(
             cfg.grpc_port,
@@ -3190,7 +3146,6 @@ impl WindowedRuntime {
                     shared: Arc::clone(&shared_state),
                     scene: Arc::clone(&shared_scene),
                     portals: Some(portals.clone()),
-                    lease_expirations: lease_expirations.clone(),
                     pairing: pairing.clone(),
                     render_wake: render_wake.clone(),
                     main_wake: wake.main_work_notifier(),
@@ -3283,7 +3238,6 @@ impl WindowedRuntime {
             frame_ready_tx: Some(frame_ready_tx),
             frame_presented_tx,
             degradation_notices,
-            lease_expirations,
             compositor: None,
             window_surface: None,
             input_processor: InputProcessor::new(),
@@ -3489,231 +3443,6 @@ mod wake_accounting_tests {
             )),
             "a genuinely future portal deadline remains a one-shot timed wake"
         );
-    }
-
-    #[test]
-    fn terminal_lease_expiry_bridge_forwards_each_scene_result_once() {
-        let sender = tze_hud_protocol::session_server::LeaseExpirySender::default();
-        let mut receiver = sender.subscribe();
-        let lease_id = tze_hud_scene::SceneId::new();
-        let tile_id = tze_hud_scene::SceneId::new();
-
-        publish_lease_expiries(
-            Some(&sender),
-            vec![tze_hud_scene::types::LeaseExpiry {
-                lease_id,
-                previous_state: tze_hud_scene::types::LeaseState::Active,
-                terminal_state: tze_hud_scene::types::LeaseState::Expired,
-                removed_tiles: vec![tile_id],
-            }],
-        );
-
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_time()
-            .build()
-            .unwrap();
-        let notice = runtime.block_on(receiver.recv()).unwrap();
-        assert_eq!(notice.lease_id, lease_id);
-        assert_eq!(
-            notice.previous_state,
-            tze_hud_scene::types::LeaseState::Active
-        );
-        assert_eq!(
-            notice.terminal_state,
-            tze_hud_scene::types::LeaseState::Expired
-        );
-        assert_eq!(notice.removed_tiles, vec![tile_id]);
-        assert!(
-            runtime.block_on(async {
-                tokio::time::timeout(std::time::Duration::from_millis(10), receiver.recv())
-                    .await
-                    .is_err()
-            }),
-            "one SceneGraph expiry result must produce exactly one bridge notice"
-        );
-    }
-
-    #[tokio::test]
-    async fn restarted_compositor_delivers_one_terminal_lease_pair_to_connected_owner() {
-        use std::time::{Duration, SystemTime, UNIX_EPOCH};
-
-        use tokio_stream::StreamExt;
-        use tze_hud_protocol::proto::session::client_message::Payload as ClientPayload;
-        use tze_hud_protocol::proto::session::hud_session_client::HudSessionClient;
-        use tze_hud_protocol::proto::session::hud_session_server::HudSessionServer;
-        use tze_hud_protocol::proto::session::server_message::Payload as ServerPayload;
-        use tze_hud_protocol::proto::session::{
-            ClaimTile, ClientMessage, ReclaimReason, Reclaimed, RequestResult, ServerMessage,
-            SessionInit,
-        };
-        use tze_hud_protocol::session_server::HudSessionImpl;
-        use tze_hud_scene::types::{LeaseExpiry, LeaseState};
-
-        fn now_wall_us() -> u64 {
-            SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_micros() as u64
-        }
-
-        let service = HudSessionImpl::new(SceneGraph::new(800.0, 600.0), "test-key");
-        let lease_expirations = service.lease_expirations.clone();
-        let listener = tokio::net::TcpListener::bind("[::1]:0").await.unwrap();
-        let addr = listener.local_addr().unwrap();
-        let server = tokio::spawn(async move {
-            let incoming = tokio_stream::wrappers::TcpListenerStream::new(listener);
-            tonic::transport::Server::builder()
-                .add_service(HudSessionServer::new(service))
-                .serve_with_incoming(incoming)
-                .await
-                .unwrap();
-        });
-
-        let endpoint = format!("http://[::1]:{}", addr.port());
-        let mut client = None;
-        for _ in 0..25 {
-            match HudSessionClient::connect(endpoint.clone()).await {
-                Ok(connected) => {
-                    client = Some(connected);
-                    break;
-                }
-                Err(_) => tokio::time::sleep(Duration::from_millis(20)).await,
-            }
-        }
-        let mut client = client.expect("test session server must accept connections");
-
-        let (tx, rx) = tokio::sync::mpsc::channel::<ClientMessage>(16);
-        tx.send(ClientMessage {
-            sequence: 1,
-            timestamp_wall_us: now_wall_us(),
-            payload: Some(ClientPayload::SessionInit(SessionInit {
-                agent_id: "restart-expiry-agent".to_string(),
-                initial_subscriptions: Vec::new(),
-                resume_token: Vec::new(),
-                min_protocol_version: 1000,
-                max_protocol_version: 1001,
-                auth_credential: Some(tze_hud_protocol::auth::psk_credential(
-                    "test-key".to_string(),
-                )),
-            })),
-        })
-        .await
-        .unwrap();
-        let mut stream = client
-            .session(tokio_stream::wrappers::ReceiverStream::new(rx))
-            .await
-            .unwrap()
-            .into_inner();
-
-        // SessionEstablished, SceneSnapshot, and initial DegradationNotice.
-        for _ in 0..3 {
-            tokio::time::timeout(Duration::from_secs(1), stream.next())
-                .await
-                .expect("session handshake must complete promptly")
-                .expect("session stream must remain open")
-                .expect("session handshake message must be valid");
-        }
-
-        tx.send(ClientMessage {
-            sequence: 2,
-            timestamp_wall_us: now_wall_us(),
-            payload: Some(ClientPayload::ClaimTile(ClaimTile {
-                ttl_ms: 60_000,
-                ..Default::default()
-            })),
-        })
-        .await
-        .unwrap();
-
-        let mut granted_lease_id = None;
-        while granted_lease_id.is_none() {
-            let message = tokio::time::timeout(Duration::from_secs(1), stream.next())
-                .await
-                .expect("lease grant must arrive promptly")
-                .expect("connected stream must remain open")
-                .expect("lease grant message must be valid");
-            match message.payload {
-                Some(ServerPayload::RequestResult(RequestResult {
-                    ok: granted,
-                    lease_id,
-                    ..
-                })) => {
-                    assert!(granted, "test lease must be granted");
-                    granted_lease_id = uuid::Uuid::from_slice(&lease_id)
-                        .ok()
-                        .map(tze_hud_scene::SceneId::from_uuid);
-                }
-                other => panic!("expected lease grant traffic, got {other:?}"),
-            }
-        }
-        let lease_id = granted_lease_id.expect("granted lease must carry a SceneId");
-
-        // Each compositor generation takes clones; the runtime keeps every
-        // sender so a later generation still reaches connected sessions.
-        let mut runtime_state = WindowedRuntimeState::new_headless();
-        let (frame_presented_tx, _frame_presented_rx) = tokio::sync::broadcast::channel(1);
-        runtime_state.frame_presented_tx = Some(frame_presented_tx);
-        runtime_state.degradation_notices = Some(Default::default());
-        runtime_state.lease_expirations = Some(lease_expirations);
-        let app = WinitApp {
-            state: runtime_state,
-        };
-
-        let first_generation = app.state.compositor_runtime_senders();
-        assert!(first_generation.0.is_some());
-        assert!(first_generation.1.is_some());
-        assert!(first_generation.2.is_some());
-        drop(first_generation);
-
-        let restarted_generation = app.state.compositor_runtime_senders();
-        assert!(app.state.frame_presented_tx.is_some());
-        assert!(app.state.degradation_notices.is_some());
-        assert!(app.state.lease_expirations.is_some());
-
-        let expiry = LeaseExpiry {
-            lease_id,
-            previous_state: LeaseState::Active,
-            terminal_state: LeaseState::Expired,
-            removed_tiles: Vec::new(),
-        };
-        publish_lease_expiries(restarted_generation.2.as_ref(), vec![expiry.clone()]);
-        publish_lease_expiries(restarted_generation.2.as_ref(), vec![expiry]);
-
-        let mut terminal_response_seen = false;
-        {
-            let message: ServerMessage =
-                tokio::time::timeout(Duration::from_secs(1), stream.next())
-                    .await
-                    .expect("terminal lease traffic must arrive promptly")
-                    .expect("connected stream must remain open")
-                    .expect("terminal lease message must be valid");
-            match message.payload {
-                Some(ServerPayload::Reclaimed(Reclaimed {
-                    lease_id: response_lease_id,
-                    why,
-                    ..
-                })) => {
-                    assert_eq!(response_lease_id, lease_id.as_uuid().as_bytes().to_vec());
-                    assert_eq!(why, ReclaimReason::Expired as i32);
-                    assert!(
-                        !terminal_response_seen,
-                        "only one terminal response is allowed"
-                    );
-                    terminal_response_seen = true;
-                }
-                other => panic!("expected terminal lease traffic, got {other:?}"),
-            }
-        }
-        assert!(terminal_response_seen);
-        assert!(
-            tokio::time::timeout(Duration::from_millis(50), stream.next())
-                .await
-                .is_err(),
-            "duplicate runtime notices must not emit a second terminal response"
-        );
-
-        drop(tx);
-        server.abort();
     }
 
     #[test]

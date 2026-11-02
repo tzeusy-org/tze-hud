@@ -371,11 +371,6 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                       "fields": {"event": "zone_text_sample", "opacity": 0.01, "frame": 3}}]
 
 
-def test_parse_tile_count_finds_the_line_among_other_output():
-    assert ws.parse_tile_count("connecting\ntiles 3\n") == 3
-    for bad in ("", "tiles\n", "tiles x\n", "my tiles 2 more\n", "sessions 5\n"):
-        with pytest.raises(AssertionError, match="no `tiles <n>` line"):
-            ws.parse_tile_count(bad)
 
 
 def test_borrowed_url_routes_only_authorized_publications_and_own_cleanup(monkeypatch, capsys):
@@ -440,7 +435,7 @@ def test_borrowed_url_routes_only_authorized_publications_and_own_cleanup(monkey
 
     monkeypatch.setattr(ws.urllib.request, "build_opener", lambda handler: Opener())
     monkeypatch.setattr(ws.time, "sleep", lambda _: None)
-    for name in ("seed_config", "wait_for_mcp", "check_pair", "check_restart", "check_tile_orphan", "run_quiescent", "kill_pid"):
+    for name in ("seed_config", "wait_for_mcp", "check_pair", "check_restart", "run_quiescent", "kill_pid"):
         monkeypatch.setattr(ws, name, lambda *a, **k: pytest.fail("borrowed process/lifecycle mutation"))
     monkeypatch.setattr(ws.subprocess, "Popen", lambda *a, **k: pytest.fail("borrowed spawn"))
     checks = []
@@ -453,7 +448,7 @@ def test_borrowed_url_routes_only_authorized_publications_and_own_cleanup(monkey
     assert len(portals) == 1 and portals[0].startswith("portal:live-smoke-")
     assert {row[1] for row in trace if isinstance(row, tuple) and row[0] == "hud_clear"} == {"widget:main-gauge", "zone:subtitle", portals[0]}
     captured = capsys.readouterr()
-    assert captured.out.count("UNEXECUTED owner-only:") == 6 and key not in captured.out + captured.err
+    assert captured.out.count("UNEXECUTED owner-only:") == 5 and key not in captured.out + captured.err
 
     # A lost publish reply can still mean a mutation: clean its tracked surface.
     trace.clear()

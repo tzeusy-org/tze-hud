@@ -820,7 +820,9 @@ async fn test_resource_upload_chunk_error_aborts_inflight_tracking() {
         sequence: 4,
         timestamp_wall_us: now_wall_us(),
         payload: Some(ClientPayload::ResourceUploadComplete(
-            ResourceUploadComplete { upload_id },
+            ResourceUploadComplete {
+                upload_id: upload_id.clone(),
+            },
         )),
     })
     .await
@@ -831,6 +833,7 @@ async fn test_resource_upload_chunk_error_aborts_inflight_tracking() {
         Some(ServerPayload::ResourceErrorResponse(err)) => {
             assert_eq!(err.request_sequence, 4);
             assert_eq!(err.error_code, 9);
+            assert_eq!(err.upload_id, upload_id);
             let hint: serde_json::Value = serde_json::from_str(&err.hint).unwrap();
             assert!(
                 hint["next_action"]
@@ -877,6 +880,35 @@ async fn test_resource_upload_chunk_error_aborts_inflight_tracking() {
             }
             other => panic!("expected capacity admission decision, got {other:?}"),
         }
+    }
+
+    // An absent upload during Chunk uses the same typed NOT_FOUND as Complete,
+    // with this request's correlation, without changing the capacity decision.
+    tx.send(ClientMessage {
+        sequence: 10,
+        timestamp_wall_us: now_wall_us(),
+        payload: Some(ClientPayload::ResourceUploadChunk(ResourceUploadChunk {
+            upload_id: upload_id.clone(),
+            chunk_index: 0,
+            data: payload.clone(),
+        })),
+    })
+    .await
+    .unwrap();
+    match next_server_msg(&mut stream).await.payload {
+        Some(ServerPayload::ResourceErrorResponse(err)) => {
+            assert_eq!(err.request_sequence, 10);
+            assert_eq!(err.upload_id, upload_id);
+            assert_eq!(err.error_code, 9);
+            let hint: serde_json::Value = serde_json::from_str(&err.hint).unwrap();
+            assert!(
+                hint["next_action"]
+                    .as_str()
+                    .unwrap()
+                    .contains("wait for ResourceUploadAccepted")
+            );
+        }
+        other => panic!("expected NOT_FOUND for absent Chunk, got: {other:?}"),
     }
     let session_id = match &init_msgs[0].payload {
         Some(ServerPayload::SessionEstablished(e)) => bytes_to_scene_id(&e.session_id).unwrap(),
@@ -1312,23 +1344,6 @@ async fn test_resident_upload_then_static_image_references_uploaded_resource_id(
         );
     }
 
-    tx.send(ClientMessage {
-        sequence: 3,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::ClaimTile(ClaimTile {
-            ttl_ms: 60_000,
-            ..Default::default()
-        })),
-    })
-    .await
-    .unwrap();
-
-    let claim_msg = next_server_msg(&mut stream).await;
-    let (lease_id, tile_id_bytes) = match claim_msg.payload {
-        Some(ServerPayload::RequestResult(resp)) if resp.ok => (resp.lease_id, resp.ids[0].clone()),
-        other => panic!("expected a granted ClaimTile, got: {other:?}"),
-    };
-
     let root_node = Node {
         layout: Default::default(),
         id: SceneId::new(),
@@ -1343,37 +1358,23 @@ async fn test_resident_upload_then_static_image_references_uploaded_resource_id(
         }),
     };
 
-    let set_root_batch_id = uuid::Uuid::now_v7().as_bytes().to_vec();
-    tx.send(ClientMessage {
-        sequence: 5,
-        timestamp_wall_us: now_wall_us(),
-        payload: Some(ClientPayload::MutationBatch(MutationBatch {
-            batch_id: set_root_batch_id.clone(),
-            lease_id,
-            mutations: vec![crate::proto::MutationProto {
-                mutation: Some(crate::proto::mutation_proto::Mutation::SetTileRoot(
-                    crate::proto::SetTileRootMutation {
-                        tile_id: tile_id_bytes.clone(),
-                        node: Some(crate::convert::scene_node_to_proto(&root_node)),
-                    },
-                )),
-            }],
-            timing: None,
-        })),
-    })
-    .await
-    .unwrap();
-
-    let set_root_result = next_server_msg(&mut stream).await;
-    match set_root_result.payload {
-        Some(ServerPayload::RequestResult(result)) => {
-            assert!(result.ok, "set_tile_root should be accepted");
-            assert_eq!(result.batch_id, set_root_batch_id);
-        }
-        other => panic!("expected MutationResult for set_tile_root, got: {other:?}"),
-    }
-
-    let tile_id = bytes_to_scene_id(&tile_id_bytes).expect("tile id from mutation must decode");
+    let tile_id = {
+        let st = shared_state.lock().await;
+        let mut scene = st.scene.lock().await;
+        let tab = scene.active_tab.unwrap();
+        let lease = scene.grant_lease("resource-scene-node", 60_000);
+        let tile = scene
+            .create_tile(
+                tab,
+                "resource-scene-node",
+                lease,
+                Rect::new(0.0, 0.0, 10.0, 10.0),
+                1,
+            )
+            .unwrap();
+        scene.set_tile_root(tile, root_node).unwrap();
+        tile
+    };
     {
         let st = shared_state.lock().await;
         let scene = st.scene.lock().await;

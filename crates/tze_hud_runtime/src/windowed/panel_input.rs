@@ -625,7 +625,7 @@ mod panel_task_tests {
         assert_eq!(
             f.panel.current_closed_notice(),
             Some(tze_hud_compositor::PanelNotice {
-                text: "Zones, widgets and tiles hidden".into(),
+                text: "Zones and widgets hidden".into(),
                 key: "Ctrl+Shift+F11".into(),
             })
         );
@@ -645,6 +645,68 @@ mod panel_task_tests {
             !f.panel.is_open() && f.panel.current_closed_notice().is_none()
         })
         .await;
+        // Hide all, then show every surviving class individually. The internal
+        // tile bit remains set, but no visible class is suppressed.
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Panel), |f| f.panel.is_open())
+            .await;
+        f.send_and_wait(PanelEvent::Key(PanelKey::Alt('h')), |_| {
+            hidden() == Some(SurfaceClasses::ALL)
+        })
+        .await;
+        f.send_and_wait(PanelEvent::Hover(None), |_| {
+            row("visibility.hide_all")
+                .is_some_and(|r| r.control == tze_hud_compositor::PanelControl::Toggle(true))
+        })
+        .await;
+        for id in [
+            "visibility.portals",
+            "visibility.zones",
+            "visibility.widgets",
+        ] {
+            f.send_and_wait(
+                PanelEvent::Click(PanelHitTarget::Row(id.into(), PanelPart::Body)),
+                |_| {
+                    row(id).is_some_and(|r| {
+                        r.control == tze_hud_compositor::PanelControl::Toggle(true)
+                    })
+                },
+            )
+            .await;
+        }
+        assert_eq!(
+            hidden(),
+            Some(SurfaceClasses {
+                tiles: true,
+                ..SurfaceClasses::NONE
+            })
+        );
+        f.send_and_wait(PanelEvent::Hover(None), |_| {
+            row("visibility.hide_all").is_some_and(|r| {
+                r.emphasis != PanelTone::Caution
+                    && !r.reset
+                    && r.detail.as_deref() == Some("Hides every agent surface; agents keep running")
+            })
+        })
+        .await;
+        let hide_all = row("visibility.hide_all").expect("published visibility row");
+        assert_eq!(
+            hide_all.control,
+            tze_hud_compositor::PanelControl::Toggle(false)
+        );
+        assert_ne!(hide_all.emphasis, PanelTone::Caution);
+        assert!(!hide_all.reset);
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Panel), |f| !f.panel.is_open())
+            .await;
+        assert!(f.panel.current_closed_notice().is_none());
+        // reset_shows_what_is_hidden also awaits Section::closed_notice directly
+        // under this same mask, proving None after computation completes.
+        assert_eq!(
+            hidden(),
+            Some(SurfaceClasses {
+                tiles: true,
+                ..SurfaceClasses::NONE
+            })
+        );
         assert_eq!(
             scene.lock().await.leases[&lease_id].state,
             LeaseState::Active,

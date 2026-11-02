@@ -347,7 +347,7 @@ pub(super) async fn run_upload_worker(
                 };
 
                 let Some(tracked) = in_flight_uploads.get(&upload_id_bytes).cloned() else {
-                    let err = StoreResourceError::InvalidChunk(
+                    let err = StoreResourceError::UploadNotFound(
                         "upload_id is not in-flight for this session".to_string(),
                     );
                     if event_tx
@@ -426,7 +426,7 @@ pub(super) async fn run_upload_worker(
                 };
 
                 let Some(tracked) = in_flight_uploads.get(&upload_id_bytes).cloned() else {
-                    let err = StoreResourceError::InvalidChunk(
+                    let err = StoreResourceError::UploadNotFound(
                         "upload_id is not in-flight for this session".to_string(),
                     );
                     if event_tx

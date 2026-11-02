@@ -38,7 +38,7 @@ pub struct AgentRecord {
     /// SHA-256 of the agent's PSK, 64 lowercase hex characters.
     pub psk_sha256: String,
     /// Surfaces the agent may use: `zone:<name|*>`, `widget:<name|*>`,
-    /// `portal`, `tiles`, or `*`.
+    /// `portal`, `admin`, or `*`.
     #[serde(default)]
     pub allow: Vec<String>,
     /// When the agent was paired (RFC 3339), for the operator.
@@ -133,7 +133,7 @@ impl AgentsFile {
                     errors.push(ConfigError {
                         code: ConfigErrorCode::UnknownAllowEntry,
                         field_path: format!("agents.{agent_id}.allow"),
-                        expected: "zone:<name|*>, widget:<name|*>, portal, tiles, or *".into(),
+                        expected: "zone:<name|*>, widget:<name|*>, portal, admin, or *".into(),
                         got: entry.clone(),
                         hint,
                     });
@@ -395,6 +395,22 @@ mod tests {
                 ConfigErrorCode::InvalidPskHash
             ]
         );
+        for allow in ["[\"tiles\"]", "[\"*\", \"tiles\"]"] {
+            let source = format!(
+                "[agents.a]\npsk_sha256 = \"{}\"\nallow = {allow}\n",
+                hash_psk_hex("test")
+            );
+            let Err(AgentsFileError::Invalid(errors)) =
+                AgentsFile::parse(&source).unwrap().directory()
+            else {
+                panic!("retired tiles entries must fail directory validation: {allow}");
+            };
+            assert!(
+                errors
+                    .iter()
+                    .any(|e| e.code == ConfigErrorCode::UnknownAllowEntry)
+            );
+        }
         assert!(AgentsFile::parse("[agents.a]\npsk = \"plaintext\"\n").is_err());
     }
 
@@ -435,7 +451,7 @@ mod tests {
             &path,
             format!(
                 "# my agents\n[agents.a] # laptop\npsk_sha256 = \"{hash}\"\nallow = [\"*\"] # all\n\n\
-                 [agents.b]\npsk_sha256 = \"{other}\"\nallow = [\"tiles\"]\n"
+                 [agents.b]\npsk_sha256 = \"{other}\"\nallow = [\"portal\"]\n"
             ),
         )
         .unwrap();
@@ -462,7 +478,7 @@ mod tests {
         assert_eq!(edited.before.agents["a"].allow, ["*", "zone:subtitle"]);
         assert_eq!(
             edited.after.agents["a"].allow,
-            ["widget:*", "portal", "tiles", "zone:subtitle"]
+            ["widget:*", "portal", "zone:subtitle"]
         );
         let saved = std::fs::read_to_string(&path).unwrap();
         assert!(
@@ -511,7 +527,7 @@ mod tests {
         ));
         let grant_missing = AgentChange::Grant {
             agent: "zz".into(),
-            grant: Grant::Tiles,
+            grant: Grant::Widgets,
             on: true,
         };
         assert!(matches!(
