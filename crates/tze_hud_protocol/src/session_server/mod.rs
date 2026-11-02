@@ -63,10 +63,10 @@ pub use degradation_notice_bus::{DegradationNoticeReceiver, DegradationNoticeSen
 use element_persist::{
     ElementStorePersistRequest, persist_element_store, touch_element_store_entry_by_namespace,
 };
+#[cfg(test)]
+use handshake::handle_session_init;
 #[allow(unused_imports)]
 use handshake::{HandshakeCtx, handle_handshake_read};
-#[cfg(test)]
-use handshake::{handle_session_init, handle_session_resume};
 pub use input_event_bus::{InputEventReceiver, InputEventRecvError, InputEventSender};
 pub use lifecycle::SessionState;
 pub use service::{HudSessionImpl, SessionDeps};

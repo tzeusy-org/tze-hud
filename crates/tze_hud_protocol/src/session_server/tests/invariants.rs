@@ -236,7 +236,7 @@ async fn send_resume(
             resume_token,
             last_seen_server_sequence: 0,
 
-            auth_credential: Some(tze_hud_protocol::auth::psk_credential("test-key")),
+            auth_credential: Some(crate::auth::psk_credential("test-key")),
         })),
     })
     .await
