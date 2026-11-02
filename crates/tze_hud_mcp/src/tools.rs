@@ -81,13 +81,6 @@ pub struct McpState {
 }
 
 impl McpState {
-    // DEBUG-ximtf11-poll: temporary deterministic owner-lock injection.
-    #[cfg(test)]
-    pub(crate) fn with_locked_agents_for_diagnostic(&self, inspect: impl FnOnce()) {
-        let _held = self.agents.lock().unwrap();
-        inspect();
-    }
-
     fn try_with<R>(&self, agent: &str, f: impl FnOnce(&mut AgentState) -> R) -> McpResult<R> {
         let mut agents = match self.agents.try_lock() {
             Ok(agents) => agents,

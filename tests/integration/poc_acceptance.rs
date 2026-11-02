@@ -54,8 +54,8 @@ const POLL: Duration = Duration::from_millis(1);
 /// operator.
 const CLAUDE_PSK: &str = "poc-acceptance-psk";
 
-/// The resident tile agent: its own `agents.toml` entry, allowed tiles and the
-/// notification zone only. It is a different identity (and namespace) from
+/// The resident zone agent: its own `agents.toml` entry, allowed the status-bar
+/// and notification zones. It is a different identity (and namespace) from
 /// `claude`, the MCP operator.
 const RESIDENT_PSK: &str = "poc-acceptance-resident-psk";
 
@@ -1000,11 +1000,11 @@ impl Poc {
 }
 
 /// docs/scope.md "Override": the human wins while an agent is hung. The agent
-/// claims a tile, then sends requests it never reads replies to until the
-/// server's send path to it is full (a few hundred ~2 KB replies). Safe mode
-/// (the hotkey bridge) then suspends its lease and refuses MCP writes, even
-/// with a `hud_input` long-poll parked; the viewer's dismiss removes its tile.
-/// Neither waits on the agent.
+/// publishes to the status-bar zone, then sends requests it never reads replies
+/// to until the server's send path is full (a few hundred ~2 KB replies). Safe
+/// mode (the hotkey bridge) refuses MCP writes while preserving the unleased
+/// publication, even with a `hud_input` long-poll parked. The owner's Clear
+/// removes the publication without waiting on the agent.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn poc_override_safe_mode_wins_with_hung_grpc_agent() {
     let mut poc = Poc::boot().await;
@@ -1031,16 +1031,18 @@ async fn poc_override_safe_mode_wins_with_hung_grpc_agent() {
         .call_err("hud_publish", json!({"surface": SUBTITLE, "content": "hi"}))
         .await;
     assert_eq!(code, "SAFE_MODE_ACTIVE");
-    if poll.is_finished() {
-        let joined = poll.await;
-        panic!("DEBUG-ximtf11-poll early_finished joined={joined:?}");
-    }
     assert!(!poll.is_finished(), "the long-poll is still parked");
 
     poc.hud.press_safe_mode_hotkey();
-    poc.wait_for("safe mode off", |hud| !hud.safe_mode_active())
-        .await;
-    assert_eq!(poc.hud.suspended_lease_count(), 0);
+    poc.wait_for("safe mode off and panel closed", |hud| {
+        !hud.safe_mode_active() && !hud.control_panel_open()
+    })
+    .await;
+    assert_eq!(
+        poc.hud.suspended_lease_count(),
+        0,
+        "safe-mode exit leaves no leases suspended"
+    );
 
     // The owner's Clear does not depend on the hung response stream.
     poc.open_panel().await;
@@ -1072,16 +1074,22 @@ async fn poc_override_exit_safe_mode_with_agent_hung_during_it() {
     poc.wait_until_hung("resident").await;
 
     poc.hud.press_safe_mode_hotkey();
-    poc.wait_for("safe mode off", |hud| !hud.safe_mode_active())
-        .await;
-    assert_eq!(poc.hud.suspended_lease_count(), 0, "the lease resumes");
+    poc.wait_for("safe mode off and panel closed", |hud| {
+        !hud.safe_mode_active() && !hud.control_panel_open()
+    })
+    .await;
+    assert_eq!(
+        poc.hud.suspended_lease_count(),
+        0,
+        "safe-mode exit leaves no leases suspended"
+    );
     flood.abort();
 }
 
 /// CP-8 with a hung agent: the owner clears, then unpairs, a resident agent
 /// that has stopped reading, from the control panel. Neither waits on it: its
-/// tile goes at once, its session ends, its key stops working, and the other
-/// agent's content and key are untouched.
+/// zone publication clears at once, its session ends, its key stops working,
+/// and the other agent's content and key are untouched.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn poc_override_clear_and_unpair_with_hung_grpc_agent() {
     let mut poc = Poc::boot_with_agents_file().await;
