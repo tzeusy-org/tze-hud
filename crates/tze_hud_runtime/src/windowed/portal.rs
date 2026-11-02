@@ -2569,6 +2569,13 @@ mod tests {
 
     // ── Pilot-path viewer history (hud-nx7yq.3) ────────────────────────────
 
+    /// Exercise the common submit owner, including its post-seed tail reset.
+    fn submit_raw_tile_reply(app: &mut WinitApp, tile_id: tze_hud_scene::SceneId, text: String) {
+        let mut batch = tze_hud_input::DraftNotificationBatch::new();
+        batch.record_submission(tze_hud_input::DraftSubmission { text, sequence: 1 });
+        app.route_and_deliver_composer_batch(viewer_echo_context(tile_id), batch);
+    }
+
     /// An accepted submission on a raw-tile portal (not authority-attached)
     /// enqueues a runtime-authored viewer echo carrying the submitted text.
     #[test]
@@ -2962,7 +2969,7 @@ mod tests {
             "test setup: scaled history must overflow its scaled input-history band"
         );
 
-        app.append_raw_tile_viewer_echo(tile_id, text);
+        submit_raw_tile_reply(&mut app, tile_id, text);
 
         let actual_total_height = app
             .state
@@ -3057,7 +3064,7 @@ mod tests {
             .map(|_| format!("{}{}", "n".repeat(200), "字".repeat(80)))
             .collect();
         for entry in &old_entries {
-            app.append_raw_tile_viewer_echo(tile_id, entry.clone());
+            submit_raw_tile_reply(&mut app, tile_id, entry.clone());
         }
 
         {
@@ -3067,7 +3074,7 @@ mod tests {
             scene.set_tile_font_scale(tile_id, RESIZED_SCALE);
         }
         let newest = format!("{}{}", "n".repeat(200), "字".repeat(80));
-        app.append_raw_tile_viewer_echo(tile_id, newest.clone());
+        submit_raw_tile_reply(&mut app, tile_id, newest.clone());
 
         let resized_metrics =
             InputHistorySeedMetrics::for_tile_font_scale(RESIZED_SCALE, &app.state.global_tokens);
@@ -3136,7 +3143,7 @@ mod tests {
 
         let old_entries: Vec<String> = (0..4).map(|_| "字".repeat(200)).collect();
         for entry in &old_entries {
-            app.append_raw_tile_viewer_echo(tile_id, entry.clone());
+            submit_raw_tile_reply(&mut app, tile_id, entry.clone());
         }
 
         {
@@ -3146,7 +3153,7 @@ mod tests {
             scene.set_tile_font_scale(tile_id, SHRUNK_SCALE);
         }
         let newest = "字".repeat(200);
-        app.append_raw_tile_viewer_echo(tile_id, newest.clone());
+        submit_raw_tile_reply(&mut app, tile_id, newest.clone());
 
         let metrics =
             InputHistorySeedMetrics::for_tile_font_scale(SHRUNK_SCALE, &app.state.global_tokens);
@@ -3222,7 +3229,7 @@ mod tests {
             .map(|i| format!("reply {i}: {}", "wrapping viewer text ".repeat(6)))
             .collect();
         for entry in &entries {
-            app.append_raw_tile_viewer_echo(tile_id, entry.clone());
+            submit_raw_tile_reply(&mut app, tile_id, entry.clone());
         }
 
         let seeded_offset = {
@@ -3289,7 +3296,7 @@ mod tests {
         // visual rows at the real ~1em advance.
         let entries: Vec<String> = (0..10).map(|_| "字".repeat(30)).collect();
         for entry in &entries {
-            app.append_raw_tile_viewer_echo(tile_id, entry.clone());
+            submit_raw_tile_reply(&mut app, tile_id, entry.clone());
         }
 
         let seeded_offset = {
@@ -3370,7 +3377,7 @@ mod tests {
         );
         let entries: Vec<String> = (0..20).map(|_| "字".repeat(FULLWIDTH_CHARS)).collect();
         for entry in &entries {
-            app.append_raw_tile_viewer_echo(tile_id, entry.clone());
+            submit_raw_tile_reply(&mut app, tile_id, entry.clone());
         }
 
         let seeded_offset = {
