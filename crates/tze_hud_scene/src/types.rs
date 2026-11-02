@@ -1982,8 +1982,8 @@ pub struct NotificationPayload {
     pub title: String,
     /// Optional action buttons shown at the bottom of the notification slot.
     ///
-    /// At most `MAX_NOTIFICATION_ACTIONS` actions are rendered; excess entries
-    /// are silently ignored by the compositor.
+    /// Both publish planes accept at most `MAX_NOTIFICATION_ACTIONS` actions;
+    /// excess entries reject the whole publish with `INVALID_ARGUMENT`.
     ///
     /// When empty (the default), no action buttons are rendered.
     #[serde(default)]
@@ -1996,12 +1996,26 @@ impl NotificationPayload {
     pub fn is_blank(&self) -> bool {
         self.title.trim().is_empty() && self.text.trim().is_empty()
     }
+
+    /// Validate notification content before either publish plane admits or
+    /// schedules it. The returned hint accompanies `INVALID_ARGUMENT`.
+    pub fn validate(&self) -> Result<(), String> {
+        if self.is_blank() {
+            return Err(BLANK_NOTIFICATION_HINT.to_string());
+        }
+        if self.actions.len() > MAX_NOTIFICATION_ACTIONS {
+            return Err(format!(
+                "notification allows at most {MAX_NOTIFICATION_ACTIONS} actions"
+            ));
+        }
+        Ok(())
+    }
 }
 
 /// Hint for a rejected blank notification, shared by both planes.
 pub const BLANK_NOTIFICATION_HINT: &str = "notification needs a title or body";
 
-/// Maximum number of action buttons rendered per notification slot.
+/// Maximum number of action buttons accepted and rendered per notification slot.
 pub const MAX_NOTIFICATION_ACTIONS: usize = 3;
 
 // ─── Zone hit regions ────────────────────────────────────────────────────────

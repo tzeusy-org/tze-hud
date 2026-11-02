@@ -25,6 +25,7 @@ mod calibration {
     #[derive(Debug, Deserialize)]
     struct DriverOutput {
         transactions: Vec<Transaction>,
+        notification_action_limit_error: Transaction,
     }
 
     #[derive(Debug, Deserialize)]
@@ -53,6 +54,12 @@ mod calibration {
     }
 
     #[derive(Debug, Serialize)]
+    struct ErrorCandidateMeasurement {
+        transaction: OperationMeasurement,
+        result_text: Counts,
+    }
+
+    #[derive(Debug, Serialize)]
     struct FlowMeasurement {
         flow_version: u32,
         flow_fingerprint: String,
@@ -77,6 +84,7 @@ mod calibration {
         tokenizer: TokenizerIdentity,
         fixture_fingerprint: String,
         flows: BTreeMap<String, FlowMeasurement>,
+        notification_action_limit_error: ErrorCandidateMeasurement,
     }
 
     fn headless_config() -> HeadlessConfig {
@@ -158,6 +166,10 @@ mod calibration {
             .arg(driver)
             .env("HUD_MCP_URL", format!("http://{address}/mcp"))
             .env("HUD_PSK", PSK)
+            .env(
+                "HUD_MAX_NOTIFICATION_ACTIONS",
+                tze_hud_scene::types::MAX_NOTIFICATION_ACTIONS.to_string(),
+            )
             .output()
             .expect("launch token-footprint Python flow driver");
         assert!(
@@ -212,6 +224,25 @@ mod calibration {
 
     fn build_output(driver: DriverOutput) -> CalibrationOutput {
         let bpe = tiktoken_rs::o200k_base().expect("load bundled o200k_base vocabulary");
+        let candidate = &driver.notification_action_limit_error;
+        let response: serde_json::Value =
+            serde_json::from_str(&candidate.response_body).expect("candidate response JSON");
+        let request = count(&candidate.request_body, &bpe);
+        let response_counts = count(&candidate.response_body, &bpe);
+        let notification_action_limit_error = ErrorCandidateMeasurement {
+            result_text: count(
+                response["result"]["content"][0]["text"]
+                    .as_str()
+                    .expect("candidate result text"),
+                &bpe,
+            ),
+            transaction: OperationMeasurement {
+                total: sum_counts(&request, &response_counts),
+                request,
+                response: response_counts,
+                model_visible: count(&model_visible_text(candidate), &bpe),
+            },
+        };
         let mut grouped: BTreeMap<String, Vec<Transaction>> = BTreeMap::new();
         for transaction in driver.transactions {
             grouped
@@ -284,6 +315,7 @@ mod calibration {
             },
             fixture_fingerprint: fingerprint(fixture_parts),
             flows,
+            notification_action_limit_error,
         }
     }
 

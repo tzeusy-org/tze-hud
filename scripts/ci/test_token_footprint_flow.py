@@ -2,6 +2,7 @@
 """Framing contract tests for the canonical token-footprint driver."""
 
 import importlib.util
+import io
 import json
 import pathlib
 import unittest
@@ -28,6 +29,11 @@ def fake_rpc_factory(calls):
                 text = {"code": "ZONE_NOT_FOUND", "hint": "call hud_surfaces"}
                 result = {"content": [{"type": "text", "text": json.dumps(text)}], "isError": True}
                 return None, json.dumps({"method": method, "params": params}), "{}", {"result": result}
+            content = params["arguments"].get("content")
+            if isinstance(content, dict) and content.get("actions"):
+                text = {"code": "INVALID_ARGUMENT", "hint": "notification allows at most 3 actions"}
+                result = {"content": [{"type": "text", "text": json.dumps(text)}], "isError": True}
+                return None, json.dumps({"method": method, "params": params}), "{}", {"result": result}
             result = {"content": [{"type": "text", "text": json.dumps(text)}]}
         return None, json.dumps({"method": method, "params": params}), "{}", {"result": result}
 
@@ -37,6 +43,9 @@ def fake_rpc_factory(calls):
 class CanonicalFlowTests(unittest.TestCase):
     def setUp(self):
         flow.transactions.clear()
+        environment = mock.patch.dict(flow.os.environ, {"HUD_MAX_NOTIFICATION_ACTIONS": "3"})
+        environment.start()
+        self.addCleanup(environment.stop)
 
     def test_every_call_is_standard_mcp(self):
         calls = []
@@ -50,7 +59,9 @@ class CanonicalFlowTests(unittest.TestCase):
         self.assertTrue(names <= {"hud_surfaces", "hud_publish", "hud_hold", "hud_clear", "hud_input"})
 
     def test_flows_and_operations_are_labelled(self):
-        with mock.patch.object(flow, "rpc", fake_rpc_factory([])), mock.patch("sys.stdout"):
+        output = io.StringIO()
+        calls = []
+        with mock.patch.object(flow, "rpc", fake_rpc_factory(calls)), mock.patch("sys.stdout", output):
             flow.main()
         labels = [(t["flow"], t["operation"]) for t in flow.transactions]
         self.assertEqual(
@@ -67,6 +78,11 @@ class CanonicalFlowTests(unittest.TestCase):
                 ("error", "hud_publish"),
             ],
         )
+        # Synthetic framing fixture only; real token evidence comes from the
+        # runtime-backed calibration, never this mocked response.
+        candidate = json.loads(output.getvalue())["notification_action_limit_error"]
+        self.assertEqual(candidate["flow"], "notification_action_limit_error")
+        self.assertEqual(len(calls[-1][1]["arguments"]["content"]["actions"]), 4)
 
     def test_portal_ack_uses_the_polled_id(self):
         calls = []

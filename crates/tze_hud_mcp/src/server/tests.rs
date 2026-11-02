@@ -387,6 +387,120 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
         assert_eq!(err["code"], "INVALID_ARGUMENT", "{content}");
         assert!(err["hint"].as_str().unwrap().contains(hint), "{err}");
     }
+
+    // The same cardinality rule applies before immediate admission and scheduling.
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use tze_hud_scene::types::MAX_NOTIFICATION_ACTIONS;
+    let snapshot = |scene: &SceneGraph| {
+        assert!(
+            scene.pending_actions.is_empty(),
+            "publish must not enqueue input"
+        );
+        (
+            serde_json::to_value(scene).unwrap(),
+            scene
+                .scheduled_batches
+                .iter()
+                .map(|s| (s.present_at_wall_us, s.batch.batch_id))
+                .collect::<Vec<_>>(),
+            scene.next_timed_content_wall_us(),
+        )
+    };
+    for delay_ms in [0, 1000] {
+        let (server, _, a, b) = two_agents_for_zones(&["subtitle", "notification-area"]);
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let observed = wakes.clone();
+        let server = server.with_render_wake_notifier(
+            tze_hud_scene::render_wake::RenderWakeNotifier::new(move || {
+                observed.fetch_add(1, Ordering::Relaxed);
+            }),
+        );
+        let foreign = call_as(
+            &server,
+            &b,
+            "hud_publish",
+            json!({"surface":"zone:subtitle", "content":"other holding", "ttl_ms":0}),
+        )
+        .await;
+        assert!(!foreign.1, "{:?}", foreign.0);
+        let args = |count| {
+            json!({
+                "surface":"zone:notification-area", "delay_ms":delay_ms, "ttl_ms":0,
+                "content":{"body":"Choose", "actions":(0..count)
+                    .map(|i| json!({"label":format!("Option {i}"), "callback_id":format!("answer-{i}")}))
+                    .collect::<Vec<_>>()}
+            })
+        };
+        // Also reject before this caller has any lease or publication.
+        for seeded in [false, true] {
+            if seeded {
+                for count in [MAX_NOTIFICATION_ACTIONS - 1, MAX_NOTIFICATION_ACTIONS] {
+                    let (result, error) = call_as(&server, &a, "hud_publish", args(count)).await;
+                    assert!(!error, "{result}");
+                }
+                let scene = server.scene.lock().await;
+                let counts = if delay_ms == 0 {
+                    scene.zone_registry.active_publishes["notification-area"]
+                        .iter()
+                        .map(|p| &p.content)
+                        .collect::<Vec<_>>()
+                } else {
+                    scene
+                        .scheduled_batches
+                        .iter()
+                        .flat_map(|s| &s.batch.mutations)
+                        .filter_map(|m| match m {
+                            tze_hud_scene::mutation::SceneMutation::PublishToZone {
+                                content,
+                                ..
+                            } => Some(content),
+                            _ => None,
+                        })
+                        .collect::<Vec<_>>()
+                };
+                assert_eq!(
+                    counts
+                        .iter()
+                        .map(|c| match c {
+                            ZoneContent::Notification(n) => n.actions.len(),
+                            _ => panic!("expected notification"),
+                        })
+                        .collect::<Vec<_>>(),
+                    [MAX_NOTIFICATION_ACTIONS - 1, MAX_NOTIFICATION_ACTIONS]
+                );
+            }
+            let before = snapshot(&*server.scene.lock().await);
+            let wake_count = wakes.load(Ordering::Relaxed);
+            for _ in 0..2 {
+                let (err, error) = call_as(
+                    &server,
+                    &a,
+                    "hud_publish",
+                    args(MAX_NOTIFICATION_ACTIONS + 1),
+                )
+                .await;
+                assert!(error, "{err}");
+                assert_eq!(err["code"], "INVALID_ARGUMENT");
+                assert_eq!(
+                    err["hint"],
+                    format!("notification allows at most {MAX_NOTIFICATION_ACTIONS} actions")
+                );
+                assert_eq!(snapshot(&*server.scene.lock().await), before);
+                assert_eq!(wakes.load(Ordering::Relaxed), wake_count);
+            }
+        }
+        let (result, error) = call_as(&server, &a, "hud_publish", args(0)).await;
+        assert!(!error, "valid publish after rejection: {result}");
+        for who in [&a, &b] {
+            let (input, error) = call_as(&server, who, "hud_input", json!({})).await;
+            assert!(!error, "{input}");
+            assert_eq!(
+                input["items"],
+                json!([]),
+                "no action/FIFO items from rejection"
+            );
+        }
+    }
 }
 
 #[tokio::test]
@@ -657,10 +771,21 @@ async fn delayed_notification_expiry_matches_immediate() {
 
 /// Two agents that may both use `zone:subtitle`, with their bearers.
 fn two_agents() -> (McpServer, TestClock, CallerContext, CallerContext) {
+    two_agents_for_zones(&["subtitle"])
+}
+
+fn two_agents_for_zones(zones: &[&str]) -> (McpServer, TestClock, CallerContext, CallerContext) {
     let clock = TestClock::new(1_000);
     let mut agents = AgentDirectory::default();
     for (id, key) in [("a", "a-key"), ("b", "b-key")] {
-        agents.insert(id, hash_psk(key), vec!["publish_zone:subtitle".to_string()]);
+        agents.insert(
+            id,
+            hash_psk(key),
+            zones
+                .iter()
+                .map(|zone| format!("publish_zone:{zone}"))
+                .collect(),
+        );
     }
     let server = McpServer::new(scene(&clock)).with_config(McpConfig::with_agents(agents.shared()));
     (

@@ -1265,9 +1265,7 @@ fn parse_zone_content(content: &Value) -> Result<ZoneContent, McpError> {
                         title,
                         actions,
                     };
-                    if n.is_blank() {
-                        return Err(invalid(tze_hud_scene::types::BLANK_NOTIFICATION_HINT));
-                    }
+                    n.validate().map_err(invalid)?;
                     Ok(ZoneContent::Notification(n))
                 }
                 "status_bar" => {
