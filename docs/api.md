@@ -62,7 +62,10 @@ otherwise. Scheduled zone publications count as held before presentation;
 - Zone: `content` is a string, or a typed object for structured zones
   (`notification` with optional `title`, `body`, integer `urgency` 0–3
   (default 1), and optional `actions: [{label, callback_id}]`; both action
-  fields are non-empty strings). Activating an action dismisses the
+  fields are non-empty strings). Both MCP and gRPC accept at most 3 actions
+  (`MAX_NOTIFICATION_ACTIONS`); excess actions reject the whole publish with
+  `INVALID_ARGUMENT` and hint `notification allows at most 3 actions`, before
+  admission or scheduling. Activating an action dismisses the
   notification. `type` may be
   omitted; the runtime infers it from what the zone accepts. `key` is the
   merge key. Supplied notification urgency must be an integer 0–3; only
@@ -775,6 +778,12 @@ baselined against regressions.
 
 These current measurements use canonical flow version 3; its refreshed baseline
 is pending owner review, with every budget unchanged.
+
+The same calibration separately executes an over-limit notification publish.
+Its `notification_action_limit_error` candidate records full wire and
+model-visible transaction costs, and checks the returned `result_text` against
+the existing 60-token error ceiling. Caller-supplied action arguments retain
+their measured cost; the six canonical flow budgets above are unchanged.
 
 The portal flow takes 4 round trips in the canonical fixture because the
 first poll has nothing to ack; in a steady loop each `hud_input` both acks
