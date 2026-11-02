@@ -27,9 +27,10 @@ use super::token_colors::{
     NOTIFICATION_DISMISS_GAP_PX, NOTIFICATION_ICON_GAP_PX, NOTIFICATION_ICON_SIZE_PX,
     NOTIFICATION_INTER_LINE_GAP, NOTIFICATION_TITLE_WEIGHT, is_alert_banner_zone,
     notification_action_button_bounds, notification_action_row_reserve,
-    notification_dismiss_bounds, resolve_composer_overlay_tokens, resolve_jump_to_latest_tokens,
-    resolve_notification_action_tokens, resolve_scroll_indicator_tokens,
-    resolve_transcript_max_measure_px, resolve_viewer_echo_tokens,
+    notification_dismiss_bounds, notification_inset, resolve_composer_overlay_tokens,
+    resolve_jump_to_latest_tokens, resolve_notification_action_tokens,
+    resolve_scroll_indicator_tokens, resolve_transcript_max_measure_px, resolve_viewer_echo_tokens,
+    urgency_to_on_severity_color,
 };
 
 /// Default line-height multiplier (`font_size_px × 1.4 = line_height_px`).
@@ -580,29 +581,19 @@ impl super::Compositor {
                                 // the defaults via RenderingPolicy while notification-area falls
                                 // through to the token/default path.
                                 //
-                                // Layout: left-aligned with 9px inset (8px padding + 1px border),
+                                // Layout: left-aligned at the card inset (`notification_inset`),
                                 // clips at content area boundary (no wrapping in v1).
                                 // When a valid icon texture is cached, the text is additionally
                                 // inset to the right of the icon (icon_size + gap).
                                 // Spec-defined inset for notification-area zones:
-                                // 1px border + 8px padding = 9px from backdrop edges.
-                                // When the zone's RenderingPolicy explicitly sets
-                                // margin_horizontal/margin_vertical, those values take
-                                // precedence (e.g. alert-banner uses margin_horizontal=8).
-                                const NOTIFICATION_PADDING_PX: f32 = 8.0;
-                                const NOTIFICATION_INSET: f32 =
-                                    super::token_colors::NOTIFICATION_BORDER_WIDTH_PX
-                                        + NOTIFICATION_PADDING_PX;
-                                // Horizontal inset: policy margin_horizontal > margin_px > 9px
-                                let inset_h = policy
-                                    .margin_horizontal
-                                    .or(policy.margin_px)
-                                    .unwrap_or(NOTIFICATION_INSET * scale);
-                                // Vertical inset: policy margin_vertical > margin_px > 9px
-                                let inset_v = policy
-                                    .margin_vertical
-                                    .or(policy.margin_px)
-                                    .unwrap_or(NOTIFICATION_INSET * scale);
+                                // the zone policy's margins (notification-area:
+                                // `spacing.notification.inset`), else 9 dp. The
+                                // action row and × share the horizontal inset.
+                                let inset_h = notification_inset(policy, scale);
+                                let inset_v =
+                                    policy.margin_vertical.or(policy.margin_px).unwrap_or(
+                                        super::token_colors::NOTIFICATION_INSET_DEFAULT_PX * scale,
+                                    );
                                 // If a cached icon texture exists, inset text to the right of it.
                                 let icon_width_reserved = parse_notification_icon(&payload.icon)
                                     .filter(|id| self.image_texture_cache.contains_key(id))
@@ -619,9 +610,16 @@ impl super::Compositor {
                                 let font_family = policy
                                     .font_family
                                     .unwrap_or(tze_hud_scene::types::FontFamily::SystemSansSerif);
-                                // Text color: policy explicit > color.text.primary token > near-white
-                                let base_color = policy
-                                    .text_color
+                                // Text color: alert-banner uses the on-severity
+                                // color for its fill; else policy explicit >
+                                // color.text.primary token > near-white.
+                                let on_severity = is_alert_banner_zone(zone_name)
+                                    .then(|| {
+                                        urgency_to_on_severity_color(payload.urgency, zone_tokens)
+                                    })
+                                    .flatten();
+                                let base_color = on_severity
+                                    .or(policy.text_color)
                                     .map(crate::text::rgba_to_srgb_u8)
                                     .unwrap_or_else(|| {
                                         Self::resolve_text_primary_color(zone_tokens)
@@ -647,16 +645,11 @@ impl super::Compositor {
                                 let dismiss_reserved_w = if is_alert_banner_zone(zone_name) {
                                     0.0
                                 } else {
-                                    // The × sits NOTIFICATION_ACTION_INSET_PX in
-                                    // from the right edge; text keeps its own
-                                    // right inset_h, so reserve the difference.
+                                    // The × sits inset_h in from the right edge,
+                                    // as the text does: reserve its width and gap.
                                     (NOTIFICATION_DISMISS_BUTTON_SIZE_PX
                                         + NOTIFICATION_DISMISS_GAP_PX)
                                         * scale
-                                        + (super::token_colors::NOTIFICATION_ACTION_INSET_PX
-                                            * scale
-                                            - inset_h)
-                                            .max(0.0)
                                 };
                                 // Text x-offset respects icon reservation (from icon texture pipeline).
                                 let text_x = zx + inset_h + icon_width_reserved;
@@ -669,7 +662,7 @@ impl super::Compositor {
 
                                 // Text stops above the action row (hud-mskx5).
                                 let text_slot_h = (effective_slot_h
-                                    - notification_action_row_reserve(payload, scale))
+                                    - notification_action_row_reserve(payload, scale, inset_h))
                                 .max(1.0);
                                 if payload.title.is_empty() {
                                     // ── Single-line rendering (backward-compatible) ──
@@ -754,6 +747,7 @@ impl super::Compositor {
                                             effective_slot_h,
                                             n_actions,
                                             scale,
+                                            inset_h,
                                         ),
                                     ) {
                                         items.push(Self::make_zone_text_item(
@@ -786,6 +780,7 @@ impl super::Compositor {
                                         zw,
                                         effective_slot_h,
                                         scale,
+                                        inset_h,
                                     );
                                     let dismiss_color = crate::text::apply_opacity_to_color(
                                         base_color,
@@ -900,18 +895,14 @@ impl super::Compositor {
                                             })
                                             .unwrap_or(0.0);
                                     if icon_width_reserved > 0.0 {
-                                        // Use the same default inset as the icon draw path
-                                        // (NOTIFICATION_INSET = 9px) so text and icon stay
-                                        // aligned when policy margins are not explicitly set.
-                                        const NOTIFICATION_INSET: f32 = 9.0;
-                                        let margin_h = policy
-                                            .margin_horizontal
-                                            .or(policy.margin_px)
-                                            .unwrap_or(NOTIFICATION_INSET * scale);
-                                        let margin_v = policy
-                                            .margin_vertical
-                                            .or(policy.margin_px)
-                                            .unwrap_or(NOTIFICATION_INSET * scale);
+                                        // The same inset as the icon draw path, so text and icon
+                                        // stay aligned.
+                                        let margin_h = notification_inset(policy, scale);
+                                        let margin_v =
+                                            policy.margin_vertical.or(policy.margin_px).unwrap_or(
+                                                super::token_colors::NOTIFICATION_INSET_DEFAULT_PX
+                                                    * scale,
+                                            );
                                         let font_size_px = policy
                                             .font_size_px
                                             .unwrap_or(16.0 * scale)
@@ -1037,18 +1028,14 @@ impl super::Compositor {
                                     .unwrap_or(0.0);
                                 if icon_width_reserved > 0.0 {
                                     // Build TextItem manually to apply icon offset.
-                                    // Use the same default inset as the icon draw path
-                                    // (NOTIFICATION_INSET = 9px) so text and icon stay
-                                    // aligned when policy margins are not explicitly set.
-                                    const NOTIFICATION_INSET: f32 = 9.0;
-                                    let margin_h = policy
-                                        .margin_horizontal
-                                        .or(policy.margin_px)
-                                        .unwrap_or(NOTIFICATION_INSET * scale);
-                                    let margin_v = policy
-                                        .margin_vertical
-                                        .or(policy.margin_px)
-                                        .unwrap_or(NOTIFICATION_INSET * scale);
+                                    // The same inset as the icon draw path, so text and icon
+                                    // stay aligned.
+                                    let margin_h = notification_inset(policy, scale);
+                                    let margin_v =
+                                        policy.margin_vertical.or(policy.margin_px).unwrap_or(
+                                            super::token_colors::NOTIFICATION_INSET_DEFAULT_PX
+                                                * scale,
+                                        );
                                     let font_size_px = policy
                                         .font_size_px
                                         .unwrap_or(16.0 * scale)

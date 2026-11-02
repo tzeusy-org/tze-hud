@@ -117,6 +117,9 @@
 "color.severity.info"                 = "#4C90F0"   # primary
 "color.severity.warning"              = "#FBB360"   # caution
 "color.severity.error"                = "#FA999C"   # error
+"color.on_severity.info"          = "#111418"   # surface: dark text on the light severity fills
+"color.on_severity.warning"       = "#111418"
+"color.on_severity.critical"      = "#111418"
 "opacity.backdrop.opaque"             = "0.96"      # opacity.surface
 "border.radius.medium"                = "4"         # shape.m
 "color.notification.urgency.low"      = "#252A31"   # surface.container

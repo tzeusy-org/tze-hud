@@ -360,9 +360,20 @@ async fn notification_actions_layout_matches_hit_regions() {
 /// text-only height.
 #[tokio::test]
 async fn notification_action_row_is_reserved_below_the_text() {
+    check_notification_action_row(None).await;
+}
+
+/// The same draw/hit/reserve agreement at a themed inset (tonal-glass's
+/// `spacing.notification.inset` = 16).
+#[tokio::test]
+async fn notification_action_row_follows_a_themed_inset() {
+    check_notification_action_row(Some(16.0)).await;
+}
+
+async fn check_notification_action_row(margin: Option<f32>) {
     use crate::renderer::token_colors::{
-        NOTIFICATION_ACTION_BUTTON_H_PX, NOTIFICATION_ACTION_INSET_PX,
-        NOTIFICATION_ACTION_ROW_GAP_PX, NOTIFICATION_STACK_GAP_DEFAULT_PX,
+        NOTIFICATION_ACTION_BUTTON_H_PX, NOTIFICATION_ACTION_ROW_GAP_PX,
+        NOTIFICATION_INSET_DEFAULT_PX, NOTIFICATION_STACK_GAP_DEFAULT_PX,
     };
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
@@ -370,8 +381,10 @@ async fn notification_action_row_is_reserved_below_the_text() {
     let policy = RenderingPolicy {
         font_size_px: Some(16.0),
         backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 1.0)),
+        margin_horizontal: margin,
         ..Default::default()
     };
+    let card_inset = margin.unwrap_or(NOTIFICATION_INSET_DEFAULT_PX);
     let action = |label: &str| tze_hud_scene::types::NotificationAction {
         label: label.to_owned(),
         callback_id: label.to_lowercase(),
@@ -406,7 +419,7 @@ async fn notification_action_row_is_reserved_below_the_text() {
             h(&plain)
                 + NOTIFICATION_ACTION_ROW_GAP_PX
                 + NOTIFICATION_ACTION_BUTTON_H_PX
-                + NOTIFICATION_ACTION_INSET_PX,
+                + card_inset,
             "title={title:?}: actions reserve the button row"
         );
     }
@@ -528,7 +541,7 @@ async fn notification_action_row_is_reserved_below_the_text() {
             .iter()
             .find(|(_, y, h)| b.y >= *y && b.y < y + h)
             .expect("each button lies in a card");
-        let inset = NOTIFICATION_ACTION_INSET_PX;
+        let inset = card_inset;
         assert!(
             b.x >= zx + inset - 0.01
                 && b.x + b.width <= zx + zw - inset + 0.01
@@ -547,7 +560,7 @@ async fn notification_action_row_is_reserved_below_the_text() {
         .map(|r| r.bounds)
         .collect();
     assert_eq!(dismiss_regions.len(), 3, "one × per card");
-    let inset = NOTIFICATION_ACTION_INSET_PX;
+    let inset = card_inset;
     for b in &dismiss_regions {
         let (_, card_y, card_h) = *cards
             .iter()
@@ -952,10 +965,10 @@ fn test_notification_urgency_color_tokens() {
     }
 }
 
-/// notification-area urgency-tinted backdrop: renders backdrop at 0.8 opacity.
+/// notification-area urgency-tinted backdrop: renders backdrop at the `opacity.notification.backdrop` opacity (0.8 by default).
 ///
 /// Per spec: non-alert-banner Notification content must use
-/// color.notification.urgency.* tokens with fixed 0.8 opacity.
+/// color.notification.urgency.* tokens at the `opacity.notification.backdrop` opacity.
 /// The policy.backdrop_opacity must NOT override this.
 #[tokio::test]
 async fn test_notification_area_backdrop_uses_0_8_opacity() {

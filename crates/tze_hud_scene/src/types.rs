@@ -2060,7 +2060,6 @@ pub enum ZoneInteractionKind {
 pub enum DragHandleElementKind {
     Tile,
     Zone,
-    Widget,
 }
 
 /// A runtime-managed interactive region derived from zone content layout.

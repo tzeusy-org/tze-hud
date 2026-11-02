@@ -227,6 +227,11 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Default border/frame color",
         default_value: "#333333",
     },
+    CanonicalToken {
+        key: "color.subtitle.backdrop",
+        description: "Fill behind the whole subtitle zone, drawn when opacity.subtitle.backdrop > 0",
+        default_value: "#000000",
+    },
     // Color — severity
     CanonicalToken {
         key: "color.severity.info",
@@ -248,6 +253,23 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Critical severity indicator color",
         default_value: "#FF0000",
     },
+    // Color — text on a severity fill (alert-banner text, which draws no
+    // outline, so these must contrast with the matching color.severity.*)
+    CanonicalToken {
+        key: "color.on_severity.info",
+        description: "Text color on an info severity fill",
+        default_value: "#111111",
+    },
+    CanonicalToken {
+        key: "color.on_severity.warning",
+        description: "Text color on a warning severity fill",
+        default_value: "#111111",
+    },
+    CanonicalToken {
+        key: "color.on_severity.critical",
+        description: "Text color on a critical severity fill",
+        default_value: "#111111",
+    },
     // Opacity
     CanonicalToken {
         key: "opacity.backdrop.default",
@@ -257,6 +279,21 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
     CanonicalToken {
         key: "opacity.backdrop.opaque",
         description: "Opaque backdrop opacity threshold (0.0–1.0)",
+        default_value: "0.9",
+    },
+    CanonicalToken {
+        key: "opacity.notification.backdrop",
+        description: "Notification card backdrop opacity (0.0–1.0)",
+        default_value: "0.8",
+    },
+    CanonicalToken {
+        key: "opacity.subtitle.backdrop",
+        description: "Opacity of the fill behind the whole subtitle zone (0.0–1.0); 0 draws none",
+        default_value: "0",
+    },
+    CanonicalToken {
+        key: "opacity.ambient.max",
+        description: "Ceiling on ambient-background opacity (0.0–1.0), so the desktop always shows through the overlay",
         default_value: "0.9",
     },
     // Typography — body
@@ -327,6 +364,11 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         key: "spacing.padding.large",
         description: "Large internal padding in pixels",
         default_value: "16",
+    },
+    CanonicalToken {
+        key: "spacing.notification.inset",
+        description: "Notification card inset in pixels: text, actions and dismiss from the card edge",
+        default_value: "9",
     },
     // Stroke
     CanonicalToken {
