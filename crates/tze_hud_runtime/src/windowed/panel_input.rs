@@ -526,12 +526,58 @@ mod panel_task_tests {
         );
         assert_eq!(model.hint_end, "Esc close and resume");
 
-        f.send_and_wait(PanelEvent::Chord(ChordRole::Pause), |f| {
-            !f.paused() && !f.panel.is_open()
+        // DEBUG-ximtf11-panel: force the POC's resume/open continuation between
+        // the real safe-mode exit and the real closed-model publication.
+        let (reached, release) = f.panel.diagnostic_resume_close_gate();
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Pause), |_| {
+            reached.load(Ordering::Acquire)
         })
         .await;
+        assert!(!f.paused());
+        assert!(f.panel.is_open());
+        assert!(f.model().is_some());
+        // Exact POC contract: its wait_for readiness followed by open_panel's
+        // `if !control_panel_open() { press_control_panel_hotkey() }` decision.
+        // None means the continuation must still wait; Some(false) skips open.
+        let continue_after_resume = || {
+            if !f.paused() {
+                Some(!f.panel.is_open())
+            } else {
+                None
+            }
+        };
+        let first_decision = continue_after_resume();
+        eprintln!(
+            "DEBUG-ximtf11-panel forced paused={} open={} decision={first_decision:?}",
+            f.paused(),
+            f.panel.is_open()
+        );
+        release.send(()).expect("panel reached the release gate");
+        // Reuse the existing patience and complete the original same-lease proof.
+        f.send_and_wait(PanelEvent::Refresh, |f| !f.paused() && !f.panel.is_open())
+            .await;
         assert_eq!(lease_state().await, LeaseState::Active);
         assert!(f.model().is_none());
+        let send_open = first_decision
+            .or_else(continue_after_resume)
+            .expect("resume and close completed");
+        eprintln!(
+            "DEBUG-ximtf11-panel released paused={} open={} model_none={} lease={:?} send_open={send_open}",
+            f.paused(),
+            f.panel.is_open(),
+            f.model().is_none(),
+            lease_state().await
+        );
+        if send_open {
+            f.send_and_wait(PanelEvent::Chord(ChordRole::Panel), |f| f.panel.is_open())
+                .await;
+        }
+        assert!(
+            f.panel.is_open(),
+            "DEBUG-ximtf11-panel continuation must reopen after completed close"
+        );
+        assert!(!f.paused());
+        assert!(f.model().is_some());
     }
 
     /// The panel chord opens without pausing; the pause tile pauses in place;

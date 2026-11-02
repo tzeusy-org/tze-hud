@@ -95,6 +95,13 @@ pub(crate) enum PanelEvent {
     },
 }
 
+// DEBUG-ximtf11-panel: temporary deterministic resume/close interleaving.
+#[cfg(test)]
+struct ResumeCloseDiagnosticGate {
+    reached: Arc<AtomicBool>,
+    release: tokio::sync::oneshot::Receiver<()>,
+}
+
 struct Shared {
     /// What the compositor draws (`None`: closed), with a version that changes
     /// on every publish.
@@ -116,6 +123,8 @@ struct Shared {
     /// Background edits whose outcome was queued (tests order on it).
     #[cfg(test)]
     applied_sent: AtomicU64,
+    #[cfg(test)]
+    resume_close_diagnostic: std::sync::Mutex<Option<ResumeCloseDiagnosticGate>>,
 }
 
 /// Cheap, cloneable access to the panel from every thread.
@@ -134,6 +143,22 @@ impl ControlPanelHandle {
     #[cfg(test)]
     pub(crate) fn applied_sent(&self) -> u64 {
         self.shared.applied_sent.load(Ordering::SeqCst)
+    }
+
+    // DEBUG-ximtf11-panel: one-shot gate, unit tests only; no production observer.
+    #[cfg(test)]
+    pub(crate) fn diagnostic_resume_close_gate(
+        &self,
+    ) -> (Arc<AtomicBool>, tokio::sync::oneshot::Sender<()>) {
+        let reached = Arc::new(AtomicBool::new(false));
+        let (release, receiver) = tokio::sync::oneshot::channel();
+        let mut gate = self.shared.resume_close_diagnostic.lock().unwrap();
+        assert!(gate.is_none());
+        *gate = Some(ResumeCloseDiagnosticGate {
+            reached: Arc::clone(&reached),
+            release: receiver,
+        });
+        (reached, release)
     }
 
     pub(crate) fn is_open(&self) -> bool {
@@ -376,6 +401,8 @@ pub(crate) fn spawn_control_panel(
             main_wake: deps.main_wake.clone(),
             #[cfg(test)]
             applied_sent: AtomicU64::new(0),
+            #[cfg(test)]
+            resume_close_diagnostic: std::sync::Mutex::new(None),
         }),
     };
     let sections: Arc<[Box<dyn Section>]> = sections.into();
@@ -568,6 +595,22 @@ impl PanelTask {
         tracing::info!(chord = role.config_key(), ?outcome, "control panel: chord");
         if let Some(pause) = outcome.pause {
             self.deps.pause.set(pause).await;
+            // DEBUG-ximtf11-panel: hold the actual task before closing publication.
+            #[cfg(test)]
+            if !pause && matches!(outcome.panel, PanelChange::Close) {
+                let gate = {
+                    self.handle
+                        .shared
+                        .resume_close_diagnostic
+                        .lock()
+                        .unwrap()
+                        .take()
+                };
+                if let Some(gate) = gate {
+                    gate.reached.store(true, Ordering::Release);
+                    gate.release.await.expect("diagnostic gate released");
+                }
+            }
         }
         match outcome.panel {
             PanelChange::Open(by) => {
