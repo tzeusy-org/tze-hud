@@ -26,13 +26,12 @@ use std::collections::HashMap;
 use std::sync::MutexGuard;
 
 use tze_hud_config::{resolve_portal_tokens, tokens::DesignTokenMap};
-use tze_hud_input::{DraftNotificationBatch, InputProcessor};
+use tze_hud_input::InputProcessor;
 pub use tze_hud_mcp::PortalHandle;
 pub use tze_hud_projection::hub::{PortalHub, PortalKey};
 use tze_hud_projection::{
-    AdapterGeometryBatch, AdapterGeometrySnapshot, AdapterPortalRect, ComposerStatus,
-    InputDeliveryState, OutputKind, PortalInputFeedback, PortalInputFeedbackState, PortalView,
-    ProjectedPortalPresentation, ProjectionLifecycleState, TranscriptUnit,
+    ComposerStatus, InputDeliveryState, OutputKind, PortalInputFeedback, PortalInputFeedbackState,
+    PortalView, ProjectedPortalPresentation, ProjectionLifecycleState, TranscriptUnit,
     hub::{DeadlineKind, Due, Portal, PortalStatus, Transition, Unit},
     render::{DEFAULT_PORTAL_SIZE, PortalRender, Size, render},
     tokens::{PortalVisualTokens, portal_visual_tokens_from_part_tokens},
@@ -111,10 +110,6 @@ struct Binding {
     /// Content height (px) from the last render. A decrease means content was
     /// trimmed from the head (spec §3.3, hud-pkg2g / hud-hkaw2).
     prev_content_height_px: f32,
-    /// Newest resize (pointer gesture or hotkey); the durable rendered size.
-    latest_geometry: Option<AdapterGeometrySnapshot>,
-    /// Resize not yet delivered to the renderer.
-    pending_geometry: Option<AdapterGeometryBatch>,
     /// Outcome of the viewer's last composer submit.
     last_input_feedback: Option<PortalInputFeedback>,
 }
@@ -128,11 +123,16 @@ impl Binding {
             scene_lease_id: None,
             tile_scene_id: None,
             prev_content_height_px: 0.0,
-            latest_geometry: None,
-            pending_geometry: None,
             last_input_feedback: None,
         }
     }
+}
+
+/// Distinguishes raw tiles from portal submissions, including service refusal.
+#[derive(Debug)]
+pub enum PortalReplyOutcome {
+    NotPortal,
+    Handled(Option<PortalInputFeedback>),
 }
 
 /// Scene/composer metadata is bounded, while the full key remains the routing
@@ -436,59 +436,20 @@ impl PortalDriver {
         self.portals.clock.now_us()
     }
 
-    /// Record a resize of a portal tile (hotkey or pointer gesture, §6b.4,
-    /// hud-npq6g) so its next render uses the new bounds. Returns `false` if
-    /// no portal owns `tile_id` or the snapshot is not newer than the last.
-    pub fn push_geometry_snapshot_for_tile(
+    /// Submit text for the complete agent/portal identity bound to this tile.
+    /// Known portals remain handled on service refusal, preventing a raw echo.
+    pub fn submit_reply_for_tile(
         &mut self,
         tile_id: SceneId,
-        snapshot: tze_hud_input::GeometrySnapshot,
-    ) -> bool {
-        let Some(key) = self.key_for_tile(tile_id) else {
-            return false;
-        };
-        let entry = self.entry(&key);
-        let snapshot = AdapterGeometrySnapshot {
-            rect: AdapterPortalRect::from_f32(
-                snapshot.rect.x,
-                snapshot.rect.y,
-                snapshot.rect.width,
-                snapshot.rect.height,
-            ),
-            gesture_active: snapshot.gesture_active,
-            sequence: snapshot.sequence,
-        };
-        if entry
-            .latest_geometry
-            .is_some_and(|latest| snapshot.sequence <= latest.sequence)
-        {
-            return false;
-        }
-        entry.latest_geometry = Some(snapshot);
-        entry
-            .pending_geometry
-            .get_or_insert_with(AdapterGeometryBatch::default)
-            .coalesce(snapshot);
-        true
-    }
-
-    /// Route a focused portal composer batch to the portal that owns the tile.
-    ///
-    /// A submission is queued directly in the
-    /// hub as input for the agent's `hud_input` (and echoed in the reply
-    /// band). Returns `None` when no portal owns `tile_id` or the batch has
-    /// no submission.
-    pub fn submit_composer_batch_for_tile(
-        &mut self,
-        tile_id: SceneId,
-        batch: &DraftNotificationBatch,
+        text: String,
         submitted_at_wall_us: u64,
-    ) -> Option<PortalInputFeedback> {
-        let key = self.key_for_tile(tile_id)?;
-        let text = batch.submission.as_ref()?.text.clone();
-        let submission = self
-            .portals
-            .submit_reply(&key, text, submitted_at_wall_us)?;
+    ) -> PortalReplyOutcome {
+        let Some(key) = self.key_for_tile(tile_id) else {
+            return PortalReplyOutcome::NotPortal;
+        };
+        let Some(submission) = self.portals.submit_reply(&key, text, submitted_at_wall_us) else {
+            return PortalReplyOutcome::Handled(None);
+        };
         let result = submission.result;
         let pending_input_count = submission.pending_input_count;
         let pending_input_bytes = submission.pending_input_bytes;
@@ -519,7 +480,7 @@ impl PortalDriver {
         {
             hub.mark_local_feedback(&key, incarnation);
         }
-        Some(feedback)
+        PortalReplyOutcome::Handled(Some(feedback))
     }
 
     /// Apply a new design-token override map, propagating to all live render
@@ -731,15 +692,18 @@ impl PortalDriver {
             )
         };
         let entry = self.entries.get_mut(key).expect("entry ensured above");
-        entry.pending_geometry = None;
-        let viewport = entry
-            .latest_geometry
-            .map(|g| Size {
-                width: g.rect.width_px as f32,
-                height: g.rect.height_px as f32,
-            })
-            .filter(|s| s.width > 0.0 && s.height > 0.0)
-            .unwrap_or(DEFAULT_PORTAL_SIZE);
+        let Some(tile) = scene.tiles.get(&tile_id) else {
+            return;
+        };
+        let viewport = Size {
+            width: tile.bounds.width,
+            height: tile.bounds.height,
+        };
+        let viewport = if viewport.width > 0.0 && viewport.height > 0.0 {
+            viewport
+        } else {
+            DEFAULT_PORTAL_SIZE
+        };
         let rendered = render(&state, &entry.tokens, viewport, now_us);
         if let Err(error) = apply_render(scene, entry, tile_id, rendered) {
             tracing::warn!(portal = %key.id, ?error, "portal scene render failed");
@@ -773,8 +737,7 @@ impl PortalDriver {
             total_lines += 2 + lines(&state.input_history);
         }
         let new_content_height_px = total_lines.max(1) as f32 * line_height_px;
-        // The live resize snapshot, then the durable resized bounds, then the
-        // default portal height (hud-v4k1h).
+        // Use the same live scene height for rendering and follow-tail.
         let viewport_height_px = viewport.height;
         // Any height decrease is a head trim (retention or the visible
         // window), notified before the append so the scrolled-back offset
@@ -988,7 +951,6 @@ impl PortalDriver {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use tze_hud_input::{DraftSubmission, GeometrySnapshot, PortalRect};
     use tze_hud_projection::hub::{PortalError, PortalLimits, Publish};
     use tze_hud_scene::{Clock, NodeData, TestClock};
 
@@ -1067,8 +1029,7 @@ mod tests {
             .expect("portal lease")
     }
 
-    /// Shrink the portal to a one-line viewport (tile bounds plus the resize
-    /// snapshot the window layer pushes). Returns the line height.
+    /// Shrink the live scene viewport to one line. Returns the line height.
     fn one_line_viewport(driver: &mut PortalDriver, scene: &mut SceneGraph, id: &str) -> f32 {
         let tile_id = tile(driver, id);
         let line_h =
@@ -1079,21 +1040,6 @@ mod tests {
             Rect::new(0.0, 0.0, 600.0, viewport_h),
             PORTAL_DRIVER_NAMESPACE,
         );
-        let snapshot = GeometrySnapshot {
-            portal_id_hash: 0,
-            rect: PortalRect {
-                x: 0.0,
-                y: 0.0,
-                width: 600.0,
-                height: viewport_h,
-            },
-            gesture_active: false,
-            sequence: 1,
-        };
-        assert!(
-            driver.push_geometry_snapshot_for_tile(tile_id, snapshot),
-            "a portal tile accepts its resize snapshot"
-        );
         line_h
     }
 
@@ -1103,14 +1049,10 @@ mod tests {
         text: &str,
         now_us: u64,
     ) -> PortalInputFeedback {
-        let mut batch = DraftNotificationBatch::new();
-        batch.record_submission(DraftSubmission {
-            text: text.to_string(),
-            sequence: 1,
-        });
-        driver
-            .submit_composer_batch_for_tile(tile_id, &batch, now_us)
-            .expect("the tile belongs to a portal")
+        match driver.submit_reply_for_tile(tile_id, text.to_string(), now_us) {
+            PortalReplyOutcome::Handled(Some(feedback)) => feedback,
+            outcome => panic!("expected portal feedback, got {outcome:?}"),
+        }
     }
 
     /// All painted text in the portal subtree.
@@ -1429,8 +1371,7 @@ mod tests {
         }
     }
 
-    /// The render site wires follow-tail (spec §3.2), the resize snapshot
-    /// (§6b.4, hud-npq6g), and the jump-to-latest unread badge (hud-g1ena.3).
+    /// Live scene geometry drives native render, follow-tail and unread state.
     #[test]
     fn drain_render_portal_notify_tile_content_appended_wiring() {
         let mut driver = PortalDriver::new(PortalHandle::default());
@@ -1440,8 +1381,7 @@ mod tests {
         let tile_id = tile(&driver, "p");
         assert!(scene.tile_scroll_config(tile_id).is_some());
 
-        // Without the snapshot the drain would size against the configured
-        // ~360 px viewport, which ten lines don't overflow.
+        // Only scene bounds change; ten lines overflow the live one-line viewport.
         one_line_viewport(&mut driver, &mut scene, "p");
         for i in 1..=9 {
             publish(&mut driver, "p", &format!("line-{i}"), 1_000 + i);
@@ -1456,12 +1396,39 @@ mod tests {
             9,
             "the drained batch's unread count"
         );
-        let entry = &driver.entries[&key("p")];
-        assert!(
-            entry.pending_geometry.is_none(),
-            "the resize is delivered once"
-        );
-        assert!(entry.latest_geometry.is_some(), "the resized size persists");
+        // Repeated ordinary publishes must reflow from live fractional bounds,
+        // preserving subpixel width/height in the surface and scroll accounting.
+        for (i, (width, height)) in [(513.25, 37.75), (401.5, 22.125)].into_iter().enumerate() {
+            scene
+                .update_tile_bounds(
+                    tile_id,
+                    Rect::new(0.0, 0.0, width, height),
+                    PORTAL_DRIVER_NAMESPACE,
+                )
+                .unwrap();
+            publish(
+                &mut driver,
+                "p",
+                "another line",
+                300_000 + i as u64 * FRAME_US,
+            );
+            driver.drain_inner(
+                &mut scene,
+                &mut processor,
+                Some(tab),
+                400_000 + i as u64 * FRAME_US,
+            );
+            let surface = scene.portal_surface(tile_id).unwrap();
+            assert_eq!(surface.parts[0].bounds.width, width);
+            assert_eq!(surface.parts[0].bounds.height, height);
+            let (_, scroll_y) = scene.tile_scroll_offset_local(tile_id);
+            let content_height = driver.entries[&key("p")].prev_content_height_px;
+            assert!(
+                (scroll_y - (content_height - height)).abs() < 0.001,
+                "follow-tail uses exact viewport height: {scroll_y}, {content_height}, {height}"
+            );
+            assert!(scene.tile_follow_tail_at_tail(tile_id));
+        }
     }
 
     /// The content height counts the INPUT band (viewer replies), not just
