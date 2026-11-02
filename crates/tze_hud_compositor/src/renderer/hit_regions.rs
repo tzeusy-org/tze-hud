@@ -26,8 +26,9 @@ use tze_hud_scene::types::*;
 use super::Compositor;
 use super::draw_cmds::DragHandleEntry;
 use super::token_colors::{
-    notification_action_button_bounds, notification_dismiss_bounds, resolve_jump_to_latest_tokens,
-    resolve_scroll_indicator_tokens, resolve_tile_close_tokens, tile_close_button_bounds,
+    notification_action_button_bounds, notification_dismiss_bounds, notification_inset,
+    resolve_jump_to_latest_tokens, resolve_scroll_indicator_tokens, resolve_tile_close_tokens,
+    tile_close_button_bounds,
 };
 use crate::pipeline::{RectVertex, rect_vertices};
 
@@ -351,8 +352,14 @@ pub(crate) fn populate_notification_hit_regions_in(
 
             // ── Dismiss (×) button ────────────────────────────────────────
             // Top-right corner of the slot; same bounds the renderer draws.
-            let dismiss_bounds =
-                notification_dismiss_bounds(zx, slot_y, zw, effective_slot_h, scale);
+            let dismiss_bounds = notification_dismiss_bounds(
+                zx,
+                slot_y,
+                zw,
+                effective_slot_h,
+                scale,
+                notification_inset(policy, scale),
+            );
             let dismiss_id = notification_dismiss_interaction_id(zone_name, record);
             scene.overlay.zone_hit_regions.push(ZoneHitRegion {
                 zone_name: zone_name.clone(),
@@ -375,6 +382,7 @@ pub(crate) fn populate_notification_hit_regions_in(
                     effective_slot_h,
                     n_actions,
                     scale,
+                    notification_inset(policy, scale),
                 );
 
                 for (action, action_bounds) in n_payload.actions.iter().zip(action_rects) {

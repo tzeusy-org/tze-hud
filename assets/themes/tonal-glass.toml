@@ -116,7 +116,11 @@
 "color.severity.info"                 = "#8AB4FF"   # primary
 "color.severity.warning"              = "#F2C14E"   # caution
 "color.severity.error"                = "#FF8A80"   # error
+"color.on_severity.info"              = "#0F1216"   # surface: dark text on the light severity fills
+"color.on_severity.warning"           = "#0F1216"
+"color.on_severity.critical"          = "#0F1216"
 "opacity.backdrop.opaque"             = "0.92"      # opacity.surface
+"opacity.notification.backdrop"       = "0.90"
 "border.radius.medium"                = "16"        # shape.l
 "color.notification.urgency.low"      = "#1B2028"   # surface.container
 "color.notification.urgency.normal"   = "#222833"   # surface.container.high
@@ -149,6 +153,7 @@
 # hud-h51u7.4).
 "typography.body.weight"               = "500"
 "spacing.padding.medium"               = "10"
+"spacing.notification.inset"          = "16"
 "typography.notification.body.scale"   = "0.90"
 "typography.notification.title.weight" = "700"
 

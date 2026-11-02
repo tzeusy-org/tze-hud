@@ -17,6 +17,9 @@ use super::super::row::{BoxFuture, Control, Edit, Row, Section};
 use super::super::runtime::TokenWriter;
 use crate::appearance::Appearance;
 
+/// The token the Subtitle backdrop toggle sets (0 or absent: no backdrop).
+const SUBTITLE_BACKDROP_KEY: &str = "opacity.subtitle.backdrop";
+
 /// The font roles the Appearance card offers: (token, label).
 const FONTS: [(&str, &str); 3] = [
     ("font.sans", "Sans font"),
@@ -160,6 +163,10 @@ impl AppearanceSection {
     /// One Ctrl+− / Ctrl+= step of `ui.scale`.
     const ZOOM_STEP: f32 = 0.1;
     const FONT_PREFIX: &'static str = "appearance.";
+    const SUBTITLE_BACKDROP: &'static str = "appearance.subtitle_backdrop";
+    /// The fill opacity the Subtitle backdrop toggle sets; fine-tune it under
+    /// Advanced tokens.
+    const SUBTITLE_BACKDROP_ON: &'static str = "0.9";
 
     pub(crate) fn new(appearance: Arc<Appearance>, save: Option<TokenWriter>) -> Self {
         Self {
@@ -290,6 +297,28 @@ impl Section for AppearanceSection {
                 ])
                 .resettable((ui_scale(&table) - 1.0).abs() > f32::EPSILON),
             ];
+            let backdrop_on = resolved
+                .get(SUBTITLE_BACKDROP_KEY)
+                .and_then(|v| v.parse::<f32>().ok())
+                .is_some_and(|o| o > 0.0);
+            rows.push(
+                Row::new(
+                    Self::SUBTITLE_BACKDROP,
+                    "Subtitle backdrop",
+                    Control::Toggle(backdrop_on),
+                )
+                .detail(format!(
+                    "A solid fill behind the subtitle zone, so streamed subtitles stand out · {}",
+                    self.tokens.saved_detail()
+                ))
+                .keywords(&[
+                    "subtitle",
+                    "caption",
+                    "backdrop",
+                    "background",
+                    "stream",
+                ]),
+            );
             for (key, label) in FONTS {
                 let set = table.get(key);
                 let family = set
@@ -349,6 +378,14 @@ impl Section for AppearanceSection {
             }
             if row == Self::THEME {
                 return self.apply_theme(edit).await;
+            }
+            if row == Self::SUBTITLE_BACKDROP {
+                let update = match edit {
+                    Edit::Set(true) => TokenUpdate::Set(Self::SUBTITLE_BACKDROP_ON.to_owned()),
+                    Edit::Set(false) | Edit::Reset => TokenUpdate::Remove,
+                    _ => return Err(unsupported()),
+                };
+                return self.tokens.change(&[(SUBTITLE_BACKDROP_KEY, update)]).await;
             }
             let key = row
                 .strip_prefix(Self::FONT_PREFIX)
@@ -566,6 +603,40 @@ mod tests {
     fn theme_names_read_as_titles() {
         assert_eq!(theme_title("tonal-glass"), "Tonal Glass");
         assert_eq!(theme_title("classic"), "Classic");
+    }
+
+    /// The Subtitle backdrop toggle sets the backdrop opacity token live and
+    /// saves it; off removes the override.
+    #[tokio::test]
+    async fn subtitle_backdrop_toggle_sets_its_token_and_saves() {
+        let (appearance, _, saved) = sections(Some(Ok(())));
+        let toggle = |rows: &[Row]| row(rows, "appearance.subtitle_backdrop").control.clone();
+        assert_eq!(toggle(&appearance.rows().await), Control::Toggle(false));
+        appearance
+            .apply("appearance.subtitle_backdrop", Edit::Set(true))
+            .await
+            .unwrap();
+        assert_eq!(toggle(&appearance.rows().await), Control::Toggle(true));
+        assert_eq!(
+            appearance
+                .tokens
+                .table()
+                .get(SUBTITLE_BACKDROP_KEY)
+                .map(String::as_str),
+            Some("0.9")
+        );
+        appearance
+            .apply("appearance.subtitle_backdrop", Edit::Set(false))
+            .await
+            .unwrap();
+        assert_eq!(toggle(&appearance.rows().await), Control::Toggle(false));
+        assert!(
+            !appearance
+                .tokens
+                .table()
+                .contains_key(SUBTITLE_BACKDROP_KEY)
+        );
+        assert_eq!(saved.lock().unwrap().len(), 2, "each change is saved");
     }
 
     /// Zoom steps `ui.scale` by 10% within its range, restyles at once,

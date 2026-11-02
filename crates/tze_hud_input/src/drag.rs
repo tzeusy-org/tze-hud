@@ -103,7 +103,7 @@ pub struct DeviceDragState {
     pub interaction_id: String,
     /// Element targeted by the drag handle.
     pub element_id: SceneId,
-    /// Element class (Tile / Zone / Widget).
+    /// Element class (Tile / Zone).
     pub element_kind: DragHandleElementKind,
     /// Instant the pointer pressed down.
     pub press_start: Instant,

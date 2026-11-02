@@ -33,10 +33,11 @@ use tze_hud_scene::types::*;
 use super::Compositor;
 use super::draw_cmds::TexturedDrawCmd;
 use super::token_colors::{
-    ICON_SIZE_PX, NOTIFICATION_BACKDROP_OPACITY, NOTIFICATION_BODY_SCALE,
-    NOTIFICATION_ICON_SIZE_PX, NOTIFICATION_INTER_LINE_GAP, STATIC_IMAGE_PLACEHOLDER_COLOR,
-    is_alert_banner_zone, notification_action_row_reserve, notification_stack_gap,
+    ICON_SIZE_PX, NOTIFICATION_BODY_SCALE, NOTIFICATION_ICON_SIZE_PX, NOTIFICATION_INTER_LINE_GAP,
+    STATIC_IMAGE_PLACEHOLDER_COLOR, is_alert_banner_zone, notification_action_row_reserve,
+    notification_backdrop_opacity, notification_inset, notification_stack_gap,
     sort_alert_banner_indices, urgency_to_notification_color, urgency_to_severity_color,
+    zone_opacity_ceiling,
 };
 use crate::pipeline::RectVertex;
 use crate::pipeline::rect_vertices;
@@ -50,7 +51,7 @@ impl Compositor {
     ///   backdrop color with the urgency-derived `color.severity.*` token color.
     /// - For non-alert-banner zones with `Notification` content, overrides the
     ///   backdrop color with the urgency-derived `color.notification.urgency.*`
-    ///   token color at 0.8 opacity. Its `color.border.default` border is an
+    ///   token color at the `opacity.notification.backdrop` opacity. Its `color.border.default` border is an
     ///   SDF command from `collect_all_rounded_rect_cmds`.
     /// - Applies the zone's current animation opacity (fade-in/fade-out).
     /// - Skips the backdrop quad when `rendering_policy.backdrop` is `None`.
@@ -126,6 +127,9 @@ impl Compositor {
                 < tze_hud_scene::DegradationLevel::Simplified
                 && policy.backdrop_radius.is_some_and(|r| r > 0.0);
 
+            // A zone's own fill/image never exceeds this (ambient-background).
+            let ceiling = zone_opacity_ceiling(zone_name, zone_tokens);
+
             // Determine current animation opacity for this zone.
             let anim_opacity =
                 if self.degradation_policy.level >= tze_hud_scene::DegradationLevel::Simplified {
@@ -168,7 +172,7 @@ impl Compositor {
                         // Determine backdrop color.
                         // alert-banner: urgency → color.severity.* tokens
                         // non-alert-banner Notification: urgency → color.notification.urgency.* tokens
-                        //   with fixed 0.8 opacity; its border and dismiss outline are SDF
+                        //   at the `opacity.notification.backdrop` opacity; its border and dismiss outline are SDF
                         //   commands (collect_all_rounded_rect_cmds)
                         // SolidColor: always its own color
                         // StaticImage: warm-gray placeholder quad (full GPU texture deferred)
@@ -183,7 +187,7 @@ impl Compositor {
                                 if self.image_texture_cache.contains_key(resource_id) {
                                     let combined_opacity = (anim_opacity
                                         * self.pub_opacity_at(zone_name, record, now))
-                                    .clamp(0.0, 1.0);
+                                    .clamp(0.0, ceiling);
                                     textured_cmds.push(TexturedDrawCmd {
                                         resource_id: *resource_id,
                                         x,
@@ -220,7 +224,7 @@ impl Compositor {
                                 if policy.backdrop.is_some() {
                                     let mut color =
                                         urgency_to_notification_color(n.urgency, zone_tokens);
-                                    color.a = NOTIFICATION_BACKDROP_OPACITY;
+                                    color.a = notification_backdrop_opacity(zone_tokens);
                                     Some(color)
                                 } else {
                                     None
@@ -232,12 +236,15 @@ impl Compositor {
                         if let Some(mut rgba) = backdrop_rgba {
                             // For non-notification content: apply policy backdrop_opacity.
                             // For Notification content in non-alert-banner zones: opacity is
-                            // already set to NOTIFICATION_BACKDROP_OPACITY above; skip policy override.
+                            // already set from notification_backdrop_opacity above; skip policy override.
                             if !is_notification_content || is_alert_banner_zone(zone_name) {
                                 if let Some(opacity) = policy.backdrop_opacity {
                                     rgba.a = opacity.clamp(0.0, 1.0);
                                 }
                             }
+                            // Fill, placeholder or policy opacity: never above the
+                            // zone's ceiling (ambient-background).
+                            rgba.a = rgba.a.min(ceiling);
                             rgba.a *= combined_opacity;
                             // Skip flat-rect emission for rounded zones — handled by the SDF pass.
                             if !use_rounded_rect {
@@ -266,16 +273,12 @@ impl Compositor {
                                 super::icon::parse_notification_icon(&payload.icon)
                             {
                                 if self.image_texture_cache.contains_key(&icon_id) {
-                                    // Inset from backdrop edge, same as text (border+padding).
-                                    const NOTIFICATION_INSET: f32 = 9.0;
-                                    let inset_h = policy
-                                        .margin_horizontal
-                                        .or(policy.margin_px)
-                                        .unwrap_or(NOTIFICATION_INSET * scale);
+                                    // Inset from backdrop edge, same as text.
+                                    let inset_h = notification_inset(policy, scale);
                                     let icon_x = x + inset_h;
                                     // Centred on the text, above any action row.
                                     let text_slot_h = effective_slot_h
-                                        - notification_action_row_reserve(payload, scale);
+                                        - notification_action_row_reserve(payload, scale, inset_h);
                                     let icon_y = slot_y
                                         + (text_slot_h - (NOTIFICATION_ICON_SIZE_PX * scale))
                                             .max(0.0)
@@ -303,10 +306,7 @@ impl Compositor {
                     let is_notification_content =
                         matches!(&latest.content, ZoneContent::Notification(_));
                     let backdrop_rgba: Option<Rgba> = match &latest.content {
-                        ZoneContent::SolidColor(rgba) => {
-                            // SolidColor always renders its own color (no policy override).
-                            Some(*rgba)
-                        }
+                        ZoneContent::SolidColor(rgba) => Some(*rgba),
                         ZoneContent::StaticImage(resource_id) => {
                             // If a GPU texture is cached, emit a textured draw command
                             // filling the zone.
@@ -318,7 +318,7 @@ impl Compositor {
                                     w,
                                     h,
                                     uv_rect: [0.0, 0.0, 1.0, 1.0],
-                                    tint: [1.0, 1.0, 1.0, anim_opacity.clamp(0.0, 1.0)],
+                                    tint: [1.0, 1.0, 1.0, anim_opacity.clamp(0.0, ceiling)],
                                 });
                                 None // skip the color quad
                             } else {
@@ -354,7 +354,7 @@ impl Compositor {
                             if policy.backdrop.is_some() {
                                 let mut color =
                                     urgency_to_notification_color(n.urgency, zone_tokens);
-                                color.a = NOTIFICATION_BACKDROP_OPACITY;
+                                color.a = notification_backdrop_opacity(zone_tokens);
                                 Some(color)
                             } else {
                                 None
@@ -369,12 +369,15 @@ impl Compositor {
                     if let Some(mut rgba) = backdrop_rgba {
                         // For non-notification content: apply policy backdrop_opacity.
                         // For Notification content in non-alert-banner zones: opacity is
-                        // already set to NOTIFICATION_BACKDROP_OPACITY above; skip policy override.
+                        // already set from notification_backdrop_opacity above; skip policy override.
                         if !is_notification_content || is_alert_banner_zone(zone_name) {
                             if let Some(opacity) = policy.backdrop_opacity {
                                 rgba.a = opacity.clamp(0.0, 1.0);
                             }
                         }
+                        // Fill, placeholder or policy opacity: never above the
+                        // zone's ceiling (ambient-background).
+                        rgba.a = rgba.a.min(ceiling);
                         // Apply zone animation opacity.
                         rgba.a *= anim_opacity.clamp(0.0, 1.0);
 
@@ -396,12 +399,7 @@ impl Compositor {
                     if let ZoneContent::Notification(payload) = &latest.content {
                         if let Some(icon_id) = super::icon::parse_notification_icon(&payload.icon) {
                             if self.image_texture_cache.contains_key(&icon_id) {
-                                const NOTIFICATION_INSET: f32 = 9.0;
-                                let inset_h = policy
-                                    .margin_horizontal
-                                    .or(policy.margin_px)
-                                    .unwrap_or(NOTIFICATION_INSET * scale);
-                                let icon_x = x + inset_h;
+                                let icon_x = x + notification_inset(policy, scale);
                                 let icon_y = y + (h - (NOTIFICATION_ICON_SIZE_PX * scale)) * 0.5;
                                 let eff_opacity = anim_opacity.clamp(0.0, 1.0);
                                 textured_cmds.push(TexturedDrawCmd {
@@ -628,7 +626,7 @@ impl Compositor {
         notification_inter_line_gap: f32,
         scale: f32,
     ) -> f32 {
-        notification_action_row_reserve(payload, scale)
+        notification_action_row_reserve(payload, scale, notification_inset(policy, scale))
             + Self::notification_text_slot_height(
                 payload,
                 policy,

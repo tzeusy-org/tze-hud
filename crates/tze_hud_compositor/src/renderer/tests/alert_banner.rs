@@ -245,3 +245,35 @@ async fn test_alert_banner_zone_height_grows_with_active_count() {
         );
     }
 }
+
+/// Banner text takes the `color.on_severity.*` color for its urgency (the
+/// counterpart of its severity fill) over the policy text color, and draws no
+/// outline.
+#[tokio::test]
+async fn test_alert_banner_text_uses_on_severity_color() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    compositor.set_token_map(
+        [
+            ("color.on_severity.warning".to_owned(), "#000000".to_owned()),
+            (
+                "color.on_severity.critical".to_owned(),
+                "#FFFFFF".to_owned(),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    );
+    let mut scene = make_alert_banner_scene();
+    publish_alert(&mut scene, "Disk almost full", 2, "agent-a");
+    publish_alert(&mut scene, "Service down", 3, "agent-b");
+    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    let item = |text: &str| {
+        items
+            .iter()
+            .find(|i| &*i.text == text)
+            .unwrap_or_else(|| panic!("no text item {text:?}"))
+    };
+    assert_eq!(item("Disk almost full").color[..3], [0, 0, 0]);
+    assert_eq!(item("Service down").color[..3], [255, 255, 255]);
+    assert!(item("Disk almost full").outline_color.is_none());
+}
