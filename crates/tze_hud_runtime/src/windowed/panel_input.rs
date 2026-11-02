@@ -600,7 +600,7 @@ mod panel_task_tests {
             serde_json::Value::Null
         );
         // Separate agent identities let one genuine poll refresh exactly one row.
-        let key = |id| PortalKey::new(id, id);
+        let key = |id: &str| PortalKey::new(id, id);
         let publish = |id: &str| {
             portals
                 .hub
