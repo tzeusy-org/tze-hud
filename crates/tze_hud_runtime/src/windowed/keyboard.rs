@@ -3087,7 +3087,7 @@ mod tests {
             .publish(
                 &tze_hud_projection::hub::PortalKey::new("test-agent", "proj-npcdf"),
                 tze_hud_projection::hub::Publish {
-                    text: Some("assistant ready".to_string()),
+                    text: Some(format!("assistant ready\n{}", "prior output\n".repeat(30))),
                     ..Default::default()
                 },
                 100,
@@ -3301,6 +3301,156 @@ mod tests {
             "no perpetual local dirty frame"
         );
 
+        // The first reply is now native scene history. Focus its rendered
+        // composer through Winit, then submit another reply after scrolling back.
+        let tail_after_first = {
+            let shared = app.state.shared_state.try_lock().unwrap();
+            let scene = shared.scene.try_lock().unwrap();
+            scene.tile_scroll_offset_local(tile_id).1
+        };
+        assert!(tail_after_first > 0.0, "native history must overflow");
+        app.dispatch_key_down_event_inner(
+            &RawKeyDownEvent {
+                key_code: "Tab".into(),
+                key: "Tab".into(),
+                modifiers: tze_hud_input::KeyboardModifiers::NONE,
+                repeat: false,
+                timestamp_mono_us: tze_hud_scene::MonoUs(4),
+            },
+            Some(tab_id),
+        );
+        assert!(app.state.input_processor.is_composer_active());
+        app.dispatch_character_event_inner(
+            &RawCharacterEvent {
+                character: "viewer-reply-after-scroll-back".into(),
+                timestamp_mono_us: tze_hud_scene::MonoUs(5),
+            },
+            Some(tab_id),
+        );
+        {
+            let shared = app.state.shared_state.try_lock().unwrap();
+            let mut scene = shared.scene.try_lock().unwrap();
+            app.state.input_processor.process_scroll_event(
+                &tze_hud_input::ScrollEvent {
+                    x: tile_bounds.x + 200.0,
+                    y: tile_bounds.y + tile_bounds.height - 20.0,
+                    delta_x: 0.0,
+                    delta_y: -50.0,
+                },
+                &mut scene,
+            );
+            assert!(!scene.tile_follow_tail_at_tail(tile_id));
+            assert!(scene.tile_scroll_offset_local(tile_id).1 < tail_after_first);
+        }
+        clock.advance_us(1);
+        app.dispatch_key_down_event_inner(
+            &RawKeyDownEvent {
+                key_code: "Enter".into(),
+                key: "Enter".into(),
+                modifiers: tze_hud_input::KeyboardModifiers::NONE,
+                repeat: false,
+                timestamp_mono_us: tze_hud_scene::MonoUs(6),
+            },
+            Some(tab_id),
+        );
+        assert!(
+            notified.as_mut().enable(),
+            "the second accepted reply signals owning-agent readiness"
+        );
+        let mut notified = std::pin::pin!(ready.notified());
+        assert!(!notified.as_mut().enable());
+        for key in ["Enter", "Space", "Enter", "Escape"] {
+            app.dispatch_key_down_event_inner(
+                &RawKeyDownEvent {
+                    key_code: key.into(),
+                    key: key.into(),
+                    modifiers: tze_hud_input::KeyboardModifiers::NONE,
+                    repeat: false,
+                    timestamp_mono_us: tze_hud_scene::MonoUs(7),
+                },
+                Some(tab_id),
+            );
+        }
+        assert!(!notified.as_mut().enable());
+        assert!(matches!(
+            app.settle_scene_work(),
+            PortalProjectionDrain::Completed {
+                scene_changed: true
+            }
+        ));
+        {
+            let hub = handle.hub.lock().unwrap();
+            let portal = hub
+                .get(&tze_hud_projection::hub::PortalKey::new(
+                    "test-agent",
+                    "proj-npcdf",
+                ))
+                .unwrap();
+            assert_eq!(portal.last_render_us, Some(202));
+            assert_eq!(portal.inputs.len(), 2);
+            assert_eq!(portal.replies.len(), 2);
+            let expected = ["viewer-reply-same-frame", "viewer-reply-after-scroll-back"];
+            assert_eq!(
+                portal
+                    .inputs
+                    .iter()
+                    .map(|input| input.text.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert_eq!(
+                portal
+                    .replies
+                    .iter()
+                    .map(|reply| reply.text.as_str())
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert_ne!(portal.inputs[0].id, portal.inputs[1].id);
+            assert!(portal.replies[0].seq < portal.replies[1].seq);
+            assert_eq!(portal.inputs[0].at_us, 201);
+            assert_eq!(portal.inputs[1].at_us, 202);
+        }
+        {
+            let shared = app.state.shared_state.try_lock().unwrap();
+            let scene = shared.scene.try_lock().unwrap();
+            assert!(scene.tile_follow_tail_at_tail(tile_id));
+            assert!(
+                scene.tile_scroll_offset_local(tile_id).1 >= tail_after_first,
+                "the second accepted reply must reach at least the prior tail"
+            );
+            let painted = scene
+                .nodes
+                .values()
+                .filter_map(|node| match &node.data {
+                    NodeData::TextMarkdown(text) => Some(text.content.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert_eq!(painted.matches("viewer-reply-same-frame").count(), 1);
+            assert_eq!(painted.matches("viewer-reply-after-scroll-back").count(), 1);
+            assert!(
+                painted.find("viewer-reply-same-frame").unwrap()
+                    < painted.find("viewer-reply-after-scroll-back").unwrap()
+            );
+        }
+        app.settle_scene_work();
+        assert_eq!(
+            handle
+                .hub
+                .lock()
+                .unwrap()
+                .get(&tze_hud_projection::hub::PortalKey::new(
+                    "test-agent",
+                    "proj-npcdf"
+                ))
+                .unwrap()
+                .last_render_us,
+            Some(202),
+            "the second reply also leaves no perpetual local dirty frame"
+        );
+
         // A known portal whose hub is unavailable must not fall back to a raw
         // success echo. Register readiness before the refusal, as a real poll does.
         let limit = handle.hub.lock().unwrap().limits().input_item_bytes;
@@ -3313,8 +3463,8 @@ mod tests {
                     "proj-npcdf",
                 ))
                 .unwrap();
-            assert_eq!(portal.inputs.len(), 1, "cap refusal admits no input");
-            assert_eq!(portal.replies.len(), 1, "cap refusal authors no echo");
+            assert_eq!(portal.inputs.len(), 2, "cap refusal admits no input");
+            assert_eq!(portal.replies.len(), 2, "cap refusal authors no echo");
         }
         assert!(
             !notified.as_mut().enable(),
@@ -3335,8 +3485,8 @@ mod tests {
                     "proj-npcdf",
                 ))
                 .unwrap();
-            assert_eq!(portal.inputs.len(), 1, "refusal admits no new input");
-            assert_eq!(portal.replies.len(), 1, "refusal authors no hub echo");
+            assert_eq!(portal.inputs.len(), 2, "refusal admits no new input");
+            assert_eq!(portal.replies.len(), 2, "refusal authors no hub echo");
         }
         assert!(
             !notified.as_mut().enable(),

@@ -1027,6 +1027,21 @@ mod tests {
                     && direct.auto_capture
                     && direct.release_on_up
             );
+            let update = proto::update_node_content_mutation::Data::HitRegion(decoded.clone());
+            let NodeData::HitRegion(updated) =
+                proto_update_node_content_data_to_scene(&update).unwrap()
+            else {
+                panic!("expected updated hit region")
+            };
+            assert!(!updated.accepts_composer_input);
+            assert_eq!(updated.bounds, Rect::new(1.0, 2.0, 30.0, 40.0));
+            assert_eq!(updated.interaction_id, "ordinary-region");
+            assert!(
+                updated.accepts_focus
+                    && updated.accepts_pointer
+                    && updated.auto_capture
+                    && updated.release_on_up
+            );
             // Even a native composer is encoded as an ordinary wire region.
             region.accepts_composer_input = true;
             let encoded = scene_node_to_proto(&scene_node);

@@ -151,14 +151,14 @@ source links when implementation changes the status.
   | Group | Before | After |
   |---|---:|---:|
   | Composer core | 4194 / 4804 / 8998 | 3595 / 4503 / 8098 |
-  | Windowed and fixtures | 13208 / 11400 / 24608 | 12421 / 10266 / 22687 |
+  | Windowed and fixtures | 13208 / 11400 / 24608 | 12421 / 10416 / 22837 |
   | Compositor mapped renderer files | 14418 / 1097 / 15515 | 12603 / 959 / 13562 |
-  | Protocol | 1921 / 859 / 2780 | 1861 / 783 / 2644 |
+  | Protocol | 1921 / 859 / 2780 | 1861 / 798 / 2659 |
   | Integration composer | 168 / 0 / 168 | 160 / 0 / 160 |
 
   The entire finite packet surface plus the compositor `lib.rs` reexports,
   `text.rs` orphan-method cleanup and scene type flag documentation measures
-  75,497 → 70,598 lines (4,899 fewer). These three supplemental
+  75,497 → 70,763 lines (4,734 fewer). These three supplemental
   files are included so no changed file is omitted.
   Test-only renderer files, shared support and the feature-gated harness count
   in physical prefixes; these are not semantic production LOC. Core prefix/test
