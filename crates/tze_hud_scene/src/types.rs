@@ -1006,8 +1006,8 @@ pub struct HitRegionNode {
     /// by the runtime's `ComposerDraftManager` and routed into a `ComposerDraft`
     /// buffer instead of being forwarded to the owning agent as raw key events.
     ///
-    /// The owning adapter receives coalesced `DraftStateNotification` state-stream
-    /// messages and a final transactional `DraftSubmission` on Enter/submit.
+    /// Native portal rendering owns this internal flag. Only submitted text
+    /// enters the portal hub; resident wire regions cannot enable this behavior.
     ///
     /// Source: spec §4.1 (hud-5jbra.4 / hud-qwqxy).
     #[serde(default)]
