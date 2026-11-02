@@ -8,13 +8,20 @@ three-argument projection caller loaded another checkout's two-argument metadata
 Those passes did not establish that the later integration compilation used the
 declared source. The complete Cargo-internal cause remains unproved.
 
-Use the repository's opt-in source-binding policy for shared worker targets.
-The coordinator first grants the exclusive Cargo/GPU lease and explicitly
-selects **one target under HOME per checkout** (worktree), empty when first
-bound. Successive commits in that checkout reuse it warm; the guard refuses it
-to any other checkout. The guard chooses no target names, changes no source
-mtimes, redirects no artifacts and deletes no caches; the coordinator deletes
-targets under the [retention rule](#retention).
+Use the repository's opt-in source-binding policy for worker targets.
+Independent Cargo/GPU work may run concurrently when coordinator scheduling
+stays within available host CPU, memory and GPU capacity. The coordinator
+explicitly selects **one target under HOME per checkout** (worktree), empty
+when first bound. That target belongs exclusively to that checkout: successive
+commits in the checkout reuse it warm; the guard refuses it to any other
+checkout. The target lock protects that target only; it does not reserve or
+exclude host-wide Cargo/GPU capacity. Unrelated running jobs alone do not block
+a guarded gate or its push. The guard chooses no target names, changes no
+source mtime, redirects no artifacts and deletes no caches; the coordinator
+deletes targets under the [retention rule](#retention). Existing test and
+performance evidence requirements remain unchanged; timings collected
+alongside unrelated work are contention-affected observations, not isolated
+benchmark evidence.
 
 ```sh
 # TARGET_EPOCH is an explicit new path supplied by the resource coordinator.
@@ -31,8 +38,9 @@ Keep the same target and opt-in environment through the ordinary push. The
 effective pre-push hook selects its existing checks, which inherit this guard
 through `just pre-push-check`. A push whose existing selector needs no Cargo
 checks still takes that established fast path. Hook configuration, ref selection
-and the hook lock are unchanged. That lock and the target binding lock do not
-grant the separate Cargo/GPU lease.
+and the hook lock are unchanged. The hook lock serializes hook runs; the target
+binding lock protects its target. Neither provides host-wide Cargo/GPU
+exclusion.
 
 Every Cargo command in the canonical `just` gates, including metadata and tool
 version probes, passes through `scripts/cargo_source_guard.py` when enabled.
@@ -137,9 +145,9 @@ contract; they do not prove prevention of arbitrary concurrent edits, an ABA
 change restored between observations, or artifact tampering by another writer.
 
 For a different checkout or compiler identity, the coordinator selects a
-fresh empty target under its lease. The deliberate cost is conservative source
-hashing per command; review fixups in one worktree stay warm. No target is
-allocated per command or per commit. Source-mutating `fmt-fix`, host
+fresh empty target. The deliberate cost is conservative source hashing per
+command; review fixups in one worktree stay warm. No target is allocated per
+command or per commit. Source-mutating `fmt-fix`, host
 `bootstrap`/install and `dead-code`'s temporary-source compile refuse in guarded
 mode; run those separately with source-isolated resources.
 
