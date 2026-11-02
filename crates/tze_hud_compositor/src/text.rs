@@ -1071,7 +1071,7 @@ impl TextRasterizer {
     /// Count the wrapped visual lines of `text` at `wrap_width` under
     /// [`WRAPPED_TEXT_WRAP`] (≥ 1). Thin wrapper over [`composer_wrap_line_widths`]
     /// for callers that need only the line count and no caret — the viewer-echo
-    /// history block (`prime_viewer_echo_layout`). Sharing the same helper keeps
+    /// composer layout. Sharing the same helper keeps
     /// the echo's break-anywhere wrap identical to what the render path paints
     /// (hud-n0x4u), so an over-long single-word reply is counted as the multiple
     /// in-box lines it actually occupies rather than one clipped line.

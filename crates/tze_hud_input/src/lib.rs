@@ -968,7 +968,7 @@ impl InputProcessor {
     /// Returns the `SceneId` of the currently focused composer node, if any.
     ///
     /// `None` when no composer region is focused.  Use this to resolve the
-    /// owning tile/namespace for outbound proto delivery.
+    /// owning tile for direct native portal submission.
     pub fn composer_focused_node(&self) -> Option<tze_hud_scene::SceneId> {
         self.composer_draft_manager.focused_node()
     }
@@ -4344,10 +4344,7 @@ mod tests {
         );
     }
 
-    /// Focus composer → feed characters → verify draft buffer and coalesced batch.
-    ///
-    /// Spec §4.1, §4.3: characters routed into draft buffer; adapter receives a
-    /// coalesced state-stream notification (not per-keystroke events).
+    /// Focused characters update local text, caret and capacity immediately.
     #[test]
     fn composer_character_routing_fills_local_draft() {
         let (mut scene, tab_id, _tile_id, _composer_id, _plain_id) = setup_composer_scene();
@@ -4366,7 +4363,7 @@ mod tests {
         processor.process_with_focus(&down, &mut scene, &mut fm, tab_id);
         assert!(processor.is_composer_active());
 
-        // Route three characters — no flush yet.
+        // Route three characters locally.
         let outcome_h = processor.route_character_to_composer("h");
         let outcome_i = processor.route_character_to_composer("i");
         let outcome_excl = processor.route_character_to_composer("!");
@@ -4375,7 +4372,6 @@ mod tests {
         assert_eq!(outcome_i, EditOutcome::Mutated);
         assert_eq!(outcome_excl, EditOutcome::Mutated);
 
-        // Before flush: no batch has been delivered.
         // Draft text is buffered locally.
         assert_eq!(
             processor.composer_draft_manager.draft().map(|d| d.text()),
@@ -4501,10 +4497,7 @@ mod tests {
         assert!(processor.composer_draft_manager.draft().is_none());
     }
 
-    /// Focus composer → submit via Enter → verify transactional batch with submission.
-    ///
-    /// Spec §4.3: submission is transactional; post-submit clear notification is
-    /// emitted in the same batch.
+    /// Enter returns exact text and clears the local text/caret/selection.
     #[test]
     fn composer_submit_via_enter_returns_exact_text_and_clears() {
         let (mut scene, tab_id, _tile_id, _composer_id, _plain_id) = setup_composer_scene();
@@ -4538,10 +4531,7 @@ mod tests {
         assert_eq!((text.as_str(), cursor, anchor), ("", 0, 0));
     }
 
-    /// Focus composer → blur → verify on_focus_lost is called and the pending
-    /// notification is flushed.
-    ///
-    /// Spec §4.3: blur is a settle point; the terminal draft state is delivered.
+    /// Blur preserves one keyed unsent local draft for matching refocus.
     #[test]
     fn composer_focus_lost_on_blur_preserves_keyed_draft() {
         let (mut scene, tab_id, tile_id, composer_id, plain_id) = setup_composer_scene();
@@ -4560,7 +4550,7 @@ mod tests {
         processor.process_with_focus(&down_composer, &mut scene, &mut fm, tab_id);
         assert!(processor.is_composer_active());
 
-        // Type a character without flushing.
+        // Type a character before blur.
         processor.route_character_to_composer("z");
 
         // Now click the plain node — focus moves to it, triggering on_focus_lost

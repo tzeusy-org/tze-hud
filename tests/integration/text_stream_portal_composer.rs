@@ -108,11 +108,11 @@ fn safe_mode_gate_suppresses_submission_and_delivery() {
     let (mut hub, key) = hub();
     assert_eq!(drafts.route_character("blocked"), EditOutcome::Suspended);
     let (_, outcome) = drafts.route_key_down("Enter", "Enter", false, false, false);
+    assert_eq!(outcome, ComposerOutcome::Unchanged);
     if let ComposerOutcome::Submitted(submission) = outcome {
         hub.submit_reply(&key, submission, 1).unwrap();
     }
     assert!(hub.get(&key).unwrap().inputs.is_empty());
-    assert_eq!(outcome, ComposerOutcome::Unchanged);
 }
 
 #[test]

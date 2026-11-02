@@ -4006,6 +4006,71 @@ mod tests {
             matches!(*app.state.local_composer_state.lock().unwrap(), Some(None)),
             "the compositor must be told to drop the composer (and its caret blink)"
         );
+        // Also retire a saved draft while a different composer is active.
+        let (mut scene, tab_id) = scene_with_pointer_composer();
+        let old_tile = scene.tiles.values().next().unwrap().clone();
+        let old_node = scene.nodes[&old_tile.root_node.unwrap()].clone();
+        let peer_tile = scene
+            .create_tile(
+                tab_id,
+                "agent",
+                old_tile.lease_id,
+                tze_hud_scene::Rect::new(500.0, 0.0, 400.0, 100.0),
+                2,
+            )
+            .unwrap();
+        let mut peer_node = old_node.clone();
+        peer_node.id = tze_hud_scene::SceneId::new();
+        let peer_id = peer_node.id;
+        scene.set_tile_root(peer_tile, peer_node).unwrap();
+        let mut fm = FocusManager::new();
+        fm.add_tab(tab_id);
+        let mut processor = InputProcessor::new();
+        processor.recover_composer_focus(&mut fm, &mut scene, tab_id, old_tile.id, old_node.id);
+        processor.route_character_to_composer("retained old text");
+        processor.recover_composer_focus(&mut fm, &mut scene, tab_id, peer_tile, peer_id);
+        processor.route_character_to_composer("live peer text");
+        scene.delete_tile(old_tile.id, "agent").unwrap();
+        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, processor);
+        app.push_local_composer_echo(std::time::Instant::now());
+        app.clear_focus_on_removed_tile();
+        assert_eq!(
+            app.state
+                .input_processor
+                .composer_draft_snapshot()
+                .unwrap()
+                .0,
+            "live peer text"
+        );
+        assert!(matches!(
+            *app.state.local_composer_state.lock().unwrap(),
+            Some(Some(_))
+        ));
+        {
+            let state = app.state.shared_state.try_lock().unwrap();
+            let mut scene = state.scene.try_lock().unwrap();
+            // Even accidental reuse of the removed node ID cannot revive its draft.
+            let replacement = scene
+                .create_tile(tab_id, "agent", old_tile.lease_id, old_tile.bounds, 3)
+                .unwrap();
+            let old_id = old_node.id;
+            scene.set_tile_root(replacement, old_node).unwrap();
+            app.state.input_processor.recover_composer_focus(
+                &mut app.state.focus_manager,
+                &mut scene,
+                tab_id,
+                replacement,
+                old_id,
+            );
+        }
+        assert_eq!(
+            app.state
+                .input_processor
+                .composer_draft_snapshot()
+                .unwrap()
+                .0,
+            ""
+        );
     }
 
     /// Hiding the tile that holds a focused composer (control panel, CP-6)

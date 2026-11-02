@@ -81,6 +81,17 @@ cancellation into an action. Existing local owner coverage:
 [`action_button_hover_and_press_are_local_and_frame_only_on_change`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs).
 Windows held-press/release acceptance remains separate.
 
+Portal composer edits stay local; accepted submissions alone atomically enter
+input and native reply history. Repeated empty Enter, whitespace, cancel,
+unknown tiles and rejected submits add neither accepted input nor readiness.
+Blur retains at most one keyed draft: an empty peer preserves it, a nonempty
+peer replaces it, and removed nodes cannot revive saved text. Regression owners:
+[`manager_draft_persists_across_focus_loss_and_restores`](../crates/tze_hud_input/src/composer_draft.rs),
+[`composer_focus_lost_on_blur_preserves_keyed_draft`](../crates/tze_hud_input/src/lib.rs),
+[`removing_focused_composer_tile_clears_local_echo`](../crates/tze_hud_runtime/src/windowed/lifecycle.rs),
+and [`hit_region_wire_cannot_enable_local_composer`](../crates/tze_hud_protocol/src/convert.rs).
+
+
 - `tze_hud_runtime` [`release_activates_only_the_button_the_press_began_on`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs),
   [`authority_attached_submit_snaps_scrolled_back_history_to_tail`](../crates/tze_hud_runtime/src/windowed/keyboard.rs),
   [`portal_composer_submission_enters_pending_input_queue_and_can_be_acknowledged`](../crates/tze_hud_runtime/src/portal.rs)

@@ -1764,7 +1764,7 @@ impl WinitApp {
     /// is momentarily busy, the entire drain stops immediately — no later event
     /// is allowed to skip ahead of an earlier one.
     ///
-    /// Ordering: called after `flush_composer_draft_at_settle` and before
+    /// Ordering: called before
     /// `drain_portal_projection` so deferred keystrokes are retried before
     /// portal-projection geometry is refreshed (no observable ordering
     /// difference under normal operation, but consistent with event-arrival

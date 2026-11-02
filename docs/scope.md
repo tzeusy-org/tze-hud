@@ -93,8 +93,9 @@ source links when implementation changes the status.
   while input expiry, prior orphan grace and maximum suspension continue.
   Scene bounds now supply the live fractional render/follow-tail viewport;
   the obsolete retained geometry cache is gone. Windowed submission routes text
-  through the complete handle, keeps known-portal refusal out of raw echo, and
-  resets history once in the common batch route after raw history seeding.
+  through the complete handle and resets history once in the direct native
+  submit route. Legacy raw-tile draft transport, history seeding and renderer
+  storage are removed; resident wire fields remain reserved.
   Resize broadcast/persistence completion and detached store persistence each
   have one post-lock owner.
 
@@ -126,13 +127,24 @@ source links when implementation changes the status.
   parents disappeared with their obsolete types. Tests: +2 ~3 -13 (net -11);
   moves are zero delta. Driver's 21 unique parents remain.
   Approximate windowed targets of 1700 / 2600 / 4300 are missed by
-  471 / 1494 / 1965 lines; group resize/drag, raw-history seeding and every
+  471 / 1494 / 1965 lines; group resize/drag, then-present raw-history seeding and every
   unique retained regression remain in scope. Driver's approximate 750 / 1100
   targets are also missed (949 / 1521). Moving tests is ownership cleanup,
   not combined deletion. This source inventory does not establish executed
-  verification or physical Windows acceptance. Composer reduction, crate
+  verification or physical Windows acceptance. Crate
   rename, final four-group size reconciliation and Windows owner acceptance
   remain (`hud-lirh2`); source evidence cannot close those owner checks.
+  The composer cleanup (`hud-lirh2.10`) removes the scheduler, raw draft wire
+  messages, raw input-history queue/store and their obsolete assertions. Native
+  local editing, accepted history and complete-handle routing remain. It keeps
+  one keyed unsent draft alongside the active draft; an empty peer preserves
+  the slot and a nonempty peer replaces it. Two mixed GPU parents move into the
+  existing composer test module, retaining live font/wrap and first-frame
+  fill/text/clip assertions; raw-history anchor/divider assertions retire with
+  that renderer. All nine integration composer parents remain. Automated
+  verification and exact source measurements are recorded with the change;
+  physical Windows typing/echo/drag/held-release acceptance is UNPERFORMED.
+
 - **T8 — diet [Observed].** The [local harness](../justfile) includes
   llvmpipe GPU recipes and Nextest; resource acceptance has a compact
   [`store_behavior`](../crates/tze_hud_resource/tests/store_behavior.rs) suite.

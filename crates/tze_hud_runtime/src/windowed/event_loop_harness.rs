@@ -3352,7 +3352,7 @@ mod tests {
     ///
     /// The composer intercept in `dispatch_character_event_inner` resolves its
     /// delivery context via `namespace_for_keyboard_tile`, which `try_lock`s
-    /// `shared_state`. Holding that guard forces `ComposerDeliveryContextLookup::
+    /// `shared_state`. Holding that guard forces `ComposerTargetLookup::
     /// Busy`, so the inner fn pushes the popped event to the tail;
     /// `restore_front_requeued_event` inside the genuine drain then detects the
     /// growth, moves it back to the front, and stops. This is the real-path

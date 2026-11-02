@@ -363,6 +363,15 @@ Only structured PSK credentials authenticate init and resume; legacy resume
 PSKs, local-socket credentials and protocol-version negotiation are removed.
 Handshake and resume send no scene content, foreign portal transcript or draft.
 
+Composer editing is local to native portals. Only accepted submissions enter the
+portal input queue returned by `hud_input`; resident sessions receive no draft
+snapshots, submit or cancel events. `HitRegionNodeProto` field 7 and name
+`accepts_composer_input` are reserved. `InputEnvelope` fields 23–25 and names
+`composer_draft_state`, `composer_draft_submit`, `composer_draft_cancel` are
+reserved; their three event messages are removed. Old wire fields are ignored
+and cannot enable the internal native composer flag.
+
+
 - **Every `RequestResult` carries `code` + `hint`.** Scene validation hints
   reach the agent rather than being flattened to `MUTATION_REJECTED`.
   `seq` echoes the request's `sequence`, including legacy zero and rejected
