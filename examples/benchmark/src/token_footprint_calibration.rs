@@ -8,7 +8,7 @@ mod calibration {
     use std::path::{Path, PathBuf};
     use std::process::Command;
     use tze_hud_runtime::headless::{HeadlessConfig, HeadlessRuntime};
-    use tze_hud_runtime::portal_projection_driver::{PortalHandle, PortalHub, PortalKey};
+    use tze_hud_runtime::portal::{PortalHandle, PortalHub, PortalKey};
     use tze_hud_runtime::threads::{ShutdownReason, ShutdownToken};
     use tze_hud_runtime::{McpServerConfig, start_mcp_http_server};
     use tze_hud_scene::types::{

@@ -224,10 +224,12 @@ impl SceneGraph {
         Self::new_with_clock(width, height, Arc::new(SystemClock::new()))
     }
 
-    /// Create a new empty scene graph with an injected clock.
-    ///
-    /// Prefer this constructor in tests so that time-dependent behaviour
-    /// (lease expiry, timestamps) is fully deterministic.
+    /// Share this scene's injected time source with runtime composition.
+    pub fn clock(&self) -> Arc<dyn Clock> {
+        Arc::clone(&self.clock)
+    }
+
+    /// Create an empty scene with injected time for deterministic lease behavior.
     pub fn new_with_clock(width: f32, height: f32, clock: Arc<dyn Clock>) -> Self {
         Self {
             clock,

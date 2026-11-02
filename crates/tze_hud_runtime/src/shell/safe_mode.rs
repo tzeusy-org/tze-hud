@@ -40,6 +40,8 @@ use super::chrome::ChromeState;
 /// Result of [`enter_safe_mode`].
 #[derive(Debug)]
 pub struct SafeModeEntryResult {
+    /// Whether this call performed the transition.
+    pub entered: bool,
     /// Number of leases that were suspended.
     pub leases_suspended: usize,
     /// Number of sessions that received `SessionSuspended`.
@@ -64,6 +66,7 @@ pub struct SafeModeExitResult {
 pub async fn enter_safe_mode(
     shared_state: &Arc<Mutex<SharedState>>,
     chrome_state: &Arc<RwLock<ChromeState>>,
+    portals: Option<&tze_hud_mcp::PortalHandle>,
 ) -> SafeModeEntryResult {
     let (leases_suspended, sessions_notified) = {
         let st = shared_state.lock().await;
@@ -71,6 +74,7 @@ pub async fn enter_safe_mode(
         // Guard: idempotent. `safe_mode_atomic` is the single source of truth.
         if st.safe_mode_atomic.load(Ordering::Acquire) {
             return SafeModeEntryResult {
+                entered: false,
                 leases_suspended: 0,
                 sessions_notified: 0,
             };
@@ -79,8 +83,13 @@ pub async fn enter_safe_mode(
         // Suspend all ACTIVE leases (NOT revoke).
         let (leases_suspended, now_us) = {
             let mut scene = st.scene.lock().await;
-            let now_ms = scene.now_millis();
             let now_us = scene.now_wall_us();
+            let now_ms = now_us / 1_000;
+            let mut hub = portals.and_then(|portals| portals.hub.lock().ok());
+            if let Some(hub) = hub.as_mut() {
+                hub.suspend_liveness(now_us);
+            }
+            st.safe_mode_atomic.store(true, Ordering::Release);
             scene.suspend_all_leases(now_ms);
             let suspended = scene
                 .leases
@@ -89,10 +98,6 @@ pub async fn enter_safe_mode(
                 .count();
             (suspended, now_us)
         };
-
-        // The event thread reads this lock-free and mutation intake reads it
-        // under the SharedState lock; Release pairs with their Acquire loads.
-        st.safe_mode_atomic.store(true, Ordering::Release);
 
         // sequence = 0: the session handler stamps the per-session sequence
         // before delivery; a shared broadcast cannot.
@@ -117,6 +122,7 @@ pub async fn enter_safe_mode(
         .safe_mode_active = true;
 
     SafeModeEntryResult {
+        entered: true,
         leases_suspended,
         sessions_notified,
     }
@@ -129,6 +135,7 @@ pub async fn enter_safe_mode(
 pub async fn exit_safe_mode(
     shared_state: &Arc<Mutex<SharedState>>,
     chrome_state: &Arc<RwLock<ChromeState>>,
+    portals: Option<&tze_hud_mcp::PortalHandle>,
 ) -> SafeModeExitResult {
     let st = shared_state.lock().await;
     if !st.safe_mode_atomic.load(Ordering::Acquire) {
@@ -147,19 +154,21 @@ pub async fn exit_safe_mode(
 
     let (leases_resumed, now_us) = {
         let mut scene = st.scene.lock().await;
-        let now_ms = scene.now_millis();
         let now_us = scene.now_wall_us();
+        let now_ms = now_us / 1_000;
         let suspended = scene
             .leases
             .values()
             .filter(|l| l.state == LeaseState::Suspended)
             .count();
+        let mut hub = portals.and_then(|portals| portals.hub.lock().ok());
         scene.resume_all_leases(now_ms);
+        if let Some(hub) = hub.as_mut() {
+            hub.resume_liveness(now_us);
+        }
+        st.safe_mode_atomic.store(false, Ordering::Release);
         (suspended, now_us)
     };
-
-    // Mutation intake accepts new batches again.
-    st.safe_mode_atomic.store(false, Ordering::Release);
 
     let resumed_msg = ServerMessage {
         sequence: 0,
@@ -221,11 +230,11 @@ mod tests {
         }
 
         async fn enter(&self) -> SafeModeEntryResult {
-            enter_safe_mode(&self.shared, &self.chrome).await
+            enter_safe_mode(&self.shared, &self.chrome, None).await
         }
 
         async fn exit(&self) -> SafeModeExitResult {
-            exit_safe_mode(&self.shared, &self.chrome).await
+            exit_safe_mode(&self.shared, &self.chrome, None).await
         }
 
         async fn grant(&self, namespace: &str) -> SceneId {
@@ -406,6 +415,7 @@ mod tests {
 
         fx.enter().await;
         let second = fx.enter().await;
+        assert!(!second.entered);
         assert_eq!(second.leases_suspended, 0, "second entry is a no-op");
         assert_eq!(fx.lease_state(lease_id).await, LeaseState::Suspended);
     }

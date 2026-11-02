@@ -18,7 +18,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tze_hud_projection::hub::{PortalHub, PortalKey, Publish};
 use tze_hud_runtime::headless::{HeadlessConfig, HeadlessRuntime};
-use tze_hud_runtime::portal_projection_driver::{InProcessPortalDriver, PortalHandle};
+use tze_hud_runtime::portal::{PortalDriver, PortalHandle};
 use tze_hud_runtime::{
     EnqueueResult, FreezeQueue, INPUT_TO_NEXT_PRESENT_BUDGET_US, MutationTrafficClass,
     QueuedMutation, STAGE3_BUDGET_US, STAGE4_BUDGET_US, STAGE5_BUDGET_US,
@@ -119,9 +119,7 @@ fn sustained_stream(
         .collect()
 }
 
-async fn portal_driver(
-    runtime: &HeadlessRuntime,
-) -> (InProcessPortalDriver, PortalHandle, Arc<TestClock>) {
+async fn portal_driver(runtime: &HeadlessRuntime) -> (PortalDriver, PortalHandle, Arc<TestClock>) {
     let clock = Arc::new(TestClock::new(1_000));
     let handle = PortalHandle::new(PortalHub::default(), clock.clone());
     {
@@ -129,11 +127,7 @@ async fn portal_driver(
         let mut scene = scene_arc.lock().await;
         *scene = SceneGraph::new_with_clock(DISPLAY_W as f32, DISPLAY_H as f32, clock.clone());
     }
-    (
-        InProcessPortalDriver::with_portals(handle.clone()),
-        handle,
-        clock,
-    )
+    (PortalDriver::new(handle.clone()), handle, clock)
 }
 
 fn publish_stream(handle: &PortalHandle, key: &PortalKey, payload: &[u8], at_us: u64) {
@@ -153,7 +147,7 @@ fn publish_stream(handle: &PortalHandle, key: &PortalKey, payload: &[u8], at_us:
         .expect("real portal publish");
 }
 
-async fn drain_portals(runtime: &mut HeadlessRuntime, driver: &mut InProcessPortalDriver) {
+async fn drain_portals(runtime: &mut HeadlessRuntime, driver: &mut PortalDriver) {
     let scene_arc = scene_handle(runtime).await;
     let mut scene = scene_arc.lock().await;
     driver.drain(&mut scene, &mut runtime.input_processor, None);

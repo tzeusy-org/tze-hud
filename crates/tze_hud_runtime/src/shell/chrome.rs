@@ -185,7 +185,7 @@ pub struct DismissTileResult {
 /// thread's own scene lock, so the tile is gone before the next frame and no
 /// agent round trip is involved. The caller publishes `expiry` after releasing
 /// the lock. Portal tiles go through
-/// `InProcessPortalDriver::viewer_dismiss_tile`, which also drops the
+/// `PortalDriver::viewer_dismiss_tile`, which also drops the
 /// projection.
 pub fn dismiss_tile(
     scene: &mut tze_hud_scene::graph::SceneGraph,

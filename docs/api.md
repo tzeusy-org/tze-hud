@@ -110,6 +110,11 @@ otherwise. Scheduled zone publications count as held before presentation;
   that long after it was published; `hud_publish`, `hud_hold` and
   `hud_surfaces` report the capped expiry. On a portal, an optional `ttl_ms` holds the
   portal atomically with this publish, with the same semantics as `hud_hold`.
+  Safe mode preserves a healthy portal's remaining idle allowance and finite
+  hold; an indefinite hold remains held. Publishing and holding during pause
+  return `SAFE_MODE_ACTIVE`, with no replay buffer. Input polling remains
+  available and refreshes real activity without double-counting pause time.
+  Input expiry, existing orphan grace and the maximum scene suspension continue.
 - `delay_ms` (zones, ≤ 300000) holds the content until then (invariant 1);
   the expiry counts from presentation, and `ttl_ms: 0` holds a delayed
   publish until cleared just like an immediate one.

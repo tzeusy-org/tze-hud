@@ -83,7 +83,7 @@ Windows held-press/release acceptance remains separate.
 
 - `tze_hud_runtime` [`release_activates_only_the_button_the_press_began_on`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs),
   [`authority_attached_submit_snaps_scrolled_back_history_to_tail`](../crates/tze_hud_runtime/src/windowed/portal.rs),
-  [`portal_composer_submission_enters_pending_input_queue_and_can_be_acknowledged`](../crates/tze_hud_runtime/src/portal_projection_driver.rs)
+  [`portal_composer_submission_enters_pending_input_queue_and_can_be_acknowledged`](../crates/tze_hud_runtime/src/portal.rs)
 - `tze_hud_projection` [`take_due_paces_renders_at_the_render_interval`](../crates/tze_hud_projection/src/hub.rs)
 
 - `tze_hud_runtime` [`shell::safe_mode`](../crates/tze_hud_runtime/src/shell/safe_mode.rs) [`test_enter_safe_mode_suspends_active_leases`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),
@@ -91,7 +91,7 @@ Windows held-press/release acceptance remains separate.
 - `tze_hud_runtime` control panel (global pause chord, default
   Ctrl+Shift+F12, `[runtime].safe_mode_hotkey`, handled on the network
   runtime, never the winit loop or an agent)
-  [`pause_chord_pauses_opens_and_second_press_resumes_and_closes`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
+  [`portal_liveness_paused_during_safe_mode`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
   [`panel_chord_opens_running_and_escape_closes_and_resumes`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
   [`winit_routing_keys_and_pointer_reach_the_open_panel_only`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
   [`refused_focus_shows_a_notice_and_chords_still_work`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
@@ -106,7 +106,7 @@ Windows held-press/release acceptance remains separate.
   [`shell_status_snapshot_exposes_no_portal_identity_or_transcript`](../tests/integration/text_stream_portal_governance.rs)
 - viewer dismiss (hover close button): `tze_hud_scene`
   [`viewer_dismiss_tile_revokes_lease_in_any_live_state`](../crates/tze_hud_scene/src/graph/tests.rs); `tze_hud_runtime`
-  [`viewer_dismiss_portal_detaches_and_next_publish_reattaches`](../crates/tze_hud_runtime/src/portal_projection_driver.rs),
+  [`viewer_dismiss_portal_detaches_and_next_publish_reattaches`](../crates/tze_hud_runtime/src/portal.rs),
   [`viewer_close_button_dismisses_hovered_tile`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs); `integration`
   [`poc_portal_viewer_dismiss_then_mcp_verbs`](../tests/integration/poc_acceptance.rs);
   `tze_hud_compositor` [`tile_close_button_draw_and_hit_region_share_token_geometry`](../crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs)
@@ -151,7 +151,7 @@ encoding: [`render_visual_goldens`](../crates/tze_hud_projection/src/render_gold
 [`portal_node_uses_injected_visual_tokens`](../tests/integration/text_stream_portal_styling.rs),
 [`local_echo_does_not_depend_on_adapter_round_trip`](../tests/integration/text_stream_portal_composer.rs).
 The driver preserves the first-class surface and focusable composer in
-[`drain_declares_first_class_portal_surface_on_tile`](../crates/tze_hud_runtime/src/portal_projection_driver.rs).
+[`drain_declares_first_class_portal_surface_on_tile`](../crates/tze_hud_runtime/src/portal.rs).
 
 ## 4. Disconnect is not release
 
@@ -170,7 +170,7 @@ leased content. No public scene snapshot exposes that origin or scene nodes.
 
 - `tze_hud_protocol` [`disconnect_transitions_to_orphaned_and_sets_disconnection_badge`](../crates/tze_hud_protocol/tests/lease_governance.rs),
   [`grace_period_expiry_removes_tile_and_nodes`](../crates/tze_hud_protocol/tests/lease_governance.rs)
-- `tze_hud_runtime` [`disconnect_then_reconnect_within_grace_resumes_same_surface_without_duplication`](../crates/tze_hud_runtime/src/portal_projection_driver.rs),
+- `tze_hud_runtime` [`portal_degrade_then_publish_within_grace_resumes_same_tile`](../crates/tze_hud_runtime/src/portal.rs),
   [`resumed_session_restores_usage_before_accepting_new_mutations`](../crates/tze_hud_runtime/src/mutation_budget_bridge.rs)
 - `tze_hud_protocol` (gRPC session) [`grpc_disconnect_orphans_publications_without_touching_peer`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs),
   [`grpc_resume_within_grace_restores_publication_origin`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs),
@@ -185,11 +185,18 @@ leased content. No public scene snapshot exposes that origin or scene nodes.
 ## 5. Leases hold time; safe mode pauses it
 
 Every lease has a TTL and expires on its own. Suspension (safe mode) pauses
-the TTL clock and preserves lease identity; resuming continues it.
+the TTL clock and preserves lease identity; resuming continues it. Healthy
+portal attachments also retain their remaining idle allowance and finite hold,
+including attachments awaiting first paint; indefinite holds stay indefinite.
+A genuine input poll during pause refreshes its own portal normally, without
+also crediting the elapsed pause on resume. Repeated transitions are no-ops.
+Output updates are rejected, never buffered for replay. Input TTL, finite poll
+ownership, prior orphan grace and the maximum scene suspension still expire.
+Blocked render/cue work stays pending until resume without periodic retries.
 
 - `tze_hud_runtime` [`test_ttl_excluded_during_suspension`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),
   [`test_lease_identity_preserved_across_suspend_resume`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),
-  [`pause_chord_pauses_opens_and_second_press_resumes_and_closes`](../crates/tze_hud_runtime/src/windowed/panel_input.rs)
+  [`portal_liveness_paused_during_safe_mode`](../crates/tze_hud_runtime/src/windowed/panel_input.rs)
 - `tze_hud_scene` [`test_lease_suspend_from_active`](../crates/tze_hud_scene/src/graph/tests.rs), [`test_lease_resume_from_suspended`](../crates/tze_hud_scene/src/graph/tests.rs)
 - `tze_hud_mcp` [`safe_mode_does_not_regrant_suspended_mcp_lease`](../crates/tze_hud_mcp/src/server/tests.rs),
   [`resume_restores_mcp_publishing`](../crates/tze_hud_mcp/src/server/tests.rs)
@@ -244,7 +251,13 @@ types, and notification TTL is top-level only.
 
 Anything with a deadline (TTL, grace periods, degradation windows, expiry)
 reads time from an injectable clock (`TestClock`, or `*_at(now)` methods), so
-its tests are deterministic and never sleep.
+its tests are deterministic and never sleep. Runtime composition shares one
+clock object between scene, MCP, portal driver and pause control before cloning
+handles. Wall deadlines use `now_us`; monotonic readings and `Instant` are only
+elapsed-time and OS-wait domains. The panel parent exercises divergent domains,
+wall rewind and saturated deadlines.
+
+- `tze_hud_runtime` [`portal_liveness_paused_during_safe_mode`](../crates/tze_hud_runtime/src/windowed/panel_input.rs)
 
 - `integration` (POC acceptance: zone TTL, `delay_ms`, and portal liveness
   and lease grace all advanced by one `TestClock`) [`poc_portal_abandoned_is_reclaimed`](../tests/integration/poc_acceptance.rs),

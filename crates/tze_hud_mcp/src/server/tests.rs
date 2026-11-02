@@ -2514,7 +2514,7 @@ fn set_safe_mode(server: &McpServer, on: bool) {
 #[tokio::test]
 async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
     let (server, _) = server();
-    let (server, hub) = hub_portal(server);
+    let (mut server, hub) = hub_portal(server);
     // Held before safe mode, so hud_hold has something to extend.
     for surface in ["zone:subtitle", "widget:gauge"] {
         let args = match surface {
@@ -2568,6 +2568,71 @@ async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
     // Reading stays open: already-queued input is still delivered.
     let v = call(&server, "hud_input", json!({})).await;
     assert_eq!(v["items"][0]["action"], "approve");
+
+    // An admission already holding the Hub commits before pause. The pause
+    // transition takes that same lock, then refuses every later publication.
+    #[derive(Debug)]
+    struct AdmissionClock {
+        entered: std::sync::Mutex<Option<std::sync::mpsc::SyncSender<()>>>,
+        release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+    impl tze_hud_scene::Clock for AdmissionClock {
+        fn now_us(&self) -> u64 {
+            if let Some(entered) = self.entered.lock().unwrap().take() {
+                entered.send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+            }
+            1_000_000
+        }
+        fn monotonic_us(&self) -> u64 {
+            9_000_000_000
+        }
+    }
+    let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(0);
+    let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
+    set_safe_mode(&server, false);
+    server.portals.as_mut().unwrap().clock = Arc::new(AdmissionClock {
+        entered: std::sync::Mutex::new(Some(entered_tx)),
+        release: std::sync::Mutex::new(release_rx),
+    });
+    let server = Arc::new(server);
+    let publishing = Arc::clone(&server);
+    let admission = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(call(
+                &publishing,
+                "hud_publish",
+                json!({"surface":"portal:main", "content":"committed before pause"}),
+            ))
+    });
+    entered_rx.recv().unwrap();
+    let pausing = Arc::clone(&server);
+    let (pause_started_tx, pause_started_rx) = std::sync::mpsc::sync_channel(0);
+    let pause = std::thread::spawn(move || {
+        pause_started_tx.send(()).unwrap();
+        let mut hub = pausing.portals.as_ref().unwrap().hub.lock().unwrap();
+        hub.suspend_liveness(1_000_000);
+        pausing
+            .safe_mode
+            .store(true, std::sync::atomic::Ordering::Release);
+    });
+    pause_started_rx.recv().unwrap();
+    release_tx.send(()).unwrap();
+    admission.join().unwrap();
+    pause.join().unwrap();
+    assert_eq!(hub.lock().unwrap().get(&key).unwrap().transcript.len(), 2);
+    let rejected = call_err(
+        &server,
+        "hud_publish",
+        json!({"surface":"portal:main", "content":"after pause"}),
+    )
+    .await;
+    assert_eq!(rejected["code"], "SAFE_MODE_ACTIVE");
+    assert!(!rejected["hint"].as_str().unwrap().is_empty());
+    assert_eq!(hub.lock().unwrap().get(&key).unwrap().transcript.len(), 2);
 }
 
 #[tokio::test]

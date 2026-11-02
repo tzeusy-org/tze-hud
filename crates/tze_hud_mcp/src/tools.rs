@@ -790,6 +790,9 @@ async fn publish_portal(ctx: &ToolCtx<'_>, pid: &str, p: PublishParams) -> McpRe
         .transpose()
         .map_err(|_| invalid("portal status must be active or degraded; hud_clear detaches"))?;
     let outcome = with_portals(ctx, |hub, now| {
+        if let Err(error) = check_not_safe_mode(ctx) {
+            return (Err(error), false);
+        }
         (
             hub.publish_with_hold(
                 &PortalKey::new(ctx.agent.agent_id.clone(), pid),
@@ -862,6 +865,9 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
             // The runtime keeps a held portal (and its transcript) past the
             // idle reclaim until the hold lapses or hud_clear.
             with_portals(ctx, |hub, now| {
+                if let Err(error) = check_not_safe_mode(ctx) {
+                    return (Err(error), false);
+                }
                 (
                     hub.hold(&PortalKey::new(ns, pid), p.ttl_ms, now)
                         .map_err(|e| portal_err(e, &p.surface)),

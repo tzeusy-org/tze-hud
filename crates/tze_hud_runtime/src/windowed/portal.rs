@@ -1474,7 +1474,7 @@ impl WinitApp {
     /// Register the tile as scrollable and advance its follow-tail content
     /// height the same way the authority-attached OUTPUT/transcript pane does
     /// (`InputProcessor::notify_tile_content_appended`, wired from
-    /// `portal_projection_driver.rs`) — the runtime plays the "adapter" role
+    /// `portal.rs`) — the runtime plays the "adapter" role
     /// here because raw-tile viewer echoes are runtime-authored, not
     /// adapter-published. A fresh `ScrollTileState` starts at content height 0
     /// with `FollowTailAnchor::AtTail`, so the very first call below seeds the
@@ -1877,7 +1877,7 @@ impl WinitApp {
     }
 
     /// Called from `about_to_wait` after composer-draft flush.  Drives
-    /// `InProcessPortalDriver::drain` which calls
+    /// `PortalDriver::drain` which calls
     /// `InputProcessor::notify_tile_content_appended` for every `RenderPortal`
     /// drain record that carries append geometry (spec §3.2 / §3.3).
     ///
@@ -2238,6 +2238,10 @@ mod tests {
         tze_hud_protocol::session_server::InputEventReceiver,
     ) {
         let cfg = WindowedConfig::default();
+        let portals = tze_hud_mcp::PortalHandle::new(
+            tze_hud_projection::hub::PortalHub::default(),
+            scene.clock(),
+        );
         let shared_state = make_shared_state();
         let (input_capture_tx, input_capture_rx) = tokio::sync::mpsc::unbounded_channel();
         let (frame_ready_tx, frame_ready_rx) = frame_ready_channel();
@@ -2351,7 +2355,7 @@ mod tests {
             tile_close_hover_state: Arc::new(StdMutex::new(None)),
             cursor_left_window: false,
             composer_visual_layout: Arc::new(StdMutex::new(None)),
-            portal_projection_driver: crate::portal_projection_driver::InProcessPortalDriver::new(),
+            portal_projection_driver: crate::portal::PortalDriver::new(portals),
             capture_inbox: crate::operator::screenshot::CaptureInbox::detached(),
             pending_keyboard_events: VecDeque::new(),
             interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
@@ -2363,7 +2367,11 @@ mod tests {
     }
 
     fn make_windowed_app_with_pending_portal_publish(projection_id: &str) -> WinitApp {
-        let driver = crate::portal_projection_driver::InProcessPortalDriver::new();
+        let mut scene = tze_hud_scene::SceneGraph::new(1920.0, 1080.0);
+        let driver = crate::portal::PortalDriver::new(tze_hud_mcp::PortalHandle::new(
+            tze_hud_projection::hub::PortalHub::default(),
+            scene.clock(),
+        ));
         driver
             .hub_mut()
             .publish(
@@ -2376,7 +2384,6 @@ mod tests {
             )
             .expect("publish accepted");
 
-        let mut scene = tze_hud_scene::SceneGraph::new(1920.0, 1080.0);
         scene.create_tab("Main", 0).unwrap();
         let (mut app, _rx) =
             make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
@@ -2520,6 +2527,47 @@ mod tests {
 
     #[test]
     fn typed_portal_deadline_owns_the_single_post_mutation_wake() {
+        use crate::idle_efficiency::RuntimeWakeupSource;
+        use crate::portal::{PortalTimedAuthority, PortalWakeDeadline};
+        use tze_hud_projection::hub::DeadlineKind;
+        for (authority, expected) in [
+            (None, RuntimeWakeupSource::SceneChange),
+            (
+                Some(PortalTimedAuthority::Hub(DeadlineKind::Render)),
+                RuntimeWakeupSource::AnimationDeadline,
+            ),
+            (
+                Some(PortalTimedAuthority::Hub(DeadlineKind::ActivityCue)),
+                RuntimeWakeupSource::AnimationDeadline,
+            ),
+            (
+                Some(PortalTimedAuthority::Hub(DeadlineKind::Liveness)),
+                RuntimeWakeupSource::TtlDeadline,
+            ),
+            (
+                Some(PortalTimedAuthority::Hub(DeadlineKind::InputExpiry)),
+                RuntimeWakeupSource::TtlDeadline,
+            ),
+            (
+                Some(PortalTimedAuthority::Scene),
+                RuntimeWakeupSource::TtlDeadline,
+            ),
+        ] {
+            let now = std::time::Instant::now();
+            let deadline = super::super::portal_deadline_after_drain(
+                PortalWakeDeadline {
+                    wall_us: 100,
+                    authority,
+                },
+                now,
+                100,
+                super::super::PortalProjectionDrain::Completed {
+                    scene_changed: false,
+                },
+            )
+            .unwrap();
+            assert_eq!(deadline, super::super::wake::Deadline::new(now, expected));
+        }
         let mut app = make_windowed_app_with_pending_portal_publish("proj-typed-wake");
         app.state
             .wake
@@ -4824,8 +4872,10 @@ mod tests {
         // `append_raw_tile_viewer_echo` never runs — isolating the keyboard
         // submit-terminal reset as the only thing that can pin the tail.
         let clock = tze_hud_scene::TestClock::from_us(200);
-        let mut driver = crate::portal_projection_driver::InProcessPortalDriver::new();
-        driver.set_clock(Arc::new(clock.clone()));
+        let mut driver = crate::portal::PortalDriver::new(tze_hud_mcp::PortalHandle::new(
+            tze_hud_projection::hub::PortalHub::default(),
+            Arc::new(clock.clone()),
+        ));
         let handle = driver.portal_handle();
         driver
             .hub_mut()

@@ -429,7 +429,14 @@ mod panel_task_tests {
     fn fixture_with(
         sections: impl FnOnce(&ControlPanelDeps) -> Vec<Box<dyn crate::shell::control_panel::Section>>,
     ) -> Fixture {
-        let state = WindowedRuntimeState::new_headless();
+        fixture_with_clock(sections, Arc::new(tze_hud_scene::SystemClock::new()))
+    }
+
+    fn fixture_with_clock(
+        sections: impl FnOnce(&ControlPanelDeps) -> Vec<Box<dyn crate::shell::control_panel::Section>>,
+        clock: Arc<dyn tze_hud_scene::Clock>,
+    ) -> Fixture {
+        let state = WindowedRuntimeState::new_headless_with_clock(clock);
         let wakes = Arc::new(AtomicUsize::new(0));
         let w = Arc::clone(&wakes);
         let render_wake = RenderWakeNotifier::new(move || {
@@ -442,6 +449,8 @@ mod panel_task_tests {
                 Arc::clone(&state.chrome_state),
                 Arc::clone(&state.safe_mode_atomic),
                 render_wake.clone(),
+                Some(state.portal_projection_driver.portal_handle()),
+                state.wake.main_work_notifier(),
             ),
             chords: crate::shell::control_panel::chords::ChordControl::fixed(HudChords::default()),
             pairing: None,
@@ -494,8 +503,30 @@ mod panel_task_tests {
     /// pressing it again resumes and closes. Drives the production task
     /// against the headless runtime's real scene and safe-mode flag.
     #[tokio::test(flavor = "multi_thread")]
-    async fn pause_chord_pauses_opens_and_second_press_resumes_and_closes() {
-        let f = fixture();
+    async fn portal_liveness_paused_during_safe_mode() {
+        use tze_hud_projection::hub::{PortalHub, PortalKey, PortalLimits, Publish};
+        use tze_hud_scene::{Clock, TestClock};
+
+        // Wall time can rewind independently; monotonic observations never do.
+        #[derive(Debug)]
+        struct DivergentClock {
+            wall: TestClock,
+            mono: std::sync::atomic::AtomicU64,
+        }
+        impl Clock for DivergentClock {
+            fn now_us(&self) -> u64 {
+                self.wall.now_us()
+            }
+            fn monotonic_us(&self) -> u64 {
+                self.mono.fetch_add(1, Ordering::Relaxed)
+            }
+        }
+        let clock = Arc::new(DivergentClock {
+            wall: TestClock::new(1_000),
+            mono: std::sync::atomic::AtomicU64::new(9_000_000_000_000),
+        });
+        assert!(clock.monotonic_us() > clock.now_us());
+        let mut f = fixture_with_clock(default_sections, clock.clone());
         let lease_id = f
             .state
             .shared_state
@@ -532,6 +563,369 @@ mod panel_task_tests {
         .await;
         assert_eq!(lease_state().await, LeaseState::Active);
         assert!(f.model().is_none());
+
+        let portals = f.state.portal_projection_driver.portal_handle();
+        let scene_handle = Arc::clone(&f.state.shared_state.lock().await.scene);
+        assert!(Arc::ptr_eq(
+            &portals.clock,
+            &scene_handle.lock().await.clock()
+        ));
+        *portals.hub.lock().unwrap() = PortalHub::new(PortalLimits {
+            input_ttl_us: 80_000_000,
+            ..Default::default()
+        });
+        let mcp = tze_hud_mcp::McpServer::with_shared_scene(Arc::clone(&scene_handle))
+            .with_config(tze_hud_mcp::McpConfig::with_psk("panel-test"))
+            .with_portals(portals.clone())
+            .with_safe_mode(Arc::clone(&f.state.safe_mode_atomic));
+        async fn call(
+            mcp: &tze_hud_mcp::McpServer,
+            name: &str,
+            arguments: serde_json::Value,
+        ) -> serde_json::Value {
+            let body = serde_json::json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":arguments}}).to_string();
+            serde_json::from_str(
+                &mcp.dispatch(&body, &mcp.caller_context(Some("panel-test".into())))
+                    .await,
+            )
+            .unwrap()
+        }
+        assert_eq!(
+            call(
+                &mcp,
+                "hud_publish",
+                serde_json::json!({"surface":"portal:mcp", "content":"before"})
+            )
+            .await["result"]["isError"],
+            serde_json::Value::Null
+        );
+        // Separate agent identities let one genuine poll refresh exactly one row.
+        let key = |id| PortalKey::new(id, id);
+        let publish = |id: &str| {
+            portals
+                .hub
+                .lock()
+                .unwrap()
+                .publish(
+                    &key(id),
+                    Publish {
+                        text: Some(id.into()),
+                        ..Default::default()
+                    },
+                    clock.now_us(),
+                )
+                .unwrap()
+        };
+        for id in [
+            "idle",
+            "finite",
+            "indefinite",
+            "polled",
+            "cancelled",
+            "orphan",
+            "recovered",
+            "replace",
+            "dismiss",
+            "input",
+            "max",
+        ] {
+            publish(id);
+        }
+        {
+            let mut hub = portals.hub.lock().unwrap();
+            hub.hold(&key("finite"), 50_000, clock.now_us()).unwrap();
+            hub.hold(&key("indefinite"), 0, clock.now_us()).unwrap();
+            hub.hold(&key("max"), 0, clock.now_us()).unwrap();
+            hub.submit_reply(&key("input"), "expires while paused".into(), clock.now_us())
+                .unwrap();
+        }
+        let (tiles, leases, tab) = {
+            let mut scene = scene_handle.lock().await;
+            let tab = scene.create_tab("Portals", 1).unwrap();
+            f.state.portal_projection_driver.drain(
+                &mut scene,
+                &mut f.state.input_processor,
+                Some(tab),
+            );
+            let tiles: std::collections::BTreeMap<_, _> = scene
+                .tiles
+                .values()
+                .filter_map(|tile| {
+                    let identity = &scene
+                        .overlay
+                        .portal_surfaces
+                        .get(&tile.id)?
+                        .identity
+                        .session_id;
+                    Some((identity.rsplit('/').next()?.to_owned(), tile.id))
+                })
+                .collect();
+            let leases: std::collections::BTreeMap<_, _> = tiles
+                .iter()
+                .map(|(id, tile)| (id.clone(), scene.tiles[tile].lease_id))
+                .collect();
+            (tiles, leases, tab)
+        };
+        clock.wall.advance(10_000);
+        // Accepted but unpainted before pause; the driver must not grant around it.
+        publish("unrendered");
+        for id in ["orphan", "recovered"] {
+            portals
+                .hub
+                .lock()
+                .unwrap()
+                .degrade(&key(id), clock.now_us());
+            scene_handle
+                .lock()
+                .await
+                .disconnect_lease(&leases[id], clock.now_millis())
+                .unwrap();
+        }
+        let input_expiry = portals
+            .hub
+            .lock()
+            .unwrap()
+            .get(&key("input"))
+            .unwrap()
+            .inputs[0]
+            .expires_us;
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Pause), |f| f.paused())
+            .await;
+        let pause = PauseControl::new(
+            Arc::clone(&f.state.shared_state),
+            Arc::clone(&f.state.chrome_state),
+            Arc::clone(&f.state.safe_mode_atomic),
+            Default::default(),
+            Some(portals.clone()),
+            f.state.wake.main_work_notifier(),
+        );
+        pause.set(true).await;
+        let refused = call(
+            &mcp,
+            "hud_publish",
+            serde_json::json!({"surface":"portal:mcp", "content":"rejected"}),
+        )
+        .await;
+        assert_eq!(refused["result"]["isError"], true);
+        assert!(refused.to_string().contains("SAFE_MODE_ACTIVE"));
+        clock.wall.advance(20_000);
+        {
+            let mut hub = portals.hub.lock().unwrap();
+            hub.poll_input("polled", &[], Some(0), clock.now_us());
+            hub.poll_input("recovered", &[], Some(0), clock.now_us());
+            let active = Arc::new(std::sync::atomic::AtomicBool::new(true));
+            let request = hub
+                .begin_input_poll("cancelled", 5_000_000, clock.now_us(), Arc::clone(&active))
+                .unwrap()
+                .unwrap();
+            active.store(false, Ordering::Release);
+            hub.end_input_poll("cancelled", request);
+            hub.clear(&key("replace")).unwrap();
+        }
+        {
+            let mut scene = scene_handle.lock().await;
+            f.state
+                .portal_projection_driver
+                .viewer_dismiss_tile(&mut scene, tiles["dismiss"]);
+        }
+        clock.wall.advance(80_000);
+        let resume_wall = clock.now_us();
+        {
+            let mut scene = scene_handle.lock().await;
+            scene.expire_leases();
+            let version = scene.version;
+            f.state.portal_projection_driver.drain(
+                &mut scene,
+                &mut f.state.input_processor,
+                Some(tab),
+            );
+            assert_eq!(scene.leases[&leases["idle"]].state, LeaseState::Suspended);
+            assert!(!scene.tiles.contains_key(&tiles["orphan"]));
+            assert!(
+                !scene.tiles.contains_key(&tiles["recovered"]),
+                "poll recovery cannot extend pre-existing scene grace"
+            );
+            assert!(!scene.tiles.contains_key(&tiles["replace"]));
+            assert!(!scene.tiles.contains_key(&tiles["dismiss"]));
+            assert_eq!(scene.tiles.len(), tiles.len() - 4);
+            // A second idle paused drain neither consumes readiness nor mutates pixels.
+            f.state.portal_projection_driver.drain(
+                &mut scene,
+                &mut f.state.input_processor,
+                Some(tab),
+            );
+            assert!(scene.version >= version);
+            let settled_version = scene.version;
+            f.state.portal_projection_driver.drain(
+                &mut scene,
+                &mut f.state.input_processor,
+                Some(tab),
+            );
+            assert_eq!(scene.version, settled_version);
+            let hub = portals.hub.lock().unwrap();
+            assert!(hub.get(&key("unrendered")).unwrap().dirty);
+            assert!(hub.get(&key("input")).unwrap().inputs.is_empty());
+            assert_eq!(hub.get(&key("idle")).unwrap().transcript[0].text, "idle");
+            assert!(
+                !scene
+                    .overlay
+                    .portal_surfaces
+                    .values()
+                    .any(|surface| surface.identity.session_id.ends_with("/unrendered"))
+            );
+            drop(hub);
+            let deadline = f
+                .state
+                .portal_projection_driver
+                .next_wake_deadline(&scene)
+                .unwrap();
+            assert!(
+                deadline.wall_us > resume_wall,
+                "blocked render/cue debt cannot spin on a past deadline"
+            );
+        }
+        let readiness = f.state.wake.main_work_generation();
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Pause), |f| {
+            !f.paused() && !f.panel.is_open()
+        })
+        .await;
+        assert_eq!(f.state.wake.main_work_generation(), readiness + 1);
+        let readiness = f.state.wake.main_work_generation();
+        pause.set(false).await;
+        assert_eq!(
+            f.state.wake.main_work_generation(),
+            readiness,
+            "idempotent exit adds no readiness"
+        );
+        assert!(
+            !publish("replace").reattached,
+            "explicit clear starts a fresh attach"
+        );
+        assert!(
+            publish("dismiss").reattached,
+            "runtime dismiss retains a tombstone"
+        );
+        {
+            let mut scene = scene_handle.lock().await;
+            f.state.portal_projection_driver.drain(
+                &mut scene,
+                &mut f.state.input_processor,
+                Some(tab),
+            );
+            assert_eq!(scene.tiles[&tiles["idle"]].lease_id, leases["idle"]);
+            assert_eq!(scene.leases[&leases["idle"]].state, LeaseState::Active);
+            assert_eq!(
+                portals
+                    .hub
+                    .lock()
+                    .unwrap()
+                    .get(&key("unrendered"))
+                    .unwrap()
+                    .unread,
+                0
+            );
+        }
+        {
+            let mut hub = portals.hub.lock().unwrap();
+            assert!(hub.sweep(resume_wall + 19_999_999).is_empty());
+            hub.sweep(resume_wall + 20_000_000);
+            for id in ["idle", "cancelled"] {
+                assert!(hub.get(&key(id)).unwrap().degraded_since_us.is_some());
+            }
+            assert!(hub.get(&key("polled")).unwrap().degraded_since_us.is_none());
+            hub.sweep(resume_wall + 30_000_000);
+            assert!(
+                hub.get(&key("polled")).unwrap().degraded_since_us.is_some(),
+                "a genuine paused poll gets 30 s, without credit for the remaining pause"
+            );
+            assert!(hub.get(&key("finite")).unwrap().degraded_since_us.is_none());
+            hub.sweep(resume_wall + 40_000_000);
+            assert!(hub.get(&key("finite")).unwrap().degraded_since_us.is_some());
+            assert!(
+                hub.get(&key("indefinite"))
+                    .unwrap()
+                    .degraded_since_us
+                    .is_none()
+            );
+            assert_eq!(input_expiry, 81_000_000, "input TTL was never shifted");
+        }
+        // Maximum suspension still reaps a healthy scene surface and tombstones
+        // its hub attachment. Resume must not grant it a replacement lease.
+        pause.set(true).await;
+        clock
+            .wall
+            .advance(tze_hud_scene::SceneGraph::DEFAULT_MAX_SUSPENSION_MS + 1);
+        {
+            let mut scene = scene_handle.lock().await;
+            scene.expire_leases();
+            f.state.portal_projection_driver.drain(
+                &mut scene,
+                &mut f.state.input_processor,
+                Some(tab),
+            );
+            assert!(portals.hub.lock().unwrap().get(&key("max")).is_none());
+        }
+        pause.set(false).await;
+        {
+            let mut scene = scene_handle.lock().await;
+            f.state.portal_projection_driver.drain(
+                &mut scene,
+                &mut f.state.input_processor,
+                Some(tab),
+            );
+            assert!(!scene.tiles.contains_key(&tiles["max"]));
+        }
+        // Rewind wall time independently of monotonically increasing readings;
+        // saturating deadlines near u64::MAX must never wrap into the past.
+        for (start, paused_at, resumed_at) in [
+            (100_000_000, 110_000_000, 50_000_000),
+            (
+                u64::MAX - 40_000_000,
+                u64::MAX - 30_000_000,
+                u64::MAX - 10_000_000,
+            ),
+        ] {
+            clock.wall.set_us(start);
+            *portals.hub.lock().unwrap() = PortalHub::new(PortalLimits::default());
+            *scene_handle.lock().await =
+                tze_hud_scene::SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
+            publish("remaining");
+            clock.wall.set_us(paused_at);
+            pause.set(true).await;
+            pause.set(true).await;
+            clock.wall.set_us(resumed_at);
+            pause.set(false).await;
+            pause.set(false).await;
+            let deadline = resumed_at.saturating_add(20_000_000);
+            let mut hub = portals.hub.lock().unwrap();
+            hub.take_due(resumed_at);
+            assert_eq!(hub.next_deadline().unwrap().at_us, deadline);
+            assert!(hub.sweep(deadline - 1).is_empty());
+            hub.sweep(deadline);
+            assert!(
+                hub.get(&key("remaining"))
+                    .unwrap()
+                    .degraded_since_us
+                    .is_some()
+            );
+        }
+        // Poison refuses agent work but never vetoes local pause/resume.
+        let hub = Arc::clone(&portals.hub);
+        let _ = std::thread::spawn(move || {
+            let _guard = hub.lock().unwrap();
+            panic!("poison fixture");
+        })
+        .join();
+        pause.set(true).await;
+        assert!(f.paused());
+        assert_eq!(
+            f.state
+                .portal_projection_driver
+                .next_wake_deadline(&scene_handle.lock().await),
+            None
+        );
+        pause.set(false).await;
+        assert!(!f.paused());
     }
 
     /// The panel chord opens without pausing; the pause tile pauses in place;
@@ -1159,6 +1553,8 @@ mod panel_task_tests {
                 Arc::clone(&state.chrome_state),
                 Arc::clone(&state.safe_mode_atomic),
                 RenderWakeNotifier::default(),
+                Some(state.portal_projection_driver.portal_handle()),
+                state.wake.main_work_notifier(),
             ),
             chords: crate::shell::control_panel::chords::ChordControl::fixed(HudChords::default()),
             pairing: None,
@@ -1298,6 +1694,8 @@ mod panel_task_tests {
                 Arc::clone(&state.chrome_state),
                 Arc::clone(&state.safe_mode_atomic),
                 RenderWakeNotifier::default(),
+                Some(state.portal_projection_driver.portal_handle()),
+                state.wake.main_work_notifier(),
             ),
             chords: crate::shell::control_panel::chords::ChordControl::fixed(HudChords::default()),
             pairing: None,
