@@ -88,6 +88,10 @@ impl WindowedRuntimeState {
     /// the lock-free keyboard-dispatch reads observe the same values a real run
     /// would.
     pub(super) fn new_headless() -> Self {
+        Self::new_headless_with_clock(Arc::new(tze_hud_scene::SystemClock::new()))
+    }
+
+    pub(super) fn new_headless_with_clock(clock: Arc<dyn Clock>) -> Self {
         use std::collections::{HashMap, HashSet, VecDeque};
         use std::sync::Mutex as StdMutex;
         use std::sync::atomic::AtomicBool;
@@ -97,9 +101,14 @@ impl WindowedRuntimeState {
         let safe_mode_atomic = Arc::new(AtomicBool::new(false));
         let active_tab_mirror: Arc<StdMutex<Option<SceneId>>> = Arc::new(StdMutex::new(None));
 
+        let portals = tze_hud_mcp::PortalHandle::new(
+            tze_hud_projection::hub::PortalHub::default(),
+            Arc::clone(&clock),
+        );
         let shared_state = Arc::new(TokioMutex::new(SharedStateBuilder::build(
             Arc::clone(&safe_mode_atomic),
             Arc::clone(&active_tab_mirror),
+            clock,
         )));
 
         let (frame_ready_tx, frame_ready_rx) = crate::channels::frame_ready_channel();
@@ -195,7 +204,7 @@ impl WindowedRuntimeState {
             tile_close_hover_state: Arc::new(StdMutex::new(None)),
             cursor_left_window: false,
             composer_visual_layout: Arc::new(StdMutex::new(None)),
-            portal_projection_driver: crate::portal_projection_driver::InProcessPortalDriver::new(),
+            portal_projection_driver: crate::portal::PortalDriver::new(portals),
             capture_inbox: crate::operator::screenshot::CaptureInbox::detached(),
             pending_keyboard_events: VecDeque::new(),
             interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
@@ -213,10 +222,13 @@ impl SharedStateBuilder {
     fn build(
         safe_mode_atomic: Arc<std::sync::atomic::AtomicBool>,
         active_tab_mirror: Arc<std::sync::Mutex<Option<SceneId>>>,
+        clock: Arc<dyn Clock>,
     ) -> tze_hud_protocol::session::SharedState {
         use tokio::sync::Mutex as TokioMutex;
         tze_hud_protocol::session::SharedState {
-            scene: Arc::new(TokioMutex::new(SceneGraph::new(1920.0, 1080.0))),
+            scene: Arc::new(TokioMutex::new(SceneGraph::new_with_clock(
+                1920.0, 1080.0, clock,
+            ))),
             sessions: tze_hud_protocol::session::SessionRegistry::new(),
             resource_store: tze_hud_resource::ResourceStore::new(
                 tze_hud_resource::ResourceStoreConfig::default(),
@@ -416,6 +428,8 @@ impl HeadlessEventLoopHarness {
                 Arc::clone(&state.chrome_state),
                 Arc::clone(&state.safe_mode_atomic),
                 render_wake.clone(),
+                Some(portals.clone()),
+                state.wake.main_work_notifier(),
             ),
             // Windows' registrar, as a record: every rebind takes.
             chords: {
@@ -474,7 +488,7 @@ impl HeadlessEventLoopHarness {
             state.shutdown.clone(),
         ));
 
-        let driver = crate::portal_projection_driver::InProcessPortalDriver::with_portals(portals);
+        let driver = crate::portal::PortalDriver::new(portals);
         state.portal_projection_driver = driver;
         state.global_tokens = global_tokens;
         state.runtime_context = runtime_context;
@@ -987,7 +1001,7 @@ impl HeadlessEventLoopHarness {
     }
 
     /// Dismiss every tile on screen the way the hover close button does, through
-    /// the runtime's real viewer-dismiss entry (`InProcessPortalDriver::viewer_dismiss_tile`).
+    /// the runtime's real viewer-dismiss entry (`PortalDriver::viewer_dismiss_tile`).
     pub fn viewer_dismiss_all_tiles(&mut self) {
         let mut scene = self.scene();
         let ids: Vec<SceneId> = scene.tiles.keys().copied().collect();

@@ -19,7 +19,7 @@ flowchart TD
     Agent -->|"gRPC HudSession"| GRPC["HudSessionImpl: resident session"]
     Owner["Owner keyboard / pointer"] --> INPUT["Windowed input and shell"]
     MCP -->|"portal verbs"| HUB["PortalHub: transcript, replies, liveness"]
-    HUB --> DRIVER["PortalProjectionDriver"]
+    HUB --> DRIVER["PortalDriver"]
     MCP -->|"zone / widget verbs"| SCENE["Shared SceneGraph: leases and content"]
     GRPC -->|"admitted operations"| SCENE
     DRIVER -->|"portal tile and nodes"| SCENE
@@ -102,8 +102,20 @@ restart and signed-update semantics belong in the
 **Portal state [Observed].**
 [`PortalHandle`](../crates/tze_hud_mcp/src/server.rs) shares one hub, clock
 and per-agent input Notify registry between MCP and
-[`PortalProjectionDriver`](../crates/tze_hud_runtime/src/portal_projection_driver.rs).
-The driver stores and clones that complete handle. Composer admission commits
+[`PortalDriver`](../crates/tze_hud_runtime/src/portal.rs).
+The production composition root creates one injected clock for the scene and
+complete handle before MCP, driver, agent control and pause control clone it.
+The driver owns one `(agent, portal id)` binding map for incarnation, tile/lease,
+native surface descriptor, geometry and local feedback. Detach revokes while
+scene-owned; hub tombstones and scene terminal state retain missed-lock cleanup.
+There is no deferred lease-revocation queue or driver-only clock setter.
+Safe mode serializes SharedState → scene → hub, preserves healthy idle/hold
+remaining time in the hub, and gates portal output admission under that same hub
+lock. Guards are released before notifications. Resume signals main-work
+readiness once; pixels still wake only after mutation.
+Timed portal work has two providers: Hub (render/cue/liveness/input expiry) and
+scene lease lifecycle. Immediate stale/terminal reconciliation stays separate.
+They retain SceneChange, AnimationDeadline and TtlDeadline wake accounting. Composer admission commits
 input and reply history under the hub lock, then signals the owning agent after
 unlock. Notification actions return an agent readiness callback that the pointer
 producer invokes after scene and shared-state unlock; queues remain authoritative.

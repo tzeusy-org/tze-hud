@@ -20,6 +20,8 @@ pub(crate) struct PauseControl {
     /// The authoritative safe-mode flag (`SharedState::safe_mode_atomic`).
     paused: Arc<AtomicBool>,
     render_wake: RenderWakeNotifier,
+    portals: Option<tze_hud_mcp::PortalHandle>,
+    main_work: RenderWakeNotifier,
 }
 
 impl PauseControl {
@@ -28,12 +30,16 @@ impl PauseControl {
         chrome: Arc<RwLock<ChromeState>>,
         paused: Arc<AtomicBool>,
         render_wake: RenderWakeNotifier,
+        portals: Option<tze_hud_mcp::PortalHandle>,
+        main_work: RenderWakeNotifier,
     ) -> Self {
         Self {
             shared,
             chrome,
             paused,
             render_wake,
+            portals,
+            main_work,
         }
     }
 
@@ -48,15 +54,17 @@ impl PauseControl {
             return;
         }
         if paused {
-            let result = enter_safe_mode(&self.shared, &self.chrome).await;
+            let result = enter_safe_mode(&self.shared, &self.chrome, self.portals.as_ref()).await;
             tracing::info!(
                 leases_suspended = result.leases_suspended,
                 sessions_notified = result.sessions_notified,
                 "control panel: agents paused (safe mode entered)"
             );
-            self.render_wake.notify();
+            if result.entered {
+                self.render_wake.notify();
+            }
         } else {
-            let result = exit_safe_mode(&self.shared, &self.chrome).await;
+            let result = exit_safe_mode(&self.shared, &self.chrome, self.portals.as_ref()).await;
             tracing::info!(
                 exited = result.exited,
                 leases_resumed = result.leases_resumed,
@@ -64,6 +72,7 @@ impl PauseControl {
                 "control panel: agents resumed (safe mode exited)"
             );
             if result.exited {
+                self.main_work.notify();
                 self.render_wake.notify();
             }
         }

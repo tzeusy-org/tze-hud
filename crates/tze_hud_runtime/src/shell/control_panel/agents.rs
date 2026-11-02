@@ -12,7 +12,7 @@ use tze_hud_scene::graph::{AgentHoldings, SceneGraph};
 use tze_hud_scene::render_wake::RenderWakeNotifier;
 
 use crate::agent_store::AgentStore;
-use crate::portal_projection_driver::PORTAL_DRIVER_NAMESPACE;
+use crate::portal::PORTAL_DRIVER_NAMESPACE;
 
 /// How long Unpair waits for the agent's session tasks to end before it
 /// clears regardless.

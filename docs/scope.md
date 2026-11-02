@@ -76,7 +76,7 @@ source links when implementation changes the status.
   `hud-i2e10.13`, `hud-lgb6c.3`, and `hud-jm8nq.18` are still open.
 - **T7 — portal [Observed].** MCP tools now share
   [`PortalHandle`](../crates/tze_hud_mcp/src/server.rs) directly with the
-  runtime's [portal driver](../crates/tze_hud_runtime/src/portal_projection_driver.rs).
+  runtime's [portal driver](../crates/tze_hud_runtime/src/portal.rs).
   [`PortalHub`](../crates/tze_hud_projection/src/hub.rs) owns transcripts,
   replies, liveness, pacing, cue deadlines and retained unread state under
   `(agent, portal id)`. The [pure renderer](../crates/tze_hud_projection/src/render.rs)
@@ -87,8 +87,18 @@ source links when implementation changes the status.
   fields 13–17 and their names are reserved; their wire messages, converters and
   scene mutation variants are removed. Native rendering retains the checked
   direct scene methods. This is source evidence, not Windows owner acceptance.
-  Crate rename, final size reconciliation and Windows owner acceptance remain
-  (`hud-lirh2`).
+  The runtime module/type is now `portal.rs` / `PortalDriver`, with one binding
+  map and immediate scene-owned lease revocation. Scene, MCP and pause control
+  share the injected clock; healthy portal idle/hold allowances survive pause
+  while input expiry, prior orphan grace and maximum suspension continue.
+  Physical driver lines are 986 production-prefix / 1511 test-module (2497
+  total), compared with 1059 / 1495 (2554 total) before this fold. No helpers
+  were extracted. The original approximate 750 / 1100 targets are not met:
+  native render/geometry/scroll and incarnation-safe lifecycle code plus all
+  21 existing unique regression parents remain. This source inventory does
+  not establish executed verification or physical Windows acceptance.
+  Windowed deduplication, composer reduction, crate rename, final four-group
+  size reconciliation and Windows owner acceptance remain (`hud-lirh2`).
 - **T8 — diet [Observed].** The [local harness](../justfile) includes
   llvmpipe GPU recipes and Nextest; resource acceptance has a compact
   [`store_behavior`](../crates/tze_hud_resource/tests/store_behavior.rs) suite.

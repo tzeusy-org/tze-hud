@@ -240,7 +240,7 @@ use self::wake::{
     CursorEntryTurn, Deadline, RuntimeWakeEvent, WindowedWake, control_flow_for_deadlines,
     deadline_from_wall_us,
 };
-use crate::portal_projection_driver::PortalWakeDeadline;
+use crate::portal::PortalWakeDeadline;
 
 /// A toast starting now (wall clock, as the compositor's expiry uses).
 fn toast_now(title: String) -> crate::shell::system_card::SystemCard {
@@ -624,7 +624,7 @@ struct WindowedRuntimeState {
     /// `about_to_wait` call.  Wires
     /// `InputProcessor::notify_tile_content_appended` so follow-tail advances
     /// (spec §3.2) and scrolled-back stability is preserved (spec §3.3).
-    portal_projection_driver: crate::portal_projection_driver::InProcessPortalDriver,
+    portal_projection_driver: crate::portal::PortalDriver,
     /// `GET /admin/screenshot` requests for the compositor thread to serve.
     capture_inbox: crate::operator::screenshot::CaptureInbox,
     /// Keyboard events deferred because the shared-state or scene lock was busy
@@ -715,8 +715,7 @@ fn portal_deadline_after_drain(
 ) -> Option<Deadline> {
     let remaining_us = portal_deadline.wall_us.saturating_sub(now_wall_us);
     if remaining_us == 0 {
-        (!portal_drain.is_deferred())
-            .then_some(Deadline::new(now, portal_deadline.family.wakeup_source()))
+        (!portal_drain.is_deferred()).then_some(Deadline::new(now, portal_deadline.wakeup_source()))
     } else {
         // Keep the wall-clock observation paired with `now`. Calling
         // `deadline_from_wall_us` here would take a second wall-clock sample;
@@ -724,7 +723,7 @@ fn portal_deadline_after_drain(
         // immediate retry while the portal drain is still deferred.
         Some(Deadline::new(
             now + std::time::Duration::from_micros(remaining_us),
-            portal_deadline.family.wakeup_source(),
+            portal_deadline.wakeup_source(),
         ))
     }
 }
@@ -1114,10 +1113,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 .portal_projection_driver
                 .next_wake_deadline(&scene)
             {
-                let now_wall_us = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map(|duration| duration.as_micros() as u64)
-                    .unwrap_or(0);
+                let now_wall_us = scene.now_wall_us();
                 if let Some(deadline) =
                     portal_deadline_after_drain(portal_deadline, now, now_wall_us, portal_drain)
                 {
@@ -1458,7 +1454,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         // attaches after startup inherits the resolved visual tokens from the
         // runtime config rather than the driver's empty default map.
         //
-        // The driver stores the map in `InProcessPortalDriveState::token_overrides`
+        // The driver stores the map in `PortalDriver::token_overrides`
         // and re-resolves `PortalVisualTokens` for every new adapter at attach
         // time; `sync_design_tokens` re-applies it after a live change.
         self.state
@@ -2754,6 +2750,7 @@ impl WindowedRuntime {
             .map(tze_hud_config::displays::zone_display_assignments)
             .unwrap_or_default();
 
+        let clock: Arc<dyn tze_hud_scene::Clock> = Arc::new(tze_hud_scene::SystemClock::new());
         let mut pending_widget_svgs: Vec<crate::widget_startup::WidgetSvgAsset> = Vec::new();
         let (
             shared_scene,
@@ -2762,7 +2759,7 @@ impl WindowedRuntime {
             startup_element_store,
             startup_element_store_path,
         ) = {
-            let mut scene = SceneGraph::new(width, height);
+            let mut scene = SceneGraph::new_with_clock(width, height, Arc::clone(&clock));
 
             // Resolve config file parent directory for path resolution.
             let config_parent_buf: Option<std::path::PathBuf> = cfg
@@ -3001,7 +2998,10 @@ impl WindowedRuntime {
             })
         };
         let portal_projection_driver =
-            crate::portal_projection_driver::InProcessPortalDriver::new();
+            crate::portal::PortalDriver::new(tze_hud_mcp::PortalHandle::new(
+                tze_hud_projection::hub::PortalHub::default(),
+                Arc::clone(&clock),
+            ));
         let portals = portal_projection_driver.portal_handle();
         if cfg.mcp_port > 0 {
             // Ensure we have a network runtime to host the MCP task. If gRPC
@@ -3127,6 +3127,8 @@ impl WindowedRuntime {
                     Arc::clone(&chrome_state),
                     Arc::clone(&safe_mode_atomic),
                     render_wake.clone(),
+                    Some(portals.clone()),
+                    portal_ingress_wake.clone(),
                 ),
                 chords: crate::shell::control_panel::chords::ChordControl::new(
                     runtime_context.chords,
@@ -3403,7 +3405,7 @@ mod wake_accounting_tests {
         let now = Instant::now();
         let past_deadline = PortalWakeDeadline {
             wall_us: 99,
-            family: crate::portal_projection_driver::PortalDeadlineFamily::ImmediateWork,
+            authority: None,
         };
 
         assert_eq!(
@@ -3431,7 +3433,9 @@ mod wake_accounting_tests {
             portal_deadline_after_drain(
                 PortalWakeDeadline {
                     wall_us: 101,
-                    family: crate::portal_projection_driver::PortalDeadlineFamily::Cadence,
+                    authority: Some(crate::portal::PortalTimedAuthority::Hub(
+                        tze_hud_projection::hub::DeadlineKind::Render
+                    )),
                 },
                 now,
                 100,

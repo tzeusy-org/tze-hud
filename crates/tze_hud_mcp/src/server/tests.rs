@@ -2514,7 +2514,7 @@ fn set_safe_mode(server: &McpServer, on: bool) {
 #[tokio::test]
 async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
     let (server, _) = server();
-    let (server, hub) = hub_portal(server);
+    let (mut server, hub) = hub_portal(server);
     // Held before safe mode, so hud_hold has something to extend.
     for surface in ["zone:subtitle", "widget:gauge"] {
         let args = match surface {
@@ -2568,6 +2568,157 @@ async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
     // Reading stays open: already-queued input is still delivered.
     let v = call(&server, "hud_input", json!({})).await;
     assert_eq!(v["items"][0]["action"], "approve");
+
+    // An admission already holding the Hub commits before pause. The pause
+    // transition takes that same lock, then refuses every later publication.
+    #[derive(Debug)]
+    struct AdmissionClock {
+        entered: std::sync::Mutex<Option<std::sync::mpsc::SyncSender<()>>>,
+        release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+    impl tze_hud_scene::Clock for AdmissionClock {
+        fn now_us(&self) -> u64 {
+            if let Some(entered) = self.entered.lock().unwrap().take() {
+                entered.send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+            }
+            1_000_000
+        }
+        fn monotonic_us(&self) -> u64 {
+            9_000_000_000
+        }
+    }
+    let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(0);
+    let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
+    set_safe_mode(&server, false);
+    server.portals.as_mut().unwrap().clock = Arc::new(AdmissionClock {
+        entered: std::sync::Mutex::new(Some(entered_tx)),
+        release: std::sync::Mutex::new(release_rx),
+    });
+    let server = Arc::new(server);
+    let publishing = Arc::clone(&server);
+    let admission = std::thread::spawn(move || {
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(call(
+                &publishing,
+                "hud_publish",
+                json!({"surface":"portal:main", "content":"committed before pause"}),
+            ))
+    });
+    entered_rx.recv().unwrap();
+    let pausing = Arc::clone(&server);
+    let (pause_started_tx, pause_started_rx) = std::sync::mpsc::sync_channel(0);
+    let pause = std::thread::spawn(move || {
+        pause_started_tx.send(()).unwrap();
+        let mut hub = pausing.portals.as_ref().unwrap().hub.lock().unwrap();
+        hub.suspend_liveness(1_000_000);
+        pausing
+            .safe_mode
+            .store(true, std::sync::atomic::Ordering::Release);
+    });
+    pause_started_rx.recv().unwrap();
+    release_tx.send(()).unwrap();
+    admission.join().unwrap();
+    pause.join().unwrap();
+    assert_eq!(hub.lock().unwrap().get(&key).unwrap().transcript.len(), 2);
+    let rejected = call_err(
+        &server,
+        "hud_publish",
+        json!({"surface":"portal:main", "content":"after pause"}),
+    )
+    .await;
+    assert_eq!(rejected["code"], "SAFE_MODE_ACTIVE");
+    assert!(!rejected["hint"].as_str().unwrap().is_empty());
+    assert_eq!(hub.lock().unwrap().get(&key).unwrap().transcript.len(), 2);
+
+    // Observe the existing phase after the early flag check but before Hub
+    // acquisition. The observer coordinates timing, not a log-text assertion.
+    struct PortalLockWait {
+        entered: std::sync::mpsc::SyncSender<()>,
+        release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    }
+    impl tracing::Subscriber for PortalLockWait {
+        fn enabled(&self, metadata: &tracing::Metadata<'_>) -> bool {
+            metadata.target() == "tze_hud_mcp_phases"
+        }
+        fn new_span(&self, _: &tracing::span::Attributes<'_>) -> tracing::span::Id {
+            tracing::span::Id::from_u64(1)
+        }
+        fn record(&self, _: &tracing::span::Id, _: &tracing::span::Record<'_>) {}
+        fn record_follows_from(&self, _: &tracing::span::Id, _: &tracing::span::Id) {}
+        fn enter(&self, _: &tracing::span::Id) {}
+        fn exit(&self, _: &tracing::span::Id) {}
+        fn event(&self, event: &tracing::Event<'_>) {
+            #[derive(Default)]
+            struct Phase(bool);
+            impl tracing::field::Visit for Phase {
+                fn record_debug(&mut self, _: &tracing::field::Field, _: &dyn std::fmt::Debug) {}
+                fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
+                    self.0 |= field.name() == "phase" && value == "portal_lock_wait";
+                }
+            }
+            let mut phase = Phase::default();
+            event.record(&mut phase);
+            if phase.0 {
+                self.entered.send(()).unwrap();
+                self.release.lock().unwrap().recv().unwrap();
+            }
+        }
+    }
+    for (name, args) in [
+        (
+            "hud_publish",
+            json!({"surface":"portal:main", "content":"stale early pass"}),
+        ),
+        ("hud_hold", json!({"surface":"portal:main", "ttl_ms":9000})),
+    ] {
+        let mut guarded_hub = hub.lock().unwrap();
+        guarded_hub.resume_liveness(1_000_000);
+        server
+            .safe_mode
+            .store(false, std::sync::atomic::Ordering::Release);
+        let before = guarded_hub.get(&key).unwrap().clone();
+        let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(0);
+        let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
+        let requesting = Arc::clone(&server);
+        let request = std::thread::spawn(move || {
+            tracing::subscriber::with_default(
+                PortalLockWait {
+                    entered: entered_tx,
+                    release: std::sync::Mutex::new(release_rx),
+                },
+                || {
+                    tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .unwrap()
+                        .block_on(call_err(&requesting, name, args))
+                },
+            )
+        });
+        // This receive can only complete after the request passed its early
+        // safe-mode gate. Pause now linearizes while owning Hub admission.
+        entered_rx.recv().unwrap();
+        guarded_hub.suspend_liveness(1_000_000);
+        server
+            .safe_mode
+            .store(true, std::sync::atomic::Ordering::Release);
+        release_tx.send(()).unwrap();
+        drop(guarded_hub);
+        let refused = request.join().unwrap();
+        assert_eq!(
+            refused["code"], "SAFE_MODE_ACTIVE",
+            "{name} queued behind pause"
+        );
+        let guarded_hub = hub.lock().unwrap();
+        let after = guarded_hub.get(&key).unwrap();
+        assert_eq!(after.transcript, before.transcript);
+        assert_eq!(after.hold_until_us, before.hold_until_us);
+        assert_eq!(after.last_seen_us, before.last_seen_us);
+    }
 }
 
 #[tokio::test]

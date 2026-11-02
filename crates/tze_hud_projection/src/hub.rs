@@ -323,6 +323,13 @@ pub struct Input {
     pub delivered: bool,
 }
 
+/// Remaining healthy time belongs to this attachment, never to its key's replacement.
+#[derive(Clone, Debug)]
+struct PausedLiveness {
+    idle_remaining_us: u64,
+    hold_remaining_us: Option<u64>,
+}
+
 #[derive(Clone, Debug)]
 pub struct Portal {
     incarnation: u64,
@@ -352,6 +359,8 @@ pub struct Portal {
     /// publish attaches a fresh portal.
     pub reclaimed_by_runtime: bool,
     next_seq: u64,
+    idle_deadline_us: Option<u64>,
+    paused_liveness: Option<PausedLiveness>,
 }
 
 impl Portal {
@@ -375,6 +384,8 @@ impl Portal {
             local_feedback_pending: false,
             reclaimed_by_runtime: false,
             next_seq: 1,
+            idle_deadline_us: None,
+            paused_liveness: None,
         }
     }
 
@@ -403,6 +414,7 @@ impl Portal {
     /// An owner call (publish, poll, hold) proves the agent is live.
     fn touch(&mut self, now_us: u64) {
         self.last_seen_us = now_us;
+        self.idle_deadline_us = None;
         if self.degraded_since_us.take().is_some() {
             self.status = PortalStatus::Active;
             self.dirty = true;
@@ -414,6 +426,7 @@ impl Portal {
         if !self.live() || self.degraded_since_us.is_some() {
             return false;
         }
+        self.paused_liveness = None;
         self.degraded_since_us = Some(now_us);
         self.status = PortalStatus::Degraded;
         self.dirty = true;
@@ -425,8 +438,8 @@ impl Portal {
         match self.hold_until_us {
             Some(u64::MAX) => None,
             hold => Some(
-                self.last_seen_us
-                    .saturating_add(limits.degrade_after_us)
+                self.idle_deadline_us
+                    .unwrap_or_else(|| self.last_seen_us.saturating_add(limits.degrade_after_us))
                     .max(hold.unwrap_or(0)),
             ),
         }
@@ -536,6 +549,7 @@ pub struct PortalHub {
     active_input_polls: BTreeMap<String, BTreeMap<u64, ActiveInputPoll>>,
     next_input_poll: u64,
     limits: PortalLimits,
+    liveness_suspended: bool,
 }
 
 fn hold_deadline(ttl_ms: u64, now_us: u64) -> u64 {
@@ -555,7 +569,63 @@ impl PortalHub {
             active_input_polls: BTreeMap::new(),
             next_input_poll: 0,
             limits,
+            liveness_suspended: false,
         }
+    }
+
+    /// Pause only healthy idle and hold allowances. Expiry, grace and pacing
+    /// timestamps stay absolute; blocked render work remains unconsumed.
+    pub fn suspend_liveness(&mut self, now_us: u64) {
+        if self.liveness_suspended {
+            return;
+        }
+        self.liveness_suspended = true;
+        for portal in self
+            .portals
+            .values_mut()
+            .filter(|p| p.live() && p.degraded_since_us.is_none())
+        {
+            portal.paused_liveness = Some(PausedLiveness {
+                idle_remaining_us: portal
+                    .idle_deadline_us
+                    .unwrap_or_else(|| {
+                        portal
+                            .last_seen_us
+                            .saturating_add(self.limits.degrade_after_us)
+                    })
+                    .saturating_sub(now_us),
+                hold_remaining_us: portal.hold_until_us.map(|at| {
+                    if at == u64::MAX {
+                        at
+                    } else {
+                        at.saturating_sub(now_us)
+                    }
+                }),
+            });
+        }
+    }
+
+    pub fn resume_liveness(&mut self, now_us: u64) {
+        if !self.liveness_suspended {
+            return;
+        }
+        self.liveness_suspended = false;
+        for portal in self.portals.values_mut() {
+            if let Some(saved) = portal.paused_liveness.take() {
+                portal.idle_deadline_us = Some(now_us.saturating_add(saved.idle_remaining_us));
+                portal.hold_until_us = saved.hold_remaining_us.map(|remaining| {
+                    if remaining == u64::MAX {
+                        remaining
+                    } else {
+                        now_us.saturating_add(remaining)
+                    }
+                });
+            }
+        }
+    }
+
+    pub fn liveness_suspended(&self) -> bool {
+        self.liveness_suspended
     }
 
     pub fn limits(&self) -> &PortalLimits {
@@ -753,6 +823,21 @@ impl PortalHub {
             changed |= portal.degraded_since_us.is_some();
             let was_dirty = portal.dirty;
             portal.touch(now_us);
+            if self.liveness_suspended {
+                let saved = portal
+                    .paused_liveness
+                    .get_or_insert_with(|| PausedLiveness {
+                        idle_remaining_us: 0,
+                        hold_remaining_us: portal.hold_until_us.map(|at| {
+                            if at == u64::MAX {
+                                at
+                            } else {
+                                at.saturating_sub(now_us)
+                            }
+                        }),
+                    });
+                saved.idle_remaining_us = self.limits.degrade_after_us;
+            }
             let before = portal.inputs.len();
             portal
                 .inputs
@@ -958,14 +1043,15 @@ impl PortalHub {
                 portal.dirty = true;
             }
             match portal.degraded_since_us {
-                None if !self
-                    .active_input_polls
-                    .get(&key.agent)
-                    .is_some_and(|polls| {
-                        polls.values().any(|poll| {
-                            poll.active.load(Ordering::Acquire) && poll.expires_us > now_us
+                None if !self.liveness_suspended
+                    && !self
+                        .active_input_polls
+                        .get(&key.agent)
+                        .is_some_and(|polls| {
+                            polls.values().any(|poll| {
+                                poll.active.load(Ordering::Acquire) && poll.expires_us > now_us
+                            })
                         })
-                    })
                     && portal.degrade_at(limits).is_some_and(|at| now_us >= at) =>
                 {
                     portal.degraded_since_us = Some(now_us);
@@ -986,6 +1072,9 @@ impl PortalHub {
     /// Portals with changes whose render interval has passed, or an accepted
     /// local reply to show immediately. Clears dirty, local urgency and unread.
     pub fn take_due(&mut self, now_us: u64) -> Vec<Due> {
+        if self.liveness_suspended {
+            return Vec::new();
+        }
         let interval = self.limits.render_interval_us;
         self.portals
             .iter_mut()
@@ -1036,7 +1125,7 @@ impl PortalHub {
             .iter()
             .filter(|(_, p)| p.live())
             .flat_map(|(key, p)| {
-                let render = p.dirty.then(|| Deadline {
+                let render = (p.dirty && !self.liveness_suspended).then(|| Deadline {
                     at_us: if p.local_feedback_pending {
                         0
                     } else {
@@ -1046,6 +1135,7 @@ impl PortalHub {
                 });
                 let liveness = match p.degraded_since_us {
                     Some(since) => Some(since.saturating_add(self.limits.reclaim_after_us)),
+                    None if self.liveness_suspended => None,
                     None => p.degrade_at(&self.limits).map(|at| {
                         self.active_input_polls
                             .get(&key.agent)
@@ -1072,10 +1162,13 @@ impl PortalHub {
                         at_us,
                         kind: DeadlineKind::InputExpiry,
                     });
-                let activity = p.activity_cue_due_us.map(|at_us| Deadline {
-                    at_us,
-                    kind: DeadlineKind::ActivityCue,
-                });
+                let activity = p
+                    .activity_cue_due_us
+                    .filter(|_| !self.liveness_suspended)
+                    .map(|at_us| Deadline {
+                        at_us,
+                        kind: DeadlineKind::ActivityCue,
+                    });
                 [render, activity, liveness, expiry]
             })
             .flatten()

@@ -55,7 +55,7 @@ pub(crate) mod net_addrs;
 pub mod operator;
 pub mod pairing;
 pub(crate) mod pipeline;
-pub mod portal_projection_driver;
+pub mod portal;
 pub mod portal_tokens;
 pub(crate) mod runtime_context;
 pub(crate) mod scene_startup;

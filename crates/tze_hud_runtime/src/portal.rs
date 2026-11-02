@@ -23,7 +23,7 @@
 //! state instead of propagating into the event loop.
 
 use std::collections::HashMap;
-use std::sync::{Arc, MutexGuard};
+use std::sync::MutexGuard;
 
 use tze_hud_config::{resolve_portal_tokens, tokens::DesignTokenMap};
 use tze_hud_input::{DraftNotificationBatch, InputProcessor};
@@ -38,38 +38,38 @@ use tze_hud_projection::{
     tokens::{PortalVisualTokens, portal_visual_tokens_from_part_tokens},
 };
 use tze_hud_scene::{
-    Clock, Rect, SceneGraph,
+    Rect, SceneGraph,
     types::{InputMode, LeaseState, PortalSurface, SceneId, TileScrollConfig},
 };
 
 use crate::idle_efficiency::RuntimeWakeupSource;
 
+/// Two timed providers. Immediate reconciliation is represented separately.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum PortalDeadlineFamily {
-    ImmediateWork,
-    Cadence,
-    ActivityCue,
-    AgentLiveness,
-    PendingInputExpiry,
-    LeaseLifecycle,
-}
-
-impl PortalDeadlineFamily {
-    pub(super) const fn wakeup_source(self) -> RuntimeWakeupSource {
-        match self {
-            Self::ImmediateWork => RuntimeWakeupSource::SceneChange,
-            Self::Cadence | Self::ActivityCue => RuntimeWakeupSource::AnimationDeadline,
-            Self::AgentLiveness | Self::PendingInputExpiry | Self::LeaseLifecycle => {
-                RuntimeWakeupSource::TtlDeadline
-            }
-        }
-    }
+pub(super) enum PortalTimedAuthority {
+    Hub(DeadlineKind),
+    Scene,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct PortalWakeDeadline {
     pub(super) wall_us: u64,
-    pub(super) family: PortalDeadlineFamily,
+    pub(super) authority: Option<PortalTimedAuthority>,
+}
+
+impl PortalWakeDeadline {
+    pub(super) const fn wakeup_source(self) -> RuntimeWakeupSource {
+        match self.authority {
+            None => RuntimeWakeupSource::SceneChange,
+            Some(PortalTimedAuthority::Hub(DeadlineKind::Render | DeadlineKind::ActivityCue)) => {
+                RuntimeWakeupSource::AnimationDeadline
+            }
+            Some(
+                PortalTimedAuthority::Hub(DeadlineKind::Liveness | DeadlineKind::InputExpiry)
+                | PortalTimedAuthority::Scene,
+            ) => RuntimeWakeupSource::TtlDeadline,
+        }
+    }
 }
 
 /// Line-height multiplier used by the compositor's text shaper (text.rs).
@@ -100,7 +100,7 @@ fn activity_cue_clear_due_us(state: &PortalView, now_us: u64) -> Option<u64> {
 
 /// Runtime-side state for one portal: its renderer, scene tile and lease,
 /// and what the renderer needs beyond the hub's portal.
-struct DriveEntry {
+struct Binding {
     incarnation: Option<u64>,
     tokens: PortalVisualTokens,
     declared_surface: Option<PortalSurface>,
@@ -119,7 +119,7 @@ struct DriveEntry {
     last_input_feedback: Option<PortalInputFeedback>,
 }
 
-impl DriveEntry {
+impl Binding {
     fn new(tokens: PortalVisualTokens) -> Self {
         Self {
             incarnation: None,
@@ -131,61 +131,6 @@ impl DriveEntry {
             latest_geometry: None,
             pending_geometry: None,
             last_input_feedback: None,
-        }
-    }
-}
-
-/// Drive entries keyed by portal, plus scene work deferred to the next drain.
-struct InProcessPortalDriveState {
-    entries: HashMap<PortalKey, DriveEntry>,
-    /// Leases of detached or reclaimed portals; revoking one removes its tile.
-    pending_lease_revocations: Vec<SceneId>,
-    /// Current resolved design-token overrides (flat key → value strings).
-    token_overrides: DesignTokenMap,
-}
-
-impl InProcessPortalDriveState {
-    fn new() -> Self {
-        Self {
-            entries: HashMap::new(),
-            pending_lease_revocations: Vec::new(),
-            token_overrides: DesignTokenMap::new(),
-        }
-    }
-
-    fn resolve_visual_tokens(&self) -> PortalVisualTokens {
-        let resolved =
-            tze_hud_config::tokens::resolve_tokens(&DesignTokenMap::new(), &self.token_overrides);
-        portal_visual_tokens_from_part_tokens(&resolve_portal_tokens(&resolved))
-    }
-
-    fn entry(&mut self, key: &PortalKey) -> &mut DriveEntry {
-        if !self.entries.contains_key(key) {
-            let tokens = self.resolve_visual_tokens();
-            self.entries.insert(key.clone(), DriveEntry::new(tokens));
-        }
-        self.entries.get_mut(key).expect("inserted above")
-    }
-
-    /// Drop a portal's entry and queue its surface for removal.
-    fn detach(&mut self, key: &PortalKey) {
-        if let Some(lease_id) = self.entries.remove(key).and_then(|e| e.scene_lease_id) {
-            self.pending_lease_revocations.push(lease_id);
-        }
-    }
-
-    fn key_for_tile(&self, tile_id: SceneId) -> Option<PortalKey> {
-        self.entries
-            .iter()
-            .find(|(_, entry)| entry.tile_scene_id == Some(tile_id))
-            .map(|(key, _)| key.clone())
-    }
-
-    fn apply_token_map(&mut self, overrides: DesignTokenMap) {
-        self.token_overrides = overrides;
-        let tokens = self.resolve_visual_tokens();
-        for entry in self.entries.values_mut() {
-            entry.tokens = tokens.clone();
         }
     }
 }
@@ -208,7 +153,7 @@ fn portal_state(
     key: &PortalKey,
     tile_id: SceneId,
     portal: &Portal,
-    entry: &DriveEntry,
+    entry: &Binding,
     visible_bytes: usize,
 ) -> PortalView {
     let unit = |u: &Unit, output_kind| TranscriptUnit {
@@ -260,7 +205,7 @@ fn portal_state(
 /// Install the renderer's native tree and overlay state under the driver's lease.
 fn apply_render(
     scene: &mut SceneGraph,
-    binding: &mut DriveEntry,
+    binding: &mut Binding,
     tile_id: SceneId,
     rendered: PortalRender,
 ) -> Result<(), tze_hud_scene::validation::ValidationError> {
@@ -317,27 +262,57 @@ fn apply_render(
 
 /// Owns the [`PortalHub`] and drives its portals onto the scene. See the
 /// module docs.
-pub struct InProcessPortalDriver {
+pub struct PortalDriver {
     /// Authoritative hub, clock and input-readiness identity shared with MCP.
     portals: PortalHandle,
-    drive: InProcessPortalDriveState,
-    /// Test-only observation alias for the most recently granted portal
-    /// lease. Production lifecycle decisions use only the owning DriveEntry.
-    #[cfg(test)]
-    lease_id: Option<SceneId>,
+    entries: HashMap<PortalKey, Binding>,
+    token_overrides: DesignTokenMap,
 }
 
-impl InProcessPortalDriver {
-    pub fn new() -> Self {
-        Self::with_portals(PortalHandle::default())
-    }
-
-    pub fn with_portals(portals: PortalHandle) -> Self {
+impl PortalDriver {
+    pub fn new(portals: PortalHandle) -> Self {
         Self {
             portals,
-            drive: InProcessPortalDriveState::new(),
-            #[cfg(test)]
-            lease_id: None,
+            entries: HashMap::new(),
+            token_overrides: DesignTokenMap::new(),
+        }
+    }
+
+    fn resolve_visual_tokens(&self) -> PortalVisualTokens {
+        let resolved =
+            tze_hud_config::tokens::resolve_tokens(&DesignTokenMap::new(), &self.token_overrides);
+        portal_visual_tokens_from_part_tokens(&resolve_portal_tokens(&resolved))
+    }
+
+    fn entry(&mut self, key: &PortalKey) -> &mut Binding {
+        if !self.entries.contains_key(key) {
+            let tokens = self.resolve_visual_tokens();
+            self.entries.insert(key.clone(), Binding::new(tokens));
+        }
+        self.entries.get_mut(key).expect("inserted above")
+    }
+
+    /// Detach while the caller owns the scene; no second cleanup queue is needed.
+    fn detach(&mut self, key: &PortalKey, scene: &mut SceneGraph) {
+        if let Some(lease_id) = self.entries.remove(key).and_then(|e| e.scene_lease_id)
+            && let Err(error) = scene.revoke_lease(lease_id)
+        {
+            tracing::debug!(?lease_id, ?error, "portal: lease already gone");
+        }
+    }
+
+    fn key_for_tile(&self, tile_id: SceneId) -> Option<PortalKey> {
+        self.entries
+            .iter()
+            .find(|(_, entry)| entry.tile_scene_id == Some(tile_id))
+            .map(|(key, _)| key.clone())
+    }
+
+    fn update_binding_tokens(&mut self, overrides: DesignTokenMap) {
+        self.token_overrides = overrides;
+        let tokens = self.resolve_visual_tokens();
+        for entry in self.entries.values_mut() {
+            entry.tokens = tokens.clone();
         }
     }
 
@@ -368,7 +343,7 @@ impl InProcessPortalDriver {
         if self.has_immediate_work(scene) {
             return Some(PortalWakeDeadline {
                 wall_us: now_us,
-                family: PortalDeadlineFamily::ImmediateWork,
+                authority: None,
             });
         }
         let hub = self
@@ -376,15 +351,9 @@ impl InProcessPortalDriver {
             .next_deadline()
             .map(|d| PortalWakeDeadline {
                 wall_us: d.at_us,
-                family: match d.kind {
-                    DeadlineKind::Render => PortalDeadlineFamily::Cadence,
-                    DeadlineKind::ActivityCue => PortalDeadlineFamily::ActivityCue,
-                    DeadlineKind::Liveness => PortalDeadlineFamily::AgentLiveness,
-                    DeadlineKind::InputExpiry => PortalDeadlineFamily::PendingInputExpiry,
-                },
+                authority: Some(PortalTimedAuthority::Hub(d.kind)),
             });
         let lease = self
-            .drive
             .entries
             .values()
             .filter_map(|entry| scene.leases.get(&entry.scene_lease_id?))
@@ -411,33 +380,30 @@ impl InProcessPortalDriver {
             .min()
             .map(|ms| PortalWakeDeadline {
                 wall_us: ms.saturating_mul(1_000),
-                family: PortalDeadlineFamily::LeaseLifecycle,
+                authority: Some(PortalTimedAuthority::Scene),
             });
         [hub, lease]
             .into_iter()
             .flatten()
-            .min_by_key(|deadline| (deadline.wall_us, deadline.family))
+            .min_by_key(|deadline| (deadline.wall_us, deadline.authority))
     }
 
     /// Scene work that must run on the next drain even with no timed
-    /// deadline: queued lease revocations, or a portal whose lease the scene
+    /// deadline: a stale attachment, or a portal whose lease the scene
     /// already reaped.
     fn has_immediate_work(&self, scene: &SceneGraph) -> bool {
-        !self.drive.pending_lease_revocations.is_empty()
-            || self.lock_hub().is_some_and(|hub| {
-                self.drive
-                    .entries
-                    .iter()
-                    .any(|(key, entry)| hub.incarnation(key) != entry.incarnation)
+        self.lock_hub().is_some_and(|hub| {
+            self.entries
+                .iter()
+                .any(|(key, entry)| hub.incarnation(key) != entry.incarnation)
+        }) || self.entries.values().any(|entry| {
+            entry.scene_lease_id.is_some_and(|lease_id| {
+                scene
+                    .leases
+                    .get(&lease_id)
+                    .is_none_or(|lease| lease.state.is_terminal())
             })
-            || self.drive.entries.values().any(|entry| {
-                entry.scene_lease_id.is_some_and(|lease_id| {
-                    scene
-                        .leases
-                        .get(&lease_id)
-                        .is_none_or(|lease| lease.state.is_terminal())
-                })
-            })
+        })
     }
 
     /// Viewer dismiss of a tile from the hover close button.
@@ -452,23 +418,17 @@ impl InProcessPortalDriver {
         scene: &mut SceneGraph,
         tile_id: SceneId,
     ) -> crate::shell::DismissTileResult {
-        if let Some(key) = self.drive.key_for_tile(tile_id) {
+        if let Some(key) = self.key_for_tile(tile_id) {
             let Some(mut hub) = self.lock_hub() else {
                 // A failed agent service never vetoes the human's override.
                 return crate::shell::dismiss_tile(scene, tile_id);
             };
             hub.reclaim(&key);
             drop(hub);
-            self.drive.entries.remove(&key);
+            self.entries.remove(&key);
             tracing::info!(portal = %key.id, "portal: viewer dismissed surface — reclaimed");
         }
         crate::shell::dismiss_tile(scene, tile_id)
-    }
-
-    /// Replace the driver's wall clock. Harnesses pass the scene's
-    /// `TestClock` so portal liveness and lease grace share one time source.
-    pub fn set_clock(&mut self, clock: Arc<dyn Clock>) {
-        self.portals.clock = clock;
     }
 
     /// Current wall-clock time (µs since the Unix epoch) from the driver's clock.
@@ -484,10 +444,10 @@ impl InProcessPortalDriver {
         tile_id: SceneId,
         snapshot: tze_hud_input::GeometrySnapshot,
     ) -> bool {
-        let Some(key) = self.drive.key_for_tile(tile_id) else {
+        let Some(key) = self.key_for_tile(tile_id) else {
             return false;
         };
-        let entry = self.drive.entry(&key);
+        let entry = self.entry(&key);
         let snapshot = AdapterGeometrySnapshot {
             rect: AdapterPortalRect::from_f32(
                 snapshot.rect.x,
@@ -524,7 +484,7 @@ impl InProcessPortalDriver {
         batch: &DraftNotificationBatch,
         submitted_at_wall_us: u64,
     ) -> Option<PortalInputFeedback> {
-        let key = self.drive.key_for_tile(tile_id)?;
+        let key = self.key_for_tile(tile_id)?;
         let text = batch.submission.as_ref()?.text.clone();
         let submission = self
             .portals
@@ -552,13 +512,9 @@ impl InProcessPortalDriver {
                 status_summary: "portal input rejected".to_string(),
             },
         };
-        self.drive.entry(&key).last_input_feedback = Some(feedback.clone());
+        self.entry(&key).last_input_feedback = Some(feedback.clone());
         if feedback.feedback_state == PortalInputFeedbackState::Rejected
-            && let Some(incarnation) = self
-                .drive
-                .entries
-                .get(&key)
-                .and_then(|entry| entry.incarnation)
+            && let Some(incarnation) = self.entries.get(&key).and_then(|entry| entry.incarnation)
             && let Some(mut hub) = self.lock_hub()
         {
             hub.mark_local_feedback(&key, incarnation);
@@ -569,7 +525,7 @@ impl InProcessPortalDriver {
     /// Apply a new design-token override map, propagating to all live render
     /// bindings; attached portals repaint on the next drain.
     pub fn apply_token_map(&mut self, overrides: DesignTokenMap) {
-        self.drive.apply_token_map(overrides);
+        self.update_binding_tokens(overrides);
         if let Some(mut hub) = self.lock_hub() {
             hub.restyle_all();
         }
@@ -621,7 +577,7 @@ impl InProcessPortalDriver {
                 "portal projection driver drain panicked — drive state reset"
             );
             if !self.portals.hub.is_poisoned() {
-                self.drive = InProcessPortalDriveState::new();
+                self.entries.clear();
             }
         }
     }
@@ -651,7 +607,6 @@ impl InProcessPortalDriver {
                 return;
             };
             let stale: Vec<_> = self
-                .drive
                 .entries
                 .iter()
                 .filter(|(key, entry)| hub.incarnation(key) != entry.incarnation)
@@ -671,7 +626,7 @@ impl InProcessPortalDriver {
             (stale, transitions, due)
         };
         for key in stale {
-            self.drive.detach(&key);
+            self.detach(&key, scene);
         }
         for transition in transitions {
             match transition {
@@ -680,11 +635,10 @@ impl InProcessPortalDriver {
                 }
                 Transition::Reclaimed(key) => {
                     tracing::info!(portal = %key.id, "portal: reclaimed after degraded window");
-                    self.drive.detach(&key);
+                    self.detach(&key, scene);
                 }
             }
         }
-        self.revoke_pending_leases(scene);
         // A returning agent's orphaned lease must be Active again before
         // rendering: a render under an orphaned lease is rejected.
         self.reconnect_recovered_leases(scene);
@@ -715,11 +669,10 @@ impl InProcessPortalDriver {
             hub.incarnation(&due.key)
         };
         if current != Some(incarnation) {
-            self.drive.detach(&due.key);
-            self.revoke_pending_leases(scene);
+            self.detach(&due.key, scene);
             return;
         }
-        let entry = self.drive.entry(&due.key);
+        let entry = self.entry(&due.key);
         entry.incarnation = Some(incarnation);
         self.render(&due.key, scene, input_processor, tab_id, now_us);
     }
@@ -744,21 +697,19 @@ impl InProcessPortalDriver {
             incarnation
         };
         if self
-            .drive
             .entries
             .get(key)
             .is_some_and(|entry| entry.incarnation != Some(incarnation))
         {
-            self.drive.detach(key);
-            self.revoke_pending_leases(scene);
+            self.detach(key, scene);
             return;
         }
-        self.drive.entry(key).incarnation = Some(incarnation);
-        let created = self.drive.entry(key).tile_scene_id.is_none();
+        self.entry(key).incarnation = Some(incarnation);
+        let created = self.entry(key).tile_scene_id.is_none();
         if created && !self.create_tile(key, scene, tab_id) {
             return;
         }
-        let Some(tile_id) = self.drive.entries[key].tile_scene_id else {
+        let Some(tile_id) = self.entries[key].tile_scene_id else {
             return;
         };
         let state = {
@@ -775,15 +726,11 @@ impl InProcessPortalDriver {
                 key,
                 tile_id,
                 portal,
-                &self.drive.entries[key],
+                &self.entries[key],
                 hub.limits().visible_bytes,
             )
         };
-        let entry = self
-            .drive
-            .entries
-            .get_mut(key)
-            .expect("entry ensured above");
+        let entry = self.entries.get_mut(key).expect("entry ensured above");
         entry.pending_geometry = None;
         let viewport = entry
             .latest_geometry
@@ -876,7 +823,7 @@ impl InProcessPortalDriver {
             tracing::warn!(portal = %key.id, "portal: no lease for a new portal tile");
             return false;
         };
-        let entry = self.drive.entry(key);
+        let entry = self.entry(key);
         let bounds = Rect::new(
             0.0,
             0.0,
@@ -913,25 +860,19 @@ impl InProcessPortalDriver {
         }
     }
 
-    /// The portal's scene lease, granting one if it has none or its old one
-    /// is terminal (a portal re-attached after reclaim starts fresh). Never
-    /// replaces an orphaned lease: that grace window belongs to the portal.
+    /// Return an active scene lease, granting one only for a fresh binding.
+    /// Existing inactive leases are never replaced here; terminal reconciliation
+    /// tombstones the matching attachment before a fresh attach can bind again.
     fn ensure_portal_lease(&mut self, key: &PortalKey, scene: &mut SceneGraph) -> Option<SceneId> {
-        let entry = self.drive.entry(key);
+        let entry = self.entry(key);
         if let Some(lease_id) = entry.scene_lease_id {
             if scene.lease_is_active(&lease_id) {
                 return Some(lease_id);
             }
-            if scene.lease_is_orphaned(&lease_id) {
-                return None;
-            }
+            return None;
         }
         let lease_id = scene.grant_lease(PORTAL_DRIVER_NAMESPACE, PORTAL_LEASE_TTL_MS);
         entry.scene_lease_id = Some(lease_id);
-        #[cfg(test)]
-        {
-            self.lease_id = Some(lease_id);
-        }
         Some(lease_id)
     }
 
@@ -948,8 +889,10 @@ impl InProcessPortalDriver {
             let Some(hub) = self.lock_hub() else {
                 return;
             };
-            self.drive
-                .entries
+            if hub.liveness_suspended() {
+                return;
+            }
+            self.entries
                 .iter()
                 .filter_map(|(key, entry)| {
                     let portal = hub.get(key)?;
@@ -983,8 +926,7 @@ impl InProcessPortalDriver {
             let Some(hub) = self.lock_hub() else {
                 return;
             };
-            self.drive
-                .entries
+            self.entries
                 .iter()
                 .filter_map(|(key, entry)| {
                     let portal = hub.get(key)?;
@@ -1013,7 +955,6 @@ impl InProcessPortalDriver {
     /// expiry swept elsewhere) has lost its surface: reclaim it in the hub.
     fn forget_lost_surfaces(&mut self, scene: &SceneGraph) {
         let lost: Vec<PortalKey> = self
-            .drive
             .entries
             .iter()
             .filter(|(_, entry)| {
@@ -1032,26 +973,12 @@ impl InProcessPortalDriver {
                 return;
             };
             // Do not reclaim a new attachment because the old surface expired.
-            if hub.incarnation(&key) == self.drive.entries[&key].incarnation {
+            if hub.incarnation(&key) == self.entries[&key].incarnation {
                 hub.reclaim(&key);
             }
             drop(hub);
-            self.drive.entries.remove(&key);
+            self.entries.remove(&key);
         }
-    }
-
-    fn revoke_pending_leases(&mut self, scene: &mut SceneGraph) {
-        for lease_id in self.drive.pending_lease_revocations.drain(..) {
-            if let Err(error) = scene.revoke_lease(lease_id) {
-                tracing::debug!(?lease_id, ?error, "portal: lease already gone");
-            }
-        }
-    }
-}
-
-impl Default for InProcessPortalDriver {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -1060,9 +987,10 @@ impl Default for InProcessPortalDriver {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::Arc;
     use tze_hud_input::{DraftSubmission, GeometrySnapshot, PortalRect};
     use tze_hud_projection::hub::{PortalError, PortalLimits, Publish};
-    use tze_hud_scene::{NodeData, TestClock};
+    use tze_hud_scene::{Clock, NodeData, TestClock};
 
     /// The header marker line the scene renderer paints while the agent is
     /// actively appending (mirrors `render::PORTAL_ACTIVITY_MARKER_LINE`).
@@ -1076,11 +1004,11 @@ mod tests {
     }
 
     /// Direct `hud_publish` state transition at `now_us`.
-    fn publish(driver: &mut InProcessPortalDriver, id: &str, text: &str, now_us: u64) {
+    fn publish(driver: &mut PortalDriver, id: &str, text: &str, now_us: u64) {
         publish_for(driver, &key(id), text, now_us);
     }
 
-    fn publish_for(driver: &InProcessPortalDriver, key: &PortalKey, text: &str, now_us: u64) {
+    fn publish_for(driver: &PortalDriver, key: &PortalKey, text: &str, now_us: u64) {
         driver
             .hub_mut()
             .publish(
@@ -1098,7 +1026,7 @@ mod tests {
     }
 
     fn hold(
-        driver: &mut InProcessPortalDriver,
+        driver: &mut PortalDriver,
         agent: &str,
         id: &str,
         ttl_ms: u64,
@@ -1116,45 +1044,35 @@ mod tests {
     }
 
     /// Driver and scene sharing one `TestClock`, as the harnesses run them.
-    fn clocked() -> (
-        InProcessPortalDriver,
-        SceneGraph,
-        SceneId,
-        InputProcessor,
-        TestClock,
-    ) {
+    fn clocked() -> (PortalDriver, SceneGraph, SceneId, InputProcessor, TestClock) {
         let clock = TestClock::new(1_000);
-        let mut driver = InProcessPortalDriver::new();
-        driver.set_clock(Arc::new(clock.clone()));
+        let driver = PortalDriver::new(PortalHandle::new(
+            PortalHub::default(),
+            Arc::new(clock.clone()),
+        ));
         let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, Arc::new(clock.clone()));
         let tab = scene.create_tab("Main", 0).unwrap();
         (driver, scene, tab, InputProcessor::new(), clock)
     }
 
-    fn tile(driver: &InProcessPortalDriver, id: &str) -> SceneId {
-        driver.drive.entries[&key(id)]
+    fn tile(driver: &PortalDriver, id: &str) -> SceneId {
+        driver.entries[&key(id)]
             .tile_scene_id
             .expect("drain created the portal tile")
     }
 
-    fn lease(driver: &InProcessPortalDriver, id: &str) -> SceneId {
-        driver.drive.entries[&key(id)]
+    fn lease(driver: &PortalDriver, id: &str) -> SceneId {
+        driver.entries[&key(id)]
             .scene_lease_id
             .expect("portal lease")
     }
 
     /// Shrink the portal to a one-line viewport (tile bounds plus the resize
     /// snapshot the window layer pushes). Returns the line height.
-    fn one_line_viewport(
-        driver: &mut InProcessPortalDriver,
-        scene: &mut SceneGraph,
-        id: &str,
-    ) -> f32 {
+    fn one_line_viewport(driver: &mut PortalDriver, scene: &mut SceneGraph, id: &str) -> f32 {
         let tile_id = tile(driver, id);
-        let line_h = driver.drive.entries[&key(id)]
-            .tokens
-            .transcript_font_size_px
-            * PORTAL_LINE_HEIGHT_MULTIPLIER;
+        let line_h =
+            driver.entries[&key(id)].tokens.transcript_font_size_px * PORTAL_LINE_HEIGHT_MULTIPLIER;
         let viewport_h = line_h.ceil();
         let _ = scene.update_tile_bounds(
             tile_id,
@@ -1180,7 +1098,7 @@ mod tests {
     }
 
     fn submit(
-        driver: &mut InProcessPortalDriver,
+        driver: &mut PortalDriver,
         tile_id: SceneId,
         text: &str,
         now_us: u64,
@@ -1220,7 +1138,7 @@ mod tests {
 
     #[test]
     fn portal_composer_submission_enters_pending_input_queue_and_can_be_acknowledged() {
-        let mut driver = InProcessPortalDriver::new();
+        let mut driver = PortalDriver::new(PortalHandle::default());
         let (mut scene, tab, mut processor) = scene();
         publish(&mut driver, "p", "assistant is ready", 100);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 200);
@@ -1263,7 +1181,7 @@ mod tests {
             );
         }
 
-        let poll = |driver: &mut InProcessPortalDriver, ack: Vec<String>, now_us| {
+        let poll = |driver: &mut PortalDriver, ack: Vec<String>, now_us| {
             driver.hub_mut().poll_input(AGENT, &ack, None, now_us)
         };
         let batch = poll(&mut driver, Vec::new(), 1_100);
@@ -1358,7 +1276,7 @@ mod tests {
             }
             driver.drain_inner(&mut scene, &mut processor, Some(tab), 200);
             let tiles: [_; 2] =
-                std::array::from_fn(|i| driver.drive.entries[&keys[i]].tile_scene_id.unwrap());
+                std::array::from_fn(|i| driver.entries[&keys[i]].tile_scene_id.unwrap());
             let identities: [_; 2] = std::array::from_fn(|i| {
                 scene
                     .portal_surface(tiles[i])
@@ -1367,7 +1285,7 @@ mod tests {
                     .session_id
                     .clone()
             });
-            let cleared_lease = driver.drive.entries[&keys[0]].scene_lease_id.unwrap();
+            let cleared_lease = driver.entries[&keys[0]].scene_lease_id.unwrap();
             let original_incarnation = driver.hub_mut().incarnation(&keys[0]);
             assert_ne!(tiles[0], tiles[1]);
             assert_ne!(identities[0], identities[1]);
@@ -1377,7 +1295,7 @@ mod tests {
             driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + FRAME_US);
             let mut input_ids = Vec::new();
             for (i, key) in keys.iter().enumerate() {
-                assert_eq!(driver.drive.entries[key].tile_scene_id, Some(tiles[i]));
+                assert_eq!(driver.entries[key].tile_scene_id, Some(tiles[i]));
                 assert_eq!(
                     scene.portal_surface(tiles[i]).unwrap().identity.session_id,
                     identities[i]
@@ -1437,11 +1355,11 @@ mod tests {
 
             driver.hub_mut().clear(&keys[0]).unwrap();
             driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + 2 * FRAME_US);
-            assert!(!driver.drive.entries.contains_key(&keys[0]));
+            assert!(!driver.entries.contains_key(&keys[0]));
             assert!(!scene.tiles.contains_key(&tiles[0]));
             assert!(scene.portal_surface(tiles[0]).is_none());
             assert!(!scene.lease_is_active(&cleared_lease));
-            assert_eq!(driver.drive.entries[&keys[1]].tile_scene_id, Some(tiles[1]));
+            assert_eq!(driver.entries[&keys[1]].tile_scene_id, Some(tiles[1]));
             assert_eq!(
                 scene.portal_surface(tiles[1]).unwrap().identity.session_id,
                 identities[1]
@@ -1461,7 +1379,7 @@ mod tests {
             );
             publish_for(&driver, &keys[1], "reconnected", 200 + 3 * FRAME_US + 1);
             driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + 4 * FRAME_US);
-            assert_eq!(driver.drive.entries[&keys[1]].tile_scene_id, Some(tiles[1]));
+            assert_eq!(driver.entries[&keys[1]].tile_scene_id, Some(tiles[1]));
             assert_eq!(
                 scene.portal_surface(tiles[1]).unwrap().identity.session_id,
                 identities[1]
@@ -1494,7 +1412,7 @@ mod tests {
                 200 + 4 * FRAME_US + 3,
             );
             driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + 5 * FRAME_US);
-            let fresh_tile = driver.drive.entries[&keys[0]].tile_scene_id.unwrap();
+            let fresh_tile = driver.entries[&keys[0]].tile_scene_id.unwrap();
             assert_ne!(fresh_tile, tiles[0]);
             assert_ne!(driver.hub_mut().incarnation(&keys[0]), original_incarnation);
             let fresh_surface = scene.portal_surface(fresh_tile).unwrap();
@@ -1503,7 +1421,7 @@ mod tests {
             assert!(tile_markdown(&scene, fresh_tile).contains("fresh-attachment"));
             assert!(!tile_markdown(&scene, fresh_tile).contains("updated-0"));
             assert!(driver.hub_mut().get(&keys[0]).unwrap().inputs.is_empty());
-            assert!(driver.drive.key_for_tile(tiles[0]).is_none());
+            assert!(driver.key_for_tile(tiles[0]).is_none());
             assert_eq!(
                 scene.portal_surface(tiles[1]).unwrap().identity.session_id,
                 identities[1]
@@ -1515,7 +1433,7 @@ mod tests {
     /// (§6b.4, hud-npq6g), and the jump-to-latest unread badge (hud-g1ena.3).
     #[test]
     fn drain_render_portal_notify_tile_content_appended_wiring() {
-        let mut driver = InProcessPortalDriver::new();
+        let mut driver = PortalDriver::new(PortalHandle::default());
         let (mut scene, tab, mut processor) = scene();
         publish(&mut driver, "p", "line-0", 100);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 200);
@@ -1538,7 +1456,7 @@ mod tests {
             9,
             "the drained batch's unread count"
         );
-        let entry = &driver.drive.entries[&key("p")];
+        let entry = &driver.entries[&key("p")];
         assert!(
             entry.pending_geometry.is_none(),
             "the resize is delivered once"
@@ -1550,7 +1468,7 @@ mod tests {
     /// the OUTPUT transcript (codex P2, hud-y4pzu).
     #[test]
     fn drain_render_portal_height_accounting_includes_input_history() {
-        let mut driver = InProcessPortalDriver::new();
+        let mut driver = PortalDriver::new(PortalHandle::default());
         let (mut scene, tab, mut processor) = scene();
         publish(&mut driver, "p", "line-0", 100);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 200);
@@ -1648,17 +1566,15 @@ mod tests {
 
     #[test]
     fn apply_token_map_propagates_to_drive_state() {
-        let font = |driver: &InProcessPortalDriver, id: &str| {
-            driver.drive.entries[&key(id)]
-                .tokens
-                .transcript_font_size_px
+        let font = |driver: &PortalDriver, id: &str| {
+            driver.entries[&key(id)].tokens.transcript_font_size_px
         };
         let tokens = |size: &str| {
             let mut map = DesignTokenMap::new();
             map.insert("portal.transcript.font_size".to_string(), size.to_string());
             map
         };
-        let mut driver = InProcessPortalDriver::new();
+        let mut driver = PortalDriver::new(PortalHandle::default());
         let (mut scene, tab, mut processor) = scene();
         driver.apply_token_map(tokens("32"));
         publish(&mut driver, "pre", "x", 100);
@@ -1686,7 +1602,7 @@ mod tests {
 
     #[test]
     fn drain_paints_published_transcript_onto_tile() {
-        let mut driver = InProcessPortalDriver::new();
+        let mut driver = PortalDriver::new(PortalHandle::default());
         let (mut scene, tab, mut processor) = scene();
         publish(&mut driver, "p", "UNIQUE-TRANSCRIPT-MARKER-42", 100);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 200);
@@ -1706,7 +1622,7 @@ mod tests {
         let long_key = PortalKey::new("a".repeat(128), "p".repeat(128));
         publish_for(&driver, &long_key, "LONG-IDENTITY-TRANSCRIPT", 300);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + 2 * FRAME_US);
-        let long_tile = driver.drive.entries[&long_key].tile_scene_id.unwrap();
+        let long_tile = driver.entries[&long_key].tile_scene_id.unwrap();
         assert!(tile_markdown(&scene, long_tile).contains("LONG-IDENTITY-TRANSCRIPT"));
     }
 
@@ -1731,11 +1647,11 @@ mod tests {
         ];
         let mut identities = std::collections::HashSet::new();
         for (portal_key, alias) in cases {
-            let mut driver = InProcessPortalDriver::new();
+            let mut driver = PortalDriver::new(PortalHandle::default());
             let (mut scene, tab, mut processor) = scene();
             publish_for(&driver, &portal_key, "hello surface", 100);
             driver.drain_inner(&mut scene, &mut processor, Some(tab), 200);
-            let tile_id = driver.drive.entries[&portal_key].tile_scene_id.unwrap();
+            let tile_id = driver.entries[&portal_key].tile_scene_id.unwrap();
 
             let surface = scene
                 .portal_surface(tile_id)
@@ -1808,7 +1724,7 @@ mod tests {
             );
         }
 
-        let driver = InProcessPortalDriver::new();
+        let driver = PortalDriver::new(PortalHandle::default());
         for invalid_id in ["p".repeat(129), "界".repeat(43)] {
             assert_eq!(
                 driver.hub_mut().publish(
@@ -1833,7 +1749,7 @@ mod tests {
     /// that adds no output (hud-lylbz).
     #[test]
     fn drain_then_render_surfaces_live_unread_count() {
-        let mut driver = InProcessPortalDriver::new();
+        let mut driver = PortalDriver::new(PortalHandle::default());
         let (mut scene, tab, mut processor) = scene();
         for i in 0..3 {
             publish(&mut driver, "p", &format!("line-{i}"), 100 + i);
@@ -1857,7 +1773,7 @@ mod tests {
     /// tab, activated only once the tile exists, or into a new "Main" tab.
     #[test]
     fn drain_with_no_active_tab_activates_tab_and_paints() {
-        let mut driver = InProcessPortalDriver::new();
+        let mut driver = PortalDriver::new(PortalHandle::default());
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         let main = scene.create_tab("Main", 0).unwrap();
         scene.active_tab = None; // a widget-less default tab boots inactive
@@ -1867,7 +1783,7 @@ mod tests {
         assert_eq!(scene.active_tab, Some(main));
         assert!(tile_markdown(&scene, tile(&driver, "p1")).contains("NO-ACTIVE-TAB-MARKER-1"));
 
-        let mut driver = InProcessPortalDriver::new();
+        let mut driver = PortalDriver::new(PortalHandle::default());
         let mut scene = SceneGraph::new(1920.0, 1080.0);
         publish(&mut driver, "p2", "NO-TABS-MARKER-2", 100);
         driver.drain_inner(&mut scene, &mut processor, None, 200);
@@ -1878,7 +1794,7 @@ mod tests {
 
     #[test]
     fn create_portal_tile_failure_does_not_mutate_active_tab() {
-        let mut driver = InProcessPortalDriver::new();
+        let mut driver = PortalDriver::new(PortalHandle::default());
         // A 1×1 display rejects the portal's bounds.
         let mut scene = SceneGraph::new(1.0, 1.0);
         scene.create_tab("Main", 0).unwrap();
@@ -1887,7 +1803,7 @@ mod tests {
         publish(&mut driver, "p", "hello", 100);
         driver.drain_inner(&mut scene, &mut processor, None, 200);
         assert_eq!(scene.active_tab, None, "hud-zccuf");
-        assert!(driver.drive.entries[&key("p")].tile_scene_id.is_none());
+        assert!(driver.entries[&key("p")].tile_scene_id.is_none());
     }
 
     /// A height-only head trim (same bytes, fewer lines) still reaches
@@ -1897,16 +1813,13 @@ mod tests {
     fn head_trim_fires_on_height_shrink_without_byte_shrink_runtime_path() {
         use tze_hud_input::ScrollEvent;
 
-        let mut driver = InProcessPortalDriver {
-            portals: PortalHandle::new(
-                PortalHub::new(PortalLimits {
-                    visible_bytes: 30,
-                    ..PortalLimits::default()
-                }),
-                Arc::new(tze_hud_scene::SystemClock::new()),
-            ),
-            ..InProcessPortalDriver::new()
-        };
+        let mut driver = PortalDriver::new(PortalHandle::new(
+            PortalHub::new(PortalLimits {
+                visible_bytes: 30,
+                ..PortalLimits::default()
+            }),
+            Arc::new(tze_hud_scene::SystemClock::new()),
+        ));
         let (mut scene, tab, mut processor) = scene();
         publish(&mut driver, "p", "S", 100);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 200);
@@ -1941,7 +1854,7 @@ mod tests {
     /// immediate work even if a scene-lock miss deferred it.
     #[test]
     fn cleanup_work_remains_immediate_after_a_simulated_lock_miss() {
-        let mut driver = InProcessPortalDriver::new();
+        let mut driver = PortalDriver::new(PortalHandle::default());
         let (mut scene, tab, mut processor) = scene();
         publish(&mut driver, "p", "surface", 100);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 100);
@@ -1949,10 +1862,7 @@ mod tests {
         assert_eq!(scene.tile_count(), 1);
 
         assert_eq!(driver.hub_mut().clear(&key("p")), Ok(()));
-        assert_eq!(
-            driver.next_wake_deadline(&scene).unwrap().family,
-            PortalDeadlineFamily::ImmediateWork
-        );
+        assert_eq!(driver.next_wake_deadline(&scene).unwrap().authority, None);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 200);
         assert_eq!(scene.tile_count(), 0);
         assert!(!scene.lease_is_active(&lease_id));
@@ -1961,6 +1871,14 @@ mod tests {
             None,
             "nothing left to do"
         );
+
+        let cleaned_version = scene.version;
+        driver.drain_inner(&mut scene, &mut processor, Some(tab), 201);
+        assert_eq!(
+            scene.version, cleaned_version,
+            "detached lease cleanup is exactly once"
+        );
+        assert!(!driver.entries.contains_key(&key("p")));
 
         // Clear and reattach before a drain: transient absence must not reuse
         // the previous incarnation's tile or leave its lease orphaned.
@@ -1974,10 +1892,7 @@ mod tests {
             driver.hub_mut().incarnation(&key("p")),
             Some(old_incarnation)
         );
-        assert_eq!(
-            driver.next_wake_deadline(&scene).unwrap().family,
-            PortalDeadlineFamily::ImmediateWork
-        );
+        assert_eq!(driver.next_wake_deadline(&scene).unwrap().authority, None);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 400);
         assert_eq!(scene.tile_count(), 1);
         assert!(!scene.tiles.contains_key(&old_tile));
@@ -2014,7 +1929,7 @@ mod tests {
 
         // Collect old unread work, then clear and replace the key before its
         // first paint. Applying that old due batch must not paint the new one.
-        let mut first_paint_driver = InProcessPortalDriver::new();
+        let mut first_paint_driver = PortalDriver::new(PortalHandle::default());
         let (mut first_scene, first_tab, mut first_processor) = self::scene();
         publish(&mut first_paint_driver, "p", "old first", 100);
         publish(&mut first_paint_driver, "p", "old second", 101);
@@ -2025,7 +1940,7 @@ mod tests {
             (due, incarnation)
         };
         assert_eq!(pending.0.unread, 2);
-        assert!(first_paint_driver.drive.entries.is_empty());
+        assert!(first_paint_driver.entries.is_empty());
         assert_eq!(first_paint_driver.hub_mut().clear(&key("p")), Ok(()));
         publish(&mut first_paint_driver, "p", "fresh replacement", 300);
         let replacement_before = {
@@ -2044,7 +1959,7 @@ mod tests {
             Some(first_tab),
             400,
         );
-        assert!(first_paint_driver.drive.entries.is_empty());
+        assert!(first_paint_driver.entries.is_empty());
         assert_eq!(first_scene.tile_count(), 0);
         assert!(first_scene.leases.is_empty());
         assert_eq!(
@@ -2078,7 +1993,7 @@ mod tests {
     /// `hud_hold` is then NOT_HELD and the next publish attaches fresh.
     #[test]
     fn viewer_dismiss_portal_detaches_and_next_publish_reattaches() {
-        let mut driver = InProcessPortalDriver::new();
+        let mut driver = PortalDriver::new(PortalHandle::default());
         let (mut scene, tab, mut processor) = scene();
         publish(&mut driver, "p", "live transcript", 100);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 100);
@@ -2090,7 +2005,7 @@ mod tests {
             old_lease
         );
         assert_eq!(scene.tile_count(), 0, "tile removed immediately");
-        assert!(!driver.drive.entries.contains_key(&key("p")));
+        assert!(!driver.entries.contains_key(&key("p")));
         assert_eq!(
             hold(&mut driver, AGENT, "p", 1_000, 150),
             Err(PortalError::NotHeld)
@@ -2102,6 +2017,28 @@ mod tests {
         assert_ne!(lease(&driver, "p"), old_lease);
         let content = tile_markdown(&scene, tile(&driver, "p"));
         assert!(content.contains("fresh") && !content.contains("live transcript"));
+
+        driver.hub_mut().suspend_liveness(250);
+        scene.suspend_all_leases(scene.now_millis());
+        let paused_tile = tile(&driver, "p");
+        driver.viewer_dismiss_tile(&mut scene, paused_tile);
+        assert_eq!(scene.tile_count(), 0);
+        assert_eq!(driver.hub_mut().clear(&key("p")), Ok(()));
+        driver.hub_mut().resume_liveness(300);
+        driver.drain_inner(&mut scene, &mut processor, Some(tab), 300);
+        assert_eq!(driver.next_wake_deadline(&scene), None);
+        publish(&mut driver, "p", "poison fallback", 400);
+        driver.drain_inner(&mut scene, &mut processor, Some(tab), 400);
+        let fallback_tile = tile(&driver, "p");
+        let hub = Arc::clone(&driver.portals.hub);
+        let _ = std::thread::spawn(move || {
+            let _guard = hub.lock().unwrap();
+            panic!("poison fixture");
+        })
+        .join();
+        driver.viewer_dismiss_tile(&mut scene, fallback_tile);
+        assert_eq!(scene.tile_count(), 0, "poison never vetoes viewer dismiss");
+        assert_eq!(driver.next_wake_deadline(&scene), None);
     }
 
     /// The scene reaped a portal's lease on its own (grace or TTL sweep):
@@ -2118,10 +2055,7 @@ mod tests {
         clock.advance(SceneGraph::DEFAULT_GRACE_PERIOD_MS + 1);
         assert_eq!(scene.expire_leases().len(), 1);
         assert_eq!(scene.tile_count(), 0);
-        assert_eq!(
-            driver.next_wake_deadline(&scene).unwrap().family,
-            PortalDeadlineFamily::ImmediateWork
-        );
+        assert_eq!(driver.next_wake_deadline(&scene).unwrap().authority, None);
         driver.drain(&mut scene, &mut processor, Some(tab));
         assert!(
             driver.hub_mut().get(&key("p")).is_none(),
@@ -2140,7 +2074,7 @@ mod tests {
 
     #[test]
     fn parked_portal_repaints_pending_count_at_input_expiry() {
-        let mut driver = InProcessPortalDriver::new();
+        let mut driver = PortalDriver::new(PortalHandle::default());
         let (mut scene, tab, mut processor) = scene();
         publish(&mut driver, "p", "waiting", 0);
         hold(&mut driver, AGENT, "p", 0, 0).unwrap();
@@ -2157,14 +2091,14 @@ mod tests {
             driver.next_wake_deadline(&scene),
             Some(PortalWakeDeadline {
                 wall_us: expires_us,
-                family: PortalDeadlineFamily::PendingInputExpiry,
+                authority: Some(PortalTimedAuthority::Hub(DeadlineKind::InputExpiry)),
             })
         );
         driver.drain_inner(&mut scene, &mut processor, Some(tab), expires_us);
         assert!(tile_markdown(&scene, tile_id).contains("pending HUD input: 0"));
         assert_ne!(
-            driver.next_wake_deadline(&scene).map(|d| d.family),
-            Some(PortalDeadlineFamily::PendingInputExpiry),
+            driver.next_wake_deadline(&scene).map(|d| d.authority),
+            Some(Some(PortalTimedAuthority::Hub(DeadlineKind::InputExpiry))),
             "the expiry deadline is one-shot"
         );
     }
@@ -2173,7 +2107,7 @@ mod tests {
     /// the unread count, and is not repainted again (hud-kbm80).
     #[test]
     fn activity_cue_quiesces_after_deadline_without_new_update() {
-        let mut driver = InProcessPortalDriver::new();
+        let mut driver = PortalDriver::new(PortalHandle::default());
         let (mut scene, tab, mut processor) = scene();
         publish(&mut driver, "p", "streaming line", 100);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 200);
@@ -2211,7 +2145,7 @@ mod tests {
 
     #[test]
     fn fresh_append_extends_activity_cue_deadline() {
-        let mut driver = InProcessPortalDriver::new();
+        let mut driver = PortalDriver::new(PortalHandle::default());
         let (mut scene, tab, mut processor) = scene();
         publish(&mut driver, "p", "line one", 100);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 200);
@@ -2245,7 +2179,7 @@ mod tests {
     /// kept); the agent returning within grace resumes the SAME tile with
     /// its transcript intact and nothing duplicated.
     #[test]
-    fn disconnect_then_reconnect_within_grace_resumes_same_surface_without_duplication() {
+    fn portal_degrade_then_publish_within_grace_resumes_same_tile() {
         const FIRST: &str = "ALPHA-committed-before-drop";
         const SECOND: &str = "BETA-continued-after-resume";
         let (mut driver, mut scene, tab, mut processor, clock) = clocked();
@@ -2262,6 +2196,11 @@ mod tests {
         );
         assert!(driver.degraded(&key("p")));
 
+        let input_id = driver
+            .hub_mut()
+            .submit_reply(&key("p"), "viewer reply".into(), clock.now_us())
+            .unwrap();
+        let before = driver.hub_mut().get(&key("p")).unwrap().clone();
         clock.advance(5_000);
         publish(&mut driver, "p", SECOND, clock.now_us());
         driver.drain(&mut scene, &mut processor, Some(tab));
@@ -2276,12 +2215,16 @@ mod tests {
         let content = tile_markdown(&scene, tile_id);
         assert_eq!(content.matches(FIRST).count(), 1, "{content}");
         assert_eq!(content.matches(SECOND).count(), 1, "{content}");
+        let hub = driver.hub_mut();
+        let recovered = hub.get(&key("p")).unwrap();
+        assert_eq!(recovered.replies, before.replies);
+        assert_eq!(recovered.inputs, before.inputs);
+        assert_eq!(recovered.inputs[0].id, input_id);
     }
 
     /// Production idle sweeps degrade the portal and, 30 s later, remove it.
-    /// The historical parent name is retained after transport-loss removal.
     #[test]
-    fn production_ungraceful_drop_reaps_surface_on_grace_expiry_via_drain_sweep() {
+    fn reclaimed_portal_removes_tile_and_state() {
         let (mut driver, mut scene, tab, mut processor, clock) = clocked();
         publish(&mut driver, "p", "committed before drop", clock.now_us());
         driver.drain(&mut scene, &mut processor, Some(tab));
@@ -2302,7 +2245,7 @@ mod tests {
         assert_eq!(scene.tile_count(), 0, "reclaimed with no agent help");
         assert!(scene.version > version);
         assert!(!scene.lease_is_active(&lease_id));
-        assert!(!driver.drive.entries.contains_key(&key("p")));
+        assert!(!driver.entries.contains_key(&key("p")));
         assert!(driver.hub_mut().get(&key("p")).is_none());
 
         driver.drain(&mut scene, &mut processor, Some(tab));
@@ -2322,7 +2265,7 @@ mod tests {
             let dismissed_tile = tile(&driver, "dismissed");
             driver.viewer_dismiss_tile(&mut scene, dismissed_tile);
             assert!(driver.hub_mut().get(&key("dismissed")).is_none());
-            assert!(driver.drive.entries.is_empty());
+            assert!(driver.entries.is_empty());
             assert_eq!(scene.tile_count(), 0);
 
             let publications = [
@@ -2353,7 +2296,7 @@ mod tests {
                 .map(|(identity, _)| driver.hub_mut().get(identity).unwrap().clone())
                 .collect();
             assert!(before.iter().all(|portal| portal.last_render_us.is_none()));
-            assert!(driver.drive.entries.is_empty());
+            assert!(driver.entries.is_empty());
             assert_eq!(
                 scene.tile_count(),
                 0,
@@ -2385,7 +2328,7 @@ mod tests {
             let surfaces: Vec<_> = publications
                 .iter()
                 .map(|(identity, _)| {
-                    let entry = &driver.drive.entries[identity];
+                    let entry = &driver.entries[identity];
                     (entry.tile_scene_id.unwrap(), entry.scene_lease_id.unwrap())
                 })
                 .collect();
@@ -2418,14 +2361,14 @@ mod tests {
                     !driver.hub_mut().get(identity).unwrap().dirty,
                     "repeat idle drain does not dirty"
                 );
-                let entry = &driver.drive.entries[identity];
+                let entry = &driver.entries[identity];
                 assert_eq!(entry.tile_scene_id, Some(*tile_id));
                 assert_eq!(entry.scene_lease_id, Some(*lease_id));
             }
             if returning_agent {
                 publish_for(&driver, alpha, "ALPHA-after-resume", clock.now_us());
                 driver.drain(&mut scene, &mut processor, Some(tab));
-                let entry = &driver.drive.entries[alpha];
+                let entry = &driver.entries[alpha];
                 assert_eq!(entry.tile_scene_id, Some(surfaces[0].0));
                 assert_eq!(entry.scene_lease_id, Some(surfaces[0].1));
                 assert!(scene.lease_is_active(&surfaces[0].1));
@@ -2476,7 +2419,7 @@ mod tests {
                 } else {
                     assert!(!scene.tiles.contains_key(tile_id));
                     assert!(scene.leases[lease_id].state.is_terminal());
-                    assert!(!driver.drive.entries.contains_key(identity));
+                    assert!(!driver.entries.contains_key(identity));
                     assert!(driver.hub_mut().get(identity).is_none());
                 }
             }
@@ -2486,14 +2429,14 @@ mod tests {
                 driver.drain(&mut scene, &mut processor, Some(tab));
                 assert_eq!(scene.version, version, "reclaimed identities do not revive");
                 assert_eq!(scene.tile_count(), 0);
-                assert!(driver.drive.entries.is_empty());
+                assert!(driver.entries.is_empty());
                 assert!(driver.hub_mut().list(AGENT).is_empty());
             }
         }
         let (mut empty, mut scene, tab, mut processor, _) = clocked();
         empty.drain(&mut scene, &mut processor, Some(tab));
         assert_eq!(scene.tile_count(), 0);
-        assert!(empty.drive.entries.is_empty());
+        assert!(empty.entries.is_empty());
     }
 
     /// `hud_hold` keeps a portal past the idle reap window (degrade + reclaim)
@@ -2514,7 +2457,7 @@ mod tests {
             driver.next_wake_deadline(&scene),
             Some(PortalWakeDeadline {
                 wall_us: hold_end_us,
-                family: PortalDeadlineFamily::AgentLiveness,
+                authority: Some(PortalTimedAuthority::Hub(DeadlineKind::Liveness)),
             })
         );
 
@@ -2539,7 +2482,7 @@ mod tests {
     /// `ttl_ms: 0` holds a portal until cleared; holds are per agent.
     #[test]
     fn portal_hold_without_ttl_never_degrades() {
-        let mut driver = InProcessPortalDriver::new();
+        let mut driver = PortalDriver::new(PortalHandle::default());
         publish(&mut driver, "p", "x", 1_000);
         assert_eq!(hold(&mut driver, AGENT, "p", 0, 1_000), Ok(()));
         driver.hub_mut().take_due(1_000);
