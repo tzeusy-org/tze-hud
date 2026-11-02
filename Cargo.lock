@@ -3517,6 +3517,7 @@ dependencies = [
  "bytemuck",
  "glyphon",
  "proptest",
+ "rayon",
  "resvg",
  "thiserror 2.0.18",
  "tiny-skia 0.12.0",

@@ -253,7 +253,26 @@ pub(crate) fn build_font_system(config: &FontConfig) -> (FontSystem, ResolvedFon
     db.set_monospace_family(resolved.mono.clone());
     db.set_serif_family(resolved.serif.clone());
 
-    (FontSystem::new_with_locale_and_db(locale(), db), resolved)
+    (new_font_system(db), resolved)
+}
+
+/// cosmic-text caches monospace faces with a rayon `par_iter` at construction.
+/// Run it in a scoped one-thread pool: otherwise rayon spawns its global pool,
+/// one thread per logical CPU, which then idles for the life of the process.
+/// The scoped pool's thread exits when the pool drops.
+fn new_font_system(db: fontdb::Database) -> FontSystem {
+    let locale = locale();
+    match rayon::ThreadPoolBuilder::new()
+        .num_threads(1)
+        .thread_name(|_| "tze-font-init".to_owned())
+        .build()
+    {
+        Ok(pool) => pool.install(|| FontSystem::new_with_locale_and_db(locale, db)),
+        Err(e) => {
+            tracing::warn!(error = %e, "font init pool unavailable; using rayon's global pool");
+            FontSystem::new_with_locale_and_db(locale, db)
+        }
+    }
 }
 
 /// Raw bytes of every bundled face, for font databases of a different fontdb
