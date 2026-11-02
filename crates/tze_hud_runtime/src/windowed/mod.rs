@@ -85,7 +85,7 @@ use winit::window::{Fullscreen, Window, WindowAttributes, WindowId};
 use crate::scene_startup::run_scene_startup;
 use tze_hud_compositor::{
     Compositor, CompositorSurface, FocusRingOwnerHandle, LocalComposerStateHandle,
-    PortalViewerEchoQueue, ResizeGripHoverHandle, TileCloseHoverHandle, WindowSurface,
+    ResizeGripHoverHandle, TileCloseHoverHandle, WindowSurface,
 };
 use tze_hud_config::resolve_runtime_widget_asset_store;
 use tze_hud_input::{
@@ -853,11 +853,6 @@ impl WinitApp {
                 }
             }
         }
-        // Flush any coalesced composer draft notifications accumulated during
-        // the current event batch.  This is the normal settle point: all key
-        // events for this winit iteration have been drained above; flushing here
-        // guarantees the terminal draft state is delivered within the same batch
-        // window (spec §4.3 flush guarantee).
         // Opportunistically reconverge the lock-free active_tab mirror from the
         // authoritative scene (hud-dwcr7).  The mirror is also refreshed at the
         // point of every active_tab change (gRPC mutation apply, pointer-down

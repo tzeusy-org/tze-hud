@@ -28,8 +28,7 @@
 //!
 //! `ComposerDraft::new(cap)` enforces `cap ≤ MAX_DRAFT_BYTES` (65535). Paste
 //! and insert that would exceed the cap are truncated at a grapheme-cluster
-//! boundary; `EditOutcome::AtCapacity` is returned and no notification leaves
-//! the runtime with content exceeding the cap.
+//! boundary; `EditOutcome::AtCapacity` reports truncation without exceeding the cap.
 
 use tze_hud_scene::SceneId;
 use unicode_segmentation::UnicodeSegmentation;
@@ -58,7 +57,7 @@ pub const DEFAULT_DRAFT_CAP: usize = 4_096;
 pub enum EditOutcome {
     /// Draft content or caret moved; re-render locally.
     Mutated,
-    /// No change; no notification needed.
+    /// No change; no local redraw needed.
     Unchanged,
     /// Paste/insert exceeded cap; content truncated to cap boundary.
     /// Render at-capacity feedback.
@@ -530,7 +529,7 @@ impl ComposerDraft {
     /// at the remaining byte cap.
     ///
     /// Oversized content is truncated and `AtCapacity` is returned. No
-    /// untruncated bytes are stored or forwarded to any notification.
+    /// untruncated bytes are stored or submitted.
     ///
     /// Spec: §4.5 (Composer Draft Bounds and Paste Caps).
     pub fn paste(&mut self, text: &str) -> EditOutcome {
@@ -854,7 +853,7 @@ impl ComposerDraft {
     /// Select the entire draft (Ctrl+A): anchor at start, cursor at end, so the
     /// whole buffer is highlighted and a subsequent copy/cut/insert acts on all
     /// of it. Returns `Unchanged` for an empty draft or when the whole buffer is
-    /// already selected (idempotent — no spurious redraw/notification).
+    /// already selected (idempotent — no spurious redraw).
     ///
     /// Spec: §"Local-First Composer Draft Editing" — selection (keyboard).
     pub fn select_all(&mut self) -> EditOutcome {
@@ -1393,7 +1392,7 @@ impl ComposerDraftManager {
         };
 
         let enter_key = is_enter_key(key_code, key);
-        match key_code {
+        let result = match key_code {
             "Backspace" => {
                 let o = if ctrl || alt {
                     draft.word_backspace()
@@ -1542,7 +1541,18 @@ impl ComposerDraftManager {
                 // to agent if needed).
                 (false, ComposerOutcome::Unchanged)
             }
+        };
+        if matches!(
+            &result.1,
+            ComposerOutcome::Submitted(_) | ComposerOutcome::Cancelled
+        ) && self
+            .retained_draft
+            .as_ref()
+            .is_some_and(|(id, _)| Some(*id) == self.focused_node)
+        {
+            self.retained_draft = None;
         }
+        result
     }
 
     /// Called when safe mode activates or deactivates.
@@ -1646,9 +1656,7 @@ mod tests {
 
     // ─── Word-wise delete ─────────────────────────────────────────────────
 
-    /// Spec scenario 4.7: word-wise backspace removes the preceding word and
-    /// the adapter observes only a draft-state notification, not per-keystroke
-    /// traffic.
+    /// Word-wise backspace removes the preceding word locally.
     #[test]
     fn word_backspace_removes_preceding_word() {
         let mut draft = ComposerDraft::new(DEFAULT_DRAFT_CAP);
@@ -1764,7 +1772,7 @@ mod tests {
     // ─── Paste and cap ────────────────────────────────────────────────────
 
     /// Spec §4.5 + §4.7: oversized paste truncates at UTF-8 boundary; at-capacity
-    /// result returned; no overflow bytes in the notification or submission.
+    /// result returned; no overflow bytes in local text or submission.
     #[test]
     fn paste_truncates_at_cap() {
         let cap = 10;
@@ -2199,7 +2207,7 @@ mod tests {
         assert_eq!(draft.selected_text(), "hello");
     }
 
-    /// Ctrl+A on an empty draft is a consumed no-op (no selection, no notification).
+    /// Ctrl+A on an empty draft is a consumed no-op (no selection, no redraw).
     #[test]
     fn manager_ctrl_a_empty_is_noop() {
         let mut mgr = ComposerDraftManager::new();
@@ -2294,7 +2302,7 @@ mod tests {
         }
     }
 
-    /// Enter key submits the draft and emits a clear notification.
+    /// Enter submits exact text and clears the local draft.
     #[test]
     fn manager_enter_submits_and_clears() {
         let mut mgr = ComposerDraftManager::new();
@@ -3175,6 +3183,7 @@ mod tests {
         // Empty matching blur clears a stale same-key slot, never a peer slot.
         mgr.retained_draft = Some((node_b, ComposerDraft::default()));
         mgr.route_key_down("Escape", "Escape", false, false, false);
+        assert!(mgr.retained_draft.is_none());
         mgr.on_focus_lost();
         assert!(mgr.retained_draft.is_none());
     }
@@ -3188,9 +3197,11 @@ mod tests {
         for ch in "send me".chars() {
             mgr.route_character(&ch.to_string());
         }
+        mgr.retained_draft = Some((node_id, ComposerDraft::default()));
         // Submit, then blur, then re-focus — must be a clean empty draft.
         let (_, batch) = mgr.route_key_down("Enter", "Enter", false, false, false);
         assert_eq!(batch, ComposerOutcome::Submitted("send me".into()));
+        assert!(mgr.retained_draft.is_none());
         mgr.on_focus_lost();
         mgr.on_focus_gained(node_id, false);
         assert_eq!(

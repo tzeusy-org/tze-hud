@@ -2121,3 +2121,422 @@ fn heal_flow_markdown_fallback(
         );
     }
 }
+
+#[cfg(test)]
+mod resize_grip_tests {
+    use super::*;
+    use crate::renderer::token_colors::{parse_hex_color, resolve_resize_grip_tokens};
+    use std::collections::HashMap;
+
+    /// The grip dots occupy a `size_px` square anchored at the region's
+    /// bottom-right corner and form a lower-right triangle (1 dot in the left
+    /// column, 2 in the middle, 3 in the right) — the diagonal grip glyph.
+    #[test]
+    fn dots_anchor_bottom_right_and_form_diagonal() {
+        let region = Rect::new(50.0, 40.0, 300.0, 200.0);
+        let size = 30.0;
+        let dots = Compositor::resize_grip_dot_rects(region, size);
+
+        // Grip square: bottom-right `size`×`size` corner of the region.
+        let grip_x = region.x + region.width - size; // 320
+        let grip_y = region.y + region.height - size; // 210
+        let corner_x = region.x + region.width; // 350
+        let corner_y = region.y + region.height; // 240
+
+        for d in &dots {
+            assert!(
+                d.width > 0.0 && d.height > 0.0,
+                "every dot must be non-empty"
+            );
+            assert!(
+                d.x >= grip_x - 1e-3 && d.x + d.width <= corner_x + 1e-3,
+                "dot x {} must sit inside the grip square [{grip_x}, {corner_x}]",
+                d.x
+            );
+            assert!(
+                d.y >= grip_y - 1e-3 && d.y + d.height <= corner_y + 1e-3,
+                "dot y {} must sit inside the grip square [{grip_y}, {corner_y}]",
+                d.y
+            );
+        }
+
+        // Column histogram: cell width is size/3, so a dot's column index is
+        // floor((x - grip_x) / cell). The diagonal grip has 1/2/3 dots in
+        // columns 0/1/2 respectively.
+        let cell = size / 3.0;
+        let mut per_col = [0u8; 3];
+        for d in &dots {
+            let col = (((d.x - grip_x) / cell).floor() as i32).clamp(0, 2) as usize;
+            per_col[col] += 1;
+        }
+        assert_eq!(
+            per_col,
+            [1, 2, 3],
+            "grip must taper as a diagonal: 1 dot left, 2 middle, 3 right"
+        );
+    }
+
+    /// A non-positive grip size yields all-zero rects (nothing drawn) so the
+    /// render site needs no separate guard.
+    #[test]
+    fn nonpositive_size_yields_empty_dots() {
+        let region = Rect::new(0.0, 0.0, 100.0, 100.0);
+        for size in [0.0, -5.0] {
+            let dots = Compositor::resize_grip_dot_rects(region, size);
+            assert!(
+                dots.iter().all(|d| d.width == 0.0 && d.height == 0.0),
+                "size {size} must produce only zero-area dots"
+            );
+        }
+    }
+
+    /// The resolver falls back to the tze_hud_config resize-grip defaults when
+    /// no override token is present: a positive size and a distinct, brighter
+    /// hover tint than the resting color.
+    #[test]
+    fn resolver_defaults_are_distinct_and_positive() {
+        let grip = resolve_resize_grip_tokens(&HashMap::new());
+        assert!(grip.size_px > 0.0, "default grip size must be positive");
+        assert_ne!(
+            grip.color, grip.hover_color,
+            "hover tint must differ from the resting grip color"
+        );
+        // The default hover (#8A93A6) is brighter than the resting grip
+        // (#5A6373) on every RGB channel.
+        for c in 0..3 {
+            assert!(
+                grip.hover_color[c] > grip.color[c],
+                "default hover channel {c} must be brighter than resting"
+            );
+        }
+    }
+
+    /// Override tokens flow through: size, resting color, and hover color are
+    /// each taken from the token map, and `mark_color` selects between resting
+    /// and hover by the pointer state.
+    #[test]
+    fn overrides_flow_through_and_hover_swaps_color() {
+        let mut map = HashMap::new();
+        map.insert(
+            "portal.window.resize_grip.size_px".to_owned(),
+            "20".to_owned(),
+        );
+        map.insert(
+            "portal.window.resize_grip.color".to_owned(),
+            "#101010".to_owned(),
+        );
+        map.insert(
+            "portal.window.resize_grip.hover_color".to_owned(),
+            "#f0f0f0".to_owned(),
+        );
+        let grip = resolve_resize_grip_tokens(&map);
+
+        assert!((grip.size_px - 20.0).abs() < 1e-4, "size override applied");
+
+        let want_rest = parse_hex_color("#101010").unwrap().to_array();
+        let want_hover = parse_hex_color("#f0f0f0").unwrap().to_array();
+        assert_eq!(grip.mark_color(false), want_rest, "resting color override");
+        assert_eq!(grip.mark_color(true), want_hover, "hover color override");
+        assert_ne!(
+            grip.mark_color(false),
+            grip.mark_color(true),
+            "hover state must swap the grip color"
+        );
+    }
+}
+
+#[cfg(test)]
+mod lifecycle_accent_tests {
+    use super::*;
+
+    fn rect(w: f32, h: f32) -> Rect {
+        Rect::new(0.0, 0.0, w, h)
+    }
+
+    /// The accent bar passes the token color through unchanged and clamps its
+    /// width to the tile, folding tile opacity into the alpha (hud-m48i0).
+    #[test]
+    fn accent_bar_clamps_width_and_folds_opacity() {
+        let accent = LifecycleAccent {
+            color: Rgba::new(0.2, 0.4, 0.6, 1.0),
+            width_px: 4.0,
+        };
+        let (w, color) =
+            Compositor::lifecycle_accent_bar_geom(rect(200.0, 150.0), accent, 0.5).unwrap();
+        assert_eq!(w, 4.0, "in-range width is used as-is");
+        assert_eq!(
+            [color[0], color[1], color[2]],
+            [0.2, 0.4, 0.6],
+            "color passes through"
+        );
+        assert!(
+            (color[3] - 0.5).abs() < 1e-6,
+            "tile opacity folds into alpha"
+        );
+
+        // Oversized token width is clamped to the tile width.
+        let wide = LifecycleAccent {
+            color: Rgba::WHITE,
+            width_px: 9999.0,
+        };
+        let (w, _) = Compositor::lifecycle_accent_bar_geom(rect(12.0, 80.0), wide, 1.0).unwrap();
+        assert_eq!(w, 12.0, "width is clamped to the tile edge");
+    }
+
+    /// Zero width or zero opacity paints nothing.
+    #[test]
+    fn accent_bar_none_when_invisible() {
+        let zero_w = LifecycleAccent {
+            color: Rgba::WHITE,
+            width_px: 0.0,
+        };
+        assert!(Compositor::lifecycle_accent_bar_geom(rect(100.0, 50.0), zero_w, 1.0).is_none());
+        let some = LifecycleAccent {
+            color: Rgba::WHITE,
+            width_px: 4.0,
+        };
+        assert!(Compositor::lifecycle_accent_bar_geom(rect(100.0, 50.0), some, 0.0).is_none());
+    }
+}
+
+#[cfg(test)]
+mod composer_draft_color_tests {
+    use super::composer_draft_base_color;
+    use crate::renderer::token_colors::{linear_to_srgb, resolve_composer_overlay_tokens};
+    use std::collections::HashMap;
+
+    /// Expected sRGB-u8 rendering of a linear-sRGB token channel, matching the
+    /// conversion `composer_draft_base_color` applies (kept independent of the
+    /// implementation so the test would catch a broken conversion).
+    fn to_srgb_u8(v: f32) -> u8 {
+        (linear_to_srgb(v.clamp(0.0, 1.0)) * 255.0 + 0.5) as u8
+    }
+    fn to_alpha_u8(v: f32) -> u8 {
+        (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8
+    }
+
+    /// hud-9gyao: an at-capacity live draft takes the token-driven at-capacity
+    /// color as its per-line base color -- a real, bounded coloring of the draft
+    /// glyphs, replacing the Phase-1 zero-length color-run sentinel. Below
+    /// capacity the draft uses the composer text color. Both resolve from design
+    /// tokens, never a literal in the render path.
+    #[test]
+    fn at_capacity_draft_uses_token_at_capacity_color() {
+        let tokens = resolve_composer_overlay_tokens(&HashMap::new());
+
+        let below = composer_draft_base_color(&tokens, false, false);
+        let at_cap = composer_draft_base_color(&tokens, true, false);
+
+        assert_eq!(
+            below,
+            [
+                to_srgb_u8(tokens.text_r),
+                to_srgb_u8(tokens.text_g),
+                to_srgb_u8(tokens.text_b),
+                to_alpha_u8(tokens.text_a),
+            ],
+            "a below-capacity draft must render in the composer text color"
+        );
+        assert_eq!(
+            at_cap,
+            [
+                to_srgb_u8(tokens.at_capacity_r),
+                to_srgb_u8(tokens.at_capacity_g),
+                to_srgb_u8(tokens.at_capacity_b),
+                to_alpha_u8(tokens.at_capacity_a),
+            ],
+            "an at-capacity draft must render in portal.composer.at_capacity_color"
+        );
+        assert_ne!(
+            below, at_cap,
+            "at capacity must change the draft color so the byte cap is visible"
+        );
+    }
+
+    /// The empty-draft placeholder hint wins over the at-capacity color: a
+    /// placeholder only shows for an empty draft (never at capacity).
+    #[test]
+    fn placeholder_color_wins_over_at_capacity() {
+        let tokens = resolve_composer_overlay_tokens(&HashMap::new());
+        assert_eq!(
+            composer_draft_base_color(&tokens, true, true),
+            tokens.placeholder_color,
+            "a placeholder hint must always render in the placeholder color"
+        );
+    }
+}
+
+#[cfg(test)]
+mod flow_fallback_cache_tests {
+    use super::heal_flow_markdown_fallback;
+    use crate::markdown::{MarkdownCache, MarkdownTokens, PARSE_MARKDOWN_SUBSET_CALLS};
+    use std::collections::{HashMap, HashSet};
+    use tze_hud_scene::types::{
+        FontFamily, Node, NodeData, NodeLayout, Rect, Rgba, SceneId, TextAlign, TextMarkdownNode,
+        TextOverflow,
+    };
+
+    /// Markdown content comfortably over `INLINE_PARSE_BYTE_THRESHOLD` (4096B), so
+    /// in production it parses on the background worker and the authoritative
+    /// `MarkdownCache` misses for several frames after a commit.
+    fn big_markdown_content() -> String {
+        let content = format!("# Heading\n{}", "lorem ipsum dolor sit amet ".repeat(200));
+        assert!(
+            content.len() > 4096,
+            "fixture must exceed the async-parse threshold"
+        );
+        content
+    }
+
+    fn markdown_node(id: SceneId, content: &str) -> Node {
+        Node {
+            id,
+            children: vec![],
+            layout: NodeLayout::Absolute,
+            data: NodeData::TextMarkdown(TextMarkdownNode {
+                content: content.to_string(),
+                bounds: Rect::new(0.0, 0.0, 300.0, 40.0),
+                font_size_px: 16.0,
+                font_family: FontFamily::SystemSansSerif,
+                color: Rgba::new(1.0, 1.0, 1.0, 1.0),
+                background: None,
+                alignment: TextAlign::Start,
+                overflow: TextOverflow::Ellipsis,
+                color_runs: Box::default(),
+            }),
+        }
+    }
+
+    /// hud-wrlv1: a large unchanged flow child that keeps authoritative-missing
+    /// (background parse still pending) must re-parse AT MOST ONCE across repeated
+    /// per-frame heal calls — the self-heal side cache absorbs every frame after
+    /// the first.
+    #[test]
+    fn heal_parses_large_content_at_most_once_across_repeated_calls() {
+        let child_id = SceneId::new();
+        let content = big_markdown_content();
+        let tokens = MarkdownTokens::default();
+        let key = MarkdownCache::compute_key(&content, &tokens);
+
+        let mut node_key_cache = HashMap::new();
+        node_key_cache.insert(child_id, key);
+        let nodes: HashMap<SceneId, Node> = [(child_id, markdown_node(child_id, &content))]
+            .into_iter()
+            .collect();
+        let flow_child_ids: HashSet<SceneId> = [child_id].into_iter().collect();
+        let portal_node_ids: HashSet<SceneId> = [child_id].into_iter().collect();
+        // Empty authoritative snapshot → the background parse has not landed yet,
+        // so every frame authoritative-misses.
+        let authoritative = MarkdownCache::new();
+        let mut fallback: HashMap<[u8; 32], _> = HashMap::new();
+
+        // Cold frame: one parse, parked in the fallback cache.
+        PARSE_MARKDOWN_SUBSET_CALLS.with(|c| c.set(0));
+        heal_flow_markdown_fallback(
+            &authoritative,
+            &mut fallback,
+            &node_key_cache,
+            &nodes,
+            &flow_child_ids,
+            &portal_node_ids,
+            &tokens,
+            &tokens,
+        );
+        assert_eq!(
+            PARSE_MARKDOWN_SUBSET_CALLS.with(|c| c.get()),
+            1,
+            "cold heal parses the large child exactly once"
+        );
+        assert!(
+            fallback.contains_key(&key),
+            "the parse must be parked in the fallback cache for later frames"
+        );
+
+        // Subsequent frames (content unchanged, authoritative still missing): the
+        // side cache absorbs them — NOT one parse per frame (the bug).
+        for _ in 0..5 {
+            heal_flow_markdown_fallback(
+                &authoritative,
+                &mut fallback,
+                &node_key_cache,
+                &nodes,
+                &flow_child_ids,
+                &portal_node_ids,
+                &tokens,
+                &tokens,
+            );
+        }
+        assert_eq!(
+            PARSE_MARKDOWN_SUBSET_CALLS.with(|c| c.get()),
+            1,
+            "repeated frames must re-parse at most once, not per frame (hud-wrlv1)"
+        );
+    }
+
+    /// A node already present in the authoritative snapshot is never parsed or
+    /// parked by the heal pass (the common steady-state).
+    #[test]
+    fn heal_skips_nodes_already_in_the_authoritative_cache() {
+        let child_id = SceneId::new();
+        let content = big_markdown_content();
+        let tokens = MarkdownTokens::default();
+        let key = MarkdownCache::compute_key(&content, &tokens);
+
+        let mut node_key_cache = HashMap::new();
+        node_key_cache.insert(child_id, key);
+        let nodes: HashMap<SceneId, Node> = [(child_id, markdown_node(child_id, &content))]
+            .into_iter()
+            .collect();
+        let flow_child_ids: HashSet<SceneId> = [child_id].into_iter().collect();
+        let portal_node_ids: HashSet<SceneId> = [child_id].into_iter().collect();
+        let mut authoritative = MarkdownCache::new();
+        authoritative.prime(&content, &tokens);
+        let mut fallback: HashMap<[u8; 32], _> = HashMap::new();
+
+        PARSE_MARKDOWN_SUBSET_CALLS.with(|c| c.set(0));
+        heal_flow_markdown_fallback(
+            &authoritative,
+            &mut fallback,
+            &node_key_cache,
+            &nodes,
+            &flow_child_ids,
+            &portal_node_ids,
+            &tokens,
+            &tokens,
+        );
+        assert_eq!(
+            PARSE_MARKDOWN_SUBSET_CALLS.with(|c| c.get()),
+            0,
+            "an authoritative-cached node must not be re-parsed by the heal pass"
+        );
+        assert!(
+            fallback.is_empty(),
+            "no fallback entry needed for an authoritative hit"
+        );
+    }
+}
+
+#[cfg(test)]
+mod degradation_opacity_tests {
+    use super::degradation_tile_opacity;
+    use tze_hud_scene::DegradationLevel;
+
+    #[test]
+    fn significant_degradation_preserves_hidden_tiles_and_opaques_visible_tiles() {
+        assert_eq!(
+            degradation_tile_opacity(0.0, DegradationLevel::Simplified),
+            0.0,
+            "durably hidden tiles must remain hidden when transparency is disabled"
+        );
+        assert_eq!(
+            degradation_tile_opacity(0.35, DegradationLevel::Simplified),
+            1.0,
+            "visible tiles must become opaque when transparency is disabled"
+        );
+        assert_eq!(
+            degradation_tile_opacity(0.35, DegradationLevel::Nominal),
+            0.35,
+            "nominal rendering must preserve fractional opacity"
+        );
+    }
+}
