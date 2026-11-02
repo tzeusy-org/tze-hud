@@ -106,14 +106,14 @@ source links when implementation changes the status.
   | runtime/windowed/portal.rs | 2207 / 6734 / 8941 | 2171 / 4094 / 6265 |
   | runtime/windowed/keyboard.rs | 2072 / 319 / 2391 | 2044 / 1706 / 3750 |
   | runtime/windowed/lifecycle.rs | 3087 / 501 / 3588 | 3052 / 1336 / 4388 |
-  | runtime/windowed/test_support.rs | 216 / 1046 / 1262 | 226 / 1351 / 1577 |
+  | runtime/windowed/test_support.rs | 216 / 1046 / 1262 | 530 / 1046 / 1576 |
   | runtime/portal.rs | 986 / 1511 / 2497 | 949 / 1521 / 2470 |
   | projection/hub.rs | 1178 / 681 / 1859 | 1096 / 565 / 1661 |
   | input/portal_resize.rs (comment only) | 1067 / 1375 / 2442 | 1064 / 1375 / 2439 |
   | projection/Cargo.toml | 16 total | 14 total |
 
   The finite combined surface includes both move destinations and all of
-  `test_support.rs`: 22,996 → 22,564 lines (432 fewer). Docs and the single
+  `test_support.rs`: 22,996 → 22,563 lines (433 fewer). Docs and the single
   removed lockfile dependency edge are outside that aggregate. These are
   physical module boundaries, not semantic production LOC: `test_support.rs`
   is entirely test-only, driver prefix retains a test-only hub accessor, and

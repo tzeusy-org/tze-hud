@@ -222,6 +222,310 @@ pub(super) fn portal_scene_with_focus() -> (SceneGraph, SceneId, SceneId, FocusM
     (scene, tab_id, tile_id, fm)
 }
 
+pub(super) fn make_windowed_keyboard_test_app(
+    scene: tze_hud_scene::graph::SceneGraph,
+    focus_manager: FocusManager,
+    input_processor: InputProcessor,
+) -> (
+    WinitApp,
+    tze_hud_protocol::session_server::InputEventReceiver,
+) {
+    let cfg = WindowedConfig::default();
+    let portals = tze_hud_mcp::PortalHandle::new(
+        tze_hud_projection::hub::PortalHub::default(),
+        scene.clock(),
+    );
+    let shared_state = make_shared_state();
+    let (input_capture_tx, input_capture_rx) = tokio::sync::mpsc::unbounded_channel();
+    let (frame_ready_tx, frame_ready_rx) = frame_ready_channel();
+    let input_event_tx = tze_hud_protocol::session_server::InputEventSender::new(8);
+    let input_event_rx = input_event_tx.subscribe_all();
+    let safe_mode_atomic = {
+        let state = shared_state
+            .try_lock()
+            .expect("shared state must be uncontended in test setup");
+        let mut scene_guard = state
+            .scene
+            .try_lock()
+            .expect("scene must be uncontended in test setup");
+        *scene_guard = scene;
+        state.refresh_active_tab_mirror(&scene_guard);
+        Arc::clone(&state.safe_mode_atomic)
+    };
+    let active_tab_mirror = {
+        let state = shared_state
+            .try_lock()
+            .expect("shared state must be uncontended after scene setup");
+        Arc::clone(&state.active_tab_mirror)
+    };
+
+    let state = WindowedRuntimeState {
+        wake: crate::windowed::wake::WindowedWake::disconnected(),
+        scheduled_main_deadline: None,
+        cursor_entry: crate::windowed::wake::CursorEntryState::default(),
+        config: cfg,
+        compositor_handle: None,
+        network_rt: None,
+        network_handles: Vec::new(),
+        runtime_context: Arc::new(RuntimeContext::headless_default()),
+        _runtime_widget_store: None,
+        shared_state,
+        safe_mode_atomic,
+        active_tab_mirror,
+        chrome_state: Arc::new(std::sync::RwLock::new(crate::shell::ChromeState::new())),
+        system_card: crate::shell::system_card::SystemCardHandle::default(),
+        live: Arc::new(crate::launch::LiveSettings::new(
+            60,
+            false,
+            Default::default(),
+        )),
+        pairing: None,
+        control_panel: None,
+        input_ring: Arc::new(std::sync::Mutex::new(
+            std::collections::VecDeque::with_capacity(INPUT_EVENT_CAPACITY),
+        )),
+        pending_input_latency: Arc::new(StdMutex::new(VecDeque::new())),
+        frame_ready_rx,
+        frame_ready_tx: Some(frame_ready_tx),
+        frame_presented_tx: None,
+        degradation_notices: None,
+        compositor: None,
+        window_surface: None,
+        input_processor,
+        input_capture_rx,
+        pending_input_capture_commands: std::collections::VecDeque::new(),
+        focus_manager,
+        keyboard_processor: KeyboardProcessor::new(),
+        telemetry: TelemetryCollector::new(),
+        pipeline: FramePipeline::new(),
+        shutdown: ShutdownToken::new(),
+        quiescent_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        terminal_surface_recovery_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        quiescent_efficiency: None,
+        cursor_x: 0.0,
+        cursor_y: 0.0,
+        left_button_down: false,
+        cursor_tracker: tze_hud_input::CursorIconTracker::new(),
+        window: None,
+        effective_mode: WindowMode::Fullscreen,
+        hit_regions: Vec::new(),
+        overlay_capturing: false,
+        static_hit_regions: Vec::new(),
+        widget_hover_trackers: std::collections::HashMap::new(),
+        pending_widget_svgs: Vec::new(),
+        modifiers: winit::keyboard::ModifiersState::empty(),
+        primary_monitor: None,
+        secondaries: Vec::new(),
+        display_targets: Default::default(),
+        displays_dirty: Default::default(),
+        surface_factory: None,
+        zone_displays: Default::default(),
+        cursor_window: None,
+        secondary_recreates: Default::default(),
+        overlay_refits: Default::default(),
+        press_window: None,
+        zone_press: None,
+        primary_drag_gesture: None,
+        global_tokens: std::collections::HashMap::new(),
+        appearance: None,
+        tokens_seen: 0,
+        _config_watch: None,
+        element_repositioned_tx: None,
+        input_event_tx: Some(input_event_tx),
+        pending_blur_delivery_context: None,
+        composer_pointer_drag_anchor: None,
+        portal_resize_states: std::collections::HashMap::new(),
+        consumed_portal_resize_keydowns: std::collections::HashSet::new(),
+        consumed_shell_shortcut_keydowns: std::collections::HashSet::new(),
+        panel_input: crate::windowed::panel_input::PanelInputState::default(),
+        keyboard_activation_nodes: std::collections::HashMap::new(),
+        consumed_command_keydowns: std::collections::HashSet::new(),
+        local_composer_state: Arc::new(StdMutex::new(None)),
+        viewer_echo_queue: Arc::new(StdMutex::new(Vec::new())),
+        input_history_seed_states: std::collections::HashMap::new(),
+        focus_ring_owner_state: Arc::new(StdMutex::new(None)),
+        resize_grip_hover_state: Arc::new(StdMutex::new(None)),
+        tile_close_hover_state: Arc::new(StdMutex::new(None)),
+        cursor_left_window: false,
+        composer_visual_layout: Arc::new(StdMutex::new(None)),
+        portal_projection_driver: crate::portal::PortalDriver::new(portals),
+        capture_inbox: crate::operator::screenshot::CaptureInbox::detached(),
+        pending_keyboard_events: VecDeque::new(),
+        interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
+    };
+
+    drop(input_capture_tx);
+
+    (WinitApp { state }, input_event_rx)
+}
+
+/// Construct a portal scene: one tile rooted at a composer node with a
+/// focusable non-composer control child. Returns
+/// `(scene, tab_id, tile_id, composer_id, control_id)`.
+pub(super) fn portal_scene_with_control() -> (
+    tze_hud_scene::graph::SceneGraph,
+    tze_hud_scene::SceneId,
+    tze_hud_scene::SceneId,
+    tze_hud_scene::SceneId,
+    tze_hud_scene::SceneId,
+) {
+    use tze_hud_scene::types::{HitRegionNode, TileScrollConfig};
+    use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
+
+    let mut scene = SceneGraph::new(1920.0, 1080.0);
+    let tab_id = scene.create_tab("Main", 0).unwrap();
+    let lease_id = scene.grant_lease("portal-agent", 60_000);
+    let tile_id = scene
+        .create_tile(
+            tab_id,
+            "portal-agent",
+            lease_id,
+            Rect::new(100.0, 100.0, 400.0, 300.0),
+            1,
+        )
+        .unwrap();
+    scene
+        .register_tile_scroll_config(tile_id, TileScrollConfig::vertical())
+        .unwrap();
+
+    let composer_id = SceneId::new();
+    let control_id = SceneId::new();
+    scene.nodes.insert(
+        composer_id,
+        Node {
+            layout: Default::default(),
+            id: composer_id,
+            children: vec![control_id],
+            data: NodeData::HitRegion(HitRegionNode {
+                bounds: Rect::new(0.0, 0.0, 400.0, 60.0),
+                interaction_id: "portal-composer".to_string(),
+                accepts_focus: true,
+                accepts_pointer: true,
+                accepts_composer_input: true,
+                ..Default::default()
+            }),
+        },
+    );
+    scene.nodes.insert(
+        control_id,
+        Node {
+            layout: Default::default(),
+            id: control_id,
+            children: vec![],
+            data: NodeData::HitRegion(HitRegionNode {
+                bounds: Rect::new(10.0, 80.0, 40.0, 40.0),
+                interaction_id: "portal-minimize".to_string(),
+                accepts_focus: true,
+                accepts_pointer: true,
+                accepts_composer_input: false,
+                ..Default::default()
+            }),
+        },
+    );
+    scene.tiles.get_mut(&tile_id).unwrap().root_node = Some(composer_id);
+    (scene, tab_id, tile_id, composer_id, control_id)
+}
+
+/// Build a multi-surface portal (frame + transcript pane + composer pane +
+/// far-corner drag shield) sharing one lease, with keyboard focus on the
+/// composer/input pane — the exact live configuration that made Ctrl resize
+/// scale only the focused pane. Returns (scene, tab, frame, transcript,
+/// composer, drag_shield, focus_manager).
+#[allow(clippy::type_complexity)]
+pub(super) fn multi_surface_portal_scene() -> (
+    tze_hud_scene::graph::SceneGraph,
+    tze_hud_scene::SceneId,
+    tze_hud_scene::SceneId,
+    tze_hud_scene::SceneId,
+    tze_hud_scene::SceneId,
+    tze_hud_scene::SceneId,
+    FocusManager,
+) {
+    use tze_hud_scene::types::TileScrollConfig;
+    use tze_hud_scene::{Rect, SceneGraph};
+
+    let mut scene = SceneGraph::new(1920.0, 1080.0);
+    let tab_id = scene.create_tab("Main", 0).unwrap();
+    let lease_id = scene.grant_lease("portal-agent", 60_000);
+    // Frame is the portal-sized anchor (largest area, not scrollable).
+    let frame_id = scene
+        .create_tile(
+            tab_id,
+            "portal-agent",
+            lease_id,
+            Rect::new(100.0, 100.0, 400.0, 300.0),
+            1,
+        )
+        .unwrap();
+    // Transcript (output) pane — a scrollable surface inside the frame.
+    let transcript_id = scene
+        .create_tile(
+            tab_id,
+            "portal-agent",
+            lease_id,
+            Rect::new(110.0, 110.0, 180.0, 280.0),
+            3,
+        )
+        .unwrap();
+    // Composer (input) pane — a scrollable surface inside the frame.
+    let composer_id = scene
+        .create_tile(
+            tab_id,
+            "portal-agent",
+            lease_id,
+            Rect::new(300.0, 110.0, 190.0, 280.0),
+            3,
+        )
+        .unwrap();
+    // Drag shield — parked in the far display corner, NOT scrollable, NOT
+    // spatially part of the portal frame.
+    let shield_id = scene
+        .create_tile(
+            tab_id,
+            "portal-agent",
+            lease_id,
+            Rect::new(1900.0, 1070.0, 1.0, 1.0),
+            20,
+        )
+        .unwrap();
+    scene
+        .register_tile_scroll_config(transcript_id, TileScrollConfig::vertical())
+        .unwrap();
+    scene
+        .register_tile_scroll_config(composer_id, TileScrollConfig::vertical())
+        .unwrap();
+
+    // Focus the composer/input pane — the live trigger for the bug.
+    let mut fm = FocusManager::new();
+    fm.request_focus(
+        FocusRequest {
+            tile_id: composer_id,
+            node_id: None,
+            steal: true,
+            requesting_namespace: "portal-agent".to_string(),
+        },
+        tab_id,
+        &scene,
+    );
+
+    (
+        scene,
+        tab_id,
+        frame_id,
+        transcript_id,
+        composer_id,
+        shield_id,
+        fm,
+    )
+}
+
+pub(super) fn viewer_echo_context(tile_id: tze_hud_scene::SceneId) -> ComposerDeliveryContext {
+    ComposerDeliveryContext {
+        namespace: "portal-agent".to_string(),
+        node_id_bytes: [0u8; 16],
+        tile_id,
+    }
+}
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
@@ -1268,310 +1572,5 @@ mod tests {
             2,
             "FIFO queue must grow by one when safe mode is inactive"
         );
-    }
-}
-
-pub(super) fn make_windowed_keyboard_test_app(
-    scene: tze_hud_scene::graph::SceneGraph,
-    focus_manager: FocusManager,
-    input_processor: InputProcessor,
-) -> (
-    WinitApp,
-    tze_hud_protocol::session_server::InputEventReceiver,
-) {
-    let cfg = WindowedConfig::default();
-    let portals = tze_hud_mcp::PortalHandle::new(
-        tze_hud_projection::hub::PortalHub::default(),
-        scene.clock(),
-    );
-    let shared_state = make_shared_state();
-    let (input_capture_tx, input_capture_rx) = tokio::sync::mpsc::unbounded_channel();
-    let (frame_ready_tx, frame_ready_rx) = frame_ready_channel();
-    let input_event_tx = tze_hud_protocol::session_server::InputEventSender::new(8);
-    let input_event_rx = input_event_tx.subscribe_all();
-    let safe_mode_atomic = {
-        let state = shared_state
-            .try_lock()
-            .expect("shared state must be uncontended in test setup");
-        let mut scene_guard = state
-            .scene
-            .try_lock()
-            .expect("scene must be uncontended in test setup");
-        *scene_guard = scene;
-        state.refresh_active_tab_mirror(&scene_guard);
-        Arc::clone(&state.safe_mode_atomic)
-    };
-    let active_tab_mirror = {
-        let state = shared_state
-            .try_lock()
-            .expect("shared state must be uncontended after scene setup");
-        Arc::clone(&state.active_tab_mirror)
-    };
-
-    let state = WindowedRuntimeState {
-        wake: crate::windowed::wake::WindowedWake::disconnected(),
-        scheduled_main_deadline: None,
-        cursor_entry: crate::windowed::wake::CursorEntryState::default(),
-        config: cfg,
-        compositor_handle: None,
-        network_rt: None,
-        network_handles: Vec::new(),
-        runtime_context: Arc::new(RuntimeContext::headless_default()),
-        _runtime_widget_store: None,
-        shared_state,
-        safe_mode_atomic,
-        active_tab_mirror,
-        chrome_state: Arc::new(std::sync::RwLock::new(crate::shell::ChromeState::new())),
-        system_card: crate::shell::system_card::SystemCardHandle::default(),
-        live: Arc::new(crate::launch::LiveSettings::new(
-            60,
-            false,
-            Default::default(),
-        )),
-        pairing: None,
-        control_panel: None,
-        input_ring: Arc::new(std::sync::Mutex::new(
-            std::collections::VecDeque::with_capacity(INPUT_EVENT_CAPACITY),
-        )),
-        pending_input_latency: Arc::new(StdMutex::new(VecDeque::new())),
-        frame_ready_rx,
-        frame_ready_tx: Some(frame_ready_tx),
-        frame_presented_tx: None,
-        degradation_notices: None,
-        compositor: None,
-        window_surface: None,
-        input_processor,
-        input_capture_rx,
-        pending_input_capture_commands: std::collections::VecDeque::new(),
-        focus_manager,
-        keyboard_processor: KeyboardProcessor::new(),
-        telemetry: TelemetryCollector::new(),
-        pipeline: FramePipeline::new(),
-        shutdown: ShutdownToken::new(),
-        quiescent_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        terminal_surface_recovery_failed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
-        quiescent_efficiency: None,
-        cursor_x: 0.0,
-        cursor_y: 0.0,
-        left_button_down: false,
-        cursor_tracker: tze_hud_input::CursorIconTracker::new(),
-        window: None,
-        effective_mode: WindowMode::Fullscreen,
-        hit_regions: Vec::new(),
-        overlay_capturing: false,
-        static_hit_regions: Vec::new(),
-        widget_hover_trackers: std::collections::HashMap::new(),
-        pending_widget_svgs: Vec::new(),
-        modifiers: winit::keyboard::ModifiersState::empty(),
-        primary_monitor: None,
-        secondaries: Vec::new(),
-        display_targets: Default::default(),
-        displays_dirty: Default::default(),
-        surface_factory: None,
-        zone_displays: Default::default(),
-        cursor_window: None,
-        secondary_recreates: Default::default(),
-        overlay_refits: Default::default(),
-        press_window: None,
-        zone_press: None,
-        primary_drag_gesture: None,
-        global_tokens: std::collections::HashMap::new(),
-        appearance: None,
-        tokens_seen: 0,
-        _config_watch: None,
-        element_repositioned_tx: None,
-        input_event_tx: Some(input_event_tx),
-        pending_blur_delivery_context: None,
-        composer_pointer_drag_anchor: None,
-        portal_resize_states: std::collections::HashMap::new(),
-        consumed_portal_resize_keydowns: std::collections::HashSet::new(),
-        consumed_shell_shortcut_keydowns: std::collections::HashSet::new(),
-        panel_input: crate::windowed::panel_input::PanelInputState::default(),
-        keyboard_activation_nodes: std::collections::HashMap::new(),
-        consumed_command_keydowns: std::collections::HashSet::new(),
-        local_composer_state: Arc::new(StdMutex::new(None)),
-        viewer_echo_queue: Arc::new(StdMutex::new(Vec::new())),
-        input_history_seed_states: std::collections::HashMap::new(),
-        focus_ring_owner_state: Arc::new(StdMutex::new(None)),
-        resize_grip_hover_state: Arc::new(StdMutex::new(None)),
-        tile_close_hover_state: Arc::new(StdMutex::new(None)),
-        cursor_left_window: false,
-        composer_visual_layout: Arc::new(StdMutex::new(None)),
-        portal_projection_driver: crate::portal::PortalDriver::new(portals),
-        capture_inbox: crate::operator::screenshot::CaptureInbox::detached(),
-        pending_keyboard_events: VecDeque::new(),
-        interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
-    };
-
-    drop(input_capture_tx);
-
-    (WinitApp { state }, input_event_rx)
-}
-
-/// Construct a portal scene: one tile rooted at a composer node with a
-/// focusable non-composer control child. Returns
-/// `(scene, tab_id, tile_id, composer_id, control_id)`.
-pub(super) fn portal_scene_with_control() -> (
-    tze_hud_scene::graph::SceneGraph,
-    tze_hud_scene::SceneId,
-    tze_hud_scene::SceneId,
-    tze_hud_scene::SceneId,
-    tze_hud_scene::SceneId,
-) {
-    use tze_hud_scene::types::{HitRegionNode, TileScrollConfig};
-    use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
-
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease("portal-agent", 60_000);
-    let tile_id = scene
-        .create_tile(
-            tab_id,
-            "portal-agent",
-            lease_id,
-            Rect::new(100.0, 100.0, 400.0, 300.0),
-            1,
-        )
-        .unwrap();
-    scene
-        .register_tile_scroll_config(tile_id, TileScrollConfig::vertical())
-        .unwrap();
-
-    let composer_id = SceneId::new();
-    let control_id = SceneId::new();
-    scene.nodes.insert(
-        composer_id,
-        Node {
-            layout: Default::default(),
-            id: composer_id,
-            children: vec![control_id],
-            data: NodeData::HitRegion(HitRegionNode {
-                bounds: Rect::new(0.0, 0.0, 400.0, 60.0),
-                interaction_id: "portal-composer".to_string(),
-                accepts_focus: true,
-                accepts_pointer: true,
-                accepts_composer_input: true,
-                ..Default::default()
-            }),
-        },
-    );
-    scene.nodes.insert(
-        control_id,
-        Node {
-            layout: Default::default(),
-            id: control_id,
-            children: vec![],
-            data: NodeData::HitRegion(HitRegionNode {
-                bounds: Rect::new(10.0, 80.0, 40.0, 40.0),
-                interaction_id: "portal-minimize".to_string(),
-                accepts_focus: true,
-                accepts_pointer: true,
-                accepts_composer_input: false,
-                ..Default::default()
-            }),
-        },
-    );
-    scene.tiles.get_mut(&tile_id).unwrap().root_node = Some(composer_id);
-    (scene, tab_id, tile_id, composer_id, control_id)
-}
-
-/// Build a multi-surface portal (frame + transcript pane + composer pane +
-/// far-corner drag shield) sharing one lease, with keyboard focus on the
-/// composer/input pane — the exact live configuration that made Ctrl resize
-/// scale only the focused pane. Returns (scene, tab, frame, transcript,
-/// composer, drag_shield, focus_manager).
-#[allow(clippy::type_complexity)]
-pub(super) fn multi_surface_portal_scene() -> (
-    tze_hud_scene::graph::SceneGraph,
-    tze_hud_scene::SceneId,
-    tze_hud_scene::SceneId,
-    tze_hud_scene::SceneId,
-    tze_hud_scene::SceneId,
-    tze_hud_scene::SceneId,
-    FocusManager,
-) {
-    use tze_hud_scene::types::TileScrollConfig;
-    use tze_hud_scene::{Rect, SceneGraph};
-
-    let mut scene = SceneGraph::new(1920.0, 1080.0);
-    let tab_id = scene.create_tab("Main", 0).unwrap();
-    let lease_id = scene.grant_lease("portal-agent", 60_000);
-    // Frame is the portal-sized anchor (largest area, not scrollable).
-    let frame_id = scene
-        .create_tile(
-            tab_id,
-            "portal-agent",
-            lease_id,
-            Rect::new(100.0, 100.0, 400.0, 300.0),
-            1,
-        )
-        .unwrap();
-    // Transcript (output) pane — a scrollable surface inside the frame.
-    let transcript_id = scene
-        .create_tile(
-            tab_id,
-            "portal-agent",
-            lease_id,
-            Rect::new(110.0, 110.0, 180.0, 280.0),
-            3,
-        )
-        .unwrap();
-    // Composer (input) pane — a scrollable surface inside the frame.
-    let composer_id = scene
-        .create_tile(
-            tab_id,
-            "portal-agent",
-            lease_id,
-            Rect::new(300.0, 110.0, 190.0, 280.0),
-            3,
-        )
-        .unwrap();
-    // Drag shield — parked in the far display corner, NOT scrollable, NOT
-    // spatially part of the portal frame.
-    let shield_id = scene
-        .create_tile(
-            tab_id,
-            "portal-agent",
-            lease_id,
-            Rect::new(1900.0, 1070.0, 1.0, 1.0),
-            20,
-        )
-        .unwrap();
-    scene
-        .register_tile_scroll_config(transcript_id, TileScrollConfig::vertical())
-        .unwrap();
-    scene
-        .register_tile_scroll_config(composer_id, TileScrollConfig::vertical())
-        .unwrap();
-
-    // Focus the composer/input pane — the live trigger for the bug.
-    let mut fm = FocusManager::new();
-    fm.request_focus(
-        FocusRequest {
-            tile_id: composer_id,
-            node_id: None,
-            steal: true,
-            requesting_namespace: "portal-agent".to_string(),
-        },
-        tab_id,
-        &scene,
-    );
-
-    (
-        scene,
-        tab_id,
-        frame_id,
-        transcript_id,
-        composer_id,
-        shield_id,
-        fm,
-    )
-}
-
-pub(super) fn viewer_echo_context(tile_id: tze_hud_scene::SceneId) -> ComposerDeliveryContext {
-    ComposerDeliveryContext {
-        namespace: "portal-agent".to_string(),
-        node_id_bytes: [0u8; 16],
-        tile_id,
     }
 }
