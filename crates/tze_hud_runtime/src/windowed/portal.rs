@@ -1754,8 +1754,8 @@ mod tests {
 
     use super::super::WinitApp;
     use super::super::test_support::{
-        make_windowed_keyboard_test_app, multi_surface_portal_scene, portal_scene_with_control,
-        portal_scene_with_focus, scene_with_drag_handle_tile,
+        make_windowed_keyboard_test_app, multi_surface_portal_scene, portal_scene_with_focus,
+        scene_with_drag_handle_tile,
     };
     use super::*;
 
