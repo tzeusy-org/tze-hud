@@ -3573,7 +3573,6 @@ dependencies = [
 name = "tze_hud_projection"
 version = "0.1.0"
 dependencies = [
- "proptest",
  "serde",
  "tze_hud_config",
  "tze_hud_scene",

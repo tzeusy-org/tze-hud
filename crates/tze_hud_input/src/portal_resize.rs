@@ -998,11 +998,8 @@ pub fn apply_hotkey_resize_axis(
     }
     .clamped(bounds);
 
-    // Always advance the sequence so the state-stream coalescer (latest-wins
-    // by sequence number) never drops this snapshot. Keeping the sequence
-    // stale would cause `AdapterGeometryBatch::coalesce` to silently discard
-    // the snapshot when an earlier one with the same sequence is already
-    // present — the adapter would then miss a clamped-at-boundary attempt.
+    // Advance even for a clamped attempt so geometry consumers can distinguish
+    // each hotkey step while retaining latest-wins sequence ordering.
     let snap = GeometrySnapshot {
         portal_id_hash: state.portal_id_hash,
         rect: new_rect,

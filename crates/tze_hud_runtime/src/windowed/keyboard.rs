@@ -867,22 +867,6 @@ impl WinitApp {
                     // Submit or cancel: clear the local echo overlay.
                     self.clear_local_composer_echo();
                 }
-                // hud-npcdf: a submission sets `key_down_is_terminal`, so the
-                // reset-to-tail in the `!key_down_is_terminal` branch below is
-                // skipped — and a hub portal tile echoes its own
-                // submission async via `portal_projection_driver`'s
-                // `notify_tile_content_appended`, which honors `ScrolledBack` and
-                // does not reset. A scrolled-back viewer's just-submitted reply
-                // would then stay off-screen. Snap the input-pane history back to
-                // the tail on SUBMIT (not cancel) so the reply the viewer just
-                // sent is revealed. The raw-tile path already resets inside
-                // `append_raw_tile_viewer_echo`; `reset_input_history_scroll_to_tail`
-                // is idempotent, so the redundant call there is harmless.
-                if is_submission {
-                    if let Some(tile_id) = history_tile_id {
-                        self.reset_input_history_scroll_to_tail(tile_id);
-                    }
-                }
             }
             if consumed {
                 tracing::debug!(
@@ -1744,18 +1728,6 @@ impl WinitApp {
                 if let Some(context) = delivery_context {
                     self.route_and_deliver_composer_batch(context, b);
                 }
-                // hud-npcdf: mirror the KeyDown submit-terminal reset so a
-                // submission arriving on the character path (e.g. an
-                // authority-attached tile) also snaps the input-pane history back
-                // to the tail — the async authority echo honors `ScrolledBack` and
-                // would otherwise strand the just-submitted reply off-screen.
-                // Idempotent alongside the raw-tile reset in
-                // `append_raw_tile_viewer_echo`.
-                if is_submission {
-                    if let Some(tile_id) = history_tile_id {
-                        self.reset_input_history_scroll_to_tail(tile_id);
-                    }
-                }
             }
             // Truncate for debug logs: raw.character carries clipboard text and
             // can be arbitrarily large.  Formatting is lazy (tracing skips it
@@ -2387,5 +2359,1392 @@ mod tests {
         assert_key_down(&queue[0], "a");
         assert_key_down(&queue[1], "b");
         assert_key_down(&queue[2], "c");
+    }
+
+    use super::super::WinitApp;
+    use super::super::portal::PortalProjectionDrain;
+    use super::super::test_support::{
+        make_windowed_keyboard_test_app, portal_scene_with_control, portal_scene_with_focus,
+        viewer_echo_context,
+    };
+    use std::sync::Arc;
+    use tze_hud_input::{FocusManager, InputProcessor, RawKeyUpEvent};
+
+    #[test]
+    fn ctrl_resize_hotkey_resizes_focused_portal_while_composer_active() {
+        use tze_hud_input::{FocusManager, InputProcessor, KeyboardModifiers};
+        use tze_hud_scene::types::{HitRegionNode, TileScrollConfig};
+        use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
+
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        let tab_id = scene.create_tab("Main", 0).unwrap();
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
+        let tile_id = scene
+            .create_tile(
+                tab_id,
+                "portal-agent",
+                lease_id,
+                Rect::new(100.0, 100.0, 400.0, 300.0),
+                1,
+            )
+            .unwrap();
+        scene
+            .register_tile_scroll_config(tile_id, TileScrollConfig::vertical())
+            .unwrap();
+
+        let composer_id = SceneId::new();
+        scene
+            .set_tile_root(
+                tile_id,
+                Node {
+                    layout: Default::default(),
+                    id: composer_id,
+                    children: vec![],
+                    data: NodeData::HitRegion(HitRegionNode {
+                        bounds: Rect::new(0.0, 0.0, 400.0, 60.0),
+                        interaction_id: "portal-composer".to_string(),
+                        accepts_focus: true,
+                        accepts_pointer: true,
+                        accepts_composer_input: true,
+                        ..Default::default()
+                    }),
+                },
+            )
+            .unwrap();
+
+        let mut processor = InputProcessor::new();
+        let mut focus_manager = FocusManager::new();
+        focus_manager.add_tab(tab_id);
+        let (_input_result, transition) = processor.process_with_focus(
+            &tze_hud_input::PointerEvent {
+                x: 110.0,
+                y: 110.0,
+                kind: tze_hud_input::PointerEventKind::Down,
+                device_id: 1,
+                timestamp: None,
+            },
+            &mut scene,
+            &mut focus_manager,
+            tab_id,
+        );
+        assert!(
+            transition.and_then(|t| t.gained).is_some(),
+            "pointer down must focus the composer node"
+        );
+        assert!(
+            processor.is_composer_active(),
+            "composer must be active after focusing the portal composer"
+        );
+
+        let (mut app, mut input_event_rx) =
+            make_windowed_keyboard_test_app(scene, focus_manager, processor);
+
+        let bounds = |app: &WinitApp| {
+            let shared = app
+                .state
+                .shared_state
+                .try_lock()
+                .expect("shared state must be available during key dispatch test");
+            let scene = shared
+                .scene
+                .try_lock()
+                .expect("scene must be available during key dispatch test");
+            scene.tiles.get(&tile_id).unwrap().bounds
+        };
+
+        let dispatch_ctrl_key =
+            |app: &mut WinitApp, key_code: &str, key: &str, shift: bool, timestamp: u64| {
+                app.dispatch_key_down_event_inner(
+                    &RawKeyDownEvent {
+                        key_code: key_code.to_string(),
+                        key: key.to_string(),
+                        modifiers: KeyboardModifiers {
+                            ctrl: true,
+                            shift,
+                            ..KeyboardModifiers::NONE
+                        },
+                        repeat: false,
+                        timestamp_mono_us: tze_hud_scene::MonoUs(timestamp),
+                    },
+                    Some(tab_id),
+                );
+            };
+        let dispatch_ctrl_key_up =
+            |app: &mut WinitApp, key_code: &str, key: &str, shift: bool, timestamp: u64| {
+                app.dispatch_key_up_event_inner(
+                    &RawKeyUpEvent {
+                        key_code: key_code.to_string(),
+                        key: key.to_string(),
+                        modifiers: KeyboardModifiers {
+                            ctrl: true,
+                            shift,
+                            ..KeyboardModifiers::NONE
+                        },
+                        timestamp_mono_us: tze_hud_scene::MonoUs(timestamp),
+                    },
+                    Some(tab_id),
+                );
+            };
+
+        let before_equal = bounds(&app);
+        dispatch_ctrl_key(&mut app, "Equal", "=", false, 1);
+        let after_equal = bounds(&app);
+
+        assert!(
+            after_equal.width > before_equal.width,
+            "Ctrl+= must grow the focused portal even when the composer is active"
+        );
+        assert!(
+            after_equal.height > before_equal.height,
+            "Ctrl+= must grow the focused portal vertically as well"
+        );
+
+        // The matching KeyUp for a KeyDown that already resized must be swallowed
+        // by the dedup set, NOT applied as a second resize (hud-v4k1h).
+        dispatch_ctrl_key_up(&mut app, "Equal", "=", false, 2);
+        let after_equal_release = bounds(&app);
+        assert_eq!(
+            after_equal_release.width, after_equal.width,
+            "matching Ctrl+= KeyUp must not apply a second horizontal resize after KeyDown already resized"
+        );
+        assert_eq!(
+            after_equal_release.height, after_equal.height,
+            "matching Ctrl+= KeyUp must not apply a second vertical resize after KeyDown already resized"
+        );
+
+        dispatch_ctrl_key(&mut app, "Equal", "+", true, 3);
+        let after_plus = bounds(&app);
+        assert!(
+            after_plus.width > after_equal_release.width,
+            "Ctrl++ must grow the focused portal even when the composer is active"
+        );
+        assert!(
+            after_plus.height > after_equal_release.height,
+            "Ctrl++ must grow the focused portal vertically as well"
+        );
+
+        dispatch_ctrl_key(&mut app, "Minus", "-", false, 4);
+        let after_minus = bounds(&app);
+        assert!(
+            after_minus.width < after_plus.width,
+            "Ctrl+- must shrink the focused portal even when the composer is active"
+        );
+        assert!(
+            after_minus.height < after_plus.height,
+            "Ctrl+- must shrink the focused portal vertically as well"
+        );
+        assert!(
+            input_event_rx.try_recv().is_err(),
+            "resize hotkey must be consumed locally, not forwarded as agent keyboard input"
+        );
+    }
+
+    /// hud-02sp5: focus acquired via keyboard Tab traversal (no pointer) must
+    /// enable the same keyboard operations as click-to-focus. A keyboard-only
+    /// viewer (Mobile Presence Node / glasses) Tabs onto the portal composer and
+    /// then the Ctrl+= resize chord must resolve and resize the focused portal —
+    /// exactly as it does when focus was acquired by a click.
+    #[test]
+    fn ctrl_resize_hotkey_resizes_portal_focused_via_tab_without_pointer() {
+        use tze_hud_input::{FocusManager, InputProcessor, KeyboardModifiers};
+        use tze_hud_scene::types::{HitRegionNode, TileScrollConfig};
+        use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
+
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        let tab_id = scene.create_tab("Main", 0).unwrap();
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
+        let tile_id = scene
+            .create_tile(
+                tab_id,
+                "portal-agent",
+                lease_id,
+                Rect::new(100.0, 100.0, 400.0, 300.0),
+                1,
+            )
+            .unwrap();
+        scene
+            .register_tile_scroll_config(tile_id, TileScrollConfig::vertical())
+            .unwrap();
+
+        // Focusable composer affordance — the only Tab stop in this portal.
+        let composer_id = SceneId::new();
+        scene
+            .set_tile_root(
+                tile_id,
+                Node {
+                    layout: Default::default(),
+                    id: composer_id,
+                    children: vec![],
+                    data: NodeData::HitRegion(HitRegionNode {
+                        bounds: Rect::new(0.0, 0.0, 400.0, 60.0),
+                        interaction_id: "portal-composer".to_string(),
+                        accepts_focus: true,
+                        accepts_pointer: true,
+                        accepts_composer_input: true,
+                        ..Default::default()
+                    }),
+                },
+            )
+            .unwrap();
+
+        // NB: no pointer event is ever synthesized. Focus is acquired purely
+        // through the windowed Tab key path.
+        let processor = InputProcessor::new();
+        let mut focus_manager = FocusManager::new();
+        focus_manager.add_tab(tab_id);
+
+        let (mut app, _input_event_rx) =
+            make_windowed_keyboard_test_app(scene, focus_manager, processor);
+
+        let bounds = |app: &WinitApp| {
+            let shared = app
+                .state
+                .shared_state
+                .try_lock()
+                .expect("shared state must be available during key dispatch test");
+            let scene = shared
+                .scene
+                .try_lock()
+                .expect("scene must be available during key dispatch test");
+            scene.tiles.get(&tile_id).unwrap().bounds
+        };
+
+        // Bare Tab (no modifiers) advances focus onto the composer — the
+        // no-pointer analogue of a click. This is the wiring proven by
+        // hud-v0cal (PR #980); here we assert it unlocks the resize chord.
+        app.dispatch_key_down_event_inner(
+            &RawKeyDownEvent {
+                key_code: "Tab".to_string(),
+                key: "Tab".to_string(),
+                modifiers: KeyboardModifiers::NONE,
+                repeat: false,
+                timestamp_mono_us: tze_hud_scene::MonoUs(1),
+            },
+            Some(tab_id),
+        );
+        assert!(
+            app.state.input_processor.is_composer_active(),
+            "bare Tab must focus the portal composer without any pointer event"
+        );
+
+        let dispatch_ctrl_key =
+            |app: &mut WinitApp, key_code: &str, key: &str, shift: bool, timestamp: u64| {
+                app.dispatch_key_down_event_inner(
+                    &RawKeyDownEvent {
+                        key_code: key_code.to_string(),
+                        key: key.to_string(),
+                        modifiers: KeyboardModifiers {
+                            ctrl: true,
+                            shift,
+                            ..KeyboardModifiers::NONE
+                        },
+                        repeat: false,
+                        timestamp_mono_us: tze_hud_scene::MonoUs(timestamp),
+                    },
+                    Some(tab_id),
+                );
+            };
+
+        let before = bounds(&app);
+        dispatch_ctrl_key(&mut app, "Equal", "=", false, 2);
+        let after = bounds(&app);
+        assert!(
+            after.width > before.width && after.height > before.height,
+            "Ctrl+= must grow the portal whose composer was focused via Tab \
+             (Tab-acquired focus must enable the same keyboard ops as a click)"
+        );
+    }
+
+    /// Regression for hud-v4k1h: on live Windows the OS (SendInput) can deliver
+    /// ONLY the `KeyUp` for the Equal/Minus chord — the `KeyDown` never arrives
+    /// while Ctrl is held. A key-down-only resize intercept therefore silently
+    /// does nothing. The key-up fallback in `dispatch_key_up_event_inner` must
+    /// resize on the release in that case.
+    #[test]
+    fn ctrl_resize_keyup_fallback_resizes_when_live_windows_omits_keydown() {
+        use tze_hud_input::{FocusManager, InputProcessor, KeyboardModifiers};
+        use tze_hud_scene::types::{HitRegionNode, TileScrollConfig};
+        use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
+
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        let tab_id = scene.create_tab("Main", 0).unwrap();
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
+        let tile_id = scene
+            .create_tile(
+                tab_id,
+                "portal-agent",
+                lease_id,
+                Rect::new(100.0, 100.0, 400.0, 300.0),
+                1,
+            )
+            .unwrap();
+        scene
+            .register_tile_scroll_config(tile_id, TileScrollConfig::vertical())
+            .unwrap();
+
+        let composer_id = SceneId::new();
+        scene
+            .set_tile_root(
+                tile_id,
+                Node {
+                    layout: Default::default(),
+                    id: composer_id,
+                    children: vec![],
+                    data: NodeData::HitRegion(HitRegionNode {
+                        bounds: Rect::new(0.0, 0.0, 400.0, 60.0),
+                        interaction_id: "portal-composer".to_string(),
+                        accepts_focus: true,
+                        accepts_pointer: true,
+                        accepts_composer_input: true,
+                        ..Default::default()
+                    }),
+                },
+            )
+            .unwrap();
+
+        let mut processor = InputProcessor::new();
+        let mut focus_manager = FocusManager::new();
+        focus_manager.add_tab(tab_id);
+        let (_input_result, transition) = processor.process_with_focus(
+            &tze_hud_input::PointerEvent {
+                x: 110.0,
+                y: 110.0,
+                kind: tze_hud_input::PointerEventKind::Down,
+                device_id: 1,
+                timestamp: None,
+            },
+            &mut scene,
+            &mut focus_manager,
+            tab_id,
+        );
+        assert!(
+            transition.and_then(|t| t.gained).is_some(),
+            "pointer down must focus the composer node"
+        );
+
+        let (mut app, mut input_event_rx) =
+            make_windowed_keyboard_test_app(scene, focus_manager, processor);
+
+        let bounds = |app: &WinitApp| {
+            let shared = app
+                .state
+                .shared_state
+                .try_lock()
+                .expect("shared state must be available during key dispatch test");
+            let scene = shared
+                .scene
+                .try_lock()
+                .expect("scene must be available during key dispatch test");
+            scene.tiles.get(&tile_id).unwrap().bounds
+        };
+
+        let dispatch_ctrl_key_up =
+            |app: &mut WinitApp, key_code: &str, key: &str, shift: bool, timestamp: u64| {
+                app.dispatch_key_up_event_inner(
+                    &RawKeyUpEvent {
+                        key_code: key_code.to_string(),
+                        key: key.to_string(),
+                        modifiers: KeyboardModifiers {
+                            ctrl: true,
+                            shift,
+                            ..KeyboardModifiers::NONE
+                        },
+                        timestamp_mono_us: tze_hud_scene::MonoUs(timestamp),
+                    },
+                    Some(tab_id),
+                );
+            };
+
+        // No KeyDown was ever consumed, so each KeyUp must drive the resize.
+        let before_equal = bounds(&app);
+        dispatch_ctrl_key_up(&mut app, "Equal", "=", false, 1);
+        let after_equal = bounds(&app);
+        assert!(
+            after_equal.width > before_equal.width,
+            "Ctrl+= release fallback must grow the focused portal when the live OS stream omitted Equal KeyDown"
+        );
+        assert!(
+            after_equal.height > before_equal.height,
+            "Ctrl+= release fallback must grow the focused portal vertically as well"
+        );
+
+        dispatch_ctrl_key_up(&mut app, "Minus", "-", false, 2);
+        let after_minus = bounds(&app);
+        assert!(
+            after_minus.width < after_equal.width,
+            "Ctrl+- release fallback must shrink the focused portal when the live OS stream omitted Minus KeyDown"
+        );
+        assert!(
+            after_minus.height < after_equal.height,
+            "Ctrl+- release fallback must shrink the focused portal vertically as well"
+        );
+        assert!(
+            input_event_rx.try_recv().is_err(),
+            "release-fallback resize hotkey must be consumed locally, not forwarded as agent keyboard input"
+        );
+    }
+
+    #[test]
+    fn ctrl_resize_hotkey_ignores_unfocused_portal_on_windowed_dispatch_path() {
+        use tze_hud_input::{FocusManager, FocusRequest, InputProcessor, KeyboardModifiers};
+        use tze_hud_protocol::proto::input_envelope::Event as InputEvent;
+        use tze_hud_scene::types::TileScrollConfig;
+        use tze_hud_scene::{Rect, SceneGraph};
+
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        let tab_id = scene.create_tab("Main", 0).unwrap();
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
+        let portal_tile_id = scene
+            .create_tile(
+                tab_id,
+                "portal-agent",
+                lease_id,
+                Rect::new(100.0, 100.0, 400.0, 300.0),
+                1,
+            )
+            .unwrap();
+        scene
+            .register_tile_scroll_config(portal_tile_id, TileScrollConfig::vertical())
+            .unwrap();
+
+        let plain_tile_id = scene
+            .create_tile(
+                tab_id,
+                "portal-agent",
+                lease_id,
+                Rect::new(700.0, 100.0, 240.0, 160.0),
+                2,
+            )
+            .unwrap();
+
+        let mut focus_manager = FocusManager::new();
+        let (focus_result, _transition) = focus_manager.request_focus(
+            FocusRequest {
+                tile_id: plain_tile_id,
+                node_id: None,
+                steal: true,
+                requesting_namespace: "portal-agent".to_string(),
+            },
+            tab_id,
+            &scene,
+        );
+        assert_eq!(
+            focus_result,
+            tze_hud_input::FocusResult::Granted,
+            "test setup must focus the non-portal tile"
+        );
+
+        let (mut app, mut input_event_rx) =
+            make_windowed_keyboard_test_app(scene, focus_manager, InputProcessor::new());
+
+        let portal_bounds = |app: &WinitApp| {
+            let shared = app
+                .state
+                .shared_state
+                .try_lock()
+                .expect("shared state must be available during key dispatch test");
+            let scene = shared
+                .scene
+                .try_lock()
+                .expect("scene must be available during key dispatch test");
+            scene.tiles.get(&portal_tile_id).unwrap().bounds
+        };
+
+        let before = portal_bounds(&app);
+        app.dispatch_key_down_event_inner(
+            &RawKeyDownEvent {
+                key_code: "Equal".to_string(),
+                key: "=".to_string(),
+                modifiers: KeyboardModifiers {
+                    ctrl: true,
+                    ..KeyboardModifiers::NONE
+                },
+                repeat: false,
+                timestamp_mono_us: tze_hud_scene::MonoUs(1),
+            },
+            Some(tab_id),
+        );
+        let after = portal_bounds(&app);
+
+        assert_eq!(
+            after, before,
+            "Ctrl+= must not resize a portal that does not hold focus"
+        );
+        assert!(
+            app.state.portal_resize_states.is_empty(),
+            "unfocused portal hotkey must not create resize state"
+        );
+        let (namespace, batch) = input_event_rx
+            .try_recv()
+            .expect("non-consumed hotkey should continue to normal keyboard routing");
+        assert_eq!(namespace, "portal-agent");
+        match batch
+            .events
+            .first()
+            .and_then(|envelope| envelope.event.as_ref())
+        {
+            Some(InputEvent::KeyDown(ev)) => {
+                assert_eq!(ev.key, "=");
+                assert!(ev.ctrl, "forwarded key event must preserve Ctrl");
+            }
+            other => panic!("expected forwarded KeyDown event, got {other:?}"),
+        }
+    }
+
+    /// Enter on a Tab-focused portal control activates it by broadcasting a
+    /// synthetic PointerDown (+PointerUp) carrying the control's interaction_id,
+    /// so the owning agent's click handler fires — the control is not a dead stop.
+    #[test]
+    fn enter_on_focused_portal_control_activates_via_synthetic_pointer() {
+        use tze_hud_input::KeyboardModifiers;
+        use tze_hud_protocol::proto::input_envelope::Event as InputEvent;
+
+        let (mut scene, tab_id, _tile_id, composer_id, control_id) = portal_scene_with_control();
+        let mut processor = InputProcessor::new();
+        let mut focus_manager = FocusManager::new();
+        focus_manager.add_tab(tab_id);
+        // Tab onto the composer, then Tab again onto the control.
+        processor.navigate_focus(&mut focus_manager, &mut scene, tab_id, false);
+        processor.navigate_focus(&mut focus_manager, &mut scene, tab_id, false);
+        assert_eq!(
+            focus_manager.current_owner(tab_id).node_id(),
+            Some(control_id),
+            "test setup: focus must rest on the non-composer control"
+        );
+        assert!(
+            !processor.is_composer_active(),
+            "composer must be inactive while the control holds focus"
+        );
+
+        let (mut app, mut input_event_rx) =
+            make_windowed_keyboard_test_app(scene, focus_manager, processor);
+
+        app.dispatch_key_down_event_inner(
+            &RawKeyDownEvent {
+                key_code: "Enter".to_string(),
+                key: "Enter".to_string(),
+                modifiers: KeyboardModifiers::NONE,
+                repeat: false,
+                timestamp_mono_us: tze_hud_scene::MonoUs(1),
+            },
+            Some(tab_id),
+        );
+
+        // First broadcast must be a synthetic PointerDown on the control.
+        let (namespace, batch) = input_event_rx
+            .try_recv()
+            .expect("Enter on a focused control must broadcast a synthetic pointer event");
+        assert_eq!(namespace, "portal-agent");
+        match batch.events.first().and_then(|e| e.event.as_ref()) {
+            Some(InputEvent::PointerDown(ev)) => {
+                assert_eq!(
+                    ev.interaction_id, "portal-minimize",
+                    "activation must target the focused control's interaction_id"
+                );
+            }
+            other => panic!("expected synthetic PointerDown, got {other:?}"),
+        }
+        // A matching PointerUp completes the synthetic click.
+        let (_ns, up_batch) = input_event_rx
+            .try_recv()
+            .expect("activation must also broadcast a PointerUp");
+        assert!(
+            matches!(
+                up_batch.events.first().and_then(|e| e.event.as_ref()),
+                Some(InputEvent::PointerUp(_))
+            ),
+            "second synthetic event must be a PointerUp"
+        );
+        // Focus stays on the control (activation is not a focus move).
+        let _ = composer_id;
+    }
+
+    /// Typing a printable character while a portal control holds focus recovers
+    /// to the composer and inserts the character — a keyboard user is never
+    /// stranded with dead typing.
+    #[test]
+    fn typing_on_focused_portal_control_recovers_to_composer() {
+        use tze_hud_input::RawCharacterEvent;
+
+        let (mut scene, tab_id, _tile_id, composer_id, control_id) = portal_scene_with_control();
+        let mut processor = InputProcessor::new();
+        let mut focus_manager = FocusManager::new();
+        focus_manager.add_tab(tab_id);
+        processor.navigate_focus(&mut focus_manager, &mut scene, tab_id, false);
+        processor.navigate_focus(&mut focus_manager, &mut scene, tab_id, false);
+        assert_eq!(
+            focus_manager.current_owner(tab_id).node_id(),
+            Some(control_id),
+            "test setup: focus must rest on the control"
+        );
+
+        let (mut app, _input_event_rx) =
+            make_windowed_keyboard_test_app(scene, focus_manager, processor);
+
+        app.dispatch_character_event_inner(
+            &RawCharacterEvent {
+                character: "h".to_string(),
+                timestamp_mono_us: tze_hud_scene::MonoUs(1),
+            },
+            Some(tab_id),
+        );
+
+        assert!(
+            app.state.input_processor.is_composer_active(),
+            "typing on a control must recover focus to the composer (draft active)"
+        );
+        assert_eq!(
+            app.state.focus_manager.current_owner(tab_id).node_id(),
+            Some(composer_id),
+            "recovery must move focus onto the composer node"
+        );
+        assert_eq!(
+            app.state
+                .input_processor
+                .composer_draft_snapshot()
+                .map(|s| s.0),
+            Some("h".to_string()),
+            "the typed character must land in the composer draft after recovery"
+        );
+    }
+
+    /// Escape on a Tab-focused portal control recovers focus to the composer.
+    #[test]
+    fn escape_on_focused_portal_control_recovers_to_composer() {
+        use tze_hud_input::KeyboardModifiers;
+
+        let (mut scene, tab_id, _tile_id, composer_id, control_id) = portal_scene_with_control();
+        let mut processor = InputProcessor::new();
+        let mut focus_manager = FocusManager::new();
+        focus_manager.add_tab(tab_id);
+        processor.navigate_focus(&mut focus_manager, &mut scene, tab_id, false);
+        processor.navigate_focus(&mut focus_manager, &mut scene, tab_id, false);
+        assert_eq!(
+            focus_manager.current_owner(tab_id).node_id(),
+            Some(control_id)
+        );
+
+        let (mut app, _input_event_rx) =
+            make_windowed_keyboard_test_app(scene, focus_manager, processor);
+
+        app.dispatch_key_down_event_inner(
+            &RawKeyDownEvent {
+                key_code: "Escape".to_string(),
+                key: "Escape".to_string(),
+                modifiers: KeyboardModifiers::NONE,
+                repeat: false,
+                timestamp_mono_us: tze_hud_scene::MonoUs(1),
+            },
+            Some(tab_id),
+        );
+
+        assert_eq!(
+            app.state.focus_manager.current_owner(tab_id).node_id(),
+            Some(composer_id),
+            "Escape on a control must recover focus to the composer"
+        );
+        assert!(
+            app.state.input_processor.is_composer_active(),
+            "composer draft must be active after Escape recovery"
+        );
+    }
+
+    /// hud-k6yvb: Escape on a composer-less focus stop (a focusable node whose
+    /// tile has no composer) clears focus to None — the keyboard user is never
+    /// stranded — and broadcasts a FocusLost for the released node.
+    #[test]
+    fn escape_on_composerless_stop_clears_focus_to_none() {
+        use tze_hud_input::{FocusManager, InputProcessor, KeyboardModifiers};
+        use tze_hud_protocol::proto::input_envelope::Event as InputEvent;
+        use tze_hud_scene::types::HitRegionNode;
+        use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
+
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        let tab_id = scene.create_tab("Main", 0).unwrap();
+        let lease_id = scene.grant_lease("agent", 60_000);
+        let tile_id = scene
+            .create_tile(
+                tab_id,
+                "agent",
+                lease_id,
+                Rect::new(100.0, 100.0, 300.0, 200.0),
+                1,
+            )
+            .unwrap();
+        // A plain focusable control — NO composer in the tile.
+        let node_id = SceneId::new();
+        scene
+            .set_tile_root(
+                tile_id,
+                Node {
+                    layout: Default::default(),
+                    id: node_id,
+                    children: vec![],
+                    data: NodeData::HitRegion(HitRegionNode {
+                        bounds: Rect::new(0.0, 0.0, 120.0, 40.0),
+                        interaction_id: "plain".to_string(),
+                        accepts_focus: true,
+                        accepts_pointer: true,
+                        accepts_composer_input: false,
+                        ..Default::default()
+                    }),
+                },
+            )
+            .unwrap();
+
+        let mut processor = InputProcessor::new();
+        let mut focus_manager = FocusManager::new();
+        focus_manager.add_tab(tab_id);
+        processor.navigate_focus(&mut focus_manager, &mut scene, tab_id, false);
+        assert_eq!(focus_manager.current_owner(tab_id).node_id(), Some(node_id));
+
+        let (mut app, mut rx) = make_windowed_keyboard_test_app(scene, focus_manager, processor);
+
+        app.dispatch_key_down_event_inner(
+            &RawKeyDownEvent {
+                key_code: "Escape".to_string(),
+                key: "Escape".to_string(),
+                modifiers: KeyboardModifiers::NONE,
+                repeat: false,
+                timestamp_mono_us: tze_hud_scene::MonoUs(1),
+            },
+            Some(tab_id),
+        );
+
+        assert_eq!(
+            *app.state.focus_manager.current_owner(tab_id),
+            tze_hud_input::FocusOwner::None,
+            "Escape on a composer-less stop must clear focus to None"
+        );
+        // A FocusLost event was broadcast for the released node. CANCEL is
+        // intentionally delivered first while the old owner is still the
+        // command target, so inspect the whole resulting event sequence.
+        let mut events = Vec::new();
+        while let Ok((_namespace, batch)) = rx.try_recv() {
+            events.extend(batch.events.into_iter().filter_map(|event| event.event));
+        }
+        assert!(
+            events
+                .iter()
+                .any(|event| matches!(event, InputEvent::FocusLost(_))),
+            "the broadcasts must include FocusLost for the released control; got {events:?}"
+        );
+    }
+
+    /// Typing into the composer while the input-pane history is scrolled back
+    /// must snap the history's scroll offset back to the tail (hud-qbcp8:
+    /// "don't strand the viewer scrolled-up" while they're actively drafting).
+    #[test]
+    fn typing_while_scrolled_back_resets_history_scroll_to_tail() {
+        use tze_hud_input::RawCharacterEvent;
+
+        let (mut scene, tab_id, tile_id, composer_id, _control_id) = portal_scene_with_control();
+        let mut processor = InputProcessor::new();
+        let mut focus_manager = FocusManager::new();
+        focus_manager.add_tab(tab_id);
+        processor.navigate_focus(&mut focus_manager, &mut scene, tab_id, false);
+        assert_eq!(
+            focus_manager.current_owner(tab_id).node_id(),
+            Some(composer_id),
+            "test setup: focus must rest on the composer"
+        );
+        assert!(
+            processor.is_composer_active(),
+            "test setup: landing focus on the composer must activate the draft"
+        );
+
+        let (mut app, _input_event_rx) =
+            make_windowed_keyboard_test_app(scene, focus_manager, processor);
+
+        // Seed an overflowing history and scroll away from the tail (same setup
+        // as `resubmitting_after_scroll_back_snaps_history_to_tail`).
+        let text = (0..20)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let mut batch = tze_hud_input::DraftNotificationBatch::new();
+        batch.record_submission(tze_hud_input::DraftSubmission { text, sequence: 1 });
+        app.route_and_deliver_composer_batch(viewer_echo_context(tile_id), batch);
+        {
+            let shared = app.state.shared_state.try_lock().unwrap();
+            let mut scene = shared.scene.try_lock().unwrap();
+            let _ = app.state.input_processor.process_scroll_event(
+                &tze_hud_input::ScrollEvent {
+                    x: 300.0,
+                    y: 250.0,
+                    delta_x: 0.0,
+                    delta_y: -50.0,
+                },
+                &mut scene,
+            );
+            assert!(
+                !scene.tile_follow_tail_at_tail(tile_id),
+                "test setup: scrolling up must leave the tile ScrolledBack"
+            );
+        }
+
+        // Type a character while the history is scrolled back.
+        app.dispatch_character_event_inner(
+            &RawCharacterEvent {
+                character: "h".to_string(),
+                timestamp_mono_us: tze_hud_scene::MonoUs(1),
+            },
+            Some(tab_id),
+        );
+
+        let shared = app.state.shared_state.try_lock().unwrap();
+        let scene = shared.scene.try_lock().unwrap();
+        assert!(
+            scene.tile_follow_tail_at_tail(tile_id),
+            "typing into the focused composer must snap the input-pane history \
+             back to the tail"
+        );
+    }
+
+    /// A hub-backed portal's submission routes to the portal hub, so the
+    /// raw-tile echo path is skipped. The common batch submission reset must
+    /// reveal the reply at the tail before the hub echo paints during settle.
+    #[test]
+    fn authority_attached_submit_snaps_scrolled_back_history_to_tail() {
+        use tze_hud_input::{FocusManager, InputProcessor, RawCharacterEvent};
+        use tze_hud_scene::types::HitRegionNode;
+        use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
+
+        // Publish and drain to MATERIALISE a hub-backed portal tile (binding
+        // it in the driver). A submission on this tile is routed to the hub,
+        // and the driver reports it handled. Only the common submission reset
+        // pins the tail; the raw-tile echo helper never runs.
+        let clock = tze_hud_scene::TestClock::from_us(200);
+        let mut driver = crate::portal::PortalDriver::new(tze_hud_mcp::PortalHandle::new(
+            tze_hud_projection::hub::PortalHub::default(),
+            Arc::new(clock.clone()),
+        ));
+        let handle = driver.portal_handle();
+        driver
+            .hub_mut()
+            .publish(
+                &tze_hud_projection::hub::PortalKey::new("test-agent", "proj-npcdf"),
+                tze_hud_projection::hub::Publish {
+                    text: Some("assistant ready".to_string()),
+                    ..Default::default()
+                },
+                100,
+            )
+            .expect("publish accepted");
+
+        let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, Arc::new(clock.clone()));
+        let tab_id = scene.create_tab("Main", 0).unwrap();
+        let mut processor = InputProcessor::new();
+
+        driver.drain(&mut scene, &mut processor, Some(tab_id));
+        assert_eq!(
+            handle
+                .hub
+                .lock()
+                .unwrap()
+                .get(&tze_hud_projection::hub::PortalKey::new(
+                    "test-agent",
+                    "proj-npcdf"
+                ))
+                .unwrap()
+                .last_render_us,
+            Some(200)
+        );
+
+        let tile_id = *scene
+            .tiles
+            .keys()
+            .next()
+            .expect("drain must materialise a portal tile");
+        let tile_bounds = scene.tiles.get(&tile_id).unwrap().bounds;
+
+        // Give the materialised tile a focusable composer so Enter routes to the
+        // draft (the driver-created tile carries no composer node of its own).
+        let composer_id = SceneId::new();
+        scene.nodes.insert(
+            composer_id,
+            Node {
+                layout: Default::default(),
+                id: composer_id,
+                children: vec![],
+                data: NodeData::HitRegion(HitRegionNode {
+                    bounds: Rect::new(0.0, 0.0, 400.0, 60.0),
+                    interaction_id: "portal-composer".to_string(),
+                    accepts_focus: true,
+                    accepts_pointer: true,
+                    accepts_composer_input: true,
+                    ..Default::default()
+                }),
+            },
+        );
+        scene.tiles.get_mut(&tile_id).unwrap().root_node = Some(composer_id);
+
+        let mut focus_manager = FocusManager::new();
+        focus_manager.add_tab(tab_id);
+        processor.navigate_focus(&mut focus_manager, &mut scene, tab_id, false);
+        assert!(
+            processor.is_composer_active(),
+            "test setup: focusing the composer must activate the draft"
+        );
+
+        // Seed an overflowing history so there is a nonzero scrollable range
+        // (mirrors the authority echo growing the transcript).
+        processor.notify_tile_content_appended(tile_id, 30.0 * 21.0, 200.0, 21.0, &mut scene);
+
+        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, focus_manager, processor);
+        app.state.portal_projection_driver = driver;
+
+        // Type a character (non-empty draft required for a real submission). This
+        // resets to the tail, matching a viewer actively drafting.
+        app.dispatch_character_event_inner(
+            &RawCharacterEvent {
+                character: "viewer-reply-same-frame".to_string(),
+                timestamp_mono_us: tze_hud_scene::MonoUs(1),
+            },
+            Some(tab_id),
+        );
+
+        // Scroll the viewer back up, away from the tail (a point in the tile body,
+        // below the composer's 60px-tall hit region).
+        {
+            let shared = app.state.shared_state.try_lock().unwrap();
+            let mut scene = shared.scene.try_lock().unwrap();
+            let _ = app.state.input_processor.process_scroll_event(
+                &tze_hud_input::ScrollEvent {
+                    x: tile_bounds.x + 200.0,
+                    y: tile_bounds.y + tile_bounds.height - 20.0,
+                    delta_x: 0.0,
+                    delta_y: -50.0,
+                },
+                &mut scene,
+            );
+            assert!(
+                !scene.tile_follow_tail_at_tail(tile_id),
+                "test setup: scrolling up must leave the tile ScrolledBack"
+            );
+        }
+
+        // Submit with Enter. The submission routes to the authority (echo path
+        // skipped), so the common batch submission reset must pin the tail.
+        clock.advance_us(1);
+        app.dispatch_key_down_event_inner(
+            &RawKeyDownEvent {
+                key_code: "Enter".to_string(),
+                key: "Enter".to_string(),
+                modifiers: tze_hud_input::KeyboardModifiers::NONE,
+                repeat: false,
+                timestamp_mono_us: tze_hud_scene::MonoUs(2),
+            },
+            Some(tab_id),
+        );
+
+        assert!(
+            app.state.viewer_echo_queue.lock().unwrap().is_empty(),
+            "an authority-attached submission must NOT enqueue a raw-tile echo — \
+             confirming the tail reset came from the common submission path, \
+             not append_raw_tile_viewer_echo"
+        );
+        let shared = app.state.shared_state.try_lock().unwrap();
+        let scene = shared.scene.try_lock().unwrap();
+        assert!(
+            scene.tile_follow_tail_at_tail(tile_id),
+            "an authority-attached submission must snap the input-pane history back \
+             to the tail on submit (hud-npcdf)"
+        );
+        drop(scene);
+        drop(shared);
+        // Execute the actual production settle order: composer flush, deferred
+        // keyboard work, then portal drain in this same Winit maintenance turn.
+        assert!(matches!(
+            app.settle_scene_work(),
+            PortalProjectionDrain::Completed {
+                scene_changed: true
+            }
+        ));
+        assert!(app.state.viewer_echo_queue.lock().unwrap().is_empty());
+        {
+            let hub = handle.hub.lock().unwrap();
+            let portal = hub
+                .get(&tze_hud_projection::hub::PortalKey::new(
+                    "test-agent",
+                    "proj-npcdf",
+                ))
+                .unwrap();
+            assert_eq!(
+                portal.last_render_us,
+                Some(201),
+                "reply paints strictly inside the 100 ms pacing slot"
+            );
+            assert_eq!(portal.replies.len(), 1);
+            assert_eq!(portal.inputs.len(), 1);
+            assert_eq!(portal.replies[0].text, "viewer-reply-same-frame");
+        }
+        {
+            let shared = app.state.shared_state.try_lock().unwrap();
+            let scene = shared.scene.try_lock().unwrap();
+            let painted = scene
+                .nodes
+                .values()
+                .filter_map(|node| match &node.data {
+                    NodeData::TextMarkdown(text) => Some(text.content.as_str()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            assert_eq!(
+                painted.matches("viewer-reply-same-frame").count(),
+                1,
+                "one hub echo in the scene, no raw duplicate: {painted}"
+            );
+            assert!(scene.tile_follow_tail_at_tail(tile_id));
+        }
+        app.settle_scene_work();
+        assert_eq!(
+            handle
+                .hub
+                .lock()
+                .unwrap()
+                .get(&tze_hud_projection::hub::PortalKey::new(
+                    "test-agent",
+                    "proj-npcdf"
+                ))
+                .unwrap()
+                .last_render_us,
+            Some(201),
+            "no perpetual local dirty frame"
+        );
+
+        // A known portal whose hub is unavailable must not fall back to a raw
+        // success echo. Register readiness before the refusal, as a real poll does.
+        let ready = handle.input_notify("test-agent").unwrap();
+        let mut notified = std::pin::pin!(ready.notified());
+        assert!(!notified.as_mut().enable());
+        let limit = handle.hub.lock().unwrap().limits().input_item_bytes;
+        let mut refused = tze_hud_input::DraftNotificationBatch::new();
+        refused.record_submission(tze_hud_input::DraftSubmission {
+            text: "x".repeat(limit + 1),
+            sequence: 2,
+        });
+        app.route_and_deliver_composer_batch(viewer_echo_context(tile_id), refused);
+        {
+            let hub = handle.hub.lock().unwrap();
+            let portal = hub
+                .get(&tze_hud_projection::hub::PortalKey::new(
+                    "test-agent",
+                    "proj-npcdf",
+                ))
+                .unwrap();
+            assert_eq!(portal.inputs.len(), 1, "cap refusal admits no input");
+            assert_eq!(portal.replies.len(), 1, "cap refusal authors no echo");
+        }
+        assert!(
+            !notified.as_mut().enable(),
+            "cap refusal never signals accepted input"
+        );
+        assert!(app.state.viewer_echo_queue.lock().unwrap().is_empty());
+        let hub = Arc::clone(&handle.hub);
+        let _ = std::thread::spawn(move || {
+            let _guard = hub.lock().unwrap();
+            panic!("poison hub fixture");
+        })
+        .join();
+        let mut batch = tze_hud_input::DraftNotificationBatch::new();
+        batch.record_submission(tze_hud_input::DraftSubmission {
+            text: "refused-known-portal".to_string(),
+            sequence: 2,
+        });
+        app.route_and_deliver_composer_batch(viewer_echo_context(tile_id), batch);
+        {
+            let hub = handle.hub.lock().err().unwrap().into_inner();
+            let portal = hub
+                .get(&tze_hud_projection::hub::PortalKey::new(
+                    "test-agent",
+                    "proj-npcdf",
+                ))
+                .unwrap();
+            assert_eq!(portal.inputs.len(), 1, "refusal admits no new input");
+            assert_eq!(portal.replies.len(), 1, "refusal authors no hub echo");
+        }
+        assert!(
+            !notified.as_mut().enable(),
+            "refusal does not notify accepted input"
+        );
+        assert!(
+            app.state.viewer_echo_queue.lock().unwrap().is_empty(),
+            "a known portal refusal must not author a raw success echo"
+        );
+    }
+
+    #[test]
+    fn shell_reserved_ctrl_tab_does_not_resize_focused_portal() {
+        use tze_hud_input::{InputProcessor, KeyboardModifiers};
+
+        let (scene, tab_id, tile_id, focus_manager) = portal_scene_with_focus();
+        let (mut app, _input_event_rx) =
+            make_windowed_keyboard_test_app(scene, focus_manager, InputProcessor::new());
+
+        let bounds = |app: &WinitApp| {
+            let shared = app
+                .state
+                .shared_state
+                .try_lock()
+                .expect("shared state must be available during key dispatch test");
+            let scene = shared
+                .scene
+                .try_lock()
+                .expect("scene must be available during key dispatch test");
+            scene.tiles.get(&tile_id).unwrap().bounds
+        };
+
+        let before = bounds(&app);
+        app.dispatch_key_down_event_inner(
+            &RawKeyDownEvent {
+                key_code: "Tab".to_string(),
+                key: "Tab".to_string(),
+                modifiers: KeyboardModifiers {
+                    ctrl: true,
+                    ..KeyboardModifiers::NONE
+                },
+                repeat: false,
+                timestamp_mono_us: tze_hud_scene::MonoUs(1),
+            },
+            Some(tab_id),
+        );
+        let after = bounds(&app);
+
+        assert_eq!(
+            after, before,
+            "shell-reserved Ctrl+Tab must not be consumed as a portal resize hotkey"
+        );
+        assert!(
+            app.state.portal_resize_states.is_empty(),
+            "shell-reserved shortcut must not create portal resize state"
+        );
+    }
+
+    #[test]
+    fn ctrl_resize_hotkey_is_captured_by_safe_mode_before_resizing() {
+        use std::sync::atomic::Ordering;
+
+        use tze_hud_input::{FocusManager, InputProcessor, KeyboardModifiers};
+        use tze_hud_scene::types::{HitRegionNode, TileScrollConfig};
+        use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
+
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        let tab_id = scene.create_tab("Main", 0).unwrap();
+        let lease_id = scene.grant_lease("portal-agent", 60_000);
+        let tile_id = scene
+            .create_tile(
+                tab_id,
+                "portal-agent",
+                lease_id,
+                Rect::new(100.0, 100.0, 400.0, 300.0),
+                1,
+            )
+            .unwrap();
+        scene
+            .register_tile_scroll_config(tile_id, TileScrollConfig::vertical())
+            .unwrap();
+
+        let composer_id = SceneId::new();
+        scene
+            .set_tile_root(
+                tile_id,
+                Node {
+                    layout: Default::default(),
+                    id: composer_id,
+                    children: vec![],
+                    data: NodeData::HitRegion(HitRegionNode {
+                        bounds: Rect::new(0.0, 0.0, 400.0, 60.0),
+                        interaction_id: "portal-composer".to_string(),
+                        accepts_focus: true,
+                        accepts_pointer: true,
+                        accepts_composer_input: true,
+                        ..Default::default()
+                    }),
+                },
+            )
+            .unwrap();
+
+        let mut processor = InputProcessor::new();
+        let mut focus_manager = FocusManager::new();
+        let (_input_result, transition) = processor.process_with_focus(
+            &tze_hud_input::PointerEvent {
+                x: 110.0,
+                y: 110.0,
+                kind: tze_hud_input::PointerEventKind::Down,
+                device_id: 1,
+                timestamp: None,
+            },
+            &mut scene,
+            &mut focus_manager,
+            tab_id,
+        );
+        assert!(
+            transition.and_then(|t| t.gained).is_some(),
+            "pointer down must focus the composer node"
+        );
+
+        let (mut app, mut input_event_rx) =
+            make_windowed_keyboard_test_app(scene, focus_manager, processor);
+        app.state.safe_mode_atomic.store(true, Ordering::Release);
+
+        let bounds = |app: &WinitApp| {
+            let shared = app
+                .state
+                .shared_state
+                .try_lock()
+                .expect("shared state must be available during key dispatch test");
+            let scene = shared
+                .scene
+                .try_lock()
+                .expect("scene must be available during key dispatch test");
+            scene.tiles.get(&tile_id).unwrap().bounds
+        };
+
+        let before = bounds(&app);
+        app.dispatch_key_down_event(&RawKeyDownEvent {
+            key_code: "Equal".to_string(),
+            key: "=".to_string(),
+            modifiers: KeyboardModifiers {
+                ctrl: true,
+                ..KeyboardModifiers::NONE
+            },
+            repeat: false,
+            timestamp_mono_us: tze_hud_scene::MonoUs(1),
+        });
+        let after = bounds(&app);
+
+        assert_eq!(
+            after, before,
+            "safe mode must capture Ctrl+= before portal resize can mutate bounds"
+        );
+        assert!(
+            app.state.portal_resize_states.is_empty(),
+            "safe-mode-captured resize hotkey must not create resize state"
+        );
+        assert!(
+            input_event_rx.try_recv().is_err(),
+            "safe-mode-captured resize hotkey must not be forwarded to the agent"
+        );
+    }
+
+    /// (e) Dispatch wiring: Ctrl+Shift+ArrowRight resizes the width of a portal
+    /// focused on a NON-composer surface, and is NOT stolen from the composer's
+    /// word-selection while the composer is active.
+    #[test]
+    fn ctrl_shift_arrow_dispatch_respects_composer_focus() {
+        use tze_hud_input::{FocusManager, InputProcessor, KeyboardModifiers};
+        use tze_hud_scene::types::{HitRegionNode, TileScrollConfig};
+        use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
+
+        // Single-tile portal with a focusable NON-composer control node.
+        let build = |accepts_composer_input: bool| {
+            let mut scene = SceneGraph::new(1920.0, 1080.0);
+            let tab_id = scene.create_tab("Main", 0).unwrap();
+            let lease_id = scene.grant_lease("portal-agent", 60_000);
+            let tile_id = scene
+                .create_tile(
+                    tab_id,
+                    "portal-agent",
+                    lease_id,
+                    Rect::new(100.0, 100.0, 400.0, 300.0),
+                    1,
+                )
+                .unwrap();
+            scene
+                .register_tile_scroll_config(tile_id, TileScrollConfig::vertical())
+                .unwrap();
+            let node_id = SceneId::new();
+            scene
+                .set_tile_root(
+                    tile_id,
+                    Node {
+                        layout: Default::default(),
+                        id: node_id,
+                        children: vec![],
+                        data: NodeData::HitRegion(HitRegionNode {
+                            bounds: Rect::new(0.0, 0.0, 400.0, 60.0),
+                            interaction_id: "portal-surface".to_string(),
+                            accepts_focus: true,
+                            accepts_pointer: true,
+                            accepts_composer_input,
+                            ..Default::default()
+                        }),
+                    },
+                )
+                .unwrap();
+
+            let mut processor = InputProcessor::new();
+            let mut focus_manager = FocusManager::new();
+            focus_manager.add_tab(tab_id);
+            // Focus the node via a pointer down (click-to-focus).
+            processor.process_with_focus(
+                &tze_hud_input::PointerEvent {
+                    x: 110.0,
+                    y: 110.0,
+                    kind: tze_hud_input::PointerEventKind::Down,
+                    device_id: 1,
+                    timestamp: None,
+                },
+                &mut scene,
+                &mut focus_manager,
+                tab_id,
+            );
+            (
+                tab_id,
+                tile_id,
+                make_windowed_keyboard_test_app(scene, focus_manager, processor),
+            )
+        };
+
+        let dispatch_ctrl_shift_arrow = |app: &mut WinitApp, tab_id, key_code: &str| {
+            app.dispatch_key_down_event_inner(
+                &RawKeyDownEvent {
+                    key_code: key_code.to_string(),
+                    key: key_code.to_string(),
+                    modifiers: KeyboardModifiers {
+                        ctrl: true,
+                        shift: true,
+                        ..KeyboardModifiers::NONE
+                    },
+                    repeat: false,
+                    timestamp_mono_us: tze_hud_scene::MonoUs(1),
+                },
+                Some(tab_id),
+            );
+        };
+        let width = |app: &WinitApp, tile_id| {
+            let shared = app.state.shared_state.try_lock().unwrap();
+            let scene = shared.scene.try_lock().unwrap();
+            scene.tiles.get(&tile_id).unwrap().bounds.width
+        };
+
+        // Composer INACTIVE (non-composer surface focused): the chord resizes.
+        let (tab_id, tile_id, (mut app, _rx)) = build(false);
+        assert!(
+            !app.state.input_processor.is_composer_active(),
+            "precondition: composer must be inactive for the non-composer surface"
+        );
+        let w0 = width(&app, tile_id);
+        dispatch_ctrl_shift_arrow(&mut app, tab_id, "ArrowRight");
+        assert!(
+            width(&app, tile_id) > w0,
+            "Ctrl+Shift+ArrowRight must grow width when the composer is inactive"
+        );
+
+        // Composer ACTIVE: the chord is NOT taken for resize (word-select wins).
+        let (tab_id2, tile_id2, (mut app2, _rx2)) = build(true);
+        assert!(
+            app2.state.input_processor.is_composer_active(),
+            "precondition: composer must be active for the composer surface"
+        );
+        let w0b = width(&app2, tile_id2);
+        dispatch_ctrl_shift_arrow(&mut app2, tab_id2, "ArrowRight");
+        assert_eq!(
+            width(&app2, tile_id2),
+            w0b,
+            "Ctrl+Shift+ArrowRight must NOT resize while the composer is active (word-select preserved)"
+        );
     }
 }

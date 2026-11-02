@@ -91,14 +91,48 @@ source links when implementation changes the status.
   map and immediate scene-owned lease revocation. Scene, MCP and pause control
   share the injected clock; healthy portal idle/hold allowances survive pause
   while input expiry, prior orphan grace and maximum suspension continue.
-  Physical driver lines are 986 production-prefix / 1511 test-module (2497
-  total), compared with 1059 / 1495 (2554 total) before this fold. No helpers
-  were extracted. The original approximate 750 / 1100 targets are not met:
-  native render/geometry/scroll and incarnation-safe lifecycle code plus all
-  21 existing unique regression parents remain. This source inventory does
-  not establish executed verification or physical Windows acceptance.
-  Windowed deduplication, composer reduction, crate rename, final four-group
-  size reconciliation and Windows owner acceptance remain (`hud-lirh2`).
+  Scene bounds now supply the live fractional render/follow-tail viewport;
+  the obsolete retained geometry cache is gone. Windowed submission routes text
+  through the complete handle, keeps known-portal refusal out of raw echo, and
+  resets history once in the common batch route after raw history seeding.
+  Resize broadcast/persistence completion and detached store persistence each
+  have one post-lock owner.
+
+  Physical line inventory (comments/blanks included; production-prefix / test
+  module / whole file) against `6ef4bf1a`, after the windowed deduplication:
+
+  | File | Before | After |
+  |---|---:|---:|
+  | runtime/windowed/portal.rs | 2207 / 6734 / 8941 | 2171 / 4094 / 6265 |
+  | runtime/windowed/keyboard.rs | 2072 / 319 / 2391 | 2044 / 1706 / 3750 |
+  | runtime/windowed/lifecycle.rs | 3087 / 501 / 3588 | 3052 / 1336 / 4388 |
+  | runtime/windowed/test_support.rs | 216 / 1046 / 1262 | 530 / 1046 / 1576 |
+  | runtime/portal.rs | 986 / 1511 / 2497 | 949 / 1521 / 2470 |
+  | projection/hub.rs | 1178 / 681 / 1859 | 1096 / 565 / 1661 |
+  | input/portal_resize.rs (comment only) | 1067 / 1375 / 2442 | 1064 / 1375 / 2439 |
+  | projection/Cargo.toml | 16 total | 14 total |
+
+  The finite combined surface includes both move destinations and all of
+  `test_support.rs`: 22,996 → 22,563 lines (433 fewer). Docs and the single
+  removed lockfile dependency edge are outside that aggregate. These are
+  physical module boundaries, not semantic production LOC: `test_support.rs`
+  is entirely test-only, driver prefix retains a test-only hub accessor, and
+  lifecycle prefix retains test-only imports. The feature-gated event-loop
+  harness is unchanged and is not counted as production reduction.
+  Thirteen keyboard and fourteen lifecycle test parents moved unchanged in
+  name; shared factories moved once into test support. Five dimension parents
+  became one five-row table and three pruning parents became one table at the
+  real app method, including busy locks and idempotence. Five cache-only
+  parents disappeared with their obsolete types. Tests: +2 ~3 -13 (net -11);
+  moves are zero delta. Driver's 21 unique parents remain.
+  Approximate windowed targets of 1700 / 2600 / 4300 are missed by
+  471 / 1494 / 1965 lines; group resize/drag, raw-history seeding and every
+  unique retained regression remain in scope. Driver's approximate 750 / 1100
+  targets are also missed (949 / 1521). Moving tests is ownership cleanup,
+  not combined deletion. This source inventory does not establish executed
+  verification or physical Windows acceptance. Composer reduction, crate
+  rename, final four-group size reconciliation and Windows owner acceptance
+  remain (`hud-lirh2`); source evidence cannot close those owner checks.
 - **T8 — diet [Observed].** The [local harness](../justfile) includes
   llvmpipe GPU recipes and Nextest; resource acceptance has a compact
   [`store_behavior`](../crates/tze_hud_resource/tests/store_behavior.rs) suite.

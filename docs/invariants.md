@@ -82,7 +82,7 @@ cancellation into an action. Existing local owner coverage:
 Windows held-press/release acceptance remains separate.
 
 - `tze_hud_runtime` [`release_activates_only_the_button_the_press_began_on`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs),
-  [`authority_attached_submit_snaps_scrolled_back_history_to_tail`](../crates/tze_hud_runtime/src/windowed/portal.rs),
+  [`authority_attached_submit_snaps_scrolled_back_history_to_tail`](../crates/tze_hud_runtime/src/windowed/keyboard.rs),
   [`portal_composer_submission_enters_pending_input_queue_and_can_be_acknowledged`](../crates/tze_hud_runtime/src/portal.rs)
 - `tze_hud_projection` [`take_due_paces_renders_at_the_render_interval`](../crates/tze_hud_projection/src/hub.rs)
 
@@ -293,7 +293,7 @@ zone is shown again.
 - `tze_hud_scene` [`classes_hide_their_own_tiles_only`](../crates/tze_hud_scene/src/graph/visibility.rs), [`hidden_tiles_pass_pointer_input_through`](../crates/tze_hud_scene/src/graph/visibility.rs),
   [`a_change_bumps_the_version_once_and_keeps_content`](../crates/tze_hud_scene/src/graph/visibility.rs)
 - `tze_hud_input` [`hidden_tile_loses_focus_and_leaves_the_cycle`](../crates/tze_hud_input/src/focus.rs)
-- `tze_hud_runtime` [`hiding_focused_composer_tile_blurs_it_and_passes_clicks_through`](../crates/tze_hud_runtime/src/windowed/portal.rs),
+- `tze_hud_runtime` [`hiding_focused_composer_tile_blurs_it_and_passes_clicks_through`](../crates/tze_hud_runtime/src/windowed/lifecycle.rs),
   [`hidden_tile_does_not_register_capture_region`](../crates/tze_hud_runtime/src/windowed/hittest.rs),
   [`hide_all_class_rows_and_the_closed_notice`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
   [`reopen_chord_falls_back_to_the_pause_chord`](../crates/tze_hud_runtime/src/shell/control_panel/mod.rs),

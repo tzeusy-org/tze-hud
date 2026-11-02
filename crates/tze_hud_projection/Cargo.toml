@@ -10,7 +10,5 @@ serde = { workspace = true }
 tze_hud_config = { path = "../tze_hud_config", version = "0.1.0" }
 tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0" }
 
-[dev-dependencies]
-proptest = { workspace = true }
 [lints]
 workspace = true
