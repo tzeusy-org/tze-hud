@@ -3,7 +3,7 @@ use tze_hud_input::{
     PortalResizeState, PortalWindowTokens, ResizeBounds, ResizeEdge, ResizeOutcome, hit_affordance,
 };
 use tze_hud_scene::HitResult;
-use tze_hud_scene::types::{DragHandleElementKind, TileScrollConfig, ZoneInteractionKind};
+use tze_hud_scene::types::{DragHandleElementKind, ZoneInteractionKind};
 
 use super::WinitApp;
 use super::input_dispatch::dispatch_portal_geometry_event;
