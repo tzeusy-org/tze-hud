@@ -5070,6 +5070,38 @@ mod tests {
             Some(201),
             "no perpetual local dirty frame"
         );
+
+        // A known portal whose hub is unavailable must not fall back to a raw
+        // success echo. Register readiness before the refusal, as a real poll does.
+        let ready = handle.input_notify("test-agent").unwrap();
+        let mut notified = std::pin::pin!(ready.notified());
+        assert!(!notified.as_mut().enable());
+        let hub = Arc::clone(&handle.hub);
+        let _ = std::thread::spawn(move || {
+            let _guard = hub.lock().unwrap();
+            panic!("poison hub fixture");
+        })
+        .join();
+        let mut batch = tze_hud_input::DraftNotificationBatch::new();
+        batch.record_submission(tze_hud_input::DraftSubmission {
+            text: "refused-known-portal".to_string(),
+            sequence: 2,
+        });
+        app.route_and_deliver_composer_batch(viewer_echo_context(tile_id), batch);
+        {
+            let hub = handle.hub.lock().err().unwrap().into_inner();
+            let portal = hub.get(&tze_hud_projection::hub::PortalKey::new(
+                "test-agent", "proj-npcdf",
+            )).unwrap();
+            assert_eq!(portal.inputs.len(), 1, "refusal admits no new input");
+            assert_eq!(portal.replies.len(), 1, "refusal authors no hub echo");
+        }
+        assert!(!notified.as_mut().enable(), "refusal does not notify accepted input");
+        assert!(
+            app.state.viewer_echo_queue.lock().unwrap().is_empty(),
+            "a known portal refusal must not author a raw success echo"
+        );
+
     }
 
     #[test]
