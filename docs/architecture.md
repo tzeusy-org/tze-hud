@@ -106,7 +106,11 @@ and per-agent input Notify registry between MCP and
 The production composition root creates one injected clock for the scene and
 complete handle before MCP, driver, agent control and pause control clone it.
 The driver owns one `(agent, portal id)` binding map for incarnation, tile/lease,
-native surface descriptor, geometry and local feedback. Detach revokes while
+native surface descriptor and local feedback. Scene tile bounds are the retained
+viewport geometry: the driver passes their positive fractional dimensions to
+the renderer and follow-tail, without a second adapter geometry cache. Resize
+completion broadcasts member geometry and optionally persists it after unlock.
+Detach revokes while
 scene-owned; hub tombstones and scene terminal state retain missed-lock cleanup.
 There is no deferred lease-revocation queue or driver-only clock setter.
 Safe mode serializes SharedState → scene → hub, preserves healthy idle/hold
@@ -117,7 +121,9 @@ Timed portal work has two providers: Hub (render/cue/liveness/input expiry) and
 scene lease lifecycle. Immediate stale/terminal reconciliation stays separate.
 They retain SceneChange, AnimationDeadline and TtlDeadline wake accounting. Composer admission commits
 input and reply history under the hub lock, then signals the owning agent after
-unlock. Notification actions return an agent readiness callback that the pointer
+unlock. Windowed text submissions use the tile binding and complete handle;
+known portal refusals cannot enter the raw-tile echo fallback. The common batch
+route resets submitted history to the tail after any raw history seeding. Notification actions return an agent readiness callback that the pointer
 producer invokes after scene and shared-state unlock; queues remain authoritative.
 Input readiness is separate from render/main-work wake delivery. `hud_input`
 arms the agent Notify before checking retained action and portal queues, releases

@@ -27,8 +27,7 @@ use crate::window::WindowMode;
 
 use super::input_dispatch::{
     dispatch_capture_released_event, dispatch_focus_event, dispatch_pointer_event,
-    dispatch_portal_geometry_event, dispatch_scroll_offset_event, enqueue_input,
-    nanoseconds_since_start,
+    dispatch_scroll_offset_event, enqueue_input, nanoseconds_since_start,
 };
 use super::keyboard::ComposerDeliveryContext;
 use super::portal::{
@@ -3557,7 +3556,7 @@ mod tests {
         make_windowed_keyboard_test_app, multi_surface_portal_scene, portal_scene_with_focus,
         scene_with_capture_tile, scene_with_drag_handle_tile,
     };
-    use tze_hud_input::{FocusManager, InputProcessor, PointerEvent, PointerEventKind};
+    use tze_hud_input::{FocusManager, InputProcessor, PointerEventKind};
 
     #[test]
     fn empty_portal_ingress_drain_does_not_create_a_compositor_generation() {

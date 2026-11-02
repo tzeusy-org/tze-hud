@@ -2175,14 +2175,13 @@ mod tests {
 
     use tze_hud_input::{
         FocusManager, FocusRequest, InputProcessor, PointerEvent, PointerEventKind,
-        PortalResizeState, PortalWindowTokens, RawKeyDownEvent, RawKeyUpEvent,
+        PortalResizeState, PortalWindowTokens,
     };
 
     use super::super::WinitApp;
     use super::super::test_support::{
         make_windowed_keyboard_test_app, multi_surface_portal_scene, portal_scene_with_control,
-        portal_scene_with_focus, scene_with_capture_tile, scene_with_drag_handle_tile,
-        viewer_echo_context,
+        portal_scene_with_focus, scene_with_drag_handle_tile, viewer_echo_context,
     };
     use super::*;
 
