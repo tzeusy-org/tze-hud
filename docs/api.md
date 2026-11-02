@@ -213,6 +213,10 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
   -> {"agent":"claude","psk":"<64 hex>","mcp":"http://100.x.y.z:9090/mcp","grpc":"100.x.y.z:50051"}
   ```
 
+  The endpoints come from each transport's successful listeners. `grpc` is
+  `null` while gRPC is disabled or has not bound yet (including during handoff);
+  an MCP bind alone does not advertise the corresponding gRPC address.
+
   `agent` is `[a-z0-9-]{1,32}`; re-pairing an existing id rotates its key. The
   new agent gets `allow = ["*"]`; add `"admin": true` to also get `admin`,
   except with a code from Connect an agent (`403 NOT_ADMIN`, code not spent). The
@@ -254,7 +258,9 @@ allow = ["zone:*", "widget:gauge", "portal", "tiles"]
   `?display=<i>` indexes `displays` (default 0, the primary; 404
   `NO_SUCH_DISPLAY` for an index not in `displays`, or one whose overlay closed
   since `displays` was read; indexes shift on hot-plug, so re-read status). One render on request, no cost
-  while idle, never cached, one at a time (429 `BUSY`), 503 `UNAVAILABLE` after
+  while idle, never cached. Capture does not advance the last-rendered scene or
+  geometry ledger or the primary acquisition/submission/present counters; an
+  unpresented scene change still needs its ordinary frame. One at a time (429 `BUSY`), 503 `UNAVAILABLE` after
   3 s or without a display, 422 `TOO_LARGE` past 8192 px per side, 16 Mpx, or a 32 MiB PNG. It
   is not exposed through MCP tools or gRPC.
   `POST /admin/restart` (POST only; 405 otherwise) relaunches the HUD with its
@@ -408,16 +414,26 @@ is disabled. The control panel's Input card changes a chord while the HUD
 runs: type it (`Ctrl+Alt+F9`) and press Enter. A chord another role has is
 refused; otherwise Windows registers the new chord before the old one is
 released, so a chord another program holds is refused and the old one keeps
-working. The new chord is saved to `[runtime]`.
+working. The new chord is saved to `[runtime]`. Each chord row says
+whether its chord is the default, saved to config, or lasts until restart
+(no config file), and a changed chord has Reset.
 
 The control panel is a full-width pane over the primary display: a search
 field, quick-action tiles, and section cards of settings that scroll
-vertically. It takes keyboard focus when it opens (if Windows refuses, the
-header says to click it) and returns focus on close. Typing searches every
-row; arrows, Tab, Enter and Space move and act; Esc clears the search, then
-closes. Clicks outside the panel pass through to the desktop. Closing the
-panel always resumes agents. While paused, the pause tile and row turn
-caution-colored.
+vertically. Its header line counts the agents connected or showing
+something and what they hold ("3 agents · 2 portals · 5 zones · 1 widget ·
+0 tiles") and says "restart pending" while a saved setting waits for a
+restart (Restart now is in System, Alt+8). It takes keyboard focus when it
+opens (if Windows refuses, the header says to click it) and returns focus
+on close. Typing searches every row; arrows, Tab, Enter and Space move and
+act; Esc clears the search, then closes. A row whose value differs from
+its default (an override that matches the theme does not) shows Reset:
+clicking it, or Delete on the row (not while typing in a field or the
+search), puts the default back live and removes the key from the config
+file. Visibility, Appearance, Advanced tokens, Input and Diagnostics rows
+offer it; ports and widget boxes take a typed value. Clicks outside the
+panel pass through to the desktop. Closing the panel always resumes
+agents. While paused, the pause tile and row turn caution-colored.
 
 The Visibility card hides portals, zones, widgets or other agent tiles for
 the session; the Hide all tile (Alt+H) hides all of them and, when everything
@@ -464,7 +480,9 @@ header, the five verbs and the content-only rule. It holds the code, never a
 key. Enter (or Copy) puts it on the clipboard, first issuing a new code if the
 shown one was used, expired or has under a minute left; the card then says it
 is waiting, that the agent paired once it has, or that the copied code no
-longer works. Clicking the name edits it; only Enter copies. New code replaces
+longer works. When Windows Firewall blocks tailnet agents, the Network row
+links to Network › Remote agents: Enter on it leaves the card at that row.
+Clicking the name edits it; only Enter copies. New code replaces
 the code. Esc goes back to the sections. While the card is up, the system card
 stays away, even for a code replaced after wrong guesses; once it is left, a
 replacement shows on the system card again.
@@ -473,15 +491,19 @@ The Network card shows the MCP and gRPC ports and Remote agents. A port is
 typed in place (the first key replaces it, Enter saves, Esc cancels) and
 saved to `[runtime]`; it applies at the next start, so the row shows
 "Restart to apply" and the running port, and Restart now counts it.
-Changing the MCP port means paired agents must use the new one. Remote
-agents shows Windows Firewall's verdict for tailnet agents; switching it on
-(asks first) or off runs the same elevated helper as `--allow-remote` /
-`--disallow-remote` (Windows asks for administrator approval) and reads the
-firewall again.
+Changing the MCP port means paired agents must use the new one, so a
+changed value asks first (the first Enter shows the warning, the second
+saves). Remote agents shows Windows Firewall's verdict for tailnet agents;
+switching it on (the panel asks first, since it widens who can connect) or
+off (at once, since it only narrows) runs the same elevated helper as
+`--allow-remote` / `--disallow-remote`, for which Windows asks for
+administrator approval either way, and reads the firewall again.
 
 The Diagnostics card sets the log file's level, zone outlines and the frame
 rate cap (choices from 30 to 240; `[runtime] fps` takes 1-240). Each applies at once and is saved to `[runtime]`; when the
-save fails the change stays for the session and the row says so. The cap
+save fails the change stays for the session and the row says so. A row
+off its default (info, off, 60) has Reset, which returns it there and
+removes its key. The cap
 paces frames; load shedding keeps the startup rate.
 
 The System card has Restart now (asks first; it lists what it applies, uses
@@ -505,20 +527,23 @@ save fails the change lasts the session and the row says so. A
 `[displays.<NAME>]` table's zones show read-only until monitor names are
 stable across reboots.
 
-The Appearance card picks the theme (Left/Right, or Alt+T from anywhere in
-the panel, steps through them) and the sans, mono and serif fonts (type a
-family name; an empty value gives the theme's). Advanced tokens lists every
+The Appearance card picks the theme and the sans, mono and serif fonts
+(type a family name; an empty value or Reset gives the theme's). Left/Right
+on the theme, or Alt+T from anywhere in the panel, previews the next theme
+live without saving it; Enter keeps it, and Esc, moving off the row or
+closing the panel puts the saved theme back. A click on the theme keeps
+its choice at once. Advanced tokens lists every
 canonical token with its value and where it comes from (the theme, the
 canonical default, or an override); typing a value of the token's kind
-overrides it, an empty value removes the override, and "Reset all
+overrides it, an empty value or Reset removes the override, and "Reset all
 overrides" removes every override but the theme. Overrides of other keys
 written in the file (such as `portal.*` colors) are listed after the
-canonical tokens and can only be cleared. Each change restyles the
+canonical tokens and can only be reset. Each change restyles the
 HUD on its next frame and is saved to `[design_tokens]` with the file's
 comments kept; when the save fails (a read-only file) the change lasts the
 session and the row shows the error and the path. The panel keeps its own
 text legible whatever an override does. Zoom steps `ui.scale` by 10%
-(−/+, Ctrl+− and Ctrl+= or Ctrl++ anywhere in the panel; Enter returns
+(−/+, Ctrl+− and Ctrl+= or Ctrl++ anywhere in the panel; Reset returns
 to 100%), resizes zone text and chrome, portals, widgets and the panel, applies live and
 saves; the panel itself stays between 0.75x and 3x so
 it remains readable and on screen.

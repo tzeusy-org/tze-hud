@@ -171,6 +171,7 @@ impl Drop for FramePacingTimerGuard {
 
 mod config;
 mod displays;
+mod frame_work;
 #[cfg(target_os = "windows")]
 mod global_hotkey;
 mod hittest;
@@ -206,7 +207,7 @@ use self::input_dispatch::{
 use self::keyboard::{ComposerDeliveryContext, PendingKeyboardEvent};
 use self::lifecycle::{
     PendingInputLatencySamples, WindowedQuiescentEfficiencyRunState, drain_windowed_input_latency,
-    read_windows_clipboard_text, update_surface_repaint_pending, windowed_frame_needs_render,
+    read_windows_clipboard_text, update_surface_repaint_pending,
 };
 pub use self::network::render_attach_info;
 use self::network::{
@@ -1600,18 +1601,10 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 // telemetry.  Plain u64 — accessed only on this thread; no atomics
                 // needed on the success path.
                 let mut scene_lock_miss_count: u64 = 0;
-                // hud-ilivg idle render gate: scene.version of the last frame we
-                // actually built+presented. The loop skips the build/encode/present
-                // pass when scene.version is unchanged AND no animation is in
-                // flight, freeing idle CPU/GPU/streaming budget without dropping any
-                // real change. u64::MAX guarantees the very first frame renders.
-                let mut last_rendered_scene_version: u64 = u64::MAX;
-                // Position-only drag-move mutations advance scene.geometry_epoch
-                // (not scene.version), so the present-gate must also repaint when
-                // the epoch changes — otherwise a smooth drag would stall on the
-                // idle gate. Content caches stay gated on scene.version so the
-                // translate never re-primes them (hud-uyhpn).
-                let mut last_rendered_geometry_epoch: u64 = u64::MAX;
+                let mut frame_work = frame_work::WindowedFrameWork::new(
+                    compositor_wake.clone(),
+                    frame_ready_tx.clone(),
+                );
                 // A recovered swapchain needs a fresh submit even if the scene
                 // lock is briefly unavailable in the recovery iteration. Keep
                 // this debt until a frame actually submits.
@@ -1897,51 +1890,29 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         // start or expiry still bumps scene.version and re-arms the
                         // gate; an in-flight eased transition / TTL fade / reveal /
                         // smooth-scroll forces a render so it never freezes.
-                        let needs_render = windowed_frame_needs_render(
-                            scene.version != last_rendered_scene_version,
-                            scene.geometry_epoch != last_rendered_geometry_epoch,
-                            compositor.has_inflight_animation(&scene),
-                            composer_needs_render,
-                            surface_repaint_pending,
-                        );
-                        let plan = displays::frame_plan(
-                            needs_render,
-                            secondaries.iter().map(|t| &t.ledger),
-                            Instant::now(),
+                        let (surf_w, surf_h) = surface_for_compositor.size();
+                        let frame_work::PreparedFrameWork {
+                            plan,
+                            render,
+                            capture,
+                        } = frame_work.prepare(
+                            &mut compositor,
+                            &mut scene,
+                            (surf_w, surf_h),
+                            &capture_inbox,
+                            frame_work::RenderTriggers {
+                                composer: composer_needs_render,
+                                surface: surface_repaint_pending,
+                            },
+                            |needs_render| {
+                                displays::frame_plan(
+                                    needs_render,
+                                    secondaries.iter().map(|t| &t.ledger),
+                                    Instant::now(),
+                                )
+                            },
                         );
                         continue_at_cadence |= plan.cadence;
-
-                        // ── Admin screenshot (build half) ─────────────────
-                        // Runs AFTER the idle gate on purpose: the build steps
-                        // animation state (scroll smoothers, widget transitions,
-                        // scroll offsets), so building first could consume an
-                        // animation's final step, leave `needs_render` false and
-                        // strand the screen on a stale frame. With the gate
-                        // already evaluated, an in-flight animation has already
-                        // forced a render (whose own build follows this one), and
-                        // an idle scene has nothing to step.
-                        // Builds under the lock like Stage 5 but does not
-                        // present, refresh hit regions, or advance
-                        // `last_rendered_*`, so an admin read does not change idle
-                        // accounting. The offscreen render + readback happens
-                        // after the lock is released (below). A request that
-                        // finds the scene locked stays queued; the availability
-                        // waiter below wakes this loop to retry.
-                        let capture_job = capture_inbox.next_live().map(|req| {
-                            let (w, h) = surface_for_compositor.size();
-                            tracing::debug!(
-                                target: "tze_hud_delay_diagnostic",
-                                event = "capture_build_begin",
-                                scene_version = scene.version,
-                            );
-                            let build = compositor.build_windowed_frame(&mut scene, w, h);
-                            tracing::debug!(
-                                target: "tze_hud_delay_diagnostic",
-                                event = "capture_build_end",
-                                scene_version = scene.version,
-                            );
-                            (req, build)
-                        });
 
                         if !plan.full {
                             // Idle: scene unchanged and nothing animating. Release
@@ -1949,10 +1920,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             // signalling the main thread to present. A secondary
                             // whose retry came due gets a build, presented to it
                             // alone (nothing animates, so building steps nothing).
-                            let retry_build = plan.retry_only.then(|| {
-                                let (w, h) = surface_for_compositor.size();
-                                compositor.build_windowed_frame(&mut scene, w, h)
-                            });
                             let scene_deadline_wall_us = scene
                                 .next_publication_expiry_wall_us()
                                 .into_iter()
@@ -1971,7 +1938,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                 lease_expirations.as_ref(),
                                 terminal_lease_expiries,
                             );
-                            if let Some(build) = retry_build
+                            if let Some(build) = render
                                 && displays::present_to_secondaries(
                                     &mut compositor,
                                     &build,
@@ -2034,8 +2001,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             // `WindowedFrameBuild`. Crucially this phase does NOT
                             // touch the swapchain surface — so it never blocks on
                             // vsync while the lock is held.
-                            let (surf_w, surf_h) = surface_for_compositor.size();
-                            let build = compositor.build_windowed_frame(&mut scene, surf_w, surf_h);
+                            let build = render.expect("full frame plan builds a frame");
                             // Hand the panel the geometry this frame draws, so a
                             // click hits what is on screen.
                             if let Some(panel) = &control_panel_for_compositor
@@ -2089,12 +2055,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             // Input latency ends at the actual primary queue submission,
                             // even if a later present/poll failure clears stage telemetry.
                             let latency_gpu_submitted = present_outcome.gpu_submitted;
-                            if present_outcome.surface_acquired {
-                                compositor_wake.counters().record_surface_acquisition();
-                            }
-                            if present_outcome.gpu_submitted {
-                                compositor_wake.counters().record_gpu_submission();
-                            }
                             // Secondary windows present the same build, each
                             // only when what it shows changed.
                             let secondary_submitted = displays::present_to_secondaries(
@@ -2104,7 +2064,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                 compositor_wake.counters(),
                                 &display_targets,
                             );
-                            let compositor_telemetry = present_outcome.telemetry;
+                            let compositor_telemetry = &present_outcome.telemetry;
                             let frame_submitted = compositor_telemetry.stage7_gpu_submit_us > 0;
                             surface_repaint_pending = update_surface_repaint_pending(
                                 surface_repaint_pending,
@@ -2119,20 +2079,14 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             // "compositor thread MUST signal the main thread via
                             // FrameReadySignal, and only the main thread SHALL call
                             // surface.present()."
-                            if frame_submitted {
-                                if let Some(handoff) = &handoff_child {
-                                    handoff.first_present();
-                                }
-                                let _ = frame_ready_tx.send(true);
-                                compositor_wake.notify_main(
-                                    crate::idle_efficiency::RuntimeWakeupSource::FrameReady,
-                                );
-                                // Advance the idle gate only after a completed
-                                // submit. A failed acquire must retry instead of
-                                // stranding an unpresented scene as "rendered".
-                                last_rendered_scene_version = built_scene_version;
-                                last_rendered_geometry_epoch = built_geometry_epoch;
-                            } else if secondary_submitted {
+                            if frame_submitted && let Some(handoff) = &handoff_child {
+                                handoff.first_present();
+                            }
+                            frame_work.record_primary_submission(
+                                &present_outcome,
+                                (built_scene_version, built_geometry_epoch),
+                            );
+                            if !frame_submitted && secondary_submitted {
                                 let _ = frame_ready_tx.send(true);
                                 compositor_wake.notify_main(
                                     crate::idle_efficiency::RuntimeWakeupSource::FrameReady,
@@ -2222,31 +2176,27 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
 
                         // ── Admin screenshot (render half) ────────────────
                         // Lock released: render offscreen, copy once, reply.
-                        if let Some((req, build)) = capture_job {
-                            let (w, h) = build.size();
-                            let target = match &req.display {
-                                None => Some(tze_hud_compositor::FrameTarget::primary(w, h)),
-                                Some(name) => secondaries
-                                    .iter()
-                                    .find(|t| &t.name == name)
-                                    .map(|t| t.frame_target()),
-                            };
-                            let result = match target {
-                                Some(target) => compositor.capture_windowed_frame(
-                                    &build,
-                                    &target,
-                                    surface_for_compositor.format(),
-                                ),
-                                None => Err(tze_hud_compositor::CaptureError::NoSuchDisplay(
-                                    req.display.clone().unwrap_or_default(),
-                                )),
-                            };
-                            tracing::debug!(
-                                target: "tze_hud_delay_diagnostic",
-                                event = "capture_render_end",
-                                success = result.is_ok(),
-                            );
-                            let _ = req.reply.send(result);
+                        if let Some(capture) = capture {
+                            capture.finish_with(|build, display| {
+                                let (w, h) = build.size();
+                                let target = match display {
+                                    None => Some(tze_hud_compositor::FrameTarget::primary(w, h)),
+                                    Some(name) => secondaries
+                                        .iter()
+                                        .find(|t| t.name == name)
+                                        .map(|t| t.frame_target()),
+                                };
+                                match target {
+                                    Some(target) => compositor.capture_windowed_frame(
+                                        build,
+                                        &target,
+                                        surface_for_compositor.format(),
+                                    ),
+                                    None => Err(tze_hud_compositor::CaptureError::NoSuchDisplay(
+                                        display.unwrap_or_default().to_owned(),
+                                    )),
+                                }
+                            });
                         }
                     } else {
                         // Stage 4 try_lock missed: the scene lock was held by a
@@ -2545,7 +2495,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     return;
                 }
                 if button != MouseButton::Left
-                    && self.panel_other_button(state == ElementState::Pressed, secondary.is_none())
+                    && self.panel_other_button(
+                        button,
+                        state == ElementState::Pressed,
+                        secondary.is_none(),
+                    )
                 {
                     return;
                 }
@@ -3040,6 +2994,10 @@ impl WindowedRuntime {
             Arc::clone(&runtime_context),
             render_wake.clone(),
             bind_gate.clone(),
+            pairing
+                .as_ref()
+                .map(|pairing| pairing.grpc_binds())
+                .unwrap_or_default(),
         )?;
 
         // ── MCP HTTP server ────────────────────────────────────────────────────

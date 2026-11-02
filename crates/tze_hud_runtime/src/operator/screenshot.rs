@@ -141,6 +141,18 @@ impl CaptureEndpoint {
     /// Ask the compositor for display `display`'s frame (0 = primary) and
     /// return it PNG-encoded.
     pub async fn capture_png(&self, index: usize) -> Result<Vec<u8>, ScreenshotError> {
+        let (frame, _permit) = self.capture_frame(index).await?;
+        tokio::task::spawn_blocking(move || encode_png(&frame))
+            .await
+            .map_err(|e| ScreenshotError::Failed(e.to_string()))?
+    }
+
+    /// The same request/readback path, before PNG encoding. The permit remains
+    /// held through the caller's encode so single-flight includes that work.
+    pub(crate) async fn capture_frame(
+        &self,
+        index: usize,
+    ) -> Result<(CapturedFrame, tokio::sync::OwnedSemaphorePermit), ScreenshotError> {
         let display = match index {
             0 => None,
             i => Some(
@@ -148,9 +160,8 @@ impl CaptureEndpoint {
                     .ok_or(ScreenshotError::NoSuchDisplay(index))?,
             ),
         };
-        let _permit = self
-            .in_flight
-            .try_acquire()
+        let permit = Arc::clone(&self.in_flight)
+            .try_acquire_owned()
             .map_err(|_| ScreenshotError::Busy)?;
         let (reply, answer) = oneshot::channel();
         self.tx
@@ -168,9 +179,7 @@ impl CaptureEndpoint {
                 ));
             }
         };
-        tokio::task::spawn_blocking(move || encode_png(&frame))
-            .await
-            .map_err(|e| ScreenshotError::Failed(e.to_string()))?
+        Ok((frame, permit))
     }
 }
 

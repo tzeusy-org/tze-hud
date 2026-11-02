@@ -230,8 +230,8 @@ async fn missing_or_unknown_psk_is_unauthenticated() {
 #[tokio::test]
 async fn swapping_shared_agents_admits_a_new_psk_on_the_next_request() {
     let agents = AgentDirectory::default().shared();
-    let server = McpServer::new(SceneGraph::new(10.0, 10.0))
-        .with_config(McpConfig::with_agents(agents.clone()));
+    let clock = TestClock::new(1_000);
+    let server = McpServer::new(scene(&clock)).with_config(McpConfig::with_agents(agents.clone()));
     let new_agent = CallerContext::with_bearer("new-key");
     let resp = rpc(&server, &new_agent, "tools/list", json!({})).await;
     assert_eq!(resp["error"]["code"], -32004);
@@ -241,6 +241,59 @@ async fn swapping_shared_agents_admits_a_new_psk_on_the_next_request() {
     agents.store(std::sync::Arc::new(paired));
     let resp = rpc(&server, &new_agent, "tools/list", json!({})).await;
     assert!(resp["result"]["tools"].is_array(), "{resp}");
+
+    let (_, is_error) = call_as(
+        &server,
+        &new_agent,
+        "hud_publish",
+        json!({"surface": "zone:subtitle", "content": "before reload"}),
+    )
+    .await;
+    assert!(!is_error);
+
+    let mut changed = AgentDirectory::default();
+    changed.insert(
+        "new",
+        hash_psk("rotated-key"),
+        vec!["publish_zone:subtitle".to_string()],
+    );
+    changed.insert("control", hash_psk("control-key"), vec!["*".to_string()]);
+    agents.store(Arc::new(changed));
+    let resp = rpc(&server, &new_agent, "tools/list", json!({})).await;
+    assert_eq!(resp["error"]["code"], -32004, "old key after rekey");
+    let rotated = CallerContext::with_bearer("rotated-key");
+    let (_, is_error) = call_as(
+        &server,
+        &rotated,
+        "hud_publish",
+        json!({"surface": "zone:subtitle", "content": "after reload"}),
+    )
+    .await;
+    assert!(!is_error, "the current key retains the allowed zone");
+    let (err, is_error) = call_as(
+        &server,
+        &rotated,
+        "hud_publish",
+        json!({"surface": "zone:pip", "content": "denied"}),
+    )
+    .await;
+    assert!(is_error);
+    assert_eq!(
+        err["code"], "NOT_ALLOWED",
+        "reduced allow applies next request"
+    );
+
+    let mut removed = AgentDirectory::default();
+    removed.insert("control", hash_psk("control-key"), vec!["*".to_string()]);
+    agents.store(Arc::new(removed));
+    let resp = rpc(&server, &rotated, "tools/list", json!({})).await;
+    assert_eq!(resp["error"]["code"], -32004, "removed agent");
+    let control = CallerContext::with_bearer("control-key");
+    let resp = rpc(&server, &control, "tools/list", json!({})).await;
+    assert!(
+        resp["result"]["tools"].is_array(),
+        "unaffected agent: {resp}"
+    );
 }
 
 #[tokio::test]

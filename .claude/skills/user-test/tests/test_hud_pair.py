@@ -28,6 +28,7 @@ class FakeHud(BaseHTTPRequestHandler):
     entered = {}
     release = threading.Event()
     condition = threading.Condition()
+    grpc_target = "h:50051"
 
     def do_GET(self):
         if self.headers.get("Authorization") != f"Bearer {type(self).last_psk}":
@@ -119,7 +120,7 @@ class FakeHud(BaseHTTPRequestHandler):
         type(self).issued += 1
         psk = f"{type(self).issued:02d}" + "ab" * 31
         type(self).last_psk = psk
-        self.reply(200, {"agent": body["agent"], "psk": psk, "mcp": "http://h:9090/mcp", "grpc": "h:50051"})
+        self.reply(200, {"agent": body["agent"], "psk": psk, "mcp": "http://h:9090/mcp", "grpc": type(self).grpc_target})
 
     def reply(self, status, payload):
         data = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
@@ -135,6 +136,7 @@ class FakeHud(BaseHTTPRequestHandler):
 @pytest.fixture
 def hud(tmp_path):
     FakeHud.issued = 0
+    FakeHud.grpc_target = "h:50051"
     FakeHud.requests, FakeHud.modes, FakeHud.entered = [], {}, {}
     FakeHud.release = threading.Event()
     server = ThreadingHTTPServer(("127.0.0.1", 0), FakeHud)
@@ -188,6 +190,10 @@ class AdapterProcess:
     def __init__(self, home, *, host=None, config=".mcp.json", short=None, stall=None):
         project = SCRIPTS.parents[3]
         self.home = home
+        self.short = short
+        self.ready_complete = False
+        self.short_deadline_marker = home / "enable-short-request-deadline"
+        self.short_deadline_marker.unlink(missing_ok=True)
         self.env = {**os.environ, "HOME": str(home), "CLAUDE_PROJECT_DIR": str(project)}
         self.env.pop("HUD_HOST", None)
         if host is not None:
@@ -195,9 +201,24 @@ class AdapterProcess:
         entry = json.loads((project / config).read_text())["mcpServers"]["tze-hud"]
         command = [entry["command"], *entry["args"]]
         if short is not None or stall is not None:
-            inject = {k: v for k, v in {"REQUEST_SECONDS": short, "OUTPUT_STALL_SECONDS": stall}.items() if v is not None}
-            code = ("import runpy,sys; m=runpy.run_path(sys.argv[1],run_name='adapter_fixture'); "
-                    f"m['main'].__globals__.update({inject!r}); sys.argv=sys.argv[:1]; raise SystemExit(m['main']())")
+            inject = {"OUTPUT_STALL_SECONDS": stall} if stall is not None else {}
+            code_lines = [
+                "import os,runpy,sys",
+                "m=runpy.run_path(sys.argv[1],run_name='adapter_fixture')",
+                f"m['main'].__globals__.update({inject!r})",
+            ]
+            if short is not None:
+                code_lines.extend([
+                    f"marker={str(self.short_deadline_marker)!r}",
+                    "original_frames=m['Adapter'].frames",
+                    "def apply_short_deadline(self):",
+                    "    if os.path.exists(marker):",
+                    f"        m['main'].__globals__['REQUEST_SECONDS']={short!r}",
+                    "    return original_frames(self)",
+                    "m['Adapter'].frames=apply_short_deadline",
+                ])
+            code_lines.extend(["sys.argv=sys.argv[:1]", "raise SystemExit(m['main']())"])
+            code = "\n".join(code_lines)
             command = [sys.executable, "-u", "-c", code, str(SCRIPTS / "hud_mcp_stdio.py")]
         self.process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                         env=self.env, bufsize=0, start_new_session=True)
@@ -263,7 +284,13 @@ class AdapterProcess:
         self.send("notifications/initialized")
         self.send("ping", 2)
         assert self.receive() == {"jsonrpc": "2.0", "id": 2, "result": {}}
+        self.ready_complete = True
         return result
+
+    def enable_short_request_deadline(self):
+        assert self.short is not None
+        assert self.ready_complete, "adapter must finish readiness before shortening its request deadline"
+        self.short_deadline_marker.touch()
 
     def stop(self, sig=None):
         self.sample()
@@ -317,7 +344,8 @@ def test_pair_writes_0600_file_and_never_prints_the_psk(hud):
     assert json.loads(result.stdout)["psk_file"] == str(psk_file(home))
 
     record = json.loads(endpoint_file(home).read_text())
-    assert record == {"schema": 1, "mcp_url": f"http://{host}/mcp", "psk_sha256": hashlib.sha256(psk.encode()).hexdigest()}
+    assert record == {"schema": 2, "mcp_url": f"http://{host}/mcp", "psk_sha256": hashlib.sha256(psk.encode()).hexdigest(),
+                      "grpc_target": "h:50051"}
     assert stat.S_IMODE(endpoint_file(home).stat().st_mode) == 0o600
     assert psk not in endpoint_file(home).read_text()
     for config in [".mcp.json", ".claude/skills/hud-projection/mcp.template.json", ".claude/skills/th-hud-publish/mcp.template.json"]:
@@ -416,6 +444,28 @@ def test_hud_env_derives_urls_and_reads_the_file(hud, monkeypatch, capsys):
         hud_env.load_psk("h")
     pair(host, home)
     assert hud_env.load_psk("127.0.0.1:1") == psk_file(home).read_text().strip()
+    assert hud_env.grpc_target(host) == "h:50051"
+    # Disabled/pending/failed gRPC still permits MCP pairing and stdio use;
+    # every gRPC client resolves through this helper instead of inventing :50051.
+    for advertised in [None, "[fd7a:115c:a1e0::1]:50072"]:
+        FakeHud.grpc_target = advertised
+        result = pair(host, home)
+        assert result.returncode == 0, result.stderr
+        assert json.loads(result.stdout)["grpc"] == advertised
+        assert json.loads(endpoint_file(home).read_text())["grpc_target"] == advertised
+        if advertised is None:
+            with pytest.raises(hud_env.HudEnvError, match="no available gRPC listener"):
+                hud_env.grpc_target(host)
+        else:
+            assert hud_env.grpc_target(host) == advertised
+        with AdapterProcess(home) as adapter:
+            adapter.ready()
+    # Retain the existing legacy schema1 reader contract.
+    record = json.loads(endpoint_file(home).read_text())
+    record["schema"] = 1
+    del record["grpc_target"]
+    endpoint_file(home).write_text(json.dumps(record))
+    assert hud_env.grpc_target(host) == "127.0.0.1:50051"
 
     # The stress publisher uses this same private paired file, with host metrics
     # explicitly unavailable even when authenticated publishing succeeds.
@@ -455,7 +505,9 @@ def test_hud_env_derives_urls_and_reads_the_file(hud, monkeypatch, capsys):
     monkeypatch.delenv("HUD_HOST")
     for invalid in [{}, {"schema": 1, "mcp_url": "http://wrong:9090/mcp", "psk_sha256": "0" * 64},
                     {"schema": 1, "mcp_url": f"http://{host}/mcp?secret=none", "psk_sha256": "0" * 64},
-                    {"schema": 1, "mcp_url": "http://${HUD_HOST}:9090/mcp", "psk_sha256": "0" * 64}]:
+                    {"schema": 1, "mcp_url": "http://${HUD_HOST}:9090/mcp", "psk_sha256": "0" * 64},
+                    *[{"schema": 2, "mcp_url": f"http://{host}/mcp", "psk_sha256": "0" * 64,
+                       "grpc_target": target} for target in [12, "h", "user:pass@h:50051", "h:99999"]]]:
         endpoint_file(home).write_text(json.dumps(invalid))
         with pytest.raises(hud_env.HudEnvError):
             hud_env.adapter_endpoint()
@@ -1005,9 +1057,10 @@ def test_mcp_headers_needs_a_bare_host(hud, monkeypatch):
     FakeHud.release = threading.Event()
     FakeHud.modes[60] = "trickle"
     # The production 60s admission/expiry is exercised by the clock above.
-    # Use the same loop with a short private budget for real HTTP/worker cleanup.
+    # Let normal readiness finish before shortening the private request budget.
     with AdapterProcess(home, short=0.3) as adapter:
         adapter.ready()
+        adapter.enable_short_request_deadline()
         adapter.send("ping", 60)
         wait_request(60)
         adapter.sample()

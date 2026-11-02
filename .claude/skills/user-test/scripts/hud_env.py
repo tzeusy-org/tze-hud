@@ -1,7 +1,8 @@
 """Shared HUD endpoint and PSK resolution for the Python clients.
 
 `HUD_HOST` (a host, `host:port`, or URL) names the HUD. The MCP URL, gRPC
-target, and PSK file all derive from it. The PSK lives in
+target, and PSK file select it. New pairs retain the actual gRPC listener (or
+its unavailability); legacy explicit clients retain the default gRPC port. The PSK lives in
 `~/.config/tze-hud/<host>.psk` (mode 0600, written by `hud_pair.py`) and is
 never printed: errors name the file, not its contents.
 The stdio adapter has separate strict helpers for sole-host discovery and
@@ -56,7 +57,15 @@ def base_url(raw: str | None = None) -> str:
 
 
 def grpc_target(raw: str | None = None) -> str:
-    return f"{hostname(raw)}:{GRPC_PORT}"
+    host = hostname(raw)
+    record = _endpoint_record(host)
+    if record and record["schema"] == 2:
+        if record["grpc_target"] is None:
+            raise HudEnvError("paired HUD has no available gRPC listener; re-pair after it binds or select --target explicitly")
+        return record["grpc_target"]
+    # Legacy pairs did not retain transport availability or custom gRPC ports.
+    rendered = f"[{host}]" if ":" in host else host
+    return f"{rendered}:{GRPC_PORT}"
 
 
 def psk_path(raw: str | None = None) -> Path:
@@ -134,15 +143,30 @@ def _endpoint_record(host: str) -> dict | None:
         return None
     try:
         record = json.loads(_private_bytes(path, 4096))
-        if not isinstance(record, dict) or set(record) != {"schema", "mcp_url", "psk_sha256"}:
+        if not isinstance(record, dict) or type(record.get("schema")) is not int:
             raise ValueError
-        if type(record["schema"]) is not int or record["schema"] != 1:
+        keys = {"schema", "mcp_url", "psk_sha256"}
+        if record["schema"] == 2:
+            keys.add("grpc_target")
+        elif record["schema"] != 1:
+            raise ValueError
+        if set(record) != keys:
             raise ValueError
         found_host, url = _adapter_url(record["mcp_url"])
         if found_host != host or url != record["mcp_url"]:
             raise ValueError
         if not isinstance(record["psk_sha256"], str) or not re.fullmatch(r"[0-9a-f]{64}", record["psk_sha256"]):
             raise ValueError
+        if record["schema"] == 2 and record["grpc_target"] is not None:
+            target = record["grpc_target"]
+            if not isinstance(target, str):
+                raise ValueError
+            parts = urlsplit(f"//{target}")
+            if (not parts.hostname or parts.port is None or not 1 <= parts.port <= 65535
+                    or parts.username is not None or parts.password is not None
+                    or parts.path or parts.query or parts.fragment
+                    or re.search(r"[^a-zA-Z0-9_.:\-]", parts.hostname)):
+                raise ValueError
         return record
     except (ValueError, TypeError, KeyError, UnicodeError):
         raise HudEnvError("invalid HUD endpoint record; re-pair, no default-port fallback") from None

@@ -16,6 +16,7 @@ fn item(id: &str, label: &str, control: PanelControl) -> PanelItem {
         shortcut: None,
         emphasis: PanelTone::Normal,
         status: None,
+        reset: false,
     }
 }
 

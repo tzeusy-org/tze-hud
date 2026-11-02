@@ -33,6 +33,13 @@ pub(crate) struct Row {
     pub caution: bool,
     /// A status dot before the label (e.g. an agent's connection).
     pub status: Option<PanelTone>,
+    /// The value differs from its default and [`Edit::Reset`] restores it:
+    /// the row shows `Reset`, and Delete or a click on it resets.
+    pub reset: bool,
+    /// A [`Control::Choice`] whose keyboard steps restyle live without
+    /// saving ([`Edit::Preview`]); Enter or a click keeps the shown option,
+    /// and leaving the row restores the saved one ([`Edit::Revert`]).
+    pub previews: bool,
 }
 
 impl Row {
@@ -46,6 +53,8 @@ impl Row {
             badge: None,
             caution: false,
             status: None,
+            reset: false,
+            previews: false,
         }
     }
 
@@ -71,6 +80,18 @@ impl Row {
 
     pub(crate) fn status(mut self, status: PanelTone) -> Self {
         self.status = Some(status);
+        self
+    }
+
+    /// Offer `Reset` while `changed`.
+    pub(crate) fn resettable(mut self, changed: bool) -> Self {
+        self.reset = changed;
+        self
+    }
+
+    /// Keyboard steps preview the option before it is kept.
+    pub(crate) fn previews(mut self) -> Self {
+        self.previews = true;
         self
     }
 }
@@ -100,20 +121,72 @@ pub(crate) enum Control {
     Action { confirm: Option<String> },
     /// Text the owner types while the row has focus: the first keystroke
     /// replaces `text`, Enter submits it as [`Edit::Text`], Esc cancels.
-    /// (On Connect an agent, Enter on the name copies the prompt.)
-    Field { text: String },
+    /// (On Connect an agent, Enter on the name copies the prompt.) With
+    /// `confirm`, a changed value asks it once first: the first Enter shows
+    /// the question, the second saves.
+    Field {
+        text: String,
+        confirm: Option<String>,
+    },
 }
 
 impl Control {
+    /// The value this row shows, for the action log.
+    pub(crate) fn value_text(&self) -> String {
+        match self {
+            Self::ReadOnly { text, .. } | Self::Stepper { text } | Self::Field { text, .. } => {
+                text.clone()
+            }
+            Self::Toggle(on) | Self::Grant { on, .. } => on_off(*on).to_owned(),
+            Self::Disclosure { open, .. } => if *open { "open" } else { "closed" }.to_owned(),
+            Self::Choice { options, selected } => {
+                options.get(*selected).cloned().unwrap_or_default()
+            }
+            Self::Action { .. } => String::new(),
+        }
+    }
+
+    /// What `edit` asks this row to become, for the action log: the new
+    /// value where the edit names one, else the step or the action.
+    pub(crate) fn edited_text(&self, edit: &Edit) -> String {
+        match (self, edit) {
+            (_, Edit::Activate) => "activated".to_owned(),
+            (_, Edit::Set(on)) => on_off(*on).to_owned(),
+            (Self::Choice { options, .. }, Edit::Choose(n)) => options
+                .get(*n)
+                .cloned()
+                .unwrap_or_else(|| format!("option {n}")),
+            (_, Edit::Choose(n)) => format!("option {n}"),
+            (_, Edit::Step(n)) => format!("{n:+} step"),
+            (_, Edit::Text(text)) => text.clone(),
+            (_, Edit::Reset) => "default".to_owned(),
+            (_, Edit::Preview(n)) => format!("preview {n:+}"),
+            (_, Edit::Keep) => "the previewed option".to_owned(),
+            (_, Edit::Revert) => "saved value".to_owned(),
+        }
+    }
+
     /// The question asked before `edit` applies, if it needs one.
     pub(crate) fn confirm_for(&self, edit: &Edit) -> Option<&str> {
         match (self, edit) {
             (Control::Action { confirm }, Edit::Activate) => confirm.as_deref(),
             // Only granting asks, and only when it changes something.
             (Control::Grant { on: false, confirm }, Edit::Set(true)) => Some(confirm),
+            // A field asks only when the typed value differs.
+            (
+                Control::Field {
+                    text,
+                    confirm: Some(confirm),
+                },
+                Edit::Text(typed),
+            ) if typed.trim() != text.trim() => Some(confirm),
             _ => None,
         }
     }
+}
+
+fn on_off(on: bool) -> &'static str {
+    if on { "on" } else { "off" }
 }
 
 /// A change the panel asks a section to make to one of its rows.
@@ -129,6 +202,16 @@ pub(crate) enum Edit {
     Step(i32),
     /// The text typed into a field, submitted with Enter.
     Text(String),
+    /// Back to the default (the row offered `Reset`).
+    Reset,
+    /// Show the option `n` steps from the one showing (negative: back) of a
+    /// previewing choice, without saving it. Relative, so a step sent while
+    /// the last one is still restyling lands on the next option.
+    Preview(i32),
+    /// Save the option the preview is showing.
+    Keep,
+    /// Drop a preview: back to the saved option.
+    Revert,
 }
 
 /// One card of the panel: a group of rows over one area of the HUD.
@@ -155,6 +238,14 @@ pub(crate) trait Section: Send + Sync {
         Box::pin(async { None })
     }
 
+    /// A few words for the panel header's state line ("3 agents · 2 portals",
+    /// "restart pending"), from state the section already holds; read on
+    /// every rebuild, so it may take a short lock but must not await or do
+    /// I/O.
+    fn summary(&self) -> Option<String> {
+        None
+    }
+
     /// The panel opened: forget anything [`Self::refresh`] throttles, so the
     /// first refresh reads fresh state.
     fn opened(&self) {}
@@ -164,5 +255,45 @@ pub(crate) trait Section: Send + Sync {
     /// once a second while it is open.
     fn refresh(&self) -> BoxFuture<'_, ()> {
         Box::pin(async {})
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The action log names each row's value before and what the edit set.
+    #[test]
+    fn log_values_name_the_old_and_new_value() {
+        let choice = Control::Choice {
+            options: vec!["classic".into(), "tonal-glass".into()],
+            selected: 0,
+        };
+        assert_eq!(choice.value_text(), "classic");
+        assert_eq!(choice.edited_text(&Edit::Choose(1)), "tonal-glass");
+        assert_eq!(Control::Toggle(true).value_text(), "on");
+        assert_eq!(Control::Toggle(true).edited_text(&Edit::Set(false)), "off");
+        let zoom = Control::Stepper {
+            text: "100%".into(),
+        };
+        assert_eq!(zoom.value_text(), "100%");
+        assert_eq!(zoom.edited_text(&Edit::Step(-1)), "-1 step");
+        let port = Control::Field {
+            text: "9090".into(),
+            confirm: Some("Change it?".into()),
+        };
+        assert_eq!(
+            port.confirm_for(&Edit::Text("9191".into())),
+            Some("Change it?")
+        );
+        assert_eq!(
+            port.confirm_for(&Edit::Text(" 9090".into())),
+            None,
+            "the same value saves without asking"
+        );
+        assert_eq!(port.edited_text(&Edit::Text("9191".into())), "9191");
+        let restart = Control::Action { confirm: None };
+        assert_eq!(restart.value_text(), "");
+        assert_eq!(restart.edited_text(&Edit::Activate), "activated");
     }
 }

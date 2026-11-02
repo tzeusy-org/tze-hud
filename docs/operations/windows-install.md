@@ -83,8 +83,13 @@ python3 .claude/skills/user-test/scripts/hud_pair.py --host <tailscale-ip[:port]
 ```
 
 The Python helper also writes a private nonsecret `<host>.endpoint.json` record
-containing schema1, the actual pairing HTTP origin/port `/mcp`, and the stored
-key's SHA-256. It does not trust an advertised reply hostname for this record.
+containing schema2, the actual pairing HTTP origin/port `/mcp`, the stored
+key's SHA-256, and the separately advertised gRPC socket or `null`. MCP retains
+the request origin rather than trusting an advertised reply hostname. The shared
+Python gRPC resolver refuses a known unavailable listener instead of assuming
+port 50051; re-pair after it binds or select a known endpoint with `--target`.
+Schema1/key-only pairs keep their legacy default until re-paired. A null gRPC
+socket does not prevent MCP pairing or stdio use.
 If metadata storage fails after the key is written, pairing reports failure;
 re-pair to repair the partial state. In a fresh Linux/WSL Claude session the
 project stdio MCP entry selects one paired host without `HUD_HOST`; multiple
@@ -114,6 +119,14 @@ The HUD listens on loopback and on each Tailscale address of the machine
 (`100.64.0.0/10`, `fd7a:115c:a1e0::/48`), on the MCP/pairing port (9090) and the
 gRPC port (50051). It never binds a wildcard address. Agents on other tailnet
 machines reach it only if Windows Firewall lets inbound TCP to those ports in.
+Both transports keep following Windows address-change notifications after startup,
+including a second Tailscale address family appearing later. Failed Tailscale
+binds (including after restart/update handoff) retry every 10 seconds for the
+first five minutes of listener management, then every 60 seconds, only while
+an address is still local and unbound. There is no steady-state polling timer.
+Status advertises successful MCP binds; pairing selects each transport's
+successful listeners independently (`grpc` is `null` when disabled or not yet
+bound). Deferred startup advertises no listener until its port binds.
 
 The HUD reads the firewall policy (no admin needed) when the pairing card opens
 and when `/admin/status` is requested, never per frame, and reports

@@ -164,9 +164,7 @@ impl RuntimeControl {
             .collect();
         displays.sort();
         let profile = config.profile.clone();
-        let window = window_label(cfg);
-        let window_sized =
-            cfg.window.mode == crate::window::WindowMode::Overlay && !cfg.overlay_auto_size;
+        let (window, window_sized) = window_label(cfg);
         Self {
             profile,
             window,
@@ -212,6 +210,19 @@ impl RuntimeControl {
         Ok(())
     }
 
+    /// Clear a saved `[runtime]` key (`update` carries `None`): the row is
+    /// back to its default.
+    pub(crate) fn clear(
+        &self,
+        update: RuntimeUpdate,
+        source: impl FnOnce(&mut LaunchSources) -> &mut crate::launch::Source,
+    ) -> Result<(), String> {
+        (self.write)(std::slice::from_ref(&update))?;
+        *source(&mut self.sources.lock().unwrap_or_else(|e| e.into_inner())) =
+            crate::launch::Source::Default;
+        Ok(())
+    }
+
     pub(crate) fn saved(&self) -> Ports {
         *self.saved.lock().unwrap_or_else(|e| e.into_inner())
     }
@@ -244,14 +255,20 @@ fn open_in_explorer(path: &Path) -> Result<(), String> {
         .map_err(|e| format!("could not start Explorer: {e}"))
 }
 
-/// The window mode and, when it applies, the size: fullscreen covers the
-/// monitor and an auto-sized overlay covers every display.
-fn window_label(cfg: &crate::windowed::WindowedConfig) -> String {
+/// The window mode and, when it applies, the size, plus whether the size
+/// applies: fullscreen covers the monitor and an auto-sized overlay covers
+/// every display, so neither uses the configured size.
+fn window_label(cfg: &crate::windowed::WindowedConfig) -> (String, bool) {
     use crate::window::WindowMode;
     match cfg.window.mode {
-        WindowMode::Fullscreen => "Fullscreen".to_owned(),
-        WindowMode::Overlay if cfg.overlay_auto_size => "Overlay · every display".to_owned(),
-        WindowMode::Overlay => format!("Overlay · {}×{}", cfg.window.width, cfg.window.height),
+        WindowMode::Fullscreen => ("Fullscreen".to_owned(), false),
+        WindowMode::Overlay if cfg.overlay_auto_size => {
+            ("Overlay · every display".to_owned(), false)
+        }
+        WindowMode::Overlay => (
+            format!("Overlay · {}×{}", cfg.window.width, cfg.window.height),
+            true,
+        ),
     }
 }
 
@@ -295,12 +312,15 @@ pub(crate) mod tests {
     fn window_label_names_the_mode_and_any_size() {
         use crate::window::WindowMode;
         let mut cfg = crate::windowed::WindowedConfig::default();
-        assert_eq!(window_label(&cfg), "Fullscreen");
+        assert_eq!(window_label(&cfg), ("Fullscreen".into(), false));
         cfg.window.mode = WindowMode::Overlay;
-        assert_eq!(window_label(&cfg), "Overlay · every display");
+        assert_eq!(
+            window_label(&cfg),
+            ("Overlay · every display".into(), false)
+        );
         cfg.overlay_auto_size = false;
         (cfg.window.width, cfg.window.height) = (1280, 720);
-        assert_eq!(window_label(&cfg), "Overlay · 1280×720");
+        assert_eq!(window_label(&cfg), ("Overlay · 1280×720".into(), true));
     }
 
     /// Update and autostart are offered only by the installed copy.

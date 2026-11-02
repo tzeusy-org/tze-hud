@@ -188,20 +188,6 @@ pub fn load(path: &Path) -> Result<AgentsFile, AgentsFileError> {
     }
 }
 
-/// Write `agents.toml` atomically: a uniquely named temp file in the same
-/// directory (removed on error), then a rename over the target. The file is
-/// owner-only (0600) on Unix; Windows has no mode bits, so it takes the
-/// directory's ACL.
-pub fn save_atomic(path: &Path, file: &AgentsFile) -> std::io::Result<()> {
-    let src = toml::to_string(file).map_err(std::io::Error::other)?;
-    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
-        std::fs::create_dir_all(dir)?;
-    }
-    write_atomic(path, src.as_bytes(), FileMode::Private, |from, to| {
-        std::fs::rename(from, to)
-    })
-}
-
 /// One change to `agents.toml`.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AgentChange {
@@ -232,7 +218,10 @@ pub struct Edited {
 /// The file is re-read first, so hand edits made since startup are kept, and
 /// it is edited in place with `toml_edit`: comments, key order and other
 /// agents' tables survive. The result is validated before anything is
-/// written, then replaced atomically (owner-only, like [`save_atomic`]).
+/// written, then replaced atomically: a uniquely named temp file in the same
+/// directory (removed on error), then a rename over the target. The file is
+/// owner-only (0600) on Unix; Windows has no mode bits, so it takes the
+/// directory's ACL.
 /// Callers that write concurrently must serialize their calls; this function
 /// holds no lock of its own.
 pub fn edit(path: &Path, change: &AgentChange) -> Result<Edited, AgentsFileError> {
@@ -350,7 +339,16 @@ mod tests {
         assert_eq!(path, dir.path().join(AGENTS_FILE_NAME));
 
         let file = AgentsFile::default().with_agent("claude", PSK, &["zone:*", "portal"]);
-        save_atomic(&path, &file).unwrap();
+        let record = file.agents["claude"].clone();
+        let edited = edit(
+            &path,
+            &AgentChange::Pair {
+                agent: "claude".into(),
+                record,
+            },
+        )
+        .unwrap();
+        assert_eq!(edited.after, file);
         let saved = std::fs::read_to_string(&path).unwrap();
         assert!(!saved.contains(PSK), "agents.toml must not contain the PSK");
         assert!(saved.contains(&hash_psk_hex(PSK)));
@@ -415,7 +413,8 @@ mod tests {
         // The same file from disk fails strict validation, naming both agents.
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(AGENTS_FILE_NAME);
-        save_atomic(&path, &shared).unwrap();
+        // `edit` refuses to write it, so the owner wrote it by hand.
+        std::fs::write(&path, toml::to_string(&shared).unwrap()).unwrap();
         let err = load(&path).unwrap().directory().unwrap_err().to_string();
         assert!(
             err.contains("agents.b.psk_sha256") && err.contains("agents.a"),
