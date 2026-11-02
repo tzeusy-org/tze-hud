@@ -678,7 +678,7 @@ mod tests {
             .expect("failed to allocate ephemeral listener for loopback bind test");
         let shared_state = make_shared_state();
         let ctx: SharedRuntimeContext = Arc::new(RuntimeContext::headless_default());
-        let (rt, handles, _, _, _, _, _, grpc_addrs) = start_network_services_on_listener(
+        let (rt, handles, _, _, _, _, grpc_addrs) = start_network_services_on_listener(
             listener,
             Default::default(),
             shared_state,
@@ -710,7 +710,7 @@ mod tests {
         let gate = crate::operator::handoff::BindGate::closed();
         let (fixture, mut control) = crate::net_addrs::tailnet_fixture();
         let grpc_binds: Arc<std::sync::Mutex<Vec<std::net::SocketAddr>>> = Arc::default();
-        let (rt, handles, _, _, _, _, _, reported) = start_enabled_network_services(
+        let (rt, handles, _, _, _, _, reported) = start_enabled_network_services(
             port,
             Default::default(),
             make_shared_state(),
