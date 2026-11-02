@@ -388,7 +388,6 @@ async fn test_resume_auth_required() {
                     resume_token: resume_token.clone(),
                     last_seen_server_sequence: 2,
                     auth_credential: credential,
-                    ..Default::default()
                 })
             } else {
                 ClientPayload::SessionInit(SessionInit {
