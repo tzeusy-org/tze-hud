@@ -1951,326 +1951,6 @@ fn separator_rects_placed_on_break_lines() {
     );
 }
 
-/// Viewer-echo history renders a token-styled divider between each adjacent
-/// pair of entries (hud-hsc1t): N entries → N−1 dividers at the cumulative
-/// wrapped-line boundary, centred on the boundary line.
-#[test]
-fn viewer_echo_divider_rects_between_adjacent_entries() {
-    // 3 entries with wrapped line counts [1, 2, 1]; block_top=100, lh=20, t=2.
-    // Boundary after entry0 → 100 + 1*20 = 120; after entry1 → 100 + 3*20 = 160.
-    let counts = [1usize, 2, 1];
-    let rects =
-        tile_render::viewer_echo_divider_rects(&counts, 10.0, 100.0, 200.0, 20.0, 2.0, 0.0, 1000.0);
-    assert_eq!(rects.len(), 2, "N-1 dividers between N entries");
-    assert!(
-        (rects[0].y - 119.0).abs() < 0.01,
-        "first boundary centred on y=120, got {}",
-        rects[0].y
-    );
-    assert_eq!(rects[0].x, 10.0, "spans from the block origin");
-    assert_eq!(rects[0].width, 200.0, "spans the zone width");
-    assert_eq!(rects[0].height, 2.0, "thickness drives height");
-    assert!(
-        (rects[1].y - 159.0).abs() < 0.01,
-        "second boundary centred on y=160, got {}",
-        rects[1].y
-    );
-}
-
-/// Boundaries scrolled above the visible band clip out; a single entry, zero
-/// width, or zero thickness produce no dividers.
-#[test]
-fn viewer_echo_divider_rects_clips_and_degenerate() {
-    let counts = [1usize, 1, 1];
-    // Boundaries at y=120 and y=140; band_top=130 clips the first.
-    let rects = tile_render::viewer_echo_divider_rects(
-        &counts, 0.0, 100.0, 200.0, 20.0, 2.0, 130.0, 1000.0,
-    );
-    assert_eq!(rects.len(), 1, "boundary above band_top is clipped");
-    assert!(
-        (rects[0].y - 139.0).abs() < 0.01,
-        "surviving divider is the in-band one, got {}",
-        rects[0].y
-    );
-    assert!(
-        tile_render::viewer_echo_divider_rects(&[3usize], 0.0, 0.0, 200.0, 20.0, 2.0, 0.0, 1000.0)
-            .is_empty(),
-        "single entry → no interior divider"
-    );
-    assert!(
-        tile_render::viewer_echo_divider_rects(&counts, 0.0, 0.0, 0.0, 20.0, 2.0, 0.0, 1000.0)
-            .is_empty(),
-        "zero width → no rects"
-    );
-    assert!(
-        tile_render::viewer_echo_divider_rects(&counts, 0.0, 0.0, 200.0, 20.0, 0.0, 0.0, 1000.0)
-            .is_empty(),
-        "zero thickness → no rects"
-    );
-}
-
-/// hud-acfvp: the input-history block's top slides within the fixed band by the
-/// input tile's clamped displayed scroll offset, so the viewer can wheel-scroll
-/// UP through older entries. Pure scroll math — no rasterizer, no GPU.
-#[test]
-fn input_history_block_top_slides_with_scroll_offset() {
-    // Band [100, 300] → band_height 200; a 500px history overflows by 300px.
-    let band_top = 100.0_f32;
-    let band_bottom = 300.0_f32;
-    let block_height = 500.0_f32;
-    let max_scrollback = block_height - (band_bottom - band_top); // 300
-
-    // No scroll config → pin to the tail: block bottom (top + height) rests on the
-    // band bottom, newest visible, oldest clipped above — the pre-scroll window.
-    let tail = tile_render::input_history_block_top(band_top, band_bottom, block_height, None);
-    assert!(
-        (tail - (band_bottom - block_height)).abs() < 0.01,
-        "no scroll config pins the block to the tail (band_bottom - block_height), got {tail}"
-    );
-    assert!(
-        (tail - (band_top - max_scrollback)).abs() < 0.01,
-        "tail equals band_top - max_scrollback"
-    );
-
-    // Offset seeded at the tail (max_scrollback) reproduces the tail exactly.
-    let at_tail = tile_render::input_history_block_top(
-        band_top,
-        band_bottom,
-        block_height,
-        Some(max_scrollback),
-    );
-    assert!(
-        (at_tail - tail).abs() < 0.01,
-        "offset at the tail matches the no-config tail, got {at_tail}"
-    );
-
-    // Scrolling up (offset eases toward 0) slides the block DOWN, revealing older
-    // lines; fully scrolled up rests the oldest line on the band top.
-    let scrolled_up =
-        tile_render::input_history_block_top(band_top, band_bottom, block_height, Some(0.0));
-    assert!(
-        (scrolled_up - band_top).abs() < 0.01,
-        "fully scrolled up rests the oldest line on band_top, got {scrolled_up}"
-    );
-    assert!(
-        scrolled_up > at_tail,
-        "scrolling up moves the block DOWN (older revealed): {scrolled_up} > {at_tail}"
-    );
-
-    // A partial offset lands proportionally between the two, and the offset is
-    // clamped so it can never overscroll past the oldest line or below the tail.
-    let mid =
-        tile_render::input_history_block_top(band_top, band_bottom, block_height, Some(100.0));
-    assert!(
-        (mid - (band_top - 100.0)).abs() < 0.01,
-        "partial scroll-back is band_top - clamp(offset), got {mid}"
-    );
-    let over_up =
-        tile_render::input_history_block_top(band_top, band_bottom, block_height, Some(-50.0));
-    assert!(
-        (over_up - band_top).abs() < 0.01,
-        "negative offset clamps to the fully-scrolled-up bound, got {over_up}"
-    );
-    let over_down =
-        tile_render::input_history_block_top(band_top, band_bottom, block_height, Some(9999.0));
-    assert!(
-        (over_down - tail).abs() < 0.01,
-        "offset past the tail clamps to the tail, got {over_down}"
-    );
-
-    // History that fits the band has zero scroll range: every offset yields the
-    // same bottom-aligned position (no spurious motion for short histories).
-    let short = 120.0_f32; // < band_height (200)
-    let fit_tail = tile_render::input_history_block_top(band_top, band_bottom, short, None);
-    let fit_scrolled =
-        tile_render::input_history_block_top(band_top, band_bottom, short, Some(50.0));
-    assert!(
-        (fit_tail - fit_scrolled).abs() < 0.01,
-        "a history that fits the band never scrolls (max_scrollback == 0)"
-    );
-    assert!(
-        (fit_tail - (band_bottom - short)).abs() < 0.01,
-        "a fitting history stays bottom-aligned at band_bottom - block_height, got {fit_tail}"
-    );
-}
-
-/// hud-3nus3: the input-history band is placed on the side of the composer box
-/// AWAY from its anchored edge, so a viewer's submissions always have on-pane
-/// room to paint. This is the pure geometry proof for the live report "input
-/// tracked, nothing rendered" on the live exemplar (`portal.composer.anchor
-/// = top`): with a top-pinned composer box the old band-above-box collapsed to
-/// zero height and the whole history silently failed to paint. No rasterizer, no
-/// GPU — asserts the band/block geometry directly.
-#[test]
-fn input_history_band_layout_places_history_below_a_top_anchored_composer() {
-    // A tall composer region (the exemplar LEFT input pane) with a one-line box.
-    let region = Rect::new(0.0, 0.0, 400.0, 300.0);
-    let box_height = 24.0_f32;
-    let block_height = 40.0_f32;
-
-    // Bottom anchor (default): box rests on the region bottom; the band is the
-    // space ABOVE it and the block bottom-aligns just above the box — byte-for-byte
-    // the pre-fix behavior (band_top == region top, band_bottom == box top).
-    let bottom_box = Rect::new(0.0, region.height - box_height, region.width, box_height);
-    let (bt_top, bt_bottom, bt_block_top) = tile_render::input_history_band_layout(
-        ComposerVerticalAnchor::Bottom,
-        region,
-        bottom_box,
-        block_height,
-        None,
-    )
-    .expect("bottom-anchored band has positive height");
-    assert_eq!(
-        bt_top, region.y,
-        "bottom-anchor band starts at the region top"
-    );
-    assert_eq!(
-        bt_bottom, bottom_box.y,
-        "bottom-anchor band ends at the box top"
-    );
-    assert!(
-        (bt_block_top - (bt_bottom - block_height)).abs() < 0.01,
-        "bottom-anchor history bottom-aligns just above the box"
-    );
-
-    // Top anchor (exemplar two-pane input pane): box pins to the region TOP, so the
-    // OLD band (`[region.y, draft_box.y]`) would be zero-height and paint nothing.
-    // The band must instead open BELOW the box, with the block flowing downward
-    // (top-aligned) beneath it — this is the fix.
-    let top_box = Rect::new(0.0, region.y, region.width, box_height);
-    assert!(
-        top_box.y - region.y <= 0.0,
-        "precondition: the old band-above-box is degenerate for a top-pinned box"
-    );
-    let (tp_top, tp_bottom, tp_block_top) = tile_render::input_history_band_layout(
-        ComposerVerticalAnchor::Top,
-        region,
-        top_box,
-        block_height,
-        None,
-    )
-    .expect("top-anchored band must have positive height (the hud-3nus3 fix)");
-    assert!(
-        (tp_top - (top_box.y + top_box.height)).abs() < 0.01,
-        "top-anchor band starts at the box bottom, got {tp_top}"
-    );
-    assert!(
-        (tp_bottom - (region.y + region.height)).abs() < 0.01,
-        "top-anchor band ends at the region bottom, got {tp_bottom}"
-    );
-    assert!(
-        tp_bottom - tp_top > 0.0,
-        "top-anchor band has room to paint submitted history"
-    );
-    assert!(
-        (tp_block_top - tp_top).abs() < 0.01,
-        "top-anchor history flows downward from just beneath the box (top-aligned), got {tp_block_top}"
-    );
-    // The first history line sits BELOW the composer box — "beneath the composer",
-    // exactly the submit event's expected visual.
-    assert!(
-        tp_block_top >= top_box.y + top_box.height,
-        "top-anchor history paints beneath the composer box"
-    );
-}
-
-/// hud-acfvp end-to-end: the rendered input-history block honors the input tile's
-/// scroll offset. With no scroll config the block pins to the tail; registering a
-/// vertical scroll config and setting the offset to 0 slides the (overflowing)
-/// block DOWN to reveal older entries, and an offset past the tail clamps back to
-/// the tail. GPU-gated (needs `new_headless`); skips when no text rasterizer.
-#[tokio::test]
-async fn input_history_block_honors_tile_scroll_offset() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 100).await);
-    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    if compositor.text_rasterizer.is_none() {
-        eprintln!("skipping: no text rasterizer (viewer-echo text path unavailable headless)");
-        return;
-    }
-
-    // Short tile so a handful of multi-line echoes overflow the band above the
-    // composer box (max_scrollback > 0), making the scroll shift observable.
-    let mut scene = SceneGraph::new(400.0, 100.0);
-    let tab_id = scene.create_tab("agent", 0).unwrap();
-    let lease_id = scene.grant_lease("agent", 60_000);
-    let tile_id = scene
-        .create_tile(
-            tab_id,
-            "agent",
-            lease_id,
-            Rect::new(0.0, 0.0, 400.0, 100.0),
-            1,
-        )
-        .unwrap();
-    let composer_id = SceneId::new();
-    scene
-        .set_tile_root(
-            tile_id,
-            Node {
-                layout: Default::default(),
-                id: composer_id,
-                children: vec![],
-                data: NodeData::HitRegion(HitRegionNode {
-                    bounds: Rect::new(0.0, 0.0, 400.0, 100.0),
-                    interaction_id: "portal-composer".to_owned(),
-                    accepts_focus: true,
-                    accepts_pointer: true,
-                    accepts_composer_input: true,
-                    ..Default::default()
-                }),
-            },
-        )
-        .unwrap();
-
-    // Several multi-line replies → a history block far taller than the band.
-    for i in 0..4 {
-        compositor
-            .viewer_echoes
-            .append(tile_id, format!("reply {i}\nline b\nline c"), i as u64);
-    }
-    compositor.prime_viewer_echo_layout(&scene);
-
-    let echo_y = |c: &Compositor, s: &SceneGraph| -> f32 {
-        let tile = s.visible_tiles()[0].clone();
-        let tokens = super::token_colors::resolve_viewer_echo_tokens(&c.token_map);
-        let items = c.collect_viewer_echo_text_items(&tile, s, 400.0, 100.0, &tokens);
-        items
-            .iter()
-            .find(|t| t.color == VIEWER_ECHO_COLOR)
-            .expect("a viewer-echo block must render")
-            .pixel_y
-    };
-
-    // No scroll config → tail (bottom-aligned newest-fit window).
-    let tail_y = echo_y(&compositor, &scene);
-
-    // Register a vertical scroll config; the offset now drives the block.
-    scene
-        .register_tile_scroll_config(tile_id, TileScrollConfig::vertical())
-        .unwrap();
-
-    // Offset 0 = fully scrolled up: the block slides DOWN, revealing older lines.
-    scene
-        .set_tile_scroll_offset_local(tile_id, 0.0, 0.0)
-        .unwrap();
-    let scrolled_up_y = echo_y(&compositor, &scene);
-    assert!(
-        scrolled_up_y > tail_y + 1.0,
-        "scrolling the input tile up must move the history block DOWN to reveal older \
-         entries: scrolled_up_y {scrolled_up_y} should exceed tail_y {tail_y}"
-    );
-
-    // An offset far past the tail clamps back to the tail position.
-    scene
-        .set_tile_scroll_offset_local(tile_id, 0.0, 100_000.0)
-        .unwrap();
-    let clamped_tail_y = echo_y(&compositor, &scene);
-    assert!(
-        (clamped_tail_y - tail_y).abs() < 0.5,
-        "an offset past the tail clamps to the tail: {clamped_tail_y} vs {tail_y}"
-    );
-}
-
 /// No breaks, zero width, or zero thickness produce no divider rects.
 #[test]
 fn separator_rects_degenerate_inputs_are_empty() {
@@ -2444,4 +2124,237 @@ async fn transcript_divider_rects_track_tile_scroll_offset() {
         "divider must track the scaled line pitch under portal resize: \
          base(scale 1.0)={base}, scaled(scale 1.5)={scaled_top}"
     );
+}
+
+/// Viewer-local portal resizing remeasures the live composer's font and wrap layout.
+#[tokio::test]
+async fn portal_resize_scales_runtime_authored_input_text_and_layout() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+
+    let (mut scene, tile_id) = composer_resize_test_scene();
+    let composer_id = scene.tiles[&tile_id]
+        .root_node
+        .expect("composer resize fixture must root the tile at its composer node");
+    // Enough ordinary words to wrap at both scales, so this proves the prime
+    // measurement path updates alongside the TextItems' draw-time font sizes.
+    let draft = "resize-aware input text ".repeat(18);
+    let draft_len = draft.len();
+    compositor.local_composer = Some(LocalComposerState {
+        text: draft.clone(),
+        cursor_byte: draft_len,
+        selection_anchor: draft_len,
+        at_capacity: false,
+        node_id: composer_id,
+        placeholder: None,
+    });
+
+    let composer_tokens = resolve_composer_overlay_tokens(&compositor.token_map);
+    let snapshot = |compositor: &mut Compositor, scene: &SceneGraph| {
+        compositor.prime_composer_scroll_offset(scene);
+        let items = compositor.collect_text_items(scene, 400.0, 300.0);
+        let composer = items
+            .iter()
+            .find(|item| item.text.as_ref() == draft)
+            .expect("local composer draft must render");
+        (
+            composer.font_size_px,
+            composer.bounds_height,
+            composer.clip_pixel_y,
+            compositor.composer_layout.total_lines,
+        )
+    };
+
+    let before = snapshot(&mut compositor, &scene);
+    assert!(
+        (before.0 - composer_tokens.font_size_px).abs() < 0.01,
+        "unresized composer must use its base token font"
+    );
+
+    // `tile_font_scale` is the viewer-local whole-portal-resize contract used by
+    // the generic OUTPUT collector. INPUT's compositor-owned overlays must follow
+    // it without any adapter republish.
+    const SCALE: f32 = 1.5;
+    scene.set_tile_font_scale(tile_id, SCALE);
+    let after = snapshot(&mut compositor, &scene);
+
+    assert!(
+        (after.0 - composer_tokens.font_size_px * SCALE).abs() < 0.01,
+        "composer draw font must scale with the resized portal (got {})",
+        after.0
+    );
+    assert!(
+        after.1 > before.1 && after.3 > before.3,
+        "composer leading/layout must be remeasured after resize: before={before:?}, after={after:?}"
+    );
+}
+
+/// The first resized frame stages composer fill and text from one fresh wrapped layout.
+#[tokio::test]
+async fn repro_resize_first_frame_keeps_composer_chrome_aligned_with_wrapped_text() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(400, 300).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+
+    let (mut scene, tile_id) = composer_resize_test_scene();
+    let composer_id = scene.tiles[&tile_id]
+        .root_node
+        .expect("composer resize fixture must root the tile at its composer node");
+    const SURFACE_H: f32 = 500.0;
+    scene.tiles.get_mut(&tile_id).unwrap().bounds.height = SURFACE_H;
+    match &mut scene.nodes.get_mut(&composer_id).unwrap().data {
+        NodeData::HitRegion(region) => region.bounds.height = SURFACE_H,
+        other => panic!("composer resize fixture root must be a composer HitRegion, got {other:?}"),
+    }
+    compositor
+        .token_map
+        .insert("portal.composer.max_lines".to_owned(), "8".to_owned());
+
+    // At the base scale this draft occupies six wrapped rows.  Raising the
+    // viewer-local scale reflows the same bytes into a taller visible box; no
+    // adapter republish occurs between the two frames.
+    let draft = "resize reflow ".repeat(21);
+    let draft_len = draft.len();
+    compositor.local_composer = Some(LocalComposerState {
+        text: draft.clone(),
+        cursor_byte: draft_len,
+        selection_anchor: draft_len,
+        at_capacity: false,
+        node_id: composer_id,
+        placeholder: None,
+    });
+    compositor.prime_composer_scroll_offset(&scene);
+    let old_visible_lines = compositor.composer_layout.visible_lines;
+    assert_eq!(
+        old_visible_lines, 6.0,
+        "test setup: base layout must occupy six visible rows"
+    );
+
+    const RESIZED_SCALE: f32 = 1.5;
+    scene.set_tile_font_scale(tile_id, RESIZED_SCALE);
+    // `build_windowed_frame` is the actual first-frame staging path: it creates
+    // flat chrome geometry before it prepares the later text pass.
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    let frame = compositor.build_windowed_frame(&mut scene, 400, SURFACE_H as u32);
+
+    // The text preparation at the tail of `build_windowed_frame` has resolved
+    // the resized layout.  Capture its fresh geometry independently of the flat
+    // vertex staging buffer so the assertion catches a one-frame mismatch.
+    let fresh_layout = compositor.composer_layout;
+    assert_eq!(
+        fresh_layout.visible_lines, 8.0,
+        "test setup: resized layout must reflow to eight visible rows"
+    );
+    let region = Rect::new(0.0, 0.0, 400.0, SURFACE_H);
+    let composer_tokens = resolve_composer_overlay_tokens(&compositor.token_map);
+    let line_height_multiplier = crate::markdown::MarkdownTokens::default().line_height_multiplier;
+    let expected_box = Compositor::composer_input_box(
+        region,
+        composer_tokens.font_size_px * RESIZED_SCALE,
+        line_height_multiplier,
+        fresh_layout.visible_lines,
+        composer_tokens.anchor,
+        composer_tokens.content_inset_px,
+    );
+
+    // The staged composer fill is the exact flat-rect geometry presented in the
+    // first frame.  Its token color is unique in this minimal scene.
+    let composer_fill = [
+        composer_tokens.bg_r,
+        composer_tokens.bg_g,
+        composer_tokens.bg_b,
+        composer_tokens.bg_a,
+    ];
+    let fill_vertices = frame
+        .flat_rect_vertices()
+        .chunks_exact(6)
+        .find(|rect| rect.iter().all(|vertex| vertex.color == composer_fill))
+        .expect("first-frame composer fill must be staged");
+    let fill_bounds = rect_vertex_bounds(fill_vertices, 400.0, SURFACE_H);
+    assert_rect_close(
+        fill_bounds,
+        expected_box,
+        "first-frame composer fill must use the resized wrapped layout",
+    );
+
+    // The later draft text preparation must use that same first-frame input box.
+    let items = compositor.collect_text_items(&scene, 400.0, SURFACE_H);
+    let composer_text = items
+        .iter()
+        .find(|item| item.text.as_ref() == draft)
+        .expect("resized composer text must render");
+    assert!(
+        (composer_text.clip_pixel_y - expected_box.y).abs() < 0.5,
+        "resized composer text clip must start at the same box top: text={}, box={}",
+        composer_text.clip_pixel_y,
+        expected_box.y
+    );
+}
+
+fn rect_vertex_bounds(vertices: &[crate::pipeline::RectVertex], sw: f32, sh: f32) -> Rect {
+    assert_eq!(vertices.len(), 6, "a flat rect must contain two triangles");
+    let left = vertices
+        .iter()
+        .map(|vertex| (vertex.position[0] + 1.0) * sw * 0.5)
+        .fold(f32::INFINITY, f32::min);
+    let right = vertices
+        .iter()
+        .map(|vertex| (vertex.position[0] + 1.0) * sw * 0.5)
+        .fold(f32::NEG_INFINITY, f32::max);
+    let top = vertices
+        .iter()
+        .map(|vertex| (1.0 - vertex.position[1]) * sh * 0.5)
+        .fold(f32::INFINITY, f32::min);
+    let bottom = vertices
+        .iter()
+        .map(|vertex| (1.0 - vertex.position[1]) * sh * 0.5)
+        .fold(f32::NEG_INFINITY, f32::max);
+    Rect::new(left, top, right - left, bottom - top)
+}
+
+fn assert_rect_close(actual: Rect, expected: Rect, message: &str) {
+    assert!(
+        (actual.x - expected.x).abs() < 0.5
+            && (actual.y - expected.y).abs() < 0.5
+            && (actual.width - expected.width).abs() < 0.5
+            && (actual.height - expected.height).abs() < 0.5,
+        "{message}: actual={actual:?}, expected={expected:?}"
+    );
+}
+
+/// Build a portal tile rooted at a composer-input HitRegion spanning the tile,
+/// returning `(scene, tile_id)` at the original mixed-test dimensions.
+fn composer_resize_test_scene() -> (SceneGraph, SceneId) {
+    let mut scene = SceneGraph::new(400.0, 300.0);
+    let tab_id = scene.create_tab("agent", 0).unwrap();
+    let lease_id = scene.grant_lease("agent", 60_000);
+    let tile_id = scene
+        .create_tile(
+            tab_id,
+            "agent",
+            lease_id,
+            Rect::new(0.0, 0.0, 400.0, 300.0),
+            1,
+        )
+        .unwrap();
+    let composer_id = SceneId::new();
+    scene
+        .set_tile_root(
+            tile_id,
+            Node {
+                layout: Default::default(),
+                id: composer_id,
+                children: vec![],
+                data: NodeData::HitRegion(HitRegionNode {
+                    bounds: Rect::new(0.0, 0.0, 400.0, 300.0),
+                    interaction_id: "portal-composer".to_owned(),
+                    accepts_focus: true,
+                    accepts_pointer: true,
+                    accepts_composer_input: true,
+                    ..Default::default()
+                }),
+            },
+        )
+        .unwrap();
+    (scene, tile_id)
 }

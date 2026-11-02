@@ -257,60 +257,6 @@ message CommandInputEvent {
   CommandSource source          = 7;
 }
 
-// ─── Composer draft events (hud-ygbcy) ───────────────────────────────────────
-//
-// These three messages carry the coalesced draft buffer state from the
-// runtime's ComposerDraftManager to the owning adapter. They replace the
-// per-keystroke composer-text republish pattern (spec §4.6).
-//
-// Message classes:
-//   ComposerDraftStateEvent  — state-stream (coalescible; latest-wins)
-//   ComposerDraftSubmitEvent — transactional (never coalesced or dropped)
-//   ComposerDraftCancelEvent — transactional (never coalesced or dropped)
-//
-// All three are delivered on the INPUT_EVENTS subscription category. The
-// sequence field provides monotonic ordering within a session so the adapter
-// can discard stale state-stream notifications (sequence ≤ last seen).
-//
-// tile_id (hud-25g5i): the owning portal tile, mirroring the tile_id already
-// carried by KeyDownEvent/KeyUpEvent/CharacterEvent. A bridged resident
-// adapter serving more than one interaction-enabled projection cannot
-// disambiguate composer input from node_id + namespace alone (AddNode returns
-// no created node id to the bridge), so tile_id is the wire signal a bridge
-// uses to attribute an inbound event to the correct projection — see
-// `resident_grpc_bridge::resolve_input_projection`.
-
-// Coalesced draft-state notification. Carries the current draft buffer
-// snapshot: text, cursor byte offset, and at-capacity flag.
-// State-stream class: the adapter SHOULD discard older notifications and
-// apply only the latest (highest sequence) snapshot.
-message ComposerDraftStateEvent {
-  bytes  node_id      = 1;  // 16-byte UUIDv7 of the focused composer node
-  string text         = 2;  // Current draft text (never exceeds draft byte cap)
-  uint64 cursor       = 3;  // Cursor byte offset into text
-  bool   at_capacity  = 4;  // True when draft is at or over its byte cap
-  uint64 sequence     = 5;  // Monotonic sequence; adapter skips if ≤ last seen
-  bytes  tile_id      = 6;  // 16-byte UUIDv7 of the owning portal tile (hud-25g5i)
-}
-
-// Transactional draft submission. Carries the exact local buffer at submit
-// time. The adapter MUST forward this to the semantic inbox.
-// Transactional class: never coalesced or dropped.
-message ComposerDraftSubmitEvent {
-  bytes  node_id   = 1;  // 16-byte UUIDv7 of the focused composer node
-  string text      = 2;  // Submitted text (exact local buffer at submit time)
-  uint64 sequence  = 3;  // Monotonic sequence (always > any prior state event)
-  bytes  tile_id   = 4;  // 16-byte UUIDv7 of the owning portal tile (hud-25g5i)
-}
-
-// Transactional cancel event. Draft cleared without submission.
-// Transactional class: never coalesced or dropped.
-message ComposerDraftCancelEvent {
-  bytes  node_id   = 1;  // 16-byte UUIDv7 of the focused composer node
-  uint64 sequence  = 2;  // Monotonic sequence
-  bytes  tile_id   = 3;  // 16-byte UUIDv7 of the owning portal tile (hud-25g5i)
-}
-
 // ─── Input Envelope and Event Batch (RFC 0004 §8.3, §8.4, §9.1) ───────────────
 //
 // InputEnvelope is a oneof covering the input event types the runtime produces.
@@ -324,6 +270,9 @@ message ComposerDraftCancelEvent {
 // slots; do not reuse them.
 
 message InputEnvelope {
+  // Retired raw-tile composer transport; local portal replies use the hub.
+  reserved 23, 24, 25;
+  reserved "composer_draft_state", "composer_draft_submit", "composer_draft_cancel";
   // Fields 15-19 (gesture and IME composition events) had no producer and
   // were removed in T8.
   reserved 15, 16, 17, 18, 19;
@@ -359,10 +308,7 @@ message InputEnvelope {
     // Command input (abstract navigation/activation)
     CommandInputEvent       command_input        = 22;  // transactional
 
-    // Composer draft events (hud-ygbcy; INPUT_EVENTS subscription category)
-    ComposerDraftStateEvent   composer_draft_state  = 23;  // state-stream (coalescible)
-    ComposerDraftSubmitEvent  composer_draft_submit = 24;  // transactional
-    ComposerDraftCancelEvent  composer_draft_cancel = 25;  // transactional
+
   }
 }
 

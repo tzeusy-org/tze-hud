@@ -67,7 +67,7 @@ pub fn proto_hit_region_to_scene(hr: &proto::HitRegionNodeProto) -> HitRegionNod
         accepts_pointer: hr.accepts_pointer,
         auto_capture: hr.auto_capture,
         release_on_up: hr.release_on_up,
-        accepts_composer_input: hr.accepts_composer_input,
+        accepts_composer_input: false,
         ..Default::default()
     }
 }
@@ -342,7 +342,7 @@ pub fn proto_update_node_content_data_to_scene(
                 accepts_pointer: hr.accepts_pointer,
                 auto_capture: hr.auto_capture,
                 release_on_up: hr.release_on_up,
-                accepts_composer_input: hr.accepts_composer_input,
+                accepts_composer_input: false,
                 ..Default::default()
             }))
         }
@@ -640,7 +640,6 @@ pub(crate) fn scene_node_to_proto(n: &Node) -> proto::NodeProto {
                 accepts_pointer: hr.accepts_pointer,
                 auto_capture: hr.auto_capture,
                 release_on_up: hr.release_on_up,
-                accepts_composer_input: hr.accepts_composer_input,
             },
         )),
         NodeData::StaticImage(si) => {
@@ -976,141 +975,80 @@ mod tests {
         );
     }
 
-    // ── HitRegionNode accepts_composer_input proto round-trip (hud-hxe91) ────
-
-    /// Proto→scene conversion via proto_node_to_scene must carry
-    /// accepts_composer_input=true from wire to scene graph.
+    /// Retired wire field 7 cannot enable local-only native composer input.
     #[test]
-    fn hit_region_proto_to_scene_carries_accepts_composer_input() {
-        let proto_node = crate::proto::NodeProto {
-            layout: 0,
-            id: Vec::new(),
-            data: Some(crate::proto::node_proto::Data::HitRegion(
-                crate::proto::HitRegionNodeProto {
-                    bounds: Some(crate::proto::Rect {
-                        x: 0.0,
-                        y: 0.0,
-                        width: 400.0,
-                        height: 100.0,
-                    }),
-                    interaction_id: "composer-region".to_string(),
-                    accepts_focus: true,
-                    accepts_pointer: false,
-                    auto_capture: false,
-                    release_on_up: false,
-                    accepts_composer_input: true,
-                },
-            )),
-            children: vec![],
-        };
-        let scene_node = proto_node_to_scene(&proto_node)
-            .expect("valid HitRegionNodeProto must convert to scene Node");
-        match &scene_node.data {
-            NodeData::HitRegion(hr) => {
-                assert!(
-                    hr.accepts_composer_input,
-                    "accepts_composer_input must be true after proto→scene conversion"
-                );
-                assert_eq!(hr.interaction_id, "composer-region");
-                assert!(hr.accepts_focus);
-                assert!(!hr.accepts_pointer);
-            }
-            other => panic!("expected HitRegion node, got {other:?}"),
-        }
-    }
-
-    /// Proto→scene conversion via proto_update_node_content_data_to_scene must
-    /// also carry accepts_composer_input=true (UpdateNodeContent path).
-    #[test]
-    fn hit_region_update_node_content_path_carries_accepts_composer_input() {
-        let data = crate::proto::update_node_content_mutation::Data::HitRegion(
-            crate::proto::HitRegionNodeProto {
-                bounds: Some(crate::proto::Rect {
-                    x: 0.0,
-                    y: 0.0,
-                    width: 200.0,
-                    height: 50.0,
-                }),
-                interaction_id: "update-composer-region".to_string(),
-                accepts_focus: true,
-                accepts_pointer: true,
-                auto_capture: false,
-                release_on_up: true,
-                accepts_composer_input: true,
-            },
-        );
-        let node_data = proto_update_node_content_data_to_scene(&data)
-            .expect("valid HitRegionNodeProto must convert to NodeData");
-        match node_data {
-            NodeData::HitRegion(hr) => {
-                assert!(
-                    hr.accepts_composer_input,
-                    "accepts_composer_input must be true after UpdateNodeContent proto→scene"
-                );
-                assert!(hr.release_on_up);
-            }
-            other => panic!("expected HitRegion NodeData, got {other:?}"),
-        }
-    }
-
-    /// Scene→proto round-trip: accepts_composer_input survives both directions.
-    #[test]
-    fn hit_region_accepts_composer_input_round_trips_scene_to_proto() {
-        let scene_node = Node {
-            layout: Default::default(),
-            id: SceneId::new(),
-            children: vec![],
-            data: NodeData::HitRegion(HitRegionNode {
-                bounds: Rect::new(0.0, 0.0, 300.0, 60.0),
-                interaction_id: "roundtrip-composer".to_string(),
-                accepts_focus: true,
-                accepts_pointer: false,
-                accepts_composer_input: true,
-                ..Default::default()
+    fn hit_region_wire_cannot_enable_local_composer() {
+        use prost::Message;
+        let wire = proto::HitRegionNodeProto {
+            bounds: Some(proto::Rect {
+                x: 1.0,
+                y: 2.0,
+                width: 30.0,
+                height: 40.0,
             }),
+            interaction_id: "ordinary-region".into(),
+            accepts_focus: true,
+            accepts_pointer: true,
+            auto_capture: true,
+            release_on_up: true,
         };
-        let proto_node = scene_node_to_proto(&scene_node);
-        match proto_node.data {
-            Some(crate::proto::node_proto::Data::HitRegion(hr)) => {
-                assert!(
-                    hr.accepts_composer_input,
-                    "accepts_composer_input must survive scene→proto conversion"
-                );
-                assert_eq!(hr.interaction_id, "roundtrip-composer");
+        for legacy_flag in [false, true] {
+            let mut bytes = wire.encode_to_vec();
+            if legacy_flag {
+                bytes.extend_from_slice(&[0x38, 1]);
             }
-            other => panic!("expected HitRegion proto data, got {other:?}"),
-        }
-    }
-
-    /// Default (false) is preserved: proto with accepts_composer_input unset
-    /// must decode to accepts_composer_input=false (proto3 default).
-    #[test]
-    fn hit_region_proto_accepts_composer_input_defaults_false() {
-        let proto_node = crate::proto::NodeProto {
-            layout: 0,
-            id: Vec::new(),
-            data: Some(crate::proto::node_proto::Data::HitRegion(
-                crate::proto::HitRegionNodeProto {
-                    bounds: None,
-                    interaction_id: "no-composer".to_string(),
-                    accepts_focus: false,
-                    accepts_pointer: true,
-                    auto_capture: false,
-                    release_on_up: false,
-                    accepts_composer_input: false,
-                },
-            )),
-            children: vec![],
-        };
-        let scene_node = proto_node_to_scene(&proto_node).unwrap();
-        match &scene_node.data {
-            NodeData::HitRegion(hr) => {
-                assert!(
-                    !hr.accepts_composer_input,
-                    "accepts_composer_input must be false when not set in proto"
-                );
-            }
-            other => panic!("expected HitRegion, got {other:?}"),
+            let decoded = proto::HitRegionNodeProto::decode(bytes.as_slice()).unwrap();
+            assert_eq!(decoded, wire);
+            let node = proto::NodeProto {
+                layout: 0,
+                id: Vec::new(),
+                children: vec![],
+                data: Some(proto::node_proto::Data::HitRegion(decoded.clone())),
+            };
+            let mut scene_node = proto_node_to_scene(&node).unwrap();
+            let direct = proto_hit_region_to_scene(&decoded);
+            let NodeData::HitRegion(region) = &mut scene_node.data else {
+                panic!("expected hit region")
+            };
+            assert!(!region.accepts_composer_input);
+            assert!(!direct.accepts_composer_input);
+            assert_eq!(region.bounds, direct.bounds);
+            assert_eq!(region.interaction_id, "ordinary-region");
+            assert!(
+                region.accepts_focus
+                    && region.accepts_pointer
+                    && region.auto_capture
+                    && region.release_on_up
+            );
+            assert_eq!(direct.interaction_id, region.interaction_id);
+            assert!(
+                direct.accepts_focus
+                    && direct.accepts_pointer
+                    && direct.auto_capture
+                    && direct.release_on_up
+            );
+            let update = proto::update_node_content_mutation::Data::HitRegion(decoded.clone());
+            let NodeData::HitRegion(updated) =
+                proto_update_node_content_data_to_scene(&update).unwrap()
+            else {
+                panic!("expected updated hit region")
+            };
+            assert!(!updated.accepts_composer_input);
+            assert_eq!(updated.bounds, Rect::new(1.0, 2.0, 30.0, 40.0));
+            assert_eq!(updated.interaction_id, "ordinary-region");
+            assert!(
+                updated.accepts_focus
+                    && updated.accepts_pointer
+                    && updated.auto_capture
+                    && updated.release_on_up
+            );
+            // Even a native composer is encoded as an ordinary wire region.
+            region.accepts_composer_input = true;
+            let encoded = scene_node_to_proto(&scene_node);
+            let Some(proto::node_proto::Data::HitRegion(encoded)) = encoded.data else {
+                panic!("expected hit region")
+            };
+            assert_eq!(encoded, wire);
         }
     }
 

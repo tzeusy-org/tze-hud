@@ -1,7 +1,6 @@
 //! Local composer editing and transactional delivery into the portal hub.
 use tze_hud_input::{
-    ComposerDraft, ComposerDraftManager, DEFAULT_DRAFT_CAP, DraftNotificationBatch, EditOutcome,
-    MAX_DRAFT_BYTES,
+    ComposerDraft, ComposerDraftManager, ComposerOutcome, EditOutcome, MAX_DRAFT_BYTES,
 };
 use tze_hud_projection::{PortalHub, PortalKey, Publish};
 use tze_hud_scene::SceneId;
@@ -17,10 +16,16 @@ fn hub() -> (PortalHub, PortalKey) {
     hub.publish(&key, Publish::default(), 0).unwrap();
     (hub, key)
 }
-fn submit(drafts: &mut ComposerDraftManager) -> DraftNotificationBatch {
-    let (handled, batch) = drafts.route_key_down("Enter", "Enter", false, false, false);
+fn submit(drafts: &mut ComposerDraftManager) -> String {
+    let (handled, outcome) = drafts.route_key_down("Enter", "Enter", false, false, false);
     assert!(handled);
-    batch.expect("submission flushes immediately")
+    submitted(outcome)
+}
+fn submitted(outcome: ComposerOutcome) -> String {
+    match outcome {
+        ComposerOutcome::Submitted(text) => text,
+        other => panic!("expected submitted text, got {other:?}"),
+    }
 }
 
 #[test]
@@ -28,10 +33,9 @@ fn local_echo_does_not_depend_on_adapter_round_trip() {
     let mut drafts = focused();
     let (hub, key) = hub();
     for ch in "hello".chars() {
-        let (outcome, batch) = drafts.route_character(&ch.to_string());
+        let outcome = drafts.route_character(&ch.to_string());
         assert_eq!(outcome, EditOutcome::Mutated);
-        assert!(batch.is_none());
-        assert!(drafts.draft().unwrap().snapshot().text.ends_with(ch));
+        assert!(drafts.draft().unwrap().text().ends_with(ch));
         assert!(hub.get(&key).unwrap().inputs.is_empty());
     }
     assert_eq!(drafts.draft().unwrap().text(), "hello");
@@ -42,9 +46,10 @@ fn word_backspace_removes_preceding_word_and_trailing_space() {
     let mut drafts = focused();
     drafts.route_character("the quick brown fox");
     for expected in ["the quick brown ", "the quick "] {
-        let (handled, batch) = drafts.route_key_down("Backspace", "Backspace", false, true, false);
+        let (handled, outcome) =
+            drafts.route_key_down("Backspace", "Backspace", false, true, false);
         assert!(handled);
-        assert!(batch.is_none());
+        assert_eq!(outcome, ComposerOutcome::Edited);
         let draft = drafts.draft().unwrap();
         assert_eq!(draft.text(), expected);
         assert_eq!(draft.cursor(), expected.len());
@@ -57,8 +62,8 @@ fn oversized_paste_does_not_forward_overflow_bytes() {
     draft.paste(&"é".repeat(100));
     assert_eq!(draft.text(), "éééé");
     let (mut hub, key) = hub();
-    let submission = draft.submit().unwrap();
-    hub.submit_reply(&key, submission.text, 1).unwrap();
+    let submission = submitted(draft.submit());
+    hub.submit_reply(&key, submission, 1).unwrap();
     let portal = hub.get(&key).unwrap();
     assert_eq!(portal.inputs.back().unwrap().text, "éééé");
     assert_eq!(portal.replies.back().unwrap().text, "éééé");
@@ -72,8 +77,7 @@ fn submission_carries_exact_draft_text() {
     let expected = "submit this exact 日本語 content";
     drafts.route_character(expected);
     let batch = submit(&mut drafts);
-    hub.submit_reply(&key, batch.submission.unwrap().text, 1)
-        .unwrap();
+    hub.submit_reply(&key, batch, 1).unwrap();
     let portal = hub.get(&key).unwrap();
     assert_eq!(portal.inputs.back().unwrap().text, expected);
     assert_eq!(portal.replies.back().unwrap().text, expected);
@@ -86,32 +90,29 @@ fn draft_suspends_under_safe_mode() {
     let mut drafts = focused();
     drafts.route_character("text before safe mode");
     drafts.set_suspended(true);
-    assert_eq!(drafts.route_character("blocked").0, EditOutcome::Suspended);
+    assert_eq!(drafts.route_character("blocked"), EditOutcome::Suspended);
     for key in ["Backspace", "Delete", "Enter", "Escape"] {
-        let (_, batch) = drafts.route_key_down(key, key, false, false, false);
-        assert!(batch.is_none());
+        let (_, outcome) = drafts.route_key_down(key, key, false, false, false);
+        assert_eq!(outcome, ComposerOutcome::Unchanged);
         assert_eq!(drafts.draft().unwrap().text(), "text before safe mode");
     }
-    assert_eq!(drafts.draft().unwrap().snapshot().cursor, 21);
+    assert_eq!(drafts.draft().unwrap().cursor(), 21);
     drafts.set_suspended(false);
-    assert_eq!(
-        submit(&mut drafts).submission.unwrap().text,
-        "text before safe mode"
-    );
+    assert_eq!(submit(&mut drafts), "text before safe mode");
 }
 
 #[test]
-fn safe_mode_gate_suppresses_notifications_and_delivery() {
+fn safe_mode_gate_suppresses_submission_and_delivery() {
     let mut drafts = ComposerDraftManager::new();
     drafts.on_focus_gained(SceneId::new(), true);
     let (mut hub, key) = hub();
-    assert_eq!(drafts.route_character("blocked").0, EditOutcome::Suspended);
-    let (_, batch) = drafts.route_key_down("Enter", "Enter", false, false, false);
-    if let Some(submission) = batch.and_then(|b| b.submission) {
-        hub.submit_reply(&key, submission.text, 1).unwrap();
+    assert_eq!(drafts.route_character("blocked"), EditOutcome::Suspended);
+    let (_, outcome) = drafts.route_key_down("Enter", "Enter", false, false, false);
+    assert_eq!(outcome, ComposerOutcome::Unchanged);
+    if let ComposerOutcome::Submitted(submission) = outcome {
+        hub.submit_reply(&key, submission, 1).unwrap();
     }
     assert!(hub.get(&key).unwrap().inputs.is_empty());
-    assert!(drafts.try_flush().is_none());
 }
 
 #[test]
@@ -121,8 +122,7 @@ fn submission_is_transactional_not_coalescible() {
     for (at, text) in [(1, "first reply"), (2, "second reply")] {
         drafts.route_character(text);
         let batch = submit(&mut drafts);
-        hub.submit_reply(&key, batch.submission.unwrap().text, at)
-            .unwrap();
+        hub.submit_reply(&key, batch, at).unwrap();
     }
     assert_eq!(
         hub.get(&key)
@@ -133,18 +133,10 @@ fn submission_is_transactional_not_coalescible() {
             .collect::<Vec<_>>(),
         ["first reply", "second reply"]
     );
-    // State notifications can coalesce, but cannot replace the first accepted submit.
-    let mut batch = DraftNotificationBatch::new();
-    let mut draft = ComposerDraft::new(DEFAULT_DRAFT_CAP);
-    draft.insert("first");
-    batch.record_submission(draft.submit().unwrap());
-    draft.insert("second");
-    batch.record_submission(draft.submit().unwrap());
-    assert_eq!(batch.submission.unwrap().text, "first");
 }
 
 #[test]
-fn navigation_and_delete_keystrokes_visible_only_as_draft_state_changes() {
+fn navigation_and_delete_keystrokes_remain_local() {
     let mut drafts = focused();
     drafts.route_character("hello world");
     drafts.route_key_down("Backspace", "Backspace", false, true, false);
@@ -153,7 +145,7 @@ fn navigation_and_delete_keystrokes_visible_only_as_draft_state_changes() {
     drafts.route_character("H");
     assert_eq!(drafts.draft().unwrap().text(), "Hello ");
     let batch = submit(&mut drafts);
-    assert_eq!(batch.submission.unwrap().text, "Hello ");
+    assert_eq!(batch, "Hello ");
 }
 
 #[test]

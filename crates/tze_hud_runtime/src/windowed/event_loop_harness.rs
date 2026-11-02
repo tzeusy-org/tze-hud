@@ -188,7 +188,6 @@ impl WindowedRuntimeState {
             _config_watch: None,
             element_repositioned_tx: None,
             input_event_tx: None,
-            pending_blur_delivery_context: None,
             composer_pointer_drag_anchor: None,
             portal_resize_states: HashMap::new(),
             consumed_portal_resize_keydowns: HashSet::new(),
@@ -197,8 +196,6 @@ impl WindowedRuntimeState {
             keyboard_activation_nodes: HashMap::new(),
             consumed_command_keydowns: HashSet::new(),
             local_composer_state: Arc::new(StdMutex::new(None)),
-            viewer_echo_queue: Arc::new(StdMutex::new(Vec::new())),
-            input_history_seed_states: HashMap::new(),
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
             resize_grip_hover_state: Arc::new(StdMutex::new(None)),
             tile_close_hover_state: Arc::new(StdMutex::new(None)),
@@ -3355,7 +3352,7 @@ mod tests {
     ///
     /// The composer intercept in `dispatch_character_event_inner` resolves its
     /// delivery context via `namespace_for_keyboard_tile`, which `try_lock`s
-    /// `shared_state`. Holding that guard forces `ComposerDeliveryContextLookup::
+    /// `shared_state`. Holding that guard forces `ComposerTargetLookup::
     /// Busy`, so the inner fn pushes the popped event to the tail;
     /// `restore_front_requeued_event` inside the genuine drain then detects the
     /// growth, moves it back to the front, and stops. This is the real-path

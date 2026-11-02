@@ -93,8 +93,9 @@ source links when implementation changes the status.
   while input expiry, prior orphan grace and maximum suspension continue.
   Scene bounds now supply the live fractional render/follow-tail viewport;
   the obsolete retained geometry cache is gone. Windowed submission routes text
-  through the complete handle, keeps known-portal refusal out of raw echo, and
-  resets history once in the common batch route after raw history seeding.
+  through the complete handle and resets history once in the direct native
+  submit route. Legacy raw-tile draft transport, history seeding and renderer
+  storage are removed; resident wire fields remain reserved.
   Resize broadcast/persistence completion and detached store persistence each
   have one post-lock owner.
 
@@ -126,13 +127,45 @@ source links when implementation changes the status.
   parents disappeared with their obsolete types. Tests: +2 ~3 -13 (net -11);
   moves are zero delta. Driver's 21 unique parents remain.
   Approximate windowed targets of 1700 / 2600 / 4300 are missed by
-  471 / 1494 / 1965 lines; group resize/drag, raw-history seeding and every
+  471 / 1494 / 1965 lines; group resize/drag, then-present raw-history seeding and every
   unique retained regression remain in scope. Driver's approximate 750 / 1100
   targets are also missed (949 / 1521). Moving tests is ownership cleanup,
   not combined deletion. This source inventory does not establish executed
-  verification or physical Windows acceptance. Composer reduction, crate
+  verification or physical Windows acceptance. Crate
   rename, final four-group size reconciliation and Windows owner acceptance
   remain (`hud-lirh2`); source evidence cannot close those owner checks.
+  The composer cleanup (`hud-lirh2.10`) removes the scheduler, raw draft wire
+  messages, raw input-history queue/store and their obsolete assertions. Native
+  local editing, accepted history and complete-handle routing remain. It keeps
+  one keyed unsent draft alongside the active draft; an empty peer preserves
+  the slot and a nonempty peer replaces it. Two mixed GPU parents move into the
+  existing composer test module, retaining live font/wrap and first-frame
+  fill/text/clip assertions; raw-history anchor/divider assertions retire with
+  that renderer. All nine integration composer parents remain. Automated
+  verification and exact source measurements are recorded with the change;
+  physical Windows typing/echo/drag/held-release acceptance is UNPERFORMED.
+
+  Physical cleanup counts against `28471250` (prefix / test-module suffix /
+  total; comments and blanks included):
+
+  | Group | Before | After |
+  |---|---:|---:|
+  | Composer core | 4194 / 4804 / 8998 | 3595 / 4503 / 8098 |
+  | Windowed and fixtures | 13208 / 11400 / 24608 | 12421 / 10416 / 22837 |
+  | Compositor mapped renderer files | 14418 / 1097 / 15515 | 12603 / 959 / 13562 |
+  | Protocol | 1921 / 859 / 2780 | 1861 / 798 / 2659 |
+  | Integration composer | 168 / 0 / 168 | 160 / 0 / 160 |
+
+  The entire finite packet surface plus the compositor `lib.rs` reexports,
+  `text.rs` orphan-method cleanup and scene type flag documentation measures
+  75,497 → 70,763 lines (4,734 fewer). These three supplemental
+  files are included so no changed file is omitted.
+  Test-only renderer files, shared support and the feature-gated harness count
+  in physical prefixes; these are not semantic production LOC. Core prefix/test
+  reductions miss their estimated 600–900 / 350–600 lines; unique coverage takes priority
+  over estimates. Tests: +0 ~54 -59 (net -59); two moves have zero add/remove
+  delta. Native projection/hub/goldens and driver source remain unchanged.
+
 - **T8 — diet [Observed].** The [local harness](../justfile) includes
   llvmpipe GPU recipes and Nextest; resource acceptance has a compact
   [`store_behavior`](../crates/tze_hud_resource/tests/store_behavior.rs) suite.

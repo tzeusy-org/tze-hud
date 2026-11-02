@@ -65,7 +65,6 @@ mod system_card;
 pub(crate) mod text;
 pub(crate) mod tile_render;
 pub(crate) mod token_colors;
-pub(crate) mod viewer_echo;
 pub(crate) mod widget_geometry;
 pub(crate) mod widgets;
 #[cfg(any(test, feature = "dev-mode"))]
@@ -103,8 +102,6 @@ use image_cache::apply_composer_slot;
 pub use image_cache::{ComposerVisualLayoutHandle, LocalComposerState, LocalComposerStateHandle};
 use text::*;
 use token_colors::*;
-use viewer_echo::ViewerEchoEntry;
-pub use viewer_echo::{PortalViewerEchoQueue, ViewerEchoAppend};
 
 /// Stable, dependency-free identity for the adapter selected by wgpu.
 ///
@@ -549,15 +546,6 @@ pub struct Compositor {
     /// thread.  `None` when no composer is active or no draft has arrived
     /// for the current frame.
     pub local_composer_state: LocalComposerStateHandle,
-    /// Shared queue for runtime-authored viewer reply echoes on raw-tile portals
-    /// (hud-nx7yq.3).  The windowed runtime pushes a [`viewer_echo::ViewerEchoAppend`]
-    /// on each accepted raw-tile composer submission; the compositor drains it
-    /// into `viewer_echoes` at frame start.
-    pub viewer_echo_queue: viewer_echo::PortalViewerEchoQueue,
-    /// Per-tile bounded store of runtime-authored viewer echo entries, rendered
-    /// as kind-distinct lines above the composer input strip.  Fed by draining
-    /// `viewer_echo_queue` and pruned to the live tile set each frame.
-    pub(crate) viewer_echoes: viewer_echo::ViewerEchoStore,
     /// Reverse channel: the active composer's wrapped-line layout, published each
     /// frame for the input thread's soft-wrap vertical caret movement (hud-21o6x).
     ///
@@ -566,23 +554,6 @@ pub struct Compositor {
     /// otherwise. The runtime clones this `Arc` at init and reads it on the main
     /// thread before dispatching ArrowUp/ArrowDown.
     pub composer_visual_layout: image_cache::ComposerVisualLayoutHandle,
-    /// Per-tile total WRAPPED visual-line count of the joined viewer-echo history,
-    /// measured once per frame in `prime_viewer_echo_layout` (hud-pncm3).
-    ///
-    /// Wrapping needs the `&mut` text rasterizer (font metrics), so it is measured
-    /// in the per-frame prime and read by the `&self` `collect_viewer_echo_text_items`
-    /// to bottom-align the history block above the live composer box. Absent =>
-    /// the collect path falls back to the logical (`\n`-split) line count.
-    pub(crate) viewer_echo_line_counts: HashMap<SceneId, usize>,
-    /// Per-tile PER-ENTRY wrapped visual-line counts of the viewer-echo history,
-    /// oldest→newest, measured alongside [`Self::viewer_echo_line_counts`] in
-    /// `prime_viewer_echo_layout` (hud-hsc1t).
-    ///
-    /// Feeds `viewer_echo_divider_rects`, which places a token-styled divider on
-    /// the cumulative-line boundary between each adjacent pair of entries so the
-    /// pilot-path history reads as discrete turns. Absent => no per-entry divider
-    /// geometry that frame (the joined text still renders).
-    pub(crate) viewer_echo_entry_line_counts: HashMap<SceneId, Vec<usize>>,
     /// Per-frame resolved vertical-flow y-offsets (hud-pd9bp): for each direct
     /// child of a `NodeLayout::VerticalFlow` node, its runtime-stacked tile-local
     /// `y` keyed by the child's own `SceneId`. Populated once per frame by
@@ -994,11 +965,7 @@ impl Compositor {
             image_texture_cache: HashMap::new(),
             failed_icon_paths: HashSet::new(),
             local_composer_state: Arc::new(StdMutex::new(None)),
-            viewer_echo_queue: Arc::new(StdMutex::new(Vec::new())),
-            viewer_echoes: viewer_echo::ViewerEchoStore::new(),
             composer_visual_layout: Arc::new(StdMutex::new(None)),
-            viewer_echo_line_counts: HashMap::new(),
-            viewer_echo_entry_line_counts: HashMap::new(),
             tile_flow_offsets: HashMap::new(),
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
             focus_ring_owner: None,
@@ -1339,11 +1306,7 @@ impl Compositor {
             image_texture_cache: HashMap::new(),
             failed_icon_paths: HashSet::new(),
             local_composer_state: Arc::new(StdMutex::new(None)),
-            viewer_echo_queue: Arc::new(StdMutex::new(Vec::new())),
-            viewer_echoes: viewer_echo::ViewerEchoStore::new(),
             composer_visual_layout: Arc::new(StdMutex::new(None)),
-            viewer_echo_line_counts: HashMap::new(),
-            viewer_echo_entry_line_counts: HashMap::new(),
             tile_flow_offsets: HashMap::new(),
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
             focus_ring_owner: None,

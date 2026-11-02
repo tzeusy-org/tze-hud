@@ -78,7 +78,6 @@ ab_glyph = "0.2"
 unicode-segmentation = "1"
 # East-Asian Wide/Fullwidth + emoji classification for the runtime's wrapped-row
 # over-estimate (input-history tail seed, hud-kaw7z).
-unicode-width = "0.1"
 
 # Misc
 subtle = "2.5"

@@ -85,7 +85,7 @@ use winit::window::{Fullscreen, Window, WindowAttributes, WindowId};
 use crate::scene_startup::run_scene_startup;
 use tze_hud_compositor::{
     Compositor, CompositorSurface, FocusRingOwnerHandle, LocalComposerStateHandle,
-    PortalViewerEchoQueue, ResizeGripHoverHandle, TileCloseHoverHandle, WindowSurface,
+    ResizeGripHoverHandle, TileCloseHoverHandle, WindowSurface,
 };
 use tze_hud_config::resolve_runtime_widget_asset_store;
 use tze_hud_input::{
@@ -225,7 +225,7 @@ use self::input_dispatch::{
     enqueue_input, logical_key_to_str, nanoseconds_since_start, normalize_mouse_wheel_delta,
     physical_key_to_key_code_str, physical_key_to_u32, winit_mods_to_keyboard_modifiers,
 };
-use self::keyboard::{ComposerDeliveryContext, PendingKeyboardEvent};
+use self::keyboard::PendingKeyboardEvent;
 use self::lifecycle::{
     PendingInputLatencySamples, WindowedQuiescentEfficiencyRunState, drain_windowed_input_latency,
     read_windows_clipboard_text, update_surface_repaint_pending,
@@ -509,26 +509,6 @@ struct WindowedRuntimeState {
     /// only to the session handler whose namespace matches, filtered by
     /// `INPUT_EVENTS` subscription.
     input_event_tx: Option<tze_hud_protocol::session_server::InputEventSender>,
-    /// Delivery context captured at the
-    /// moment a composer node loses focus (blur transition).
-    ///
-    /// When `InputProcessor::process_with_focus` processes a focus-lost event
-    /// for a composer region it calls `ComposerDraftManager::on_focus_lost()`,
-    /// which clears `focused_node` and stores the terminal draft batch in
-    /// `pending_flushed_batch`.  By the time `flush_composer_draft_at_settle`
-    /// runs later that same frame, `composer_focused_node()` already returns
-    /// `None` — so `composer_delivery_context()` cannot resolve the namespace
-    /// or node_id.  Without this field the pending batch would be silently
-    /// dropped, violating the §4.3 flush guarantee on blur.
-    ///
-    /// This field is written by the focus-transition handler immediately after
-    /// `process_with_focus` returns (while the namespace and node_id are still
-    /// available from the `FocusTransition`) and consumed by
-    /// `flush_composer_draft_at_settle` as a fallback delivery context.
-    ///
-    /// Cleared on focus-gain to prevent stale context from leaking across
-    /// focus boundaries.
-    pending_blur_delivery_context: Option<ComposerDeliveryContext>,
     /// `(tile_id, anchor_byte)` for an in-progress composer pointer drag-select
     /// (hud-etrs0).
     ///
@@ -584,18 +564,6 @@ struct WindowedRuntimeState {
     /// `Some(Some(state))` = new draft snapshot; `Some(None)` = deactivate.
     /// `None` = no update since last drain (compositor keeps prior state).
     local_composer_state: LocalComposerStateHandle,
-    /// Shared queue for runtime-authored viewer reply echoes on raw-tile portals
-    /// (hud-nx7yq.3).  On an accepted composer submission for a raw tile (one
-    /// that is not a hub portal, which echoes on its own path), this
-    /// thread pushes the submitted text; the compositor drains it into its
-    /// per-tile viewer-echo store and renders it above the composer strip.
-    viewer_echo_queue: PortalViewerEchoQueue,
-    /// Last conservative geometry used for each raw-tile history seed. Retained
-    /// history is tracked in physical pixels by InputProcessor, so a later
-    /// whole-portal resize rebases its conservative tail estimate for both line
-    /// pitch and wrap capacity before adding the next local echo.
-    input_history_seed_states:
-        std::collections::HashMap<tze_hud_scene::SceneId, portal::InputHistorySeedState>,
     /// Shared handle carrying the current keyboard-focus owner to the compositor's
     /// chrome-layer ring pass (hud-k6yvb). Written each frame in `about_to_wait`
     /// from the active tab's `FocusManager` owner; the compositor draws the ring
@@ -885,12 +853,6 @@ impl WinitApp {
                 }
             }
         }
-        // Flush any coalesced composer draft notifications accumulated during
-        // the current event batch.  This is the normal settle point: all key
-        // events for this winit iteration have been drained above; flushing here
-        // guarantees the terminal draft state is delivered within the same batch
-        // window (spec §4.3 flush guarantee).
-        self.flush_composer_draft_at_settle();
         // Opportunistically reconverge the lock-free active_tab mirror from the
         // authoritative scene (hud-dwcr7).  The mirror is also refreshed at the
         // point of every active_tab change (gRPC mutation apply, pointer-down
@@ -1477,7 +1439,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         // thread) can push draft snapshots to the compositor thread without any
         // additional allocations or locks on the hot path.
         self.state.local_composer_state = Arc::clone(&compositor.local_composer_state);
-        self.state.viewer_echo_queue = Arc::clone(&compositor.viewer_echo_queue);
         self.state.focus_ring_owner_state = Arc::clone(&compositor.focus_ring_owner_state);
         self.state.resize_grip_hover_state = Arc::clone(&compositor.resize_grip_hover_state);
         self.state.tile_close_hover_state = Arc::clone(&compositor.tile_close_hover_state);
@@ -3283,7 +3244,6 @@ impl WindowedRuntime {
             _config_watch: config_watch,
             element_repositioned_tx,
             input_event_tx,
-            pending_blur_delivery_context: None,
             composer_pointer_drag_anchor: None,
             portal_resize_states: std::collections::HashMap::new(),
             consumed_portal_resize_keydowns: std::collections::HashSet::new(),
@@ -3294,8 +3254,6 @@ impl WindowedRuntime {
             // Placeholder; replaced in resumed() with the Arc cloned from the
             // compositor.  Separate Arc so it works before compositor is created.
             local_composer_state: Arc::new(StdMutex::new(None)),
-            viewer_echo_queue: Arc::new(StdMutex::new(Vec::new())),
-            input_history_seed_states: std::collections::HashMap::new(),
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
             // Placeholder; replaced in resumed() with the compositor's Arc (hud-wgiys).
             resize_grip_hover_state: Arc::new(StdMutex::new(None)),

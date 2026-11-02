@@ -448,7 +448,7 @@ enum TextLayer {
     Overlay,
 }
 
-/// Wrap policy for wrapped text (composer draft, viewer-echo history, and every
+/// Wrap policy for wrapped text (composer draft and every
 /// bounded `TextItem` in the render path).
 ///
 /// [`Wrap::WordOrGlyph`] wraps at word boundaries **and** falls back to breaking
@@ -461,8 +461,7 @@ enum TextLayer {
 ///
 /// This constant is the single source of truth for that policy: the measurement
 /// helpers ([`TextRasterizer::measure_composer_wrapped`],
-/// [`TextRasterizer::measure_composer_visual_layout`],
-/// [`composer_wrap_line_widths`]) and the render path
+/// [`TextRasterizer::measure_composer_visual_layout`]) and the render path
 /// ([`TextRasterizer::build_and_shape_buffer`]) all use it, so predicted line
 /// counts and painted line counts always agree (no caret drift).
 pub(crate) const WRAPPED_TEXT_WRAP: Wrap = Wrap::WordOrGlyph;
@@ -470,15 +469,9 @@ pub(crate) const WRAPPED_TEXT_WRAP: Wrap = Wrap::WordOrGlyph;
 /// Shape `text` wrapped to `wrap_width` under [`WRAPPED_TEXT_WRAP`] and return the
 /// advance width (`line_w`) of each resulting visual line, top-to-bottom.
 ///
-/// Pure CPU: operates on a borrowed [`FontSystem`] (no GPU device needed), so it
-/// is unit-testable without a headless surface. Used by
-/// [`TextRasterizer::measure_wrapped_line_count`] (the viewer-echo history line
-/// count) and exercised directly by the break-anywhere wrap tests. Uses the same
-/// sans-serif base attributes and metrics as the composer/echo measurement paths
-/// so the counted layout matches what the render path paints.
-///
-/// Returns an empty vec only for text that produces no layout runs (e.g. the
-/// empty string); callers that need a floor of one line should `.max(1)`.
+/// Pure CPU helper for the existing break-anywhere wrap regressions. It uses
+/// the same sans-serif attributes and metrics as the live composer path.
+#[cfg(test)]
 pub(crate) fn composer_wrap_line_widths(
     font_system: &mut FontSystem,
     text: &str,
@@ -1068,13 +1061,6 @@ impl TextRasterizer {
         (total_lines.max(1), caret_line)
     }
 
-    /// Count the wrapped visual lines of `text` at `wrap_width` under
-    /// [`WRAPPED_TEXT_WRAP`] (≥ 1). Thin wrapper over [`composer_wrap_line_widths`]
-    /// for callers that need only the line count and no caret — the viewer-echo
-    /// history block (`prime_viewer_echo_layout`). Sharing the same helper keeps
-    /// the echo's break-anywhere wrap identical to what the render path paints
-    /// (hud-n0x4u), so an over-long single-word reply is counted as the multiple
-    /// in-box lines it actually occupies rather than one clipped line.
     /// Mutable access to the rasterizer's `FontSystem` — the SAME font system the
     /// render path shapes glyphs with, so it carries any agent-uploaded fonts
     /// loaded via `load_font_data` (hud-9gopx). Exposed so the vertical-flow
@@ -1100,24 +1086,6 @@ impl TextRasterizer {
             font_family,
             font_weight,
         )
-    }
-
-    pub(crate) fn measure_wrapped_line_count(
-        &mut self,
-        text: &str,
-        wrap_width: f32,
-        font_size_px: f32,
-        line_height_multiplier: f32,
-    ) -> usize {
-        composer_wrap_line_widths(
-            &mut self.font_system,
-            text,
-            wrap_width,
-            font_size_px,
-            line_height_multiplier,
-        )
-        .len()
-        .max(1)
     }
 
     /// Measure the composer draft's wrapped VISUAL-LINE layout for soft-wrap

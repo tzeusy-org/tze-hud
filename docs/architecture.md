@@ -122,8 +122,8 @@ scene lease lifecycle. Immediate stale/terminal reconciliation stays separate.
 They retain SceneChange, AnimationDeadline and TtlDeadline wake accounting. Composer admission commits
 input and reply history under the hub lock, then signals the owning agent after
 unlock. Windowed text submissions use the tile binding and complete handle;
-known portal refusals cannot enter the raw-tile echo fallback. The common batch
-route resets submitted history to the tail after any raw history seeding. Notification actions return an agent readiness callback that the pointer
+the private tile/text route resets submitted history to the tail once. Unknown
+tiles and known refusals produce no accepted input or history. Notification actions return an agent readiness callback that the pointer
 producer invokes after scene and shared-state unlock; queues remain authoritative.
 Input readiness is separate from render/main-work wake delivery. `hud_input`
 arms the agent Notify before checking retained action and portal queues, releases
@@ -133,8 +133,9 @@ first attachment during that wait. Per-request ownership drops on return or
 cancellation without writing future activity; explicit upstream degradation,
 reclaim, clear and input expiry keep their existing semantics. Zero portals add
 no periodic runtime wake. Local accepted replies and truthful rejection feedback
-bypass output pacing once; the actual Winit settle order flushes the composer
-before portal drain. Hub reply history owns the echo, so raw-tile echo is skipped.
+bypass output pacing once. Winit drains deferred keyboard work before the
+portal drain in the same maintenance turn. Hub reply history owns the echo;
+the raw-tile queue/store renderer and periodic draft flush are removed.
 Notification input retains Callback versus human-X Dismiss through MCP
 serialization. Only a validated X that removed its exact publication emits the
 runtime kind; callback auto-removal, TTL and clear do not.
@@ -145,7 +146,14 @@ The pure renderer builds scene nodes and `PortalSurface` descriptors directly.
 The driver applies them through checked scene calls; it no longer builds or
 decodes protobuf render batches. The hub owns cue-expiry repaints and retained
 unread counts. Composer drafts, selections and carets remain in the runtime
-input manager; only submissions enter the hub.
+input manager; only submissions enter the hub. The manager keeps an active draft
+and one keyed retained draft. Nonempty blur replaces the retained slot; an empty
+peer leaves it intact. Matching refocus restores text/caret/selection under the
+current suspension and placeholder configuration. Removed nodes lose their saved
+state. The input layer returns direct `ComposerOutcome` results, with consumed-key
+status separate and local capacity/suspension detail retained in `EditOutcome`.
+Native `PortalView.input_history` is rendered through projection markdown and
+ordinary scene text; its timestamps, grouping and dividers remain unchanged.
 The full `(agent, portal id)` key remains authoritative for routing and input
 ACKs. Scene and composer metadata preserve `text-stream://portal/{agent}/{id}`
 when the agent has no slash and the result fits the scene's 256-byte limit;
