@@ -3971,6 +3971,21 @@ mod tests {
             "",
             "a different composer node must not inherit node_a's draft"
         );
+
+        // An empty peer must leave the one retained draft alone.
+        mgr.on_focus_lost();
+        mgr.on_focus_gained(node_a, false);
+        assert_eq!(mgr.draft().unwrap().text(), "unsent reply");
+        mgr.on_focus_lost();
+        mgr.on_focus_gained(node_b, false);
+        mgr.route_character("new peer draft");
+        mgr.on_focus_lost();
+        mgr.on_focus_gained(node_a, false);
+        assert_eq!(
+            mgr.draft().unwrap().text(),
+            "",
+            "nonempty peer blur replaces the single retained slot"
+        );
     }
 
     /// A submitted draft is empty and must NOT be resurrected on re-focus.
