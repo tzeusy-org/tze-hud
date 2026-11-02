@@ -860,9 +860,9 @@ impl PortalDriver {
         }
     }
 
-    /// The portal's scene lease, granting one if it has none or its old one
-    /// is terminal (a portal re-attached after reclaim starts fresh). Never
-    /// replaces an orphaned lease: that grace window belongs to the portal.
+    /// Return an active scene lease, granting one only for a fresh binding.
+    /// Existing inactive leases are never replaced here; terminal reconciliation
+    /// tombstones the matching attachment before a fresh attach can bind again.
     fn ensure_portal_lease(&mut self, key: &PortalKey, scene: &mut SceneGraph) -> Option<SceneId> {
         let entry = self.entry(key);
         if let Some(lease_id) = entry.scene_lease_id {
