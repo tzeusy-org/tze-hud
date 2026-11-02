@@ -606,12 +606,13 @@ mod panel_task_tests {
                 .hub
                 .lock()
                 .unwrap()
-                .publish(
+                .publish_with_hold(
                     &key(id),
                     Publish {
                         text: Some(id.into()),
                         ..Default::default()
                     },
+                    None,
                     clock.now_us(),
                 )
                 .unwrap()
@@ -921,7 +922,7 @@ mod panel_task_tests {
         assert_eq!(
             f.state
                 .portal_projection_driver
-                .next_wake_deadline(&scene_handle.lock().await),
+                .next_wake_deadline(&*scene_handle.lock().await),
             None
         );
         pause.set(false).await;
