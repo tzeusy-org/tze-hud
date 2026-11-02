@@ -107,13 +107,13 @@ source links when implementation changes the status.
   | runtime/windowed/keyboard.rs | 2072 / 319 / 2391 | 2044 / 1706 / 3750 |
   | runtime/windowed/lifecycle.rs | 3087 / 501 / 3588 | 3052 / 1336 / 4388 |
   | runtime/windowed/test_support.rs | 216 / 1046 / 1262 | 226 / 1351 / 1577 |
-  | runtime/portal.rs | 986 / 1511 / 2497 | 949 / 1515 / 2464 |
+  | runtime/portal.rs | 986 / 1511 / 2497 | 949 / 1521 / 2470 |
   | projection/hub.rs | 1178 / 681 / 1859 | 1096 / 565 / 1661 |
   | input/portal_resize.rs (comment only) | 1067 / 1375 / 2442 | 1064 / 1375 / 2439 |
   | projection/Cargo.toml | 16 total | 14 total |
 
   The finite combined surface includes both move destinations and all of
-  `test_support.rs`: 22,996 → 22,551 lines (445 fewer). Docs and the single
+  `test_support.rs`: 22,996 → 22,557 lines (439 fewer). Docs and the single
   removed lockfile dependency edge are outside that aggregate. These are
   physical module boundaries, not semantic production LOC: `test_support.rs`
   is entirely test-only, driver prefix retains a test-only hub accessor, and
@@ -128,7 +128,7 @@ source links when implementation changes the status.
   Approximate windowed targets of 1700 / 2600 / 4300 are missed by
   471 / 1487 / 1958 lines; group resize/drag, raw-history seeding and every
   unique retained regression remain in scope. Driver's approximate 750 / 1100
-  targets are also missed (949 / 1515). Moving tests is ownership cleanup,
+  targets are also missed (949 / 1521). Moving tests is ownership cleanup,
   not combined deletion. This source inventory does not establish executed
   verification or physical Windows acceptance. Composer reduction, crate
   rename, final four-group size reconciliation and Windows owner acceptance

@@ -1423,6 +1423,12 @@ mod tests {
             assert_eq!(surface.parts[0].bounds.height, height);
             let (_, scroll_y) = scene.tile_scroll_offset_local(tile_id);
             let content_height = driver.entries[&key("p")].prev_content_height_px;
+            assert!(scroll_y <= content_height - height);
+            assert!(scene.tile_follow_tail_at_tail(tile_id));
+            // Ordinary append advances whole lines even after a shrink. An
+            // explicit tail reset exposes its retained exact viewport bound.
+            processor.reset_tile_scroll_to_tail(tile_id, &mut scene);
+            let (_, scroll_y) = scene.tile_scroll_offset_local(tile_id);
             assert!(
                 (scroll_y - (content_height - height)).abs() < 0.001,
                 "follow-tail uses exact viewport height: {scroll_y}, {content_height}, {height}"
