@@ -197,6 +197,15 @@ the [`ci.yml`](../.github/workflows/ci.yml) header and this section together.
   run starting. Suites that cannot fit run in the weekly lanes
   (`perf-budget.yml`, `perf-assert.yml`) or in `windows.yml`, never in the
   required set. [Observed 2026-10-14] p50 4.1 min, max 5.2 min.
+- **Not queued.** Wall time is run time plus the wait for a hosted runner, and
+  every job, PR push, merge-group build and main push draws on one shared
+  pool. Required checks are three jobs (`static checks`, `cargo clippy`,
+  `cargo test`); a new gate is a step in one of them, not a new job.
+  Superseded PR runs are cancelled, and `windows.yml` keeps its
+  informational idle measurement off PRs and runs its theme captures only
+  when a PR touches rendered paths. [Observed 2026-11-01, nine jobs per run]
+  jobs ran ≤3.3 min but waited 4–15 min for a runner; PR and merge-group wall
+  time reached 13–18 min.
 - **Repeatable.** A correct change passes on the first attempt. Nextest runs
   with `retries = 0`; a per-test retry override in
   [`.config/nextest.toml`](../.config/nextest.toml) names its reason and is

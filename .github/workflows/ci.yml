@@ -6,34 +6,33 @@
 # Every job has a job-level timeout-minutes and every apt step has its own, so
 # a stalled runner or mirror fails fast instead of timing out the merge queue.
 #
+# Three jobs, by design. Every job pays ~30–60 s of runner setup (toolchain,
+# cache restore, apt) and holds one slot of the org's shared hosted-runner
+# pool. With nine jobs per run, PR pushes, up to three merge-group builds and
+# main pushes queued 4–15 min for runners while each job ran ≤3.3 min
+# (2026-11-01 measurement). Fewer, fuller jobs keep the wall time near the
+# run time. Add a step to an existing job before adding a job.
+#
 # Required checks (ruleset "main merge queue"; job `name:`s must not change):
-#   cargo check, cargo fmt, cargo clippy, cargo test (unit),
-#   cargo test (integration), dev-mode guard (release build),
-#   cargo clippy (windows-gnu cross-target)
+#   static checks, cargo clippy, cargo test
 #
 # Job map:
-#   check          — cargo check: fast compilation gate (no codegen)
-#                    + cargo machete (unused dependencies)
-#                    + fail-closed idle-efficiency checker contract tests
-#   fmt            — cargo fmt --check
-#   clippy         — cargo clippy --all-targets -D warnings (incl. tests/examples/benches)
-#   clippy-windows-gnu — cargo clippy --target x86_64-pc-windows-gnu -D warnings on the
-#     crates carrying cfg(windows) code, which the Linux clippy job never compiles
-#   test-unit      — pinned cargo nextest run --workspace --all-targets --exclude integration
-#                    --features tze_hud_runtime/dev-mode (required check name unchanged)
-#   test-integration — cargo test -p integration --tests
-#                    + deterministic LLM-facing token-footprint gate
-#   test-unit also runs both production_boot suites and runtime pixel_readback;
-#     the focused local boot/GPU recipes remain available
-#   user-test-python-suite — pytest over the user-test and repo script suites;
-#     pure-Python tests only, with no GPU, Windows, live HUD runtime, or network
-#   dev-mode-guard — cargo-metadata check (no build) that dev-mode is not enabled in the
-#     default-build dependency closure of any workspace package, incl. the shipped
-#     binary (the actual release build runs in windows.yml)
-#   cargo-deny     — advisories + licenses + bans + sources (workflow-blocking;
-#     outside the current seven required checks)
+#   static  — no Rust compilation:
+#             evidence roots untracked, cargo fmt --check, locked metadata,
+#             dev-mode guard (default-build closure of every package),
+#             cargo machete (unused deps), cargo deny licenses/bans/sources,
+#             cargo deny advisories (advisory on PR/queue, fatal on main push:
+#             a new RUSTSEC entry must not block unrelated merges),
+#             pure-Python suites (user-test skill, scripts/tests, scripts/ci)
+#   clippy  — cargo clippy --workspace --all-targets -D warnings (subsumes
+#             cargo check), then the cfg(windows) crates on the windows-gnu
+#             cross-target, which the Linux pass never compiles
+#   test    — pinned cargo nextest over the workspace minus `integration`
+#             with tze_hud_runtime/dev-mode (incl. production_boot suites and
+#             runtime pixel_readback), then cargo test -p integration --tests,
+#             then the deterministic LLM-facing token-footprint gate
 #
-# GPU jobs run with HEADLESS_FORCE_SOFTWARE=1 (llvmpipe on Linux) so no
+# GPU steps run with HEADLESS_FORCE_SOFTWARE=1 (llvmpipe on Linux) so no
 # hardware GPU is needed.
 
 name: CI
@@ -47,6 +46,11 @@ on:
   # `gh-readonly-queue/main/*` branches, or queued PRs never become mergeable.
   merge_group:
 
+# A new push to a PR supersedes its running checks; queue and main runs finish.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 env:
   # apt retries and network timeouts: a stalled mirror fails fast instead of
   # hanging the job (a 51-minute mingw-w64 install once timed out the merge queue).
@@ -58,53 +62,19 @@ env:
   HEADLESS_FORCE_SOFTWARE: "1"
 
 jobs:
-  # ── Fast fail ───────────────────────────────────────────────────────────────
+  # ── Static: no compilation ──────────────────────────────────────────────────
+  #
+  # The Python suites are pure-Python and hermetic: no GPU, Windows, live HUD
+  # runtime or network. test_hud_grpc_client.py needs the `blake3` wheel from
+  # requirements-dev.txt; without it, it compiles a cargo helper on the fly (a
+  # hidden crates.io dependency). Live-HUD CLI tools under the user-test skill's
+  # scripts/ (stress_test_zones.py, publish_*_batch.py, *_exemplar.py) are not
+  # test suites and stay out.
 
-  check:
-    name: cargo check
+  static:
+    name: static checks
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    env:
-      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
-      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install pinned mold (native Linux linker)
-        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
-        timeout-minutes: 5
-        with:
-          mold-version: "2.42.1"
-          make-default: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.88"
-      # timeout-minutes caps cache-save hangs (incident: PR #606, canonical-app-production-boot
-      # hung 15+ min in the Swatinem/rust-cache post-step, required --admin merge).
-      # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
-      - uses: Swatinem/rust-cache@v2.9.1
-        timeout-minutes: 10
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Validate locked dependency graph
-        run: cargo metadata --locked --format-version 1 >/dev/null
-      - name: cargo check (workspace)
-        run: cargo check --workspace
-      # Unused dependencies. Needs no build; false positives go in
-      # [package.metadata.cargo-machete] ignored (with a comment saying why).
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-machete@0.9.2
-      - name: cargo machete (unused dependencies)
-        run: cargo machete
-      - name: Test idle-efficiency artifact gate
-        run: python3 scripts/ci/test_check_idle_efficiency.py
-      - name: Test quiescent-efficiency startup contract
-        run: python3 scripts/ci/test_run_quiescent_efficiency_script.py
-
-  fmt:
-    name: cargo fmt
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v5
       - name: Check evidence roots are untracked
@@ -115,6 +85,50 @@ jobs:
           components: rustfmt
       - name: cargo fmt --check
         run: cargo fmt --check
+      - name: Validate locked dependency graph
+        run: cargo metadata --locked --format-version 1 >/dev/null
+      - name: dev-mode guard (default-build closure)
+        run: cargo metadata --format-version 1 --no-deps | python3 scripts/ci/check_dev_mode_defaults.py
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-machete@0.9.2,cargo-deny@0.20.2
+      # False positives go in [package.metadata.cargo-machete] ignored, with a reason.
+      - name: cargo machete (unused dependencies)
+        run: cargo machete
+      # Waivers and license allowances are documented in deny.toml.
+      - name: cargo deny (licenses, bans, sources)
+        run: cargo deny --log-level warn check licenses bans sources
+      - name: cargo deny (advisories)
+        continue-on-error: ${{ github.event_name != 'push' }}
+        run: cargo deny --log-level warn check advisories
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install Python test dependencies
+        run: pip install --quiet -r scripts/requirements-dev.txt
+      - name: Pure-Python suites (user-test skill, scripts/tests)
+        run: |
+          python3 -m pytest \
+            .claude/skills/user-test/tests/ \
+            .claude/skills/user-test/scripts/test_hud_grpc_client.py \
+            scripts/tests/ \
+            -q
+      # Includes the idle-efficiency, quiescent-startup and token-footprint
+      # gate contract tests (scripts/ci/test_*.py).
+      - name: scripts/ci unit tests
+        run: python3 -m unittest discover -s scripts/ci
+
+  # ── Lint: Linux all-targets, then the cfg(windows) crates ──────────────────
+  #
+  # The Linux pass never compiles #[cfg(target_os = "windows")] code;
+  # hud-53s6m found a real clippy::io_other_error regression in
+  # element_store.rs's Windows-only MoveFileExW path that slipped through that
+  # gap (PR #1042). The cross-target pass typechecks only (blake3's portable
+  # backend, no MinGW, no linking) and is scoped to the crates confirmed
+  # (hud-fsfkx) to cross-compile clippy-clean: tze_hud_runtime,
+  # tze_hud_compositor, tze_hud_config. Several workspace members pull in
+  # Linux-only windowing deps, so `--workspace --target …-windows-gnu` is not
+  # used. A crate that grows cfg(windows) code joins the -p list.
 
   clippy:
     name: cargo clippy
@@ -135,6 +149,7 @@ jobs:
         with:
           toolchain: "1.88"
           components: clippy
+          targets: x86_64-pc-windows-gnu
       # timeout-minutes caps cache-save hangs (incident: PR #606, canonical-app-production-boot
       # hung 15+ min in the Swatinem/rust-cache post-step, required --admin merge).
       # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
@@ -144,51 +159,6 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo clippy (workspace, all targets, deny warnings)
         run: cargo clippy --workspace --all-targets -- -D warnings
-
-  # ── Windows-target clippy (cfg(windows) coverage) ──────────────────────────
-  #
-  # The `clippy` job above runs on ubuntu-24.04, so it never compiles code
-  # gated on #[cfg(target_os = "windows")] — that code is entirely invisible
-  # to the Linux lint gate. hud-53s6m found a real clippy::io_other_error
-  # regression in element_store.rs's Windows-only MoveFileExW path that this
-  # gap let slip onto main undetected (PR #1042 fixed it).
-  #
-  # This job cross-compiles+lints just the crates that carry cfg(windows)
-  # code, using blake3's portable Rust backend without MinGW (no linking or
-  # execution — clippy only needs to typecheck). A workspace-wide `--workspace --target
-  # x86_64-pc-windows-gnu` clippy run is NOT used here: several workspace
-  # members pull in Linux-only windowing deps that do not
-  # cross-compile, so this job is deliberately scoped to the three crates
-  # confirmed (hud-fsfkx) to cross-compile clippy-clean:
-  #   tze_hud_runtime, tze_hud_compositor, tze_hud_config
-  #
-  # If another crate later grows cfg(windows) code, add it to the -p list
-  # below (or drop it here with a comment if it doesn't cross-compile clean).
-
-  clippy-windows-gnu:
-    name: cargo clippy (windows-gnu cross-target)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    env:
-      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
-      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install pinned mold (native Linux linker)
-        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
-        timeout-minutes: 5
-        with:
-          mold-version: "2.42.1"
-          make-default: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.88"
-          components: clippy
-          targets: x86_64-pc-windows-gnu
-      - uses: Swatinem/rust-cache@v2.9.1
-        timeout-minutes: 10
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo clippy (windows-gnu, cfg(windows) crates, deny warnings)
         env:
           # Lint only; real Windows builds retain their compiler/hash backend.
@@ -201,19 +171,17 @@ jobs:
             --target x86_64-pc-windows-gnu \
             -- -D warnings
 
-  # ── Unit and crate-level tests ───────────────────────────────────────────────
+  # ── Tests: workspace (nextest), integration, token footprint ───────────────
   #
-  # Runs all unit and crate tests across the workspace, excluding the
-  # `integration` package, whose test targets run in their own jobs
-  # (test-integration below) so failures are
-  # attributable per-suite.
-  # The vertical_slice tests require a software GPU (llvmpipe) — HEADLESS_FORCE_SOFTWARE=1
-  # is set globally in env above.
+  # The workspace pass excludes the `integration` package, whose headless
+  # suites (HeadlessRuntime + software GPU; no display server) run in their
+  # own step so a failure is attributable per suite. `just test` and
+  # `just test-integration` run the same commands.
 
-  test-unit:
-    name: cargo test (unit)
+  test:
+    name: cargo test
     runs-on: ubuntu-24.04
-    timeout-minutes: 8
+    timeout-minutes: 12
     env:
       # Native Linux only; preserve Windows target linkage.
       CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
@@ -322,65 +290,9 @@ jobs:
             test_results/compile-diet/nextest/
             target/nextest/default/junit.xml
           if-no-files-found: warn
-
-  # ── Integration: headless multi-crate suites ───────────────────────────────
-  #
-  # Runs the `integration` package's test targets that are fast and headless
-  # (HeadlessRuntime + software GPU via HEADLESS_FORCE_SOFTWARE=1; no display
-  # server required).
-  # `just test-integration` runs the same `--tests` command.
-
-  test-integration:
-    name: cargo test (integration)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    env:
-      # Native Linux only: preserve MinGW/MSVC flags and the system ld.
-      CARGO_TARGET_X86_64_UNKNOWN_LINUX_GNU_RUSTFLAGS: "-C link-arg=-fuse-ld=mold"
-    steps:
-      - uses: actions/checkout@v5
-      - name: Install pinned mold (native Linux linker)
-        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
-        timeout-minutes: 5
-        with:
-          mold-version: "2.42.1"
-          make-default: false
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: "1.88"
-      # timeout-minutes caps cache-save hangs (incident: PR #606, canonical-app-production-boot
-      # hung 15+ min in the Swatinem/rust-cache post-step, required --admin merge).
-      # v2.9.1 pins to a specific stable release rather than the floating v2 alias.
-      - uses: Swatinem/rust-cache@v2.9.1
-        timeout-minutes: 10
-        with:
-          save-if: ${{ github.ref == 'refs/heads/main' }}
-      - name: Install Mesa / llvmpipe
-        timeout-minutes: 5
-        run: |
-          # Remove only the observed Azure HTTP route; keep signed HTTPS fallbacks.
-          # An unsupported hosted image layout must fail before package acquisition.
-          apt_mirror_list=/etc/apt/apt-mirrors.txt
-          test -f "$apt_mirror_list"
-          test ! -L "$apt_mirror_list"
-          grep -Eq '^https://archive[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          grep -Eq '^https://security[.]ubuntu[.]com/ubuntu/?([[:space:]]|$)' "$apt_mirror_list"
-          sudo sed -Ei '\|^http://azure[.]archive[.]ubuntu[.]com/ubuntu/?([[:space:]].*)?$|d' "$apt_mirror_list"
-          sudo apt-get $APT_OPTS update -q --error-on=any
-          sudo apt-get $APT_OPTS install -y --no-install-recommends \
-            libvulkan1 \
-            mesa-vulkan-drivers \
-            mesa-utils \
-            libegl-mesa0 \
-            libgl1-mesa-dri
       - name: cargo test -p integration (headless suites)
         run: |
           cargo test -p integration --tests
-      - name: Test token-footprint gate contract
-        run: >-
-          python3 -m unittest
-          scripts.ci.test_check_token_footprint
-          scripts.ci.test_token_footprint_flow
       - name: Calibrate deterministic LLM-facing token footprint
         env:
           HEADLESS_FORCE_SOFTWARE: "1"
@@ -405,92 +317,3 @@ jobs:
           name: token-footprint-calibration
           path: test_results/token-footprint/
           if-no-files-found: error
-
-  # ── User-test Python suite ──────────────────────────────────────────────────
-  #
-  # Runs the pure-Python unit tests under .claude/skills/user-test/{tests,scripts}/.
-  # Previously this suite only ran interactively via the user-test skill, so
-  # drift went undetected until a worker tripped over it (hud-43z24).
-  #
-  # Scope is limited to files verified hermetic by reading + running locally:
-  # no GPU, no Windows, no live HUD runtime, no external network.
-  #   - tests/ (presence card, portal client, projection adoption docs)
-  #   - scripts/test_hud_grpc_client.py (needs the packages installed below;
-  #     without the `blake3` package it falls back to compiling a tiny cargo
-  #     helper on the fly — a hidden crates.io network dependency — so
-  #     installing the `blake3` wheel here keeps this job fully pip-hermetic)
-  #
-  # Excluded: scripts/stress_test_zones.py, publish_widget_batch.py,
-  # publish_zone_batch.py and the other *_exemplar.py scripts under scripts/ —
-  # these are live-HUD-runtime CLI tools (gRPC session against a running
-  # resident), not unit-test suites, and have no test_*.py counterpart here.
-
-  user-test-python-suite:
-    name: user-test python suite
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-      - name: Install Python test dependencies
-        run: |
-          pip install --quiet -r scripts/requirements-dev.txt
-      - name: Run pure-Python user-test suite
-        run: |
-          python3 -m pytest \
-            .claude/skills/user-test/tests/ \
-            .claude/skills/user-test/scripts/test_hud_grpc_client.py \
-            scripts/tests/ \
-            -q
-      - name: Run scripts/ci unit tests
-        run: python3 -m unittest discover -s scripts/ci
-
-  # ── Dev-mode guard ──────────────────────────────────────────────────────────
-  #
-  # Verifies that `dev-mode` is not enabled by a default build of any workspace
-  # package, including the tze_hud_app release binary's whole dependency closure
-  # (feature edges and indirection included; scripts/ci/check_dev_mode_defaults.py).
-  # This is a Cargo metadata check only; the real release build runs in windows.yml.
-  # `just dev-mode-guard` runs the same command.
-
-  dev-mode-guard:
-    name: dev-mode guard (release build)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@v5
-      - name: Verify dev-mode is not a default feature
-        run: cargo metadata --format-version 1 --no-deps | python3 scripts/ci/check_dev_mode_defaults.py
-
-  # ── Dependency security + license audit (cargo-deny) ──────────────────────
-  #
-  # Runs cargo-deny to check:
-  #   - advisories: known CVEs and unmaintained crates (RUSTSEC database)
-  #   - licenses: all dependencies must be GPL-3.0 compatible per deny.toml
-  #
-  # This job does NOT require compilation — cargo-deny reads Cargo.lock and
-  # crate metadata only.  It runs against the same Rust toolchain as the rest
-  # of CI so that workspace metadata resolution is consistent.
-  #
-  # Advisory waivers and license allowances are documented with rationale in
-  # deny.toml at the repository root.  See hud-1aswu.5 for context.
-  #
-  # Uses EmbarkStudios/cargo-deny-action for a stable, versioned install.
-  # The current @v2 reference is a version tag, not a commit SHA.
-
-  cargo-deny:
-    name: cargo deny (advisories + licenses)
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@v5
-      - name: cargo deny check advisories + licenses
-        uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          # Explicitly check all four gates: advisories, licenses, bans and sources.
-          command: check advisories licenses bans sources
-          # Log level: warn surfaces yanked-crate and duplicate-version notices
-          # without failing the job.
-          log-level: warn

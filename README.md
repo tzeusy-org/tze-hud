@@ -50,19 +50,20 @@ Each local recipe maps to a CI job:
 
 | Local recipe (`just …`) | CI job | Checks |
 |---|---|---|
-| `check` | `check` | `cargo check --workspace` (fast compile gate); CI also validates locked dependency metadata |
-| `untracked-evidence` | `fmt` | local evidence roots must stay out of Git |
-| `fmt` | `fmt` | `cargo fmt --check` |
-| `clippy` | `clippy` | `cargo clippy --workspace --all-targets -D warnings` |
-| `test` | `test-unit` | workspace tests (excludes `integration`), including the GPU compositor tests and `pixel_readback` on Mesa llvmpipe |
-| `test-integration` | `test-integration` | headless integration suites |
-| `token-footprint` | `test-integration` | deterministic LLM-facing token-footprint gate |
-| `test-python` | `user-test-python-suite` | pure-Python suites (pytest + `scripts/ci` unittest) |
-| `production-boot` | `test-unit` | vertical-slice production-config boot; focused local recipe |
-| `canonical-app-boot` | `test-unit` | canonical app production-config boot; focused local recipe |
-| `dev-mode-guard` | `dev-mode-guard` | dev-mode not enabled in any package's default-build dependency closure (shipped binary included) |
-| `deps-unused` | `check` | `cargo machete`: unused dependencies |
-| `idle-efficiency-checker` | `check` | fail-closed idle artifact contract tests |
+| `untracked-evidence` | `static checks` | local evidence roots must stay out of Git |
+| `fmt` | `static checks` | `cargo fmt --check`; CI also validates locked dependency metadata |
+| `dev-mode-guard` | `static checks` | dev-mode not enabled in any package's default-build dependency closure (shipped binary included) |
+| `deps-unused` | `static checks` | `cargo machete`: unused dependencies |
+| `cargo-deny` | `static checks` | licenses, bans, sources; advisories fail only on main pushes |
+| `test-python` | `static checks` | pure-Python suites (pytest + `scripts/ci` unittest discovery, which includes the idle-efficiency contracts) |
+| `clippy` | `cargo clippy` | `cargo clippy --workspace --all-targets -D warnings` (subsumes `cargo check`) |
+| `clippy-windows-gnu` | `cargo clippy` | the `cfg(windows)` crates on the windows-gnu cross-target |
+| `test` | `cargo test` | workspace tests (excludes `integration`), including the GPU compositor tests and `pixel_readback` on Mesa llvmpipe |
+| `test-integration` | `cargo test` | headless integration suites |
+| `token-footprint` | `cargo test` | deterministic LLM-facing token-footprint gate |
+| `production-boot` | `cargo test` | vertical-slice production-config boot; focused local recipe |
+| `canonical-app-boot` | `cargo test` | canonical app production-config boot; focused local recipe |
+| `check`, `idle-efficiency-checker` | — | focused local recipes; covered by `clippy` and `test-python` |
 | `test-gpu` | — | GPU subset of `test` only (compositor + `pixel_readback`), llvmpipe-pinned with timeouts; already covered by `test`, so not a separate `just ci` step |
 | `clippy-windows-gnu` | `clippy-windows-gnu` | clippy on the `x86_64-pc-windows-gnu` target for the crates carrying `cfg(windows)` code |
 | `cargo-deny` | `cargo-deny` | dependency/advisory policy (`deny.toml`) |
@@ -266,7 +267,7 @@ To install on Windows, see [Windows install and operation](#12-windows-install-a
 
 CI-backed checks for the canonical path:
 - `app/tze_hud_app/tests/canonical_config_schema.rs` validates `app/tze_hud_app/config/production.toml`.
-- CI `test-unit` job runs pinned Nextest 0.9.114 with `cargo nextest run --workspace --all-targets --exclude integration --features tze_hud_runtime/dev-mode`, which includes that test.
+- The CI `cargo test` job runs pinned Nextest 0.9.114 with `cargo nextest run --workspace --all-targets --exclude integration --features tze_hud_runtime/dev-mode`, which includes that test.
 
 ## 1.2) Windows install and operation
 

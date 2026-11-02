@@ -8,6 +8,10 @@
 #   measurement), then exercises self-install, single instance, and uninstall
 #   (scripts/ci/windows_install_smoke.py).
 #   Runs on non-docs PRs and main pushes, v* tags, and manual dispatch.
+#   PRs skip the informational idle measurement and run theme captures (and
+#   the changed-scene comment) only when they touch rendered paths, keeping
+#   the PR run near 10 min and off the shared runner pool; main pushes run
+#   everything, so the capture baseline and idle trend stay complete.
 #   Informational: omit merge_group while this check is not required. Restore
 #   merge_group in the same hud-bstmy.8.8 change that makes it required.
 #   Docs-only PR/main updates skip; tag and manual runs are unaffected.
@@ -55,6 +59,26 @@ jobs:
       HUD_BUILD_PROFILE: ${{ startsWith(github.ref, 'refs/tags/v') && 'release' || 'release-dev' }}
     steps:
       - uses: actions/checkout@v5
+        with:
+          # PR checkouts are the merge commit; HEAD^1 is the base for the
+          # rendered-path filter below.
+          fetch-depth: 2
+
+      # Paths whose change can alter a captured frame. Non-PR events always capture.
+      - name: Detect rendered-path changes
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
+            echo rendered=true >> "$GITHUB_OUTPUT"; exit 0
+          fi
+          git diff --name-only HEAD^1 HEAD | tee "$RUNNER_TEMP/changed-files.txt"
+          if grep -Eq '^(crates/tze_hud_(compositor|widget|scene|config|runtime)/|app/tze_hud_app/|assets/|\.claude/skills/user-test/scripts/[^/]+\.json$|scripts/ci/windows_smoke\.py$|Cargo\.lock$|\.github/workflows/windows\.yml$)' "$RUNNER_TEMP/changed-files.txt"; then
+            echo rendered=true >> "$GITHUB_OUTPUT"
+          else
+            echo rendered=false >> "$GITHUB_OUTPUT"
+          fi
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -123,6 +147,7 @@ jobs:
       # WARP timing flake from failing the build until the owner decides to
       # require it (see the PR that added it for the stability record).
       - name: Quiescent with content (informational)
+        if: github.event_name != 'pull_request'
         continue-on-error: true
         timeout-minutes: 5
         run: python scripts/ci/windows_smoke.py --quiescent-with-content --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --config app/tze_hud_app/config/production.toml
@@ -135,6 +160,7 @@ jobs:
       # required check. First main run bootstraps an explicitly absent baseline.
       - name: Theme fixture captures (informational)
         id: captures
+        if: steps.changes.outputs.rendered == 'true'
         continue-on-error: true
         timeout-minutes: 10
         env:
