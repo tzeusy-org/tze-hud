@@ -252,8 +252,17 @@ as Linux CI: `cargo nextest run --workspace --all-targets --exclude integration 
 
 The hardware-GPU note: on Linux, concurrent device creation with a hardware
 Vulkan ICD (NVIDIA) has hung tests, which is why the recipes pin llvmpipe
-there. Headless test adapters use `Backends::all()`, so on Windows the NVIDIA
-Vulkan driver may still be loaded alongside WARP. Nextest's `gpu` group limits
+there. With `HEADLESS_FORCE_SOFTWARE=1`, headless construction tries primary
+backends first and initializes GL only if none provides a software adapter.
+Primary backends include Vulkan, so on Windows the NVIDIA Vulkan driver may
+still be loaded alongside WARP. Hardware headless selection uses all backends.
+
+The Linux investigation in hud-vlvu6 traced 81.6s and 101.8s waits inside Mesa
+EGL's Wayland display initialization, before adapter selection. Deferring GL
+avoids that window-server startup when a primary software adapter is available.
+The earlier 120s texture-budget timeout was untraced; its cause remains unproved.
+
+Nextest's `gpu` group limits
 constructor-reaching test processes to one, conservatively including CPU cases
 in those packages; other CPU cases retain normal global parallelism. For a
 separate diagnostic Nextest command, global concurrency is `--test-threads=1`,
