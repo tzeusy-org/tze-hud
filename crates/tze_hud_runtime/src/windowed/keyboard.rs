@@ -1228,10 +1228,7 @@ impl WinitApp {
         };
 
         // Mirror the pointer / Tab transition broadcast (locks already released).
-        let mut composer_focus_lost = false;
-        if transition.lost.is_some() {
-            composer_focus_lost = true;
-        }
+        let composer_focus_lost = transition.lost.is_some();
         tracing::debug!("portal recovery: focus redirected to composer");
         dispatch_focus_event(&self.state.input_event_tx, transition);
         if composer_focus_lost {

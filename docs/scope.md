@@ -145,6 +145,26 @@ source links when implementation changes the status.
   verification and exact source measurements are recorded with the change;
   physical Windows typing/echo/drag/held-release acceptance is UNPERFORMED.
 
+  Physical cleanup counts against `28471250` (prefix / test-module suffix /
+  total; comments and blanks included):
+
+  | Group | Before | After |
+  |---|---:|---:|
+  | Composer core | 4194 / 4804 / 8998 | 3595 / 4503 / 8098 |
+  | Windowed and fixtures | 13208 / 11400 / 24608 | 12421 / 10266 / 22687 |
+  | Compositor mapped renderer files | 14418 / 1097 / 15515 | 12603 / 959 / 13562 |
+  | Protocol | 1921 / 859 / 2780 | 1861 / 783 / 2644 |
+  | Integration composer | 168 / 0 / 168 | 160 / 0 / 160 |
+
+  The entire finite packet surface plus the compositor `lib.rs` reexports and
+  `text.rs` orphan-method cleanup measures 71,453 → 66,553 lines (4,900 fewer).
+  These two supplemental files are included so no changed file is omitted.
+  Test-only renderer files, shared support and the feature-gated harness count
+  in physical prefixes; these are not semantic production LOC. Core test
+  reduction misses the estimated 350–600 lines; unique coverage takes priority
+  over estimates. Tests: +0 ~54 -59 (net -59); two moves have zero add/remove
+  delta. Native projection/hub/goldens and driver source remain unchanged.
+
 - **T8 — diet [Observed].** The [local harness](../justfile) includes
   llvmpipe GPU recipes and Nextest; resource acceptance has a compact
   [`store_behavior`](../crates/tze_hud_resource/tests/store_behavior.rs) suite.

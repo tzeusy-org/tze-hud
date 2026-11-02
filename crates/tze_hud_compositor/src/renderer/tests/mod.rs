@@ -138,7 +138,6 @@ async fn make_compositor_and_surface(w: u32, h: u32) -> Option<(Compositor, Head
         Err(e) => panic!("unexpected compositor error: {e}"),
     }
 }
-const VIEWER_ECHO_COLOR: [u8; 4] = [0x8A, 0xB4, 0xF8, 0xFF];
 
 mod alert_banner;
 mod composer;
