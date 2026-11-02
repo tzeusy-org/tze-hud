@@ -30,6 +30,9 @@ Hard boundaries:
   explicitly installs the optional [Claude Code hooks](references/claude-code-hooks.md)
   to mirror safe tool progress and opted-in final replies without model calls.
 - Not PTY, tmux, shell, or terminal capture.
+- Not a document viewer. Publish status and short answers; put long reports,
+  diffs and reviews on a page built for reading (a claude.ai artifact, a PR)
+  and publish its link.
 - The portal authority runs in-process in the runtime and holds only
   ephemeral state (visible transcript window, pending input, lifecycle). The
   session owns its own history.
