@@ -1485,6 +1485,54 @@ async fn portal_output_too_large_is_content_rejected() {
 
 #[tokio::test]
 async fn portal_flow_attach_publish_poll_ack_clear() {
+    // DEBUG-ximtf11-poll: finite failures and released real-dispatch Pending.
+    {
+        use std::future::Future;
+        use std::task::{Context, Poll, Waker};
+        let (isolated, _, caller, _) = two_agents();
+        let (isolated, isolated_hub) = hub_portal(isolated);
+        let mut cx = Context::from_waker(Waker::noop());
+        let expected = json!({
+            "code": "INTERNAL",
+            "hint": "input state unavailable; retry hud_input"
+        });
+        {
+            let _held = isolated_hub.lock().unwrap();
+            let mut request = Box::pin(call_as(
+                &isolated,
+                &caller,
+                "hud_input",
+                json!({"wait_ms": 30_000}),
+            ));
+            let Poll::Ready((error, true)) = request.as_mut().poll(&mut cx) else {
+                panic!("DEBUG-ximtf11-poll held Hub must refuse before parking");
+            };
+            assert_eq!(error, expected);
+            eprintln!("DEBUG-ximtf11-poll held_hub response={error}");
+        }
+        isolated.state.with_locked_agents_for_diagnostic(|| {
+            let mut request = Box::pin(call_as(
+                &isolated,
+                &caller,
+                "hud_input",
+                json!({"wait_ms": 30_000}),
+            ));
+            let Poll::Ready((error, true)) = request.as_mut().poll(&mut cx) else {
+                panic!("DEBUG-ximtf11-poll held MCP state must refuse before parking");
+            };
+            assert_eq!(error, expected);
+            eprintln!("DEBUG-ximtf11-poll held_state response={error}");
+        });
+        let mut released = Box::pin(call_as(
+            &isolated,
+            &caller,
+            "hud_input",
+            json!({"wait_ms": 30_000}),
+        ));
+        assert!(released.as_mut().poll(&mut cx).is_pending());
+        eprintln!("DEBUG-ximtf11-poll released_owners dispatch=Pending");
+        drop(released);
+    }
     let (server, _) = server();
     let (server, hub) = hub_portal(server);
     let key = PortalKey::new(psk_agent(), "main");

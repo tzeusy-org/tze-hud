@@ -1031,6 +1031,10 @@ async fn poc_override_safe_mode_wins_with_hung_grpc_agent() {
         .call_err("hud_publish", json!({"surface": SUBTITLE, "content": "hi"}))
         .await;
     assert_eq!(code, "SAFE_MODE_ACTIVE");
+    if poll.is_finished() {
+        let joined = poll.await;
+        panic!("DEBUG-ximtf11-poll early_finished joined={joined:?}");
+    }
     assert!(!poll.is_finished(), "the long-poll is still parked");
 
     poc.hud.press_safe_mode_hotkey();
