@@ -156,12 +156,13 @@ source links when implementation changes the status.
   | Protocol | 1921 / 859 / 2780 | 1861 / 783 / 2644 |
   | Integration composer | 168 / 0 / 168 | 160 / 0 / 160 |
 
-  The entire finite packet surface plus the compositor `lib.rs` reexports and
-  `text.rs` orphan-method cleanup measures 71,453 → 66,553 lines (4,900 fewer).
-  These two supplemental files are included so no changed file is omitted.
+  The entire finite packet surface plus the compositor `lib.rs` reexports,
+  `text.rs` orphan-method cleanup and scene type flag documentation measures
+  75,497 → 70,598 lines (4,899 fewer). These three supplemental
+  files are included so no changed file is omitted.
   Test-only renderer files, shared support and the feature-gated harness count
-  in physical prefixes; these are not semantic production LOC. Core test
-  reduction misses the estimated 350–600 lines; unique coverage takes priority
+  in physical prefixes; these are not semantic production LOC. Core prefix/test
+  reductions miss their estimated 600–900 / 350–600 lines; unique coverage takes priority
   over estimates. Tests: +0 ~54 -59 (net -59); two moves have zero add/remove
   delta. Native projection/hub/goldens and driver source remain unchanged.
 
