@@ -516,6 +516,16 @@ impl HeadlessEventLoopHarness {
             .expect("harness was built without with_network")
     }
 
+    /// Observe the actual armed wait of one correlated MCP input request.
+    #[cfg(feature = "test-harness")]
+    pub fn observe_input_wait(&self, namespace: &str) -> tze_hud_mcp::server::InputWaitProbe {
+        self.app
+            .state
+            .portal_projection_driver
+            .portal_handle()
+            .observe_input_wait(namespace)
+    }
+
     /// The gRPC session endpoint `with_network` bound (loopback, ephemeral).
     ///
     /// # Panics

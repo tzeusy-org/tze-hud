@@ -984,18 +984,37 @@ impl Poc {
         }
     }
 
-    /// A `hud_input` long-poll the operator never reads: parked in the MCP
-    /// server for the whole test.
-    fn park_long_poll(&self) -> tokio::task::JoinHandle<String> {
-        tokio::spawn(post(
+    /// Wait for this real HTTP request's authoritative, armed empty-queue wait
+    /// before the owner starts ticking or sending hotkeys. The returned closure
+    /// owns the observer without borrowing this fixture.
+    async fn park_long_poll(&self) -> (tokio::task::JoinHandle<String>, impl Fn() -> bool + use<>) {
+        let mut probe = self.hud.observe_input_wait("claude");
+        let mut poll = tokio::spawn(post(
             self.hud.mcp_addr(),
             CLAUDE_PSK,
             json!({
-                "jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                "jsonrpc": "2.0", "id": probe.request_id(), "method": "tools/call",
                 "params": {"name": "hud_input", "arguments": {"wait_ms": 30_000}},
             })
             .to_string(),
-        ))
+        ));
+        let armed = tokio::time::timeout(WAIT, async {
+            tokio::select! {
+                biased;
+                joined = &mut poll => panic!("hud_input returned before its armed wait: {joined:?}"),
+                waiting = probe.wait_until_waiting() => {
+                    if !waiting {
+                        let joined = (&mut poll).await;
+                        panic!("hud_input closed before its armed wait: {joined:?}");
+                    }
+                }
+            }
+        }).await;
+        if armed.is_err() {
+            poll.abort();
+            panic!("hud_input did not reach its armed wait within {WAIT:?}");
+        }
+        (poll, move || probe.is_waiting())
     }
 }
 
@@ -1008,6 +1027,34 @@ impl Poc {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn poc_override_safe_mode_wins_with_hung_grpc_agent() {
     let mut poc = Poc::boot().await;
+    // A completed zero-wait HTTP request must never certify an armed long-poll.
+    let mut zero = poc.hud.observe_input_wait("claude");
+    let zero_request = json!({
+        "jsonrpc":"2.0", "id":zero.request_id(), "method":"tools/call",
+        "params":{"name":"hud_input", "arguments":{"wait_ms":0}},
+    })
+    .to_string();
+    let raw = tokio::time::timeout(WAIT, async {
+        let raw = post(poc.hud.mcp_addr(), CLAUDE_PSK, zero_request).await;
+        assert!(!zero.is_waiting(), "zero-wait response: {raw}");
+        assert!(
+            !zero.wait_until_waiting().await,
+            "zero-wait response: {raw}"
+        );
+        raw
+    })
+    .await
+    .expect("zero-wait HTTP response and closed observer");
+    let response: Value = serde_json::from_str(&raw).expect("zero-wait JSON-RPC response");
+    assert_ne!(response["result"]["isError"], true, "{raw}");
+    let input: Value = serde_json::from_str(
+        response["result"]["content"][0]["text"]
+            .as_str()
+            .expect("zero-wait tool result"),
+    )
+    .expect("zero-wait input");
+    assert_eq!(input, json!({"items":[],"remaining":0}), "{raw}");
+
     let hung = HungAgent::connect(poc.hud.grpc_addr()).await;
     assert_eq!(poc.shown("zone:status-bar"), 1);
     let big_clear = || {
@@ -1017,7 +1064,11 @@ async fn poc_override_safe_mode_wins_with_hung_grpc_agent() {
     };
     let flood = hung.keep_sending(big_clear);
     poc.wait_until_hung("resident").await;
-    let poll = poc.park_long_poll();
+    let (mut poll, poll_is_waiting) = poc.park_long_poll().await;
+    if !poll_is_waiting() || poll.is_finished() {
+        let joined = tokio::time::timeout(WAIT, &mut poll).await;
+        panic!("hud_input left its armed wait before owner action: {joined:?}");
+    }
 
     poc.hud.press_safe_mode_hotkey();
     poc.wait_for("safe mode", |hud| hud.safe_mode_active())
@@ -1031,6 +1082,11 @@ async fn poc_override_safe_mode_wins_with_hung_grpc_agent() {
         .call_err("hud_publish", json!({"surface": SUBTITLE, "content": "hi"}))
         .await;
     assert_eq!(code, "SAFE_MODE_ACTIVE");
+    if !poll_is_waiting() || poll.is_finished() {
+        let joined = tokio::time::timeout(WAIT, &mut poll).await;
+        panic!("hud_input left its armed wait during owner action: {joined:?}");
+    }
+    assert!(poll_is_waiting(), "the server's input wait is still armed");
     assert!(!poll.is_finished(), "the long-poll is still parked");
 
     poc.hud.press_safe_mode_hotkey();
@@ -1053,6 +1109,7 @@ async fn poc_override_safe_mode_wins_with_hung_grpc_agent() {
         hud.zone_publication_count("status-bar") == 0
     })
     .await;
+    // Client abort closes its socket; it does not prove server dispatch cancellation.
     poll.abort();
     flood.abort();
 }

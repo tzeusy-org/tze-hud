@@ -127,9 +127,117 @@ const TOOL_NAMES: &[&str] = &[
 #[derive(Clone, Default)]
 pub struct InputNotifiers {
     agents: Arc<HubMutex<HashMap<String, Arc<Notify>>>>,
+    #[cfg(any(test, feature = "test-harness"))]
+    wait_probes: Arc<HubMutex<InputWaitProbes>>,
+}
+
+#[cfg(any(test, feature = "test-harness"))]
+#[derive(Default)]
+struct InputWaitProbes {
+    next_id: u64,
+    pending: HashMap<(String, String), tokio::sync::watch::Sender<bool>>,
+}
+
+/// One authenticated request's current armed queue wait, available to fixtures.
+/// Dropping the observer does not cancel the server's dispatch future.
+#[cfg(any(test, feature = "test-harness"))]
+pub struct InputWaitProbe {
+    namespace: String,
+    request_id: String,
+    waiting: tokio::sync::watch::Receiver<bool>,
+    registry: Arc<HubMutex<InputWaitProbes>>,
+}
+
+#[cfg(any(test, feature = "test-harness"))]
+impl InputWaitProbe {
+    pub fn request_id(&self) -> &str {
+        &self.request_id
+    }
+
+    /// True only while the matched dispatch is inside its armed wait.
+    pub fn is_waiting(&self) -> bool {
+        self.waiting.has_changed().is_ok() && *self.waiting.borrow()
+    }
+
+    /// False when dispatch finishes before reaching a currently armed wait.
+    /// The caller must bound this observation with its existing test patience.
+    pub async fn wait_until_waiting(&mut self) -> bool {
+        loop {
+            if self.is_waiting() {
+                return true;
+            }
+            if self.waiting.changed().await.is_err() {
+                return false;
+            }
+        }
+    }
+}
+
+#[cfg(any(test, feature = "test-harness"))]
+impl Drop for InputWaitProbe {
+    fn drop(&mut self) {
+        self.registry
+            .lock()
+            .unwrap()
+            .pending
+            .remove(&(self.namespace.clone(), self.request_id.clone()));
+    }
+}
+
+#[cfg(any(test, feature = "test-harness"))]
+pub(crate) struct InputWaitGuard<'a>(&'a tokio::sync::watch::Sender<bool>);
+
+#[cfg(any(test, feature = "test-harness"))]
+impl<'a> InputWaitGuard<'a> {
+    pub(crate) fn arm(sender: &'a tokio::sync::watch::Sender<bool>) -> Self {
+        sender.send_replace(true);
+        Self(sender)
+    }
+}
+
+#[cfg(any(test, feature = "test-harness"))]
+impl Drop for InputWaitGuard<'_> {
+    fn drop(&mut self) {
+        self.0.send_replace(false);
+    }
 }
 
 impl InputNotifiers {
+    #[cfg(any(test, feature = "test-harness"))]
+    fn observe_input_wait(&self, namespace: &str) -> InputWaitProbe {
+        let mut registry = self.wait_probes.lock().unwrap();
+        registry.next_id = registry
+            .next_id
+            .checked_add(1)
+            .expect("input probe id space");
+        let request_id = format!("input-wait-probe-{}", registry.next_id);
+        let (sender, waiting) = tokio::sync::watch::channel(false);
+        let replaced = registry
+            .pending
+            .insert((namespace.to_owned(), request_id.clone()), sender);
+        assert!(replaced.is_none());
+        InputWaitProbe {
+            namespace: namespace.to_owned(),
+            request_id,
+            waiting,
+            registry: Arc::clone(&self.wait_probes),
+        }
+    }
+
+    #[cfg(any(test, feature = "test-harness"))]
+    fn claim_input_wait(
+        &self,
+        namespace: &str,
+        id: Option<&serde_json::Value>,
+    ) -> Option<tokio::sync::watch::Sender<bool>> {
+        let id = id?.as_str()?;
+        self.wait_probes
+            .lock()
+            .unwrap()
+            .pending
+            .remove(&(namespace.to_owned(), id.to_owned()))
+    }
+
     pub fn for_agent(&self, namespace: &str) -> Result<Arc<Notify>, McpError> {
         let mut agents = self.agents.lock().map_err(|_| McpError::Tool {
             code: "INTERNAL",
@@ -175,6 +283,12 @@ impl PortalHandle {
 
     pub fn input_notify(&self, namespace: &str) -> Result<Arc<Notify>, McpError> {
         self.input_notifiers.for_agent(namespace)
+    }
+
+    /// Reserve a unique JSON-RPC id for an authenticated namespace's hud_input.
+    #[cfg(any(test, feature = "test-harness"))]
+    pub fn observe_input_wait(&self, namespace: &str) -> InputWaitProbe {
+        self.input_notifiers.observe_input_wait(namespace)
     }
 
     /// Commit the same input/history admission used by the runtime composer.
@@ -360,10 +474,19 @@ impl McpServer {
                     .filter(|a| !a.is_null())
                     .unwrap_or_else(|| serde_json::json!({}));
                 debug!(tool = name, agent = %identity.agent_id, "MCP: tools/call");
+                #[cfg(any(test, feature = "test-harness"))]
+                let input_wait_probe = if name == "hud_input" {
+                    self.input_notifiers
+                        .claim_input_wait(&identity.agent_id, id.as_ref())
+                } else {
+                    None
+                };
                 let tool_ctx = ToolCtx {
                     scene: &self.scene,
                     portals: self.portals.as_ref(),
                     input_notifiers: &self.input_notifiers,
+                    #[cfg(any(test, feature = "test-harness"))]
+                    input_wait_probe: input_wait_probe.as_ref(),
                     portal_wake: &self.portal_ingress_wake,
                     state: &self.state,
                     safe_mode: &self.safe_mode,
