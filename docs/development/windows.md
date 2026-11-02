@@ -213,7 +213,10 @@ prints redacted discovery information without launching another window.
   Ctrl+Shift+F11 opens it with agents running, Ctrl+Shift+F10 shows a pairing
   code. They work without focusing the HUD; see `docs/api.md`.
 - **Frame pacing** raises the timer resolution to 1 ms
-  (`timeBeginPeriod`) while the compositor runs. This is expected.
+  (`timeBeginPeriod`) only while the next compositor deadline is under 50 ms
+  (animations and transitions at the panel's 30+ fps settings) and releases it
+  when the HUD goes idle. Expect it in
+  `powercfg /energy` reports during animation, not while idle.
 - **Config changes need a restart.** Restart the process, or use
   `POST /admin/restart` (see
   [Restart and handoff](../operations/windows-install.md#restart-and-handoff)).

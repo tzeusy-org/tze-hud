@@ -119,10 +119,13 @@ use crate::window::{HitRegion, WindowMode};
 /// by up to a full timer tick. That quantization — not payload size — is the
 /// dominant source of the live present-budget misses recorded in hud-ofe76
 /// (present overhead p95 21 ms / max 56 ms against the 16.6 ms Windows lane
-/// budget, with near-identical payloads ranging 0→56 ms). Holding
-/// `timeBeginPeriod(1)` for the compositor thread's lifetime cuts sleep
-/// granularity to ~1 ms, comfortably within budget; the period is released via
-/// `timeEndPeriod(1)` when the guard drops on any loop-exit path.
+/// budget, with near-identical payloads ranging 0→56 ms). `timeBeginPeriod(1)`
+/// cuts sleep granularity to ~1 ms, comfortably within budget.
+///
+/// A raised resolution keeps the system timer interrupt at ~1 kHz, so the
+/// compositor holds the guard only while it paces frames (see
+/// [`fine_timer_wanted`]) and drops it, calling `timeEndPeriod(1)`, before an
+/// idle wait and on any loop-exit path.
 ///
 /// No-op on non-Windows targets, whose sleep granularity is already sub-ms.
 #[cfg(windows)]
@@ -133,7 +136,25 @@ struct FramePacingTimerGuard {
 #[cfg(not(windows))]
 struct FramePacingTimerGuard;
 
+/// Deadlines nearer than this are frame pacing (a transition tick, the next
+/// frame at cadence) and get the 1 ms timer. A later deadline, such as a caret
+/// toggle or a fade start, tolerates one coarse tick of lateness.
+const FINE_TIMER_HORIZON: std::time::Duration = std::time::Duration::from_millis(50);
+
+/// Whether the compositor's next wait needs the 1 ms timer: only when it
+/// sleeps toward a near deadline. An untimed (idle) wait never does.
+fn fine_timer_wanted(next_deadline: Option<Instant>, now: Instant) -> bool {
+    next_deadline.is_some_and(|at| at.saturating_duration_since(now) < FINE_TIMER_HORIZON)
+}
+
 impl FramePacingTimerGuard {
+    /// Hold the guard in `slot` exactly while `wanted`.
+    fn hold(slot: &mut Option<Self>, wanted: bool) {
+        if wanted != slot.is_some() {
+            *slot = wanted.then(Self::acquire);
+        }
+    }
+
     fn acquire() -> Self {
         #[cfg(windows)]
         {
@@ -1552,11 +1573,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         degradation_envelope,
                     );
 
-                // Hold a 1 ms OS timer resolution for the whole frame loop so the
-                // pacing sleep below does not overshoot the present budget on the
-                // default coarse Windows timer (hud-ofe76). Released when the
-                // guard drops on any loop-exit path.
-                let _frame_timer_guard = FramePacingTimerGuard::acquire();
+                // A 1 ms OS timer resolution while pacing frames, so the pacing
+                // sleep below does not overshoot the present budget on the
+                // default coarse Windows timer (hud-ofe76). Released before an
+                // idle wait and when the guard drops on any loop-exit path.
+                let mut frame_timer_guard: Option<FramePacingTimerGuard> = None;
 
                 // The degradation envelope above keeps the startup cadence;
                 // the panel's frame rate cap changes only the pacing.
@@ -2194,6 +2215,10 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         .chain(timed_deadline)
                         .chain(secondary_retry)
                         .min_by_key(|candidate| candidate.at);
+                    FramePacingTimerGuard::hold(
+                        &mut frame_timer_guard,
+                        fine_timer_wanted(next_deadline.as_ref().map(|d| d.at), Instant::now()),
+                    );
                     let observed = compositor_wake
                         .compositor()
                         .wait(wake_checkpoint, next_deadline);
@@ -3469,5 +3494,26 @@ mod wake_accounting_tests {
             crate::idle_efficiency::RuntimeWakeupSource::Shutdown,
             "the main event loop must be woken so it can observe and exit on the terminal transition"
         );
+    }
+}
+
+#[cfg(test)]
+mod frame_pacing_timer_tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn idle_waits_and_far_deadlines_release_the_fine_timer() {
+        let now = Instant::now();
+        assert!(!fine_timer_wanted(None, now), "an untimed idle wait");
+        assert!(
+            !fine_timer_wanted(Some(now + Duration::from_millis(530)), now),
+            "a caret toggle"
+        );
+        assert!(fine_timer_wanted(
+            Some(now + Duration::from_millis(16)),
+            now
+        ));
+        assert!(fine_timer_wanted(Some(now), now), "an overdue deadline");
     }
 }

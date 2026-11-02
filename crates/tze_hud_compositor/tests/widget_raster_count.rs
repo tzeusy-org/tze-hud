@@ -843,3 +843,119 @@ async fn a_restyled_widget_type_rerasters_once() {
     let next = render(&mut compositor, &mut scene, &mut surface);
     assert!(next.widget_rasterized.is_empty(), "once");
 }
+
+/// Render gauges sharing one box (each `(instance, level)`) in a fresh scene
+/// and read the frame back.
+fn overlapping_gauges_frame(
+    compositor: &mut Compositor,
+    surface: &mut HeadlessSurface,
+    gauges: &[(&str, f32)],
+) -> Vec<u8> {
+    let mut scene = SceneGraph::new(512.0, 256.0);
+    let tab = scene.create_tab("Main", 0).unwrap();
+    let BundleScanResult::Ok(b) = bundle!("gauge", ["background.svg", "fill.svg"]) else {
+        panic!("built-in gauge bundle failed to load");
+    };
+    let type_name = b.definition.id.clone();
+    for (file, bytes) in b.svg_contents {
+        compositor
+            .widget_renderer_mut()
+            .unwrap()
+            .register_svg(&type_name, &file, bytes);
+    }
+    scene.widget_registry.register_definition(b.definition);
+    for &(instance, level) in gauges {
+        scene.widget_registry.register_instance(WidgetInstance {
+            id: SceneId::new(),
+            widget_type_name: type_name.clone(),
+            tab_id: tab,
+            geometry_override: Some(GeometryPolicy::Relative {
+                x_pct: 0.1,
+                y_pct: 0.1,
+                width_pct: 0.25,
+                height_pct: 0.5,
+            }),
+            contention_override: None,
+            instance_name: instance.to_string(),
+            current_params: HashMap::new(),
+            auto_clear_ms: None,
+        });
+        publish(&mut scene, instance, "level", level);
+    }
+    render(compositor, &mut scene, surface);
+    surface.read_pixels(&compositor.device)
+}
+
+/// Every widget shares one z-order, so overlapping widgets stack by instance
+/// name on every frame and every run, independent of the instance map's
+/// iteration order (a `HashMap`, reseeded per scene).
+#[tokio::test]
+async fn overlapping_widgets_stack_by_instance_name() {
+    if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
+        return;
+    }
+    let mut compositor = match Compositor::new_headless(512, 256).await {
+        Ok(c) => c,
+        Err(CompositorError::NoAdapter) => {
+            assert!(
+                !std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1"),
+                "TZE_HUD_REQUIRE_GPU=1 but no adapter"
+            );
+            return;
+        }
+        Err(e) => panic!("unexpected compositor error: {e}"),
+    };
+    let mut surface = HeadlessSurface::new(&compositor.device, 512, 256);
+    compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut frame =
+        |gauges: &[(&str, f32)]| overlapping_gauges_frame(&mut compositor, &mut surface, gauges);
+    let full = frame(&[("b", 1.0)]);
+    let empty = frame(&[("b", 0.0)]);
+    // The full bar's interior: pixels where a full and an empty gauge differ,
+    // as do all four neighbours (no antialiased edge). Bar and empty track
+    // are opaque there, so only the top widget decides the colour.
+    let (w, h) = (512usize, 256usize);
+    let differs = |x: usize, y: usize| {
+        let i = (y * w + x) * 4;
+        full[i..i + 4] != empty[i..i + 4]
+    };
+    let probe: Vec<usize> = (1..h - 1)
+        .flat_map(|y| (1..w - 1).map(move |x| (x, y)))
+        .filter(|&(x, y)| {
+            differs(x, y)
+                && differs(x - 1, y)
+                && differs(x + 1, y)
+                && differs(x, y - 1)
+                && differs(x, y + 1)
+        })
+        .map(|(x, y)| (y * w + x) * 4)
+        .collect();
+    assert!(!probe.is_empty(), "a full and an empty gauge must differ");
+    // Each probe pixel must be nearer the expected gauge's colour than the
+    // other's: a rounded track corner blends slightly differently over one
+    // card than over two, but full and empty differ by ~80 per channel.
+    let distance = |a: &[u8], b: &[u8]| -> u32 {
+        a.iter()
+            .zip(b)
+            .map(|(x, y)| u32::from(x.abs_diff(*y)))
+            .sum()
+    };
+    let shows = |frame: &[u8], expected: &[u8], other: &[u8]| {
+        probe.iter().all(|&i| {
+            let px = &frame[i..i + 4];
+            distance(px, &expected[i..i + 4]) < distance(px, &other[i..i + 4])
+        })
+    };
+    for gauges in [[("a", 0.0), ("b", 1.0)], [("b", 1.0), ("a", 0.0)]] {
+        assert!(
+            shows(&frame(&gauges), &full, &empty),
+            "b draws over a: {gauges:?}"
+        );
+    }
+    for gauges in [[("a", 1.0), ("b", 0.0)], [("b", 0.0), ("a", 1.0)]] {
+        assert!(
+            shows(&frame(&gauges), &empty, &full),
+            "b draws over a: {gauges:?}"
+        );
+    }
+}
