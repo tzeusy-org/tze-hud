@@ -190,7 +190,12 @@ async fn test_zone_publish_result() {
                 );
                 assert_eq!(
                     result.hint,
-                    format!("notification allows at most {MAX_NOTIFICATION_ACTIONS} actions")
+                    super::verbs::fail(
+                        seq,
+                        "INVALID_ARGUMENT",
+                        format!("notification allows at most {MAX_NOTIFICATION_ACTIONS} actions"),
+                    )
+                    .hint
                 );
                 seq += 1;
                 assert_eq!(snapshot(&*scene.lock().await), before);
