@@ -1,9 +1,9 @@
 # Production status-indicator widget bundle.
 #
 # Visual contract (shared with gauge and progress-bar):
-# - Compact top-right badge: a tonal tile like the notification cards
-#   (surface.container.high at opacity.surface, outline.variant edge, shape.m
-#   corners); no always-visible label text
+# - Compact top-right badge: a circular tonal tile (surface.container.high at
+#   opacity.surface, outline.variant edge, as the notification cards) so it
+#   matches the round status disc on it; no always-visible label text
 # - `status` colors the badge content: online = success, away = caution,
 #   busy = error, offline = outline; `theme` picks dot, glyph, or expressive
 #   glyph
@@ -17,7 +17,7 @@
 # assets/widget_bundles/status-indicator/.
 
 name        = "status-indicator"
-version     = "1.1.0"
+version     = "1.2.0"
 description = "Compact status badge with selectable glyph style and hover tooltip"
 default_contention_policy = "LatestWins"
 

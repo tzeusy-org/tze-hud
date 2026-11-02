@@ -74,6 +74,9 @@ otherwise. Scheduled zone publications count as held before presentation;
   whose every value is a string; an empty string removes that entry.
   Notification TTL belongs at the publish's top-level `ttl_ms`; an inner
   `content.ttl_ms` is rejected with a hint to move it.
+- `zone:ambient-background` draws its fill or image at most
+  `opacity.ambient.max` (0.9 by default) opaque, so the desktop under the
+  overlay always shows through.
 - Widget: `params` is the typed parameter map. F32 values must be finite and
   within the declaration's inclusive bounds (including one-sided bounds).
   Both MCP and gRPC reject out-of-range values rather than clamping them.
@@ -518,6 +521,7 @@ in the config file or the launch arguments and restart), and the version.
 
 The Layout card shows, per widget, its box as percentages of the display
 ("4%, 8% · 18×12%": x, y, width×height) and how long its content stays up.
+Widgets draw no drag handle; this box is how the owner places them.
 Typing four numbers and Enter moves or resizes it at once (a box that does
 not fit on the display is refused); "Clears after" (Never, 5 s ... 1 h)
 caps each publication at that long after it was published, including what
@@ -528,7 +532,11 @@ save fails the change lasts the session and the row says so. A
 stable across reboots.
 
 The Appearance card picks the theme and the sans, mono and serif fonts
-(type a family name; an empty value or Reset gives the theme's). Left/Right
+(type a family name; an empty value or Reset gives the theme's), and
+Subtitle backdrop: on sets `opacity.subtitle.backdrop` to 0.9, drawing a
+`color.subtitle.backdrop` fill behind the whole subtitle zone so streamed
+subtitles stand out; off removes the override (0 draws none). Agents send
+nothing for it. Left/Right
 on the theme, or Alt+T from anywhere in the panel, previews the next theme
 live without saving it; Enter keeps it, and Esc, moving off the row or
 closing the panel puts the saved theme back. A click on the theme keeps
