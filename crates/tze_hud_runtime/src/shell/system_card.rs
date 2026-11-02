@@ -172,13 +172,7 @@ mod tests {
         scene.zone_registry = ZoneRegistry::with_defaults();
         scene.create_tab("Main", 0).unwrap();
         let snapshot_json = scene.take_snapshot(1, 1).to_json().unwrap();
-        let snapshot_proto = tze_hud_protocol::proto::session::SceneSnapshot {
-            snapshot_json: snapshot_json.clone(),
-            ..Default::default()
-        };
-        let mut bytes = Vec::new();
-        prost::Message::encode(&snapshot_proto, &mut bytes).unwrap();
-        assert!(!bytes.windows(CODE.len()).any(|w| w == CODE.as_bytes()));
+        assert!(!snapshot_json.contains(CODE));
         assert!(!snapshot_json.contains("Pair an agent"));
 
         let server = McpServer::new(scene).with_config(McpConfig::with_psk("test-key"));

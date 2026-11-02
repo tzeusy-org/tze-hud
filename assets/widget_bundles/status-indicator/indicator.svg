@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Status badge (top right) with a hover tooltip below it.
 
-     The badge is a tonal tile like the notification cards; `theme` picks what
+     The badge is a circular tonal tile (fill and edge as the notification
+     cards; round so it matches the status disc it holds); `theme` picks what
      sits on it, and `status` colors it (success / caution / error / outline):
        minimal-group   a solid status dot
        system-group    a tonal status disc with a glyph (✓ … ! ×)
@@ -21,7 +22,7 @@
     data-role="backdrop"
     x="280.5" y="0.5"
     width="39" height="39"
-    rx="{{token.shape.m}}" ry="{{token.shape.m}}"
+    rx="19.5" ry="19.5"
     fill="{{token.color.surface.container.high}}"
     fill-opacity="{{token.opacity.surface}}"
     stroke="{{token.color.outline.variant}}"

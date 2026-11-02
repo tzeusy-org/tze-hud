@@ -167,70 +167,9 @@ Basic rendering confirmed working (colored backdrops, text, stacking, TTL expiry
 **Files changed:**
 - `.claude/skills/user-test/scripts/ambient_background_exemplar.py` — DEFAULT_ALPHA=0.15, fixed log format, phase 3 pause 2s→5s
 
-**Infrastructure built during this review:**
-- gRPC server bind changed from `[::1]` to `0.0.0.0` (windowed.rs + headless.rs) — enables remote gRPC testing over Tailnet
-- Python gRPC test client (`hud_grpc_client.py`) — session, lease, tile, node support via proto stubs
-- Proto stubs generated in `proto_gen/` from `crates/tze_hud_protocol/proto/`
-
----
-
-## 6. Dashboard Tile
-
-**Type:** Tile | **Size:** 400x300 px
-
-**Spec:** `openspec/changes/exemplar-dashboard-tile/`
-
-### Design Review
-
-- [ ] Tile size and proportions
-- [ ] Dark background opacity
-- [ ] Icon size and placement
-- [ ] Markdown body rendering
-- [ ] Button styling (Refresh/Dismiss)
-- [ ] Button hit targets (touch-friendly?)
-- [ ] Tile border/shadow treatment
-- [ ] Orphan handling visual cue
-
-### UX Tweaks
-
-_(to be filled during review)_
-
----
-
-## 7. Presence Card
-
-**Type:** Tile | **Size:** 200x80 px | **Position:** bottom-left stack
-
-**Spec:** `openspec/changes/exemplar-presence-card/`
-
-### Design Review
-
-- [ ] Card size — enough room for content?
-- [ ] Avatar size and shape
-- [ ] Agent name text size
-- [ ] "Last active" timestamp readability
-- [ ] Stack spacing when multiple agents
-- [ ] Disconnect/offline visual treatment
-- [ ] Card background contrast
-
-### UX Tweaks
-
-Live validation update (2026-04-16):
-1. Attempted canonical resident `/user-test` run against `windows-host.example:50051`.
-2. Reachability succeeded (`50051` and `9090` reachable), but scenario exited with `{"error":"missing_psk"}`.
-3. Manual visual verdict is blocked until the host is paired (`hud_pair.py`) and the scenario is re-run.
-
-Open closeout items:
-1. Re-run `presence_card_exemplar.py` after pairing and archive transcript evidence.
-2. Record PASS/FAIL for all seven visual steps in `docs/reports/exemplar-presence-card-user-test.md`.
-3. Move status to `done` only after evidence-backed manual sign-off is recorded.
-
-Spec sections awaiting live proof:
-- `Requirement: gRPC Test Sequence`
-  - `Scenario: Full single-agent lifecycle`
-  - `Scenario: Three-agent concurrent lifecycle`
-- `Requirement: User-Test Scenario`
-  - `Scenario: User-test visual verification sequence`
+Public resident tile scenarios and their Python client were retired on
+2026-10-14. The deferred specification remains in hud-x1wuq. Internal scene
+and native portal validation remain separate.
 
 ---
 

@@ -11,13 +11,11 @@
 //! - `resolve_widget_geometry` — convert a `WidgetInstance`/`WidgetDefinition`
 //!   pair to pixel bounds using the instance's geometry policy (or the
 //!   definition's default).
-//! - `synthetic_widget_element_id` — derive a stable `SceneId` for a widget
-//!   instance from its name.
 //! - `scene_id_hex` — format a `SceneId` as a lowercase hex string.
 //! - `drag_handle_bounds` — compute the drag-handle rect for an element given
 //!   its bounds and the configured `DragHandleStyle`.
 //! - `collect_drag_handle_entries` — build the full `Vec<DragHandleEntry>` for
-//!   the current frame covering tiles, zones, and widgets.
+//!   the current frame covering tiles and zones (widgets get none).
 //! - `drag_highlight_cmds` — SDF border commands for the active-drag highlight.
 //! - `append_drag_handle_vertices` — emit GPU vertices for all drag handles.
 
@@ -29,12 +27,6 @@ use super::draw_cmds::DragHandleEntry;
 use crate::pipeline::{RectVertex, RoundedRectDrawCmd, rect_vertices};
 
 impl Compositor {
-    fn synthetic_widget_element_id(instance_name: &str) -> SceneId {
-        let key = format!("widget:{instance_name}");
-        let rid = ResourceId::of(key.as_bytes());
-        SceneId::from_bytes_le(&rid.as_bytes()[..16]).unwrap_or(SceneId::null())
-    }
-
     fn scene_id_hex(id: SceneId) -> String {
         use std::fmt::Write as _;
         let mut out = String::with_capacity(32);
@@ -161,51 +153,9 @@ impl Compositor {
             });
         }
 
-        let active_tab = scene.active_tab;
-        let mut widget_names: Vec<_> = scene
-            .widget_registry
-            .instances
-            .keys()
-            .filter(|_| scene.widgets_shown())
-            .collect();
-        widget_names.sort_unstable();
-        for instance_name in widget_names {
-            if scene
-                .widget_registry
-                .active_publishes
-                .get(instance_name)
-                .is_none_or(|p| p.is_empty())
-            {
-                continue;
-            }
-            let instance = match scene.widget_registry.instances.get(instance_name) {
-                Some(i) => i,
-                None => continue,
-            };
-            if let Some(tab_id) = active_tab
-                && instance.tab_id != tab_id
-            {
-                continue;
-            }
-            let Some(geometry) = scene.widget_registry.drawn_geometry(instance) else {
-                continue;
-            };
-            let (x, y, w, h) = Self::resolve_zone_geometry(&geometry, sw, sh);
-            let element_bounds_widget = Rect::new(x, y, w, h);
-            let bounds = Self::drag_handle_bounds(element_bounds_widget, style, scale, sw, sh);
-            let element_id = Self::synthetic_widget_element_id(instance_name);
-            let interaction_id = format!("drag-handle:{}", Self::scene_id_hex(element_id));
-            entries.push(DragHandleEntry {
-                element_id,
-                element_kind: DragHandleElementKind::Widget,
-                bounds,
-                element_bounds: element_bounds_widget,
-                interaction_id,
-                style,
-                is_header_band: false,
-            });
-        }
-
+        // Widgets get no handle: widget geometry is set from the control
+        // panel's Layout card, and a drawn handle that cannot drag is a dead
+        // affordance.
         entries
     }
 

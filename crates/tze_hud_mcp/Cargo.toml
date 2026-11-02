@@ -5,6 +5,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[features]
+# Request-specific armed-wait observations for headless integration fixtures.
+test-harness = []
+
 [dependencies]
 tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0" }
 # Provides shared portal state and `PortalError`, mapped by MCP to

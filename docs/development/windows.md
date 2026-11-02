@@ -213,7 +213,10 @@ prints redacted discovery information without launching another window.
   Ctrl+Shift+F11 opens it with agents running, Ctrl+Shift+F10 shows a pairing
   code. They work without focusing the HUD; see `docs/api.md`.
 - **Frame pacing** raises the timer resolution to 1 ms
-  (`timeBeginPeriod`) while the compositor runs. This is expected.
+  (`timeBeginPeriod`) only while the next compositor deadline is under 50 ms
+  (animations and transitions at the panel's 30+ fps settings) and releases it
+  when the HUD goes idle. Expect it in
+  `powercfg /energy` reports during animation, not while idle.
 - **Config changes need a restart.** Restart the process, or use
   `POST /admin/restart` (see
   [Restart and handoff](../operations/windows-install.md#restart-and-handoff)).
@@ -249,8 +252,17 @@ as Linux CI: `cargo nextest run --workspace --all-targets --exclude integration 
 
 The hardware-GPU note: on Linux, concurrent device creation with a hardware
 Vulkan ICD (NVIDIA) has hung tests, which is why the recipes pin llvmpipe
-there. Headless test adapters use `Backends::all()`, so on Windows the NVIDIA
-Vulkan driver may still be loaded alongside WARP. Nextest's `gpu` group limits
+there. With `HEADLESS_FORCE_SOFTWARE=1`, headless construction tries primary
+backends first and initializes GL only if none provides a software adapter.
+Primary backends include Vulkan, so on Windows the NVIDIA Vulkan driver may
+still be loaded alongside WARP. Hardware headless selection uses all backends.
+
+The Linux investigation in hud-vlvu6 traced 81.6s and 101.8s waits inside Mesa
+EGL's Wayland display initialization, before adapter selection. Deferring GL
+avoids that window-server startup when a primary software adapter is available.
+The earlier 120s texture-budget timeout was untraced; its cause remains unproved.
+
+Nextest's `gpu` group limits
 constructor-reaching test processes to one, conservatively including CPU cases
 in those packages; other CPU cases retain normal global parallelism. For a
 separate diagnostic Nextest command, global concurrency is `--test-threads=1`,
@@ -278,7 +290,7 @@ real `HKCU\...\Run\tze_hud` autostart value. Afterwards, reinstall your HUD
 ```powershell
 cargo build --profile release-dev --locked -p tze_hud_app --bin tze_hud
 cargo build --profile release-dev --locked -p poc_demo --bin poc_demo
-python scripts/ci/windows_smoke.py --exe target/release-dev/tze_hud.exe --poc-demo target/release-dev/poc_demo.exe --config app/tze_hud_app/config/production.toml
+python scripts/ci/windows_smoke.py --exe target/release-dev/tze_hud.exe --config app/tze_hud_app/config/production.toml
 python scripts/ci/windows_install_smoke.py --exe target/release-dev/tze_hud.exe
 ```
 

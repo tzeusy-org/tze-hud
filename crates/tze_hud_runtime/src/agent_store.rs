@@ -246,7 +246,7 @@ mod tests {
         let edited = store
             .apply(&AgentChange::Grant {
                 agent: "a".into(),
-                grant: Grant::Tiles,
+                grant: Grant::Widgets,
                 on: false,
             })
             .unwrap();

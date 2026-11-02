@@ -74,11 +74,20 @@ pub(super) const NOTIFICATION_URGENCY_CRITICAL: Rgba = Rgba {
     a: 1.0,
 };
 
-/// Per-notification backdrop opacity applied to urgency-tinted backdrop quads.
-///
-/// This is the fixed 0.8 opacity specified for notification zone backdrop rendering.
-/// It overrides the token color's alpha channel.
-pub(super) const NOTIFICATION_BACKDROP_OPACITY: f32 = 0.8;
+/// Fallback for `opacity.notification.backdrop` (keep in sync with
+/// `tze_hud_config`'s `CANONICAL_TOKENS`).
+const NOTIFICATION_BACKDROP_OPACITY_DEFAULT: f32 = 0.8;
+
+/// Opacity of urgency-tinted notification card backdrops, from the
+/// `opacity.notification.backdrop` token. It overrides the urgency color's
+/// alpha channel.
+pub(super) fn notification_backdrop_opacity(token_map: &HashMap<String, String>) -> f32 {
+    token_map
+        .get("opacity.notification.backdrop")
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|v| v.is_finite())
+        .map_or(NOTIFICATION_BACKDROP_OPACITY_DEFAULT, |v| v.clamp(0.0, 1.0))
+}
 
 /// Scale factor for the body line font size in two-line notification layout.
 ///
@@ -402,6 +411,39 @@ pub(super) fn urgency_to_severity_color(urgency: u32, token_map: &HashMap<String
         }
         _ => resolve_severity_token(token_map, "color.severity.info").unwrap_or(SEVERITY_INFO),
     }
+}
+
+/// Fallback for `opacity.ambient.max` (keep in sync with `tze_hud_config`'s
+/// `CANONICAL_TOKENS`).
+const AMBIENT_OPACITY_MAX_DEFAULT: f32 = 0.9;
+
+/// Ceiling on the opacity of a zone's own fill or image: `opacity.ambient.max`
+/// for `ambient-background`, whose full-display fill would otherwise hide the
+/// whole desktop under the topmost overlay; 1.0 for every other zone.
+pub(super) fn zone_opacity_ceiling(zone_name: &str, token_map: &HashMap<String, String>) -> f32 {
+    if zone_name != "ambient-background" {
+        return 1.0;
+    }
+    token_map
+        .get("opacity.ambient.max")
+        .and_then(|v| v.parse::<f32>().ok())
+        .filter(|v| v.is_finite())
+        .map_or(AMBIENT_OPACITY_MAX_DEFAULT, |v| v.clamp(0.0, 1.0))
+}
+
+/// Text color for an alert-banner publication: `color.on_severity.*` for its
+/// urgency, the counterpart of [`urgency_to_severity_color`]. `None` when the
+/// token is absent or invalid (the caller keeps the policy text color).
+pub(super) fn urgency_to_on_severity_color(
+    urgency: u32,
+    token_map: &HashMap<String, String>,
+) -> Option<Rgba> {
+    let key = match urgency {
+        3.. => "color.on_severity.critical",
+        2 => "color.on_severity.warning",
+        _ => "color.on_severity.info",
+    };
+    resolve_token_color(token_map, key)
 }
 
 /// Map a `NotificationPayload.urgency` level to a notification urgency backdrop color.
@@ -1018,10 +1060,10 @@ pub(super) fn resolve_section_gap_px(token_map: &HashMap<String, String>) -> f32
         * px_scale(token_map)
 }
 
-/// Bounds of a notification's dismiss ×: top-right, inset from the card's
-/// top and right edges by `NOTIFICATION_ACTION_INSET_PX` (border plus the
-/// text's padding) so the rounded corner never clips it. The single
-/// geometry source for both drawing and the hit region.
+/// Bounds of a notification's dismiss ×: top-right, `inset` (see
+/// [`notification_inset`]) from the card's top and right edges so the
+/// rounded corner never clips it. The single geometry source for both
+/// drawing and the hit region.
 #[inline]
 pub(super) fn notification_dismiss_bounds(
     x: f32,
@@ -1029,8 +1071,8 @@ pub(super) fn notification_dismiss_bounds(
     w: f32,
     effective_slot_h: f32,
     scale: f32,
+    inset: f32,
 ) -> Rect {
-    let inset = NOTIFICATION_ACTION_INSET_PX * scale;
     let size = NOTIFICATION_DISMISS_BUTTON_SIZE_PX * scale;
     let top = inset.min((effective_slot_h - 1.0).max(0.0));
     Rect::new(
@@ -1048,10 +1090,20 @@ pub(super) const NOTIFICATION_BORDER_WIDTH_PX: f32 = 1.0;
 /// Height of the notification action-button row (bottom strip of the slot).
 pub(super) const NOTIFICATION_ACTION_BUTTON_H_PX: f32 = 22.0;
 
-/// Inset of the action-button row from the card's sides and bottom: the
-/// border plus the padding the text uses, so the rounded backdrop fully
-/// contains the buttons.
-pub(super) const NOTIFICATION_ACTION_INSET_PX: f32 = 9.0;
+/// Card inset (dp) when the zone policy sets no margin: the border plus 8 dp
+/// of padding.
+pub(super) const NOTIFICATION_INSET_DEFAULT_PX: f32 = 9.0;
+
+/// The card inset in physical px: text, the action-button row and the
+/// dismiss × all sit this far from the card edge, so the rounded backdrop
+/// fully contains them. It is the zone policy's horizontal margin (from the
+/// `spacing.notification.inset` token for notification-area).
+pub(super) fn notification_inset(policy: &RenderingPolicy, scale: f32) -> f32 {
+    policy
+        .margin_horizontal
+        .or(policy.margin_px)
+        .unwrap_or(NOTIFICATION_INSET_DEFAULT_PX * scale)
+}
 
 /// Gap between a notification's text and its action-button row.
 pub(super) const NOTIFICATION_ACTION_ROW_GAP_PX: f32 = 4.0;
@@ -1061,14 +1113,15 @@ pub(super) const NOTIFICATION_ACTION_ROW_GAP_PX: f32 = 4.0;
 /// buttons, and the bottom inset that keeps them inside the card. Zero
 /// without actions, so plain notifications keep their height. Slot height
 /// adds it; text bounds subtract it.
-pub(super) fn notification_action_row_reserve(payload: &NotificationPayload, scale: f32) -> f32 {
+pub(super) fn notification_action_row_reserve(
+    payload: &NotificationPayload,
+    scale: f32,
+    inset: f32,
+) -> f32 {
     if payload.actions.is_empty() {
         0.0
     } else {
-        (NOTIFICATION_ACTION_ROW_GAP_PX
-            + NOTIFICATION_ACTION_BUTTON_H_PX
-            + NOTIFICATION_ACTION_INSET_PX)
-            * scale
+        (NOTIFICATION_ACTION_ROW_GAP_PX + NOTIFICATION_ACTION_BUTTON_H_PX) * scale + inset
     }
 }
 
@@ -1100,11 +1153,11 @@ pub(super) fn notification_action_button_bounds(
     effective_slot_h: f32,
     n_actions: usize,
     scale: f32,
+    inset: f32,
 ) -> Vec<Rect> {
     if n_actions == 0 {
         return Vec::new();
     }
-    let inset = NOTIFICATION_ACTION_INSET_PX * scale;
     let button_h = NOTIFICATION_ACTION_BUTTON_H_PX * scale;
     let btn_w = (zw - inset * 2.0).max(1.0) / n_actions as f32;
     let action_y = (slot_y + effective_slot_h - inset - button_h).max(slot_y);
@@ -1636,5 +1689,44 @@ mod tests {
         assert!((default.color_r - expected.r).abs() < eps);
         assert!((default.color_g - expected.g).abs() < eps);
         assert!((default.color_b - expected.b).abs() < eps);
+    }
+
+    // ── Widget/zone UX pass tokens ────────────────────────────────────────────
+
+    #[test]
+    fn notification_backdrop_opacity_follows_its_token() {
+        assert_eq!(notification_backdrop_opacity(&token_map(&[])), 0.8);
+        let tm = token_map(&[("opacity.notification.backdrop", "0.9")]);
+        assert_eq!(notification_backdrop_opacity(&tm), 0.9);
+        let tm = token_map(&[("opacity.notification.backdrop", "7")]);
+        assert_eq!(notification_backdrop_opacity(&tm), 1.0, "clamped");
+    }
+
+    #[test]
+    fn notification_inset_is_the_policy_margin_else_nine_dp() {
+        let mut policy = RenderingPolicy::default();
+        assert_eq!(notification_inset(&policy, 2.0), 18.0);
+        policy.margin_horizontal = Some(24.0);
+        assert_eq!(notification_inset(&policy, 2.0), 24.0);
+    }
+
+    #[test]
+    fn only_ambient_background_has_an_opacity_ceiling() {
+        let tm = token_map(&[]);
+        assert_eq!(zone_opacity_ceiling("ambient-background", &tm), 0.9);
+        assert_eq!(zone_opacity_ceiling("pip", &tm), 1.0);
+        let tm = token_map(&[("opacity.ambient.max", "0.5")]);
+        assert_eq!(zone_opacity_ceiling("ambient-background", &tm), 0.5);
+    }
+
+    #[test]
+    fn banner_text_uses_the_on_severity_token_for_its_urgency() {
+        let tm = token_map(&[
+            ("color.on_severity.info", "#000000"),
+            ("color.on_severity.warning", "#FFFFFF"),
+        ]);
+        assert_eq!(urgency_to_on_severity_color(1, &tm).map(|c| c.r), Some(0.0));
+        assert_eq!(urgency_to_on_severity_color(2, &tm).map(|c| c.r), Some(1.0));
+        assert_eq!(urgency_to_on_severity_color(3, &tm), None, "absent token");
     }
 }

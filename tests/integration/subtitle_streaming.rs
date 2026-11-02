@@ -23,7 +23,7 @@
 //!   gRPC and MCP paths produce identical breakpoint records for the same payload.
 //!
 //! - [`test_grpc_list_zones_subtitle_metadata`]
-//!   gRPC SceneSnapshot contains subtitle zone with LatestWins contention and StreamText type.
+//!   Internal zone registry contains subtitle zone with LatestWins contention and StreamText type.
 //!
 //! All tests are headless (no display server required).
 //! Each test continuously owns a kernel-assigned listener through runtime startup.
@@ -35,7 +35,6 @@
 
 use std::net::SocketAddr;
 
-use tze_hud_protocol::auth::{RUNTIME_MAX_VERSION, RUNTIME_MIN_VERSION};
 use tze_hud_protocol::proto;
 use tze_hud_protocol::proto::session as session_proto;
 #[allow(deprecated)]
@@ -124,8 +123,6 @@ async fn connect_agent_with_zone_publish_cap(
                 agent_id: agent_id.to_string(),
                 initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
                 resume_token: Vec::new(),
-                min_protocol_version: RUNTIME_MIN_VERSION,
-                max_protocol_version: RUNTIME_MAX_VERSION,
                 auth_credential: Some(tze_hud_protocol::auth::psk_credential(TEST_PSK.to_string())),
             },
         )),
@@ -136,8 +133,6 @@ async fn connect_agent_with_zone_publish_cap(
 
     // Consume SessionEstablished
     let _established = rx.next().await.ok_or("no SessionEstablished")??;
-    // Consume SceneSnapshot
-    let _snapshot = rx.next().await.ok_or("no SceneSnapshot")??;
     // Consume the mandatory current degradation baseline.
     let degradation = rx.next().await.ok_or("no DegradationNotice")??;
     if !matches!(
@@ -145,39 +140,17 @@ async fn connect_agent_with_zone_publish_cap(
         Some(session_proto::server_message::Payload::DegradationNotice(_))
     ) {
         return Err(format!(
-            "Expected DegradationNotice after SceneSnapshot, got: {:?}",
+            "Expected DegradationNotice after SessionEstablished, got: {:?}",
             degradation.payload
         )
         .into());
     }
 
-    // Request a lease with publish_zone capability
-    tx.send(session_proto::ClientMessage {
-        sequence: 2,
-        timestamp_wall_us: common::now_wall_us(),
-        payload: Some(session_proto::client_message::Payload::ClaimTile(
-            session_proto::ClaimTile {
-                ttl_ms: 120_000,
-                ..Default::default()
-            },
-        )),
-    })
-    .await?;
-
-    let mut session = AgentSession {
+    let session = AgentSession {
         tx,
         rx,
-        sequence: 2,
+        sequence: 1,
     };
-
-    // Consume the ClaimTile result
-    let msg = session.rx.next().await.ok_or("no lease response")??;
-    match &msg.payload {
-        Some(session_proto::server_message::Payload::RequestResult(resp)) if resp.ok => {}
-        other => {
-            return Err(format!("Expected a granted ClaimTile, got: {other:?}").into());
-        }
-    }
 
     Ok(session)
 }
@@ -420,7 +393,7 @@ async fn test_grpc_zone_publish_breakpoints_match_mcp_behavior()
 
 /// The subtitle zone has the correct metadata: LatestWins contention, StreamText media type.
 ///
-/// This verifies what both gRPC SceneSnapshot and MCP hud_surfaces would report.
+/// This verifies the internal metadata used by MCP hud_surfaces.
 ///
 /// Spec §Subtitle Contention Policy — Latest Wins.
 /// Spec §Subtitle MCP Test Fixtures — zone_name: "subtitle".

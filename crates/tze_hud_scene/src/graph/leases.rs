@@ -140,8 +140,7 @@ impl SceneGraph {
     /// owns is removed and the lease ends `Revoked`, in any non-terminal state
     /// (Active, Orphaned, Suspended), with no agent veto.
     ///
-    /// Returns the `LeaseExpiry` the runtime forwards to the owning session
-    /// (which sends `Reclaimed{OVERRIDE}`), or `None` for an unknown tile or an
+    /// Returns the internal `LeaseExpiry`, or `None` for an unknown tile or an
     /// already-terminal lease.
     pub fn viewer_dismiss_tile(&mut self, tile_id: SceneId) -> Option<LeaseExpiry> {
         let lease_id = self.tiles.get(&tile_id)?.lease_id;

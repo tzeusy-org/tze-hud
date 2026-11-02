@@ -38,11 +38,11 @@ use super::draw_cmds::TexturedDrawCmd;
 use super::hit_regions::{notification_action_interaction_id, notification_dismiss_interaction_id};
 use super::tile_render::node_uses_display_tile_scroll;
 use super::token_colors::{
-    NOTIFICATION_BACKDROP_OPACITY, NOTIFICATION_BORDER_WIDTH_PX, STATIC_IMAGE_PLACEHOLDER_COLOR,
-    is_alert_banner_zone, linear_to_srgb, notification_action_button_bounds,
-    notification_dismiss_bounds, resolve_border_default_color, resolve_notification_action_tokens,
-    resolve_notification_control_color, srgb_to_linear, urgency_to_notification_color,
-    urgency_to_severity_color,
+    NOTIFICATION_BORDER_WIDTH_PX, STATIC_IMAGE_PLACEHOLDER_COLOR, is_alert_banner_zone,
+    linear_to_srgb, notification_action_button_bounds, notification_backdrop_opacity,
+    notification_dismiss_bounds, notification_inset, resolve_border_default_color,
+    resolve_notification_action_tokens, resolve_notification_control_color, srgb_to_linear,
+    urgency_to_notification_color, urgency_to_severity_color, zone_opacity_ceiling,
 };
 
 #[inline]
@@ -448,8 +448,14 @@ impl super::Compositor {
                         };
                         // Dismiss control outline, filled while hovered/pressed.
                         if pushed && notification_cards {
-                            let b =
-                                notification_dismiss_bounds(x, slot_y, w, effective_slot_h, scale);
+                            let b = notification_dismiss_bounds(
+                                x,
+                                slot_y,
+                                w,
+                                effective_slot_h,
+                                scale,
+                                notification_inset(policy, scale),
+                            );
                             let state = chrome_state(notification_dismiss_interaction_id(
                                 zone_name, record,
                             ));
@@ -475,6 +481,7 @@ impl super::Compositor {
                                     effective_slot_h,
                                     n_actions,
                                     scale,
+                                    notification_inset(policy, scale),
                                 ))
                         {
                             let state = chrome_state(notification_action_interaction_id(
@@ -536,7 +543,7 @@ impl super::Compositor {
                 .map(|_| urgency_to_severity_color(n.urgency, &self.token_map)),
             ZoneContent::Notification(n) => policy.backdrop.map(|_| {
                 let mut color = urgency_to_notification_color(n.urgency, &self.token_map);
-                color.a = NOTIFICATION_BACKDROP_OPACITY;
+                color.a = notification_backdrop_opacity(&self.token_map);
                 color
             }),
             _ => policy.backdrop,
@@ -557,12 +564,14 @@ impl super::Compositor {
             }
         });
         if sdf_radius.is_some() {
-            // Notification cards keep their fixed opacity; others take the policy's.
+            // Notification cards keep their token opacity; others take the policy's.
             if !is_card {
                 if let Some(o) = policy.backdrop_opacity {
                     rgba.a = o.clamp(0.0, 1.0);
                 }
             }
+            // Never above the zone's ceiling (ambient-background).
+            rgba.a = rgba.a.min(zone_opacity_ceiling(zone_name, &self.token_map));
             rgba.a *= opacity;
             out.push(RoundedRectDrawCmd {
                 x: slot.x,

@@ -28,15 +28,6 @@ toml = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
 tokio-stream = { workspace = true }
-# `subtle` provides `ConstantTimeEq` for the constant-time PSK comparison in
-# `auth.rs`. Dependency-policy justification (engineering-bar.md §6): `subtle`
-# is the de-facto-standard constant-time-primitives crate (RustCrypto
-# ecosystem), permissively licensed (BSD-3-Clause — cargo-deny clean), has a
-# tiny `no_std` surface with no transitive deps, and is ALREADY a vetted
-# workspace dependency used by `tze_hud_mcp` and `tze_hud_projection`. It
-# replaces a hand-rolled xor-fold so we no longer maintain a security-relevant
-# primitive ourselves.
-subtle = { workspace = true }
 
 [dev-dependencies]
 # Self-dependency with dev-mode enabled so that integration tests under tests/

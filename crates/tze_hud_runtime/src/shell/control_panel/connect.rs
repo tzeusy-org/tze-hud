@@ -406,7 +406,7 @@ impl ConnectControl {
                     mono: false,
                 },
             )
-            .detail("Zones, widgets, portal, tiles. Not admin."),
+            .detail("Zones, widgets and portal. Not admin."),
             Row::new(
                 COPY,
                 "Copy prompt · Enter",

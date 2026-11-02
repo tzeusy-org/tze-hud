@@ -34,7 +34,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use ab_glyph::{Font, ScaleFont};
 use tze_hud_scene::DegradationLevel;
 use tze_hud_scene::types::{
-    GeometryPolicy, Rgba, WIDGET_TILE_Z_MIN, WidgetBinding, WidgetBindingMapping, WidgetDefinition,
+    GeometryPolicy, Rgba, WidgetBinding, WidgetBindingMapping, WidgetDefinition,
     WidgetParameterValue, WidgetRegistry,
 };
 
@@ -1754,8 +1754,9 @@ pub(crate) fn interpolate_param(
 /// new texture. When false, the cached texture is reused.
 pub struct WidgetTextureEntry {
     resident_allocation_id: Option<tze_hud_resource::AllocationId>,
-    /// Owns the cached wgpu texture (RGBA8Unorm, premultiplied alpha).
-    _texture: wgpu::Texture,
+    /// Owns the cached wgpu texture (RGBA8Unorm, premultiplied alpha). A
+    /// same-size re-raster writes into it in place.
+    texture: wgpu::Texture,
     /// Bind group for sampling the texture in the widget render pass.
     pub(crate) bind_group: wgpu::BindGroup,
     /// Width of the texture in pixels.
@@ -2574,6 +2575,9 @@ pub struct WidgetRenderer {
     /// Bind group layout for the texture pipeline.
     texture_bind_group_layout: wgpu::BindGroupLayout,
 
+    /// One linear clamp sampler shared by every widget bind group.
+    sampler: wgpu::Sampler,
+
     /// Render pipeline for compositing widget textures.
     texture_pipeline: wgpu::RenderPipeline,
 }
@@ -2596,6 +2600,34 @@ fn reserve_widget_source(
         )?;
     }
     Ok(allocation_id)
+}
+
+fn write_widget_pixels(
+    queue: &wgpu::Queue,
+    texture: &wgpu::Texture,
+    rgba_data: &[u8],
+    width: u32,
+    height: u32,
+) {
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo {
+            texture,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        rgba_data,
+        wgpu::TexelCopyBufferLayout {
+            offset: 0,
+            bytes_per_row: Some(width * 4),
+            rows_per_image: Some(height),
+        },
+        wgpu::Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
+    );
 }
 
 impl WidgetRenderer {
@@ -2628,6 +2660,14 @@ impl WidgetRenderer {
 
         let texture_pipeline =
             Self::create_texture_pipeline(device, &texture_bind_group_layout, output_format);
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("widget_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Linear,
+            min_filter: wgpu::FilterMode::Linear,
+            ..Default::default()
+        });
 
         Self {
             snap_on_show: false,
@@ -2642,6 +2682,7 @@ impl WidgetRenderer {
             rgba_upload_count: 0,
             render_plans: HashMap::new(),
             texture_bind_group_layout,
+            sampler,
             texture_pipeline,
         }
     }
@@ -2943,6 +2984,10 @@ impl WidgetRenderer {
     }
 
     /// Upload RGBA pixel data to a wgpu texture (creating or replacing the cached entry).
+    ///
+    /// A re-raster at the cached size (every tick of a transition, every
+    /// parameter update) writes into the existing texture and keeps its bind
+    /// group; only a size change allocates GPU objects.
     fn upload_texture(
         &mut self,
         device: &wgpu::Device,
@@ -2966,7 +3011,24 @@ impl WidgetRenderer {
             tracing::warn!(instance_name, "widget raster cache admission denied");
             return;
         }
-        // Create the GPU texture.
+        if let Some(entry) = self.textures.get_mut(instance_name)
+            && entry.width == width
+            && entry.height == height
+        {
+            // Same size, same allocation identity: the reservation above was
+            // idempotent, so nothing is re-charged.
+            write_widget_pixels(queue, &entry.texture, rgba_data, width, height);
+            // A ledger installed after this texture was created owns it now.
+            entry.resident_allocation_id = self.resident_ledger.as_ref().map(|_| allocation_id);
+            entry.dirty = false;
+            entry.last_rendered_params = HashMap::new();
+            #[cfg(any(test, feature = "dev-mode"))]
+            {
+                self.rgba_upload_count += 1;
+            }
+            return;
+        }
+
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some(&format!("widget_tex_{instance_name}")),
             size: wgpu::Extent3d {
@@ -2984,27 +3046,7 @@ impl WidgetRenderer {
             usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
             view_formats: &[],
         });
-
-        // Write pixel data.
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &texture,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            rgba_data,
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(width * 4),
-                rows_per_image: Some(height),
-            },
-            wgpu::Extent3d {
-                width,
-                height,
-                depth_or_array_layers: 1,
-            },
-        );
+        write_widget_pixels(queue, &texture, rgba_data, width, height);
 
         #[cfg(any(test, feature = "dev-mode"))]
         {
@@ -3012,15 +3054,6 @@ impl WidgetRenderer {
         }
 
         let texture_view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some(&format!("widget_sampler_{instance_name}")),
-            address_mode_u: wgpu::AddressMode::ClampToEdge,
-            address_mode_v: wgpu::AddressMode::ClampToEdge,
-            mag_filter: wgpu::FilterMode::Linear,
-            min_filter: wgpu::FilterMode::Linear,
-            ..Default::default()
-        });
-
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some(&format!("widget_bg_{instance_name}")),
             layout: &self.texture_bind_group_layout,
@@ -3031,7 +3064,7 @@ impl WidgetRenderer {
                 },
                 wgpu::BindGroupEntry {
                     binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
                 },
             ],
         });
@@ -3048,7 +3081,7 @@ impl WidgetRenderer {
                     .resident_ledger
                     .as_ref()
                     .map(|_| allocation_id.clone()),
-                _texture: texture,
+                texture,
                 bind_group,
                 width,
                 height,
@@ -3086,8 +3119,8 @@ impl WidgetRenderer {
     ) {
         use wgpu::util::DeviceExt;
 
-        // Sort active instances by z_order (all widgets use WIDGET_TILE_Z_MIN
-        // base + their declared order, so any ordering works for now).
+        // Every widget shares WIDGET_TILE_Z_MIN, so overlapping widgets draw
+        // in instance-name order: stable across frames, unlike HashMap order.
         let mut instances: Vec<&tze_hud_scene::types::WidgetInstance> = registry
             .instances
             .values()
@@ -3098,7 +3131,7 @@ impl WidgetRenderer {
                     .is_some_and(|publishes| !publishes.is_empty())
             })
             .collect();
-        instances.sort_by_key(|_i| WIDGET_TILE_Z_MIN);
+        instances.sort_unstable_by(|a, b| a.instance_name.cmp(&b.instance_name));
 
         render_pass.set_pipeline(&self.texture_pipeline);
 
@@ -3164,7 +3197,7 @@ impl WidgetRenderer {
                     .is_some_and(|publishes| !publishes.is_empty())
             })
             .collect();
-        instances.sort_by_key(|_i| WIDGET_TILE_Z_MIN);
+        instances.sort_unstable_by(|a, b| a.instance_name.cmp(&b.instance_name));
 
         let mut quads = Vec::new();
         for instance in instances {

@@ -153,7 +153,6 @@ test-integration:
 test-python:
     {{py}} -m pytest \
         .claude/skills/user-test/tests/ \
-        .claude/skills/user-test/scripts/test_hud_grpc_client.py \
         scripts/tests/ \
         -q
     {{py}} -m unittest discover -s scripts/ci

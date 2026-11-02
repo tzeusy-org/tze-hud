@@ -486,7 +486,7 @@ fn populate_drag_handles(compositor: &Compositor, scene: &mut SceneGraph, sw: f3
 }
 
 #[tokio::test]
-async fn drag_handle_regions_cover_visible_tile_zone_and_widget() {
+async fn drag_handle_regions_cover_visible_tile_and_zone_but_not_widget() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
 
     let mut scene = SceneGraph::new(1920.0, 1080.0);
@@ -615,10 +615,9 @@ async fn drag_handle_regions_cover_visible_tile_zone_and_widget() {
         kinds.contains(&DragHandleElementKind::Zone),
         "zone handle missing"
     );
-    assert!(
-        kinds.contains(&DragHandleElementKind::Widget),
-        "widget handle missing"
-    );
+    // One tile handle and one active-zone handle; the published widget gets
+    // none (its geometry comes from the control panel's Layout card).
+    assert_eq!(kinds.len(), 2, "unexpected drag handles: {kinds:?}");
     assert!(
         scene
             .overlay

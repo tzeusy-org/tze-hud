@@ -221,10 +221,17 @@ pub struct NetworkRuntime {
     pub rt: Runtime,
 }
 
+/// Network worker threads. A handful of trusted agents never saturates two
+/// workers as long as CPU-heavy work (resource hashing and decode) goes to
+/// `spawn_blocking`; tokio's default (one per logical CPU) only adds parked
+/// threads, 16+ on a desktop.
+const NETWORK_WORKER_THREADS: usize = 2;
+
 impl NetworkRuntime {
     /// Build a multi-thread Tokio runtime for network tasks.
     pub fn new() -> Result<Self, std::io::Error> {
         let rt = tokio::runtime::Builder::new_multi_thread()
+            .worker_threads(NETWORK_WORKER_THREADS)
             .thread_name("tze-network")
             .enable_all()
             .build()?;

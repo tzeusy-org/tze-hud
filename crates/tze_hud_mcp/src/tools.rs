@@ -106,6 +106,8 @@ pub struct ToolCtx<'a> {
     pub scene: &'a Arc<Mutex<SceneGraph>>,
     pub portals: Option<&'a PortalHandle>,
     pub input_notifiers: &'a InputNotifiers,
+    #[cfg(any(test, feature = "test-harness"))]
+    pub input_wait_probe: Option<&'a tokio::sync::watch::Sender<bool>>,
     pub portal_wake: &'a RenderWakeNotifier,
     pub state: &'a McpState,
     /// The runtime's safe-mode flag, shared with gRPC. While set, every
@@ -1099,9 +1101,15 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
         if !items.is_empty() || backlog > 0 || now >= deadline {
             return Ok(json!({ "items": items, "remaining": backlog }));
         }
-        tokio::select! {
-            _ = notified.as_mut() => {},
-            _ = tokio::time::sleep_until(deadline) => {},
+        {
+            // Observe only the armed wait after both authoritative predicates.
+            // Every wake or dispatch cancellation clears it before any recheck.
+            #[cfg(any(test, feature = "test-harness"))]
+            let _waiting = ctx.input_wait_probe.map(crate::server::InputWaitGuard::arm);
+            tokio::select! {
+                _ = notified.as_mut() => {},
+                _ = tokio::time::sleep_until(deadline) => {},
+            }
         }
         // A deadline wake takes one final predicate pass; it never resets the
         // request deadline or repeatedly touches the Hub while idle.

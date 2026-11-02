@@ -296,7 +296,7 @@ async fn start_server() -> (Client, tokio::task::JoinHandle<()>, InputEventSende
 }
 
 /// Handshake subscribing to `subscriptions`; returns the stream positioned after
-/// `SessionEstablished`, `SceneSnapshot`, and the initial `DegradationNotice`.
+/// `SessionEstablished` and the initial `DegradationNotice`.
 async fn connect(client: &mut Client, agent_id: &str, subscriptions: &[&str]) -> (Sender, Stream) {
     let (tx, rx) = tokio::sync::mpsc::channel::<ClientMessage>(64);
     tx.send(ClientMessage {
@@ -306,8 +306,6 @@ async fn connect(client: &mut Client, agent_id: &str, subscriptions: &[&str]) ->
             agent_id: agent_id.to_string(),
             initial_subscriptions: subscriptions.iter().map(|s| s.to_string()).collect(),
             resume_token: Vec::new(),
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
             auth_credential: Some(tze_hud_protocol::auth::psk_credential(
                 "test-psk".to_string(),
             )),
@@ -320,7 +318,7 @@ async fn connect(client: &mut Client, agent_id: &str, subscriptions: &[&str]) ->
         .await
         .unwrap()
         .into_inner();
-    for _ in 0..3 {
+    for _ in 0..2 {
         let _ = stream.next().await;
     }
     (tx, stream)

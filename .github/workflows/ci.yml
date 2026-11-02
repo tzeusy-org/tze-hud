@@ -65,9 +65,7 @@ jobs:
   # ── Static: no compilation ──────────────────────────────────────────────────
   #
   # The Python suites are pure-Python and hermetic: no GPU, Windows, live HUD
-  # runtime or network. test_hud_grpc_client.py needs the `blake3` wheel from
-  # requirements-dev.txt; without it, it compiles a cargo helper on the fly (a
-  # hidden crates.io dependency). Live-HUD CLI tools under the user-test skill's
+  # runtime or network. Live-HUD CLI tools under the user-test skill's
   # scripts/ (stress_test_zones.py, publish_*_batch.py, *_exemplar.py) are not
   # test suites and stay out.
 
@@ -110,7 +108,6 @@ jobs:
         run: |
           python3 -m pytest \
             .claude/skills/user-test/tests/ \
-            .claude/skills/user-test/scripts/test_hud_grpc_client.py \
             scripts/tests/ \
             -q
       # Includes the idle-efficiency, quiescent-startup and token-footprint

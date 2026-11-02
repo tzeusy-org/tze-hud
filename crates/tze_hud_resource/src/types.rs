@@ -283,9 +283,12 @@ pub enum ResourceError {
     #[error("RESOURCE_TOO_MANY_UPLOADS: agent has too many concurrent uploads")]
     TooManyUploads,
 
-    /// Chunk arrived out-of-order or for an unknown upload ID.
+    /// Chunk arrived malformed or out of order.
     #[error("RESOURCE_INVALID_CHUNK: {0}")]
     InvalidChunk(String),
+    /// The upload ID has no active upload for this agent.
+    #[error("RESOURCE_INVALID_CHUNK: {0}")]
+    UploadNotFound(String),
 
     /// Upload was aborted before completion.
     ///
@@ -313,7 +316,9 @@ impl ResourceError {
             ResourceError::UnsupportedType(_) => "RESOURCE_UNSUPPORTED_TYPE",
             ResourceError::DecodeError(_) => "RESOURCE_DECODE_ERROR",
             ResourceError::TooManyUploads => "RESOURCE_TOO_MANY_UPLOADS",
-            ResourceError::InvalidChunk(_) => "RESOURCE_INVALID_CHUNK",
+            ResourceError::InvalidChunk(_) | ResourceError::UploadNotFound(_) => {
+                "RESOURCE_INVALID_CHUNK"
+            }
             ResourceError::UploadAborted(_) => "RESOURCE_UPLOAD_ABORTED",
             ResourceError::Internal(_) => "RESOURCE_INTERNAL",
         }

@@ -60,8 +60,8 @@ fn token_font_family(tokens: &DesignTokenMap, key: &str) -> Option<FontFamily> {
 /// - `font_family` ← `typography.subtitle.family`
 /// - `font_size_px` ← `typography.subtitle.size`
 /// - `font_weight` ← `typography.subtitle.weight`
-/// - `backdrop` ← `color.backdrop.default`
-/// - `backdrop_opacity` ← `opacity.backdrop.default`
+/// - `backdrop` ← `color.subtitle.backdrop`, `backdrop_opacity` ←
+///   `opacity.subtitle.backdrop`, only when that opacity is above 0
 /// - `outline_color` ← `color.outline.default`
 /// - `outline_width` ← `stroke.outline.width`
 /// - `text_align` ← `Center` (hardcoded, not token-driven)
@@ -80,10 +80,16 @@ pub fn apply_subtitle_token_defaults(policy: &mut RenderingPolicy, tokens: &Desi
     if policy.font_weight.is_none() {
         policy.font_weight = token_u16(tokens, "typography.subtitle.weight");
     }
-    // Subtitle uses outline-only readability (no backdrop). The DualLayer
-    // technique achieves legibility via text outline alone on a transparent
-    // background, letting the underlying content show through.
-    // backdrop and backdrop_opacity are intentionally NOT populated from tokens.
+    // Subtitle reads by its text outline alone over a transparent zone. The
+    // owner can add a fill behind the whole zone (Appearance → Subtitle
+    // backdrop), which makes streamed subtitles stand out: it is drawn only
+    // while `opacity.subtitle.backdrop` > 0.
+    if policy.backdrop.is_none()
+        && let Some(opacity) = token_f32(tokens, "opacity.subtitle.backdrop").filter(|o| *o > 0.0)
+    {
+        policy.backdrop = token_color(tokens, "color.subtitle.backdrop");
+        policy.backdrop_opacity = Some(opacity.min(1.0));
+    }
     if policy.outline_color.is_none() {
         policy.outline_color = token_color(tokens, "color.outline.default");
     }
@@ -120,8 +126,7 @@ pub fn apply_subtitle_token_defaults(policy: &mut RenderingPolicy, tokens: &Desi
 /// - `backdrop` ← `color.backdrop.default`
 /// - `backdrop_opacity` ← `opacity.backdrop.opaque`
 /// - `outline_color` ← `None` (no outline for notifications; spec says explicitly None)
-/// - `margin_horizontal` ← `spacing.padding.medium`
-/// - `margin_vertical` ← `spacing.padding.medium`
+/// - `margin_horizontal`, `margin_vertical` ← `spacing.notification.inset`
 /// - `backdrop_radius` ← `border.radius.medium`
 /// - `text_align` ← `Start`; transitions ← `motion.enter.ms` / `motion.exit.ms`
 pub fn apply_notification_area_token_defaults(
@@ -147,11 +152,13 @@ pub fn apply_notification_area_token_defaults(
         policy.backdrop_opacity = token_f32(tokens, "opacity.backdrop.opaque");
     }
     // outline_color: explicitly None for notifications — not token-driven
+    // The card inset: text, action row and × all sit this far from the edge.
+    let inset = token_f32(tokens, "spacing.notification.inset");
     if policy.margin_horizontal.is_none() {
-        policy.margin_horizontal = token_f32(tokens, "spacing.padding.medium");
+        policy.margin_horizontal = inset;
     }
     if policy.margin_vertical.is_none() {
-        policy.margin_vertical = token_f32(tokens, "spacing.padding.medium");
+        policy.margin_vertical = inset;
     }
     if policy.backdrop_radius.is_none() {
         policy.backdrop_radius = token_f32(tokens, "border.radius.medium");
@@ -202,7 +209,8 @@ pub fn apply_status_bar_token_defaults(policy: &mut RenderingPolicy, tokens: &De
 /// Apply token-derived defaults for the `alert-banner` zone to `policy`.
 ///
 /// Token mappings:
-/// - `text_color` ← `color.text.primary`
+/// - `text_color` ← `color.text.primary` (the compositor draws banner text in
+///   `color.on_severity.*` for the publication's urgency instead)
 /// - `font_family` ← `typography.heading.family`
 /// - `font_size_px` ← `typography.heading.size`
 /// - `font_weight` ← `typography.heading.weight`
@@ -227,13 +235,8 @@ pub fn apply_alert_banner_token_defaults(policy: &mut RenderingPolicy, tokens: &
     if policy.backdrop_opacity.is_none() {
         policy.backdrop_opacity = token_f32(tokens, "opacity.backdrop.opaque");
     }
-    // Black text outline for legibility on light backdrops (e.g. warning/amber).
-    if policy.outline_color.is_none() {
-        policy.outline_color = token_color(tokens, "color.outline.default");
-    }
-    if policy.outline_width.is_none() {
-        policy.outline_width = Some(1.0);
-    }
+    // No text outline: the compositor draws banner text in the
+    // `color.on_severity.*` color that contrasts with its severity fill.
     // Generous vertical padding for banner readability.
     if policy.margin_vertical.is_none() {
         policy.margin_vertical = Some(12.0);
@@ -308,6 +311,38 @@ mod tests {
     }
 
     // ── apply_token_defaults_for_zone ─────────────────────────────────────────
+
+    #[test]
+    fn subtitle_backdrop_is_drawn_only_while_its_opacity_is_above_zero() {
+        let mut tokens = default_tokens();
+        let mut off = RenderingPolicy::default();
+        apply_token_defaults_for_zone("subtitle", &mut off, &tokens);
+        assert!(off.backdrop.is_none() && off.backdrop_opacity.is_none());
+
+        tokens.insert("opacity.subtitle.backdrop".into(), "0.85".into());
+        tokens.insert("color.subtitle.backdrop".into(), "#102030".into());
+        let mut on = RenderingPolicy::default();
+        apply_token_defaults_for_zone("subtitle", &mut on, &tokens);
+        assert_eq!(on.backdrop, token_color(&tokens, "color.subtitle.backdrop"));
+        assert_eq!(on.backdrop_opacity, Some(0.85));
+    }
+
+    #[test]
+    fn notification_margins_follow_the_notification_inset_token() {
+        let mut tokens = default_tokens();
+        tokens.insert("spacing.notification.inset".into(), "16".into());
+        let mut policy = RenderingPolicy::default();
+        apply_token_defaults_for_zone("notification-area", &mut policy, &tokens);
+        assert_eq!(policy.margin_horizontal, Some(16.0));
+        assert_eq!(policy.margin_vertical, Some(16.0));
+    }
+
+    #[test]
+    fn alert_banner_draws_no_text_outline() {
+        let mut policy = RenderingPolicy::default();
+        apply_token_defaults_for_zone("alert-banner", &mut policy, &default_tokens());
+        assert!(policy.outline_color.is_none() && policy.outline_width.is_none());
+    }
 
     #[test]
     fn test_subtitle_token_defaults_populate_none_fields() {
@@ -611,73 +646,5 @@ mod tests {
 
         // ambient-background gets no token defaults
         assert_eq!(policy, RenderingPolicy::default());
-    }
-}
-
-/// Claimed-tile placement sizes from the resolved `tile.*` tokens; missing or
-/// unparseable entries keep the defaults.
-pub fn tile_placement_from_tokens(
-    tokens: &DesignTokenMap,
-) -> tze_hud_scene::placement::TilePlacementTokens {
-    let mut t = tze_hud_scene::placement::TilePlacementTokens::default();
-    for (class, slot) in [
-        ("small", &mut t.small),
-        ("medium", &mut t.medium),
-        ("large", &mut t.large),
-        ("wide", &mut t.wide),
-        ("tall", &mut t.tall),
-    ] {
-        if let Some(w) = token_f32(tokens, &format!("tile.{class}.width")).filter(|v| *v > 0.0) {
-            slot.0 = w;
-        }
-        if let Some(h) = token_f32(tokens, &format!("tile.{class}.height")).filter(|v| *v > 0.0) {
-            slot.1 = h;
-        }
-    }
-    if let Some(m) = token_f32(tokens, "tile.margin").filter(|v| *v >= 0.0) {
-        t.margin = m;
-    }
-    if let Some(g) = token_f32(tokens, "tile.gap").filter(|v| *v >= 0.0) {
-        t.gap = g;
-    }
-    // Logical dp to physical px.
-    let scale = crate::tokens::px_scale(tokens);
-    for slot in [
-        &mut t.small,
-        &mut t.medium,
-        &mut t.large,
-        &mut t.wide,
-        &mut t.tall,
-    ] {
-        slot.0 *= scale;
-        slot.1 *= scale;
-    }
-    t.margin *= scale;
-    t.gap *= scale;
-    t
-}
-
-#[cfg(test)]
-mod tile_placement_tests {
-    use super::*;
-
-    #[test]
-    fn canonical_tile_tokens_match_placement_defaults() {
-        let resolved =
-            crate::tokens::resolve_tokens(&DesignTokenMap::new(), &DesignTokenMap::new());
-        assert_eq!(
-            tile_placement_from_tokens(&resolved),
-            tze_hud_scene::placement::TilePlacementTokens::default()
-        );
-    }
-
-    #[test]
-    fn tile_tokens_override_sizes() {
-        let mut tokens = DesignTokenMap::new();
-        tokens.insert("tile.small.width".into(), "100".into());
-        tokens.insert("tile.gap".into(), "4".into());
-        let t = tile_placement_from_tokens(&tokens);
-        assert_eq!(t.small.0, 100.0);
-        assert_eq!(t.gap, 4.0);
     }
 }

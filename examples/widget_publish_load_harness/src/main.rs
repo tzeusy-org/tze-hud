@@ -617,8 +617,6 @@ fn build_session_init(cli: &Cli, psk: &str, sequence: u64) -> session_proto::Cli
             agent_id: cli.agent_id.clone(),
             initial_subscriptions: Vec::new(),
             resume_token: Vec::new(),
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
             auth_credential: Some(session_proto::AuthCredential {
                 credential: Some(session_proto::auth_credential::Credential::PreSharedKey(
                     session_proto::PreSharedKeyCredential {

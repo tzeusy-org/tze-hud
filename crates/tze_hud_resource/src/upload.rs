@@ -335,12 +335,12 @@ impl ResourceStore {
         }
 
         let mut guard = self.agent_uploads.lock().await;
-        let uploads = guard
-            .get_mut(agent_namespace)
-            .ok_or_else(|| ResourceError::InvalidChunk("no uploads in flight for agent".into()))?;
+        let uploads = guard.get_mut(agent_namespace).ok_or_else(|| {
+            ResourceError::UploadNotFound("no uploads in flight for agent".into())
+        })?;
 
         let inflight = uploads.inflight.get_mut(&upload_id).ok_or_else(|| {
-            ResourceError::InvalidChunk(format!("unknown upload_id {upload_id:?}"))
+            ResourceError::UploadNotFound(format!("unknown upload_id {upload_id:?}"))
         })?;
 
         if chunk_index != inflight.next_chunk_index {
@@ -392,11 +392,11 @@ impl ResourceStore {
         let (resource_type, expected_hash, assembled, width, height) = {
             let mut guard = self.agent_uploads.lock().await;
             let uploads = guard.get_mut(agent_namespace).ok_or_else(|| {
-                ResourceError::InvalidChunk("no uploads in flight for agent".into())
+                ResourceError::UploadNotFound("no uploads in flight for agent".into())
             })?;
 
             let inflight = uploads.inflight.remove(&upload_id).ok_or_else(|| {
-                ResourceError::InvalidChunk(format!("unknown upload_id {upload_id:?}"))
+                ResourceError::UploadNotFound(format!("unknown upload_id {upload_id:?}"))
             })?;
 
             let assembled = inflight.assemble();
@@ -469,11 +469,18 @@ impl ResourceStore {
         // Type check.
         check_resource_type(resource_type)?;
 
-        // BLAKE3 hash integrity.
-        check_hash(&data, &expected_hash)?;
-
-        // Decode validation (also checks decoded size limits).
-        let meta = decode_and_validate(&data, resource_type, &self.config, width, height)?;
+        // Hashing and decoding a large payload is CPU-bound, so it runs on the
+        // blocking pool instead of the (deliberately small) network workers.
+        let config = Arc::clone(&self.config);
+        let (data, meta) = tokio::task::spawn_blocking(move || {
+            // BLAKE3 hash integrity.
+            check_hash(&data, &expected_hash)?;
+            // Decode validation (also checks decoded size limits).
+            let meta = decode_and_validate(&data, resource_type, &config, width, height)?;
+            Ok::<_, ResourceError>((data, meta))
+        })
+        .await
+        .map_err(|e| ResourceError::DecodeError(format!("validation task failed: {e}")))??;
 
         // Validation and font-byte preparation stay outside the admission guard.
         let resource_id = ResourceId::from_bytes(expected_hash);

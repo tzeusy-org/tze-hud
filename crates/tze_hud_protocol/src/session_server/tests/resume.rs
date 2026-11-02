@@ -16,7 +16,41 @@ async fn disconnect_after_cleanup_registration(
 
 #[tokio::test]
 async fn test_resume_with_token() {
+    use prost::Message;
     let (mut client, _server, state) = setup_test_with_state().await;
+    // Foreign portal content and an unsent composer draft must never cross
+    // the session boundary, including for an unrestricted paired agent.
+    {
+        let st = state.lock().await;
+        let mut scene = st.scene.lock().await;
+        let tab = scene.create_tab("main", 0).unwrap();
+        for secret in ["foreign-transcript-sentinel", "foreign-draft-sentinel"] {
+            let lease = scene.grant_lease("foreign-portal", 60_000);
+            let tile = scene
+                .create_tile(
+                    tab,
+                    "foreign-portal",
+                    lease,
+                    Rect::new(0.0, 0.0, 100.0, 50.0),
+                    1,
+                )
+                .unwrap();
+            let node = crate::convert::proto_node_to_scene(&crate::proto::NodeProto {
+                data: Some(crate::proto::node_proto::Data::TextMarkdown(
+                    crate::proto::TextMarkdownNodeProto {
+                        content: secret.to_string(),
+                        ..Default::default()
+                    },
+                )),
+                ..Default::default()
+            })
+            .unwrap();
+            scene.set_tile_root(tile, node).unwrap();
+            scene
+                .set_portal_surface(tile, PortalSurface::default(), "foreign-portal")
+                .unwrap();
+        }
+    }
 
     // Start initial session to get a resume token and its actual scene identity.
     let (tx, init_messages, stream) = handshake(&mut client, "resumable", "test-key").await;
@@ -43,8 +77,7 @@ async fn test_resume_with_token() {
                 agent_id: "resumable".to_string(),
                 resume_token,
                 last_seen_server_sequence: 2,
-                pre_shared_key: "test-key".to_string(),
-                auth_credential: None,
+                auth_credential: Some(crate::auth::psk_credential("test-key")),
             })),
         })
         .await
@@ -52,34 +85,32 @@ async fn test_resume_with_token() {
 
     let mut response_stream = client.session(resume_stream).await.unwrap().into_inner();
 
-    // Resume ordering is result, coherent snapshot, then current degradation
-    // state before any live transition.
+    // Resume sends its result and current degradation before any live transition.
     let msg1 = response_stream.next().await.unwrap().unwrap();
     match &msg1.payload {
         Some(ServerPayload::SessionResumeResult(result)) => {
             assert!(result.accepted, "expected resume to be accepted");
             assert!(!result.new_session_token.is_empty());
-            // version = major * 1000 + minor; runtime max = v1.1 = 1001
-            assert_eq!(
-                result.negotiated_protocol_version,
-                crate::auth::RUNTIME_MAX_VERSION
-            );
         }
         other => panic!("Expected SessionResumeResult on resume, got: {other:?}"),
     }
 
     let msg2 = response_stream.next().await.unwrap().unwrap();
     match &msg2.payload {
-        Some(ServerPayload::SceneSnapshot(_)) => {}
-        other => panic!("Expected SceneSnapshot on resume, got: {other:?}"),
-    }
-
-    let msg3 = response_stream.next().await.unwrap().unwrap();
-    match &msg3.payload {
         Some(ServerPayload::DegradationNotice(notice)) => {
             assert_eq!(notice.level, DegradationLevel::Normal as i32);
         }
         other => panic!("Expected current DegradationNotice on resume, got: {other:?}"),
+    }
+    for message in [msg1, msg2] {
+        let wire = message.encode_to_vec();
+        for secret in ["foreign-transcript-sentinel", "foreign-draft-sentinel"] {
+            assert!(
+                !wire
+                    .windows(secret.len())
+                    .any(|bytes| bytes == secret.as_bytes())
+            );
+        }
     }
 }
 
@@ -127,8 +158,7 @@ async fn test_reconnect_within_grace_accepted() {
                 agent_id: "resume-ok-agent".to_string(),
                 resume_token: resume_token.clone(),
                 last_seen_server_sequence: 2,
-                pre_shared_key: "test-key".to_string(),
-                auth_credential: None,
+                auth_credential: Some(crate::auth::psk_credential("test-key")),
             })),
         })
         .await
@@ -148,19 +178,15 @@ async fn test_reconnect_within_grace_accepted() {
                 result.new_session_token, resume_token,
                 "new token must differ from old token"
             );
-            assert_eq!(
-                result.negotiated_protocol_version,
-                crate::auth::RUNTIME_MAX_VERSION
-            );
         }
         other => panic!("Expected SessionResumeResult, got: {other:?}"),
     }
 
-    // Full SceneSnapshot must follow SessionResumeResult.
+    // The current degradation state must follow SessionResumeResult.
     let msg2 = response_stream.next().await.unwrap().unwrap();
     match &msg2.payload {
-        Some(ServerPayload::SceneSnapshot(_)) => {}
-        other => panic!("Expected SceneSnapshot after resume, got: {other:?}"),
+        Some(ServerPayload::DegradationNotice(_)) => {}
+        other => panic!("Expected current DegradationNotice after resume, got: {other:?}"),
     }
 }
 
@@ -182,8 +208,7 @@ async fn test_resume_token_single_use() {
             agent_id: "single-use-agent".to_string(),
             resume_token: resume_token.clone(),
             last_seen_server_sequence: 2,
-            pre_shared_key: "test-key".to_string(),
-            auth_credential: None,
+            auth_credential: Some(crate::auth::psk_credential("test-key")),
         })),
     })
     .await
@@ -221,8 +246,7 @@ async fn test_resume_token_single_use() {
             agent_id: "single-use-agent".to_string(),
             resume_token: resume_token.clone(),
             last_seen_server_sequence: 2,
-            pre_shared_key: "test-key".to_string(),
-            auth_credential: None,
+            auth_credential: Some(crate::auth::psk_credential("test-key")),
         })),
     })
     .await
@@ -297,30 +321,45 @@ async fn test_resume_auth_required() {
         let resume_token =
             handshake_and_disconnect(&mut client, "auth-check-agent", "old-key", &state).await;
 
-        // Invalid auth must not consume the token, even before any hand edit.
-        let (wrong_tx, wrong_rx) = tokio::sync::mpsc::channel(64);
-        wrong_tx
-            .send(ClientMessage {
-                sequence: 1,
-                timestamp_wall_us: now_wall_us(),
-                payload: Some(ClientPayload::SessionResume(SessionResume {
-                    agent_id: "auth-check-agent".to_string(),
-                    resume_token: resume_token.clone(),
-                    last_seen_server_sequence: 2,
-                    auth_credential: Some(crate::auth::psk_credential("wrong-key".to_string())),
-                    ..Default::default()
-                })),
-            })
-            .await
-            .unwrap();
-        let mut wrong_stream = client
-            .session(tokio_stream::wrappers::ReceiverStream::new(wrong_rx))
-            .await
-            .unwrap()
-            .into_inner();
-        match next_server_msg(&mut wrong_stream).await.payload {
-            Some(ServerPayload::SessionError(err)) => assert_eq!(err.code, "AUTH_FAILED"),
-            other => panic!("{change}: expected wrong-key AUTH_FAILED, got {other:?}"),
+        // Rejected credentials must not consume the token. Retired wire field4
+        // must be ignored even when it contains the correct previous PSK.
+        use prost::Message;
+        for (credential_case, credential) in [
+            ("wrong", Some(crate::auth::psk_credential("wrong-key"))),
+            ("empty", Some(crate::auth::psk_credential(""))),
+            ("missing", None),
+            ("legacy-only", None),
+        ] {
+            let mut resume = SessionResume {
+                agent_id: "auth-check-agent".to_string(),
+                resume_token: resume_token.clone(),
+                last_seen_server_sequence: 2,
+                auth_credential: credential,
+            };
+            if credential_case == "legacy-only" {
+                let mut wire = resume.encode_to_vec();
+                wire.extend_from_slice(&[0x22, 7]); // old pre_shared_key field4
+                wire.extend_from_slice(b"old-key");
+                resume = SessionResume::decode(wire.as_slice()).unwrap();
+            }
+            let (wrong_tx, wrong_rx) = tokio::sync::mpsc::channel(64);
+            wrong_tx
+                .send(ClientMessage {
+                    sequence: 1,
+                    timestamp_wall_us: now_wall_us(),
+                    payload: Some(ClientPayload::SessionResume(resume)),
+                })
+                .await
+                .unwrap();
+            let mut wrong_stream = client
+                .session(tokio_stream::wrappers::ReceiverStream::new(wrong_rx))
+                .await
+                .unwrap()
+                .into_inner();
+            match next_server_msg(&mut wrong_stream).await.payload {
+                Some(ServerPayload::SessionError(err)) => assert_eq!(err.code, "AUTH_FAILED"),
+                other => panic!("{change}/{credential_case}: expected AUTH_FAILED, got {other:?}"),
+            }
         }
 
         agents.store(Arc::new(directory(current_key, true)));
@@ -349,14 +388,11 @@ async fn test_resume_auth_required() {
                     resume_token: resume_token.clone(),
                     last_seen_server_sequence: 2,
                     auth_credential: credential,
-                    ..Default::default()
                 })
             } else {
                 ClientPayload::SessionInit(SessionInit {
                     agent_id: "auth-check-agent".to_string(),
                     initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string()],
-                    min_protocol_version: 1000,
-                    max_protocol_version: 1001,
                     auth_credential: credential,
                     ..Default::default()
                 })
@@ -398,10 +434,6 @@ async fn test_resume_auth_required() {
                     assert!(result.accepted, "{change}: {result:?}");
                     assert!(!result.new_session_token.is_empty());
                     assert_ne!(result.new_session_token, resume_token);
-                    assert_eq!(
-                        result.negotiated_protocol_version,
-                        crate::auth::RUNTIME_MAX_VERSION
-                    );
                     assert!(
                         result
                             .active_subscriptions
@@ -469,8 +501,7 @@ async fn test_bogus_token_rejected_with_grace_expired() {
                 agent_id: "restart-agent".to_string(),
                 resume_token: bogus_token,
                 last_seen_server_sequence: 0,
-                pre_shared_key: "test-key".to_string(),
-                auth_credential: None,
+                auth_credential: Some(crate::auth::psk_credential("test-key")),
             })),
         })
         .await
@@ -512,8 +543,6 @@ async fn test_resume_result_carries_subscription_state() {
             // Include required capabilities for both subscriptions (canonical names)
             initial_subscriptions: vec!["SCENE_TOPOLOGY".to_string(), "INPUT_EVENTS".to_string()],
             resume_token: Vec::new(),
-            min_protocol_version: 1000,
-            max_protocol_version: 1001,
             auth_credential: Some(crate::auth::psk_credential("test-key".to_string())),
         })),
     })
@@ -543,8 +572,7 @@ async fn test_resume_result_carries_subscription_state() {
             agent_id: "sub-resume-agent".to_string(),
             resume_token,
             last_seen_server_sequence: 2,
-            pre_shared_key: "test-key".to_string(),
-            auth_credential: None,
+            auth_credential: Some(crate::auth::psk_credential("test-key")),
         })),
     })
     .await

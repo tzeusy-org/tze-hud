@@ -5,8 +5,7 @@
 //! The dispatcher (`dispatch_message`) and session loop remain in `mod.rs`
 //! and call these functions unchanged.
 
-use crate::auth::{identify_session, negotiate_version};
-use crate::dedup::DedupWindow;
+use crate::auth::identify_session;
 use crate::lease::{DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY, LeaseCorrelationCache};
 use crate::proto::session::server_message::Payload as ServerPayload;
 use crate::proto::session::*;
@@ -18,7 +17,6 @@ use tonic::Status;
 use tze_hud_scene::config::{AgentDirectory, AgentIdentity, AuthRejection, SharedAgents};
 use tze_hud_scene::types::ResourceBudget;
 
-use super::freeze_queue::{FREEZE_QUEUE_CAPACITY, SessionFreezeQueue};
 use super::lifecycle::SessionState;
 use super::stream_session::StreamSession;
 use super::upload::UploadByteRateLimiter;
@@ -163,8 +161,6 @@ pub(super) struct HandshakeCtx<'a> {
     pub closer: &'a SessionCloser,
     pub resource_budget: &'a ResourceBudget,
     pub budget_enforcer: Option<&'a super::SharedMutationBudgetEnforcer>,
-    /// Peer address, for loopback gating of local-socket credentials.
-    pub peer_ip: Option<std::net::IpAddr>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -180,43 +176,8 @@ pub(super) async fn handle_session_init(
         closer,
         resource_budget,
         budget_enforcer,
-        peer_ip,
     } = ctx;
-    // ── Step 1: Version negotiation (RFC 0005 §4.1) ──────────────────────────
-    // Do this before authentication so agents can learn about version
-    // incompatibility even if they send a wrong key.
-    let negotiated_version =
-        match negotiate_version(init.min_protocol_version, init.max_protocol_version) {
-            Ok(v) => v,
-            Err(msg) => {
-                let _ = tx
-                    .send(Ok(ServerMessage {
-                        sequence: 1,
-                        timestamp_wall_us: now_wall_us(),
-                        payload: Some(ServerPayload::SessionError(SessionError {
-                            code: "UNSUPPORTED_PROTOCOL_VERSION".to_string(),
-                            message: msg,
-                            hint: format!(
-                                "{{\"runtime_min\": {}, \"runtime_max\": {}}}",
-                                crate::auth::RUNTIME_MIN_VERSION,
-                                crate::auth::RUNTIME_MAX_VERSION
-                            ),
-                        })),
-                    }))
-                    .await;
-                return None;
-            }
-        };
-
-    // ── Step 2: Identity (PSK → agent, allow → permissions) ──────────────────
-    // peer_ip is passed for LocalSocketCredential loopback gating (hud-1aswu.1).
-    let identity = match identify_session(
-        agents,
-        init.auth_credential.as_ref(),
-        "",
-        &init.agent_id,
-        peer_ip,
-    ) {
+    let identity = match identify_session(agents, init.auth_credential.as_ref(), &init.agent_id) {
         Ok(identity) => identity,
         Err(rejection) => {
             send_auth_failed(tx, rejection).await;
@@ -276,9 +237,7 @@ pub(super) async fn handle_session_init(
             identify_session(
                 &live_agents.load(),
                 init.auth_credential.as_ref(),
-                "",
                 &init.agent_id,
-                peer_ip,
             )
         };
         let Some(registered) =
@@ -296,17 +255,13 @@ pub(super) async fn handle_session_init(
             st.resource_store.upload_rate_limit_bytes_per_sec(),
         )
     };
-    let scene_clock = Arc::clone(&state.lock().await.scene);
-    let session_open_at = scene_clock.lock().await.now_wall_us();
     let mut session = StreamSession {
         session_id,
         namespace: namespace.clone(),
         agent_name: namespace.clone(),
         capabilities: granted_capabilities,
-        lease_ids: Vec::new(),
         scene_session_id,
         publication_origin: scene_session_id,
-        resource_budget,
         budget_enforcer: budget_enforcer.cloned(),
         subscriptions: sub_result.active.clone(),
         server_sequence: 0,
@@ -314,9 +269,6 @@ pub(super) async fn handle_session_init(
         state: SessionState::Handshaking,
         last_client_sequence: 1, // SessionInit is sequence 1; start validation from next
         safe_mode_active: false,
-        freeze_queue: SessionFreezeQueue::new(FREEZE_QUEUE_CAPACITY),
-        session_open_at_wall_us: session_open_at,
-        dedup_window: DedupWindow::new(1000, 60),
         lease_correlation_cache: LeaseCorrelationCache::new(
             DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY,
         ),
@@ -343,7 +295,6 @@ pub(super) async fn handle_session_init(
                 compositor_timestamp_wall_us: compositor_ts,
                 active_subscriptions: sub_result.active,
                 denied_subscriptions: sub_result.denied,
-                negotiated_protocol_version: negotiated_version,
             })),
         }))
         .await;
@@ -356,14 +307,13 @@ pub(super) async fn handle_session_init(
 ///
 /// # Protocol contract
 ///
-/// 1. Re-authenticate via `pre_shared_key` (RFC 0005 §6.2).
+/// 1. Re-authenticate via the structured PSK credential.
 /// 2. Look up and consume the resume token from the [`TokenStore`].
 ///    - If missing or expired → `SessionError(SESSION_GRACE_EXPIRED)`.
 ///    - If valid → restore session state and issue new token.
 /// 3. Send [`SessionResumeResult`] with `accepted=true` and the confirmed
 ///    subscription/capability state.
-/// 4. The caller (main session loop) sends a [`SceneSnapshot`] immediately
-///    after this function returns (same mechanism as new connections).
+/// 4. The caller sends the current degradation state, without scene content.
 #[allow(clippy::too_many_arguments)]
 pub(super) async fn handle_session_resume(
     ctx: HandshakeCtx<'_>,
@@ -377,17 +327,10 @@ pub(super) async fn handle_session_resume(
         closer,
         resource_budget,
         budget_enforcer,
-        peer_ip,
     } = ctx;
     // Re-authentication is required on resume (RFC 0005 §6.2).
-    // peer_ip is passed for LocalSocketCredential loopback gating (hud-1aswu.1).
-    let identity = match identify_session(
-        agents,
-        resume.auth_credential.as_ref(),
-        &resume.pre_shared_key,
-        &resume.agent_id,
-        peer_ip,
-    ) {
+    let identity = match identify_session(agents, resume.auth_credential.as_ref(), &resume.agent_id)
+    {
         Ok(identity) => identity,
         Err(rejection) => {
             send_auth_failed(tx, rejection).await;
@@ -405,7 +348,7 @@ pub(super) async fn handle_session_resume(
             .consume(&resume.resume_token, &identity.agent_id, current_ms)
     };
 
-    let mut prior_entry = match resume_result {
+    let prior_entry = match resume_result {
         Ok(entry) => entry,
         Err(err) => {
             // Token invalid or expired — agent must perform a full SessionInit.
@@ -431,19 +374,7 @@ pub(super) async fn handle_session_resume(
     let new_resume_token = uuid::Uuid::now_v7().as_bytes().to_vec();
     let scene_session_id = tze_hud_scene::SceneId::from_uuid(session_uuid);
     let resource_budget = resource_budget.clone();
-    let restored_usage = {
-        let st = state.lock().await;
-        let scene = st.scene.lock().await;
-        prior_entry.orphaned_lease_ids.iter().fold(
-            super::MutationBudgetUsage::default(),
-            |mut total, lease_id| {
-                let usage = scene.lease_resource_usage(lease_id);
-                total.tiles = total.tiles.saturating_add(usage.tiles);
-                total.texture_bytes = total.texture_bytes.saturating_add(usage.texture_bytes);
-                total
-            },
-        )
-    };
+    let restored_usage = super::MutationBudgetUsage::default();
     let registration_guard = if let Some(enforcer) = budget_enforcer {
         if let super::MutationBudgetDecision::Reject {
             error_code,
@@ -477,28 +408,17 @@ pub(super) async fn handle_session_resume(
         None
     };
 
-    // Reconnect the orphaned leases (ORPHANED → ACTIVE, badge cleared). Leases
-    // the runtime already reclaimed are dropped from the restored set.
+    // Restore only publications still owned by this resumable origin.
     {
         let st = state.lock().await;
         let mut scene = st.scene.lock().await;
-        let now = scene.now_millis();
         if let Some(origin) = prior_entry.publication_origin {
             scene.resume_publications(origin);
         }
-        prior_entry.orphaned_lease_ids.retain(|lease_id| {
-            match scene.leases.get(lease_id).map(|l| l.state) {
-                Some(tze_hud_scene::LeaseState::Orphaned) => {
-                    scene.reconnect_lease(lease_id, now).is_ok()
-                }
-                Some(state) => !state.is_terminal(),
-                None => false,
-            }
-        });
     }
 
     // Register the resumed agent in the session registry so shared-state
-    // operations (e.g. lease grant, broadcast) can find it, and capture the
+    // operations (e.g. broadcast) can find it, and capture the
     // current upload-rate configuration for this session.
     let (session_id, upload_rate_limit_bytes_per_sec) = {
         let mut st = state.lock().await;
@@ -506,9 +426,7 @@ pub(super) async fn handle_session_resume(
             identify_session(
                 &live_agents.load(),
                 resume.auth_credential.as_ref(),
-                &resume.pre_shared_key,
                 &resume.agent_id,
-                peer_ip,
             )
         };
         let Some(registered) =
@@ -527,19 +445,14 @@ pub(super) async fn handle_session_resume(
         )
     };
 
-    let scene_clock = Arc::clone(&state.lock().await.scene);
-    let session_open_at = scene_clock.lock().await.now_wall_us();
     let mut session = StreamSession {
         session_id,
         namespace: namespace.clone(),
         agent_name: namespace.clone(),
         // Permissions come from the current config, not the pre-disconnect set.
         capabilities: identity.permissions,
-        // Restore orphaned leases so the agent can continue using them.
-        lease_ids: prior_entry.orphaned_lease_ids.clone(),
         scene_session_id,
         publication_origin: prior_entry.publication_origin.unwrap_or(scene_session_id),
-        resource_budget,
         budget_enforcer: budget_enforcer.cloned(),
         // Restore subscription set from before the disconnect.
         subscriptions: prior_entry.subscriptions.clone(),
@@ -548,9 +461,6 @@ pub(super) async fn handle_session_resume(
         state: SessionState::Resuming,
         last_client_sequence: 1, // SessionResume is sequence 1; start validation from next
         safe_mode_active: false,
-        freeze_queue: SessionFreezeQueue::new(FREEZE_QUEUE_CAPACITY),
-        session_open_at_wall_us: session_open_at,
-        dedup_window: DedupWindow::new(1000, 60),
         lease_correlation_cache: LeaseCorrelationCache::new(
             DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY,
         ),
@@ -569,9 +479,6 @@ pub(super) async fn handle_session_resume(
                 accepted: true,
                 new_session_token: new_resume_token.clone(),
                 new_server_sequence: seq,
-                // Resume always runs at the highest runtime-supported version.
-                // version = major * 1000 + minor; v1.1 = 1001.
-                negotiated_protocol_version: crate::auth::RUNTIME_MAX_VERSION,
                 active_subscriptions: prior_entry.subscriptions,
                 denied_subscriptions: Vec::new(),
             })),

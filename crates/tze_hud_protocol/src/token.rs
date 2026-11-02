@@ -41,9 +41,6 @@ pub struct ResumeEntry {
     /// [`SessionResumeResult`] rather than assuming their pre-disconnect set
     /// is intact.
     pub subscriptions: Vec<String>,
-    /// Lease IDs that were held by the agent at disconnect.
-    /// The runtime may use these to reclaim/restore orphaned leases.
-    pub orphaned_lease_ids: Vec<SceneId>,
     /// Transient gRPC publication owner, independent of a resumed physical session.
     pub(crate) publication_origin: Option<SceneId>,
     /// Wall-clock expiry time in milliseconds (since UNIX epoch).
@@ -85,7 +82,6 @@ impl TokenStore {
         agent_id: String,
         capabilities: Vec<String>,
         subscriptions: Vec<String>,
-        orphaned_lease_ids: Vec<SceneId>,
         grace_period_ms: u64,
         now_ms: u64,
     ) {
@@ -94,7 +90,6 @@ impl TokenStore {
             agent_id,
             capabilities,
             subscriptions,
-            orphaned_lease_ids,
             grace_period_ms,
             now_ms,
             None,
@@ -108,7 +103,6 @@ impl TokenStore {
         agent_id: String,
         capabilities: Vec<String>,
         subscriptions: Vec<String>,
-        orphaned_lease_ids: Vec<SceneId>,
         grace_period_ms: u64,
         now_ms: u64,
         publication_origin: Option<SceneId>,
@@ -117,10 +111,12 @@ impl TokenStore {
             agent_id,
             capabilities,
             subscriptions,
-            orphaned_lease_ids,
             publication_origin,
             expires_at_ms: now_ms.saturating_add(grace_period_ms),
         };
+        // Tokens that are never presented again would otherwise stay for the
+        // life of the process; each disconnect sweeps out the expired ones.
+        self.evict_expired(now_ms);
         self.entries.insert(token, entry);
     }
 
@@ -175,8 +171,7 @@ impl TokenStore {
         }
     }
 
-    /// Remove expired entries in token-store fixtures.
-    #[cfg(test)]
+    /// Remove entries whose grace period has elapsed.
     fn evict_expired(&mut self, now_ms: u64) {
         self.entries.retain(|_, e| e.is_valid(now_ms));
     }
@@ -242,9 +237,8 @@ mod tests {
         store.insert(
             token.to_vec(),
             agent_id.to_string(),
-            vec!["create_tile".to_string()],
+            vec!["publish_zone:subtitle".to_string()],
             vec!["SCENE_TOPOLOGY".to_string()],
-            vec![],
             grace_ms,
             now_ms,
         );
@@ -263,7 +257,11 @@ mod tests {
 
         let entry = result.unwrap();
         assert_eq!(entry.agent_id, "agent-a");
-        assert!(entry.capabilities.contains(&"create_tile".to_string()));
+        assert!(
+            entry
+                .capabilities
+                .contains(&"publish_zone:subtitle".to_string())
+        );
     }
 
     /// Token is single-use: second consume attempt fails.
@@ -347,9 +345,10 @@ mod tests {
         );
     }
 
-    /// Expired entries are removed by evict_expired.
+    /// A later disconnect sweeps out tokens whose grace has elapsed, so
+    /// never-presented tokens do not accumulate with uptime.
     #[test]
-    fn test_evict_expired() {
+    fn test_insert_evicts_expired_tokens() {
         let mut store = TokenStore::new();
         let now = 1_000_000u64;
 
@@ -363,12 +362,12 @@ mod tests {
 
         assert_eq!(store.len(), 2);
 
-        // Advance time by 10 seconds
-        store.evict_expired(now + 10_000);
+        // Ten seconds later another session disconnects.
+        insert_entry(&mut store, &make_token(), "agent-c", 60_000, now + 10_000);
 
         assert_eq!(
             store.len(),
-            1,
+            2,
             "expired entry for agent-a should be evicted"
         );
 
@@ -404,13 +403,12 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    /// Orphaned lease IDs are preserved in the resume entry.
+    /// Publication origin is preserved in the resume entry.
     #[test]
-    fn test_orphaned_leases_preserved() {
+    fn test_publication_origin_preserved() {
         let mut store = TokenStore::new();
         let token = make_token();
         let now = 1_000_000u64;
-        let lease_id = SceneId::new();
 
         let origin = SceneId::new();
         store.insert_with_publication_origin(
@@ -418,15 +416,12 @@ mod tests {
             "agent-a".to_string(),
             vec![],
             vec![],
-            vec![lease_id],
             30_000,
             now,
             Some(origin),
         );
 
         let entry = store.consume(&token, "agent-a", now + 1_000).unwrap();
-        assert_eq!(entry.orphaned_lease_ids.len(), 1);
-        assert_eq!(entry.orphaned_lease_ids[0], lease_id);
         assert_eq!(entry.publication_origin, Some(origin));
     }
 }

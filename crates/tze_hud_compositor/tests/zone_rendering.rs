@@ -21,6 +21,16 @@ use tze_hud_scene::types::{
 const CLEAR: [u8; 4] = [63, 63, 89, 255];
 const TOL: u8 = 12;
 
+/// Lift the ambient-background opacity ceiling so a test can check exact
+/// fill colors; `ambient_background_opacity_is_capped` covers the ceiling.
+fn uncap_ambient(gpu: &mut Gpu) {
+    gpu.compositor.set_token_map(
+        [("opacity.ambient.max".to_owned(), "1".to_owned())]
+            .into_iter()
+            .collect(),
+    );
+}
+
 /// A scene with the shipped default zones (subtitle, notification-area,
 /// alert-banner, ambient-background, ...).
 fn default_scene(w: u32, h: u32) -> SceneGraph {
@@ -324,6 +334,7 @@ async fn ambient_background_shows_only_latest_publication() {
     let Some(mut gpu) = Gpu::new(64, 64).await else {
         return;
     };
+    uncap_ambient(&mut gpu);
     type Colors = &'static [(f32, f32, f32)];
     let cases: [(&str, Colors, [u8; 4]); 2] = [
         (
@@ -364,6 +375,7 @@ async fn background_layer_renders_below_content_zone() {
     let Some(mut gpu) = Gpu::new(256, 256).await else {
         return;
     };
+    uncap_ambient(&mut gpu);
     let mut scene = default_scene(256, 256);
     register_zone(
         &mut scene,
@@ -387,6 +399,22 @@ async fn background_layer_renders_below_content_zone() {
     frame.expect(128, 128, [255, 0, 0, 255], 8, "content over background");
 }
 
+/// The ambient fill never reaches full opacity (default `opacity.ambient.max`
+/// 0.9): the topmost overlay must not hide the whole desktop.
+#[tokio::test]
+async fn ambient_background_opacity_is_capped() {
+    let Some(mut gpu) = Gpu::new(64, 64).await else {
+        return;
+    };
+    let mut scene = default_scene(64, 64);
+    publish(&mut scene, "ambient-background", solid(0.0, 0.0, 1.0));
+    let px = gpu.render(&mut scene).at(32, 32);
+    assert!(
+        px[0] > 8 && px[1] > 8 && px[2] > 200,
+        "an opaque blue fill must let the clear color show through, got {px:?}"
+    );
+}
+
 /// A static image draws its texture (any aspect ratio) once bytes are registered,
 /// and the warm-grey placeholder until then.
 #[tokio::test]
@@ -399,6 +427,7 @@ async fn ambient_static_image_draws_texture_or_placeholder() {
         );
         return;
     };
+    uncap_ambient(&mut gpu);
     // Textures are evicted once unreferenced, so register right before each frame.
     // Retain the old centre check; the controls below test full-zone coverage
     // rather than assuming a tile-style non-square fitting policy.

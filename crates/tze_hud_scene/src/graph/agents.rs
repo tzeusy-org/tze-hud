@@ -33,8 +33,7 @@ impl AgentHoldings {
 pub struct AgentReclaim {
     /// The agent's holdings just before the Clear.
     pub cleared: AgentHoldings,
-    /// One per lease ended, for the runtime to forward to the owning session
-    /// (which sends `Reclaimed{OVERRIDE}`).
+    /// Internal terminal transitions for the leases ended by this Clear.
     pub expiries: Vec<LeaseExpiry>,
 }
 

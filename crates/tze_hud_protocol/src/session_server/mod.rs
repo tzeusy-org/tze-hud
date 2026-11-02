@@ -2,7 +2,7 @@
 //!
 //! This module provides `HudSessionImpl`, the server-side implementation of the
 //! `HudSession` gRPC service. It manages the bidirectional streaming session
-//! lifecycle: handshake, mutation processing, lease management, heartbeats,
+//! lifecycle: handshake, publication management, resource uploads, heartbeats,
 //! event dispatch, and reconnection.
 //!
 //! # Session Lifecycle State Machine (RFC 0005 §1.1)
@@ -22,9 +22,6 @@
 //! - Resuming → Active (valid resume token)
 //! - Resuming → Closed (expired/invalid token)
 
-// DedupWindow is used transitively in `mod tests { use super::* }`.
-#[allow(unused_imports)]
-use crate::dedup::{CachedResult, DedupWindow};
 // LeaseCorrelationCache and DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY are used
 // transitively in `mod tests { use super::* }`.
 #[allow(unused_imports)]
@@ -44,22 +41,17 @@ use tonic::{Request, Response, Status};
 use tze_hud_resource::{
     ResourceError as StoreResourceError, ResourceStored as StoreResourceStored,
 };
-use tze_hud_scene::types::*;
 
 // ─── Submodules (SS-1..SS-7h) ────────────────────────────────────────────────
 
 pub mod budget_gate;
 pub mod degradation_notice_bus;
 mod element_persist;
-pub mod freeze_queue;
 pub mod handshake;
 pub mod input_event_bus;
-pub mod lease_expiry_bus;
 pub mod lifecycle;
-pub mod mutations;
 pub mod service;
 pub mod stream_session;
-pub mod traffic;
 pub mod upload;
 pub mod verbs;
 
@@ -68,26 +60,19 @@ pub use budget_gate::{
     SharedMutationBudgetEnforcer,
 };
 pub use degradation_notice_bus::{DegradationNoticeReceiver, DegradationNoticeSender};
-// FreezeEnqueueResult, FREEZE_QUEUE_CAPACITY, and SessionFreezeQueue are used
-// transitively in `mod tests { use super::* }`.
 use element_persist::{
-    ElementStorePersistRequest, persist_created_tile_entries, persist_element_store,
-    touch_element_store_entry_by_namespace,
+    ElementStorePersistRequest, persist_element_store, touch_element_store_entry_by_namespace,
 };
-#[allow(unused_imports)]
-use freeze_queue::{FREEZE_QUEUE_CAPACITY, FreezeEnqueueResult, SessionFreezeQueue};
-use handshake::{HandshakeCtx, handle_handshake_read};
 #[cfg(test)]
-use handshake::{handle_session_init, handle_session_resume};
+use handshake::handle_session_init;
+#[allow(unused_imports)]
+use handshake::{HandshakeCtx, handle_handshake_read};
 pub use input_event_bus::{InputEventReceiver, InputEventRecvError, InputEventSender};
-pub use lease_expiry_bus::{LeaseExpiryNotice, LeaseExpiryReceiver, LeaseExpirySender};
 pub use lifecycle::SessionState;
-use mutations::{apply_queued_batch_to_scene, handle_mutation_batch};
 pub use service::{HudSessionImpl, SessionDeps};
 use stream_session::StreamSession;
-pub use traffic::TrafficClass;
 use upload::{UploadWorkerCommand, UploadWorkerEvent, run_upload_worker};
-use verbs::{handle_claim_tile, handle_clear, handle_hold, handle_publish};
+use verbs::{handle_clear, handle_hold, handle_publish};
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -105,26 +90,6 @@ const DEFAULT_HEARTBEAT_TIMEOUT_MS: u64 =
 const DEFAULT_MAX_SEQUENCE_GAP: u64 = 100;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
-
-/// Process-start instant used as the base for monotonic timestamps.
-///
-/// Initialized on first access. All `_mono_us` timestamps are microseconds
-/// elapsed since this point, giving true monotonic semantics independent of
-/// wall-clock adjustments.
-static PROCESS_START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-
-/// Returns the process-start `Instant`, initializing it on first call.
-fn process_start() -> std::time::Instant {
-    *PROCESS_START.get_or_init(std::time::Instant::now)
-}
-
-/// Returns monotonic microseconds elapsed since process start.
-///
-/// Uses `std::time::Instant` so the value is immune to wall-clock adjustments
-/// (NTP steps, leap seconds, user clock changes). Suitable for `_mono_us` fields.
-fn now_mono_us() -> u64 {
-    process_start().elapsed().as_micros() as u64
-}
 
 pub(super) fn now_wall_us() -> u64 {
     std::time::SystemTime::now()
@@ -144,6 +109,7 @@ pub(super) fn scene_id_to_bytes(id: tze_hud_scene::SceneId) -> Vec<u8> {
     id.as_uuid().as_bytes().to_vec()
 }
 
+#[cfg(test)]
 #[allow(clippy::result_large_err)] // tonic::Status is large by design; boxing it would add indirection on every call
 pub(super) fn bytes_to_scene_id(bytes: &[u8]) -> Result<tze_hud_scene::SceneId, Status> {
     if bytes.len() != 16 {
@@ -275,10 +241,6 @@ impl HudSession for HudSessionImpl {
         &self,
         request: Request<tonic::Streaming<ClientMessage>>,
     ) -> Result<Response<Self::SessionStream>, Status> {
-        // Extract peer address BEFORE consuming the request via into_inner().
-        // This is needed for LocalSocketCredential loopback gating (hud-1aswu.1).
-        let peer_ip: Option<std::net::IpAddr> = request.remote_addr().map(|addr| addr.ip());
-
         let mut inbound = request.into_inner();
         let state = self.state.clone();
         let agents = self.agents.clone();
@@ -337,7 +299,6 @@ impl HudSession for HudSessionImpl {
                 closer: &closer,
                 resource_budget: &resource_budget,
                 budget_enforcer: budget_enforcer.as_ref(),
-                peer_ip,
             };
             let mut session = handle_handshake_read(handshake_ctx, &tx, first_read).await;
 
@@ -375,42 +336,7 @@ impl HudSession for HudSessionImpl {
                 // sessions from accumulating transactional input for other agents.
                 let mut input_event_rx = feeds.input_events.subscribe(session.namespace.clone());
 
-                // Send SceneSnapshot after successful handshake (RFC 0005 §1.3, §6.4)
-                {
-                    let st = state.lock().await;
-                    let wall_us = now_wall_us();
-                    let mono_us: u64 = now_mono_us();
-                    let (snap_json, checksum, sequence_number) = {
-                        let scene = st.scene.lock().await;
-                        let graph_snap = scene.take_snapshot(wall_us, mono_us);
-                        let snap_json = graph_snap
-                            .to_json()
-                            .unwrap_or_else(|e| format!("{{\"error\": \"{e}\"}}"));
-                        let checksum = graph_snap.checksum.clone();
-                        let sequence_number = scene.sequence_number;
-                        (snap_json, checksum, sequence_number)
-                    };
-                    let seq = session.next_server_seq();
-                    drop(st);
-                    let _ = tx
-                        .send(Ok(ServerMessage {
-                            sequence: seq,
-                            timestamp_wall_us: now_wall_us(),
-                            payload: Some(ServerPayload::SceneSnapshot(SceneSnapshot {
-                                snapshot_json: snap_json,
-                                sequence: sequence_number,
-                                snapshot_wall_us: wall_us,
-                                snapshot_mono_us: mono_us,
-                                blake3_checksum: checksum,
-                            })),
-                        }))
-                        .await;
-                }
-
-                // Atomically subscribe after the coherent scene snapshot, then send
-                // the captured current policy before any later transition or
-                // incremental event. RFC 0005 requires this for both new sessions
-                // and resumes, including when the current level is Normal.
+                // Atomically subscribe and send the current policy before later events.
                 let (mut degradation_rx, current_degradation) =
                     degradation_notices.subscribe_with_current();
                 let seq = session.next_server_seq();
@@ -460,34 +386,6 @@ impl HudSession for HudSessionImpl {
                     let timeout_duration =
                         tokio::time::Duration::from_millis(DEFAULT_HEARTBEAT_TIMEOUT_MS);
 
-                    // ── Unfreeze drain: apply queued mutations if freeze just cleared ──
-                    // When the shell sets SharedState.freeze_active = false, queued
-                    // mutations are applied at the start of the next loop iteration
-                    // so they are delivered in the next available frame batch
-                    // (system-shell/spec.md §Freeze Scene: "Unfreeze applies queued
-                    //  mutations in submission order in the next available frame batch").
-                    //
-                    // IMPORTANT: Use `apply_queued_batch_to_scene` (not
-                    // `handle_mutation_batch`) here. Each queued batch has already
-                    // received an immediate `MutationResult(accepted=true)` when it
-                    // was enqueued. Re-using `handle_mutation_batch` would send a
-                    // second result for the same batch_id, violating RFC 0005 §2.1.
-                    {
-                        let freeze_active = state.lock().await.freeze_active;
-                        if !freeze_active && !session.freeze_queue.is_empty() {
-                            let queued = session.freeze_queue.drain();
-                            let mut applied_render_work = false;
-                            for queued_batch in queued {
-                                applied_render_work |=
-                                    apply_queued_batch_to_scene(&state, session, queued_batch)
-                                        .await;
-                            }
-                            if applied_render_work {
-                                render_wake.notify();
-                            }
-                        }
-                    }
-
                     tokio::select! {
                         // ── Inbound client message ────────────────────────────────
                         msg_result = tokio::time::timeout(timeout_duration, inbound.message()) => {
@@ -515,17 +413,6 @@ impl HudSession for HudSessionImpl {
                         // regardless of subscription config. Never dropped.
                         degradation_notice = degradation_rx.recv() => {
                             if let LoopAction::Break = session.on_degradation(degradation_notice, &tx).await {
-                                break;
-                            }
-                        }
-
-                        // ── Terminal lease transition from the compositor ─────────
-                        //
-                        // `SceneGraph::expire_leases()` owns the transition and
-                        // resource cleanup. This per-session durable lane owns the
-                        // corresponding wire notification, filtered by lease id.
-                        lease_expiry = feeds.lease_expiry.recv() => {
-                            if let LoopAction::Break = session.on_lease_expiry(lease_expiry, &tx).await {
                                 break;
                             }
                         }
@@ -608,15 +495,6 @@ impl HudSession for HudSessionImpl {
                     let now = {
                         let mut scene = st.scene.lock().await;
                         let now = scene.now_millis();
-                        for lease_id in &session.lease_ids {
-                            let active = scene
-                                .leases
-                                .get(lease_id)
-                                .is_some_and(|l| l.state == LeaseState::Active);
-                            if active {
-                                let _ = scene.disconnect_lease(lease_id, now);
-                            }
-                        }
                         scene.orphan_publications(
                             session.publication_origin,
                             now,
@@ -629,7 +507,6 @@ impl HudSession for HudSessionImpl {
                         session.agent_name.clone(),
                         session.capabilities.clone(),
                         session.subscriptions.clone(),
-                        session.lease_ids.clone(),
                         DEFAULT_GRACE_PERIOD_MS,
                         now,
                         Some(session.publication_origin),
@@ -747,12 +624,6 @@ async fn handle_client_message(
     };
 
     match payload {
-        ClientPayload::MutationBatch(batch) => {
-            handle_mutation_batch(state, session, tx, client_sequence, batch, render_wake).await;
-        }
-        ClientPayload::ClaimTile(claim) => {
-            handle_claim_tile(state, session, tx, client_sequence, claim, render_wake).await;
-        }
         ClientPayload::Publish(publish) => {
             handle_publish(state, session, tx, client_sequence, publish, render_wake).await;
         }
@@ -845,9 +716,7 @@ impl StreamSession {
                 // regression).
                 let is_lease_op = matches!(
                     &msg.payload,
-                    Some(ClientPayload::ClaimTile(_))
-                        | Some(ClientPayload::Hold(_))
-                        | Some(ClientPayload::Clear(_))
+                    Some(ClientPayload::Hold(_)) | Some(ClientPayload::Clear(_))
                 );
                 if is_lease_op
                     && msg.sequence > 0
@@ -1019,64 +888,6 @@ impl StreamSession {
         }
     }
 
-    /// Deliver one terminal scene-lease transition to its owning session.
-    ///
-    /// The compositor has already applied cleanup by the time it publishes the
-    /// notice. Removing the id before sending makes duplicate runtime notices
-    /// harmless and guarantees at most one terminal response for a
-    /// connected session.
-    async fn on_lease_expiry(
-        &mut self,
-        lease_expiry: Option<LeaseExpiryNotice>,
-        tx: &tokio::sync::mpsc::Sender<Result<ServerMessage, tonic::Status>>,
-    ) -> LoopAction {
-        let Some(notice) = lease_expiry else {
-            self.transition(SessionState::Closed);
-            return LoopAction::Break;
-        };
-        if !self.lease_ids.contains(&notice.lease_id) {
-            return LoopAction::Continue;
-        }
-
-        self.lease_ids
-            .retain(|lease_id| *lease_id != notice.lease_id);
-        let lease_id = scene_id_to_bytes(notice.lease_id);
-        let why = match notice.terminal_state {
-            LeaseState::Expired => ReclaimReason::Expired,
-            _ => ReclaimReason::Override,
-        } as i32;
-        let surfaces: Vec<String> = if notice.removed_tiles.is_empty() {
-            vec![String::new()]
-        } else {
-            notice
-                .removed_tiles
-                .iter()
-                .map(|t| verbs::tile_surface(*t))
-                .collect()
-        };
-        for surface in surfaces {
-            let seq = self.next_server_seq();
-            if tx
-                .send(Ok(ServerMessage {
-                    sequence: seq,
-                    timestamp_wall_us: now_wall_us(),
-                    payload: Some(ServerPayload::Reclaimed(Reclaimed {
-                        surface,
-                        why,
-                        lease_id: lease_id.clone(),
-                    })),
-                }))
-                .await
-                .is_err()
-            {
-                self.transition(SessionState::Closed);
-                return LoopAction::Break;
-            }
-        }
-
-        LoopAction::Continue
-    }
-
     /// Handle a runtime-injected input `EventBatch` broadcast result (hud-i6yd.6).
     ///
     /// The compositor input pipeline assembles ClickEvent / CommandInputEvent batches
@@ -1218,67 +1029,6 @@ impl StreamSession {
 /// Maximum future schedule horizon in microseconds (RFC 0003 §3.5, default 5 minutes).
 pub(super) const DEFAULT_MAX_FUTURE_SCHEDULE_US: u64 = 300_000_000;
 
-/// Validate TimingHints for a MutationBatch (RFC 0003 §3.5, RFC 0005 §3.3).
-///
-/// Returns `Ok(())` if valid, or `Err((error_code, message))` for each
-/// invalid condition.
-///
-/// Validation rules:
-/// - `present_at_wall_us < session_open_at_wall_us - 60_000_000` → TIMESTAMP_TOO_OLD
-/// - `present_at_wall_us > current_wall_us + max_future_schedule_us` → TIMESTAMP_TOO_FUTURE
-/// - `expires_at_wall_us > 0 && expires_at_wall_us <= present_at_wall_us` → TIMESTAMP_EXPIRY_BEFORE_PRESENT
-///
-/// A value of 0 in either field means "no constraint".
-/// `now` comes from the same injected scene wall clock as the session stamp.
-pub(super) fn validate_timing_hints(
-    hints: &TimingHints,
-    session_open_at_wall_us: u64,
-    max_future_schedule_us: u64,
-    now: u64,
-) -> Result<(), (&'static str, String)> {
-    let present = hints.present_at_wall_us;
-    let expires = hints.expires_at_wall_us;
-
-    if present > 0 {
-        // TIMESTAMP_TOO_OLD: present_at_wall_us more than 60 seconds before session open
-        // (RFC 0003 §3.5; 60s = 60_000_000 µs)
-        let too_old_threshold = session_open_at_wall_us.saturating_sub(60_000_000);
-        if present < too_old_threshold {
-            return Err((
-                "TIMESTAMP_TOO_OLD",
-                format!(
-                    "present_at_wall_us ({present}) is more than 60s before session open \
-                     ({session_open_at_wall_us})"
-                ),
-            ));
-        }
-
-        // TIMESTAMP_TOO_FUTURE: present_at_wall_us exceeds max_future_schedule_us horizon
-        if present > now.saturating_add(max_future_schedule_us) {
-            return Err((
-                "TIMESTAMP_TOO_FUTURE",
-                format!(
-                    "present_at_wall_us ({present}) exceeds max future schedule \
-                     ({max_future_schedule_us} µs from now={now})"
-                ),
-            ));
-        }
-
-        // TIMESTAMP_EXPIRY_BEFORE_PRESENT: non-zero expiry at or before present
-        if expires > 0 && expires <= present {
-            return Err((
-                "TIMESTAMP_EXPIRY_BEFORE_PRESENT",
-                format!(
-                    "expires_at_wall_us ({expires}) must be strictly after \
-                     present_at_wall_us ({present})"
-                ),
-            ));
-        }
-    }
-
-    Ok(())
-}
-
 pub(super) fn capability_grant_covers(granted: &str, requested: &str) -> bool {
     if granted == "*" || granted == requested {
         return true;
@@ -1302,13 +1052,7 @@ fn resource_error_code_i32(err: &StoreResourceError) -> i32 {
         StoreResourceError::UnsupportedType(_) => 4,
         StoreResourceError::DecodeError(_) => 5,
         StoreResourceError::HashMismatch { .. } => 6,
-        StoreResourceError::InvalidChunk(detail)
-            if detail.contains("unknown upload_id")
-                || detail.contains("not in-flight")
-                || detail.contains("no uploads in flight") =>
-        {
-            9
-        }
+        StoreResourceError::UploadNotFound(_) => 9,
         StoreResourceError::InvalidChunk(_) => 7,
         StoreResourceError::TooManyUploads => 8,
         StoreResourceError::UploadAborted(_) => 9,
@@ -1379,11 +1123,7 @@ async fn send_resource_error_response(
         StoreResourceError::TooManyUploads => {
             "Complete an in-flight upload before retrying ResourceUploadStart; if none can complete, report stale upload capacity to the operator"
         }
-        StoreResourceError::InvalidChunk(detail)
-            if detail.contains("unknown upload_id")
-                || detail.contains("not in-flight")
-                || detail.contains("no uploads in flight") =>
-        {
+        StoreResourceError::UploadNotFound(_) => {
             "Restart with ResourceUploadStart and wait for ResourceUploadAccepted before sending chunks"
         }
         StoreResourceError::InvalidChunk(_) => {

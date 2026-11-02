@@ -8,7 +8,6 @@ use tokio::sync::Mutex;
 use tze_hud_config::Grant;
 use tze_hud_config::agents_file::{AgentChange, Edited};
 use tze_hud_protocol::session::SharedState;
-use tze_hud_protocol::session_server::LeaseExpirySender;
 use tze_hud_scene::graph::{AgentHoldings, SceneGraph};
 use tze_hud_scene::render_wake::RenderWakeNotifier;
 
@@ -51,8 +50,6 @@ pub(crate) struct AgentControl {
     pub shared: Arc<Mutex<SharedState>>,
     pub scene: Arc<Mutex<SceneGraph>>,
     pub portals: Option<tze_hud_mcp::PortalHandle>,
-    /// Forwards revoked leases to their sessions (`Reclaimed{OVERRIDE}`).
-    pub lease_expirations: Option<LeaseExpirySender>,
     /// Reopened when the last paired agent is unpaired.
     pub pairing: Option<Arc<crate::pairing::Pairing>>,
     pub render_wake: RenderWakeNotifier,
@@ -125,7 +122,6 @@ impl AgentControl {
             None => 0,
         };
         let reclaim = self.scene.lock().await.reclaim_agent(agent);
-        crate::windowed::publish_lease_expiries(self.lease_expirations.as_ref(), reclaim.expiries);
         if portals > 0 {
             self.main_wake.notify();
         }

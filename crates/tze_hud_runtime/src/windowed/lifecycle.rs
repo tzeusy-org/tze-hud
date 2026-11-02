@@ -2349,9 +2349,6 @@ impl WinitApp {
         // `portal_resize_outcome` carries the geometry snapshot from a pointer-driven
         // portal resize step so that `dispatch_portal_geometry_event` can be called
         // without holding the scene lock.
-        // Terminal lease transitions from viewer dismisses (hover close button),
-        // published to the owning sessions once the scene lock is released.
-        let mut viewer_dismiss_expiries: Vec<tze_hud_scene::types::LeaseExpiry> = Vec::new();
         let mut pending_action_wakes = Vec::new();
         let drag_released: Option<DragReleasedData>;
         let portal_resize_outcome: Option<PortalResizePointerOutcome>;
@@ -2735,9 +2732,8 @@ impl WinitApp {
                             ZoneInteractionKind::DismissTile { tile_id } => {
                                 // Human override: reclaim the tile's lease on
                                 // this thread's own scene lock, so the tile is
-                                // gone before the next frame. The agent learns
-                                // of it via `Reclaimed{OVERRIDE}`, published
-                                // after the lock is released.
+                                // gone before the next frame, without waiting
+                                // for the agent.
                                 let dismissed = self
                                     .state
                                     .portal_projection_driver
@@ -2747,7 +2743,6 @@ impl WinitApp {
                                     reclaimed = dismissed.expiry.is_some(),
                                     "viewer dismiss: tile close button pressed"
                                 );
-                                viewer_dismiss_expiries.extend(dismissed.expiry);
                             }
                             ZoneInteractionKind::JumpToLatest { tile_id } => {
                                 // Local feedback first: snap the tile's
@@ -2929,12 +2924,6 @@ impl WinitApp {
         if let Some(released) = drag_released {
             self.persist_drag_release(released);
         }
-
-        // ── Post-lock: tell the dismissed tiles' agents ───────────────────────
-        super::publish_lease_expiries(
-            self.state.lease_expirations.as_ref(),
-            viewer_dismiss_expiries,
-        );
 
         // ── Post-lock: broadcast geometry event after pointer-affordance resize ─
         // Tile bounds were already updated inside the lock (local-first).  We

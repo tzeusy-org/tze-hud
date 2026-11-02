@@ -5,7 +5,6 @@
 
 pub mod auth;
 pub mod convert;
-pub(crate) mod dedup;
 pub(crate) mod lease;
 pub mod session;
 pub mod session_server;

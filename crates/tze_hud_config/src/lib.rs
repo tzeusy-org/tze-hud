@@ -39,9 +39,7 @@ pub use loader::{
     DEFAULT_FPS, DEFAULT_GRPC_PORT, DEFAULT_LOG_LEVEL, DEFAULT_MCP_PORT, LOG_LEVELS, MAX_FPS,
     TzeHudConfig, runtime_section,
 };
-pub use policy_builder::{
-    apply_token_defaults_for_zone, build_effective_policy, tile_placement_from_tokens,
-};
+pub use policy_builder::{apply_token_defaults_for_zone, build_effective_policy};
 pub use portal_tokens::{
     PORTAL_TOKEN_COLLAPSED_BACKGROUND, PORTAL_TOKEN_COLLAPSED_FONT_SIZE,
     PORTAL_TOKEN_COLLAPSED_TEXT_COLOR, PORTAL_TOKEN_COMPOSER_AT_CAPACITY_COLOR,

@@ -275,10 +275,9 @@ message MutationProto {
     SetTileUnreadCountMutation  set_tile_unread_count  = 16;
     SetTileComposerInteractionMutation set_tile_composer_interaction = 17;
   }
-  // Agents may send set_tile_root (2) and 6–9, 11, 12 on their own tiles.
-  // create_tile (1), publish_to_tile (10), and the portal mutations (13–17)
-  // are runtime-internal (the in-process portal driver); the session server
-  // rejects them from agents — claim tiles with ClaimTile.
+  // Internal scene conversion contract only; no public Session envelope
+  // dispatches MutationProto. The in-process portal driver and internal scene
+  // consumers retain these tags unchanged.
   // Removed in T5 S4b: zone/widget publishing is the Publish/Clear verbs.
   reserved 3, 4, 5;
   reserved "publish_to_zone", "clear_zone", "clear_widget";

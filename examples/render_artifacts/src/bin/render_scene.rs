@@ -796,16 +796,16 @@ mod tests {
         assert_eq!(first.dimensions(), (1920, 1080));
         assert_eq!(settled.dimensions(), first.dimensions());
         // Canonical notification area starts at (75%, 2%) and is 30% tall
-        // (21.6..345.6 px). Tonal Glass two-line slots are 79.2px (20px body
-        // text) plus a 35px button row on cards with actions (22px buttons,
-        // 4px gap, 9px bottom inset), 10px apart, newest at the top. These
-        // interior regions exclude borders, dismiss controls and the portal
-        // grip.
-        let slot_heights = [114.2_f32, 114.2];
+        // (21.6..345.6 px). Tonal Glass two-line slots are 91.2px (20px body
+        // text, 16px `spacing.notification.inset` top and bottom) plus a 42px
+        // button row on cards with actions (22px buttons, 4px gap, 16px
+        // bottom inset), 10px apart, newest at the top. These interior
+        // regions exclude borders, dismiss controls and the portal grip.
+        let slot_heights = [133.2_f32, 133.2];
         let top_of = |slot: usize| {
             (21.6 + slot_heights[..slot].iter().map(|h| h + 10.0).sum::<f32>()) as u32
         };
-        // The third card (Normal / Blue-Black) would end at 349.2 px, past the
+        // The third card (Normal / Blue-Black) would end past the
         // zone bottom, so it and the oldest are not shown at all rather than
         // drawn cut off.
         let zone_bottom = 345_u32;
@@ -819,7 +819,7 @@ mod tests {
         );
         for (slot, title) in titles[..2].iter().enumerate() {
             let top = top_of(slot);
-            for (line, from, to) in [("title", top + 10, top + 38), ("body", top + 40, top + 63)] {
+            for (line, from, to) in [("title", top + 16, top + 44), ("body", top + 46, top + 69)] {
                 let ink = |pixels: &image::RgbaImage| {
                     (from..to)
                         .flat_map(|y| (1450..1800).map(move |x| pixels.get_pixel(x, y)))

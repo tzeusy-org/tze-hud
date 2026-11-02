@@ -827,8 +827,9 @@ pub(crate) fn zone_geometry_in(
 }
 
 /// Backends the windowed compositor requests: Vulkan on Linux, D3D12 and
-/// Vulkan on Windows, Metal on macOS. Headless construction uses
-/// `Backends::all()` so software renderers (llvmpipe, WARP) still work.
+/// Vulkan on Windows, Metal on macOS. Headless hardware selection uses all
+/// backends; forced software selection defers GL until primary backends have
+/// no suitable software adapter.
 fn platform_backends() -> wgpu::Backends {
     if cfg!(target_os = "linux") {
         wgpu::Backends::VULKAN
@@ -846,7 +847,8 @@ impl Compositor {
     ///
     /// Checks the `HEADLESS_FORCE_SOFTWARE` environment variable.  When set to
     /// `1`, wgpu adapter selection uses `force_fallback_adapter = true`, which
-    /// selects llvmpipe on Linux or WARP on Windows.
+    /// selects llvmpipe on Linux or WARP on Windows. Primary backends are tried
+    /// first; GL is initialized only if none provides a software adapter.
     ///
     /// Per runtime-kernel/spec.md Requirement: Headless Software GPU (line 211):
     /// "When set, the wgpu adapter selection MUST request a software fallback
@@ -858,19 +860,35 @@ impl Compositor {
             .map(|v| v.trim() == "1")
             .unwrap_or(false);
 
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
-            ..Default::default()
-        });
-
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
-                compatible_surface: None,
-                force_fallback_adapter: force_software,
-            })
-            .await
-            .ok_or(CompositorError::NoAdapter)?;
+        // All software adapters have the same device-type preference, so wgpu
+        // selects a primary backend before GL. Defer GL initialization until it
+        // is needed: EGL may contact a window server even for headless work.
+        // Keep GL-only software hosts supported and leave hardware selection
+        // across all backends unchanged.
+        let backend_sets: &[wgpu::Backends] = if force_software {
+            &[wgpu::Backends::PRIMARY, wgpu::Backends::SECONDARY]
+        } else {
+            &[wgpu::Backends::all()]
+        };
+        let mut selected_adapter = None;
+        for &backends in backend_sets {
+            let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+                backends,
+                ..Default::default()
+            });
+            if let Some(adapter) = instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::LowPower,
+                    compatible_surface: None,
+                    force_fallback_adapter: force_software,
+                })
+                .await
+            {
+                selected_adapter = Some((instance, adapter));
+                break;
+            }
+        }
+        let (_instance, adapter) = selected_adapter.ok_or(CompositorError::NoAdapter)?;
         let adapter_info = CompositorAdapterInfo::from(adapter.get_info());
 
         let (device, queue) = adapter
@@ -1014,7 +1032,8 @@ impl Compositor {
     /// immediately after creation. The `WindowSurface` is owned by the main thread.
     ///
     /// Per spec §Platform GPU Backends (line 189): this path uses the platform-
-    /// mandated backends — unlike `new_headless` which uses `Backends::all()`.
+    /// mandated backends. Headless hardware selection uses all backends, while
+    /// headless software selection initializes GL only as a fallback.
     pub async fn new_windowed(
         window: std::sync::Arc<winit::window::Window>,
         width: u32,

@@ -67,7 +67,7 @@ pub struct SharedState {
     /// write are visible to the event thread once it observes the raised flag,
     /// even though the reader does not hold the `SharedState` mutex.
     ///
-    /// Mutation-intake readers (e.g. `handle_mutation_batch`) hold the
+    /// Publication-intake readers hold the
     /// `SharedState` mutex and likewise load with `Ordering::Acquire`.
     pub safe_mode_atomic: Arc<AtomicBool>,
     /// Lock-free mirror of `scene.active_tab` for the winit event thread.
@@ -93,15 +93,6 @@ pub struct SharedState {
     /// In-memory resume token store (RFC 0005 §6.1).
     /// Cleared on process restart; never persisted.
     pub token_store: TokenStore,
-    /// Runtime-wide freeze state (system-shell/spec.md §Freeze Scene).
-    ///
-    /// The shell is the sole writer of this field. When `freeze_active` is
-    /// `true`, mutation batches are queued (not rejected) until unfreeze.
-    ///
-    /// Per the invariant: `safe_mode_atomic == true` implies
-    /// `freeze_active = false`. Safe mode entry cancels freeze
-    /// and discards all per-session freeze queues.
-    pub freeze_active: bool,
     /// Optional bridge for session-plane pointer capture requests. Windowed
     /// runtime installs the receiving end; the gRPC session plane no longer
     /// sends commands (the capture requests were removed in T5 S6).
@@ -110,9 +101,6 @@ pub struct SharedState {
     /// enqueue uses this to wake the sole windowed consumer without creating a
     /// speculative compositor generation.
     pub input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
-    /// Claimed-tile sizes and spacing from `[design_tokens]` `tile.*`, used
-    /// to resolve `ClaimTile` placement hints.
-    pub tile_placement: tze_hud_scene::placement::TilePlacementTokens,
 }
 
 impl SharedState {
@@ -152,7 +140,6 @@ pub struct AgentSession {
     pub namespace: String,
     pub agent_name: String,
     pub capabilities: Vec<String>,
-    pub lease_ids: Vec<SceneId>,
     pub event_subscribed: bool,
     /// Sender half of the per-session ServerMessage channel.
     ///
@@ -232,7 +219,6 @@ impl Clone for AgentSession {
             namespace: self.namespace.clone(),
             agent_name: self.agent_name.clone(),
             capabilities: self.capabilities.clone(),
-            lease_ids: self.lease_ids.clone(),
             event_subscribed: self.event_subscribed,
             server_message_tx: None,
             closer: self.closer.clone(),
@@ -274,7 +260,6 @@ impl SessionRegistry {
             namespace: agent_name.to_string(),
             agent_name: agent_name.to_string(),
             capabilities: capabilities.to_vec(),
-            lease_ids: Vec::new(),
             event_subscribed: false,
             server_message_tx: None,
             closer,
