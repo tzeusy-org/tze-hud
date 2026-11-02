@@ -1489,8 +1489,19 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
     {
         use std::future::Future;
         use std::task::{Context, Poll, Waker};
-        let (isolated, _, caller, _) = two_agents();
-        let (isolated, isolated_hub) = hub_portal(isolated);
+        let clock = TestClock::new(1_000);
+        let mut agents = AgentDirectory::default();
+        agents.insert(
+            "diagnostic-poll-agent",
+            hash_psk("synthetic-diagnostic-poll-key"),
+            vec!["resident_mcp".to_string()],
+        );
+        let caller = CallerContext::with_bearer("synthetic-diagnostic-poll-key");
+        let portals = PortalHandle::new(PortalHub::default(), Arc::new(clock.clone()));
+        let isolated_hub = Arc::clone(&portals.hub);
+        let isolated = McpServer::new(scene(&clock))
+            .with_config(McpConfig::with_agents(agents.shared()))
+            .with_portals(portals);
         let mut cx = Context::from_waker(Waker::noop());
         let expected = json!({
             "code": "INTERNAL",
@@ -1504,7 +1515,9 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
                 "hud_input",
                 json!({"wait_ms": 30_000}),
             ));
-            let Poll::Ready((error, true)) = request.as_mut().poll(&mut cx) else {
+            let observed = request.as_mut().poll(&mut cx);
+            eprintln!("DEBUG-ximtf11-poll held_hub observed={observed:?}");
+            let Poll::Ready((error, true)) = observed else {
                 panic!("DEBUG-ximtf11-poll held Hub must refuse before parking");
             };
             assert_eq!(error, expected);
@@ -1517,7 +1530,9 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
                 "hud_input",
                 json!({"wait_ms": 30_000}),
             ));
-            let Poll::Ready((error, true)) = request.as_mut().poll(&mut cx) else {
+            let observed = request.as_mut().poll(&mut cx);
+            eprintln!("DEBUG-ximtf11-poll held_state observed={observed:?}");
+            let Poll::Ready((error, true)) = observed else {
                 panic!("DEBUG-ximtf11-poll held MCP state must refuse before parking");
             };
             assert_eq!(error, expected);
