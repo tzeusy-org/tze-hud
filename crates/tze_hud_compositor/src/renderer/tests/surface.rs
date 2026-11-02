@@ -363,9 +363,7 @@ async fn capture_windowed_frame_reads_back_the_built_frame() {
 }
 
 /// Verify that HEADLESS_FORCE_SOFTWARE env-var path is exercised in the
-/// adapter-selection code.  We cannot assert the adapter backend in a unit
-/// test (it's opaque), so we just verify that creating a compositor with
-/// the env var set does not crash.
+/// adapter-selection code and only a CPU software adapter is selected.
 // await_holding_lock: intentional — the guard must stay held across the
 // await so no parallel test mutates HEADLESS_FORCE_SOFTWARE mid-construction.
 #[allow(clippy::await_holding_lock)]
@@ -398,7 +396,7 @@ async fn test_new_headless_with_force_software_env_var() {
     // Either Ok (software GPU found) or Err(NoAdapter) (no software GPU
     // installed in this CI environment) are acceptable.  A panic would not be.
     match result {
-        Ok(_) => {}
+        Ok(compositor) => assert_eq!(compositor.adapter_info().device_type, "Cpu"),
         Err(CompositorError::NoAdapter) => {}
         Err(e) => panic!("unexpected error with HEADLESS_FORCE_SOFTWARE=1: {e}"),
     }

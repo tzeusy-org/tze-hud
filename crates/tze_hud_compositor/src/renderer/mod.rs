@@ -868,21 +868,37 @@ impl Compositor {
             .map(|v| v.trim() == "1")
             .unwrap_or(false);
 
-        phase("instance-begin");
-        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
-            ..Default::default()
-        });
-
-        phase("instance-done");
-        let adapter = instance
-            .request_adapter(&wgpu::RequestAdapterOptions {
-                power_preference: wgpu::PowerPreference::LowPower,
-                compatible_surface: None,
-                force_fallback_adapter: force_software,
-            })
-            .await
-            .ok_or(CompositorError::NoAdapter)?;
+        // All software adapters have the same device-type preference, so wgpu
+        // selects a primary backend before GL. Defer GL initialization until it
+        // is needed: EGL may contact a window server even for headless work.
+        // Keep GL-only software hosts supported and leave hardware selection
+        // across all backends unchanged.
+        let backend_sets: &[wgpu::Backends] = if force_software {
+            &[wgpu::Backends::PRIMARY, wgpu::Backends::SECONDARY]
+        } else {
+            &[wgpu::Backends::all()]
+        };
+        let mut selected_adapter = None;
+        for &backends in backend_sets {
+            phase("instance-begin");
+            let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+                backends,
+                ..Default::default()
+            });
+            phase("instance-done");
+            if let Some(adapter) = instance
+                .request_adapter(&wgpu::RequestAdapterOptions {
+                    power_preference: wgpu::PowerPreference::LowPower,
+                    compatible_surface: None,
+                    force_fallback_adapter: force_software,
+                })
+                .await
+            {
+                selected_adapter = Some((instance, adapter));
+                break;
+            }
+        }
+        let (_instance, adapter) = selected_adapter.ok_or(CompositorError::NoAdapter)?;
         phase("adapter-done");
         let adapter_info = CompositorAdapterInfo::from(adapter.get_info());
 
