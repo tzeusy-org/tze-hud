@@ -68,7 +68,6 @@ MIN_CHANGED_PIXELS = 200
 POLL_S = 0.25
 HANG_GUARD_S = 45  # upper bound on any single wait; the expected time is far shorter
 EARLY_SLACK_S = 0.5  # an event may not land earlier than its delay, give or take this
-TILE_POLL_S = 3.0
 AGENT = "ci-smoke"
 TOOLS = {"hud_surfaces", "hud_publish", "hud_hold", "hud_clear", "hud_input"}
 CAPTURE_ARTIFACT = "windows-captures"

@@ -48,6 +48,10 @@ const CLASSES: [ClassRow; 3] = [
     ),
 ];
 
+fn any_class_hidden(hidden: SurfaceClasses) -> bool {
+    CLASSES.iter().any(|(row, ..)| class_hidden(hidden, row))
+}
+
 fn class_hidden(set: SurfaceClasses, row: &str) -> bool {
     let mut set = set;
     class_mut(&mut set, row).is_some_and(|hidden| *hidden)
@@ -120,14 +124,14 @@ impl Section for VisibilitySection {
                     "Hide all",
                     Control::Toggle(hidden.portals && hidden.zones && hidden.widgets),
                 )
-                .detail(if hidden.any() {
+                .detail(if any_class_hidden(hidden) {
                     format!("{} hidden · agents keep running", hidden_names(hidden))
                 } else {
                     "Hides every agent surface; agents keep running".to_owned()
                 })
                 .keywords(&["show", "presenting", "screen share", "clear", "declutter"])
-                .caution(hidden.any())
-                .resettable(hidden.any()),
+                .caution(any_class_hidden(hidden))
+                .resettable(any_class_hidden(hidden)),
             ];
             for (id, label, covers, keywords) in CLASSES {
                 let off = class_hidden(hidden, id);
@@ -189,9 +193,7 @@ impl Section for VisibilitySection {
     fn closed_notice(&self) -> BoxFuture<'_, Option<String>> {
         Box::pin(async move {
             let hidden = self.hidden().await;
-            hidden
-                .any()
-                .then(|| format!("{} hidden", hidden_names(hidden)))
+            any_class_hidden(hidden).then(|| format!("{} hidden", hidden_names(hidden)))
         })
     }
 }
@@ -259,5 +261,38 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(section.hidden().await, SurfaceClasses::NONE);
+
+        // Showing all public classes leaves the internal tile mask untouched.
+        section
+            .apply(VisibilitySection::HIDE_ALL, Edit::Set(true))
+            .await
+            .unwrap();
+        for (id, ..) in CLASSES {
+            section.apply(id, Edit::Set(true)).await.unwrap();
+        }
+        let hidden = section.hidden().await;
+        assert_eq!(
+            hidden,
+            SurfaceClasses {
+                tiles: true,
+                ..SurfaceClasses::NONE
+            }
+        );
+        assert!(
+            hidden.any(),
+            "the scene still tracks its internal tile mask"
+        );
+        let rows = section.rows().await;
+        assert!(rows.iter().all(|r| !r.caution && !r.reset));
+        assert_eq!(rows[0].control, Control::Toggle(false));
+        assert_eq!(
+            rows[0].detail.as_deref(),
+            Some("Hides every agent surface; agents keep running")
+        );
+        assert_eq!(
+            section.closed_notice().await,
+            None,
+            "completed notice computation ignores only the internal tile bit"
+        );
     }
 }

@@ -47,12 +47,6 @@ pub struct HudSessionImpl {
     pub(super) budget_enforcer: Option<SharedMutationBudgetEnforcer>,
     /// Bounded never-drop sender for transactional degradation notices.
     pub degradation_notices: super::DegradationNoticeSender,
-    /// Runtime-to-session durable bridge for terminal lease transitions.
-    ///
-    /// The compositor publishes each `SceneGraph::expire_leases()` result here
-    /// after releasing the scene lock. The handler that owns the lease emits
-    /// the wire `LeaseResponse` transactionally.
-
     /// Traffic-class-aware sender for runtime-injected input event batches (hud-i6yd.6).
     ///
     /// Carries `(namespace, EventBatch)` tuples. Each session handler subscribes

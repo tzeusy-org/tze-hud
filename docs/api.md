@@ -418,8 +418,8 @@ whether its chord is the default, saved to config, or lasts until restart
 The control panel is a full-width pane over the primary display: a search
 field, quick-action tiles, and section cards of settings that scroll
 vertically. Its header line counts the agents connected or showing
-something and what they hold ("3 agents · 2 portals · 5 zones · 1 widget ·
-0 widgets") and says "restart pending" while a saved setting waits for a
+something and what they hold ("3 agents · 2 portals · 5 zones · 1 widget")
+and says "restart pending" while a saved setting waits for a
 restart (Restart now is in System, Alt+8). It takes keyboard focus when it
 opens (if Windows refuses, the header says to click it) and returns focus
 on close. Typing searches every row; arrows, Tab, Enter and Space move and

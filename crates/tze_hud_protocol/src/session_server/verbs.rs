@@ -413,7 +413,7 @@ fn timing_error(
 
 // ─── Clear ───────────────────────────────────────────────────────────────────
 
-/// Release a zone publication, a widget publication, or a tile (its lease).
+/// Release a zone or widget publication.
 pub(super) async fn handle_clear(
     state: &Arc<Mutex<SharedState>>,
     session: &mut StreamSession,
