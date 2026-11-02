@@ -827,8 +827,9 @@ pub(crate) fn zone_geometry_in(
 }
 
 /// Backends the windowed compositor requests: Vulkan on Linux, D3D12 and
-/// Vulkan on Windows, Metal on macOS. Headless construction uses
-/// `Backends::all()` so software renderers (llvmpipe, WARP) still work.
+/// Vulkan on Windows, Metal on macOS. Headless hardware selection uses all
+/// backends; forced software selection defers GL until primary backends have
+/// no suitable software adapter.
 fn platform_backends() -> wgpu::Backends {
     if cfg!(target_os = "linux") {
         wgpu::Backends::VULKAN
@@ -846,22 +847,13 @@ impl Compositor {
     ///
     /// Checks the `HEADLESS_FORCE_SOFTWARE` environment variable.  When set to
     /// `1`, wgpu adapter selection uses `force_fallback_adapter = true`, which
-    /// selects llvmpipe on Linux or WARP on Windows.
+    /// selects llvmpipe on Linux or WARP on Windows. Primary backends are tried
+    /// first; GL is initialized only if none provides a software adapter.
     ///
     /// Per runtime-kernel/spec.md Requirement: Headless Software GPU (line 211):
     /// "When set, the wgpu adapter selection MUST request a software fallback
     /// (force_fallback_adapter = true)."
     pub async fn new_headless(width: u32, height: u32) -> Result<Self, CompositorError> {
-        let diagnostic_started = std::time::Instant::now();
-        let phase = |name: &str| {
-            eprintln!(
-                "[DEBUG-hud-vlvu6] pid={} compositor {} {:.6}s",
-                std::process::id(),
-                name,
-                diagnostic_started.elapsed().as_secs_f64()
-            );
-        };
-        phase("enter");
         // Check HEADLESS_FORCE_SOFTWARE env var (spec line 409: "conventionally
         // named HEADLESS_FORCE_SOFTWARE").
         let force_software = std::env::var("HEADLESS_FORCE_SOFTWARE")
@@ -880,12 +872,10 @@ impl Compositor {
         };
         let mut selected_adapter = None;
         for &backends in backend_sets {
-            phase("instance-begin");
             let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
                 backends,
                 ..Default::default()
             });
-            phase("instance-done");
             if let Some(adapter) = instance
                 .request_adapter(&wgpu::RequestAdapterOptions {
                     power_preference: wgpu::PowerPreference::LowPower,
@@ -899,7 +889,6 @@ impl Compositor {
             }
         }
         let (_instance, adapter) = selected_adapter.ok_or(CompositorError::NoAdapter)?;
-        phase("adapter-done");
         let adapter_info = CompositorAdapterInfo::from(adapter.get_info());
 
         let (device, queue) = adapter
@@ -915,7 +904,6 @@ impl Compositor {
             .await
             .map_err(|e| CompositorError::DeviceCreation(e.to_string()))?;
 
-        phase("device-done");
         let pipeline = Self::create_pipeline(&device);
         let clear_pipeline =
             Self::create_clear_pipeline(&device, wgpu::TextureFormat::Rgba8UnormSrgb);
@@ -941,7 +929,6 @@ impl Compositor {
             ..Default::default()
         });
 
-        phase("pipelines-done-return");
         Ok(Self {
             device,
             queue,
@@ -1045,7 +1032,8 @@ impl Compositor {
     /// immediately after creation. The `WindowSurface` is owned by the main thread.
     ///
     /// Per spec §Platform GPU Backends (line 189): this path uses the platform-
-    /// mandated backends — unlike `new_headless` which uses `Backends::all()`.
+    /// mandated backends. Headless hardware selection uses all backends, while
+    /// headless software selection initializes GL only as a fallback.
     pub async fn new_windowed(
         window: std::sync::Arc<winit::window::Window>,
         width: u32,

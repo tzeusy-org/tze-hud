@@ -739,18 +739,8 @@ impl TextRasterizer {
         format: wgpu::TextureFormat,
         font_config: &FontConfig,
     ) -> Self {
-        let diagnostic_started = std::time::Instant::now();
-        eprintln!(
-            "[DEBUG-hud-vlvu6] pid={} text fonts-begin",
-            std::process::id()
-        );
         let font_config = font_config.clone().normalized();
         let (font_system, resolved_fonts) = build_font_system(&font_config);
-        eprintln!(
-            "[DEBUG-hud-vlvu6] pid={} text fonts-done {:.6}s",
-            std::process::id(),
-            diagnostic_started.elapsed().as_secs_f64()
-        );
 
         tracing::info!(
             font_face_count = font_system.db().faces().count(),

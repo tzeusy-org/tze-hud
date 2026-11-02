@@ -205,34 +205,19 @@ impl HeadlessRuntime {
     /// - In production builds (without `dev-mode`): returns `Err` immediately —
     ///   the runtime refuses to start without an explicit config.
     pub async fn new(config: HeadlessConfig) -> Result<Self, Box<dyn std::error::Error>> {
-        let diagnostic_started = std::time::Instant::now();
-        let phase = |name: &str| {
-            eprintln!(
-                "[DEBUG-hud-vlvu6] pid={} runtime {} {:.6}s",
-                std::process::id(),
-                name,
-                diagnostic_started.elapsed().as_secs_f64()
-            );
-        };
-        phase("enter");
         // Build RuntimeContext at startup from loaded config (or default).
         // Returns Err if config_toml is None in a production build (dev-mode not enabled).
         let runtime_context = Arc::new(config.build_runtime_context()?);
         let agents = config.agents.clone().shared();
 
-        phase("context-done-compositor-begin");
         let mut compositor = Compositor::new_headless(config.width, config.height).await?;
-        phase("compositor-returned");
         let surface = HeadlessSurface::new(&compositor.device, config.width, config.height);
 
         // ── Initialize text renderer ──────────────────────────────────────
         // HeadlessSurface always uses Rgba8UnormSrgb. Must be called here so
         // glyphon text rendering is active for all runtime paths (not just tests).
-        phase("surface-done-text-begin");
         compositor.init_text_renderer(TextureFormat::Rgba8UnormSrgb);
-        phase("text-done-widget-begin");
         compositor.init_widget_renderer(TextureFormat::Rgba8UnormSrgb);
-        phase("widget-done");
         compositor.set_resident_ledger(runtime_context.resident_ledger.clone());
         // Apply the resolved per-surface truncation-input bound so the
         // viewport-adjacent-window fallback engages at the operator-configured
@@ -306,9 +291,7 @@ impl HeadlessRuntime {
         compositor.set_token_map(compositor_token_map);
         tracing::debug!("headless: compositor token map applied");
 
-        phase("scene-tokens-done-store-begin");
         let element_store_bootstrap = bootstrap_scene_element_store(&mut scene);
-        phase("store-done");
         let scene = Arc::new(Mutex::new(scene));
         let sessions = tze_hud_protocol::session::SessionRegistry::new();
         let resident_limits = runtime_context.resident_store_limits();
@@ -341,7 +324,6 @@ impl HeadlessRuntime {
         );
 
         let degradation_notices = DegradationNoticeSender::default();
-        phase("return");
         Ok(Self {
             compositor,
             surface,
