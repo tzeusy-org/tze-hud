@@ -15,20 +15,7 @@
 //! It rotates to `.1` at [`crate::operator::logs::MAX_LOG_BYTES`], like the
 //! main log, so a panic loop cannot fill the disk.
 
-use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-/// Resolve the diagnostics log path (best-effort).
-fn diag_path() -> PathBuf {
-    if let Ok(p) = std::env::var("TZE_HUD_DIAG_LOG") {
-        if !p.is_empty() {
-            return PathBuf::from(p);
-        }
-    }
-    let dir = crate::operator::logs::log_dir();
-    let _ = std::fs::create_dir_all(&dir);
-    dir.join("hud-diag.log")
-}
 
 /// Append a single timestamped line to the diagnostics log. Best-effort:
 /// any I/O error is swallowed (diagnostics must never affect runtime behaviour).
@@ -42,7 +29,7 @@ pub fn diag_write(line: &str) {
         .unwrap_or("unnamed")
         .to_string();
     let _ = crate::operator::logs::append_rotating(
-        &diag_path(),
+        &crate::operator::logs::diagnostic_path(),
         format!("[{ms}ms][{thread}] {line}\n").as_bytes(),
         crate::operator::logs::MAX_LOG_BYTES,
     );

@@ -1369,6 +1369,10 @@ def main(argv=None) -> int:
 
     psk = secrets.token_hex(32)
     config = seed_config(args.config, psk)
+    # This smoke runs the built executable in place with its isolated config.
+    # Keep the actual output assertion and final evidence on the same path.
+    log_dir = Path(os.environ["TZE_HUD_LOG_DIR"]) if os.environ.get("TZE_HUD_LOG_DIR") else config.parent / "logs"
+    durable = log_dir / "tze_hud.log"
     log_path = Path(tempfile.gettempdir()) / "tze_hud_smoke.log"
     cmd = [
         str(args.exe),
@@ -1384,6 +1388,14 @@ def main(argv=None) -> int:
     try:
         wait_for_mcp(smoke, proc, args.startup_timeout)
         print("ok  MCP initialize")
+        assert durable.is_file(), f"ordinary log missing from selected directory: {durable}"
+        # Normal startup's install_panic_hook emits its initialization line;
+        # no panic is needed. Explicit diagnostic overrides retain best-effort
+        # parent/error behavior, so only the default file is required here.
+        if not os.environ.get("TZE_HUD_DIAG_LOG"):
+            diagnostic = log_dir / "hud-diag.log"
+            assert diagnostic.is_file(), f"default diagnostic log missing: {diagnostic}"
+        print("ok  in-place ordinary/default diagnostic output uses the selected log directory")
         run_checks(smoke)
         time.sleep(args.settle_s)
         check_admin(smoke)
@@ -1418,10 +1430,6 @@ def main(argv=None) -> int:
             except OSError:
                 print("FAIL delayed smoke trace write (OSError)", file=sys.stderr)
         # Durable log (shared by the old and restarted instance).
-        base = os.environ.get("LOCALAPPDATA") if sys.platform == "win32" else None
-        durable = (Path(base) if base else Path(tempfile.gettempdir())) / "tze_hud" / "logs" / "tze_hud.log"
-        if os.environ.get("TZE_HUD_LOG_DIR"):
-            durable = Path(os.environ["TZE_HUD_LOG_DIR"]) / "tze_hud.log"
         if durable.exists():
             print(f"--- durable log tail ({durable}) ---")
             print(durable.read_text(errors="replace")[-8_000:])

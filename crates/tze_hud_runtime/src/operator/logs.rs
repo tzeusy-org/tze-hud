@@ -52,22 +52,102 @@ pub fn file_level() -> Option<String> {
         .map(|(_, current)| current.lock().unwrap_or_else(|e| e.into_inner()).clone())
 }
 
-/// Where logs live: `TZE_HUD_LOG_DIR`, else `%LOCALAPPDATA%\tze_hud\logs`, else
-/// `<temp>/tze_hud/logs`.
+/// The normal process's shared tracing, diagnostic, admin and Open logs paths.
+/// Selection happens before opening the file logger or installing panic hooks.
+#[derive(Clone, Debug)]
+pub struct LogPaths {
+    directory: PathBuf,
+    diagnostic_override: Option<PathBuf>,
+}
+
+impl LogPaths {
+    /// Explicit nonempty overrides win. Otherwise in-place runs use the
+    /// selected config's sibling `logs` directory; installed/no-config runs
+    /// retain the platform fallback. Inputs are injectable without changing env.
+    pub fn select(
+        selected_config: Option<&Path>,
+        installed: bool,
+        directory_override: Option<&Path>,
+        diagnostic_override: Option<&Path>,
+        fallback: PathBuf,
+    ) -> Self {
+        let nonempty = |path: &&Path| !path.as_os_str().is_empty();
+        let directory = if let Some(path) = directory_override.filter(nonempty) {
+            path.to_path_buf()
+        } else if !installed && let Some(parent) = selected_config.and_then(Path::parent) {
+            parent.join("logs")
+        } else {
+            fallback
+        };
+        Self {
+            directory,
+            diagnostic_override: diagnostic_override.filter(nonempty).map(Path::to_path_buf),
+        }
+    }
+
+    pub fn from_environment(selected_config: Option<&Path>, installed: bool) -> Self {
+        let directory_override = std::env::var_os("TZE_HUD_LOG_DIR").map(PathBuf::from);
+        let diagnostic_override = std::env::var("TZE_HUD_DIAG_LOG").ok().map(PathBuf::from);
+        let fallback = if cfg!(windows)
+            && let Some(base) = std::env::var_os("LOCALAPPDATA").filter(|d| !d.is_empty())
+        {
+            PathBuf::from(base).join("tze_hud").join("logs")
+        } else {
+            std::env::temp_dir().join("tze_hud").join("logs")
+        };
+        Self::select(
+            selected_config,
+            installed,
+            directory_override.as_deref(),
+            diagnostic_override.as_deref(),
+            fallback,
+        )
+    }
+
+    pub fn directory(&self) -> &Path {
+        &self.directory
+    }
+
+    pub fn log_path(&self) -> PathBuf {
+        self.directory.join(LOG_FILE_NAME)
+    }
+
+    /// Resolve diagnostics, creating the default directory best-effort.
+    /// An explicit diagnostic file retains its existing parent/error behavior.
+    pub fn diagnostic_path(&self) -> PathBuf {
+        if let Some(path) = &self.diagnostic_override {
+            return path.clone();
+        }
+        let _ = std::fs::create_dir_all(&self.directory);
+        self.directory.join("hud-diag.log")
+    }
+}
+
+static PROCESS_PATHS: std::sync::OnceLock<LogPaths> = std::sync::OnceLock::new();
+
+/// Set once by normal startup, after helper dispatch and config selection.
+/// Runtime-only/headless callers retain the existing environment fallback.
+pub fn install_paths(paths: LogPaths) {
+    let _ = PROCESS_PATHS.set(paths);
+}
+
+fn process_paths() -> LogPaths {
+    PROCESS_PATHS
+        .get()
+        .cloned()
+        .unwrap_or_else(|| LogPaths::from_environment(None, false))
+}
+
 pub fn log_dir() -> PathBuf {
-    if let Some(dir) = std::env::var_os("TZE_HUD_LOG_DIR").filter(|d| !d.is_empty()) {
-        return PathBuf::from(dir);
-    }
-    if cfg!(windows)
-        && let Some(base) = std::env::var_os("LOCALAPPDATA").filter(|d| !d.is_empty())
-    {
-        return PathBuf::from(base).join("tze_hud").join("logs");
-    }
-    std::env::temp_dir().join("tze_hud").join("logs")
+    process_paths().directory
 }
 
 pub fn log_path() -> PathBuf {
-    log_dir().join(LOG_FILE_NAME)
+    process_paths().log_path()
+}
+
+pub(crate) fn diagnostic_path() -> PathBuf {
+    process_paths().diagnostic_path()
 }
 
 fn rotated(path: &Path) -> PathBuf {
