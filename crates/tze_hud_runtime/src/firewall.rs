@@ -415,9 +415,82 @@ fn read_snapshot() -> Result<FirewallSnapshot, String> {
         .unwrap_or_else(|_| Err("firewall reader panicked".to_owned()))
 }
 
+// Keep assembly shared with the regression test: a partial policy must never
+// reach `decide` as a successful snapshot.
+#[cfg(any(target_os = "windows", test))]
+mod diagnostic {
+    use super::{FirewallSnapshot, Rule};
+
+    pub(super) trait RuleReader {
+        fn name(&self) -> Result<String, String>;
+        fn enabled(&self) -> Result<bool, String>;
+        fn inbound(&self) -> Result<bool, String>;
+        fn allow(&self) -> Result<bool, String>;
+        fn profiles(&self) -> Result<u32, String>;
+        fn application(&self) -> Result<String, String>;
+        fn protocol(&self) -> Result<i32, String>;
+        fn local_ports(&self) -> Result<String, String>;
+        fn remote_addresses(&self) -> Result<String, String>;
+    }
+
+    pub(super) fn snapshot<R: RuleReader>(
+        mut snapshot: FirewallSnapshot,
+        mut next: impl FnMut() -> Result<Option<R>, String>,
+    ) -> Result<FirewallSnapshot, String> {
+        while let Some(rule) = next()? {
+            let protocol = rule.protocol()?;
+            // Windows only defines LocalPorts for TCP and UDP. In particular,
+            // ANY and ICMP rules may legitimately reject that getter.
+            let local_ports = if protocol == 6 || protocol == 17 {
+                Some(rule.local_ports()?).filter(|s| !s.is_empty())
+            } else {
+                None
+            };
+            snapshot.rules.push(Rule {
+                name: rule.name()?,
+                enabled: rule.enabled()?,
+                inbound: rule.inbound()?,
+                allow: rule.allow()?,
+                profiles: rule.profiles()?,
+                application: Some(rule.application()?).filter(|s| !s.is_empty()),
+                protocol,
+                local_ports,
+                remote_addresses: rule.remote_addresses()?,
+            });
+        }
+        Ok(snapshot)
+    }
+
+    pub(super) fn next<R>(
+        status: i32,
+        fetched: u32,
+        read: impl FnOnce() -> Result<R, String>,
+    ) -> Result<Option<R>, String> {
+        match (status, fetched) {
+            (1, 0) => Ok(None),         // S_FALSE: normal exhaustion of a one-item read.
+            (0, 1) => read().map(Some), // S_OK: exactly one yielded rule.
+            _ => Err(format!(
+                "incomplete firewall enumeration (HRESULT 0x{:08X}, fetched {fetched})",
+                status as u32
+            )),
+        }
+    }
+
+    pub(super) fn interface<T, R>(
+        dispatch: bool,
+        borrow: impl FnOnce() -> Option<T>,
+        cast: impl FnOnce(T) -> Result<R, String>,
+    ) -> Result<R, String> {
+        if !dispatch {
+            return Err("unexpected firewall enumeration variant".into());
+        }
+        cast(borrow().ok_or("null firewall rule interface")?)
+    }
+}
+
 #[cfg(target_os = "windows")]
 mod win {
-    use super::{FirewallSnapshot, PROFILE_DOMAIN, PROFILE_PRIVATE, PROFILE_PUBLIC, Rule};
+    use super::{FirewallSnapshot, PROFILE_DOMAIN, PROFILE_PRIVATE, PROFILE_PUBLIC, diagnostic};
     use windows::Win32::NetworkManagement::WindowsFirewall::{
         INetFwPolicy2, INetFwRule, NET_FW_ACTION_ALLOW, NET_FW_ACTION_BLOCK, NET_FW_PROFILE_TYPE2,
         NET_FW_RULE_DIR_IN, NetFwPolicy2,
@@ -446,75 +519,112 @@ mod win {
                 .ok()
                 .map_err(|e| format!("CoInitializeEx: {e}"))?;
             let _com = Com;
-            read().map_err(|e| format!("INetFwPolicy2: {e}"))
+            read()
         }
     }
 
-    unsafe fn read() -> windows::core::Result<FirewallSnapshot> {
-        let policy: INetFwPolicy2 =
-            unsafe { CoCreateInstance(&NetFwPolicy2, None, CLSCTX_INPROC_SERVER)? };
+    fn failure(context: &str, error: windows::core::Error) -> String {
+        format!("{context}: HRESULT 0x{:08X}", error.code().0 as u32)
+    }
+
+    unsafe fn read() -> Result<FirewallSnapshot, String> {
+        let policy: INetFwPolicy2 = unsafe {
+            CoCreateInstance(&NetFwPolicy2, None, CLSCTX_INPROC_SERVER)
+                .map_err(|e| failure("INetFwPolicy2", e))?
+        };
         let mut snap = FirewallSnapshot {
-            current: unsafe { policy.CurrentProfileTypes()? } as u32,
+            current: unsafe { policy.CurrentProfileTypes() }
+                .map_err(|e| failure("CurrentProfileTypes", e))? as u32,
             ..Default::default()
         };
         for bit in [PROFILE_DOMAIN, PROFILE_PRIVATE, PROFILE_PUBLIC] {
             let profile = NET_FW_PROFILE_TYPE2(bit as i32);
-            if unsafe { policy.get_FirewallEnabled(profile)? }.as_bool() {
+            if unsafe { policy.get_FirewallEnabled(profile) }
+                .map_err(|e| failure("FirewallEnabled", e))?
+                .as_bool()
+            {
                 snap.enabled |= bit;
             }
-            if unsafe { policy.get_DefaultInboundAction(profile)? } == NET_FW_ACTION_BLOCK {
+            if unsafe { policy.get_DefaultInboundAction(profile) }
+                .map_err(|e| failure("DefaultInboundAction", e))?
+                == NET_FW_ACTION_BLOCK
+            {
                 snap.default_block |= bit;
             }
         }
-        let enumerator: IEnumVARIANT = unsafe { policy.Rules()?._NewEnum()?.cast()? };
-        loop {
+        let enumerator: IEnumVARIANT = unsafe { policy.Rules().and_then(|r| r._NewEnum()) }
+            .and_then(|e| e.cast())
+            .map_err(|e| failure("firewall rule enumeration", e))?;
+        diagnostic::snapshot(snap, || {
             let mut item = [VARIANT::default()];
             let mut fetched = 0u32;
             // SAFETY: one-element buffer; `fetched` is a live local.
-            if unsafe { enumerator.Next(&mut item, &mut fetched) }.0 != 0 || fetched == 0 {
-                break;
-            }
-            if let Some(rule) = unsafe { rule_of(&item[0]) } {
-                if let Some(r) = unsafe { to_rule(&rule) } {
-                    snap.rules.push(r);
-                }
-            }
-        }
-        Ok(snap)
+            let status = unsafe { enumerator.Next(&mut item, &mut fetched) };
+            diagnostic::next(status.0, fetched, || unsafe { rule_of(&item[0]) })
+        })
     }
 
-    unsafe fn rule_of(v: &VARIANT) -> Option<INetFwRule> {
+    unsafe fn rule_of(v: &VARIANT) -> Result<INetFwRule, String> {
         let raw = v.as_raw();
         // SAFETY: the union member is read only after checking `vt`; the pointer
         // is borrowed from the VARIANT, which outlives this call.
         unsafe {
             let inner = &raw.Anonymous.Anonymous;
-            if inner.vt != VT_DISPATCH.0 {
-                return None;
-            }
-            let punk = windows::core::IUnknown::from_raw_borrowed(&inner.Anonymous.pdispVal)?;
-            punk.cast::<INetFwRule>().ok()
+            diagnostic::interface(
+                inner.vt == VT_DISPATCH.0,
+                || windows::core::IUnknown::from_raw_borrowed(&inner.Anonymous.pdispVal),
+                |punk| {
+                    punk.cast()
+                        .map_err(|e| failure("firewall rule interface", e))
+                },
+            )
         }
     }
 
-    unsafe fn to_rule(r: &INetFwRule) -> Option<Rule> {
-        // A rule whose properties cannot be read is skipped, not fatal.
-        // SAFETY: read-only property getters on a live interface.
-        unsafe {
-            let text = |b: windows::core::Result<windows::core::BSTR>| {
-                b.map(|b| b.to_string()).unwrap_or_default()
-            };
-            Some(Rule {
-                name: text(r.Name()),
-                enabled: r.Enabled().ok()?.as_bool(),
-                inbound: r.Direction().ok()? == NET_FW_RULE_DIR_IN,
-                allow: r.Action().ok()? == NET_FW_ACTION_ALLOW,
-                profiles: r.Profiles().ok()? as u32,
-                application: Some(text(r.ApplicationName())).filter(|s| !s.is_empty()),
-                protocol: r.Protocol().ok()?,
-                local_ports: Some(text(r.LocalPorts())).filter(|s| !s.is_empty()),
-                remote_addresses: text(r.RemoteAddresses()),
-            })
+    // SAFETY: each getter reads a live, owned COM rule on the reader thread.
+    impl diagnostic::RuleReader for INetFwRule {
+        fn name(&self) -> Result<String, String> {
+            unsafe { self.Name() }
+                .map(|s| s.to_string())
+                .map_err(|e| failure("Name", e))
+        }
+        fn enabled(&self) -> Result<bool, String> {
+            unsafe { self.Enabled() }
+                .map(|v| v.as_bool())
+                .map_err(|e| failure("Enabled", e))
+        }
+        fn inbound(&self) -> Result<bool, String> {
+            unsafe { self.Direction() }
+                .map(|v| v == NET_FW_RULE_DIR_IN)
+                .map_err(|e| failure("Direction", e))
+        }
+        fn allow(&self) -> Result<bool, String> {
+            unsafe { self.Action() }
+                .map(|v| v == NET_FW_ACTION_ALLOW)
+                .map_err(|e| failure("Action", e))
+        }
+        fn profiles(&self) -> Result<u32, String> {
+            unsafe { self.Profiles() }
+                .map(|v| v as u32)
+                .map_err(|e| failure("Profiles", e))
+        }
+        fn application(&self) -> Result<String, String> {
+            unsafe { self.ApplicationName() }
+                .map(|s| s.to_string())
+                .map_err(|e| failure("ApplicationName", e))
+        }
+        fn protocol(&self) -> Result<i32, String> {
+            unsafe { self.Protocol() }.map_err(|e| failure("Protocol", e))
+        }
+        fn local_ports(&self) -> Result<String, String> {
+            unsafe { self.LocalPorts() }
+                .map(|s| s.to_string())
+                .map_err(|e| failure("LocalPorts", e))
+        }
+        fn remote_addresses(&self) -> Result<String, String> {
+            unsafe { self.RemoteAddresses() }
+                .map(|s| s.to_string())
+                .map_err(|e| failure("RemoteAddresses", e))
         }
     }
 }
@@ -694,6 +804,187 @@ mod tests {
                 error: "E_ACCESSDENIED".into()
             }
         );
+
+        struct Reading {
+            rule: Rule,
+            failure: Option<&'static str>,
+        }
+        impl Reading {
+            fn get<T>(&self, property: &str, value: T) -> Result<T, String> {
+                if self.failure == Some(property) {
+                    Err(format!("{property}: HRESULT 0x80070005"))
+                } else {
+                    Ok(value)
+                }
+            }
+        }
+        impl diagnostic::RuleReader for Reading {
+            fn name(&self) -> Result<String, String> {
+                self.get("Name", self.rule.name.clone())
+            }
+            fn enabled(&self) -> Result<bool, String> {
+                self.get("Enabled", self.rule.enabled)
+            }
+            fn inbound(&self) -> Result<bool, String> {
+                self.get("Direction", self.rule.inbound)
+            }
+            fn allow(&self) -> Result<bool, String> {
+                self.get("Action", self.rule.allow)
+            }
+            fn profiles(&self) -> Result<u32, String> {
+                self.get("Profiles", self.rule.profiles)
+            }
+            fn application(&self) -> Result<String, String> {
+                self.get(
+                    "ApplicationName",
+                    self.rule.application.clone().unwrap_or_default(),
+                )
+            }
+            fn protocol(&self) -> Result<i32, String> {
+                self.get("Protocol", self.rule.protocol)
+            }
+            fn local_ports(&self) -> Result<String, String> {
+                self.get(
+                    "LocalPorts",
+                    self.rule.local_ports.clone().unwrap_or_default(),
+                )
+            }
+            fn remote_addresses(&self) -> Result<String, String> {
+                self.get("RemoteAddresses", self.rule.remote_addresses.clone())
+            }
+        }
+        let reading = |rule, failure| Reading { rule, failure };
+        let assemble =
+            |prefix: Vec<Rule>, terminal: &mut dyn FnMut() -> Result<Option<Reading>, String>| {
+                let mut prefix = prefix.into_iter();
+                let mut terminal_read = false;
+                diagnostic::snapshot(snap(vec![]), || {
+                    if let Some(rule) = prefix.next() {
+                        diagnostic::next(0, 1, || Ok(reading(rule, None)))
+                    } else if terminal_read {
+                        diagnostic::next(1, 0, || unreachable!())
+                    } else {
+                        terminal_read = true;
+                        terminal()
+                    }
+                })
+            };
+        let verdict = |snapshot: Result<FirewallSnapshot, String>| {
+            FirewallProbe::new(move || decide(true, &snapshot, Path::new(EXE), PORTS)).current()
+        };
+        let unknown = |snapshot| {
+            let verdict = verdict(snapshot);
+            assert!(
+                matches!(&verdict, TailnetInbound::Unknown { error } if !error.is_empty()),
+                "{verdict:?}"
+            );
+            assert_eq!(verdict.to_json()["state"], "unknown");
+        };
+
+        // Exhaustion succeeds both before any rules and after an accepted
+        // allow/block rule. Failures must discard that partial snapshot.
+        for prefix in [
+            vec![],
+            vec![rule("allow", true)],
+            vec![rule("block", false)],
+        ] {
+            let complete = assemble(prefix.clone(), &mut || {
+                diagnostic::next(1, 0, || -> Result<Reading, String> {
+                    panic!("EOF has no rule")
+                })
+            });
+            assert_eq!(complete, Ok(snap(prefix.clone())));
+            assert_eq!(verdict(complete), run(snap(prefix.clone())));
+
+            for (status, fetched) in [
+                (0x8000_4005_u32 as i32, 0),
+                (0x8000_4005_u32 as i32, 1),
+                (0, 0),
+                (0, 2),
+                (1, 1),
+                (2, 0),
+            ] {
+                unknown(assemble(prefix.clone(), &mut || {
+                    diagnostic::next(status, fetched, || -> Result<Reading, String> {
+                        panic!("invalid enumeration must not read a rule")
+                    })
+                }));
+            }
+
+            for (dispatch, present, cast_ok) in [
+                (false, true, true),
+                (true, false, true),
+                (true, true, false),
+                (true, true, true),
+            ] {
+                let result = assemble(prefix.clone(), &mut || {
+                    diagnostic::next(0, 1, || {
+                        diagnostic::interface(
+                            dispatch,
+                            || {
+                                assert!(dispatch, "unexpected variant must not read the union");
+                                present.then(|| reading(rule("candidate", true), None))
+                            },
+                            |r| {
+                                if cast_ok {
+                                    Ok(r)
+                                } else {
+                                    Err("firewall rule interface: HRESULT 0x80004002".into())
+                                }
+                            },
+                        )
+                    })
+                });
+                if dispatch && present && cast_ok {
+                    let mut expected = prefix.clone();
+                    expected.push(rule("candidate", true));
+                    assert_eq!(result, Ok(snap(expected)));
+                } else {
+                    unknown(result);
+                }
+            }
+
+            for property in [
+                "Name",
+                "Enabled",
+                "Direction",
+                "Action",
+                "Profiles",
+                "ApplicationName",
+                "Protocol",
+                "LocalPorts",
+                "RemoteAddresses",
+            ] {
+                unknown(assemble(prefix.clone(), &mut || {
+                    diagnostic::next(0, 1, || {
+                        Ok(reading(
+                            ports(rule("candidate", true), "9090,50051"),
+                            Some(property),
+                        ))
+                    })
+                }));
+            }
+        }
+
+        // Successful empty strings retain their wildcard meaning. For
+        // non-port protocols even a rejecting LocalPorts getter is irrelevant.
+        for protocol in [PROTO_TCP, 17, PROTO_ANY, 1, 58] {
+            let mut candidate = rule("", true);
+            candidate.protocol = protocol;
+            candidate.remote_addresses.clear();
+            for failure in [None, Some("LocalPorts")] {
+                let result = assemble(vec![], &mut || {
+                    diagnostic::next(0, 1, || Ok(reading(candidate.clone(), failure)))
+                });
+                if failure.is_some() && (protocol == 6 || protocol == 17) {
+                    unknown(result);
+                } else {
+                    let expected = snap(vec![candidate.clone()]);
+                    assert_eq!(result, Ok(expected.clone()));
+                    assert_eq!(verdict(result), run(expected));
+                }
+            }
+        }
     }
 
     #[test]
