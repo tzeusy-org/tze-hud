@@ -585,5 +585,6 @@ validation remains pending.
 - Machine-specific rules in `~/.claude/CLAUDE.md` on the Linux host, such as
   the `orca` user's Kubernetes and secret-handling rules, don't carry over to
   Windows. Repo rules in `CLAUDE.md` and `AGENTS.md` still apply.
-- Use `-o BatchMode=yes` for `ssh`/`scp`, and non-interactive `cp`/`mv`/`rm`
-  flags, the same as on Linux (`AGENTS.md`).
+- Use non-interactive `cp`/`mv`/`rm` flags as in `AGENTS.md`. For HUD
+  deployment and evidence, use the paired clients and `/admin` routes in
+  [Windows installation](../operations/windows-install.md).
