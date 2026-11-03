@@ -338,24 +338,58 @@ pub fn install(
 ) -> Result<Staged, InstallError> {
     #[cfg(windows)]
     {
-        validate_owned(paths)?;
-        const QUIT_WAIT: Duration = Duration::from_secs(15);
-        if win::signal_quit() && !win::wait_for_instance_exit(QUIT_WAIT) {
-            return Err(InstallError::StillRunning(QUIT_WAIT.as_secs()));
-        }
-        let staged = stage_files(current_exe, paths, default_config)?;
-        win::register(paths).map_err(io_err("register autostart"))?;
-        // --handoff: if anything still holds the instance mutex, wait for it.
-        let mut args = paths.launch_args();
-        args.push("--handoff".into());
-        win::spawn_detached(&paths.exe, &args).map_err(io_err("relaunch"))?;
-        Ok(staged)
+        install_with(
+            current_exe,
+            paths,
+            default_config,
+            win::signal_quit,
+            win::acquire,
+            win::register,
+            win::spawn_detached,
+        )
     }
     #[cfg(not(windows))]
     {
         let _ = (current_exe, paths, default_config);
         Err(InstallError::WindowsOnly)
     }
+}
+
+// Keep the authorization and all install mutations in one production path;
+// only the platform operations are injected for host-independent coverage.
+#[cfg(any(windows, test))]
+pub(super) fn install_with(
+    current_exe: &Path,
+    paths: &InstallPaths,
+    default_config: &str,
+    signal_quit: impl FnOnce() -> bool,
+    acquire: impl FnOnce(Duration) -> io::Result<Acquire>,
+    register: impl FnOnce(&InstallPaths) -> io::Result<()>,
+    relaunch: impl FnOnce(&Path, &[OsString]) -> io::Result<()>,
+) -> Result<Staged, InstallError> {
+    validate_owned(paths)?;
+    const QUIT_WAIT: Duration = Duration::from_secs(15);
+    if signal_quit() && !wait_for_instance_exit(QUIT_WAIT, acquire)? {
+        return Err(InstallError::StillRunning(QUIT_WAIT.as_secs()));
+    }
+    let staged = stage_files(current_exe, paths, default_config)?;
+    register(paths).map_err(io_err("register autostart"))?;
+    // --handoff: if anything still holds the instance mutex, wait for it.
+    let mut args = paths.launch_args();
+    args.push("--handoff".into());
+    relaunch(&paths.exe, &args).map_err(io_err("relaunch"))?;
+    Ok(staged)
+}
+
+/// A mutex error cannot confirm that the predecessor has exited.
+#[cfg(any(windows, test))]
+fn wait_for_instance_exit(
+    timeout: Duration,
+    acquire: impl FnOnce(Duration) -> io::Result<Acquire>,
+) -> Result<bool, InstallError> {
+    acquire(timeout)
+        .map(|outcome| matches!(outcome, Acquire::Acquired(_)))
+        .map_err(io_err("confirm previous instance exit"))
 }
 
 /// Remove autostart, stop the running instance, and delete the install dir
@@ -398,8 +432,9 @@ pub enum Acquire {
 }
 
 /// Take the per-user instance mutex, waiting up to `wait` for a previous
-/// holder to release it (`--handoff`). Always acquires off Windows.
-pub fn acquire_single_instance(wait: Duration) -> Acquire {
+/// holder to release it (`--handoff`). An OS error refuses startup/takeover;
+/// it is distinct from a running predecessor. Always acquires off Windows.
+pub fn acquire_single_instance(wait: Duration) -> io::Result<Acquire> {
     #[cfg(windows)]
     {
         win::acquire(wait)
@@ -407,7 +442,28 @@ pub fn acquire_single_instance(wait: Duration) -> Acquire {
     #[cfg(not(windows))]
     {
         let _ = wait;
-        Acquire::Acquired(InstanceGuard {})
+        Ok(Acquire::Acquired(InstanceGuard {}))
+    }
+}
+
+// A successful probe owns its handle until it is returned or dropped. An
+// existing-instance probe is closed before retrying; an OS error owns nothing.
+#[cfg(any(windows, test))]
+pub(super) fn acquire_with(
+    wait: Duration,
+    mut create: impl FnMut() -> io::Result<(InstanceGuard, bool)>,
+) -> io::Result<Acquire> {
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        let (guard, exists) = create()?;
+        if !exists {
+            return Ok(Acquire::Acquired(guard));
+        }
+        drop(guard);
+        if std::time::Instant::now() >= deadline {
+            return Ok(Acquire::AlreadyRunning);
+        }
+        std::thread::sleep(Duration::from_millis(250));
     }
 }
 
@@ -473,7 +529,7 @@ mod win {
     use std::os::windows::ffi::OsStrExt;
     use std::os::windows::process::CommandExt;
     use std::path::Path;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
     use windows::Win32::Foundation::{
         CloseHandle, ERROR_ALREADY_EXISTS, ERROR_FILE_NOT_FOUND, ERROR_PATH_NOT_FOUND,
         GetLastError, HANDLE, WAIT_OBJECT_0, WIN32_ERROR,
@@ -666,38 +722,23 @@ mod win {
         }
     }
 
-    /// True once no instance holds the mutex (within `timeout`).
-    pub(super) fn wait_for_instance_exit(timeout: Duration) -> bool {
-        matches!(acquire(timeout), Acquire::Acquired(_))
-    }
-
-    pub(super) fn acquire(wait: Duration) -> Acquire {
+    pub(super) fn acquire(wait: Duration) -> io::Result<Acquire> {
         let name = wide(MUTEX_NAME);
-        let deadline = Instant::now() + wait;
-        loop {
+        super::acquire_with(wait, || {
             // SAFETY: `name` is a live NUL-terminated buffer. GetLastError is
-            // read immediately after the call that sets it.
+            // read immediately after the successful call that sets it.
             let (handle, exists) = unsafe {
-                match CreateMutexW(None, false, PCWSTR(name.as_ptr())) {
-                    Ok(h) => (h, GetLastError() == ERROR_ALREADY_EXISTS),
-                    Err(e) => {
-                        // Fail open: a broken mutex must not stop the HUD.
-                        tracing::warn!(error = %e, "single-instance mutex unavailable; continuing");
-                        return Acquire::Acquired(InstanceGuard { handle: 0 });
-                    }
-                }
+                let handle =
+                    CreateMutexW(None, false, PCWSTR(name.as_ptr())).map_err(io::Error::other)?;
+                (handle, GetLastError() == ERROR_ALREADY_EXISTS)
             };
-            if !exists {
-                return Acquire::Acquired(InstanceGuard {
+            Ok((
+                InstanceGuard {
                     handle: handle.0 as usize,
-                });
-            }
-            close(handle.0 as usize);
-            if Instant::now() >= deadline {
-                return Acquire::AlreadyRunning;
-            }
-            std::thread::sleep(Duration::from_millis(250));
-        }
+                },
+                exists,
+            ))
+        })
     }
 
     pub(super) fn spawn_pair_listener(on_pair: impl Fn() + Send + 'static) {
