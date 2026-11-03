@@ -721,6 +721,34 @@ mod tests {
         let (r, killed, shutdowns) = run(Behaviour::ExitEarly, Duration::from_secs(5));
         assert!(matches!(r, Err(HandoffError::ChildExited(_))), "{r:?}");
         assert!(killed && shutdowns == 0);
+
+        // Queue the report before spawn returns: an expired attempt must not
+        // accept READY just because it is already waiting in the listener.
+        for valid in [true, false] {
+            let killed = Arc::new(AtomicBool::new(false));
+            let shutdowns = Arc::new(AtomicUsize::new(0));
+            let (k, s) = (Arc::clone(&killed), Arc::clone(&shutdowns));
+            let r = handoff(
+                move |spec| {
+                    let mut report = spec.clone();
+                    if !valid {
+                        report.nonce = "wrongnonce".into();
+                    }
+                    report_ready(&report).unwrap();
+                    Ok(Box::new(Fake {
+                        exited: Arc::new(Mutex::new(None)),
+                        killed: k,
+                    }))
+                },
+                Duration::ZERO,
+                move || {
+                    s.fetch_add(1, Ordering::SeqCst);
+                },
+            );
+            assert!(matches!(r, Err(HandoffError::Timeout(_))), "{r:?}");
+            assert!(killed.load(Ordering::SeqCst));
+            assert_eq!(shutdowns.load(Ordering::SeqCst), 0);
+        }
     }
 
     #[test]
