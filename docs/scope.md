@@ -41,7 +41,7 @@ source links when implementation changes the status.
 | T3 | Governance: attention budget, quiet hours, privacy redaction and viewer classes, `[privacy]`/`[degradation]`/`[chrome]` config, admission controller, budget ladder (now plain hard caps), unwired lease state machine and suspension manager, degradation ladder down to one fallback (Normal ↔ Simplified). **Kept** the lease lifecycle (request, TTL, renew, release, revoke, disconnect grace). Capability-scope shrink moved to T5: it changes the session-init and lease wire contract | done |
 | T4 | Scaffolding: `tze_hud_validation`, replay/trace recording, v1-thesis/Layer-4 artifact harness and their CI jobs; component profiles (flat `[design_tokens]` stay; removed profile sections are rejected); sync groups and clock-skew estimation (`compositor_timestamp_wall_us` stays for `present_at`/`expires_at`; wire fields reserved); hardware calibration (tests use a fixed `test_budget` slack; the benchmark keeps its CI factors); test scenes for removed features; reserved mobile display profile; unwired tab-switch trigger; redundant tests | done |
 | T5 | API redesign ([api.md](api.md)): one verb set per lifecycle stage across MCP and gRPC (five MCP tools replace 22; gRPC `Publish`/`Clear`/`Hold`/`RequestResult`); per-agent PSK identity with an `allow` list replaces the capability vocabulary, resident principal, and portal owner token; one shared error-code set with hints; geometry remains runtime-owned; token budgets enforced in CI; dead wire removed and reserved; session-server constructors collapsed; invariant 1 and 4 breaks on the gRPC path fixed; owner-directed public tile removal on 2026-10-14 (deferred spec hud-x1wuq) | done |
-| T6 | Windows delivery without SSH, then prove the POC on it. (1) CI builds `x86_64-pc-windows-msvc` natively on a Windows runner, boots it under WARP with an MCP smoke, and publishes minisign-signed releases (rolling `dev` from main, `v*` tags). (2) The exe self-installs per user (`%LOCALAPPDATA%`, `HKCU` Run autostart, no admin). (3) It listens on loopback and the Tailscale address only (owner reaffirmed 2026-10-06: no loopback-only default, no relay). The HUD detects when Windows Firewall blocks tailnet inbound and says so on the pairing card and in `/admin/status`; an opt-in elevated helper adds one program-scoped rule (bead `hud-lgb6c`). (4) First-run pairing: the HUD shows a one-time code, an agent host trades it for a per-agent PSK (`POST /pair`; only a hash is stored); delete `--psk`, the default PSK, and `--bind-all-interfaces`. (5) `/admin/*` operator endpoints (status, logs, screenshot of the HUD's own frame, restart, signed pull-only self-update with health handoff), off the MCP surface. (6) Rewrite `user-test`/`hud-projection` around the paired PSK; delete SSH deploy tooling. Then run POC acceptance on the owner's host; close stale draft PRs | delivery paths implemented; GEN2 repairs landed; fresh reconciliation pending; historical owner checks recorded |
+| T6 | Windows delivery without SSH, then prove the POC on it. (1) CI builds `x86_64-pc-windows-msvc` natively on a Windows runner, boots it under WARP with an MCP smoke, and publishes minisign-signed releases (rolling `dev` from main, `v*` tags). (2) The exe self-installs per user (`%LOCALAPPDATA%`, `HKCU` Run autostart, no admin). (3) It listens on loopback and the Tailscale address only (owner reaffirmed 2026-10-06: no loopback-only default, no relay). The HUD detects when Windows Firewall blocks tailnet inbound and says so on the pairing card and in `/admin/status`; an opt-in elevated helper adds one program-scoped rule (bead `hud-lgb6c`). (4) First-run pairing: the HUD shows a one-time code, an agent host trades it for a per-agent PSK (`POST /pair`; only a hash is stored); delete `--psk`, the default PSK, and `--bind-all-interfaces`. (5) `/admin/*` operator endpoints (status, logs, screenshot of the HUD's own frame, restart, signed pull-only self-update with health handoff), off the MCP surface. (6) Rewrite `user-test`/`hud-projection` around the paired PSK; delete SSH deploy tooling. Then run POC acceptance on the owner's host; close stale draft PRs | delivery paths implemented; GEN3 source audit complete; historical owner checks recorded |
 | T7 | Portal as a runtime feature: projection state lives in the runtime keyed by PSK identity. Delete the external-authority design: owner tokens, audit log, provider-neutral contract, `projection_authority` binary, `resident_grpc` adapter. Fold the `PROJECTION_*` error codes into the shared set. Internal interfaces may break; the MCP surface and token footprint must not regress. Target: portal code (projection, driver, windowed portal, composer) under ~12k lines from ~45k | in progress: shared `PortalHub` and direct scene renderer are live; portal-only wire fields 13–17 are reserved; rename, final size reconciliation and owner acceptance remain |
 | T8 | Code and test diet, crate by crate (compositor, runtime, scene, protocol, input first): delete code without a current user, replace oversized test files with behavior tests tied to `invariants.md`, add `tze_hud_resource` tests, a local llvmpipe recipe for compositor tests, and strip pre-reset references (openspec, RFCs, doctrine) from comments and protos | in progress: resource behavior tests and llvmpipe recipes exist; diet and reconciliation continue |
 | T9 | Owner-directed 2026-10-05, alongside T6 rather than after the POC. Per-monitor overlays: one window and surface per monitor sharing one scene, the default with no flag; delete `--monitor` and monitor cycling; logical (dp) token sizes scaled per monitor (bead `hud-1pt5h`). Owner-directed 2026-10-06: `[displays.<key>]` is keyed by EDID model and serial, plus the GPU connector path when two monitors are ambiguous; `/admin/status` and the log show each key (bead `hud-avr7s`). One global `ui.scale` token multiplies every logical size on top of each monitor's Windows scale factor; there are no per-monitor overrides (bead `hud-h51u7.3`) | partial: overlay windows exist; logical (dp) sizing and `ui.scale` landed (`hud-h51u7.3`); stable keys remain |
@@ -77,15 +77,32 @@ source links when implementation changes the status.
   then an ordinary scene change still presents. The [operational retirement guard](../.claude/skills/user-test/tests/test_skills_docs.py),
   `test_operational_sources_do_not_use_retired_transports_or_doc_psks`, covers
   supported skill mirrors, scripts, workflows, `justfile` and `.mcp.json`.
-  T6-only source refresh: `7d30e984` (2026-11-03). The GEN2 read-only audit
-  (`hud-i2e10.18`, at `af06ca8a`) found absolute handoff-deadline and ordinary
-  paired-client IPv6 HTTP-origin gaps. Their repairs landed as `hud-i2e10.19`
-  ([PR #1544](https://github.com/tzeusy-org/tze-hud/pull/1544)) and
-  `hud-i2e10.20` ([PR #1543](https://github.com/tzeusy-org/tze-hud/pull/1543)).
-  The repairs' exact-source automated receipts are separate from the fresh
-  selected execution state and receipts recorded in the `.18` bead/report.
-  Independent `hud-i2e10.21` reconciliation remains required for a fresh
-  no-gaps proof; the audit and merged repairs do not establish full coverage.
+  T6-only GEN3 source audit (`hud-i2e10.21`, 2026-11-03): `d54eb17d`, tree
+  `87bcf10db4ed7d463c82dc58b91ed3167d9bde6a`. Fresh review of all 37 original
+  requirements found 35 implemented, 0 partial, 0 missing and 2 retained
+  historical design deviations, with no new implementation gap in the finite
+  audited paths. The deviations remain explicit: mutex creation failure proceeds
+  without the singleton lock; the original `.7` in-place log-path design differs
+  from the current documented LOCALAPPDATA/temp path and override.
+  The GEN2 read-only audit (`hud-i2e10.18`, at `af06ca8a`) found absolute
+  handoff-deadline and ordinary paired-client IPv6 HTTP-origin gaps. Their repairs
+  landed as `hud-i2e10.19` (`7d30e984`,
+  [PR #1544](https://github.com/tzeusy-org/tze-hud/pull/1544)) and
+  `hud-i2e10.20` (`315a4149`,
+  [PR #1543](https://github.com/tzeusy-org/tze-hud/pull/1543)); GEN3 reread both
+  repaired bodies and their actual restart/update and paired-client callers.
+  The accepted `.18` selected receipts ran at `099f28a2`, the same tree
+  `87bcf10db4ed7d463c82dc58b91ed3167d9bde6a`: 9 native tests, 11 Python tests
+  and 8 soak unittests passed. GEN3 verified and reused those receipts. This
+  prose update changes the Git tree; the earlier runs did not execute this docs
+  tree. All implementing, test, Cargo, protobuf, schema, CI, guard and Nextest
+  source blobs are unchanged. The soak unittests do not establish an overnight
+  physical run. The repairs' other exact-source receipts retain their own tested
+  heads; source inspection and merged repairs alone do not establish full coverage.
+  Required checks all succeeded on attempt 1, but the `.19` merge group took
+  630 s and the `.18` docs merge group took 411 s, exceeding the 6-minute
+  requirement. Existing `hud-4k3b2` retains both measured deadline failures;
+  the provider cause remains unproved and no waiver is claimed.
   This source/automated evidence does not establish current Windows owner acceptance.
   `hud-i2e10.13` is closed with six historical owner passes and decisions recorded;
   those results do not accept the current host or a new build. Separate firewall

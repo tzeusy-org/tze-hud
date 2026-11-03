@@ -99,9 +99,10 @@ HUD_HOST=<host> python3 .claude/skills/hud-projection/scripts/portal_client.py \
 
 ## Connect
 
-Set `HUD_HOST` to the HUD's host. The client derives `http://$HUD_HOST:9090/mcp`
-and reads your PSK from `~/.config/tze-hud/$HUD_HOST.psk`. If that file is
-missing, pair once with the 6-digit code the HUD shows on screen
+Set `HUD_HOST` to the HUD's host, `host:port`, or HTTP URL (bracket IPv6 literals).
+The client uses the selected HTTP port or 9090 and reads your PSK from
+`~/.config/tze-hud/<hostname>.psk`; the hostname excludes brackets and port.
+If that file is missing, pair once with the 6-digit code the HUD shows on screen
 (`.claude/skills/user-test/scripts/hud_pair.py --code <code>`); the PSK is
 written to the file and never printed. The paired agent gets `allow = ["*"]`,
 which includes `portal`.

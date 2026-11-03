@@ -17,9 +17,11 @@ Everything goes over the HUD's MCP port (default 9090) with your paired PSK.
 Contract: `docs/api.md` (pairing, `hud_*` verbs) and
 `docs/operations/windows-install.md` (`/admin/*`).
 
-`HUD_HOST` names the HUD (host or `host:port`). Every script here derives the
-MCP URL, the gRPC target, and the PSK file `~/.config/tze-hud/$HUD_HOST.psk`
-from it. The PSK is never printed; do not read the file into context.
+`HUD_HOST` names the HUD (host, `host:port`, or HTTP URL; bracket IPv6 literals).
+The shared resolver uses the selected HTTP port or 9090 and reads
+`~/.config/tze-hud/<hostname>.psk`; the hostname excludes brackets and port.
+The paired gRPC endpoint is resolved separately. The PSK is never printed;
+do not read the file into context.
 
 Claude's project MCP entry uses a Linux/WSL stdio adapter: one paired host works
 without exporting `HUD_HOST`; multiple hosts require explicit selection. New
