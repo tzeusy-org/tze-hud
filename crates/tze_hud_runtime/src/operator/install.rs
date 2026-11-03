@@ -455,11 +455,12 @@ pub(super) fn acquire_with(
 ) -> io::Result<Acquire> {
     let deadline = std::time::Instant::now() + wait;
     loop {
-        let (guard, exists) = create()?;
-        if !exists {
-            return Ok(Acquire::Acquired(guard));
-        }
-        drop(guard);
+        {
+            let (guard, exists) = create()?;
+            if !exists {
+                return Ok(Acquire::Acquired(guard));
+            }
+        } // Close an existing-instance probe before waiting or retrying.
         if std::time::Instant::now() >= deadline {
             return Ok(Acquire::AlreadyRunning);
         }
