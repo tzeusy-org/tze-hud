@@ -147,6 +147,10 @@ Zone sets are instance-specific; discover with `hud_surfaces`.
 - **Microseconds** — every time is milliseconds (`ttl_ms`, `delay_ms`).
 - **Text to a structured zone** — status bar and color zones need objects.
 - **No `key` on status-bar** — without one, entries can't be updated in place.
+- **Long content on the HUD** — the HUD catches attention and takes quick
+  decisions. If the owner needs more than two lines to decide, put the detail
+  on a page built for reading (a claude.ai artifact, a PR, a Codex page) and
+  name it in the card's body; keep the card to the decision.
 
 ## Script
 

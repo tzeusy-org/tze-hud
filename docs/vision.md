@@ -57,6 +57,11 @@ Surfaces on that lifecycle, in priority order:
   proportion to what changed.
 - **Local feedback first.** Hover, press, focus, and composer typing never
   wait on a round trip.
+- **Catch attention; link out for depth.** The HUD is for noticing and quick
+  decisions: seeing state at a glance, and acting with a press or a short
+  reply. Reading, reviewing and editing belong in tools built for them (a
+  claude.ai artifact, a Codex page, GitHub), reached by a link from the HUD.
+  Don't rebuild document or app UI in the overlay.
 - **No hardcoded styling.** Visuals come from flat design tokens, resolved in
   layers: canonical defaults, then the selected theme, then `[design_tokens]`
   overrides. Themes (token values only, Tonal Glass by default) and fonts are
