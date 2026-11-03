@@ -48,7 +48,8 @@ def hostname(raw: str | None = None) -> str:
 
 def mcp_url(raw: str | None = None) -> str:
     host, port = _split(raw)
-    return f"http://{host}:{port or MCP_PORT}/mcp"
+    rendered = f"[{host}]" if ":" in host else host
+    return f"http://{rendered}:{port or MCP_PORT}/mcp"
 
 
 def base_url(raw: str | None = None) -> str:

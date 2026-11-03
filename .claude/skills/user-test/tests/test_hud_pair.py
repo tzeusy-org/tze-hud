@@ -445,6 +445,33 @@ def test_hud_env_derives_urls_and_reads_the_file(hud, monkeypatch, capsys):
     pair(host, home)
     assert hud_env.load_psk("127.0.0.1:1") == psk_file(home).read_text().strip()
     assert hud_env.grpc_target(host) == "h:50051"
+
+    # Ordinary clients share these origins; parsing strips brackets from the
+    # hostname identity used by the paired file, but HTTP authorities need them.
+    from urllib.parse import urlsplit
+
+    for address in ("::1", "fd7a:115c:a1e0::1"):
+        key_file = home / ".config" / "tze-hud" / f"{address}.psk"
+        key_file.write_bytes(psk_file(home).read_bytes())
+        key_file.chmod(0o600)
+        try:
+            for raw, port in [(f"[{address}]", 9090), (f"[{address}]:8080", 8080),
+                              (f"http://[{address}]/", 9090), (f"http://[{address}]:8080/mcp", 8080)]:
+                origin = f"http://[{address}]:{port}"
+                assert hud_env.hostname(raw) == address
+                assert hud_env.psk_path(raw) == key_file
+                assert hud_env.mcp_url(raw) == f"{origin}/mcp"
+                assert hud_env.base_url(raw) == origin
+                parsed = urlsplit(hud_env.mcp_url(raw))
+                assert (parsed.hostname, parsed.port, parsed.path) == (address, port, "/mcp")
+                assert hud_env.grpc_target(raw) == f"[{address}]:50051"
+                with monkeypatch.context() as ipv6_env:
+                    ipv6_env.setenv("HUD_HOST", raw)
+                    assert hud_env.resolve() == (f"{origin}/mcp", hud_env.load_psk(raw))
+                    assert hud_env.base_url() == origin
+                    assert hud_env.adapter_endpoint()["url"] == f"{origin}/mcp"
+        finally:
+            key_file.unlink()
     # Disabled/pending/failed gRPC still permits MCP pairing and stdio use;
     # every gRPC client resolves through this helper instead of inventing :50051.
     for advertised in [None, "[fd7a:115c:a1e0::1]:50072"]:
