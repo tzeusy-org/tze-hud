@@ -18,7 +18,7 @@
 //! Nothing here accepts arguments from a request: the relaunch is the current
 //! exe with its own validated argv (see [`child_args`]).
 
-use std::io::{self, BufRead, Read};
+use std::io::{self, Read};
 use std::net::{Ipv4Addr, SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -250,7 +250,15 @@ pub fn handoff(
     let spec = ChildSpec::fresh(listener.local_addr().map_err(HandoffError::Listen)?);
     let deadline = Instant::now() + timeout;
     let mut child = spawn(&spec).map_err(HandoffError::Spawn)?;
-    match wait_ready(&listener, &spec, child.as_mut(), deadline, timeout) {
+    let result =
+        wait_ready(&listener, &spec, child.as_mut(), deadline, timeout).and_then(|ready| {
+            if Instant::now() >= deadline {
+                Err(HandoffError::Timeout(timeout))
+            } else {
+                Ok(ready)
+            }
+        });
+    match result {
         Ok(ready) => {
             on_ready();
             Ok(ready)
@@ -270,6 +278,12 @@ fn wait_ready(
     timeout: Duration,
 ) -> Result<Ready, HandoffError> {
     loop {
+        if Instant::now() >= deadline {
+            return Err(HandoffError::Timeout(timeout));
+        }
+        if let Some(status) = child.try_wait().map_err(HandoffError::Wait)? {
+            return Err(HandoffError::ChildExited(status));
+        }
         match listener.accept() {
             // Anything else that connects (wrong nonce, junk, silence) is
             // dropped and the wait goes on, so a stray local connection cannot
@@ -283,9 +297,6 @@ fn wait_ready(
             Err(e) if e.kind() == io::ErrorKind::WouldBlock => {}
             Err(e) => return Err(HandoffError::Listen(e)),
         }
-        if let Some(status) = child.try_wait().map_err(HandoffError::Wait)? {
-            return Err(HandoffError::ChildExited(status));
-        }
         let now = Instant::now();
         if now >= deadline {
             return Err(HandoffError::Timeout(timeout));
@@ -295,33 +306,68 @@ fn wait_ready(
 }
 
 fn read_ready(
-    stream: TcpStream,
+    mut stream: TcpStream,
     spec: &ChildSpec,
     deadline: Instant,
     timeout: Duration,
 ) -> Result<Ready, HandoffError> {
-    let remaining = deadline
-        .saturating_duration_since(Instant::now())
-        .min(CONN_READ_CAP)
-        .max(Duration::from_millis(1));
     stream.set_nonblocking(false).map_err(HandoffError::Wait)?;
-    stream
-        .set_read_timeout(Some(remaining))
-        .map_err(HandoffError::Wait)?;
-    let mut line = String::new();
-    match io::BufReader::new(stream.take(MAX_LINE)).read_line(&mut line) {
-        Ok(0) => Err(HandoffError::BadReady("connection closed without a line")),
-        Ok(_) => parse_ready_line(&line, spec),
-        Err(e)
-            if matches!(
-                e.kind(),
-                io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-            ) =>
-        {
-            Err(HandoffError::Timeout(timeout))
+    read_ready_with(spec, deadline, timeout, Instant::now, |bytes, remaining| {
+        stream.set_read_timeout(Some(remaining))?;
+        stream.read(bytes)
+    })
+}
+
+/// Bound the entire line, not each fragment. The private callbacks let tests
+/// advance time at read boundaries without a wall-clock trickle fixture.
+fn read_ready_with(
+    spec: &ChildSpec,
+    deadline: Instant,
+    timeout: Duration,
+    mut now: impl FnMut() -> Instant,
+    mut read: impl FnMut(&mut [u8], Duration) -> io::Result<usize>,
+) -> Result<Ready, HandoffError> {
+    let line_deadline = deadline.min(now() + CONN_READ_CAP);
+    let mut line = Vec::new();
+    while line.len() < MAX_LINE as usize {
+        let remaining = line_deadline
+            .checked_duration_since(now())
+            .filter(|left| !left.is_zero())
+            .ok_or(HandoffError::Timeout(timeout))?;
+        let mut bytes = [0; 512];
+        let capacity = bytes.len().min(MAX_LINE as usize - line.len());
+        let count = match read(&mut bytes[..capacity], remaining) {
+            Ok(count) => count,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e)
+                if matches!(
+                    e.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) =>
+            {
+                return Err(HandoffError::Timeout(timeout));
+            }
+            Err(e) => return Err(HandoffError::Wait(e)),
+        };
+        if now() >= line_deadline {
+            return Err(HandoffError::Timeout(timeout));
         }
-        Err(e) => Err(HandoffError::Wait(e)),
+        let end = bytes[..count].iter().position(|b| *b == b'\n');
+        line.extend_from_slice(&bytes[..end.map_or(count, |i| i + 1)]);
+        if count == 0 || end.is_some() {
+            break;
+        }
     }
+    if line.is_empty() {
+        return Err(HandoffError::BadReady("connection closed without a line"));
+    }
+    let line = String::from_utf8(line)
+        .map_err(|e| HandoffError::Wait(io::Error::new(io::ErrorKind::InvalidData, e)))?;
+    let ready = parse_ready_line(&line, spec)?;
+    if now() >= line_deadline {
+        return Err(HandoffError::Timeout(timeout));
+    }
+    Ok(ready)
 }
 
 // ── Restart (POST /admin/restart) ────────────────────────────────────────────
@@ -721,6 +767,98 @@ mod tests {
         let (r, killed, shutdowns) = run(Behaviour::ExitEarly, Duration::from_secs(5));
         assert!(matches!(r, Err(HandoffError::ChildExited(_))), "{r:?}");
         assert!(killed && shutdowns == 0);
+
+        // Queue the report before spawn returns: an expired attempt must not
+        // accept READY just because it is already waiting in the listener.
+        for (valid, exited) in [(true, false), (false, false), (true, true)] {
+            let killed = Arc::new(AtomicBool::new(false));
+            let shutdowns = Arc::new(AtomicUsize::new(0));
+            let (k, s) = (Arc::clone(&killed), Arc::clone(&shutdowns));
+            let r = handoff(
+                move |spec| {
+                    let mut report = spec.clone();
+                    if !valid {
+                        report.nonce = "wrongnonce".into();
+                    }
+                    report_ready(&report).unwrap();
+                    Ok(Box::new(Fake {
+                        exited: Arc::new(Mutex::new(exited.then(|| "exit status: 3".into()))),
+                        killed: k,
+                    }))
+                },
+                if exited { SHORT } else { Duration::ZERO },
+                move || {
+                    s.fetch_add(1, Ordering::SeqCst);
+                },
+            );
+            if exited {
+                assert!(matches!(r, Err(HandoffError::ChildExited(_))), "{r:?}");
+            } else {
+                assert!(matches!(r, Err(HandoffError::Timeout(_))), "{r:?}");
+            }
+            assert!(killed.load(Ordering::SeqCst));
+            assert_eq!(shutdowns.load(Ordering::SeqCst), 0);
+        }
+
+        use std::cell::{Cell, RefCell};
+        let spec = ChildSpec::parse("127.0.0.1:1:abcdef0123456789").unwrap();
+        let start = Instant::now();
+        let r = read_ready_with(
+            &spec,
+            start,
+            Duration::ZERO,
+            || start,
+            |_, _| panic!("an expired read must not start"),
+        );
+        assert!(matches!(r, Err(HandoffError::Timeout(_))));
+
+        // Both the shorter attempt and the one-second connection cap bound
+        // all fragments together. Progress cannot refresh either deadline.
+        for timeout in [SHORT, HANDOFF_TIMEOUT] {
+            let budget = timeout.min(CONN_READ_CAP);
+            let clock = Cell::new(start);
+            let waits = RefCell::new(Vec::new());
+            let r = read_ready_with(
+                &spec,
+                start + timeout,
+                timeout,
+                || clock.get(),
+                |bytes, remaining| {
+                    waits.borrow_mut().push(remaining);
+                    clock.set(clock.get() + budget / 2);
+                    bytes[0] = b'R';
+                    Ok(1)
+                },
+            );
+            assert!(matches!(r, Err(HandoffError::Timeout(_))));
+            assert_eq!(*waits.borrow(), [budget, budget / 2]);
+            assert_eq!(clock.get(), start + budget);
+
+            // Even a complete, correct READY received at the cutoff is late.
+            let line = ready_line(&Ready {
+                version: "test".into(),
+                sha: "test".into(),
+                pid: 42,
+                nonce: spec.nonce.clone(),
+            });
+            clock.set(start);
+            let reads = Cell::new(0);
+            let r = read_ready_with(
+                &spec,
+                start + timeout,
+                timeout,
+                || clock.get(),
+                |bytes, remaining| {
+                    assert_eq!(remaining, budget);
+                    reads.set(reads.get() + 1);
+                    clock.set(start + budget);
+                    bytes[..line.len()].copy_from_slice(line.as_bytes());
+                    Ok(line.len())
+                },
+            );
+            assert!(matches!(r, Err(HandoffError::Timeout(_))));
+            assert_eq!(reads.get(), 1);
+        }
     }
 
     #[test]
