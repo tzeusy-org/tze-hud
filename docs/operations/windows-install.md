@@ -218,11 +218,21 @@ and per-user installation remain unchanged.
 
 ## Logs and operator endpoints
 
-The overlay has no console, so tracing also goes to `tze_hud.log` in
-`%LOCALAPPDATA%\tze_hud\logs` (override with `TZE_HUD_LOG_DIR`; elsewhere
-`<temp>/tze_hud/logs`). It rotates to `tze_hud.log.1` at 10 MB. File level is
-`info`; set `TZE_HUD_FILE_LOG` to change it. Panics go to `hud-diag.log` in the
-same directory.
+The overlay has no console, so tracing also goes to `tze_hud.log`. Installed
+Windows execution uses `%LOCALAPPDATA%\tze_hud\logs`; in-place execution uses
+`logs` beside its selected config, whether explicit or auto-resolved. Relative
+config paths resolve from the launch directory. A nonempty `TZE_HUD_LOG_DIR`
+overrides either location. Without a selected config, the platform fallback is
+`%LOCALAPPDATA%\tze_hud\logs` on Windows, else `<temp>/tze_hud/logs` (also used
+when `LOCALAPPDATA` is unavailable).
+
+The file rotates to `tze_hud.log.1` at 10 MB. File level is `info`; set
+`TZE_HUD_FILE_LOG` to change it. Diagnostics, including panics, go to
+`hud-diag.log` in that same directory unless nonempty `TZE_HUD_DIAG_LOG` selects
+a diagnostic file only. Empty path overrides use the normal fallback. Admin
+log tails and the control panel's Open logs use the same selected directory.
+Remote-firewall one-shot helpers initialize neither ordinary logging nor panic
+diagnostics.
 
 An agent whose `allow` includes `admin` (`*` does not grant it) can read, on
 the MCP port with its PSK as the bearer:

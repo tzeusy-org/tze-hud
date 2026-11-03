@@ -79,10 +79,13 @@
 //! On Windows a downloaded bare exe self-installs. A bare launch of the
 //! installed exe uses the installed config and overlay mode, like autostart.
 
+use std::path::{Path, PathBuf};
+
 use tze_hud_config::{agents_file, agents_path_for, resolve_config_path, validate_config};
 use tze_hud_runtime::launch::Source;
 use tze_hud_runtime::operator::handoff::{self, HandoffChild};
 use tze_hud_runtime::operator::install::{self, Acquire, Action, InstallPaths};
+use tze_hud_runtime::operator::logs::{self, LogPaths};
 use tze_hud_runtime::window::{WindowConfig, WindowMode};
 use tze_hud_runtime::windowed::{
     Relaunch, WindowedConfig, WindowedQuiescentEfficiencyConfig, WindowedRuntime,
@@ -277,8 +280,8 @@ impl Default for StartupOptions {
 }
 
 #[derive(Debug)]
-enum StartupAction {
-    Normal(StartupOptions),
+enum StartupAction<T> {
+    Normal(StartupOptions, T),
     Remote(
         tze_hud_runtime::remote_firewall::RemoteAction,
         StartupOptions,
@@ -307,10 +310,10 @@ fn runtime_launch_args(
 
 /// One-shot helpers must never open ordinary environment-selected log files,
 /// including when rejecting private input. Only normal startup initializes them.
-fn prepare_startup(
+fn prepare_startup<T>(
     args: &[String],
-    initialize_normal: impl FnOnce(),
-) -> Result<StartupAction, String> {
+    initialize_normal: impl FnOnce(&StartupOptions) -> T,
+) -> Result<StartupAction<T>, String> {
     if let Some(request) = tze_hud_runtime::remote_firewall::parse_private_child(args)? {
         return Ok(StartupAction::Child(request));
     }
@@ -318,8 +321,30 @@ fn prepare_startup(
     if let Some(action) = opts.remote_action {
         return Ok(StartupAction::Remote(action, opts));
     }
-    initialize_normal();
-    Ok(StartupAction::Normal(opts))
+    let normal = initialize_normal(&opts);
+    Ok(StartupAction::Normal(opts, normal))
+}
+
+/// Resolve once for normal startup, before opening logs. Loading later reuses
+/// this exact identity, including absolute interpretation of relative paths.
+fn normal_startup_paths(
+    config: Option<&str>,
+    cwd: &Path,
+    resolve: impl FnOnce(Option<&str>) -> Result<String, Vec<String>>,
+    select_logs: impl FnOnce(Option<&Path>) -> LogPaths,
+) -> (Result<String, Vec<String>>, LogPaths) {
+    let selected = resolve(config).map(|path| {
+        let path = PathBuf::from(path);
+        if path.is_absolute() {
+            path
+        } else {
+            cwd.join(path)
+        }
+        .to_string_lossy()
+        .into_owned()
+    });
+    let logs = select_logs(selected.as_deref().ok().map(Path::new));
+    (selected, logs)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1042,7 +1067,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         raw_args.clone()
     };
 
-    let startup = prepare_startup(&args, || {
+    let startup = prepare_startup(&args, |opts| {
+        let installed = cfg!(windows)
+            && match (std::env::current_exe(), InstallPaths::from_env()) {
+                (Ok(exe), Ok(paths)) => install::same_path(&exe, &paths.exe),
+                _ => false,
+            };
+        let (selected_config, log_paths) = normal_startup_paths(
+            opts.config_path.as_deref(),
+            &std::env::current_dir().unwrap_or_default(),
+            resolve_config_path,
+            |config| LogPaths::from_environment(config, installed),
+        );
+        logs::install_paths(log_paths);
         init_logging();
         tze_hud_runtime::operator::status::set_build_info(
             tze_hud_runtime::operator::status::BuildInfo {
@@ -1053,14 +1090,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         // Keep normal runtime panic diagnostics; helper results use only the
         // protected result transport and the attached console.
         tze_hud_runtime::diag::install_panic_hook();
+        selected_config
     })
     .unwrap_or_else(|error| {
         eprintln!("error: {error}");
         std::process::exit(1);
     });
 
-    let mut opts = match startup {
-        StartupAction::Normal(opts) => opts,
+    let (mut opts, selected_config_path) = match startup {
+        StartupAction::Normal(opts, selected_config) => (opts, selected_config),
         StartupAction::Child(request) => {
             finish_remote(tze_hud_runtime::remote_firewall::execute_child(request))
         }
@@ -1096,7 +1134,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // ── Attach-info fast path (hud-b7c0m) ─────────────────────────────────────
     // Print the MCP attach-info block and exit *before* acquiring the GPU lock,
-    // resolving/validating a config, or starting the runtime. This is an
+    // reading/validating a config, or starting the runtime. This is an
     // onboarding aid that works on any platform without a shell, so it must not
     // fail-closed on a missing/invalid config the way canonical startup does.
     if opts.print_attach_info {
@@ -1176,7 +1214,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     };
 
-    // Resolve config file path and read its contents.
+    // Read the config selected before logging; never resolve a second identity.
     // The resolved path is logged so operators can confirm which file is in use.
     // We track both the TOML content and the file path so that relative
     // [widget_bundles].paths entries can be resolved relative to the config file's
@@ -1185,7 +1223,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut searched_paths_for_missing: Vec<String> = Vec::new();
     let mut config_read_error_detail: Option<String> = None;
     let (config_toml, config_file_path): (Option<String>, Option<String>) =
-        match resolve_config_path(opts.config_path.as_deref()) {
+        match selected_config_path {
             Ok(path) => {
                 match std::fs::read_to_string(&path) {
                     Ok(toml_src) => {
@@ -1404,8 +1442,8 @@ mod tests {
         let args: Vec<String> = args.iter().map(|s| s.to_string()).collect();
         let initialized = std::cell::Cell::new(false);
         let result =
-            prepare_startup(&args, || initialized.set(true)).map(|startup| match startup {
-                StartupAction::Normal(opts) => {
+            prepare_startup(&args, |_| initialized.set(true)).map(|startup| match startup {
+                StartupAction::Normal(opts, ()) => {
                     assert!(initialized.get());
                     opts
                 }
@@ -1423,39 +1461,192 @@ mod tests {
         result
     }
 
-    /// The log file's level changes while running: after the setter moves
-    /// it from info to debug, a debug event reaches the file, and back.
+    /// Normal startup selects one config identity and log directory; real file
+    /// output keeps its live level filter for every path/override combination.
     #[test]
     fn file_log_level_reloads_live() {
+        use std::cell::Cell;
         use tracing_subscriber::layer::SubscriberExt;
 
-        #[derive(Clone, Default)]
-        struct Sink(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
-        impl std::io::Write for Sink {
-            fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-                self.0.lock().unwrap().extend_from_slice(buf);
-                Ok(buf.len())
+        let scratch = std::env::temp_dir().join(format!("tze_hud_file_log_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&scratch);
+        // name, installed, explicit, resolved config, log override, diag override, expected dir
+        let config = Some("selected/config.toml");
+        let directory = Some("override");
+        let diagnostic = Some("diagnostic-only.log");
+        let empty = Some("");
+        let cases = [
+            ("installed", true, true, config, None, None, "platform/logs"),
+            ("explicit", false, true, config, None, None, "selected/logs"),
+            ("auto", false, false, config, None, None, "selected/logs"),
+            (
+                "relative explicit",
+                false,
+                true,
+                Some("./selected/config.toml"),
+                None,
+                None,
+                "selected/logs",
+            ),
+            (
+                "relative auto",
+                false,
+                false,
+                Some("tze_hud.toml"),
+                None,
+                None,
+                "logs",
+            ),
+            (
+                "in-place override",
+                false,
+                true,
+                config,
+                directory,
+                None,
+                "override",
+            ),
+            (
+                "installed override",
+                true,
+                true,
+                config,
+                directory,
+                None,
+                "override",
+            ),
+            (
+                "diag override",
+                false,
+                true,
+                config,
+                None,
+                diagnostic,
+                "selected/logs",
+            ),
+            (
+                "both overrides",
+                false,
+                true,
+                config,
+                directory,
+                diagnostic,
+                "override",
+            ),
+            (
+                "empty overrides",
+                false,
+                true,
+                config,
+                empty,
+                empty,
+                "selected/logs",
+            ),
+            ("no config", false, false, None, None, None, "platform/logs"),
+            (
+                "installed empty overrides",
+                true,
+                false,
+                None,
+                empty,
+                empty,
+                "platform/logs",
+            ),
+        ];
+        for (index, (name, installed, explicit, resolved, log_override, diag_override, expected)) in
+            cases.into_iter().enumerate()
+        {
+            let root = scratch.join(index.to_string());
+            let resolved = resolved.map(|path| {
+                if path.starts_with("./") || path == "tze_hud.toml" {
+                    path.to_owned()
+                } else {
+                    root.join(path).to_string_lossy().into_owned()
+                }
+            });
+            if let Some(path) = &resolved {
+                let path = root.join(path);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, "selected config").unwrap();
             }
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
+            let requested = if explicit { resolved.as_deref() } else { None };
+            let override_path = |value: Option<&str>| {
+                value.map(|path| {
+                    if path.is_empty() {
+                        PathBuf::new()
+                    } else {
+                        root.join(path)
+                    }
+                })
+            };
+            let directory_override = override_path(log_override);
+            let diagnostic_override = override_path(diag_override);
+            let resolutions = Cell::new(0);
+            let (selected, paths) = normal_startup_paths(
+                requested,
+                &root,
+                |config| {
+                    resolutions.set(resolutions.get() + 1);
+                    assert_eq!(config, requested, "{name}");
+                    resolved
+                        .clone()
+                        .ok_or_else(|| vec!["missing config".to_owned()])
+                },
+                |config| {
+                    LogPaths::select(
+                        config,
+                        installed,
+                        directory_override.as_deref(),
+                        diagnostic_override.as_deref(),
+                        root.join("platform/logs"),
+                    )
+                },
+            );
+            assert_eq!(resolutions.get(), 1, "{name}");
+            if let Ok(config) = selected {
+                assert!(Path::new(&config).is_absolute(), "{name}");
+                assert_eq!(
+                    std::fs::read_to_string(config).unwrap(),
+                    "selected config",
+                    "{name}"
+                );
+            } else {
+                assert!(resolved.is_none(), "{name}");
             }
+            let expected_dir = root.join(expected);
+            assert_eq!(paths.directory(), expected_dir, "{name}");
+            let log_path = paths.log_path();
+            assert_eq!(log_path, expected_dir.join(logs::LOG_FILE_NAME), "{name}");
+            let file = logs::RotatingFile::open(log_path.clone(), logs::MAX_LOG_BYTES).unwrap();
+            let (layer, set_level) = file_log_layer(
+                move || logs::LogWriter(file.clone()),
+                tze_hud_config::DEFAULT_LOG_LEVEL,
+            );
+            let subscriber = tracing_subscriber::registry().with(layer);
+            tracing::subscriber::with_default(subscriber, || {
+                tracing::debug!("hidden at info");
+                set_level("debug").unwrap();
+                tracing::debug!("shown at debug");
+                set_level("warn").unwrap();
+                tracing::info!("hidden at warn");
+            });
+            let log = std::fs::read_to_string(log_path).unwrap();
+            assert!(!log.contains("hidden at"), "{name}: {log}");
+            assert!(log.contains("shown at debug"), "{name}: {log}");
+            let diagnostic = paths.diagnostic_path();
+            let expected_diag = diag_override
+                .filter(|s| !s.is_empty())
+                .map_or_else(|| expected_dir.join("hud-diag.log"), |path| root.join(path));
+            assert_eq!(diagnostic, expected_diag, "{name}");
+            logs::append_rotating(&diagnostic, b"diagnostic output\n", logs::MAX_LOG_BYTES)
+                .unwrap();
+            assert_eq!(
+                std::fs::read_to_string(diagnostic).unwrap(),
+                "diagnostic output\n",
+                "{name}"
+            );
         }
-        let sink = Sink::default();
-        let writer = sink.clone();
-        let (layer, set_level) =
-            file_log_layer(move || writer.clone(), tze_hud_config::DEFAULT_LOG_LEVEL);
-        let subscriber = tracing_subscriber::registry().with(layer);
-        let written = || String::from_utf8(sink.0.lock().unwrap().clone()).unwrap();
-        tracing::subscriber::with_default(subscriber, || {
-            tracing::debug!("hidden at info");
-            set_level("debug").unwrap();
-            tracing::debug!("shown at debug");
-            set_level("warn").unwrap();
-            tracing::info!("hidden at warn");
-        });
-        let log = written();
-        assert!(!log.contains("hidden at"), "{log}");
-        assert!(log.contains("shown at debug"), "{log}");
+        std::fs::remove_dir_all(scratch).unwrap();
     }
 
     /// The window's mode and size keep where they came from for the
@@ -1807,7 +1998,7 @@ mod tests {
         assert!(matches!(
             prepare_startup(
                 &[tze_hud_runtime::remote_firewall::CHILD_FLAG.into(), payload],
-                || initialized.set(true)
+                |_| initialized.set(true)
             )
             .unwrap(),
             StartupAction::Child(_)
