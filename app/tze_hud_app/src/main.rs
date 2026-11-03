@@ -1149,7 +1149,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _instance = if opts.handoff_child.is_some() {
         None
     } else {
-        match install::acquire_single_instance(wait) {
+        match install::acquire_single_instance(wait)
+            .map_err(|e| format!("could not acquire the single-instance mutex: {e}"))?
+        {
             Acquire::Acquired(guard) => Some(guard),
             Acquire::AlreadyRunning => {
                 // Silent exit 0 only for a bare launch or the autostart command;

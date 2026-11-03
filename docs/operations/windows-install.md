@@ -57,6 +57,8 @@ prints an error and exits 2. `--handoff` waits up to 35 s for the previous one
 to exit instead. Install and uninstall stop the running instance through a
 named event that only the windowed runtime listens on; if it has not exited
 within 15 s, install fails without replacing anything.
+A Windows mutex API error also refuses startup and install replacement; a
+handoff child fails its bind gate and shuts down without opening service ports.
 
 `tze_hud.exe --uninstall` removes both registry entries, stops the running
 instance, and deletes the install dir once it has exited. It keeps

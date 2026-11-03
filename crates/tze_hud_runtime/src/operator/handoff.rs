@@ -622,6 +622,13 @@ impl HandoffChild {
     /// are a cheap no-op). Never blocks the caller: reports READY, waits for
     /// the single-instance mutex, then opens the gate.
     pub fn first_present(&self) {
+        self.first_present_with(super::install::acquire_single_instance);
+    }
+
+    fn first_present_with(
+        &self,
+        acquire: impl FnOnce(Duration) -> io::Result<super::install::Acquire> + Send + 'static,
+    ) {
         if self.fired.swap(true, Ordering::AcqRel) {
             return;
         }
@@ -632,8 +639,8 @@ impl HandoffChild {
                 if let Err(e) = report_ready(&spec) {
                     return gate.fail(&format!("could not report ready: {e}"));
                 }
-                match super::install::acquire_single_instance(super::install::HANDOFF_WAIT) {
-                    super::install::Acquire::Acquired(guard) => {
+                match acquire(super::install::HANDOFF_WAIT) {
+                    Ok(super::install::Acquire::Acquired(guard)) => {
                         tracing::info!("handoff: took over the single-instance mutex");
                         gate.open();
                         // Hold the mutex (this thread parks) until the process exits.
@@ -642,10 +649,13 @@ impl HandoffChild {
                             let _held = &guard;
                         }
                     }
-                    super::install::Acquire::AlreadyRunning => {
+                    Ok(super::install::Acquire::AlreadyRunning) => {
                         gate.fail(
                             "the previous instance did not release the single-instance mutex",
                         );
+                    }
+                    Err(e) => {
+                        gate.fail(&format!("could not acquire the single-instance mutex: {e}"));
                     }
                 }
             });
@@ -1051,6 +1061,98 @@ mod tests {
         .join();
         busy.try_acquire().unwrap().keep();
         assert!(busy.try_acquire().is_none());
+    }
+
+    #[tokio::test]
+    async fn mutex_acquisition_error_does_not_authorize_instance_takeover() {
+        use super::super::install::{self, InstallError, InstallPaths};
+        use std::cell::Cell;
+        use std::io::BufRead;
+
+        // The same polling helper used around CreateMutexW must propagate an
+        // error without manufacturing ownership, even with time left to wait.
+        let denied = || io::Error::from(io::ErrorKind::PermissionDenied);
+        let probes = Cell::new(0);
+        let outcome = install::acquire_with(install::HANDOFF_WAIT, || {
+            probes.set(probes.get() + 1);
+            Err(denied())
+        });
+        assert!(matches!(outcome, Err(e) if e.kind() == io::ErrorKind::PermissionDenied));
+        assert_eq!(probes.get(), 1);
+
+        // Execute the real install orchestration. A signalled predecessor is
+        // not confirmed gone: no file staging, registry write or relaunch.
+        let dir = tempfile::tempdir().unwrap();
+        let paths = InstallPaths::from_dirs(&dir.path().join("L"), &dir.path().join("R"));
+        let download = dir.path().join("download.exe");
+        std::fs::create_dir_all(&paths.install_dir).unwrap();
+        std::fs::write(&paths.exe, "previous").unwrap();
+        std::fs::write(&download, "replacement").unwrap();
+        let mutations = Cell::new(0);
+        let installed = install::install_with(
+            &download,
+            &paths,
+            "default config",
+            || true,
+            |wait| {
+                assert_eq!(wait, Duration::from_secs(15));
+                install::acquire_with(wait, || Err(denied()))
+            },
+            |_| {
+                mutations.set(mutations.get() + 1);
+                Ok(())
+            },
+            |_, _| {
+                mutations.set(mutations.get() + 1);
+                Ok(())
+            },
+        );
+        assert!(matches!(installed, Err(InstallError::Io { source, .. })
+            if source.kind() == io::ErrorKind::PermissionDenied));
+        assert_eq!(std::fs::read_to_string(&paths.exe).unwrap(), "previous");
+        assert!(!paths.old_exe.exists());
+        assert!(!paths.config_file.exists());
+        assert_eq!(mutations.get(), 0);
+
+        // The actual first-submission worker reports READY before attempting
+        // ownership. An error must fail its real gate and invoke shutdown.
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        let spec = ChildSpec::fresh(listener.local_addr().unwrap());
+        let child = HandoffChild::new(spec.clone());
+        let (quit_tx, quit_rx) = std::sync::mpsc::channel();
+        child.gate().install_quit(Arc::new(move || {
+            quit_tx.send(()).unwrap();
+        }));
+        let waiting = tokio::spawn({
+            let gate = child.gate().clone();
+            async move { gate.wait().await }
+        });
+        child.first_present_with(move |wait| {
+            assert_eq!(wait, install::HANDOFF_WAIT);
+            install::acquire_with(wait, || Err(denied()))
+        });
+        assert!(
+            !tokio::time::timeout(Duration::from_secs(5), waiting)
+                .await
+                .unwrap()
+                .unwrap()
+        );
+        quit_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(*child.gate().tx.borrow(), GateState::Failed);
+        let (report, _) = listener.accept().unwrap();
+        report
+            .set_read_timeout(Some(Duration::from_secs(5)))
+            .unwrap();
+        let mut line = String::new();
+        std::io::BufReader::new(report)
+            .read_line(&mut line)
+            .unwrap();
+        assert_eq!(
+            parse_ready_line(&line, &spec).unwrap().pid,
+            std::process::id()
+        );
+        child.first_present_with(|_| panic!("first submission must only run once"));
+        assert!(!child.gate().wait().await);
     }
 
     #[tokio::test]
