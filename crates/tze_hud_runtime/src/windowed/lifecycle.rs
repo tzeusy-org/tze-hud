@@ -2212,24 +2212,22 @@ impl WinitApp {
         window_id: winit::window::WindowId,
         secondary: Option<usize>,
     ) {
-        if button == winit::event::MouseButton::Left
-            && self.panel_left_button(pressed, secondary.is_none())
-        {
-            return;
-        }
-        if button != winit::event::MouseButton::Left
-            && self.panel_other_button(button, pressed, secondary.is_none())
-        {
-            return;
-        }
         if button == winit::event::MouseButton::Left {
-            // Consume pending old loss before binding a newer Down.
+            // Every delivered left edge owes its native receipt, including
+            // panel-owned input. Leaving those receipts queued makes a later
+            // active notification edge indistinguishable from lost history.
             self.drain_chrome_capture_cancellation();
             let chrome_edge = ChromeAppEdge::begin(window_id, pressed);
+            if self.panel_left_button(pressed, secondary.is_none()) {
+                return;
+            }
             if !chrome_edge.retired() {
                 self.handle_left_button(pressed, window_id, secondary);
             }
-        } else if button == winit::event::MouseButton::Right && !pressed {
+        } else if !self.panel_other_button(button, pressed, secondary.is_none())
+            && button == winit::event::MouseButton::Right
+            && !pressed
+        {
             // Right-click: show context menu if cursor is on a drag handle.
             self.handle_right_click_on_drag_handle();
         }
