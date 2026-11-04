@@ -1487,11 +1487,11 @@ mod tests {
                 );
             }
             on_text(&mut open, &nav, "9191");
-            let (item, nav) = shown(&mut open);
             assert_eq!(
                 open.query, "MCP port",
                 "explicit selection routes typing to the field"
             );
+            let (item, nav) = shown(&mut open);
             assert!(
                 matches!(item.control, PanelControl::Value { ref text, .. } if text == "9191▏")
             );
