@@ -932,6 +932,12 @@ class UsageHarness(HookHarness):
             try:
                 self.reap_detached()
             finally:
+                # Also close the HTTP fixture when its completion assertion
+                # failed; restoring subreaper state must not depend on a PASS.
+                self.release.set()
+                self.server.shutdown()
+                self.server.server_close()
+                self.thread.join(2)
                 if self.registration_thread is not None:
                     self.registration_stop.set()
                     self.registration_thread.join(2)
@@ -942,7 +948,7 @@ class UsageHarness(HookHarness):
                         if not select.select([descriptor], [], [], 0)[0]:
                             signal.pidfd_send_signal(descriptor, signal.SIGKILL)
                         try:
-                            os.waitpid(pid, 0)
+                            os.waitid(os.P_PIDFD, descriptor, os.WEXITED)
                         except ChildProcessError:
                             pass
                         os.close(descriptor)
@@ -970,15 +976,16 @@ class UsageHarness(HookHarness):
             assert select.select([descriptor], [], [], max(0, deadline - time.monotonic()))[0], (
                 f"owned fixture child {pid} remained live after fixture wait")
             try:
-                waited, status = os.waitpid(pid, 0)
+                status = os.waitid(os.P_PIDFD, descriptor, os.WEXITED)
             except ChildProcessError:
                 # Bash can reap its foreground sleep before it is cancelled.
                 assert role == b"s", f"detached helper {pid} lost its owned exit status"
                 self.process_results.append({"owned_pid": pid, "reaped_by_wrapper": True})
             else:
-                assert waited == pid
+                assert status.si_pid == pid
+                returncode = status.si_status if status.si_code == os.CLD_EXITED else -status.si_status
                 self.process_results.append({"detached_pid": pid, "role": role.decode(),
-                                             "returncode": os.waitstatus_to_exitcode(status)})
+                                             "returncode": returncode})
             with self.guard:
                 self.owned_children.remove((pid, descriptor, role))
             os.close(descriptor)
