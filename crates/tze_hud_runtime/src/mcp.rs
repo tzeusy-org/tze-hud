@@ -1761,6 +1761,11 @@ mod tests {
             "{response}"
         );
 
+        // DEBUG-hud-bhs4r-capture-probe: replay another test thread rebuilding
+        // shared callsite interest while this thread owns the only subscriber.
+        std::thread::spawn(tracing::callsite::rebuild_interest_cache)
+            .join()
+            .unwrap();
         let delayed = r#"{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"zone:subtitle","content":"delayed","delay_ms":3000,"ttl_ms":20000}},"id":8}"#;
         let response = http_post(addr, delayed, Some("test-key")).await;
         assert!(response.contains(r#"{\"expires_in_ms\":23000,\"ok\":true}"#));
