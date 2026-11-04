@@ -762,6 +762,92 @@ async fn test_hud_publish_zone_contention_policy_latest_wins() {
     let publishes = &scene.zone_registry.active_publishes["subtitle"];
     assert_eq!(publishes.len(), 1);
     assert!(matches!(&publishes[0].content, ZoneContent::StreamText(s) if s == "second"));
+    drop(scene);
+
+    // Opt-in release comparison of the real JSON-RPC publish path. Unrelated
+    // retained transcript size must not turn a tiny subtitle into scene-wide work.
+    if std::env::var_os("TZE_HUD_ZONE_SCALING").is_some() {
+        use std::time::Instant;
+        use tze_hud_scene::types::{
+            FontFamily, Node, NodeData, Rect, TextAlign, TextMarkdownNode, TextOverflow,
+        };
+        assert!(!cfg!(debug_assertions), "scaling proof requires --release");
+        let mut servers = Vec::new();
+        for tile_count in [1, 64] {
+            let (candidate, _) = super::tests::server();
+            {
+                let mut scene = candidate.scene.lock().await;
+                let tab = scene.active_tab.unwrap();
+                let lease = scene.grant_lease("unrelated-transcript", 60_000);
+                for index in 0..tile_count {
+                    let tile = scene
+                        .create_tile(
+                            tab,
+                            "unrelated-transcript",
+                            lease,
+                            Rect::new(0.0, 0.0, 100.0, 100.0),
+                            index,
+                        )
+                        .unwrap();
+                    scene
+                        .set_tile_root(
+                            tile,
+                            Node {
+                                id: SceneId::new(),
+                                children: Vec::new(),
+                                layout: Default::default(),
+                                data: NodeData::TextMarkdown(TextMarkdownNode {
+                                    content: "x".repeat(65_535),
+                                    bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
+                                    font_size_px: 16.0,
+                                    font_family: FontFamily::SystemSansSerif,
+                                    color: Rgba::WHITE,
+                                    background: None,
+                                    alignment: TextAlign::Left,
+                                    overflow: TextOverflow::Clip,
+                                    color_runs: Box::default(),
+                                }),
+                            },
+                        )
+                        .unwrap();
+                }
+            }
+            servers.push(candidate);
+        }
+        let payload = json!({"surface":"zone:subtitle", "content":"tiny update", "ttl_ms":20000});
+        for candidate in &servers {
+            for _ in 0..10 {
+                call(candidate, "hud_publish", payload.clone()).await;
+            }
+        }
+        let mut samples = [Vec::new(), Vec::new()];
+        // Alternate order each round to limit drift; setup and warmup are untimed.
+        for round in 0..7 {
+            for index in if round % 2 == 0 { [0, 1] } else { [1, 0] } {
+                let start = Instant::now();
+                for _ in 0..100 {
+                    let reply = call(&servers[index], "hud_publish", payload.clone()).await;
+                    assert_eq!(reply, json!({"ok":true,"expires_in_ms":20000}));
+                }
+                samples[index].push(start.elapsed().as_nanos() / 100);
+            }
+        }
+        println!(
+            "ZONE_SCALING payload={payload} tiles=[1,64] text_bytes_per_tile=65535 samples_ns_per_publish={samples:?}"
+        );
+        for sample in &mut samples {
+            sample.sort_unstable();
+        }
+        let ratio = samples[1][3] as f64 / samples[0][3] as f64;
+        println!(
+            "ZONE_SCALING median_ns=[{},{}] growth_ratio={ratio:.3}",
+            samples[0][3], samples[1][3]
+        );
+        assert!(
+            ratio < 4.0,
+            "unrelated scene growth amplified publish cost by {ratio:.3}x"
+        );
+    }
 }
 
 #[tokio::test]
