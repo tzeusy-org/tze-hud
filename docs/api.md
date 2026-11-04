@@ -260,7 +260,10 @@ agents until one is paired.
   address on the system card; the pairing chord and the control panel's
   Connect an agent card (see
   [Human chords and the control panel](#human-chords-and-the-control-panel))
-  show it in a copyable setup prompt instead. The agent trades it for a key:
+  show it in a copyable setup prompt instead. A late successfully bound MCP
+  address refreshes an already displayed, still-valid startup/`--pair` card,
+  preserving its code and original expiration. Failed binds, interface removal
+  and gRPC-only changes do not refresh that card. The agent trades it for a key:
 
   ```
   curl -s host:9090/pair -d '{"agent":"claude","code":"482913"}'

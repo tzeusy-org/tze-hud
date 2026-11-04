@@ -324,6 +324,9 @@ fn spawn_tailnet_watcher(
                             .lock()
                             .unwrap_or_else(|e| e.into_inner())
                             .push(local);
+                        if let Some(pairing) = &admin.pairing {
+                            pairing.refresh_open_system_card();
+                        }
                         tokio::spawn(run_accept_loop(
                             listener,
                             Arc::clone(&server),
@@ -383,6 +386,9 @@ async fn run_deferred_listeners(
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .push(local);
+                if let Some(pairing) = &admin.pairing {
+                    pairing.refresh_open_system_card();
+                }
                 loops.push(tokio::spawn(run_accept_loop(
                     listener,
                     Arc::clone(&server),
@@ -1356,6 +1362,7 @@ mod tests {
     /// interface address without needing Tailscale.
     #[tokio::test]
     async fn mcp_http_tools_list_on_every_listener() {
+        let rig = crate::pairing::tests::rig();
         let config = McpServerConfig {
             appearance: None,
             publication_defaults: Default::default(),
@@ -1374,13 +1381,14 @@ mod tests {
             restart: None,
             update: None,
             bind_gate: None,
-            pairing: None,
+            pairing: Some(Arc::clone(&rig.pairing)),
         };
+        rig.pairing.binds(&[]).lock().unwrap().clear();
         let shutdown = ShutdownToken::new();
         let (fixture, mut control) = crate::net_addrs::tailnet_fixture();
         let (handle, addrs) = start_mcp_http_server_inner(
             make_scene(),
-            config,
+            config.clone(),
             shutdown.clone(),
             None,
             tze_hud_scene::render_wake::RenderWakeNotifier::default(),
@@ -1391,6 +1399,14 @@ mod tests {
         .await
         .expect("bind");
         assert_eq!(addrs.len(), 2);
+        rig.pairing.open();
+        let eager = rig
+            .card
+            .frame_state(crate::pairing::PairClock::wall_us(rig.clock.as_ref()));
+        assert_eq!(
+            eager.model.as_ref().unwrap().lines[1],
+            format!("http://{}/pair", addrs[0])
+        );
 
         let body = r#"{"jsonrpc":"2.0","method":"tools/list","params":{},"id":1}"#;
         for addr in &addrs {
@@ -1432,6 +1448,12 @@ mod tests {
         let status: serde_json::Value =
             serde_json::from_str(status.split("\r\n\r\n").nth(1).unwrap()).unwrap();
         assert_eq!(status["binds"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            rig.card
+                .frame_state(crate::pairing::PairClock::wall_us(rig.clock.as_ref())),
+            eager,
+            "appended loopback leaves preferred endpoint unchanged"
+        );
         assert!(
             status["binds"]
                 .as_array()
@@ -1439,6 +1461,67 @@ mod tests {
                 .contains(&serde_json::json!(late.to_string()))
         );
 
+        shutdown.trigger(crate::threads::ShutdownReason::Clean);
+        handle.await.expect("task");
+
+        // Fixture-only empty startup: exercise the production late-bind callback
+        // on the first successful listener, without any real tailnet interface.
+        let rig = crate::pairing::tests::rig();
+        rig.pairing.binds(&[]).lock().unwrap().clear();
+        let shutdown = ShutdownToken::new();
+        let (fixture, mut control) = crate::net_addrs::tailnet_fixture();
+        let mut empty = config;
+        empty.bind_addrs.clear();
+        empty.pairing = Some(Arc::clone(&rig.pairing));
+        let (handle, addrs) = start_mcp_http_server_inner(
+            make_scene(),
+            empty,
+            shutdown.clone(),
+            None,
+            tze_hud_scene::render_wake::RenderWakeNotifier::default(),
+            tze_hud_scene::render_wake::RenderWakeNotifier::default(),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            Some(fixture),
+        )
+        .await
+        .unwrap();
+        assert!(addrs.is_empty());
+        rig.pairing.open();
+        let before = rig
+            .card
+            .frame_state(crate::pairing::PairClock::wall_us(rig.clock.as_ref()));
+        let code = rig.pairing.code().unwrap();
+        assert_eq!(
+            before.model.as_ref().unwrap().lines[1],
+            "this machine, port 9090"
+        );
+        control.addresses.send(vec![control.v6]).unwrap();
+        assert_eq!(control.next_attempt().await, (control.v6, None));
+        assert_eq!(
+            rig.card
+                .frame_state(crate::pairing::PairClock::wall_us(rig.clock.as_ref())),
+            before
+        );
+        control
+            .fail
+            .store(false, std::sync::atomic::Ordering::Release);
+        control.addresses.send(vec![control.v6]).unwrap();
+        let late = control.next_bound(control.v6).await;
+        // A completed request also proves callback publication finished: the
+        // accept loop starts only after the pairing refresh has returned.
+        let response = http_post(late, body, Some("root-psk")).await;
+        assert!(response.contains("HTTP/1.1 200") && response.contains("hud_publish"));
+        let after = rig
+            .card
+            .frame_state(crate::pairing::PairClock::wall_us(rig.clock.as_ref()));
+        let mut expected = before;
+        expected.model.as_mut().unwrap().lines[1] = format!("http://{late}/pair");
+        assert_eq!(after, expected);
+        assert_eq!(
+            rig.pairing.code().unwrap(),
+            code,
+            "same code and monotonic deadline"
+        );
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
         handle.await.expect("task");
     }
@@ -1545,26 +1628,9 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_http_hud_publish_authenticated() {
-        #[derive(Clone, Default)]
-        struct Sink(Arc<std::sync::Mutex<Vec<u8>>>);
-        impl std::io::Write for Sink {
-            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-                self.0.lock().unwrap().extend_from_slice(bytes);
-                Ok(bytes.len())
-            }
-            fn flush(&mut self) -> std::io::Result<()> {
-                Ok(())
-            }
-        }
-        let sink = Sink::default();
-        let writer = sink.clone();
-        let _trace = tracing::subscriber::set_default(
-            tracing_subscriber::fmt()
-                .with_writer(move || writer.clone())
-                .json()
-                .with_max_level(tracing::Level::DEBUG)
-                .finish(),
-        );
+        // Share the existing process-wide collector: callsite interest is
+        // process-wide even while other tests poll without a local subscriber.
+        let _ = crate::pairing::tests::captured_logs();
         use tze_hud_scene::SceneId;
         use tze_hud_scene::types::{
             ContentionPolicy, GeometryPolicy, LayerAttachment, RenderingPolicy, ZoneDefinition,
@@ -1681,22 +1747,33 @@ mod tests {
         let delayed = r#"{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"zone:subtitle","content":"delayed","delay_ms":3000,"ttl_ms":20000}},"id":8}"#;
         let response = http_post(addr, delayed, Some("test-key")).await;
         assert!(response.contains(r#"{\"expires_in_ms\":23000,\"ok\":true}"#));
-        let records: Vec<serde_json::Value> = String::from_utf8(sink.0.lock().unwrap().clone())
-            .unwrap()
-            .lines()
-            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
-            .filter(|e| e["target"] == "tze_hud_delay_diagnostic")
+        let scene_guard = scene.lock().await;
+        let batch = &scene_guard.scheduled_batches[0];
+        let (hi, lo) = batch.batch.batch_id.as_uuid().as_u64_pair();
+        let records: Vec<serde_json::Value> =
+            String::from_utf8(crate::pairing::tests::captured_logs())
+                .unwrap()
+                .lines()
+                .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+                .filter(|e| e["target"] == "tze_hud_delay_diagnostic")
+                .collect();
+        let enqueues: Vec<_> = records
+            .iter()
+            .filter(|e| e["fields"]["batch_hi"] == hi && e["fields"]["batch_lo"] == lo)
             .collect();
-        assert_eq!(records.len(), 2);
-        let request = &records[0]["fields"];
-        let enqueue = &records[1]["fields"];
+        assert_eq!(enqueues.len(), 1, "exactly one enqueue for this batch");
+        let span_id = enqueues[0]["fields"]["request_span_id"].as_u64().unwrap();
+        let own_records: Vec<_> = records
+            .iter()
+            .filter(|e| e["fields"]["request_span_id"] == span_id)
+            .collect();
+        assert_eq!(own_records.len(), 2, "request and enqueue for this span");
+        let request = &own_records[0]["fields"];
+        let enqueue = &own_records[1]["fields"];
         assert_eq!(request["event"], "delayed_request");
         assert_eq!(request["request_id"], 8);
         assert_eq!(request["request_span_id"], enqueue["request_span_id"]);
         assert!(request["request_span_id"].as_u64().is_some());
-        let scene_guard = scene.lock().await;
-        let batch = &scene_guard.scheduled_batches[0];
-        let (hi, lo) = batch.batch.batch_id.as_uuid().as_u64_pair();
         assert_eq!(enqueue["batch_hi"], hi);
         assert_eq!(enqueue["batch_lo"], lo);
         assert_eq!(enqueue["present_at_wall_us"], batch.present_at_wall_us);

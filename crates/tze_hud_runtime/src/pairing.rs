@@ -345,13 +345,21 @@ fn pairing_lines(
         address,
         format!("valid for {} minutes", CODE_TTL.as_secs() / 60),
     ];
+    set_firewall_warning(&mut lines, firewall);
+    lines
+}
+
+fn set_firewall_warning(
+    lines: &mut Vec<String>,
+    firewall: Option<&crate::firewall::TailnetInbound>,
+) {
+    lines.truncate(3);
     if firewall.is_some_and(crate::firewall::TailnetInbound::is_blocked) {
         lines.push(format!(
             "Windows Firewall blocks remote agents: {}",
             crate::firewall::FIX_HINT
         ));
     }
-    lines
 }
 
 impl std::fmt::Debug for Pairing {
@@ -459,20 +467,103 @@ impl Pairing {
             expires_at_wall_us: Some(self.clock.wall_us() + CODE_TTL.as_micros() as u64),
         };
         self.card.set(card.clone());
-        if on_tailnet && known.is_none() {
-            let (probe, handle, code) = (
+        self.warn_in_background(card, issued.expires_at, on_tailnet, known.is_none());
+    }
+
+    /// The policy read remains background work. Its exact expected-card guard
+    /// also rejects a snapshot that expired before the compositor pruned it.
+    fn warn_in_background(
+        &self,
+        card: SystemCard,
+        expires_at: Instant,
+        on_tailnet: bool,
+        unknown: bool,
+    ) {
+        if on_tailnet && unknown {
+            let (probe, handle, clock) = (
                 Arc::clone(&self.firewall),
                 self.card.clone(),
-                issued.code.clone(),
+                Arc::clone(&self.clock),
             );
             std::thread::spawn(move || {
-                let verdict = probe.current();
-                if verdict.is_blocked() {
-                    let mut with_warning = card.clone();
-                    with_warning.lines = pairing_lines(&code, address, Some(&verdict));
-                    handle.replace_if_current(&card, with_warning);
-                }
+                Self::add_firewall_warning(&probe, &handle, clock.as_ref(), &card, expires_at);
             });
+        }
+    }
+
+    fn add_firewall_warning(
+        probe: &crate::firewall::FirewallProbe,
+        handle: &SystemCardHandle,
+        clock: &dyn PairClock,
+        expected: &SystemCard,
+        expires_at: Instant,
+    ) {
+        let verdict = probe.current();
+        if verdict.is_blocked() {
+            handle.replace_if_current(expected, |current| {
+                if clock.now() > expires_at
+                    || current
+                        .expires_at_wall_us
+                        .is_none_or(|at| at <= clock.wall_us())
+                {
+                    return None;
+                }
+                let mut warned = current.clone();
+                set_firewall_warning(&mut warned.lines, Some(&verdict));
+                Some(warned)
+            });
+        }
+    }
+
+    /// A successful MCP bind may improve the address on an already-open
+    /// startup/--pair card. This never issues a code or changes either expiry.
+    pub(crate) fn refresh_open_system_card(&self) {
+        let state = self.lock();
+        let Some(issued) = state.current_at(self.clock.now()) else {
+            return;
+        };
+        if self.in_panel.load(Ordering::Acquire) {
+            return;
+        }
+        let endpoint = {
+            let binds = self.binds.lock().unwrap_or_else(|e| e.into_inner());
+            Self::endpoint(&binds)
+        };
+        let Some(endpoint) = endpoint else {
+            return;
+        };
+        let on_tailnet = !crate::net_addrs::tailnet_addrs(&[endpoint.ip()]).is_empty();
+        let known = on_tailnet.then(|| self.firewall.cached()).flatten();
+        let address = format!("http://{endpoint}/pair");
+        let mut refreshed = None;
+        self.card.transform_current(|current| {
+            if self.in_panel.load(Ordering::Acquire)
+                || state.current_at(self.clock.now()).as_ref() != Some(&issued)
+                || current.kind != tze_hud_compositor::SystemCardKind::Pairing
+                || current.lines.len() < 3
+                || current.lines[0] != issued.code
+                || current
+                    .expires_at_wall_us
+                    .is_none_or(|at| at <= self.clock.wall_us())
+            {
+                return None;
+            }
+            let mut new = current.clone();
+            new.lines[1] = address;
+            // Keep an in-flight warning for the same address. A new address
+            // uses the same cached/background policy as initial presentation.
+            if new.lines[1] != current.lines[1] || known.is_some() || !on_tailnet {
+                set_firewall_warning(&mut new.lines, known.as_ref());
+            }
+            if new == *current {
+                return None;
+            }
+            refreshed = Some(new.clone());
+            Some(new)
+        });
+        drop(state);
+        if let Some(card) = refreshed {
+            self.warn_in_background(card, issued.expires_at, on_tailnet, known.is_none());
         }
     }
 
@@ -726,7 +817,7 @@ impl Pairing {
 pub(crate) mod tests {
     use super::*;
     use std::path::PathBuf;
-    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
     use tze_hud_compositor::SystemCardKind;
     use tze_hud_scene::config::SharedAgents;
 
@@ -734,6 +825,7 @@ pub(crate) mod tests {
     pub(crate) struct TestClock {
         base: Instant,
         offset_ms: AtomicU64,
+        wall_offset_ms: AtomicU64,
     }
 
     impl TestClock {
@@ -741,11 +833,14 @@ pub(crate) mod tests {
             Arc::new(Self {
                 base: Instant::now(),
                 offset_ms: AtomicU64::new(0),
+                wall_offset_ms: AtomicU64::new(0),
             })
         }
 
         pub(crate) fn advance(&self, by: Duration) {
             self.offset_ms
+                .fetch_add(by.as_millis() as u64, Ordering::SeqCst);
+            self.wall_offset_ms
                 .fetch_add(by.as_millis() as u64, Ordering::SeqCst);
         }
 
@@ -760,7 +855,7 @@ pub(crate) mod tests {
         }
 
         fn wall_us(&self) -> u64 {
-            1_000_000 + self.offset_ms.load(Ordering::SeqCst) * 1_000
+            1_000_000 + self.wall_offset_ms.load(Ordering::SeqCst) * 1_000
         }
     }
 
@@ -886,7 +981,8 @@ pub(crate) mod tests {
         pub(crate) pairing: Arc<Pairing>,
         pub(crate) store: Arc<AgentStore>,
         pub(crate) clock: Arc<TestClock>,
-        card: SystemCardHandle,
+        pub(crate) card: SystemCardHandle,
+        wakes: Arc<AtomicUsize>,
         pub(crate) agents: SharedAgents,
         path: PathBuf,
         _dir: tempfile::TempDir,
@@ -896,7 +992,13 @@ pub(crate) mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("agents.toml");
         let clock = TestClock::new();
-        let card = SystemCardHandle::default();
+        let wakes = Arc::new(AtomicUsize::new(0));
+        let wake_count = Arc::clone(&wakes);
+        let card = SystemCardHandle::new(tze_hud_scene::render_wake::RenderWakeNotifier::new(
+            move || {
+                wake_count.fetch_add(1, Ordering::SeqCst);
+            },
+        ));
         let agents = SharedAgents::default();
         let store = Arc::new(AgentStore::open(Some(path.clone()), agents.clone()));
         let pairing = Arc::new(Pairing::new(
@@ -912,6 +1014,7 @@ pub(crate) mod tests {
             store,
             clock,
             card,
+            wakes,
             agents,
             path,
             _dir: dir,
@@ -962,40 +1065,201 @@ pub(crate) mod tests {
     #[test]
     fn a_blocked_tailnet_address_adds_the_warning_to_the_card_without_waiting() {
         use crate::firewall::{BlockReason, FirewallProbe, TailnetInbound};
-        let mut rig = rig();
         {
-            let mut binds = rig.pairing.binds.lock().unwrap();
-            binds.clear();
-            binds.push("100.100.1.2:9090".parse().unwrap());
-        }
-        Arc::get_mut(&mut rig.pairing).unwrap().firewall =
-            Arc::new(FirewallProbe::new(|| TailnetInbound::Blocked {
+            let mut background = rig();
+            let (wake_tx, wake_rx) = std::sync::mpsc::channel();
+            let card = SystemCardHandle::new(tze_hud_scene::render_wake::RenderWakeNotifier::new(
+                move || {
+                    wake_tx.send(()).unwrap();
+                },
+            ));
+            background.card = card.clone();
+            let pairing = Arc::get_mut(&mut background.pairing).unwrap();
+            pairing.card = card;
+            pairing.firewall = Arc::new(FirewallProbe::new(|| TailnetInbound::Blocked {
                 reason: BlockReason::NoAllowRule,
                 rule: None,
             }));
-        rig.pairing.open();
-        // Shown at once without the warning; the background check adds it.
-        let deadline = std::time::Instant::now() + Duration::from_secs(5);
-        while card_lines(&rig).unwrap().1.len() < 4 {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "warning never appeared"
+            pairing.open();
+            let original = background.card.frame_state(background.clock.wall_us());
+            *background.pairing.binds.lock().unwrap() = vec!["100.100.1.2:9090".parse().unwrap()];
+            background.pairing.refresh_open_system_card();
+            // Initial set, refresh and background warning notify after unlock.
+            for _ in 0..3 {
+                wake_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+            let warned = background.card.frame_state(background.clock.wall_us());
+            assert_eq!(warned.model.as_ref().unwrap().lines.len(), 4);
+            assert_eq!(warned.wake_at_wall_us, original.wake_at_wall_us);
+            assert_eq!(
+                warned.model.as_ref().unwrap().lines[0],
+                original.model.as_ref().unwrap().lines[0]
             );
-            std::thread::sleep(Duration::from_millis(10));
+            // The opposite completion order also works: a warning already in
+            // the slot cannot make the only bind update lose a snapshot race.
+            *background.pairing.binds.lock().unwrap() = vec!["100.100.1.3:9090".parse().unwrap()];
+            background.pairing.refresh_open_system_card();
+            let refreshed = background.card.frame_state(background.clock.wall_us());
+            assert_eq!(
+                refreshed.model.as_ref().unwrap().lines[1],
+                "http://100.100.1.3:9090/pair"
+            );
+            assert_eq!(refreshed.model.as_ref().unwrap().lines.len(), 4);
+            assert_eq!(refreshed.wake_at_wall_us, original.wake_at_wall_us);
         }
-        let (_, lines) = card_lines(&rig).unwrap();
-        assert_eq!(lines[0], "111111");
-        assert_eq!(lines[1], "http://100.100.1.2:9090/pair");
+        let mut rig = rig();
+        // A cached verdict uses the same warning assembly as a background one.
+        Arc::get_mut(&mut rig.pairing).unwrap().firewall =
+            Arc::new(FirewallProbe::new(|| TailnetInbound::Allowed));
+        rig.pairing.firewall.current();
+        rig.pairing.open();
+        let original_deadline = rig.card.frame_state(rig.clock.wall_us()).wake_at_wall_us;
+        // Complete each policy read only after a newer address, code, card,
+        // clear or wall expiry has landed. Joining proves the stale callback
+        // finished; no timing sleeps or polling stand in for completion.
+        for change in [
+            "address",
+            "code",
+            "toast",
+            "clear",
+            "wall-expiry",
+            "code-expiry",
+            "current",
+        ] {
+            rig.pairing.open();
+            let mut expected = None;
+            rig.card.transform_current(|card| {
+                expected = Some(card.clone());
+                None
+            });
+            let expected = expected.unwrap();
+            let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let release_rx = Mutex::new(release_rx);
+            let probe = FirewallProbe::new(move || {
+                entered_tx.send(()).unwrap();
+                release_rx.lock().unwrap().recv().unwrap();
+                TailnetInbound::Blocked {
+                    reason: BlockReason::NoAllowRule,
+                    rule: None,
+                }
+            });
+            let handle = rig.card.clone();
+            let clock = rig.clock.clone();
+            let expires_at = rig
+                .pairing
+                .lock()
+                .current_at(rig.clock.now())
+                .unwrap()
+                .expires_at;
+            let completion = std::thread::spawn(move || {
+                Pairing::add_firewall_warning(
+                    &probe,
+                    &handle,
+                    clock.as_ref(),
+                    &expected,
+                    expires_at,
+                );
+            });
+            entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            match change {
+                "address" => {
+                    *rig.pairing.binds.lock().unwrap() = vec!["100.100.1.2:9090".parse().unwrap()];
+                    rig.pairing.refresh_open_system_card();
+                }
+                "code" => rig.pairing.open(),
+                "toast" => rig
+                    .card
+                    .set(SystemCard::toast("Updated", rig.clock.wall_us())),
+                "clear" => rig.card.clear(),
+                "wall-expiry" => {
+                    rig.clock
+                        .wall_offset_ms
+                        .fetch_add(CODE_TTL.as_millis() as u64, Ordering::SeqCst);
+                }
+                "code-expiry" => {
+                    rig.clock
+                        .offset_ms
+                        .fetch_add(CODE_TTL.as_millis() as u64 + 1, Ordering::SeqCst);
+                }
+                _ => {} // unchanged current card: the warning must land
+            }
+            let before = rig.card.frame_state(if change == "wall-expiry" {
+                0
+            } else {
+                rig.clock.wall_us()
+            });
+            let wakes = rig.wakes.load(Ordering::SeqCst);
+            release_tx.send(()).unwrap();
+            completion.join().unwrap();
+            let after = rig.card.frame_state(if change == "wall-expiry" {
+                0
+            } else {
+                rig.clock.wall_us()
+            });
+            if change == "current" {
+                let model = after.model.unwrap();
+                assert_eq!(model.lines.len(), 4);
+                assert!(model.lines[3].contains(crate::firewall::FIX_HINT));
+                assert_eq!(rig.wakes.load(Ordering::SeqCst), wakes + 1);
+            } else {
+                assert_eq!(after, before, "stale completion {change} restored content");
+                assert_eq!(rig.wakes.load(Ordering::SeqCst), wakes);
+            }
+        }
+        assert_eq!(
+            original_deadline,
+            Some(1_000_000 + CODE_TTL.as_micros() as u64)
+        );
     }
 
     #[test]
     fn the_right_code_pairs_once_and_stores_only_the_hash() {
-        let rig = rig();
+        let mut rig = rig();
+        Arc::get_mut(&mut rig.pairing).unwrap().firewall =
+            Arc::new(crate::firewall::FirewallProbe::new(|| {
+                crate::firewall::TailnetInbound::Allowed
+            }));
+        rig.pairing.refresh_open_system_card();
+        assert_eq!(rig.wakes.load(Ordering::SeqCst), 0, "closed stays closed");
         rig.pairing.open();
+        let issued = rig.pairing.lock().current_at(rig.clock.now()).unwrap();
+        let original = rig.card.frame_state(rig.clock.wall_us());
+        rig.clock.advance(Duration::from_secs(17));
+        rig.pairing.refresh_open_system_card();
+        assert_eq!(
+            rig.wakes.load(Ordering::SeqCst),
+            1,
+            "unchanged model does not wake"
+        );
+        // No policy I/O is needed for this injected successful tailnet bind.
+        rig.pairing.firewall.current();
+        rig.pairing
+            .binds
+            .lock()
+            .unwrap()
+            .push("100.100.1.2:9090".parse().unwrap());
+        rig.pairing.refresh_open_system_card();
+        let refreshed = rig.card.frame_state(rig.clock.wall_us());
+        assert_eq!(refreshed.wake_at_wall_us, original.wake_at_wall_us);
+        assert!(rig.pairing.lock().current_at(rig.clock.now()) == Some(issued));
+        assert_eq!(rig.wakes.load(Ordering::SeqCst), 2);
+        rig.pairing.refresh_open_system_card();
+        rig.pairing
+            .binds
+            .lock()
+            .unwrap()
+            .push("127.0.0.2:9090".parse().unwrap());
+        rig.pairing.refresh_open_system_card();
+        assert_eq!(
+            rig.wakes.load(Ordering::SeqCst),
+            2,
+            "same preferred endpoint is quiet"
+        );
         let (kind, lines) = card_lines(&rig).expect("card while pairing");
         assert_eq!(kind, SystemCardKind::Pairing);
         assert_eq!(lines[0], "111111");
-        assert_eq!(lines[1], "http://127.0.0.1:9090/pair");
+        assert_eq!(lines[1], "http://100.100.1.2:9090/pair");
 
         let ok = rig.pairing.pair(&pair_body("claude", "111111", false));
         assert_eq!(ok.status, 200);
@@ -1003,7 +1267,7 @@ pub(crate) mod tests {
         let psk = body["psk"].as_str().unwrap();
         assert_eq!(psk.len(), 64);
         assert_eq!(body["agent"], "claude");
-        assert_eq!(body["mcp"], "http://127.0.0.1:9090/mcp");
+        assert_eq!(body["mcp"], "http://100.100.1.2:9090/mcp");
         assert!(body["grpc"].is_null(), "no gRPC listener has bound yet");
         // A successful MCP bind says nothing about the gRPC sibling. Pairing
         // reports only the listener state supplied by the gRPC server.
@@ -1024,7 +1288,7 @@ pub(crate) mod tests {
         let saved = std::fs::read_to_string(&rig.path).unwrap();
         assert!(!saved.contains(psk));
         assert!(saved.contains(&agents_file::hash_psk_hex(psk)));
-        assert!(saved.contains("paired_at = \"1970-01-01T00:00:01Z\""));
+        assert!(saved.contains("paired_at = \"1970-01-01T00:00:18Z\""));
 
         // The card is replaced by the toast, and the code is spent.
         let (kind, _) = card_lines(&rig).unwrap();
@@ -1032,6 +1296,17 @@ pub(crate) mod tests {
         let again = rig.pairing.pair(&pair_body("claude", "111111", false));
         assert_eq!(again.status, 403);
         assert!(String::from_utf8_lossy(&again.body).contains("PAIRING_CLOSED"));
+        let spent = rig.card.frame_state(rig.clock.wall_us());
+        let wakes = rig.wakes.load(Ordering::SeqCst);
+        rig.pairing.refresh_open_system_card();
+        assert_eq!(rig.card.frame_state(rig.clock.wall_us()), spent);
+        assert_eq!(rig.wakes.load(Ordering::SeqCst), wakes);
+        rig.pairing.open();
+        assert_eq!(
+            rig.pairing.code().unwrap().0,
+            "222222",
+            "refresh consumes no generator draw"
+        );
     }
 
     #[test]
@@ -1117,6 +1392,12 @@ pub(crate) mod tests {
         rig.card
             .set(SystemCard::toast("Updated to 1.2", rig.clock.wall_us()));
         rig.pairing.open_in_panel().unwrap();
+        rig.pairing
+            .binds
+            .lock()
+            .unwrap()
+            .insert(0, "[::1]:9090".parse().unwrap());
+        rig.pairing.refresh_open_system_card();
         assert!(
             matches!(card_lines(&rig), Some((SystemCardKind::Toast, _))),
             "an unrelated toast is left alone"
@@ -1127,6 +1408,7 @@ pub(crate) mod tests {
             }
         };
         guess(&rig);
+        rig.pairing.refresh_open_system_card();
         assert!(
             !matches!(card_lines(&rig), Some((SystemCardKind::Pairing, _))),
             "the replacement code shows on the Connect card only"
@@ -1134,6 +1416,12 @@ pub(crate) mod tests {
         let replacement = rig.pairing.code().unwrap().0;
 
         rig.pairing.leave_panel();
+        rig.card.clear();
+        rig.pairing.refresh_open_system_card();
+        assert!(
+            card_lines(&rig).is_none(),
+            "leaving Connect does not restore a card"
+        );
         guess(&rig);
         let (kind, lines) = card_lines(&rig).expect("card after leaving Connect");
         assert_eq!(kind, SystemCardKind::Pairing);
@@ -1198,12 +1486,47 @@ pub(crate) mod tests {
 
     #[test]
     fn expired_code_is_closed_and_the_card_self_expires() {
-        let rig = rig();
-        rig.pairing.open();
-        rig.clock.advance(CODE_TTL + Duration::from_millis(1));
-        let resp = rig.pairing.pair(&pair_body("claude", "111111", false));
-        assert!(String::from_utf8_lossy(&resp.body).contains("PAIRING_CLOSED"));
-        assert!(card_lines(&rig).is_none(), "card clears with the code");
+        for wall_expiry in [false, true] {
+            let rig = rig();
+            rig.pairing.open();
+            let original = rig.card.frame_state(0);
+            rig.pairing
+                .binds
+                .lock()
+                .unwrap()
+                .insert(0, "[::1]:9090".parse().unwrap());
+            if wall_expiry {
+                // The code remains monotonically valid at exact wall expiry.
+                rig.clock
+                    .wall_offset_ms
+                    .store(CODE_TTL.as_millis() as u64, Ordering::SeqCst);
+            } else {
+                rig.clock
+                    .offset_ms
+                    .store(CODE_TTL.as_millis() as u64 + 1, Ordering::SeqCst);
+            }
+            rig.pairing.refresh_open_system_card();
+            assert_eq!(
+                rig.card.frame_state(0),
+                original,
+                "refresh before compositor pruning"
+            );
+            assert_eq!(rig.wakes.load(Ordering::SeqCst), 1);
+            if wall_expiry {
+                assert!(rig.pairing.is_open());
+                assert!(card_lines(&rig).is_none());
+                rig.clock.wall_offset_ms.fetch_add(1, Ordering::SeqCst);
+                rig.pairing.refresh_open_system_card();
+                assert!(card_lines(&rig).is_none());
+            } else {
+                let resp = rig.pairing.pair(&pair_body("claude", "111111", false));
+                assert!(String::from_utf8_lossy(&resp.body).contains("PAIRING_CLOSED"));
+                rig.clock
+                    .wall_offset_ms
+                    .store(CODE_TTL.as_millis() as u64, Ordering::SeqCst);
+                assert!(card_lines(&rig).is_none(), "card clears with the code");
+            }
+        }
     }
 
     #[test]
@@ -1213,7 +1536,14 @@ pub(crate) mod tests {
         for _ in 0..MAX_BAD_ATTEMPTS {
             rig.pairing.pair(&pair_body("claude", "000000", false));
         }
+        rig.pairing
+            .binds
+            .lock()
+            .unwrap()
+            .insert(0, "[::1]:9090".parse().unwrap());
+        rig.pairing.refresh_open_system_card();
         assert_eq!(card_lines(&rig).unwrap().1[0], "222222");
+        assert_eq!(card_lines(&rig).unwrap().1[1], "http://[::1]:9090/pair");
         for _ in 0..MAX_BAD_ATTEMPTS * 2 {
             rig.pairing.pair(&pair_body("claude", "000000", false));
         }
@@ -1221,6 +1551,16 @@ pub(crate) mod tests {
         // Opening during the cooldown does not issue a code.
         rig.pairing.open();
         assert_ne!(card_lines(&rig).unwrap().0, SystemCardKind::Pairing);
+        rig.pairing.refresh_open_system_card();
+        rig.clock.advance(COOLDOWN);
+        rig.pairing.refresh_open_system_card();
+        assert!(
+            !rig.pairing.is_open(),
+            "cooldown expiry requires owner reopening"
+        );
+        assert!(card_lines(&rig).is_none());
+        rig.pairing.open();
+        assert_eq!(rig.pairing.code().unwrap().0, "444444");
     }
 
     #[test]
@@ -1297,12 +1637,18 @@ pub(crate) mod tests {
                     .with_writer(log.clone())
                     // Timestamps carry digit runs that can look like a code.
                     .without_time()
+                    .json()
                     .with_max_level(tracing::Level::TRACE)
                     .finish(),
             )
             .expect("no other test installs a global subscriber");
             log
         })
+    }
+
+    /// Shared test-only snapshot; initializes the existing global collector.
+    pub(crate) fn captured_logs() -> Vec<u8> {
+        global_capture().0.lock().unwrap().clone()
     }
 
     #[test]
