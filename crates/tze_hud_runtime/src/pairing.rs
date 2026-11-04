@@ -1637,12 +1637,18 @@ pub(crate) mod tests {
                     .with_writer(log.clone())
                     // Timestamps carry digit runs that can look like a code.
                     .without_time()
+                    .json()
                     .with_max_level(tracing::Level::TRACE)
                     .finish(),
             )
             .expect("no other test installs a global subscriber");
             log
         })
+    }
+
+    /// Shared test-only snapshot; initializes the existing global collector.
+    pub(crate) fn captured_logs() -> Vec<u8> {
+        global_capture().0.lock().unwrap().clone()
     }
 
     #[test]
