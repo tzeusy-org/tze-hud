@@ -2706,6 +2706,9 @@ mod tests {
                 interaction_id: format!("jump-to-latest:{tile}"),
                 tab_order: 0,
             });
+            let version = scene.version;
+            scene.prune_notification_feedback();
+            assert_eq!(scene.version, version, "cleanup does not request a redraw");
             (tile, control, untracked, tail)
         };
         let target_scroll = || {
@@ -2853,6 +2856,12 @@ mod tests {
                 interaction_id: format!("tile-close:{tile_id}"),
                 tab_order: 0,
             });
+        {
+            let mut scene = harness.scene();
+            let version = scene.version;
+            scene.prune_notification_feedback();
+            assert_eq!(scene.version, version, "cleanup does not request a redraw");
+        }
         harness.click(bx, by);
         harness.drain();
 
