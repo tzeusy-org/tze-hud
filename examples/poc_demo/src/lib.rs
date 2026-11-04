@@ -47,8 +47,54 @@ pub struct Mcp<'a>(pub &'a Target);
 
 impl Mcp<'_> {
     /// Call a tool, print its model-visible tokens, and return the parsed
-    /// result. A tool error is returned as `code: hint`.
+    /// result. Only the explicit scene-busy `hud_input` error is retried, for
+    /// at most 100 ms; every attempt's request and response are counted.
     pub async fn call(&self, tool: &str, arguments: Value) -> Result<Value> {
+        let input_deadline = tokio::time::Instant::now()
+            + Duration::from_millis(arguments["wait_ms"].as_u64().unwrap_or(0).min(30_000));
+        let mut arguments = arguments;
+        let mut recovery_deadline = None;
+        loop {
+            let attempt = self.call_once(tool, &arguments);
+            let (is_error, parsed) = match recovery_deadline {
+                Some(deadline) => tokio::time::timeout_at(deadline, attempt)
+                    .await
+                    .map_err(|_| "hud_input scene-busy recovery exceeded 100 ms")??,
+                None => attempt.await?,
+            };
+            if !is_error {
+                return Ok(parsed);
+            }
+            let error = format!("{}: {}", parsed["code"], parsed["hint"]);
+            if tool != "hud_input"
+                || parsed["code"] != "INTERNAL"
+                || parsed["hint"] != "input state busy; retry hud_input"
+            {
+                return Err(error.into());
+            }
+            let deadline = *recovery_deadline
+                .get_or_insert_with(|| tokio::time::Instant::now() + Duration::from_millis(100));
+            let next_attempt = tokio::time::Instant::now() + Duration::from_millis(10);
+            if next_attempt >= deadline {
+                return Err(format!("{error}; 100 ms client recovery budget exhausted").into());
+            }
+            tokio::time::sleep_until(next_attempt).await;
+            if tokio::time::Instant::now() >= deadline {
+                return Err(format!("{error}; 100 ms client recovery budget exhausted").into());
+            }
+            // Retrying a poll must not restart its human-input waiting window.
+            // Omitted/default-zero ACK requests retain their exact arguments.
+            if let Some(wait_ms) = arguments.get_mut("wait_ms") {
+                *wait_ms = json!(
+                    input_deadline
+                        .saturating_duration_since(tokio::time::Instant::now())
+                        .as_millis() as u64
+                );
+            }
+        }
+    }
+
+    async fn call_once(&self, tool: &str, arguments: &Value) -> Result<(bool, Value)> {
         let body = json!({
             "jsonrpc": "2.0", "id": 1, "method": "tools/call",
             "params": {"name": tool, "arguments": arguments},
@@ -86,10 +132,7 @@ impl Mcp<'_> {
             model_tokens(&format!("{tool}{arguments}{text}"))
         );
         let parsed: Value = serde_json::from_str(text)?;
-        if result["isError"] == json!(true) {
-            return Err(format!("{}: {}", parsed["code"], parsed["hint"]).into());
-        }
-        Ok(parsed)
+        Ok((result["isError"] == json!(true), parsed))
     }
 
     /// Say what the next stage shows, on `zone:subtitle`.

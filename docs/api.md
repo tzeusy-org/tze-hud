@@ -209,6 +209,15 @@ The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
   A finite active poll protects only its agent from idle degradation, including
   first attachment; completion/cancellation releases ownership without a future
   heartbeat. Explicit upstream loss, reclaim, holds and input TTL still apply.
+- A contended scene can return `INTERNAL` with `input state busy; retry hud_input`
+  rather than exceed that request's deadline. Repeating the same ACK is safe:
+  acknowledgements are idempotent and unacknowledged input keeps its stable id.
+  The production `poc_demo` client retries only this exact typed input error,
+  with one 100 ms recovery deadline and 10 ms cooperative backoff. A retried
+  positive `wait_ms` uses the original input deadline; default-zero polls and
+  ACK arguments stay unchanged. Every actual attempt prints its request/error
+  or success token cost. Other tool, transport and protocol errors fail normally;
+  the canonical token calibration does not retry or omit an attempt.
 - An accepted local portal reply is echoed in the submitting scene-maintenance
   turn, inside the ordinary 100 ms output pacing slot. Refused replies add no
   accepted input or success echo; their truthful local feedback is also urgent.
