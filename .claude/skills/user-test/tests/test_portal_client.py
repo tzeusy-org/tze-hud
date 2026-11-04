@@ -946,14 +946,27 @@ class UsageHarness(HookHarness):
                         self.registration_listener.close()
                         assert not self.registration_thread.is_alive()
                     # Failure cleanup touches only the pinned fixture children.
+                    cleanup_errors = []
                     for pid, descriptor, _ in self.owned_children:
-                        if not select.select([descriptor], [], [], 0)[0]:
-                            signal.pidfd_send_signal(descriptor, signal.SIGKILL)
                         try:
-                            os.waitid(os.P_PIDFD, descriptor, os.WEXITED)
-                        except ChildProcessError:
-                            pass
-                        os.close(descriptor)
+                            if not select.select([descriptor], [], [], 0)[0]:
+                                try:
+                                    signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                                except ProcessLookupError:
+                                    pass  # It exited after the live check.
+                            try:
+                                os.waitid(os.P_PIDFD, descriptor, os.WEXITED)
+                            except ChildProcessError:
+                                pass
+                        except Exception as error:
+                            cleanup_errors.append(error)
+                        finally:
+                            try:
+                                os.close(descriptor)
+                            except OSError as error:
+                                cleanup_errors.append(error)
+                    if cleanup_errors:
+                        raise ExceptionGroup("owned fixture child cleanup failed", cleanup_errors)
                 finally:
                     assert self.libc.prctl(36, self.previous_subreaper, 0, 0, 0) == 0
                     receipt_root = os.environ.get("TZE_HUD_USAGE_TEST_RECEIPTS")
