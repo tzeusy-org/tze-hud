@@ -26,7 +26,6 @@ use super::token_colors::{
     NOTIFICATION_DISMISS_FONT_SIZE_PX, NOTIFICATION_DISMISS_FONT_WEIGHT,
     NOTIFICATION_DISMISS_GAP_PX, NOTIFICATION_ICON_GAP_PX, NOTIFICATION_ICON_SIZE_PX,
     NOTIFICATION_INTER_LINE_GAP, NOTIFICATION_TITLE_WEIGHT, is_alert_banner_zone,
-    notification_action_button_bounds, notification_action_row_reserve,
     notification_dismiss_bounds, notification_inset, resolve_composer_overlay_tokens,
     resolve_jump_to_latest_tokens, resolve_notification_action_tokens,
     resolve_scroll_indicator_tokens, resolve_transcript_max_measure_px,
@@ -309,7 +308,7 @@ impl super::Compositor {
 
             match zone_def.contention_policy {
                 ContentionPolicy::Stack { .. } => {
-                    let layout = self.zone_slot_layout(zone_name, publishes, policy, zh);
+                    let layout = self.zone_slot_layout(zone_name, publishes, policy, zh, zw);
                     for (pub_idx, slot_y, effective_slot_h) in layout.iter_visible(zy) {
                         if let ZoneContent::StreamText(text) = &publishes[pub_idx].content {
                             items.push(Self::zone_stream_text_item(
@@ -524,7 +523,7 @@ impl super::Compositor {
                 ContentionPolicy::Stack { .. } => {
                     // Slot geometry is computed once by zone_slot_layout and shared
                     // with render_zone_content / collect_all_rounded_rect_cmds (hud-qlerb).
-                    let layout = self.zone_slot_layout(zone_name, publishes, policy, zh);
+                    let layout = self.zone_slot_layout(zone_name, publishes, policy, zh, zw);
 
                     // Resolve notification typography tokens needed for text rendering
                     // (not slot geometry — those live in zone_slot_layout).
@@ -668,7 +667,9 @@ impl super::Compositor {
 
                                 // Text stops above the action row (hud-mskx5).
                                 let text_slot_h = (effective_slot_h
-                                    - notification_action_row_reserve(payload, scale, inset_h))
+                                    - self
+                                        .notification_action_layout(zone_name, record, policy, zw)
+                                        .reserve(inset_h))
                                 .max(1.0);
                                 if payload.title.is_empty() {
                                     // ── Single-line rendering (backward-compatible) ──
@@ -743,27 +744,23 @@ impl super::Compositor {
                                 }
 
                                 if self.text_rasterizer.is_some() {
-                                    let n_actions =
-                                        payload.actions.len().min(MAX_NOTIFICATION_ACTIONS);
-                                    for (action, b) in payload.actions.iter().zip(
-                                        notification_action_button_bounds(
+                                    let action_layout = self
+                                        .notification_action_layout(zone_name, record, policy, zw);
+                                    for (action, b) in
+                                        payload.actions.iter().zip(action_layout.bounds(
                                             zx,
                                             slot_y,
                                             zw,
                                             effective_slot_h,
-                                            n_actions,
-                                            scale,
                                             inset_h,
-                                        ),
-                                    ) {
+                                        ))
+                                    {
                                         items.push(Self::make_zone_text_item(
                                             Arc::from(action.label.as_str()),
-                                            b.x,
-                                            b.y + (b.height - notif_action_font_size_px * 1.4)
-                                                .max(0.0)
-                                                * 0.5,
-                                            b.width.max(1.0),
-                                            b.height.max(1.0),
+                                            b.x + action_layout.padding,
+                                            b.y + action_layout.padding,
+                                            (b.width - action_layout.padding * 2.0).max(1.0),
+                                            (b.height - action_layout.padding * 2.0).max(1.0),
                                             notif_action_font_size_px,
                                             font_family,
                                             notif_action_font_weight,

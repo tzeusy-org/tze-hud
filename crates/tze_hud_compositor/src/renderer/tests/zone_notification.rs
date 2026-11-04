@@ -235,123 +235,165 @@ async fn test_lifecycle_sentinel_keeps_cached_markdown_render_path() {
 /// shared slot layout. Draw-command level (no pixel readback).
 #[tokio::test]
 async fn notification_actions_layout_matches_hit_regions() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 1080).await);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-    compositor
-        .token_map
-        .insert("notification.action.background".into(), "#336699".into());
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.create_tab("Main", 0).unwrap();
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "notification-area".to_owned(),
-        description: "notification area zone".to_owned(),
-        geometry_policy: GeometryPolicy::Relative {
+    let adversarial = "A full-width label still clips within one button. ".repeat(128);
+    for (labels, stacked) in [
+        (["Ship", "Hold", "Skip", "Open"], false),
+        ([adversarial.as_str(), "Hold", "Skip", "Open"], true),
+        (
+            [
+                "Ship after the entire staging validation has finished",
+                "Hold",
+                "Skip",
+                "Open",
+            ],
+            true,
+        ),
+        (
+            [
+                "Sélectionner après la vérification complète",
+                "Überprüfen",
+                "العربية",
+                "Ouvrir",
+            ],
+            true,
+        ),
+    ] {
+        let mut tokens = HashMap::from([
+            ("runtime.px_scale".into(), "1.5".into()),
+            ("font.sans".into(), "IBM Plex Mono".into()),
+            ("notification.action.background".into(), "#336699".into()),
+            ("notification.action.padding_px".into(), "3".into()),
+            ("notification.action.gap_px".into(), "6".into()),
+        ]);
+        tokens = tze_hud_config::themes::resolve_config_tokens(&tokens);
+        compositor.set_token_map(tokens);
+        let mut scene = SceneGraph::new(1280.0, 1080.0);
+        scene.create_tab("Main", 0).unwrap();
+        let mut zone = ZoneRegistry::with_defaults()
+            .zones
+            .remove("notification-area")
+            .unwrap();
+        zone.geometry_policy = GeometryPolicy::Relative {
             x_pct: 0.6,
             y_pct: 0.0,
             width_pct: 0.35,
-            height_pct: 0.5,
-        },
-        accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
-        rendering_policy: RenderingPolicy {
-            font_size_px: Some(16.0),
-            backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 1.0)),
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::Stack { max_depth: 8 },
-        max_publishers: 4,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-    let action = |label: &str| tze_hud_scene::types::NotificationAction {
-        label: label.to_owned(),
-        callback_id: label.to_lowercase(),
-    };
-    for (ns, title, labels) in [
-        ("a", "Deploy", vec!["Ship", "Hold"]),
-        ("b", "", vec!["Open"]),
-    ] {
-        scene
-            .publish_to_zone(
-                "notification-area",
-                ZoneContent::Notification(NotificationPayload {
-                    text: "body".to_owned(),
-                    icon: String::new(),
-                    urgency: 1,
-                    ttl_ms: None,
-                    title: title.to_owned(),
-                    actions: labels.into_iter().map(action).collect(),
-                }),
-                ns,
-                None,
-                None,
-                None,
-            )
-            .unwrap();
-    }
-
-    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
-    let region_id = |callback: &str| {
-        scene
-            .overlay
-            .zone_hit_regions
-            .iter()
-            .find(|r| matches!(&r.kind, tze_hud_scene::types::ZoneInteractionKind::Action { callback_id } if callback_id == callback))
-            .map(|r| r.interaction_id.clone())
-            .unwrap()
-    };
-    let (ship, hold) = (region_id("ship"), region_id("hold"));
-    scene.set_chrome_hovered(&ship, true);
-    scene.set_chrome_pressed(&hold, true);
-
-    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
-    compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
-    assert_eq!(
-        vertices.len(),
-        12,
-        "the flat pass draws only the two backdrops; buttons are SDF controls"
-    );
-    let cmds = compositor
-        .collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0)
-        .chrome;
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-
-    let tokens =
-        crate::renderer::token_colors::resolve_notification_action_tokens(&compositor.token_map);
-    let mut checked = 0;
-    for region in &scene.overlay.zone_hit_regions {
-        let tze_hud_scene::types::ZoneInteractionKind::Action { callback_id } = &region.kind else {
-            continue;
+            height_pct: 0.95,
         };
-        let b = region.bounds;
-        let fill = match callback_id.as_str() {
-            "ship" => tokens.background_hover,
-            "hold" => tokens.background_pressed,
-            _ => tokens.background,
-        };
-        assert!(
-            cmds.iter().any(
-                |c| (c.x, c.y, c.width, c.height) == (b.x, b.y, b.width, b.height)
-                    && c.color == compositor.gpu_color(fill)
-                    && c.border.map(|border| border.width) == Some(1.0)
-            ),
-            "no outlined control in the {callback_id} state fill at its hit region: {b:?}"
+        zone.rendering_policy.margin_horizontal = Some(18.0);
+        zone.rendering_policy.font_family = Some(FontFamily::SystemMonospace);
+        scene.register_zone(zone);
+        for ns in ["following", "newest"] {
+            scene
+                .publish_to_zone(
+                    "notification-area",
+                    ZoneContent::Notification(NotificationPayload {
+                        text: format!("Body for {ns}"),
+                        title: "Deploy".into(),
+                        actions: labels
+                            .iter()
+                            .enumerate()
+                            .map(|(i, label)| NotificationAction {
+                                label: (*label).into(),
+                                callback_id: i.to_string(),
+                            })
+                            .collect(),
+                        ..Default::default()
+                    }),
+                    ns,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+        compositor.prime_notification_layouts(&scene, 1280.0, 1080.0);
+        compositor.populate_zone_hit_regions(&mut scene, 1280.0, 1080.0);
+        let record = &scene.zone_registry.active_for_zone("notification-area")[1];
+        let policy = &scene.zone_registry.zones["notification-area"].rendering_policy;
+        let descriptor =
+            compositor.notification_action_layout("notification-area", record, policy, 448.0);
+        assert_eq!(descriptor.stacked, stacked);
+        let shapes = compositor.notification_layouts.borrow().shapes;
+        let regions = scene.overlay.zone_hit_regions.clone();
+        assert_eq!(
+            regions
+                .iter()
+                .filter(|r| matches!(r.kind, ZoneInteractionKind::Action { .. }))
+                .count(),
+            8
         );
-        let label = callback_id.to_uppercase()[..1].to_string() + &callback_id[1..];
-        let item = items
+        let action_regions: Vec<_> = regions
             .iter()
-            .find(|i| &*i.text == label.as_str())
-            .unwrap_or_else(|| panic!("no label text item for {callback_id}"));
-        assert_eq!((item.pixel_x, item.bounds_width), (b.x, b.width));
+            .filter(|r| {
+                r.publisher_namespace == "newest"
+                    && matches!(r.kind, ZoneInteractionKind::Action { .. })
+            })
+            .collect();
+        scene.set_chrome_hovered(&action_regions[0].interaction_id, true);
+        scene.set_chrome_pressed(&action_regions[1].interaction_id, true);
+        scene.focus_notification(Some(action_regions[2].interaction_id.clone()));
+        let commands = compositor
+            .collect_all_rounded_rect_cmds(&scene, 1280.0, 1080.0)
+            .chrome;
+        let items = compositor.collect_text_items(&scene, 1280.0, 1080.0);
+        let tokens = resolve_notification_action_tokens(&compositor.token_map);
+        for region in &action_regions {
+            let ZoneInteractionKind::Action { callback_id } = &region.kind else {
+                unreachable!()
+            };
+            let index = callback_id.parse::<usize>().unwrap();
+            let bounds = region.bounds;
+            let fill = match index {
+                0 => tokens.background_hover,
+                1 => tokens.background_pressed,
+                _ => tokens.background,
+            };
+            assert!(commands.iter().any(|c| (c.x, c.y, c.width, c.height)
+                == (bounds.x, bounds.y, bounds.width, bounds.height)
+                && c.color == compositor.gpu_color(fill)));
+            let item = items
+                .iter()
+                .find(|item| &*item.text == labels[index])
+                .unwrap();
+            assert_eq!(item.pixel_x, bounds.x + descriptor.padding);
+            assert_eq!(item.bounds_width, bounds.width - descriptor.padding * 2.0);
+            assert!(
+                item.pixel_y >= bounds.y
+                    && item.pixel_y + item.bounds_height <= bounds.y + bounds.height
+            );
+            assert!(
+                items
+                    .iter()
+                    .filter(|i| &*i.text == "Body for newest")
+                    .all(|i| i.pixel_y + i.bounds_height <= action_regions[0].bounds.y)
+            );
+            if stacked {
+                assert_eq!(bounds.width, 448.0 - 36.0);
+            }
+        }
+        for pair in action_regions.windows(2) {
+            if stacked {
+                assert!(pair[0].bounds.y + pair[0].bounds.height < pair[1].bounds.y);
+            } else {
+                assert_eq!(pair[0].bounds.y, pair[1].bounds.y);
+            }
+        }
+        let dismiss: Vec<_> = regions
+            .iter()
+            .filter(|r| matches!(r.kind, ZoneInteractionKind::Dismiss))
+            .collect();
         assert!(
-            item.pixel_y >= b.y && item.pixel_y + item.font_size_px <= b.y + b.height,
-            "label for {callback_id} must sit inside its button"
+            dismiss[0].bounds.y < dismiss[1].bounds.y,
+            "following card moves below the entire chosen layout"
         );
-        checked += 1;
+        // An unchanged frame uses retained measurements and identical hit geometry.
+        compositor.prime_notification_layouts(&scene, 1280.0, 1080.0);
+        compositor.populate_zone_hit_regions(&mut scene, 1280.0, 1080.0);
+        assert_eq!(compositor.notification_layouts.borrow().shapes, shapes);
+        assert_eq!(scene.overlay.zone_hit_regions, regions);
     }
-    assert_eq!(checked, 3, "all three actions must have hit regions");
 }
 
 /// hud-mskx5: a notification with actions reserves its button row in the
@@ -372,7 +414,6 @@ async fn notification_action_row_follows_a_themed_inset() {
 
 async fn check_notification_action_row(margin: Option<f32>) {
     use crate::renderer::token_colors::{
-        NOTIFICATION_ACTION_BUTTON_H_PX, NOTIFICATION_ACTION_ROW_GAP_PX,
         NOTIFICATION_INSET_DEFAULT_PX, NOTIFICATION_STACK_GAP_DEFAULT_PX,
     };
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
@@ -397,32 +438,6 @@ async fn check_notification_action_row(margin: Option<f32>) {
         title: title.to_owned(),
         actions: labels.iter().map(|l| action(l)).collect(),
     };
-
-    // Slot height: actions add exactly the reserved row; no actions add nothing.
-    for title in ["", "Title"] {
-        let plain = payload(title, "body", &[]);
-        let with_actions = payload(title, "body", &["Approve", "Reject"]);
-        let h = |p: &NotificationPayload| {
-            Compositor::notification_slot_height(
-                p,
-                &policy,
-                NOTIFICATION_BODY_SCALE,
-                NOTIFICATION_INTER_LINE_GAP,
-                1.0,
-            )
-        };
-        if title.is_empty() {
-            assert_eq!(h(&plain), Compositor::stack_slot_height(&policy, 1.0));
-        }
-        assert_eq!(
-            h(&with_actions),
-            h(&plain)
-                + NOTIFICATION_ACTION_ROW_GAP_PX
-                + NOTIFICATION_ACTION_BUTTON_H_PX
-                + card_inset,
-            "title={title:?}: actions reserve the button row"
-        );
-    }
 
     let mut scene = SceneGraph::new(1280.0, 720.0);
     scene.create_tab("Main", 0).unwrap();
@@ -511,7 +526,7 @@ async fn check_notification_action_row(margin: Option<f32>) {
         .to_vec();
     // Zone: x = 0.6 * 1280, y = 0, w = 0.35 * 1280, h = 0.8 * 720.
     let (zx, zy, zw, zh) = (768.0_f32, 0.0_f32, 448.0_f32, 576.0_f32);
-    let layout = compositor.zone_slot_layout("notification-area", &publishes, &policy, zh);
+    let layout = compositor.zone_slot_layout("notification-area", &publishes, &policy, zh, zw);
     let cards: Vec<(usize, f32, f32)> = layout.iter_visible(zy).collect();
     assert_eq!(cards.len(), 3, "all three cards are visible");
     for pair in cards.windows(2) {
@@ -594,6 +609,51 @@ async fn check_notification_action_row(margin: Option<f32>) {
                 item.bounds_width,
                 item.bounds_height
             );
+        }
+    }
+    for labels in [
+        ["A", "B", "C", "D"],
+        [
+            "Choose after every staging dependency is ready",
+            "Hold",
+            "Skip",
+            "Open",
+        ],
+        [
+            "Après la vérification complète de tous les services",
+            "Später",
+            "العربية",
+            "Åpne",
+        ],
+    ] {
+        scene.clear_zone("notification-area").unwrap();
+        for (ns, title) in [("older", "Title"), ("newer", "")] {
+            scene
+                .publish_to_zone(
+                    "notification-area",
+                    ZoneContent::Notification(payload(title, ns, &labels)),
+                    ns,
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+        compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+        let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+        for ns in ["older", "newer"] {
+            let body = items.iter().find(|item| &*item.text == ns).unwrap();
+            let top = scene
+                .overlay
+                .zone_hit_regions
+                .iter()
+                .filter(|region| {
+                    region.publisher_namespace == ns
+                        && matches!(region.kind, ZoneInteractionKind::Action { .. })
+                })
+                .map(|region| region.bounds.y)
+                .fold(f32::INFINITY, f32::min);
+            assert!(body.pixel_y + body.bounds_height <= top);
         }
     }
 }

@@ -113,6 +113,23 @@ def main():
         {"surface": "zone:subtitles", "content": "hello"},
         expect_error=True,
     )
+    tool(
+        "notification_choice", "1_ask", "hud_publish",
+        {"surface": "zone:notification-area", "content": {
+            "body": "Next?", "actions": [
+                {"label": label, "callback_id": callback}
+                for label, callback in [("Ship", "a"), ("Hold", "b"), ("Skip", "c"), ("Open", "d")]
+            ]}},
+    )
+    # The local calibration producer releases this barrier only after real
+    # shared activation queues Skip. This is fixture synchronization, not MCP
+    # input: the actual default poll, returned answer and ACK remain counted.
+    if sys.stdin.readline() != "notification-choice-ready\n":
+        raise RuntimeError("choice fixture did not confirm shared activation")
+    answer = tool("notification_choice", "2_answer", "hud_input", {})
+    if len(answer["items"]) != 1 or answer["items"][0].get("action") != "c":
+        raise RuntimeError(f"choice flow did not receive its live notification answer: {answer}")
+    tool("notification_choice", "3_ack", "hud_input", {"ack": [answer["items"][0]["id"]]})
     limit = int(os.environ["HUD_MAX_NOTIFICATION_ACTIONS"])
     error = tool(
         "notification_action_limit_error",

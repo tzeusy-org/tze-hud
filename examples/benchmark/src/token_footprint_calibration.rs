@@ -4,9 +4,11 @@
 mod calibration {
     use serde::{Deserialize, Serialize};
     use std::collections::{BTreeMap, HashMap};
+    use std::io::Write;
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::path::{Path, PathBuf};
-    use std::process::Command;
+    use std::process::{Command, Stdio};
+    use std::sync::mpsc;
     use tze_hud_runtime::headless::{HeadlessConfig, HeadlessRuntime};
     use tze_hud_runtime::portal::{PortalHandle, PortalHub, PortalKey};
     use tze_hud_runtime::threads::{ShutdownReason, ShutdownToken};
@@ -14,11 +16,11 @@ mod calibration {
     use tze_hud_scene::types::{
         ContentionPolicy, GeometryPolicy, RenderingPolicy, SceneId, WidgetDefinition,
         WidgetInstance, WidgetParamConstraints, WidgetParamType, WidgetParameterDeclaration,
-        WidgetParameterValue,
+        WidgetParameterValue, ZoneContent, ZoneInteractionKind,
     };
 
     const PSK: &str = "token-calibration-resident-psk";
-    const CANONICAL_FLOW_VERSION: u32 = 3;
+    const CANONICAL_FLOW_VERSION: u32 = 4;
     const VOCAB_FINGERPRINT: &str =
         "sha256:446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d";
 
@@ -159,10 +161,10 @@ mod calibration {
         state.scene.clone()
     }
 
-    fn run_python_driver(address: SocketAddr) -> DriverOutput {
+    fn run_python_driver(address: SocketAddr, choice_ready: mpsc::Receiver<()>) -> DriverOutput {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let driver = root.join("examples/benchmark/token_footprint_flow.py");
-        let output = Command::new("python3")
+        let mut child = Command::new("python3")
             .arg(driver)
             .env("HUD_MCP_URL", format!("http://{address}/mcp"))
             .env("HUD_PSK", PSK)
@@ -170,8 +172,33 @@ mod calibration {
                 "HUD_MAX_NOTIFICATION_ACTIONS",
                 tze_hud_scene::types::MAX_NOTIFICATION_ACTIONS.to_string(),
             )
-            .output()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .expect("launch token-footprint Python flow driver");
+        // Fixture-only barrier: a default (zero-wait) hud_input is sufficient
+        // after the real shared activation has queued its answer. Never race
+        // the producer or replace the answer with a synthetic PendingAction.
+        let readiness = choice_ready
+            .recv_timeout(std::time::Duration::from_secs(60))
+            .map_err(|error| format!("choice activation was not ready: {error}"))
+            .and_then(|()| {
+                child
+                    .stdin
+                    .take()
+                    .expect("piped flow-driver stdin")
+                    .write_all(b"notification-choice-ready\n")
+                    .map_err(|error| format!("notify flow driver of choice activation: {error}"))
+            });
+        if let Err(error) = readiness {
+            let _ = child.kill();
+            let output = child.wait_with_output().expect("reap failed flow driver");
+            panic!("{error}: {}", String::from_utf8_lossy(&output.stderr));
+        }
+        let output = child
+            .wait_with_output()
+            .expect("wait for Python flow driver");
         assert!(
             output.status.success(),
             "Python flow driver failed: {}",
@@ -291,6 +318,13 @@ mod calibration {
                     },
                 );
             }
+            if flow_name == "notification_choice" {
+                assert_eq!(
+                    operations.len(),
+                    3,
+                    "ask, returned answer and ACK are all counted"
+                );
+            }
             flows.insert(
                 flow_name,
                 FlowMeasurement {
@@ -356,12 +390,15 @@ mod calibration {
         };
         let (server_task, addresses) =
             start_mcp_http_server(scene, config, shutdown.clone(), Some(portals.clone())).await?;
-        let mut python = tokio::task::spawn_blocking(move || run_python_driver(addresses[0]));
+        let (choice_ready_tx, choice_ready_rx) = mpsc::channel();
+        let mut python =
+            tokio::task::spawn_blocking(move || run_python_driver(addresses[0], choice_ready_rx));
         let agent = tze_hud_scene::config::AgentDirectory::unrestricted(PSK)
             .resolve(PSK, "")
             .expect("calibration agent")
             .agent_id;
         let mut input_injected = false;
+        let mut choice_activated = false;
         let driver_output = loop {
             if !input_injected {
                 let mut hub = portals.hub.lock().expect("calibration hub");
@@ -374,6 +411,59 @@ mod calibration {
                     )
                     .expect("inject canonical portal input");
                     input_injected = true;
+                }
+            }
+            if !choice_activated {
+                let shared = runtime.shared_state().lock().await;
+                let mut scene = shared.scene.lock().await;
+                // Do not shape earlier notifications while the independent
+                // portal flow needs this scene lock. Wait for the choice itself.
+                let choice_pending =
+                    scene
+                        .zone_registry
+                        .active_publishes
+                        .values()
+                        .flatten()
+                        .any(|record| {
+                            if record.publisher_namespace != agent {
+                                return false;
+                            }
+                            match &record.content {
+                                ZoneContent::Notification(notification) => notification
+                                    .actions
+                                    .iter()
+                                    .any(|action| action.callback_id == "c"),
+                                _ => false,
+                            }
+                        });
+                let wake = if choice_pending {
+                    // Exercise the production exact-live activation operation,
+                    // shared by pointer and keyboard. Never inject a PendingAction.
+                    runtime
+                        .compositor
+                        .populate_zone_hit_regions(&mut scene, 1920.0, 1080.0);
+                    let target = scene
+                        .overlay
+                        .zone_hit_regions
+                        .iter()
+                        .find(|region| {
+                            region.publisher_namespace == agent
+                                && matches!(&region.kind,
+                                    ZoneInteractionKind::Action { callback_id } if callback_id == "c")
+                        })
+                        .cloned();
+                    target.and_then(|region| scene.activate_notification(&region, 0))
+                } else {
+                    None
+                };
+                choice_activated = wake.is_some();
+                drop(scene);
+                drop(shared);
+                if let Some(wake) = wake {
+                    wake.notify();
+                    choice_ready_tx
+                        .send(())
+                        .expect("notify driver after shared choice activation");
                 }
             }
             tokio::select! {

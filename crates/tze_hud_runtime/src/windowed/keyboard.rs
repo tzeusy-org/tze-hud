@@ -612,9 +612,26 @@ impl WinitApp {
             return;
         }
 
+        // Held local keys never turn into agent input after focus or publication
+        // changes. Shell/panel routing still has first refusal.
+        if self
+            .state
+            .notification_keydowns
+            .contains(&keyboard_key_identity(&raw.key_code, &raw.key))
+        {
+            return;
+        }
+
         // No active tab → nothing else to route to. Drop after global shell
         // handling, which must not depend on a focused content tab.
-        let Some(tab_id) = active_tab else { return };
+        let Some(tab_id) = active_tab else {
+            if self.route_notification_key(raw, None).is_err() {
+                self.state
+                    .pending_keyboard_events
+                    .push_back(PendingKeyboardEvent::KeyDown(raw.clone()));
+            }
+            return;
+        };
 
         {
             // ── Priority 4: Portal resize hotkey intercept (§6b.2) ────────
@@ -684,6 +701,17 @@ impl WinitApp {
                 );
                 return;
             }
+        }
+
+        match self.route_notification_key(raw, active_tab) {
+            Ok(true) => return,
+            Err(()) => {
+                self.state
+                    .pending_keyboard_events
+                    .push_back(PendingKeyboardEvent::KeyDown(raw.clone()));
+                return;
+            }
+            Ok(false) => {}
         }
 
         // ── Keyboard focus traversal: Tab / Shift+Tab (hud-v0cal) ─────────
@@ -1321,6 +1349,115 @@ impl WinitApp {
         );
     }
 
+    /// Explicit Tab joins notification controls at the existing content cycle's
+    /// wrap boundary. Preserve that content owner while local card focus is
+    /// active, so Escape/activation/removal restores editing without a steal.
+    fn route_notification_key(
+        &mut self,
+        raw: &RawKeyDownEvent,
+        tab: Option<tze_hud_scene::SceneId>,
+    ) -> Result<bool, ()> {
+        let modified = raw.modifiers.ctrl || raw.modifiers.alt || raw.modifiers.meta;
+        let traversal = is_bare_tab_chord(&raw.key, &raw.modifiers);
+        let activation = !modified && is_activation_key(&raw.key, &raw.key_code);
+        let mut wake = None;
+        let consumed = {
+            let state = spin_acquire(&self.state.shared_state, INTERACTION_LOCK_BUDGET).ok_or(())?;
+            let mut scene = spin_acquire(&state.scene, INTERACTION_LOCK_BUDGET).ok_or(())?;
+            // A focus-loss event may precede this key before the settle
+            // retry. Apply the retained chrome cleanup before routing new input.
+            if self.state.input_processor.chrome_feedback_cancel_pending {
+                self.state.input_processor.clear_chrome_feedback(&mut scene);
+            }
+            scene.prune_notification_feedback();
+            let mut controls: Vec<_> = scene
+                .overlay
+                .zone_hit_regions
+                .iter()
+                .filter(|region| {
+                    matches!(
+                        region.kind,
+                        tze_hud_scene::types::ZoneInteractionKind::Dismiss
+                            | tze_hud_scene::types::ZoneInteractionKind::Action { .. }
+                    )
+                })
+                .cloned()
+                .collect();
+            controls.sort_by_key(|region| region.tab_order);
+            if controls.is_empty() || (modified && scene.overlay.notification_focus.is_none()) {
+                false
+            } else if traversal {
+                let current = controls.iter().position(|r| {
+                    Some(&r.interaction_id) == scene.overlay.notification_focus.as_ref()
+                });
+                if let Some(index) = current {
+                    if (raw.modifiers.shift && index == 0)
+                        || (!raw.modifiers.shift && index + 1 == controls.len())
+                    {
+                        let entered_reverse = scene.overlay.notification_focus_entered_reverse;
+                        scene.focus_notification(None);
+                        // Reversing at the entry edge returns to the saved stop;
+                        // continuing across the far edge advances the content cycle.
+                        raw.modifiers.shift != entered_reverse
+                    } else {
+                        if !raw.repeat {
+                            let next = if raw.modifiers.shift {
+                                index - 1
+                            } else {
+                                index + 1
+                            };
+                            scene.focus_notification(Some(controls[next].interaction_id.clone()));
+                        }
+                        true
+                    }
+                } else if tab.is_none_or(|tab| {
+                    self.state
+                        .focus_manager
+                        .traversal_would_wrap(tab, &scene, raw.modifiers.shift)
+                }) {
+                    if !raw.repeat {
+                        let next = if raw.modifiers.shift {
+                            controls.len() - 1
+                        } else {
+                            0
+                        };
+                        scene.overlay.notification_focus_entered_reverse = raw.modifiers.shift;
+                        scene.focus_notification(Some(controls[next].interaction_id.clone()));
+                    }
+                    true
+                } else {
+                    false
+                }
+            } else if let Some(control) = controls
+                .iter()
+                .find(|r| Some(&r.interaction_id) == scene.overlay.notification_focus.as_ref())
+            {
+                if is_escape_key(&raw.key, &raw.key_code) {
+                    scene.focus_notification(None);
+                } else if activation && !raw.repeat {
+                    let duration = super::lifecycle::notification_exit_ms(
+                        &scene,
+                        &control.zone_name,
+                        &self.state.global_tokens,
+                    );
+                    wake = scene.activate_notification(control, duration);
+                }
+                true
+            } else {
+                false
+            }
+        };
+        if consumed {
+            self.state
+                .notification_keydowns
+                .insert(keyboard_key_identity(&raw.key_code, &raw.key));
+        }
+        if let Some(wake) = wake {
+            wake.notify();
+        }
+        Ok(consumed)
+    }
+
     /// Translate a raw key-up event through the `KeyboardProcessor`, log it,
     /// and broadcast it over the `INPUT_EVENTS` gRPC channel.
     ///
@@ -1342,6 +1479,9 @@ impl WinitApp {
         {
             self.state
                 .consumed_shell_shortcut_keydowns
+                .remove(&keyboard_key_identity(&raw.key_code, &raw.key));
+            self.state
+                .notification_keydowns
                 .remove(&keyboard_key_identity(&raw.key_code, &raw.key));
             tracing::debug!(
                 key = %str_preview(&raw.key),
@@ -1377,6 +1517,9 @@ impl WinitApp {
         active_tab: Option<tze_hud_scene::SceneId>,
     ) {
         let key_identity = keyboard_key_identity(&raw.key_code, &raw.key);
+        if self.state.notification_keydowns.remove(&key_identity) {
+            return;
+        }
         if self
             .state
             .consumed_shell_shortcut_keydowns
@@ -1601,6 +1744,31 @@ impl WinitApp {
         raw: &RawCharacterEvent,
         active_tab: Option<tze_hud_scene::SceneId>,
     ) {
+        if !self.state.notification_keydowns.is_empty() {
+            return;
+        }
+        {
+            let Some(state) = spin_acquire(&self.state.shared_state, INTERACTION_LOCK_BUDGET)
+            else {
+                self.state
+                    .pending_keyboard_events
+                    .push_back(PendingKeyboardEvent::Character(raw.clone()));
+                return;
+            };
+            let Some(mut scene) = spin_acquire(&state.scene, INTERACTION_LOCK_BUDGET) else {
+                self.state
+                    .pending_keyboard_events
+                    .push_back(PendingKeyboardEvent::Character(raw.clone()));
+                return;
+            };
+            if self.state.input_processor.chrome_feedback_cancel_pending {
+                self.state.input_processor.clear_chrome_feedback(&mut scene);
+            }
+            scene.prune_notification_feedback();
+            if scene.overlay.notification_focus.is_some() {
+                return;
+            }
+        }
         let Some(tab_id) = active_tab else { return };
 
         // ── Portal control typing recovery (hud-2v8br) ──────────────────────

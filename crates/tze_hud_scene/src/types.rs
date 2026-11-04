@@ -1924,7 +1924,7 @@ pub struct ZonePublishToken {
 /// When the user clicks or activates an action button, the runtime routes the
 /// callback to the publishing agent by emitting an interaction event.  The
 /// emitted event's `interaction_id` follows the scheme
-/// `"zone:{zone_name}:action:{published_at_wall_us}:{publisher_namespace}:{callback_id}"`
+/// `"zone:{zone_name}:action:{publication_id}:{publisher_namespace}:{index}:{callback_id}"`
 /// (see [`ZoneInteractionKind::Action`] and [`ZoneHitRegion::interaction_id`]).
 ///
 /// Rendering: buttons appear in a horizontal row at the bottom of the
@@ -2014,7 +2014,7 @@ impl NotificationPayload {
 pub const BLANK_NOTIFICATION_HINT: &str = "notification needs a title or body";
 
 /// Maximum number of action buttons accepted and rendered per notification slot.
-pub const MAX_NOTIFICATION_ACTIONS: usize = 3;
+pub const MAX_NOTIFICATION_ACTIONS: usize = 4;
 
 // ─── Zone hit regions ────────────────────────────────────────────────────────
 
@@ -2025,12 +2025,12 @@ pub enum ZoneInteractionKind {
     ///
     /// Activating this removes the notification from the zone.  The
     /// `interaction_id` for dismiss elements follows the pattern
-    /// `"zone:{zone_name}:dismiss:{published_at_wall_us}:{publisher_namespace}"`.
+    /// `"zone:{zone_name}:dismiss:{publication_id}:{publisher_namespace}"`.
     Dismiss,
     /// An action button.  `callback_id` is the agent-defined identifier from
     /// [`NotificationAction::callback_id`].  The `interaction_id` follows the
     /// pattern
-    /// `"zone:{zone_name}:action:{published_at_wall_us}:{publisher_namespace}:{callback_id}"`.
+    /// `"zone:{zone_name}:action:{publication_id}:{publisher_namespace}:{index}:{callback_id}"`.
     Action { callback_id: String },
     /// Runtime chrome drag handle for a movable element.
     DragHandle {
@@ -2100,6 +2100,8 @@ pub enum DragHandleElementKind {
 /// agent-managed tiles for each notification slot.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ZoneHitRegion {
+    /// Exact runtime publication; null for non-notification chrome.
+    pub publication_id: SceneId,
     /// Zone that owns this interactive element.
     pub zone_name: String,
     /// `published_at_wall_us` of the publication this region belongs to.
@@ -2113,8 +2115,8 @@ pub struct ZoneHitRegion {
     /// Interaction identifier forwarded in all events from this region.
     ///
     /// Scheme:
-    /// - Dismiss: `"zone:{zone_name}:dismiss:{published_at_wall_us}:{publisher_namespace}"`
-    /// - Action:  `"zone:{zone_name}:action:{published_at_wall_us}:{publisher_namespace}:{callback_id}"`
+    /// - Dismiss: `"zone:{zone_name}:dismiss:{publication_id}:{publisher_namespace}"`
+    /// - Action:  `"zone:{zone_name}:action:{publication_id}:{publisher_namespace}:{index}:{callback_id}"`
     pub interaction_id: String,
     /// Tab-order index within the zone's interactive elements.
     ///
@@ -2158,6 +2160,8 @@ pub struct DragHandleHitRegion {
 pub struct ChromeLocalState {
     pub hovered: bool,
     pub pressed: bool,
+    #[serde(default)]
+    pub focused: bool,
 }
 
 /// Runtime-managed chrome context menu anchored to a drag handle.
@@ -2211,6 +2215,10 @@ pub enum ZoneContent {
 /// ZoneType → ZoneInstance → ZonePublication → ZoneOccupancy).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ZonePublishRecord {
+    /// Runtime identity, independent of wall-clock resolution. Restored records
+    /// receive fresh identities; cloning a live scene preserves them.
+    #[serde(skip, default = "SceneId::new")]
+    pub publication_id: SceneId,
     pub zone_name: String,
     pub publisher_namespace: String,
     pub content: ZoneContent,

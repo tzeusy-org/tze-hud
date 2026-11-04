@@ -141,6 +141,7 @@ impl WinitApp {
             &logical_key_to_str(logical),
         );
         if !pressed {
+            self.state.notification_keydowns.remove(&identity);
             self.state
                 .consumed_shell_shortcut_keydowns
                 .remove(&identity);

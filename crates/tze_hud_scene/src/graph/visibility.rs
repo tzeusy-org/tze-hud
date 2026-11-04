@@ -57,6 +57,7 @@ impl SceneGraph {
             return false;
         }
         self.overlay.owner_hidden = hidden;
+        self.prune_notification_feedback();
         self.version += 1;
         true
     }

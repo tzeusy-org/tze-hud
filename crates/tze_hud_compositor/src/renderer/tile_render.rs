@@ -382,6 +382,9 @@ impl Compositor {
         sw: f32,
         sh: f32,
     ) {
+        if scene.overlay.notification_focus.is_some() {
+            return;
+        }
         let Some(owner) = self.focus_ring_owner else {
             return;
         };
@@ -466,6 +469,9 @@ impl Compositor {
         sw: f32,
         sh: f32,
     ) {
+        if scene.overlay.notification_focus.is_some() {
+            return;
+        }
         let Some(ref cs) = self.local_composer else {
             return;
         };

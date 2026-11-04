@@ -62,17 +62,38 @@ otherwise. Scheduled zone publications count as held before presentation;
 - Zone: `content` is a string, or a typed object for structured zones
   (`notification` with optional `title`, `body`, integer `urgency` 0–3
   (default 1), and optional `actions: [{label, callback_id}]`; both action
-  fields are non-empty strings). Both MCP and gRPC accept at most 3 actions
+  fields are non-empty strings). Both MCP and gRPC accept at most 4 actions
   (`MAX_NOTIFICATION_ACTIONS`); excess actions reject the whole publish with
-  `INVALID_ARGUMENT` and hint `notification allows at most 3 actions`, before
-  admission or scheduling. Activating an action dismisses the
-  notification. `type` may be
+  `INVALID_ARGUMENT` and hint `notification allows at most 4 actions`, before
+  admission or scheduling. Notification actions form a choice card: four equal
+  cells when every shaped label fits; any overflow stacks all options at full
+  width. Layout uses the owner's font, theme, scale and action metric tokens,
+  and unchanged frames reuse the publication's measured geometry. Long labels
+  retain the existing bounded Clip policy inside each full-width button; a
+  label longer than that width cannot displace the later options. The zone's
+  existing whole-card visibility bounds still apply. `type` may be
   omitted; the runtime infers it from what the zone accepts. `key` is the
   merge key. Supplied notification urgency must be an integer 0–3; only
   omission defaults to 1. `status_bar.entries` must be a non-empty object
   whose every value is a string; an empty string removes that entry.
   Notification TTL belongs at the publish's top-level `ttl_ms`; an inner
   `content.ttl_ms` is rejected with a hint to move it.
+  Activating an action queues its unchanged `hud_input` callback once and
+  immediately disables all controls on that exact publication. Runtime identity
+  keeps same-tick publications and replacements independent without changing
+  their wall-clock timestamps or TTLs. The chosen button keeps its pressed fill during the finite `motion.exit.ms` fade
+  (`motion.exit.easing`); zero exit duration removes it instantly. Explicit
+  clear, expiry or replacement finishes the local presentation without another
+  callback or a human-X record. Owner hiding removes its pixels/input while
+  leaving the finite lifetime intact. `hud_hold` cannot prolong an
+  answered card's exit. Waiting cards add no timer, countdown or periodic
+  reshape/repaint; existing Stack TTL fade is the only waiting time cue.
+  Bare Tab/Shift+Tab joins visible notification controls at the content focus
+  cycle's wrap boundary, in dismiss-then-publication-action order. HUD keyboard
+  focus loss clears card focus even when the pointer is over another overlay.
+  Enter/Space uses the same exact-publication activation as pointer release. Publication
+  never activates an OS window or steals editor focus; Escape, completion and
+  removal release local card focus. Panel and shell routing retain precedence.
 - `zone:ambient-background` draws its fill or image at most
   `opacity.ambient.max` (0.9 by default) opaque, so the desktop under the
   overlay always shows through.
@@ -171,7 +192,8 @@ The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
   `{"id":…,"s":"zone:notification-area","action":"approve"}`. A validated
   human notification × uses `{"id":…,"s":"zone:notification-area","action":"dismiss","kind":"dismiss"}`.
   A publisher callback named `dismiss` has no `kind` field. Callback activation
-  already removes its notification locally; it emits no second human-X event.
+  already disables its notification locally and finishes a finite chosen exit;
+  it emits no second human-X event.
   TTL expiry, `hud_clear` and stale/unmatched releases do not emit human-X input.
 - Accepted notification events are retained in a growable per-publisher FIFO,
   with stable ids until `ack`; one publisher cannot evict or acknowledge another's
@@ -734,6 +756,7 @@ color overrides still take precedence.
 | Surfaces | `color.surface`, `color.surface.container`, `color.surface.container.{low,high,highest}`, `opacity.surface`, `opacity.scrim` |
 | Roles | `color.on_surface[.variant]`, `color.outline[.variant]`, `color.primary`, `color.on_primary`, `color.[on_]primary.container`, `color.success`, `color.caution`, `color.error`, `color.[on_]caution.container`, `color.[on_]error.container` |
 | State | `state.hover.opacity`, `state.pressed.opacity`, `focus.ring.width`, `focus.ring.offset` |
+| Choice actions | `notification.action.{height,gap,padding}_px`, `notification.action.background{,_hover,_pressed}`, `typography.notification.action.{font_size_px,font_weight}` |
 | Motion | `motion.{enter,exit,state}.ms`, `motion.{enter,exit}.easing` (`linear`, `standard`, `decelerate`, `accelerate`) |
 | Shape | `shape.{xs,s,m,l,xl,full}` (corner radius) |
 | Spacing | `space.{xs,s,m,l,xl,xxl}` (4 px grid) |
@@ -811,13 +834,35 @@ baselined against regressions.
 | `tools/list` | 4,418 | 554 | 517 | ≤ 900 |
 | Discover (default scene) | ~430 (`list_zones`) | 181 | 113 | ≤ 150 |
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
+| Four-option notification ask + returned answer + ACK | — | 273 (historical) | 114 (historical) | ≤ 120 |
 | Widget publish | ~168 | 73 | 22 | ≤ 80 |
 | Portal: attach+publish+hold, poll, ack, clear | ~575 over 5 round trips | 343 over 4 | 137 over 4 | ≤ 250 |
 | Discover (`production.toml`: 6 zones, 3 built-in widgets) | n/a | n/a | ~232 | ≤ 250 |
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
 
-These current measurements use canonical flow version 3; its refreshed baseline
-is pending owner review, with every budget unchanged.
+The non-choice measurements use canonical flow version 3; its refreshed baseline
+is pending owner review, with every budget unchanged. The choice flow uses
+version 4. Current-main calibration and baseline review remain pending.
+
+The `notification_choice` flow publishes Ship/Hold/Skip/Open, activates Skip through
+`SceneGraph::activate_notification` (the shared pointer/keyboard producer), polls
+its actual retained `hud_input` answer and acknowledges that returned id normally.
+All three calls count toward the owner-approved 120-token ceiling. That ceiling
+applies only to this new complete four-option flow; the six established flow
+ceilings and public serialization/accounting remain unchanged.
+
+Historical runtime-backed version-4 calibration measured 114 model-visible tokens:
+ask 69, answer 28, ACK 17. It failed the former 104-token ceiling. This historical
+measurement is not a current-main pass or approval of regenerated baseline bytes;
+the version-4 baseline has not yet been regenerated.
+
+The calibration fixture waits for shared activation through a local readiness
+pipe before issuing the choice's default `hud_input {}` poll. `wait_ms` already
+defaults to zero; omitting it measures the supported concise form without a
+producer race. This fixture signal is outside MCP and carries no answer;
+the returned answer and its ACK still pass through the real MCP handler.
+The fixture defers notification layout until that choice is published, keeping
+its producer work out of the preceding portal flow's scene-lock deadline.
 
 The same calibration separately executes an over-limit notification publish.
 Its `notification_action_limit_error` candidate records full wire and

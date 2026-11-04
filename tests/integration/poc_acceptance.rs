@@ -863,6 +863,13 @@ async fn poc_notification_action_reaches_hud_input() {
     poc.hud.click(x, y);
     poc.settle().await;
 
+    assert!(
+        poc.hud.notification_action_center("ship").is_none(),
+        "chosen exit is immediately noninteractive"
+    );
+    poc.hud.click(x, y);
+    poc.settle().await;
+
     let poll = poc.call("hud_input", json!({})).await;
     let items = input_items(&poll);
     assert_eq!(items.len(), 1, "one action press: {}", poll.body);
@@ -958,6 +965,18 @@ async fn poc_notification_action_reaches_hud_input() {
         assert!(publish.model_tokens + poll.model_tokens + ack.model_tokens <= PORTAL_FLOW_BUDGET);
         poc.call_as(RESIDENT_PSK, "hud_clear", json!({"surface": NOTIFICATION}))
             .await;
+        let tokens = std::collections::HashMap::from([(
+            "motion.exit.ms".to_string(),
+            poc.hud
+                .design_token("motion.exit.ms")
+                .expect("resolved exit token"),
+        )]);
+        let exit_ms = tze_hud_config::tokens::resolve_motion_duration_ms(&tokens, "motion.exit.ms");
+        poc.advance(u64::from(exit_ms) + 1).await;
+        assert!(
+            input_items(&poc.call("hud_input", json!({})).await).is_empty(),
+            "chosen completion emits no human X"
+        );
         assert_eq!(poc.shown(NOTIFICATION), 0);
     }
 }

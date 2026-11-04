@@ -312,12 +312,8 @@ impl ZoneAnimationState {
     }
 }
 
-/// Stable key that uniquely identifies a single publication within a zone.
-///
-/// Composed of `(published_at_wall_us, publisher_namespace)`.  Because the
-/// scene graph assigns `published_at_wall_us` from a monotonic wall clock, the
-/// combination is unique per-zone across all practical usage.
-pub(crate) type PubKey = (u64, String);
+/// Runtime publication identity, independent of wall-clock resolution.
+pub(crate) type PubKey = tze_hud_scene::SceneId;
 
 /// Per-publication opacity animation state for TTL-based fade-out.
 ///
@@ -769,10 +765,10 @@ mod tests {
         // The idle render gate (hud-ilivg) treats a reveal as in-flight only
         // while breakpoint segments remain. Empty breakpoints reveal instantly
         // (never in flight); a non-empty reveal is in flight until fully revealed.
-        let key: PubKey = (1, "agent".to_owned());
+        let key = PubKey::new();
 
         // No breakpoints → reveal-all → never in flight.
-        let none = StreamRevealState::new(key.clone(), vec![]);
+        let none = StreamRevealState::new(key, vec![]);
         assert!(!none.is_revealing());
 
         // Two segments → in flight until both are revealed.

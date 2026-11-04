@@ -471,6 +471,7 @@ struct WindowedRuntimeState {
     /// began on. A release activates a dismiss/action button only when it
     /// lands on the same affordance the press started on (hud-z21e9).
     zone_press: Option<String>,
+    notification_keydowns: std::collections::HashSet<String>,
     /// Original primary drag identity and, only on a missed Up, its terminal event.
     primary_drag_gesture: Option<portal::PrimaryDragGesture>,
     /// Global design token map from scene startup.
@@ -2402,19 +2403,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 }
             }
 
-            WindowEvent::Focused(true) if secondary.is_none() => {
-                self.panel_window_focus(true);
-            }
-
-            WindowEvent::Focused(false) => {
-                if secondary.is_none() {
-                    self.panel_window_focus(false);
-                }
-                if self.state.press_window == Some(window_id)
-                    || self.state.cursor_window == Some(window_id)
-                {
-                    self.cancel_chrome_feedback();
-                }
+            WindowEvent::Focused(focused) => {
+                self.handle_window_focus(secondary, focused);
             }
 
             // ── Pointer: button press/release ──────────────────────────────
@@ -3238,6 +3228,7 @@ impl WindowedRuntime {
             overlay_refits: Default::default(),
             press_window: None,
             zone_press: None,
+            notification_keydowns: Default::default(),
             primary_drag_gesture: None,
             global_tokens: startup_compositor_tokens,
             appearance: Some(appearance),

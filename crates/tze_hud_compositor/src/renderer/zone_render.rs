@@ -28,16 +28,16 @@
 
 use std::collections::HashMap;
 
+use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::*;
 
 use super::Compositor;
 use super::draw_cmds::TexturedDrawCmd;
 use super::token_colors::{
     ICON_SIZE_PX, NOTIFICATION_BODY_SCALE, NOTIFICATION_ICON_SIZE_PX, NOTIFICATION_INTER_LINE_GAP,
-    STATIC_IMAGE_PLACEHOLDER_COLOR, is_alert_banner_zone, notification_action_row_reserve,
-    notification_backdrop_opacity, notification_inset, notification_stack_gap,
-    sort_alert_banner_indices, urgency_to_notification_color, urgency_to_severity_color,
-    zone_opacity_ceiling,
+    STATIC_IMAGE_PLACEHOLDER_COLOR, is_alert_banner_zone, notification_backdrop_opacity,
+    notification_inset, notification_stack_gap, sort_alert_banner_indices,
+    urgency_to_notification_color, urgency_to_severity_color, zone_opacity_ceiling,
 };
 use crate::pipeline::RectVertex;
 use crate::pipeline::rect_vertices;
@@ -159,7 +159,7 @@ impl Compositor {
                 ContentionPolicy::Stack { .. } => {
                     // Slot geometry is computed once by zone_slot_layout and shared
                     // with collect_text_items / collect_all_rounded_rect_cmds (hud-qlerb).
-                    let layout = self.zone_slot_layout(zone_name, publishes, policy, h);
+                    let layout = self.zone_slot_layout(zone_name, publishes, policy, h, w);
 
                     for (pub_idx, slot_y, effective_slot_h) in layout.iter_visible(y) {
                         let record = &publishes[pub_idx];
@@ -278,7 +278,11 @@ impl Compositor {
                                     let icon_x = x + inset_h;
                                     // Centred on the text, above any action row.
                                     let text_slot_h = effective_slot_h
-                                        - notification_action_row_reserve(payload, scale, inset_h);
+                                        - self
+                                            .notification_action_layout(
+                                                zone_name, record, policy, w,
+                                            )
+                                            .reserve(inset_h);
                                     let icon_y = slot_y
                                         + (text_slot_h - (NOTIFICATION_ICON_SIZE_PX * scale))
                                             .max(0.0)
@@ -616,28 +620,8 @@ impl Compositor {
     /// When `payload.title` is empty, the text height is [`Self::stack_slot_height`]
     /// (single line).
     ///
-    /// Either way, a notification with actions adds
-    /// [`notification_action_row_reserve`] so its button row sits below the
-    /// text instead of over it (hud-mskx5).
-    pub(crate) fn notification_slot_height(
-        payload: &NotificationPayload,
-        policy: &RenderingPolicy,
-        notification_body_scale: f32,
-        notification_inter_line_gap: f32,
-        scale: f32,
-    ) -> f32 {
-        notification_action_row_reserve(payload, scale, notification_inset(policy, scale))
-            + Self::notification_text_slot_height(
-                payload,
-                policy,
-                notification_body_scale,
-                notification_inter_line_gap,
-                scale,
-            )
-    }
-
     /// Slot height for a notification's text alone (title and body).
-    fn notification_text_slot_height(
+    pub(crate) fn notification_slot_height(
         payload: &NotificationPayload,
         policy: &RenderingPolicy,
         notification_body_scale: f32,
@@ -696,6 +680,50 @@ impl Compositor {
             .collect()
     }
 
+    /// Resolve changed publications before the first slot/animation/draw read,
+    /// using the rasterizer's actual font database (including uploaded fonts).
+    pub(super) fn prime_notification_layouts(&mut self, scene: &SceneGraph, sw: f32, sh: f32) {
+        let Some(rasterizer) = self.text_rasterizer.as_mut() else {
+            return;
+        };
+        let mut cache = self.notification_layouts.borrow_mut();
+        cache.retain(scene);
+        for (name, records) in scene.shown_zone_publishes() {
+            let Some(zone) = scene.zone_registry.zones.get(name) else {
+                continue;
+            };
+            let tokens = tze_hud_config::tokens::for_zone(&self.token_map, name);
+            let (_, _, width, _) =
+                super::zone_geometry_in(&self.display_layout, name, &zone.geometry_policy, sw, sh);
+            for record in records {
+                cache.resolve_with_fonts(
+                    &tokens,
+                    name,
+                    record,
+                    &zone.rendering_policy,
+                    width,
+                    Some(rasterizer.font_system_mut()),
+                );
+            }
+        }
+    }
+
+    pub(super) fn notification_action_layout(
+        &self,
+        zone: &str,
+        record: &ZonePublishRecord,
+        policy: &RenderingPolicy,
+        width: f32,
+    ) -> super::notification_layout::NotificationActionLayout {
+        self.notification_layouts.borrow_mut().resolve(
+            self.zone_tokens(zone),
+            zone,
+            record,
+            policy,
+            width,
+        )
+    }
+
     /// Compute the [`ZoneSlotLayout`] for a Stack zone.
     ///
     /// This is the single authoritative computation for zone slot geometry.
@@ -716,6 +744,7 @@ impl Compositor {
         publishes: &[ZonePublishRecord],
         policy: &RenderingPolicy,
         zh: f32,
+        zw: f32,
     ) -> super::ZoneSlotLayout {
         Self::zone_slot_layout_with_tokens(
             self.zone_tokens(zone_name),
@@ -723,6 +752,8 @@ impl Compositor {
             publishes,
             policy,
             zh,
+            zw,
+            &self.notification_layouts,
         )
     }
 
@@ -734,6 +765,8 @@ impl Compositor {
         publishes: &[ZonePublishRecord],
         policy: &RenderingPolicy,
         zh: f32,
+        zw: f32,
+        layouts: &std::cell::RefCell<super::notification_layout::NotificationLayoutCache>,
     ) -> super::ZoneSlotLayout {
         let ordered_indices: Vec<usize> = if is_alert_banner_zone(zone_name) {
             sort_alert_banner_indices(publishes)
@@ -750,13 +783,23 @@ impl Compositor {
 
         let ordered_refs: Vec<&ZonePublishRecord> =
             ordered_indices.iter().map(|&i| &publishes[i]).collect();
-        let slot_heights = Self::per_slot_heights(
+        let mut slot_heights = Self::per_slot_heights(
             &ordered_refs,
             policy,
             notif_body_scale,
             NOTIFICATION_INTER_LINE_GAP * tze_hud_config::tokens::px_scale(token_map),
             tze_hud_config::tokens::px_scale(token_map),
         );
+        for (height, record) in slot_heights.iter_mut().zip(&ordered_refs) {
+            if let ZoneContent::Notification(_) = &record.content {
+                let scale = tze_hud_config::tokens::px_scale(token_map);
+                let inset = notification_inset(policy, scale);
+                *height += layouts
+                    .borrow_mut()
+                    .resolve(token_map, zone_name, record, policy, zw)
+                    .reserve(inset);
+            }
+        }
         // Alert banners stack flush as one strip; notification cards are
         // separated by a token gap so consecutive cards never touch.
         let (slot_offsets, effective_h) = if is_alert_banner_zone(zone_name) {
