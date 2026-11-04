@@ -834,15 +834,18 @@ baselined against regressions.
 | `tools/list` | 4,418 | 554 | 517 | ≤ 900 |
 | Discover (default scene) | ~430 (`list_zones`) | 181 | 113 | ≤ 150 |
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
-| Four-option notification ask + returned answer + ACK | — | 273 (historical) | 114 (historical) | ≤ 120 |
+| Four-option notification ask + returned answer + ACK | — | 273 | 114 | ≤ 120 |
 | Widget publish | ~168 | 73 | 22 | ≤ 80 |
 | Portal: attach+publish+hold, poll, ack, clear | ~575 over 5 round trips | 343 over 4 | 137 over 4 | ≤ 250 |
 | Discover (`production.toml`: 6 zones, 3 built-in widgets) | n/a | n/a | ~232 | ≤ 250 |
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
 
-The non-choice measurements use canonical flow version 3; its refreshed baseline
-is pending owner review, with every budget unchanged. The choice flow uses
-version 4. Current-main calibration and baseline review remain pending.
+All seven measurements use canonical flow version 4. Two byte-identical
+current-main calibrations measured the complete choice flow at 114 model-visible
+tokens (69 ask + 28 retained answer + 17 ACK). The six established flows retain
+identical request/response fingerprints and metrics from version 3, with every
+budget unchanged. The refreshed baseline remains `pending_owner_review`; the
+approved choice ceiling does not approve its measured bytes.
 
 The `notification_choice` flow publishes Ship/Hold/Skip/Open, activates Skip through
 `SceneGraph::activate_notification` (the shared pointer/keyboard producer), polls
@@ -852,9 +855,9 @@ applies only to this new complete four-option flow; the six established flow
 ceilings and public serialization/accounting remain unchanged.
 
 Historical runtime-backed version-4 calibration measured 114 model-visible tokens:
-ask 69, answer 28, ACK 17. It failed the former 104-token ceiling. This historical
-measurement is not a current-main pass or approval of regenerated baseline bytes;
-the version-4 baseline has not yet been regenerated.
+ask 69, answer 28, ACK 17. It failed the former 104-token ceiling and remains a historical failure. Fresh
+current-main measurements meet the amended 120-token ceiling; their regenerated
+version-4 baseline still awaits review.
 
 The calibration fixture waits for shared activation through a local readiness
 pipe before issuing the choice's default `hud_input {}` poll. `wait_ms` already
