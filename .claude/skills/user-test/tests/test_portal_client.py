@@ -1149,7 +1149,19 @@ def test_usage_wrapper_stdout_and_detached_cancellation(tmp_path):
         assert h.state()["ack"]["key"] == [h.reset, 41]
         assert time.monotonic() - started < 1
         h.wait_idle()
-        h.reap_detached()
+        # Another caller's live child is not part of this fixture's completion.
+        unrelated = subprocess.Popen(
+            [sys.executable, "-c", "import sys; print('ready', flush=True); sys.stdin.buffer.read()"],
+            cwd=tmp_path, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        assert unrelated.stdout.readline() == b"ready\n"
+        h.process_results.append({"unrelated_probe_pid": unrelated.pid, "state": "live"})
+        try:
+            h.reap_detached()
+            assert unrelated.poll() is None, "fixture must not wait for or reap another caller's child"
+        finally:
+            assert unrelated.communicate(timeout=1) == (b"", b"")
+            assert unrelated.returncode == 0
+            h.process_results.append({"unrelated_probe_pid": unrelated.pid, "returncode": unrelated.returncode})
         assert any(r.get("detached_pid") and r["returncode"] == 0 for r in h.process_results)
 
         h.hold_before_commit = True
