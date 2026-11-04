@@ -1,6 +1,7 @@
 """Unit tests for the hud-projection portal client (no network)."""
 
 import importlib.util
+import errno
 import http.server
 import json
 import os
@@ -1331,6 +1332,73 @@ def test_usage_wrapper_stdout_and_detached_cancellation(tmp_path):
             if failure == "missing-pair":
                 key.with_suffix(".saved").rename(key)
             state_path.chmod(0o600)
+
+    # Exercise actual __exit__ fallback: an owned process can finish between
+    # the readiness check and signal. Its disappearance must not skip the next
+    # owned child or replace the completion failure that initiated cleanup.
+    children, descriptors, gone, statuses = [], [], [], []
+    completion_failure = AssertionError("controlled owned completion failure")
+    real_select, real_signal, real_waitid = select.select, signal.pidfd_send_signal, os.waitid
+
+    def exit_after_live_check(readers, writers, errors, timeout):
+        result = real_select(readers, writers, errors, timeout)
+        if readers == descriptors[:1] and not result[0] and children[0].poll() is None:
+            assert children[0].communicate(timeout=1) == (b"", b"")
+            assert children[0].returncode == 0
+        return result
+
+    def observe_signal(descriptor, sig):
+        try:
+            return real_signal(descriptor, sig)
+        except ProcessLookupError as error:
+            gone.append((descriptor, error.errno))
+            cleanup.process_results.append({"cleanup_race_pid": children[0].pid, "signal_errno": error.errno})
+            raise
+
+    def observe_status(kind, descriptor, options):
+        status = real_waitid(kind, descriptor, options)
+        statuses.append(status)
+        if status.si_pid == children[1].pid:
+            children[1].returncode = status.si_status if status.si_code == os.CLD_EXITED else -status.si_status
+            cleanup.process_results.append({"cleanup_remaining_pid": status.si_pid,
+                                            "returncode": children[1].returncode})
+        return status
+
+    try:
+        with mock.patch.object(UsageHarness, "reap_detached", side_effect=completion_failure), \
+                mock.patch.object(select, "select", side_effect=exit_after_live_check), \
+                mock.patch.object(signal, "pidfd_send_signal", side_effect=observe_signal), \
+                mock.patch.object(os, "waitid", side_effect=observe_status):
+            with pytest.raises(AssertionError) as caught:
+                with UsageHarness(tmp_path / "cleanup-race") as cleanup:
+                    for _ in range(2):
+                        child = subprocess.Popen(
+                            [sys.executable, "-c", "import sys; print('ready', flush=True); sys.stdin.buffer.read()"],
+                            cwd=cleanup.home, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                        children.append(child)
+                        assert child.stdout.readline() == b"ready\n"
+                        descriptor = os.pidfd_open(child.pid)
+                        descriptors.append(descriptor)
+                        cleanup.owned_children.append((child.pid, descriptor, b"h"))
+            assert caught.value is completion_failure
+        assert gone == [(descriptors[0], errno.ESRCH)]
+        assert [(status.si_pid, status.si_code, status.si_status) for status in statuses] == [
+            (children[1].pid, os.CLD_KILLED, signal.SIGKILL)]
+        for descriptor in descriptors:
+            with pytest.raises(OSError) as closed:
+                os.fstat(descriptor)
+            assert closed.value.errno == errno.EBADF
+    finally:
+        # A failing old-fixture RED must also leave no probe children/FDs.
+        for child in children:
+            if child.poll() is None:
+                child.kill()
+            child.communicate(timeout=1)
+        for descriptor in descriptors:
+            try:
+                os.close(descriptor)
+            except OSError as error:
+                assert error.errno == errno.EBADF
 
 
 def test_usage_failures_are_silent_private_bounded_and_event_driven(tmp_path):
