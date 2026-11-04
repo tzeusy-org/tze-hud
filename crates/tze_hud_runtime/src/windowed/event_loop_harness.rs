@@ -2100,12 +2100,7 @@ mod tests {
                 1920.0,
                 1080.0,
             );
-            let background = geometry
-                .hits
-                .iter()
-                .find(|hit| hit.target == tze_hud_compositor::PanelHitTarget::Panel)
-                .expect("panel background")
-                .rect;
+            let background = geometry.panel;
             panel.set_geometry(1, || geometry.clone());
             // The top-left inset is background, outside every row/control.
             (harness.app.state.cursor_x, harness.app.state.cursor_y) =
