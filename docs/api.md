@@ -214,8 +214,8 @@ The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
   acknowledgements are idempotent and unacknowledged input keeps its stable id.
   The production `poc_demo` client retries only this exact typed input error,
   with one 100 ms recovery deadline and 10 ms cooperative backoff. A retried
-  positive `wait_ms` uses the original input deadline; default-zero polls and
-  ACK arguments stay unchanged. Every actual attempt prints its request/error
+  positive `wait_ms` may still wait until the original input deadline;
+  default-zero polls and ACK arguments stay unchanged. Every actual attempt prints its request/error
   or success token cost. Other tool, transport and protocol errors fail normally;
   the canonical token calibration does not retry or omit an attempt.
 - An accepted local portal reply is echoed in the submitting scene-maintenance

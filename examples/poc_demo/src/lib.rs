@@ -57,7 +57,9 @@ impl Mcp<'_> {
         loop {
             let attempt = self.call_once(tool, &arguments);
             let (is_error, parsed) = match recovery_deadline {
-                Some(deadline) => tokio::time::timeout_at(deadline, attempt)
+                // An admitted long poll can still wait until its original input
+                // deadline; only transient-error recovery is capped at 100 ms.
+                Some(deadline) => tokio::time::timeout_at(deadline.max(input_deadline), attempt)
                     .await
                     .map_err(|_| "hud_input scene-busy recovery exceeded 100 ms")??,
                 None => attempt.await?,
