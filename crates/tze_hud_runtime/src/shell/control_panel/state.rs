@@ -528,7 +528,11 @@ pub(crate) fn build(
     }
 
     let mut hints: Vec<String> = [
-        "Type to search",
+        if open.editing.is_some() || open.selected_field.is_some() {
+            "Type value"
+        } else {
+            "Type to search"
+        },
         "↑↓ move",
         "Tab next section",
         "←→ change",
@@ -2000,6 +2004,29 @@ mod tests {
         open.focus = PanelFocus::Tile(7);
         built(&mut open);
         assert_eq!(open.focus, PanelFocus::Search);
+
+        // A selected field can disappear during a section refresh. Neither
+        // its draft nor its explicit selection may capture later search.
+        let mut rows = sections();
+        rows[0].rows.push(Row::new(
+            "agents.name",
+            "Name",
+            Control::Field {
+                text: "Agent".into(),
+                confirm: None,
+            },
+        ));
+        let (_, nav) = built_with(&mut open, &rows);
+        let field = PanelHitTarget::Row("agents.name".into(), PanelPart::Body);
+        on_click(&mut open, &nav, &field, None);
+        on_text(&mut open, &nav, "Replacement");
+        let (_, nav) = built(&mut open);
+        assert_eq!(open.focus, PanelFocus::Search);
+        assert!(open.editing.is_none());
+        on_text(&mut open, &nav, "pause");
+        assert_eq!(open.query, "pause");
+        assert!(on_key(&mut open, &nav, PanelKey::Escape, None).is_empty());
+        assert!(open.query.is_empty(), "no vanished selection consumes Esc");
     }
 
     /// Clicks on parts step and cycle; the wheel scrolls within bounds; a
