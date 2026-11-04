@@ -83,11 +83,15 @@ The main session owns this presence. Subagents report through their parent
 unless explicitly delegated an existing element; they do not each create a
 status entry, notification stream or portal.
 
-- **Status:** maintain one compact `zone:status-bar` entry with a unique
-  session/work key and a recognizable label. Update it on meaningful changes
-  such as working, testing, blocked and done; coalesce updates under that key.
-  Discover surfaces first. Use an existing widget only when its typed params
-  fit and it is allocated to this work; do not commandeer a shared widget.
+- **Status:** prefer one compact status element with a unique session/work
+  key and a recognizable label. Update it on meaningful changes such as
+  working, testing, blocked and done; coalesce updates under that key. Discover
+  surfaces first and verify their actual presentation. The current status bar
+  rendered as an intrusive slab in owner dogfooding (2026-11-04; tracked under
+  `hud-h51u7.4.4`); do not use it by default until its compact presentation is
+  accepted. Use brief milestone notifications meanwhile. Use an existing widget
+  only when its typed params fit and it is allocated to this work; do not
+  commandeer a shared widget.
 - **Attention and decisions:** prefer a short notification for an actionable
   blocker, meaningful completion, or an actual owner choice. Use a concise
   question with explicit action labels, such as Yes / No / Later, within the
