@@ -83,7 +83,9 @@ Agents answer-window row saves first, then updates `LiveSettings`' shared
 atomic handle. Windowed startup creates that handle before either server and
 threads the same clone through MCP config/ToolCtx and gRPC SessionDeps/session
 state. Each action-notification admission snapshots it once into the existing
-absolute-expiry mutation; changing it does not wake rendering or retime content.
+absolute deadline. Immediate MCP admission uses a lease-checked single-zone
+write; delayed admission retains that deadline in the scheduled mutation. Neither
+path retimes existing content, and changing the default does not wake rendering.
 The
 Layout card edits widget instances in the scene and their `[[tabs.widgets]]`
 entries (`tze_hud_config::set_widget`); the Input card's chord changes go

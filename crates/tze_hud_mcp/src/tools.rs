@@ -630,32 +630,28 @@ async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpRes
     let now = now_us(&scene);
     let present_at = now.saturating_add(delay_ms.saturating_mul(1_000));
     let expires_at = (ttl_ms > 0).then(|| present_at.saturating_add(ttl_ms.saturating_mul(1_000)));
-    let batch = MutationBatch {
-        batch_id: SceneId::new(),
-        agent_namespace: ns,
-        mutations: vec![SceneMutation::PublishToZone {
-            zone_name: zone.to_string(),
-            content,
-            publish_token: ZonePublishToken { token: Vec::new() },
-            merge_key: p.key,
-            expires_at_wall_us: expires_at,
-            content_classification: None,
-            breakpoints: Vec::new(),
-            held: expires_at.is_none(),
-        }],
-        timing_hints: None,
-        lease_id: Some(lease_id),
-    };
     if delay_ms > 0 {
+        let batch = MutationBatch {
+            batch_id: SceneId::new(),
+            agent_namespace: ns,
+            mutations: vec![SceneMutation::PublishToZone {
+                zone_name: zone.to_string(),
+                content,
+                publish_token: ZonePublishToken { token: Vec::new() },
+                merge_key: p.key,
+                expires_at_wall_us: expires_at,
+                content_classification: None,
+                breakpoints: Vec::new(),
+                held: expires_at.is_none(),
+            }],
+            timing_hints: None,
+            lease_id: Some(lease_id),
+        };
         scene.schedule_batch(present_at, batch);
     } else {
-        let result = scene.apply_batch(&batch);
-        if let Some(error) = result.error {
-            return Err(scene_error(&error));
-        }
-        if !result.applied {
-            return Err(tool_err("INTERNAL", "zone publish was not applied"));
-        }
+        scene
+            .publish_to_zone_until_with_lease(zone, content, &ns, lease_id, p.key, expires_at)
+            .map_err(|error| scene_error(&error))?;
     }
     Ok(ok_with_expiry(
         expires_at.map(|at| at.saturating_sub(now) / 1_000),

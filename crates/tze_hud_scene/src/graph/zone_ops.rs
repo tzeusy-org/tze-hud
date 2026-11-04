@@ -368,6 +368,33 @@ impl SceneGraph {
         )
     }
 
+    /// Publish under an active, namespace-owned lease using an already resolved
+    /// absolute deadline. `None` means held, including notifications; no urgency
+    /// default is applied. This touches only publication state, not tile topology.
+    pub fn publish_to_zone_until_with_lease(
+        &mut self,
+        zone_name: &str,
+        content: ZoneContent,
+        publisher_namespace: &str,
+        lease_id: SceneId,
+        merge_key: Option<String>,
+        expires_at_wall_us: Option<u64>,
+    ) -> Result<(), ValidationError> {
+        self.check_zone_publish_lease(publisher_namespace, lease_id)?;
+        self.publish_to_zone_inner(
+            zone_name,
+            content,
+            publisher_namespace,
+            merge_key,
+            expires_at_wall_us,
+            None,
+            Vec::new(),
+            Some(lease_id),
+            None,
+            false,
+        )
+    }
+
     /// [`Self::publish_to_zone_with_lease`] with no expiry at all: the
     /// publication stays until cleared, even a notification (whose urgency
     /// default would otherwise apply). `hud_publish` with `ttl_ms: 0`.
@@ -379,18 +406,13 @@ impl SceneGraph {
         lease_id: SceneId,
         merge_key: Option<String>,
     ) -> Result<(), ValidationError> {
-        self.check_zone_publish_lease(publisher_namespace, lease_id)?;
-        self.publish_to_zone_inner(
+        self.publish_to_zone_until_with_lease(
             zone_name,
             content,
             publisher_namespace,
+            lease_id,
             merge_key,
             None,
-            None,
-            Vec::new(),
-            Some(lease_id),
-            None,
-            false,
         )
     }
 
