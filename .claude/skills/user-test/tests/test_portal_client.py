@@ -4,7 +4,11 @@ import importlib.util
 import http.server
 import json
 import os
+import select
+import shutil
 import signal
+import socket
+import struct
 from pathlib import Path
 import subprocess
 import sys
@@ -861,31 +865,123 @@ class UsageHarness(HookHarness):
         self.env["TZ"] = "UTC"
         self.reset = int(time.time()) + 3600
         self.process_results = []
+        self.owned_children = []
+        self.registration_errors = []
+        self.registration_stop = threading.Event()
+        self.sleep_registered = threading.Event()
+        self.registration_thread = None
         self.worker_script = USAGE
         self.hold_timeout = 5
+
+    def track_wrapper_children(self):
+        # Pin each detached helper and foreground sleep before real exec. The
+        # private handshake closes before exec, so it cannot keep wrapper IO
+        # open or become part of the helper's HTTP/cancellation lifetime.
+        address = "\0hud-usage-test-" + uuid.uuid4().hex
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(address)
+        listener.listen()
+        listener.settimeout(0.1)
+        self.registration_listener = listener
+
+        def register():
+            while not self.registration_stop.is_set():
+                try:
+                    connection, _ = listener.accept()
+                except socket.timeout:
+                    continue
+                try:
+                    with connection:
+                        connection.settimeout(1)
+                        pid, uid, _ = struct.unpack("3i", connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
+                        assert uid == os.getuid() and os.readlink(f"/proc/{pid}/cwd") == self.private_cwd
+                        role = connection.recv(1)
+                        assert role in (b"h", b"s")
+                        # setsid must exec in place, rather than leave a new
+                        # unregistered child behind an intermediary process.
+                        assert role != b"h" or os.getpgid(pid) != pid
+                        with self.guard:
+                            self.owned_children.append((pid, os.pidfd_open(pid), role))
+                        connection.sendall(b"+")
+                        if role == b"s":
+                            self.sleep_registered.set()
+                except Exception as error:
+                    self.registration_errors.append(repr(error))
+
+        self.registration_thread = threading.Thread(target=register, daemon=True)
+        self.registration_thread.start()
+        commands = self.home / "bin"
+        commands.mkdir()
+        for name, role in (("setsid", b"h"), ("sleep", b"s")):
+            executable = shutil.which(name, path=self.env["PATH"])
+            assert executable
+            shim = commands / name
+            shim.write_text(f"#!{sys.executable}\nimport os, socket, sys\n"
+                            f"with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as channel:\n"
+                            f"    channel.connect({address!r})\n"
+                            f"    channel.sendall({role!r})\n"
+                            "    assert channel.recv(1) == b'+'\n"
+                            f"os.execv({executable!r}, [{executable!r}, *sys.argv[1:]])\n")
+            shim.chmod(0o755)
+        self.env["PATH"] = str(commands) + os.pathsep + self.env["PATH"]
 
     def __exit__(self, *args):
         try:
             super().__exit__(*args)
         finally:
-            self.reap_detached()
-            assert self.libc.prctl(36, self.previous_subreaper, 0, 0, 0) == 0
-            receipt_root = os.environ.get("TZE_HUD_USAGE_TEST_RECEIPTS")
-            if receipt_root:
-                receipt = Path(receipt_root) / (self.home.name + ".json")
-                receipt.parent.mkdir(parents=True, exist_ok=True)
-                receipt.write_text(json.dumps({"provenance": "docs-derived synthetic loopback fixture",
-                                               "requests": self.records, "committed": self.committed,
-                                               "processes": self.process_results}, indent=2))
-
-    def reap_detached(self):
-        while True:
             try:
-                pid, status = os.waitpid(-1, os.WNOHANG)
+                self.reap_detached()
+            finally:
+                if self.registration_thread is not None:
+                    self.registration_stop.set()
+                    self.registration_thread.join(2)
+                    self.registration_listener.close()
+                try:
+                    # Failure cleanup touches only the pinned fixture children.
+                    for pid, descriptor, _ in self.owned_children:
+                        if not select.select([descriptor], [], [], 0)[0]:
+                            signal.pidfd_send_signal(descriptor, signal.SIGKILL)
+                        try:
+                            os.waitpid(pid, 0)
+                        except ChildProcessError:
+                            pass
+                        os.close(descriptor)
+                finally:
+                    assert self.libc.prctl(36, self.previous_subreaper, 0, 0, 0) == 0
+                    receipt_root = os.environ.get("TZE_HUD_USAGE_TEST_RECEIPTS")
+                    if receipt_root:
+                        receipt = Path(receipt_root) / (self.home.name + ".json")
+                        receipt.parent.mkdir(parents=True, exist_ok=True)
+                        receipt.write_text(json.dumps({"provenance": "docs-derived synthetic loopback fixture",
+                                                       "requests": self.records, "committed": self.committed,
+                                                       "processes": self.process_results}, indent=2))
+
+    def wait_idle(self):
+        deadline = time.monotonic() + 3
+        super().wait_idle()
+        self.reap_detached(deadline)
+
+    def reap_detached(self, deadline=None):
+        deadline = time.monotonic() + 3 if deadline is None else deadline
+        assert not self.registration_errors, self.registration_errors
+        with self.guard:
+            children = list(self.owned_children)
+        for pid, descriptor, role in children:
+            assert select.select([descriptor], [], [], max(0, deadline - time.monotonic()))[0], (
+                f"owned fixture child {pid} remained live after fixture wait")
+            try:
+                waited, status = os.waitpid(pid, 0)
             except ChildProcessError:
-                return
-            assert pid, "owned detached child remained live after fixture wait"
-            self.process_results.append({"detached_pid": pid, "returncode": os.waitstatus_to_exitcode(status)})
+                # Bash can reap its foreground sleep before it is cancelled.
+                assert role == b"s", f"detached helper {pid} lost its owned exit status"
+                self.process_results.append({"owned_pid": pid, "reaped_by_wrapper": True})
+            else:
+                assert waited == pid
+                self.process_results.append({"detached_pid": pid, "role": role.decode(),
+                                             "returncode": os.waitstatus_to_exitcode(status)})
+            with self.guard:
+                self.owned_children.remove((pid, descriptor, role))
+            os.close(descriptor)
 
     def payload(self, pct=41.2, reset=None):
         return {"rate_limits": {"five_hour": {"used_percentage": pct, "resets_at": reset or self.reset}},
@@ -1124,6 +1220,7 @@ def test_usage_uncertain_generation_allows_distinct_transition(tmp_path, failure
 
 def test_usage_wrapper_stdout_and_detached_cancellation(tmp_path):
     with UsageHarness(tmp_path / "wrapper") as h:
+        h.track_wrapper_children()
         h.block_text = f'41% · resets {time.strftime("%H:%M", time.gmtime(h.reset))}'
         script = h.home / "statusline.sh"
         # This is the documented one-line addition. Existing stdout is emitted
@@ -1139,6 +1236,7 @@ def test_usage_wrapper_stdout_and_detached_cancellation(tmp_path):
         assert p.stdout.readline() == "\033[32mexisting Ω\033[0m\n".encode()
         assert time.monotonic() - started < 0.5
         assert h.received.wait(1)
+        assert h.sleep_registered.wait(1)
         os.killpg(p.pid, signal.SIGTERM)
         out, err = p.communicate(timeout=1)
         assert out == err == b""
@@ -1168,6 +1266,7 @@ def test_usage_wrapper_stdout_and_detached_cancellation(tmp_path):
         h.block_text = f'42% · resets {time.strftime("%H:%M", time.gmtime(h.reset))}'
         h.received.clear()
         h.release.clear()
+        h.sleep_registered.clear()
         p = subprocess.Popen(["bash", str(script)], cwd=h.home, env=h.env, stdin=subprocess.PIPE,
                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
         started = time.monotonic()
@@ -1176,6 +1275,7 @@ def test_usage_wrapper_stdout_and_detached_cancellation(tmp_path):
         p.stdin = None
         assert p.stdout.readline() == "\033[32mexisting Ω\033[0m\n".encode()
         assert time.monotonic() - started < 0.5 and h.received.wait(1)
+        assert h.sleep_registered.wait(1)
         os.killpg(p.pid, signal.SIGTERM)
         assert p.communicate(timeout=1) == (b"", b"")
         h.wait_idle()  # Helper survives parent cancellation, then hits its original timer.
