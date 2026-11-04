@@ -208,6 +208,8 @@ pub struct PendingAction {
     pub publisher_namespace: String,
     pub zone_name: String,
     pub kind: PendingActionKind,
+    /// Snapshot of the exact accepted notification, never a live-card lookup.
+    pub key: Option<String>,
 }
 
 impl SceneGraph {

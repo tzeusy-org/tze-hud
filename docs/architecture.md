@@ -148,6 +148,18 @@ the raw-tile queue/store renderer and periodic draft flush are removed.
 Notification input retains Callback versus human-X Dismiss through MCP
 serialization. Only a validated X that removed its exact publication emits the
 runtime kind; callback auto-removal, TTL and clear do not.
+Scene `graph/zone_ops.rs` owns notification-key validation, publisher-scoped
+replacement and selective clear; `graph/timed.rs` cancels matching delayed
+notifications while retaining mixed-batch remainder. Central
+`SceneGraph::activate_notification` validates the exact publication and snapshots
+its existing `merge_key` into `PendingAction` before removal or finite exit.
+MCP retains that value in `ActionItem` through serialization and ACK. Pointer
+and keyboard callers share this producer; neither hit regions nor zone records
+need a second routing-key field. MCP tools and gRPC lifecycle verbs validate
+before lease renewal or scheduling and use the same scene contracts. Generic
+widget contention and portal ownership remain with their existing owners.
+The key-only core provides no generation arbitration: `hud-bz9bv.7` owns broker
+callback nonces and owner-D stale-cancellation behavior.
 The hub is keyed by authenticated agent and portal id; its time-dependent
 operations take injected time. The driver materializes scene tiles, mirrors
 liveness onto leases, and connects composer submissions back to the hub.

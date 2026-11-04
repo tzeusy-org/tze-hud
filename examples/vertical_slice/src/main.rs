@@ -202,6 +202,7 @@ async fn run_lifecycle(
     // Clear: release the tile and its lease (and with it the zone publication).
     agent
         .request(Request::Clear(Clear {
+            key: String::new(),
             surface: "zone:status-bar".to_string(),
         }))
         .await?;

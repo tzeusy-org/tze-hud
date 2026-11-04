@@ -8,7 +8,7 @@
     "vocab_fingerprint": "sha256:446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d",
     "counting_policy": "each canonical JSON-RPC body independently; UTF-8 bytes; encode_with_special_tokens; operation and flow totals are integer sums; model_visible counts tool name + arguments + result text only"
   },
-  "fixture_fingerprint": "blake3:125c02b7d7d8ee201cb0ab7277d071b92e23927085ea677fbe2755c9f360c5c8",
+  "fixture_fingerprint": "blake3:a05f82b0e7a81f592643ce5107dfdef42e759c1a8dd6f438d6244c07f81181f4",
   "flows": {
     "discover": {
       "flow_version": 4,
@@ -230,7 +230,7 @@
     },
     "tools_list": {
       "flow_version": 4,
-      "flow_fingerprint": "blake3:b050fb412f31b7724e2a8ab2b8a043f51e647902051aa74e07b92f9eea68c232",
+      "flow_fingerprint": "blake3:5b41d25a7f19772e59885a4ac5dc3cd81ad20dd6ac405238263d32f537548b23",
       "operations": {
         "tools/list": {
           "request": {
@@ -238,26 +238,26 @@
             "tokens": 21
           },
           "response": {
-            "bytes": 2292,
-            "tokens": 533
+            "bytes": 2495,
+            "tokens": 578
           },
           "total": {
-            "bytes": 2350,
-            "tokens": 554
+            "bytes": 2553,
+            "tokens": 599
           },
           "model_visible": {
-            "bytes": 2248,
-            "tokens": 517
+            "bytes": 2451,
+            "tokens": 562
           }
         }
       },
       "total": {
-        "bytes": 2350,
-        "tokens": 554
+        "bytes": 2553,
+        "tokens": 599
       },
       "model_visible": {
-        "bytes": 2248,
-        "tokens": 517
+        "bytes": 2451,
+        "tokens": 562
       }
     },
     "widget_publish": {
@@ -363,7 +363,7 @@
   },
   "approval": {
     "status": "pending_owner_review",
-    "decision_reference": "hud-bz9bv.2 / hud-7f5vg option A: owner comment b00459ed-763e-54b4-b250-c45a53f53548 (2026-11-04); current-main4941cad9 runtime calibration and baseline bytes pending review",
-    "basis": "Two byte-identical current-main canonical version4 measurements: complete four-option ask, real retained answer and normal returned-ID ACK total114 model-visible o200k tokens (69+28+17), within the owner-approved new-flow120 ceiling. All six established flow request/response fingerprints, operation/flow metrics, public accounting and budgets are unchanged except shared flow_version3->4. Ceiling approval is not approval of these baseline bytes."
+    "decision_reference": "hud-bz9bv.6 keyed schema calibration on 7b98d667 against actual merged main 8a94fcf7; hud-7f5vg option A owner comment b00459ed-763e-54b4-b250-c45a53f53548 (2026-11-04) approves only the new complete choice flow ceiling of 120 tokens, not these baseline bytes",
+    "basis": "Actual same-checkout/source-guarded runtime measurements: tools/list adds 203 model-visible UTF-8 bytes and 45 o200k tokens (2248/517 to 2451/562), within unchanged 900 ceiling. All five other established flows and the complete real four-choice ask/retained-answer/normal-ACK flow are byte-identical to actual 8a94; choice remains 114 = 69 + 28 + 17 <= 120. All six established ceilings, flow version 4, public serialization/accounting and tokenizer remain unchanged. The canonical gate requires two byte-identical final-source measurements; baseline bytes remain pending owner review."
   }
 }

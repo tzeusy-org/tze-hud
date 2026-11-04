@@ -1,6 +1,19 @@
 use super::*;
 
 impl SceneGraph {
+    /// Notification routing keys are exact UTF-8 bytes, with empty meaning absent.
+    pub const MAX_NOTIFICATION_KEY_BYTES: usize = 256;
+
+    pub fn validate_notification_key(key: Option<&str>) -> Result<(), ValidationError> {
+        if key.is_some_and(|key| key.len() > Self::MAX_NOTIFICATION_KEY_BYTES) {
+            return Err(ValidationError::InvalidField {
+                field: "key".into(),
+                reason: "notification key must be at most 256 UTF-8 bytes".into(),
+            });
+        }
+        Ok(())
+    }
+
     /// Validate before narrowing JSON f64 values, so rounding cannot hide a
     /// range violation. Typed f32 callers use the same check.
     pub fn validate_widget_f32_value(
@@ -231,6 +244,13 @@ impl SceneGraph {
             });
         }
 
+        let notification = matches!(&content, ZoneContent::Notification(_));
+        let merge_key = if notification {
+            Self::validate_notification_key(merge_key.as_deref())?;
+            merge_key.filter(|key| !key.is_empty())
+        } else {
+            merge_key
+        };
         let now_us = self.clock.now_us();
 
         // Auto-dismiss: if no explicit expires_at is provided and the content is a
@@ -279,16 +299,41 @@ impl SceneGraph {
             .entry(zone_name.to_string())
             .or_default();
 
-        apply_contention(
-            publishes,
-            record,
-            contention_policy,
-            max_publishers,
-            |max| ValidationError::ZoneMaxPublishersReached {
-                zone: zone_name.to_string(),
-                max,
-            },
-        )?;
+        let replacement = notification.then_some(()).and_then(|()| {
+            merge_key.as_ref().and_then(|key| {
+                publishes.iter().position(|old| {
+                    old.publisher_namespace == publisher_namespace
+                        && matches!(&old.content, ZoneContent::Notification(_))
+                        && old.merge_key.as_ref() == Some(key)
+                })
+            })
+        });
+        if let Some(index) = replacement {
+            // Keep the visual slot, but never transfer the old activation or
+            // chosen-feedback identity. This also works at publisher capacity.
+            publishes[index] = record;
+        } else if notification
+            && merge_key.is_some()
+            && let ContentionPolicy::MergeByKey { max_keys } = contention_policy
+        {
+            // Generic MergeByKey matches raw keys (and also serves widgets).
+            // Notification keys are scoped to their authenticated publisher.
+            if max_keys > 0 && publishes.len() >= max_keys as usize {
+                publishes.remove(0);
+            }
+            publishes.push(record);
+        } else {
+            apply_contention(
+                publishes,
+                record,
+                contention_policy,
+                max_publishers,
+                |max| ValidationError::ZoneMaxPublishersReached {
+                    zone: zone_name.to_string(),
+                    max,
+                },
+            )?;
+        }
 
         self.prune_publication_orphans();
         self.version += 1;
@@ -852,6 +897,53 @@ impl SceneGraph {
         Ok(())
     }
 
+    /// Clear only this publisher's exact notification routing key, including
+    /// delayed publishes. Accepted input remains authoritative until ACK.
+    pub fn clear_notification_key(
+        &mut self,
+        zone_name: &str,
+        publisher_namespace: &str,
+        key: &str,
+    ) -> Result<(), ValidationError> {
+        Self::validate_notification_key(Some(key))?;
+        if key.is_empty() {
+            return self.clear_zone_and_cancel_pending(zone_name, publisher_namespace);
+        }
+        let zone = self.zone_registry.get_by_name(zone_name).ok_or_else(|| {
+            ValidationError::ZoneNotFound {
+                name: zone_name.into(),
+            }
+        })?;
+        if !zone
+            .accepted_media_types
+            .contains(&ZoneMediaType::ShortTextWithIcon)
+        {
+            return Err(ValidationError::InvalidField {
+                field: "key".into(),
+                reason: "keyed clear requires a notification zone".into(),
+            });
+        }
+        let mut removed = false;
+        if let Some(records) = self.zone_registry.active_publishes.get_mut(zone_name) {
+            let before = records.len();
+            records.retain(|record| {
+                !(record.publisher_namespace == publisher_namespace
+                    && matches!(&record.content, ZoneContent::Notification(_))
+                    && record.merge_key.as_deref() == Some(key))
+            });
+            removed = records.len() != before;
+            if records.is_empty() {
+                self.zone_registry.active_publishes.remove(zone_name);
+            }
+        }
+        self.cancel_scheduled_notification_key(zone_name, publisher_namespace, key);
+        self.prune_publication_orphans();
+        if removed {
+            self.version += 1;
+        }
+        Ok(())
+    }
+
     /// Dismiss a single notification by its publication key.
     ///
     /// Removes the publication identified by `(zone_name, publication_id,
@@ -954,6 +1046,7 @@ impl SceneGraph {
             }
             _ => return None,
         };
+        let notification_key = record.merge_key.clone().filter(|key| !key.is_empty());
         if matches!(region.kind, ZoneInteractionKind::Dismiss) || exit_ms == 0 {
             if !self.dismiss_notification(
                 &region.zone_name,
@@ -1003,6 +1096,7 @@ impl SceneGraph {
             publisher_namespace: region.publisher_namespace.clone(),
             zone_name: region.zone_name.clone(),
             kind,
+            key: notification_key,
         }))
     }
 

@@ -61,6 +61,15 @@ ids without oldest-first eviction. Destructive scene transfer has no cancellatio
 point before retained commit. Callback and runtime-authored human-X kinds remain
 distinct; coalesced readiness wakes carry no record ownership. These in-memory
 guarantees do not claim process-crash durability or add a gRPC action transport.
+A notification key names one exact-byte slot within a zone and authenticated
+publisher. Replacing it retains its position and zone enter progress while
+issuing fresh publication identity. Selective clear removes only matching active
+and delayed notifications, never sibling keys, foreign publishers or mixed-batch
+remainder. Neither operation retracts accepted input: the activation snapshots
+its original optional key before removal, and its FIFO record and stable ACK id
+survive replacement, clear and expiry. A reused key is not a generation nonce;
+owner option D permits stale cancellation, never a stale answer. The broker
+owns per-request callback routing and its accepted-race proof.
 
 Notification hover/press is ephemeral runtime state: it never enters the
 accepted input FIFO or changes ACK ownership. One matching live activation

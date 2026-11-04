@@ -2314,6 +2314,49 @@ mod tests {
         harness.drain();
         assert_eq!(take_action_ids(&harness), ["second"]);
         assert_eq!(harness.zone_publication_count("notification-area"), 0);
+
+        for dismiss in [false, true] {
+            let mut harness = approve_reject_notification_harness();
+            let content = harness
+                .scene()
+                .zone_registry
+                .active_for_zone("notification-area")[0]
+                .content
+                .clone();
+            {
+                let mut scene = harness.scene();
+                scene.clear_zone("notification-area").unwrap();
+                scene
+                    .publish_to_zone(
+                        "notification-area",
+                        content,
+                        "notif-agent",
+                        Some("slot".into()),
+                        None,
+                        None,
+                    )
+                    .unwrap();
+            }
+            assert!(harness.tick());
+            let point = if dismiss {
+                dismiss_center(&harness)
+            } else {
+                harness.notification_action_center("approve").unwrap()
+            };
+            harness.click(point.0, point.1);
+            harness.drain();
+            let accepted = harness.scene().take_pending_actions("notif-agent");
+            assert_eq!(accepted.len(), 1);
+            assert_eq!(accepted[0].key.as_deref(), Some("slot"));
+            assert_eq!(
+                accepted[0].kind,
+                if dismiss {
+                    tze_hud_scene::graph::PendingActionKind::Dismiss
+                } else {
+                    tze_hud_scene::graph::PendingActionKind::Callback("approve".into())
+                }
+            );
+        }
     }
 
     /// A release activates an action only when the press began on that same
@@ -2414,6 +2457,79 @@ mod tests {
                 take_action_ids(&harness).is_empty(),
                 "{terminal} between Down/Up cannot answer"
             );
+        }
+
+        for terminal in ["replace", "clear", "expiry"] {
+            for dismiss in [false, true] {
+                let mut harness = approve_reject_notification_harness();
+                let content = harness
+                    .scene()
+                    .zone_registry
+                    .active_for_zone("notification-area")[0]
+                    .content
+                    .clone();
+                {
+                    let mut scene = harness.scene();
+                    scene.clear_zone("notification-area").unwrap();
+                    scene
+                        .publish_to_zone(
+                            "notification-area",
+                            content.clone(),
+                            "notif-agent",
+                            Some("slot".into()),
+                            None,
+                            None,
+                        )
+                        .unwrap();
+                }
+                assert!(harness.tick());
+                let point = if dismiss {
+                    dismiss_center(&harness)
+                } else {
+                    harness.notification_action_center("approve").unwrap()
+                };
+                harness.app.state.cursor_x = point.0;
+                harness.app.state.cursor_y = point.1;
+                harness.app.enqueue_pointer_event(PointerEventKind::Down);
+                harness.drain();
+                {
+                    let mut scene = harness.scene();
+                    if terminal == "replace" {
+                        scene
+                            .publish_to_zone(
+                                "notification-area",
+                                content,
+                                "notif-agent",
+                                Some("slot".into()),
+                                None,
+                                None,
+                            )
+                            .unwrap();
+                    } else if terminal == "clear" {
+                        scene
+                            .clear_notification_key("notification-area", "notif-agent", "slot")
+                            .unwrap();
+                    } else {
+                        scene
+                            .zone_registry
+                            .active_publishes
+                            .get_mut("notification-area")
+                            .unwrap()[0]
+                            .expires_at_wall_us = Some(0);
+                        scene.drain_expired_zone_publications();
+                    }
+                }
+                assert!(harness.tick());
+                harness.app.enqueue_pointer_event(PointerEventKind::Up);
+                harness.drain();
+                assert!(
+                    harness
+                        .scene()
+                        .take_pending_actions("notif-agent")
+                        .is_empty(),
+                    "{terminal} retired the original exact control"
+                );
+            }
         }
     }
 
@@ -3711,6 +3827,92 @@ mod tests {
                 .len(),
             1
         );
+
+        for (code, key) in [("Enter", "Enter"), ("Space", " ")] {
+            for terminal in ["replace", "clear", "expiry"] {
+                let mut harness = approve_reject_notification_harness();
+                let content = harness
+                    .scene()
+                    .zone_registry
+                    .active_for_zone("notification-area")[0]
+                    .content
+                    .clone();
+                {
+                    let mut scene = harness.scene();
+                    scene.clear_zone("notification-area").unwrap();
+                    scene
+                        .publish_to_zone(
+                            "notification-area",
+                            content.clone(),
+                            "notif-agent",
+                            Some("slot".into()),
+                            None,
+                            None,
+                        )
+                        .unwrap();
+                }
+                assert!(harness.tick());
+                {
+                    let mut scene = harness.scene();
+                    let control = scene.overlay.zone_hit_regions.iter().find(|r| matches!(&r.kind, ZoneInteractionKind::Action { callback_id } if callback_id == "approve")).unwrap().interaction_id.clone();
+                    scene.focus_notification(Some(control));
+                }
+                harness.app.state.global_tokens = tze_hud_config::themes::resolve_config_tokens(
+                    &std::collections::HashMap::from([
+                        ("theme".into(), "blueprint".into()),
+                        ("motion.exit.ms".into(), "240".into()),
+                    ]),
+                );
+                harness.enqueue(key_down(code, key, 2_000));
+                harness.drain(); // Keyboard activation commits on Down.
+                {
+                    let mut scene = harness.scene();
+                    if terminal == "replace" {
+                        scene
+                            .publish_to_zone(
+                                "notification-area",
+                                content,
+                                "notif-agent",
+                                Some("slot".into()),
+                                None,
+                                None,
+                            )
+                            .unwrap();
+                    } else if terminal == "clear" {
+                        scene
+                            .clear_notification_key("notification-area", "notif-agent", "slot")
+                            .unwrap();
+                    } else {
+                        scene
+                            .zone_registry
+                            .active_publishes
+                            .get_mut("notification-area")
+                            .unwrap()[0]
+                            .expires_at_wall_us = Some(0);
+                        scene.drain_expired_zone_publications();
+                    }
+                }
+                assert!(harness.tick());
+                let mut repeat = key_down(code, key, 2_100);
+                if let PendingKeyboardEvent::KeyDown(raw) = &mut repeat {
+                    raw.repeat = true;
+                }
+                harness.enqueue(repeat);
+                harness.enqueue(key_up(code, key, 2_200));
+                harness.drain();
+                let accepted = harness.scene().take_pending_actions("notif-agent");
+                assert_eq!(
+                    accepted.len(),
+                    1,
+                    "{terminal} cannot turn repeat/Up into a B answer or retire accepted A"
+                );
+                assert_eq!(accepted[0].key.as_deref(), Some("slot"));
+                assert_eq!(
+                    accepted[0].kind,
+                    tze_hud_scene::graph::PendingActionKind::Callback("approve".into())
+                );
+            }
+        }
     }
 
     /// RFC 0004 §10 production proof: keyboard is a concrete pointer-free

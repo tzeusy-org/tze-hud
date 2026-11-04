@@ -50,7 +50,7 @@ pub fn tools_list_result() -> Value {
                     "params": {"type": "object"},
                     "ttl_ms": {"type": "integer", "minimum": 0, "description": "zone default 60000; widget durable; portal hold; 0 = until cleared"},
                     "delay_ms": {"type": "integer", "minimum": 0, "maximum": 300000, "description": "show later"},
-                    "key": {"type": "string", "description": "merge key: same key replaces"},
+                    "key": {"type": "string", "description": "notification: own exact key replaces; at most 256 UTF-8 bytes; empty appends. Other surfaces: merge key"},
                     "status": {"type": "string", "enum": ["active", "degraded"], "description": "portal agent status; content optional"},
                     "expects_reply": {"type": "boolean", "description": "portal: arm reply composer"},
                     "display_name": {"type": "string"},
@@ -72,7 +72,7 @@ pub fn tools_list_result() -> Value {
             "description": "Remove your content from a surface, or detach a portal.",
             "inputSchema": {
                 "type": "object",
-                "properties": {"surface": surface},
+                "properties": {"surface": surface, "key": {"type": "string", "description": "notification zone only: clear own exact key and delayed publishes; empty clears all own"}},
                 "required": ["surface"],
             },
         },

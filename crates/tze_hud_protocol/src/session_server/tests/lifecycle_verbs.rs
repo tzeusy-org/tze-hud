@@ -57,6 +57,7 @@ async fn clear_zone_publication() {
         &mut stream,
         3,
         ClientPayload::Clear(Clear {
+            key: String::new(),
             surface: "zone:subtitle".to_string(),
         }),
     )
@@ -79,6 +80,7 @@ async fn clear_zone_publication() {
             &mut stream,
             3,
             ClientPayload::Clear(Clear {
+                key: String::new(),
                 surface: "zone:subtitle".into()
             })
         )
@@ -89,6 +91,101 @@ async fn clear_zone_publication() {
         subtitle_texts(&*state.lock().await.scene.lock().await),
         ["new"]
     );
+
+    let shared_scene = state.lock().await.scene.clone();
+    shared_scene
+        .lock()
+        .await
+        .zone_registry
+        .zones
+        .get_mut("notification-area")
+        .unwrap()
+        .ephemeral = false;
+    let publish = |key: &str| {
+        ClientPayload::Publish(Publish {
+            surface: "zone:notification-area".into(),
+            key: key.into(),
+            content: Some(crate::proto::ZoneContent {
+                payload: Some(crate::proto::zone_content::Payload::Notification(
+                    crate::proto::NotificationPayload {
+                        text: key.into(),
+                        ..Default::default()
+                    },
+                )),
+            }),
+            ..Default::default()
+        })
+    };
+    let mut seq = 5;
+    for key in ["first", "second", "first"] {
+        assert!(request(&tx, &mut stream, seq, publish(key)).await.ok);
+        seq += 1;
+    }
+    assert_eq!(
+        shared_scene
+            .lock()
+            .await
+            .zone_registry
+            .active_for_zone("notification-area")
+            .len(),
+        2
+    );
+    let selective = ClientPayload::Clear(Clear {
+        surface: "zone:notification-area".into(),
+        key: "first".into(),
+    });
+    assert!(request(&tx, &mut stream, seq, selective.clone()).await.ok);
+    let clear_seq = seq;
+    seq += 1;
+    assert!(request(&tx, &mut stream, seq, publish("first")).await.ok);
+    assert!(
+        request(&tx, &mut stream, clear_seq, selective).await.ok,
+        "replayed clear returns its cached result"
+    );
+    assert_eq!(
+        shared_scene
+            .lock()
+            .await
+            .zone_registry
+            .active_for_zone("notification-area")
+            .len(),
+        2
+    );
+    seq += 1;
+    let denied = request(
+        &tx,
+        &mut stream,
+        seq,
+        ClientPayload::Clear(Clear {
+            surface: "zone:subtitle".into(),
+            key: "first".into(),
+        }),
+    )
+    .await;
+    assert_eq!(denied.code, "INVALID_ARGUMENT");
+    seq += 1;
+    assert!(
+        request(
+            &tx,
+            &mut stream,
+            seq,
+            ClientPayload::Clear(Clear {
+                surface: "zone:notification-area".into(),
+                ..Default::default()
+            })
+        )
+        .await
+        .ok
+    );
+    assert!(
+        shared_scene
+            .lock()
+            .await
+            .zone_registry
+            .active_for_zone("notification-area")
+            .is_empty()
+    );
+
     server.abort();
 }
 
@@ -129,7 +226,16 @@ async fn hold_and_clear_reach_a_pending_delayed_publish() {
         };
         assert_eq!(*expires_at_wall_us, Some(present_at + 5_000_000));
     }
-    let c = request(&tx, &mut stream, 4, ClientPayload::Clear(Clear { surface })).await;
+    let c = request(
+        &tx,
+        &mut stream,
+        4,
+        ClientPayload::Clear(Clear {
+            key: String::new(),
+            surface,
+        }),
+    )
+    .await;
     assert!(c.ok, "{c:?}");
     let st = state.lock().await;
     let scene = st.scene.lock().await;
@@ -137,6 +243,72 @@ async fn hold_and_clear_reach_a_pending_delayed_publish() {
     assert_eq!(scene.next_timed_content_wall_us(), None);
     drop(scene);
     drop(st);
+
+    let shared_scene = state.lock().await.scene.clone();
+    shared_scene
+        .lock()
+        .await
+        .zone_registry
+        .zones
+        .get_mut("notification-area")
+        .unwrap()
+        .ephemeral = false;
+    for (sequence, key) in [(5, "first"), (6, "second")] {
+        let publish = Publish {
+            surface: "zone:notification-area".into(),
+            key: key.into(),
+            present_at_us: present_at,
+            content: Some(crate::proto::ZoneContent {
+                payload: Some(crate::proto::zone_content::Payload::Notification(
+                    crate::proto::NotificationPayload {
+                        text: key.into(),
+                        ..Default::default()
+                    },
+                )),
+            }),
+            ..Default::default()
+        };
+        assert!(
+            request(&tx, &mut stream, sequence, ClientPayload::Publish(publish))
+                .await
+                .ok
+        );
+    }
+    assert!(
+        request(
+            &tx,
+            &mut stream,
+            7,
+            ClientPayload::Clear(Clear {
+                surface: "zone:notification-area".into(),
+                key: "first".into()
+            })
+        )
+        .await
+        .ok
+    );
+    {
+        let scene = shared_scene.lock().await;
+        assert_eq!(scene.scheduled_batches.len(), 1);
+        assert!(
+            matches!(&scene.scheduled_batches[0].batch.mutations[0],tze_hud_scene::mutation::SceneMutation::PublishToZone {merge_key:Some(key),..} if key=="second")
+        );
+    }
+    assert!(
+        request(
+            &tx,
+            &mut stream,
+            8,
+            ClientPayload::Clear(Clear {
+                surface: "zone:notification-area".into(),
+                key: "second".into()
+            })
+        )
+        .await
+        .ok
+    );
+    assert_eq!(shared_scene.lock().await.next_timed_content_wall_us(), None);
+
     server.abort();
 }
 

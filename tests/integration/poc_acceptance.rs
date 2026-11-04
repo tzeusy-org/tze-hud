@@ -979,6 +979,27 @@ async fn poc_notification_action_reaches_hud_input() {
         );
         assert_eq!(poc.shown(NOTIFICATION), 0);
     }
+
+    // Additive keyed path leaves the original unkeyed budget fixture above intact.
+    poc.call("hud_publish", json!({"surface":NOTIFICATION,"key":"question:session","ttl_ms":0,"content":{"body":"Keyed?","actions":[{"label":"Approve","callback_id":"keyed-approve"}]}})).await;
+    let (x, y) = poc.hud.notification_action_center("keyed-approve").unwrap();
+    poc.hud.click(x, y);
+    poc.settle().await;
+    poc.call("hud_publish", json!({"surface":NOTIFICATION,"key":"question:session","ttl_ms":0,"content":{"body":"Replacement"}})).await;
+    poc.call(
+        "hud_clear",
+        json!({"surface":NOTIFICATION,"key":"question:session"}),
+    )
+    .await;
+    let accepted = poc.call("hud_input", json!({})).await;
+    let items = input_items(&accepted);
+    assert_eq!(items.len(), 1);
+    assert_eq!(items[0]["key"], "question:session");
+    assert_eq!(items[0]["action"], "keyed-approve");
+    let repeated = poc.call("hud_input", json!({})).await;
+    assert_eq!(input_items(&repeated), items);
+    let ack = poc.call("hud_input", json!({"ack":[items[0]["id"]]})).await;
+    assert!(input_items(&ack).is_empty());
 }
 
 impl Poc {
@@ -1078,6 +1099,7 @@ async fn poc_override_safe_mode_wins_with_hung_grpc_agent() {
     assert_eq!(poc.shown("zone:status-bar"), 1);
     let big_clear = || {
         ClientPayload::Clear(wire::Clear {
+            key: String::new(),
             surface: format!("zone:{}", "z".repeat(2_000)),
         })
     };
@@ -1178,6 +1200,7 @@ async fn poc_override_clear_and_unpair_with_hung_grpc_agent() {
     assert_eq!(poc.shown("zone:status-bar"), 1);
     let flood = hung.keep_sending(|| {
         ClientPayload::Clear(wire::Clear {
+            key: String::new(),
             surface: format!("zone:{}", "z".repeat(2_000)),
         })
     });

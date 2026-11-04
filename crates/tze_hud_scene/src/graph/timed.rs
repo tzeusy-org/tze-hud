@@ -63,6 +63,27 @@ impl SceneGraph {
         cancelled
     }
 
+    pub(crate) fn cancel_scheduled_notification_key(
+        &mut self,
+        zone: &str,
+        namespace: &str,
+        key: &str,
+    ) {
+        for scheduled in &mut self.scheduled_batches {
+            if scheduled.batch.agent_namespace == namespace {
+                scheduled.batch.mutations.retain(|mutation| {
+                    !matches!(mutation, SceneMutation::PublishToZone {
+                        zone_name, content: crate::types::ZoneContent::Notification(_),
+                        merge_key: Some(candidate), ..
+                    } if zone_name == zone && candidate == key)
+                });
+            }
+        }
+        self.scheduled_batches
+            .retain(|scheduled| !scheduled.batch.mutations.is_empty());
+        self.prune_publication_orphans();
+    }
+
     /// Retime `namespace`'s pending publishes to `zone` as a hold would an
     /// active one, except that the expiry counts from presentation
     /// (`present_at + ttl_ms`; `None` holds until cleared). Returns whether

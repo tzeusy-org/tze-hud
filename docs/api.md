@@ -72,8 +72,15 @@ otherwise. Scheduled zone publications count as held before presentation;
   retain the existing bounded Clip policy inside each full-width button; a
   label longer than that width cannot displace the later options. The zone's
   existing whole-card visibility bounds still apply. `type` may be
-  omitted; the runtime infers it from what the zone accepts. `key` is the
-  merge key. Supplied notification urgency must be an integer 0–3; only
+  omitted; the runtime infers it from what the zone accepts. For notifications,
+  a nonempty `key` addresses one card within that zone and authenticated
+  publisher. Matching publishes replace that card in the same slot before
+  capacity admission, with fresh content, expiry and activation identity;
+  the zone's enter motion does not restart. Sibling cards and another
+  publisher's identical key survive. Keys are exact, case-sensitive UTF-8,
+  at most 256 bytes: no trimming, normalization or truncation. Missing or
+  empty keys preserve existing notification behavior. Other content retains
+  its existing merge-key policy. Supplied notification urgency must be an integer 0–3; only
   omission defaults to 1. `status_bar.entries` must be a non-empty object
   whose every value is a string; an empty string removes that entry.
   Notification TTL belongs at the publish's top-level `ttl_ms`; an inner
@@ -178,9 +185,15 @@ or until `hud_clear` when 0, even with no other calls. Without a hold, a
 portal is degraded after 30 s with no publish, poll, or hold, and reclaimed
 30 s later.
 
-**`hud_clear`** `{surface*}` releases a zone publication, a widget
-instance, or a portal (detach). On a zone it also cancels the caller's own
-delayed publishes that haven't presented yet; other agents' are untouched.
+**`hud_clear`** `{surface*, key?}` releases a zone publication, a widget
+instance, or a portal (detach). With a nonempty key, it clears only that
+publisher's matching notification in a notification-capable zone, including
+matching delayed notification publishes. Sibling keys, foreign publishers and
+nonnotification content in mixed zones or scheduled batches survive. A missing
+match succeeds; emptied batches leave no wake deadline. Missing or empty keys
+retain clear-all-own behavior, including the caller's delayed publishes.
+The same exact 256-byte key bound applies before mutation. Nonempty keys on
+widget, portal or nonnotification-zone clears return `INVALID_ARGUMENT`.
 The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
 `ClearZone` mutation clears only active publications and never cancels pending ones.
 
@@ -193,12 +206,22 @@ The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
   human notification × uses `{"id":…,"s":"zone:notification-area","action":"dismiss","kind":"dismiss"}`.
   A publisher callback named `dismiss` has no `kind` field. Callback activation
   already disables its notification locally and finishes a finite chosen exit;
-  it emits no second human-X event.
+  it emits no second human-X event. Keyed callbacks and human-X items also
+  include `"key":"…"`, snapshotted from the exact activated card before its
+  removal. Unkeyed items omit it. Replacement, clear and expiry never rewrite
+  or retract input already accepted into the scene FIFO, retained by MCP or
+  encoded in a response; its key and ACK id remain stable.
   TTL expiry, `hud_clear` and stale/unmatched releases do not emit human-X input.
 - Accepted notification events are retained in a growable per-publisher FIFO,
   with stable ids until `ack`; one publisher cannot evict or acknowledge another's
   records. Retention is in memory, with no crash/disk durability claim. Portal
   replies keep their existing admission bounds, TTL, clear and reclaim rules.
+  A key identifies a reusable visual slot, not an answer-generation nonce.
+  Under owner option D, an old accepted human-X or delayed keyed clear may
+  cancel a replacement card, but must never answer it. Broker callback-nonce
+  routing, cancelled-question terminal fallback, cancelled-nudge silence and
+  the executing stale-X/old-callback race proof belong to `hud-bz9bv.7`;
+  this key API adds no revision, conditional clear or input-retirement rule.
 - `ack` confirms earlier items once per call; unacked items are redelivered.
   `max_items` limits the result and `remaining` reports the retained backlog;
   zero returns the backlog without consuming it. Notification FIFO items precede
@@ -394,9 +417,14 @@ down to the lifecycle.
 |---|---|
 | `SessionInit{agent_id, auth_credential, subscriptions, …}` / `SessionResume{resume_token, auth_credential}` | `SessionEstablished{session_id, namespace, resume_token, heartbeat_interval_ms, …}` / `SessionResumeResult`, then current `DegradationNotice` |
 | `Publish{surface, content \| params, ttl_ms, present_at_us?, expires_at_us?, key?}` | `RequestResult{seq, ok, code?, hint?, ttl_ms?}` |
-| `Clear{surface}` (zone or widget) | `EventBatch{…}` (input, focus, commands), `ElementRepositioned`, `FramePresented` |
+| `Clear{surface, key?}` (zone or widget) | `EventBatch{…}` (input, focus, commands), `ElementRepositioned`, `FramePresented` |
 | `Hold{surface, ttl_ms}` (zone or widget) | `SessionSuspended` / `SessionResumed` (safe mode) |
 | `ResourceUpload*` (images), `Heartbeat`, `SessionClose` | Resource upload replies, `Heartbeat`, `DegradationNotice` |
+
+`Publish.key` remains wire field 7. `Clear.key` is additive string field 2;
+its empty protobuf default preserves old clients. Keyed notification replacement,
+selective clear, byte validation and authenticated publisher isolation match MCP.
+There is no new gRPC notification callback/dismiss stream.
 
 Public `ClaimTile`, `MutationBatch`, `SceneSnapshot`, `Reclaimed`, placement
 and tile surfaces are removed. Their wire tags and names stay reserved.
@@ -845,7 +873,7 @@ baselined against regressions.
 
 | Measure | Before T5 (wire) | Wire | Model-visible | Budget (model-visible) |
 |---|---|---|---|---|
-| `tools/list` | 4,418 | 554 | 517 | ≤ 900 |
+| `tools/list` | 4,418 | 599 | 562 | ≤ 900 |
 | Discover (default scene) | ~430 (`list_zones`) | 181 | 113 | ≤ 150 |
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
 | Four-option notification ask + returned answer + ACK | — | 273 | 114 | ≤ 120 |
@@ -854,12 +882,16 @@ baselined against regressions.
 | Discover (`production.toml`: 6 zones, 3 built-in widgets) | n/a | n/a | ~232 | ≤ 250 |
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
 
-All seven measurements use canonical flow version 4. Two byte-identical
-current-main calibrations measured the complete choice flow at 114 model-visible
-tokens (69 ask + 28 retained answer + 17 ACK). The six established flows retain
-identical request/response fingerprints and metrics from version 3, with every
-budget unchanged. The refreshed baseline remains `pending_owner_review`; the
-approved choice ceiling does not approve its measured bytes.
+All seven measurements use canonical flow version 4. Runtime calibration of
+notification keys against actual merged main `8a94fcf7` changes `tools/list`
+from 2,248 to 2,451 model-visible UTF-8 bytes and 517 to 562 o200k tokens
+(+203 bytes, +45 tokens). The tokenizer is `tiktoken-rs` 0.12.0, `o200k_base`.
+The five other established flows and the complete choice flow retain identical
+request/response fingerprints and metrics; every ceiling is unchanged.
+The complete choice remains 114 tokens (69 ask + 28 retained answer + 17 ACK).
+The canonical gate requires two byte-identical final-source measurements.
+The refreshed baseline remains `pending_owner_review`; approval of the choice
+ceiling does not approve these measured bytes.
 
 The `notification_choice` flow publishes Ship/Hold/Skip/Open, activates Skip through
 `SceneGraph::activate_notification` (the shared pointer/keyboard producer), polls
@@ -870,7 +902,7 @@ ceilings and public serialization/accounting remain unchanged.
 
 Historical runtime-backed version-4 calibration measured 114 model-visible tokens:
 ask 69, answer 28, ACK 17. It failed the former 104-token ceiling and remains a historical failure. Fresh
-current-main measurements meet the amended 120-token ceiling; their regenerated
+runtime measurements meet the amended 120-token ceiling; the regenerated
 version-4 baseline still awaits review.
 
 The calibration fixture waits for shared activation through a local readiness

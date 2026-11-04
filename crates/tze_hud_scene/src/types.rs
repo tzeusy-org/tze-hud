@@ -2224,7 +2224,8 @@ pub struct ZonePublishRecord {
     pub content: ZoneContent,
     /// UTC wall-clock timestamp in microseconds (per timing-model/spec.md Clock Domain Naming Convention).
     pub published_at_wall_us: u64,
-    /// For MergeByKey contention: the key under which this record is stored.
+    /// Exact publisher-scoped routing key for notifications; also used by
+    /// generic MergeByKey contention for other zone content.
     pub merge_key: Option<String>,
     /// Optional wall-clock expiry timestamp (microseconds since epoch).
     /// When present, the runtime MUST clear this publication at or before this time.
