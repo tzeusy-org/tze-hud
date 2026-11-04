@@ -932,17 +932,18 @@ class UsageHarness(HookHarness):
             try:
                 self.reap_detached()
             finally:
-                # Also close the HTTP fixture when its completion assertion
-                # failed; restoring subreaper state must not depend on a PASS.
-                self.release.set()
-                self.server.shutdown()
-                self.server.server_close()
-                self.thread.join(2)
-                if self.registration_thread is not None:
-                    self.registration_stop.set()
-                    self.registration_thread.join(2)
-                    self.registration_listener.close()
                 try:
+                    # Also close HTTP when its completion assertion failed;
+                    # subreaper restoration must not depend on a PASS.
+                    self.release.set()
+                    self.server.shutdown()
+                    self.server.server_close()
+                    self.thread.join(2)
+                    if self.registration_thread is not None:
+                        self.registration_stop.set()
+                        self.registration_thread.join(2)
+                        self.registration_listener.close()
+                        assert not self.registration_thread.is_alive()
                     # Failure cleanup touches only the pinned fixture children.
                     for pid, descriptor, _ in self.owned_children:
                         if not select.select([descriptor], [], [], 0)[0]:
