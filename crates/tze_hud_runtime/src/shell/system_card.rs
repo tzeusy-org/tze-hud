@@ -79,8 +79,18 @@ impl SystemCardHandle {
 
     /// Replace the card with `new` only if `expected` is still the one showing
     /// (a newer code must not be overwritten by a late background result).
-    pub fn replace_if_current(&self, expected: &SystemCard, new: SystemCard) -> bool {
-        self.transform_current(|current| (current == expected).then_some(new))
+    pub fn replace_if_current(
+        &self,
+        expected: &SystemCard,
+        transform: impl FnOnce(&SystemCard) -> Option<SystemCard>,
+    ) -> bool {
+        self.transform_current(|current| {
+            if current == expected {
+                transform(current)
+            } else {
+                None
+            }
+        })
     }
 
     /// Transform the exact current card atomically. Notify only after a changed

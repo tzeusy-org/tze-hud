@@ -493,11 +493,10 @@ impl Pairing {
     ) {
         let verdict = probe.current();
         if verdict.is_blocked() {
-            handle.transform_current(|current| {
-                if current != expected
-                    || !current
-                        .expires_at_wall_us
-                        .is_some_and(|at| at > clock.wall_us())
+            handle.replace_if_current(expected, |current| {
+                if !current
+                    .expires_at_wall_us
+                    .is_some_and(|at| at > clock.wall_us())
                 {
                     return None;
                 }
