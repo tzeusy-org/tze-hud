@@ -467,12 +467,18 @@ impl Pairing {
             expires_at_wall_us: Some(self.clock.wall_us() + CODE_TTL.as_micros() as u64),
         };
         self.card.set(card.clone());
-        self.warn_in_background(card, on_tailnet, known.is_none());
+        self.warn_in_background(card, issued.expires_at, on_tailnet, known.is_none());
     }
 
     /// The policy read remains background work. Its exact expected-card guard
     /// also rejects a snapshot that expired before the compositor pruned it.
-    fn warn_in_background(&self, card: SystemCard, on_tailnet: bool, unknown: bool) {
+    fn warn_in_background(
+        &self,
+        card: SystemCard,
+        expires_at: Instant,
+        on_tailnet: bool,
+        unknown: bool,
+    ) {
         if on_tailnet && unknown {
             let (probe, handle, clock) = (
                 Arc::clone(&self.firewall),
@@ -480,7 +486,7 @@ impl Pairing {
                 Arc::clone(&self.clock),
             );
             std::thread::spawn(move || {
-                Self::add_firewall_warning(&probe, &handle, clock.as_ref(), &card);
+                Self::add_firewall_warning(&probe, &handle, clock.as_ref(), &card, expires_at);
             });
         }
     }
@@ -490,13 +496,15 @@ impl Pairing {
         handle: &SystemCardHandle,
         clock: &dyn PairClock,
         expected: &SystemCard,
+        expires_at: Instant,
     ) {
         let verdict = probe.current();
         if verdict.is_blocked() {
             handle.replace_if_current(expected, |current| {
-                if !current
-                    .expires_at_wall_us
-                    .is_some_and(|at| at > clock.wall_us())
+                if clock.now() > expires_at
+                    || !current
+                        .expires_at_wall_us
+                        .is_some_and(|at| at > clock.wall_us())
                 {
                     return None;
                 }
@@ -555,7 +563,7 @@ impl Pairing {
         });
         drop(state);
         if let Some(card) = refreshed {
-            self.warn_in_background(card, on_tailnet, known.is_none());
+            self.warn_in_background(card, issued.expires_at, on_tailnet, known.is_none());
         }
     }
 
@@ -1057,6 +1065,28 @@ pub(crate) mod tests {
     #[test]
     fn a_blocked_tailnet_address_adds_the_warning_to_the_card_without_waiting() {
         use crate::firewall::{BlockReason, FirewallProbe, TailnetInbound};
+        {
+            let mut background = rig();
+            let (wake_tx, wake_rx) = std::sync::mpsc::channel();
+            let card = SystemCardHandle::new(tze_hud_scene::render_wake::RenderWakeNotifier::new(
+                move || {
+                    wake_tx.send(()).unwrap();
+                },
+            ));
+            background.card = card.clone();
+            let pairing = Arc::get_mut(&mut background.pairing).unwrap();
+            pairing.card = card;
+            pairing.firewall = Arc::new(FirewallProbe::new(|| TailnetInbound::Blocked {
+                reason: BlockReason::NoAllowRule,
+                rule: None,
+            }));
+            *pairing.binds.lock().unwrap() = vec!["100.100.1.2:9090".parse().unwrap()];
+            pairing.open();
+            // Initial set and background warning each notify only after unlock.
+            wake_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            wake_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            assert_eq!(card_lines(&background).unwrap().1.len(), 4);
+        }
         let mut rig = rig();
         // A cached verdict uses the same warning assembly as a background one.
         Arc::get_mut(&mut rig.pairing).unwrap().firewall =
@@ -1067,7 +1097,15 @@ pub(crate) mod tests {
         // Complete each policy read only after a newer address, code, card,
         // clear or wall expiry has landed. Joining proves the stale callback
         // finished; no timing sleeps or polling stand in for completion.
-        for change in 0..6 {
+        for change in [
+            "address",
+            "code",
+            "toast",
+            "clear",
+            "wall-expiry",
+            "code-expiry",
+            "current",
+        ] {
             rig.pairing.open();
             let mut expected = None;
             rig.card.transform_current(|card| {
@@ -1088,37 +1126,58 @@ pub(crate) mod tests {
             });
             let handle = rig.card.clone();
             let clock = rig.clock.clone();
+            let expires_at = rig
+                .pairing
+                .lock()
+                .current_at(rig.clock.now())
+                .unwrap()
+                .expires_at;
             let completion = std::thread::spawn(move || {
-                Pairing::add_firewall_warning(&probe, &handle, clock.as_ref(), &expected);
+                Pairing::add_firewall_warning(
+                    &probe,
+                    &handle,
+                    clock.as_ref(),
+                    &expected,
+                    expires_at,
+                );
             });
             entered_rx.recv_timeout(Duration::from_secs(5)).unwrap();
             match change {
-                0 => {
+                "address" => {
                     *rig.pairing.binds.lock().unwrap() = vec!["100.100.1.2:9090".parse().unwrap()];
                     rig.pairing.refresh_open_system_card();
                 }
-                1 => rig.pairing.open(),
-                2 => rig
+                "code" => rig.pairing.open(),
+                "toast" => rig
                     .card
                     .set(SystemCard::toast("Updated", rig.clock.wall_us())),
-                3 => rig.card.clear(),
-                4 => {
+                "clear" => rig.card.clear(),
+                "wall-expiry" => {
                     rig.clock
                         .wall_offset_ms
                         .fetch_add(CODE_TTL.as_millis() as u64, Ordering::SeqCst);
                 }
+                "code-expiry" => {
+                    rig.clock
+                        .offset_ms
+                        .fetch_add(CODE_TTL.as_millis() as u64 + 1, Ordering::SeqCst);
+                }
                 _ => {} // unchanged current card: the warning must land
             }
-            let before = rig
-                .card
-                .frame_state(if change == 4 { 0 } else { rig.clock.wall_us() });
+            let before = rig.card.frame_state(if change == "wall-expiry" {
+                0
+            } else {
+                rig.clock.wall_us()
+            });
             let wakes = rig.wakes.load(Ordering::SeqCst);
             release_tx.send(()).unwrap();
             completion.join().unwrap();
-            let after = rig
-                .card
-                .frame_state(if change == 4 { 0 } else { rig.clock.wall_us() });
-            if change == 5 {
+            let after = rig.card.frame_state(if change == "wall-expiry" {
+                0
+            } else {
+                rig.clock.wall_us()
+            });
+            if change == "current" {
                 let model = after.model.unwrap();
                 assert_eq!(model.lines.len(), 4);
                 assert!(model.lines[3].contains(crate::firewall::FIX_HINT));
