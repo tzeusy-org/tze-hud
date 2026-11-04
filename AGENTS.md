@@ -97,11 +97,15 @@ status entry, notification stream or portal.
   question with explicit action labels, such as Yes / No / Later, within the
   running build's supported action limit. Give callback ids a unique session
   and question identity. Publish only when ready to consume the answer.
-- **Replies:** use a small, session-named portal when a short typed answer or
-  compact ongoing exchange is useful. A portal is optional; do not mirror
-  every chat message or open one for each subagent. The owner's normal coding
-  workload is 4–12 main sessions, excluding subagents; keep attention and
-  screen space proportionate to that workload.
+- **Replies:** use a session-named portal when a short typed answer or compact
+  ongoing exchange is useful and its presentation is accepted. The current
+  default portal is owner-rejected (2026-11-04): drag makes it transparent
+  (`hud-1wizi`) and its base card needs 3× the width and height at the existing
+  font size. Keep ordinary exchanges in chat until those defects are resolved;
+  use the portal only for an explicit validation step meanwhile. Do not mirror
+  every chat message or open a portal for each subagent. The owner's normal
+  coding workload is 4–12 main sessions, excluding subagents; keep attention
+  and screen space proportionate to that workload.
 - **Keep it glanceable:** status is a few words; a notification carries one
   question and at most a couple of short lines. Keep long explanations,
   logs, diffs and reports in chat, a PR or another reading surface; name or
