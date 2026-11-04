@@ -1080,12 +1080,32 @@ pub(crate) mod tests {
                 reason: BlockReason::NoAllowRule,
                 rule: None,
             }));
-            *pairing.binds.lock().unwrap() = vec!["100.100.1.2:9090".parse().unwrap()];
             pairing.open();
-            // Initial set and background warning each notify only after unlock.
-            wake_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-            wake_rx.recv_timeout(Duration::from_secs(5)).unwrap();
-            assert_eq!(card_lines(&background).unwrap().1.len(), 4);
+            let original = background.card.frame_state(background.clock.wall_us());
+            *background.pairing.binds.lock().unwrap() = vec!["100.100.1.2:9090".parse().unwrap()];
+            background.pairing.refresh_open_system_card();
+            // Initial set, refresh and background warning notify after unlock.
+            for _ in 0..3 {
+                wake_rx.recv_timeout(Duration::from_secs(5)).unwrap();
+            }
+            let warned = background.card.frame_state(background.clock.wall_us());
+            assert_eq!(warned.model.as_ref().unwrap().lines.len(), 4);
+            assert_eq!(warned.wake_at_wall_us, original.wake_at_wall_us);
+            assert_eq!(
+                warned.model.as_ref().unwrap().lines[0],
+                original.model.as_ref().unwrap().lines[0]
+            );
+            // The opposite completion order also works: a warning already in
+            // the slot cannot make the only bind update lose a snapshot race.
+            *background.pairing.binds.lock().unwrap() = vec!["100.100.1.3:9090".parse().unwrap()];
+            background.pairing.refresh_open_system_card();
+            let refreshed = background.card.frame_state(background.clock.wall_us());
+            assert_eq!(
+                refreshed.model.as_ref().unwrap().lines[1],
+                "http://100.100.1.3:9090/pair"
+            );
+            assert_eq!(refreshed.model.as_ref().unwrap().lines.len(), 4);
+            assert_eq!(refreshed.wake_at_wall_us, original.wake_at_wall_us);
         }
         let mut rig = rig();
         // A cached verdict uses the same warning assembly as a background one.
