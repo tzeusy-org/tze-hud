@@ -162,6 +162,9 @@ pub(crate) struct Open {
     /// A field row being typed into: (row id, text so far). Enter submits
     /// it as [`Edit::Text`]; Esc or moving away drops it.
     pub editing: Option<(String, String)>,
+    /// Explicit field selection (click or Enter), distinct from search's
+    /// automatic result focus and from the replacement text not yet typed.
+    selected_field: Option<String>,
     /// A previewing choice showing an option it has not saved: Enter or a
     /// click keeps it; Esc, moving away or closing reverts it.
     pub preview: Option<String>,
@@ -184,6 +187,7 @@ impl Open {
             focus_first_result: false,
             connect: None,
             editing: None,
+            selected_field: None,
             preview: None,
             reveal: false,
         }
@@ -292,6 +296,7 @@ fn item_for(row: &Row, open: &Open, context: Option<&str>) -> PanelItem {
         Control::Field { text, .. } => PanelControl::Value {
             text: match &open.editing {
                 Some((id, typed)) if *id == row.id => format!("{typed}▏"),
+                _ if open.selected_field.as_deref() == Some(&row.id) => format!("{text}▏"),
                 _ => text.clone(),
             },
             mono: true,
@@ -317,6 +322,9 @@ fn item_for(row: &Row, open: &Open, context: Option<&str>) -> PanelItem {
     if open.preview.as_deref() == Some(&row.id) {
         item.detail = Some("Preview · Enter keeps it · Esc restores".to_owned());
         item.detail_tone = PanelTone::Normal;
+    }
+    if open.selected_field.as_deref() == Some(&row.id) {
+        item.detail = Some("Type to replace · Esc cancels".to_owned());
     }
     if let Some((id, message)) = &open.error
         && *id == row.id
@@ -379,6 +387,31 @@ pub(crate) fn build(
     ctx: &ViewContext,
 ) -> (ControlPanelModel, Nav) {
     let find = |id: &str| sections.iter().flat_map(|s| &s.rows).find(|r| r.id == id);
+    // A refreshed row may disappear/change control, or Connect may take
+    // focus outside this core. Neither leaves an editor behind.
+    let field = match &open.focus {
+        PanelFocus::Row(id)
+            if open.connect.is_none()
+                && find(id).is_some_and(|r| matches!(r.control, Control::Field { .. })) =>
+        {
+            Some(id.as_str())
+        }
+        _ => None,
+    };
+    if open
+        .selected_field
+        .as_deref()
+        .is_some_and(|id| Some(id) != field)
+    {
+        open.selected_field = None;
+    }
+    if open
+        .editing
+        .as_ref()
+        .is_some_and(|(id, _)| Some(id.as_str()) != field)
+    {
+        open.editing = None;
+    }
     let mut nav = Nav::default();
     for row in sections.iter().flat_map(|s| &s.rows) {
         if row.reset {
@@ -495,7 +528,11 @@ pub(crate) fn build(
     }
 
     let mut hints: Vec<String> = [
-        "Type to search",
+        if open.editing.is_some() || open.selected_field.is_some() {
+            "Type value"
+        } else {
+            "Type to search"
+        },
         "↑↓ move",
         "Tab next section",
         "←→ change",
@@ -509,13 +546,16 @@ pub(crate) fn build(
     }
     if query.is_empty()
         && open.editing.is_none()
+        && open.selected_field.is_none()
         && open
             .focused_row(&nav)
             .is_some_and(|id| nav.resettable.iter().any(|r| r == id))
     {
         hints.push("Del reset".into());
     }
-    let hint_end = if !query.is_empty() {
+    let hint_end = if open.editing.is_some() || open.selected_field.is_some() {
+        "Esc cancel edit"
+    } else if !query.is_empty() {
         "Esc clear search"
     } else if ctx.paused {
         "Esc close and resume"
@@ -692,6 +732,9 @@ fn act(open: &mut Open, nav: &Nav, id: &str, gesture: Gesture, by: By) -> Vec<Ef
         open_remote_row(open);
         return Vec::new();
     }
+    if matches!(control, Control::Field { .. }) && gesture == Gesture::Activate {
+        open.selected_field = Some(id.to_owned());
+    }
     let previews = nav.previews.iter().any(|r| r == id);
     let Some(edit) = edit_for(control, gesture) else {
         return Vec::new();
@@ -776,10 +819,12 @@ pub(crate) fn on_key(
             | PanelKey::Escape
     ) {
         open.editing = None;
+        open.selected_field = None;
     }
     match key {
         PanelKey::Escape => {
-            if open.editing.take().is_some() {
+            let selected = open.selected_field.take().is_some();
+            if open.editing.take().is_some() || selected {
                 // Cancelling the edit cancels its confirmation too.
                 open.confirming = None;
             } else if !open.query.is_empty() {
@@ -922,7 +967,10 @@ pub(crate) fn on_key(
             PanelFocus::Row(_) if key == PanelKey::Space && typing_name(open) => {
                 on_text(open, nav, " ")
             }
-            PanelFocus::Row(id) if key == PanelKey::Space && editing_field(open, nav, &id) => {
+            PanelFocus::Row(id)
+                if key == PanelKey::Space
+                    && matches!(nav.control(&id), Some(Control::Field { .. })) =>
+            {
                 on_text(open, nav, " ")
             }
             PanelFocus::Search => {
@@ -955,6 +1003,7 @@ pub(crate) fn on_key(
                             return Vec::new();
                         }
                         open.confirming = None;
+                        open.selected_field = None;
                         open.error = None;
                         return vec![Effect::Apply {
                             row: id,
@@ -975,6 +1024,10 @@ pub(crate) fn on_key(
                 }
             } else if let Some((_, text)) = open.editing.as_mut() {
                 text.pop();
+            } else if let Some(id) = &open.selected_field {
+                // First edit replaces the selected value, including when
+                // that edit is Backspace. It must never erase the search.
+                open.editing = Some((id.clone(), String::new()));
             } else if open.query.pop().is_some() {
                 open.scroll = 0.0;
                 open.focus_first_result = true;
@@ -984,6 +1037,7 @@ pub(crate) fn on_key(
             // Not while typing (a field or the search): Delete there must
             // never reset a row the owner did not pick.
             if open.editing.is_none()
+                && open.selected_field.is_none()
                 && open.query.is_empty()
                 && let Some(id) = open.focused_row(nav).map(str::to_owned)
             {
@@ -1065,6 +1119,7 @@ fn reset(open: &mut Open, nav: &Nav, id: &str) -> Vec<Effect> {
     }
     open.confirming = None;
     open.editing = None;
+    open.selected_field = None;
     open.error = None;
     if open.preview.as_deref() == Some(id) {
         open.preview = None;
@@ -1075,10 +1130,11 @@ fn reset(open: &mut Open, nav: &Nav, id: &str) -> Vec<Effect> {
     }]
 }
 
-/// Whether typing goes into field row `id`: it has focus, is a field, and
-/// no search is showing.
+/// Unfiltered fields take typing directly. Search results need explicit
+/// selection; merely focusing the first match must keep type-to-search.
 fn editing_field(open: &Open, nav: &Nav, id: &str) -> bool {
-    open.query.is_empty() && matches!(nav.control(id), Some(Control::Field { .. }))
+    (open.query.is_empty() || open.selected_field.as_deref() == Some(id))
+        && matches!(nav.control(id), Some(Control::Field { .. }))
 }
 
 /// Typed text goes to the focused field (the Connect name, or a section's
@@ -1106,6 +1162,8 @@ pub(crate) fn on_text(open: &mut Open, nav: &Nav, text: &str) {
     if typed.is_empty() || (open.query.is_empty() && typed.trim().is_empty()) {
         return;
     }
+    open.editing = None;
+    open.selected_field = None;
     open.query.push_str(&typed);
     open.scroll = 0.0;
     open.confirming = None;
@@ -1119,6 +1177,17 @@ pub(crate) fn on_click(
     target: &PanelHitTarget,
     geometry: Option<&ControlPanelGeometry>,
 ) -> Vec<Effect> {
+    if !matches!(target, PanelHitTarget::Panel) {
+        // Clicks are explicit focus choices, including when a query update
+        // has a pending automatic first-result focus.
+        open.focus_first_result = false;
+        let same_field = matches!(target, PanelHitTarget::Row(id, _)
+            if open.focus == PanelFocus::Row(id.clone()));
+        if !same_field {
+            open.editing = None;
+            open.selected_field = None;
+        }
+    }
     match target {
         PanelHitTarget::Search => {
             open.confirming = None;
@@ -1152,6 +1221,7 @@ pub(crate) fn on_click(
             }
             // Clicking a field edits it; only Enter acts on it.
             if matches!(nav.control(id), Some(Control::Field { .. })) {
+                open.selected_field = Some(id.clone());
                 return Vec::new();
             }
             act(open, nav, id, gesture_for(*part), By::Pointer)
@@ -1345,10 +1415,12 @@ mod tests {
         };
         let shown = |open: &mut Open| {
             let (model, nav) = build(open, &rows, &ctx);
-            let PanelBody::Sections(sections) = &model.body else {
-                panic!("sections expected")
+            let item = match &model.body {
+                PanelBody::Sections(sections) => &sections[0].items[0],
+                PanelBody::Results { items, .. } => &items[0],
+                _ => panic!("field expected"),
             };
-            (sections[0].items[0].clone(), nav)
+            (item.clone(), nav)
         };
         let mut open = Open::new(PANEL);
         open.focus = PanelFocus::Row("network.mcp_port".into());
@@ -1383,6 +1455,31 @@ mod tests {
             apply("network.mcp_port", Edit::Text("9090".into())),
             "an unchanged value does not ask"
         );
+
+        // Filtering does not weaken the field's confirmation or cancel.
+        let mut open = Open::new(PANEL);
+        let (_, nav) = shown(&mut open);
+        on_text(&mut open, &nav, "MCP");
+        let (_, nav) = shown(&mut open);
+        let field = PanelHitTarget::Row("network.mcp_port".into(), PanelPart::Body);
+        on_click(&mut open, &nav, &field, None);
+        on_text(&mut open, &nav, "9191");
+        assert!(on_key(&mut open, &nav, PanelKey::Enter, None).is_empty());
+        let (item, _) = shown(&mut open);
+        assert_eq!(item.detail_tone, PanelTone::Danger);
+        assert!(item.badge.is_some());
+        assert_eq!(
+            on_key(&mut open, &nav, PanelKey::Enter, None),
+            apply("network.mcp_port", Edit::Text("9191".into()))
+        );
+        assert_eq!(open.query, "MCP");
+        on_click(&mut open, &nav, &field, None);
+        on_text(&mut open, &nav, "9292");
+        assert!(on_key(&mut open, &nav, PanelKey::Enter, None).is_empty());
+        assert!(on_key(&mut open, &nav, PanelKey::Escape, None).is_empty());
+        assert!(open.editing.is_none());
+        assert!(open.confirming.is_none());
+        assert_eq!(open.query, "MCP");
     }
 
     /// A field row takes typing while focused: the first key replaces the
@@ -1414,12 +1511,13 @@ mod tests {
         };
         let shown = |open: &mut Open| {
             let (model, nav) = build(open, &rows, &ctx);
-            let PanelBody::Sections(sections) = &model.body else {
-                panic!("sections expected")
+            let items: Vec<_> = match &model.body {
+                PanelBody::Sections(sections) => sections.iter().flat_map(|s| &s.items).collect(),
+                PanelBody::Results { items, .. } => items.iter().collect(),
+                _ => panic!("field rows expected"),
             };
-            let item = sections
-                .iter()
-                .flat_map(|s| &s.items)
+            let item = items
+                .into_iter()
                 .find(|i| i.id == "network.mcp_port")
                 .unwrap()
                 .clone();
@@ -1465,6 +1563,114 @@ mod tests {
         on_text(&mut open, &nav, "1");
         on_key(&mut open, &nav, PanelKey::Down, None);
         assert_eq!(open.editing, None, "moving away drops the edit");
+
+        // Search auto-focus is not editing intent. Either a click or Enter
+        // explicitly selects the field, without throwing away the query.
+        for pointer in [true, false] {
+            let mut open = Open::new(PANEL);
+            let (_, nav) = shown(&mut open);
+            on_text(&mut open, &nav, "MCP");
+            let (_, nav) = shown(&mut open);
+            on_text(&mut open, &nav, " port");
+            let (_, nav) = shown(&mut open);
+            assert_eq!(open.query, "MCP port");
+            let field = PanelHitTarget::Row("network.mcp_port".into(), PanelPart::Body);
+            if pointer {
+                assert!(on_click(&mut open, &nav, &field, None).is_empty());
+            } else {
+                assert_eq!(
+                    on_key(&mut open, &nav, PanelKey::Enter, None),
+                    apply("network.mcp_port", Edit::Activate)
+                );
+            }
+            on_text(&mut open, &nav, "9191");
+            assert_eq!(
+                open.query, "MCP port",
+                "explicit selection routes typing to the field"
+            );
+            let (item, nav) = shown(&mut open);
+            assert!(
+                matches!(item.control, PanelControl::Value { ref text, .. } if text == "9191▏")
+            );
+            assert_eq!(item.detail.as_deref(), Some("Enter saves · Esc cancels"));
+            assert!(on_click(&mut open, &nav, &field, None).is_empty());
+            assert_eq!(
+                on_key(&mut open, &nav, PanelKey::Enter, None),
+                apply("network.mcp_port", Edit::Text("9191".into())),
+                "a repeated click preserves the draft"
+            );
+            assert_eq!(open.query, "MCP port");
+            // The section reports rejected values on this same row; a
+            // completed editor must not hide its validation feedback.
+            open.error = Some(("network.mcp_port".into(), "Invalid port".into()));
+            let (item, _) = shown(&mut open);
+            assert_eq!(item.detail_tone, PanelTone::Danger);
+            assert_eq!(item.detail.as_deref(), Some("Invalid port"));
+
+            // No new selection after save: typing resumes searching.
+            on_text(&mut open, &nav, "x");
+            assert_eq!(open.query, "MCP portx");
+            on_key(&mut open, &nav, PanelKey::Backspace, None);
+            let (_, nav) = shown(&mut open);
+            on_click(&mut open, &nav, &field, None);
+            let (item, _) = shown(&mut open);
+            assert!(
+                matches!(item.control, PanelControl::Value { ref text, .. } if text == "9090▏"),
+                "selection is visible before typing"
+            );
+            assert!(on_key(&mut open, &nav, PanelKey::Backspace, None).is_empty());
+            assert_eq!(
+                open.query, "MCP port",
+                "Backspace cannot edit the retained query"
+            );
+            assert_eq!(
+                open.editing,
+                Some(("network.mcp_port".into(), String::new()))
+            );
+            assert!(on_key(&mut open, &nav, PanelKey::Escape, None).is_empty());
+            assert_eq!(
+                open.query, "MCP port",
+                "Esc cancels editing before clearing search"
+            );
+            on_click(&mut open, &nav, &field, None);
+            assert!(on_key(&mut open, &nav, PanelKey::Escape, None).is_empty());
+            assert_eq!(
+                open.query, "MCP port",
+                "Esc also cancels an untouched selection"
+            );
+            on_click(&mut open, &nav, &field, None);
+            on_text(&mut open, &nav, "9292");
+            assert!(on_key(&mut open, &nav, PanelKey::Escape, None).is_empty());
+            assert_eq!(open.query, "MCP port");
+            assert!(open.editing.is_none());
+            assert!(
+                matches!(shown(&mut open).0.control, PanelControl::Value { ref text, .. } if text == "9090")
+            );
+
+            // Moving or clicking away drops the draft, and search regains text.
+            on_click(&mut open, &nav, &field, None);
+            on_text(&mut open, &nav, "9393");
+            on_key(&mut open, &nav, PanelKey::Up, None);
+            assert_eq!(open.focus, PanelFocus::Search);
+            assert!(open.editing.is_none());
+            on_click(&mut open, &nav, &field, None);
+            on_text(&mut open, &nav, "9494");
+            on_click(&mut open, &nav, &PanelHitTarget::Search, None);
+            on_text(&mut open, &nav, "x");
+            assert_eq!(open.query, "MCP portx");
+            assert!(open.editing.is_none());
+        }
+
+        let mut open = Open::new(PANEL);
+        let (_, nav) = shown(&mut open);
+        on_text(&mut open, &nav, "MCP");
+        let (_, nav) = shown(&mut open);
+        assert!(on_key(&mut open, &nav, PanelKey::Space, None).is_empty());
+        on_text(&mut open, &nav, "port");
+        assert_eq!(
+            open.query, "MCP port",
+            "Space in an automatically focused field keeps searching"
+        );
     }
 
     /// Empty sections are not listed; chips and Alt keys follow the listed
@@ -1798,6 +2004,29 @@ mod tests {
         open.focus = PanelFocus::Tile(7);
         built(&mut open);
         assert_eq!(open.focus, PanelFocus::Search);
+
+        // A selected field can disappear during a section refresh. Neither
+        // its draft nor its explicit selection may capture later search.
+        let mut rows = sections();
+        rows[0].rows.push(Row::new(
+            "agents.name",
+            "Name",
+            Control::Field {
+                text: "Agent".into(),
+                confirm: None,
+            },
+        ));
+        let (_, nav) = built_with(&mut open, &rows);
+        let field = PanelHitTarget::Row("agents.name".into(), PanelPart::Body);
+        on_click(&mut open, &nav, &field, None);
+        on_text(&mut open, &nav, "Replacement");
+        let (_, nav) = built(&mut open);
+        assert_eq!(open.focus, PanelFocus::Search);
+        assert!(open.editing.is_none());
+        on_text(&mut open, &nav, "pause");
+        assert_eq!(open.query, "pause");
+        assert!(on_key(&mut open, &nav, PanelKey::Escape, None).is_empty());
+        assert!(open.query.is_empty(), "no vanished selection consumes Esc");
     }
 
     /// Clicks on parts step and cycle; the wheel scrolls within bounds; a
@@ -2034,6 +2263,37 @@ mod tests {
         let (_, nav) = built_with(&mut open, &field_sections);
         assert_eq!(open.focus, PanelFocus::Row("look.zoom".into()));
         assert!(on_key(&mut open, &nav, PanelKey::Delete, None).is_empty());
+
+        for query in ["", "font"] {
+            let mut open = Open::new(PANEL);
+            let (_, nav) = built_with(&mut open, &field_sections);
+            if !query.is_empty() {
+                on_text(&mut open, &nav, query);
+            }
+            let (_, nav) = built_with(&mut open, &field_sections);
+            let field = PanelHitTarget::Row("look.font".into(), PanelPart::Body);
+            on_click(&mut open, &nav, &field, None);
+            let (model, _) = built_with(&mut open, &field_sections);
+            assert!(!model.hints.iter().any(|h| h == "Del reset"));
+            assert!(
+                on_key(&mut open, &nav, PanelKey::Delete, None).is_empty(),
+                "a selected editor is not a Delete-reset target before its first character"
+            );
+            on_text(&mut open, &nav, "Seg");
+            assert!(on_key(&mut open, &nav, PanelKey::Delete, None).is_empty());
+            assert_eq!(open.query, query);
+            assert_eq!(open.editing, Some(("look.font".into(), "Seg".into())));
+            let reset = PanelHitTarget::Row("look.font".into(), PanelPart::Reset);
+            assert_eq!(
+                on_click(&mut open, &nav, &reset, None),
+                apply("look.font", Edit::Reset)
+            );
+            assert!(open.editing.is_none());
+            assert_eq!(
+                open.query, query,
+                "the explicit per-row Reset retains the filter"
+            );
+        }
     }
 
     /// On Connect, a firewall that blocks tailnet agents links to Network ›

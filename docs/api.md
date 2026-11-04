@@ -607,8 +607,11 @@ stays away, even for a code replaced after wrong guesses; once it is left, a
 replacement shows on the system card again.
 
 The Network card shows the MCP and gRPC ports and Remote agents. A port is
-typed in place (the first key replaces it, Enter saves, Esc cancels) and
-saved to `[runtime]`; it applies at the next start, so the row shows
+typed in place (the first key replaces it, Enter saves, Esc cancels). In
+search results, click the field or press Enter on it to start editing; the
+caret and row hint show that typing will replace its value. Automatic result
+focus keeps typing in search. Saving or cancelling retains the search;
+Esc again clears it. Port changes are saved to `[runtime]`; it applies at the next start, so the row shows
 "Restart to apply" and the running port, and Restart now counts it.
 Changing the MCP port means paired agents must use the new one, so a
 changed value asks first (the first Enter shows the warning, the second
