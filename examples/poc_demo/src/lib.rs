@@ -54,7 +54,7 @@ impl Mcp<'_> {
             + Duration::from_millis(arguments["wait_ms"].as_u64().unwrap_or(0).min(30_000));
         let input_response_deadline = input_deadline + Duration::from_millis(100);
         let mut arguments = arguments;
-        let mut recovery_deadline = None;
+        let mut recovery_deadline: Option<tokio::time::Instant> = None;
         loop {
             let attempt = self.call_once(tool, &arguments);
             let (is_error, parsed) = match recovery_deadline {
