@@ -873,7 +873,7 @@ baselined against regressions.
 
 | Measure | Before T5 (wire) | Wire | Model-visible | Budget (model-visible) |
 |---|---|---|---|---|
-| `tools/list` | 4,418 | 554 | 517 | ≤ 900 |
+| `tools/list` | 4,418 | 599 | 562 | ≤ 900 |
 | Discover (default scene) | ~430 (`list_zones`) | 181 | 113 | ≤ 150 |
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
 | Four-option notification ask + returned answer + ACK | — | 273 | 114 | ≤ 120 |
@@ -882,12 +882,16 @@ baselined against regressions.
 | Discover (`production.toml`: 6 zones, 3 built-in widgets) | n/a | n/a | ~232 | ≤ 250 |
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
 
-All seven measurements use canonical flow version 4. Two byte-identical
-current-main calibrations measured the complete choice flow at 114 model-visible
-tokens (69 ask + 28 retained answer + 17 ACK). The six established flows retain
-identical request/response fingerprints and metrics from version 3, with every
-budget unchanged. The refreshed baseline remains `pending_owner_review`; the
-approved choice ceiling does not approve its measured bytes.
+All seven measurements use canonical flow version 4. Runtime calibration of
+notification keys against actual merged main `8a94fcf7` changes `tools/list`
+from 2,248 to 2,451 model-visible UTF-8 bytes and 517 to 562 o200k tokens
+(+203 bytes, +45 tokens). The tokenizer is `tiktoken-rs` 0.12.0, `o200k_base`.
+The five other established flows and the complete choice flow retain identical
+request/response fingerprints and metrics; every ceiling is unchanged.
+The complete choice remains 114 tokens (69 ask + 28 retained answer + 17 ACK).
+The canonical gate requires two byte-identical final-source measurements.
+The refreshed baseline remains `pending_owner_review`; approval of the choice
+ceiling does not approve these measured bytes.
 
 The `notification_choice` flow publishes Ship/Hold/Skip/Open, activates Skip through
 `SceneGraph::activate_notification` (the shared pointer/keyboard producer), polls
@@ -898,7 +902,7 @@ ceilings and public serialization/accounting remain unchanged.
 
 Historical runtime-backed version-4 calibration measured 114 model-visible tokens:
 ask 69, answer 28, ACK 17. It failed the former 104-token ceiling and remains a historical failure. Fresh
-current-main measurements meet the amended 120-token ceiling; their regenerated
+runtime measurements meet the amended 120-token ceiling; the regenerated
 version-4 baseline still awaits review.
 
 The calibration fixture waits for shared activation through a local readiness
