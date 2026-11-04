@@ -52,16 +52,19 @@ impl Mcp<'_> {
     pub async fn call(&self, tool: &str, arguments: Value) -> Result<Value> {
         let input_deadline = tokio::time::Instant::now()
             + Duration::from_millis(arguments["wait_ms"].as_u64().unwrap_or(0).min(30_000));
+        let input_response_deadline = input_deadline + Duration::from_millis(100);
         let mut arguments = arguments;
         let mut recovery_deadline = None;
         loop {
             let attempt = self.call_once(tool, &arguments);
             let (is_error, parsed) = match recovery_deadline {
-                // An admitted long poll can still wait until its original input
-                // deadline; only transient-error recovery is capped at 100 ms.
-                Some(deadline) => tokio::time::timeout_at(deadline.max(input_deadline), attempt)
-                    .await
-                    .map_err(|_| "hud_input scene-busy recovery exceeded 100 ms")??,
+                // Leave fixed response-drain time after the original input wait.
+                // Busy/backoff recovery still uses its own unchanged deadline.
+                Some(deadline) => {
+                    tokio::time::timeout_at(deadline.max(input_response_deadline), attempt)
+                        .await
+                        .map_err(|_| "hud_input recovery response deadline exceeded")??
+                }
                 None => attempt.await?,
             };
             if !is_error {

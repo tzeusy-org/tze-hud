@@ -174,6 +174,15 @@ async fn zones_and_widgets_run_against_the_shipped_config() {
                 let payload = if attempt == 0 {
                     response.clone()
                 } else {
+                    if observed.lock().unwrap().last().unwrap()["params"]["arguments"]
+                        ["wait_ms"]
+                        .as_u64()
+                        .is_some_and(|ms| ms > 0)
+                    {
+                        // A genuine positive poll may return after the recovery
+                        // budget while still inside its original human wait.
+                        tokio::time::sleep(Duration::from_millis(150)).await;
+                    }
                     json!({"jsonrpc":"2.0","id":1,"result":{"content":[{"type":"text","text":"{\"items\":[],\"remaining\":0}"}]}})
                 }.to_string();
                 let status = if attempt == 0 { status } else { 200 };
