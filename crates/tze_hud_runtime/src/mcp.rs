@@ -365,7 +365,7 @@ async fn run_deferred_listeners(
     late_tailnet_port: Option<u16>,
     #[cfg(test)] tailnet_fixture: Option<crate::net_addrs::TailnetFixture>,
 ) {
-    use crate::operator::handoff::{retry_bind, BIND_RETRY};
+    use crate::operator::handoff::{BIND_RETRY, retry_bind};
     if !gate.wait().await {
         return;
     }
@@ -664,7 +664,7 @@ async fn handle_admin(
     admin: &StatusSource,
 ) -> crate::http::Response {
     use crate::http::{
-        admin_guard, query_param, AdminRoute, OperatorCode, OperatorError, Response,
+        AdminRoute, OperatorCode, OperatorError, Response, admin_guard, query_param,
     };
     use crate::operator::handoff::RestartError;
     let unavailable = |why: &str| {
@@ -841,9 +841,9 @@ mod tests {
         StatusSource {
             appearance: None,
             agents: dir.shared(),
-            binds: Arc::new(std::sync::Mutex::new(vec!["127.0.0.1:9090"
-                .parse()
-                .unwrap()])),
+            binds: Arc::new(std::sync::Mutex::new(vec![
+                "127.0.0.1:9090".parse().unwrap(),
+            ])),
             safe_mode: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             presents: None,
             capture: None,
@@ -939,16 +939,18 @@ mod tests {
         use crate::http::AdminRoute::Screenshot;
         let mut src = admin_source(std::env::temp_dir().join("tze_hud_no_such.log"));
         let (endpoint, inbox) = crate::operator::screenshot::capture_channel(|| {});
-        std::thread::spawn(move || loop {
-            if let Some(req) = inbox.next_live() {
-                let _ = req.reply.send(Ok(tze_hud_compositor::CapturedFrame {
-                    width: 1,
-                    height: 1,
-                    rgba: vec![1, 2, 3, 4],
-                }));
-                return;
+        std::thread::spawn(move || {
+            loop {
+                if let Some(req) = inbox.next_live() {
+                    let _ = req.reply.send(Ok(tze_hud_compositor::CapturedFrame {
+                        width: 1,
+                        height: 1,
+                        rgba: vec![1, 2, 3, 4],
+                    }));
+                    return;
+                }
+                std::thread::sleep(std::time::Duration::from_millis(5));
             }
-            std::thread::sleep(std::time::Duration::from_millis(5));
         });
         src.capture = Some(endpoint);
         async fn get(src: &StatusSource, bearer: Option<&str>) -> crate::http::Response {
@@ -1452,10 +1454,12 @@ mod tests {
             eager,
             "appended loopback leaves preferred endpoint unchanged"
         );
-        assert!(status["binds"]
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!(late.to_string())));
+        assert!(
+            status["binds"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!(late.to_string()))
+        );
 
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
         handle.await.expect("task");
@@ -1557,14 +1561,16 @@ mod tests {
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
         handle.await.expect("task");
 
-        assert!(start_mcp_http_server(
-            make_scene(),
-            cfg(["192.0.2.1:0", "127.0.0.1:0"]),
-            ShutdownToken::new(),
-            None,
-        )
-        .await
-        .is_err());
+        assert!(
+            start_mcp_http_server(
+                make_scene(),
+                cfg(["192.0.2.1:0", "127.0.0.1:0"]),
+                ShutdownToken::new(),
+                None,
+            )
+            .await
+            .is_err()
+        );
     }
 
     #[tokio::test]

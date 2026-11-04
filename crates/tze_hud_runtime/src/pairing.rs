@@ -1288,19 +1288,21 @@ pub(crate) mod tests {
         assert!(rig.pairing.is_open(), "the refusal leaves the code usable");
         let plain = json(&rig.pairing.pair(&pair_body("boss", &code, false)));
         let dir = rig.agents.load();
-        assert!(!dir
-            .resolve(plain["psk"].as_str().unwrap(), "")
-            .unwrap()
-            .is_operator_admin());
+        assert!(
+            !dir.resolve(plain["psk"].as_str().unwrap(), "")
+                .unwrap()
+                .is_operator_admin()
+        );
 
         rig.pairing.open();
         let code = rig.pairing.code().unwrap().0;
         let admin = json(&rig.pairing.pair(&pair_body("root", &code, true)));
         let dir = rig.agents.load();
-        assert!(dir
-            .resolve(admin["psk"].as_str().unwrap(), "")
-            .unwrap()
-            .is_operator_admin());
+        assert!(
+            dir.resolve(admin["psk"].as_str().unwrap(), "")
+                .unwrap()
+                .is_operator_admin()
+        );
     }
 
     /// While the Connect card shows the code the system card stays away,
