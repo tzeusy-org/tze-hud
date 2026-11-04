@@ -304,6 +304,14 @@ fn publish_zone(
     if let Some((code, hint)) = timing_error(publish, now, zone, zone_exists) {
         return fail(seq, code, hint);
     }
+    let expiry = expires_at_wall_us(publish, now).or_else(|| {
+        matches!(&content, tze_hud_scene::ZoneContent::Notification(n) if !n.actions.is_empty())
+            .then(|| {
+                publish.present_at_us.max(now).saturating_add(
+                    u64::from(session.publication_defaults.answer_window_ms()) * 1_000,
+                )
+            })
+    });
     let batch = SceneMutationBatch {
         batch_id: SceneId::new(),
         agent_namespace: session.namespace.clone(),
@@ -314,7 +322,7 @@ fn publish_zone(
             merge_key: (!publish.key.is_empty()).then(|| publish.key.clone()),
             // Content expiry (invariant 1): expires_at wins, else ttl_ms
             // counts from presentation.
-            expires_at_wall_us: expires_at_wall_us(publish, now),
+            expires_at_wall_us: expiry,
             content_classification: None,
             breakpoints: publish.breakpoints.clone(),
             held: false,

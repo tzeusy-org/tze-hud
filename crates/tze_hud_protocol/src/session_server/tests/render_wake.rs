@@ -2,6 +2,7 @@ use super::*;
 
 fn direct_handler_test_session(namespace: &str, capabilities: Vec<String>) -> StreamSession {
     StreamSession {
+        publication_defaults: Default::default(),
         session_id: format!("{namespace}-direct-handler"),
         namespace: namespace.to_string(),
         agent_name: namespace.to_string(),

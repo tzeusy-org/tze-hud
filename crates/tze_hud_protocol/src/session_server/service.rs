@@ -35,6 +35,7 @@ use tze_hud_scene::types::{ResourceBudget, SceneId};
 /// `allow`-derived permissions (see [`AgentDirectory`]).
 pub struct HudSessionImpl {
     pub state: Arc<Mutex<SharedState>>,
+    pub(super) publication_defaults: tze_hud_scene::PublicationDefaults,
     /// Runtime-owned callback that wakes the windowed event/compositor loops
     /// after render-relevant session work is accepted or enqueued.
     pub(super) render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
@@ -90,6 +91,7 @@ pub struct HudSessionImpl {
 /// [`SessionDeps::new`] fills the optional parts with defaults; set the
 /// fields that differ before passing it to [`HudSessionImpl::from_deps`].
 pub struct SessionDeps {
+    pub publication_defaults: tze_hud_scene::PublicationDefaults,
     pub state: Arc<Mutex<SharedState>>,
     /// Credential → agent identity and permissions, shared live with MCP.
     pub agents: SharedAgents,
@@ -109,6 +111,7 @@ impl SessionDeps {
             state,
             agents,
             resource_budget: ResourceBudget::default(),
+            publication_defaults: Default::default(),
             budget_enforcer: None,
             degradation_notices: super::DegradationNoticeSender::default(),
             render_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
@@ -146,6 +149,7 @@ impl HudSessionImpl {
             tokio::sync::broadcast::channel(super::BROADCAST_CHANNEL_CAPACITY);
         Self {
             state: deps.state,
+            publication_defaults: deps.publication_defaults,
             render_wake: deps.render_wake,
             agents: deps.agents,
             resource_budget: deps.resource_budget,

@@ -651,19 +651,32 @@ async fn grpc_zone_publish_ttl_sets_expiry_and_is_swept() {
     // separate request that removes expiry, including before presentation.
     let surface = "zone:notification-area";
     let mut sequence = 3;
-    for (urgency, default_ttl_ms, scheduled) in [
-        (0, 8_000, false),
-        (1, 8_000, false),
-        (2, 15_000, true),
-        (3, 30_000, true),
+    for (urgency, default_ttl_ms, scheduled, actions, explicit_ttl) in [
+        (0, 8_000, false, false, 0),
+        (1, 8_000, false, false, 0),
+        (2, 15_000, true, false, 0),
+        (3, 30_000, true, false, 0),
+        (0, 60_000, false, true, 0),
+        (3, 60_000, true, true, 0),
+        (1, 5_000, false, true, 5_000),
+        (2, 600_000, true, true, 600_000),
     ] {
         let notification = Publish {
             surface: surface.into(),
+            ttl_ms: explicit_ttl,
             content: Some(crate::proto::ZoneContent {
                 payload: Some(crate::proto::zone_content::Payload::Notification(
                     crate::proto::NotificationPayload {
                         text: "Keep this notification".into(),
                         urgency,
+                        actions: if actions {
+                            vec![crate::proto::NotificationActionProto {
+                                label: "Yes".into(),
+                                callback_id: "yes".into(),
+                            }]
+                        } else {
+                            Vec::new()
+                        },
                         ..Default::default()
                     },
                 )),
@@ -673,7 +686,6 @@ async fn grpc_zone_publish_ttl_sets_expiry_and_is_swept() {
         let shown_at = clock.now_us() + if scheduled { 5_000_000 } else { 0 };
         let publish = if scheduled {
             Publish {
-                ttl_ms: 0,
                 expires_at_us: 0,
                 present_at_us: shown_at,
                 ..notification.clone()
@@ -839,6 +851,42 @@ async fn grpc_zone_publish_expires_at_is_swept() {
     assert!(subtitle_texts(&scene).is_empty());
     drop(scene);
     drop(st);
+    let expires_at = clock.now_us() + 4_000_000;
+    let ack = publish_and_ack(
+        &tx,
+        &mut stream,
+        3,
+        Publish {
+            surface: "zone:notification-area".into(),
+            ttl_ms: 600_000,
+            expires_at_us: expires_at,
+            content: Some(crate::proto::ZoneContent {
+                payload: Some(crate::proto::zone_content::Payload::Notification(
+                    crate::proto::NotificationPayload {
+                        text: "Choose".into(),
+                        actions: vec![crate::proto::NotificationActionProto {
+                            label: "Yes".into(),
+                            callback_id: "yes".into(),
+                        }],
+                        ..Default::default()
+                    },
+                )),
+            }),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(ack.ok, "{ack:?}");
+    {
+        let st = state.lock().await;
+        let mut scene = st.scene.lock().await;
+        assert_eq!(
+            scene.zone_registry.active_publishes["notification-area"][0].expires_at_wall_us,
+            Some(expires_at)
+        );
+        clock.advance(4_001);
+        assert_eq!(scene.drain_expired_zone_publications(), 1);
+    }
     server.abort();
 }
 
@@ -877,5 +925,52 @@ async fn grpc_zone_publish_present_at_is_held_until_due() {
     );
     drop(scene);
     drop(st);
+    let present_at = clock.now_us() + 5_000_000;
+    let ack = publish_and_ack(
+        &tx,
+        &mut stream,
+        3,
+        Publish {
+            surface: "zone:notification-area".into(),
+            present_at_us: present_at,
+            content: Some(crate::proto::ZoneContent {
+                payload: Some(crate::proto::zone_content::Payload::Notification(
+                    crate::proto::NotificationPayload {
+                        text: "Choose".into(),
+                        actions: vec![crate::proto::NotificationActionProto {
+                            label: "Yes".into(),
+                            callback_id: "yes".into(),
+                        }],
+                        ..Default::default()
+                    },
+                )),
+            }),
+            ..Default::default()
+        },
+    )
+    .await;
+    assert!(ack.ok, "{ack:?}");
+    {
+        let st = state.lock().await;
+        let mut scene = st.scene.lock().await;
+        let admitted_expiry = match &scene.scheduled_batches[0].batch.mutations[0] {
+            tze_hud_scene::SceneMutation::PublishToZone {
+                expires_at_wall_us, ..
+            } => *expires_at_wall_us,
+            other => panic!("expected scheduled zone publish, got {other:?}"),
+        };
+        assert_eq!(admitted_expiry, Some(present_at + 60_000_000));
+        clock.advance(6_000);
+        assert!(
+            scene
+                .apply_due_batches()
+                .iter()
+                .all(|result| result.applied)
+        );
+        assert_eq!(
+            scene.zone_registry.active_publishes["notification-area"][0].expires_at_wall_us,
+            admitted_expiry
+        );
+    }
     server.abort();
 }

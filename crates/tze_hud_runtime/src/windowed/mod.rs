@@ -2799,11 +2799,10 @@ impl WindowedRuntime {
         let active_tab_mirror = Arc::new(std::sync::Mutex::new(None));
         let chrome_state = Arc::new(std::sync::RwLock::new(crate::shell::ChromeState::new()));
         let system_card = crate::shell::system_card::SystemCardHandle::new(render_wake.clone());
-        let live = Arc::new(crate::launch::LiveSettings::new(
-            cfg.target_fps,
-            cfg.debug_zones,
-            render_wake.clone(),
-        ));
+        let live = Arc::new(
+            crate::launch::LiveSettings::new(cfg.target_fps, cfg.debug_zones, render_wake.clone())
+                .with_answer_window(cfg.answer_window_ms),
+        );
         let appearance = Arc::new(crate::appearance::Appearance::for_startup(
             raw_config_for_startup.as_ref(),
             cfg.config_file_path.as_deref().map(std::path::Path::new),
@@ -2931,6 +2930,7 @@ impl WindowedRuntime {
             Arc::clone(&cfg.agents),
             shared_state.clone(),
             Arc::clone(&runtime_context),
+            live.publication_defaults.clone(),
             render_wake.clone(),
             bind_gate.clone(),
             pairing
@@ -2987,6 +2987,7 @@ impl WindowedRuntime {
                 // Same addresses as gRPC: loopback plus local Tailscale.
                 let mcp_config = McpServerConfig {
                     appearance: Some(Arc::clone(&appearance)),
+                    publication_defaults: live.publication_defaults.clone(),
                     widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
                         &startup_compositor_tokens,
                         "motion.state.ms",

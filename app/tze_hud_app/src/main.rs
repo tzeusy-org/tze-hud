@@ -221,6 +221,7 @@ struct StartupOptions {
     grpc_port: u16,
     mcp_port: u16,
     fps: u32,
+    answer_window_ms: u32,
     /// When true, render zone boundaries with colored debug tints.
     debug_zones: bool,
     /// Which of the panel-visible settings a flag or variable set.
@@ -263,6 +264,7 @@ impl Default for StartupOptions {
             grpc_port: tze_hud_config::DEFAULT_GRPC_PORT,
             mcp_port: tze_hud_config::DEFAULT_MCP_PORT,
             fps: tze_hud_config::DEFAULT_FPS,
+            answer_window_ms: tze_hud_config::DEFAULT_ANSWER_WINDOW_MS,
             debug_zones: false,
             sources: Default::default(),
             quiescent_efficiency_emit: None,
@@ -896,6 +898,9 @@ fn apply_runtime_config(opts: &mut StartupOptions, config_toml: Option<&str>) {
         .take_config(&mut opts.grpc_port, runtime.grpc_port);
     sources.fps.take_config(&mut opts.fps, runtime.fps);
     sources
+        .answer_window_ms
+        .take_config(&mut opts.answer_window_ms, runtime.answer_window_ms);
+    sources
         .debug_zones
         .take_config(&mut opts.debug_zones, runtime.debug_zones);
     let mut level = String::new();
@@ -1365,6 +1370,7 @@ set {DEV_ALLOW_INSECURE_STARTUP_ENV}=1 only in debug/dev runs if you need fallba
         mcp_port: opts.mcp_port,
         agents: agents.shared(),
         target_fps: opts.fps,
+        answer_window_ms: opts.answer_window_ms,
         config_toml,
         config_file_path,
         debug_zones: opts.debug_zones,
@@ -1688,6 +1694,28 @@ mod tests {
     /// the control panel: config fills only what nothing higher set.
     #[test]
     fn runtime_config_fills_below_flags_and_env() {
+        let mut defaults = StartupOptions::default();
+        apply_runtime_config(
+            &mut defaults,
+            Some("[runtime]\nprofile = \"full-display\"\n"),
+        );
+        assert_eq!(
+            (defaults.answer_window_ms, defaults.sources.answer_window_ms),
+            (60_000, Source::Default)
+        );
+        for value in [1, 15_000, 60_000, 123_456, 300_000] {
+            let mut opts = StartupOptions::default();
+            apply_runtime_config(
+                &mut opts,
+                Some(&format!(
+                    "[runtime]\nprofile = \"full-display\"\nanswer_window_ms = {value}\n"
+                )),
+            );
+            assert_eq!(
+                (opts.answer_window_ms, opts.sources.answer_window_ms),
+                (value, Source::Config)
+            );
+        }
         let config = "[runtime]\nprofile = \"full-display\"\nmcp_port = 9290\ngrpc_port = 50061\nfps = 30\ndebug_zones = true\n";
         let mut opts =
             parse_with_env(&[("TZE_HUD_GRPC_PORT", "50071")], &["--mcp-port", "9390"]).unwrap();

@@ -116,6 +116,7 @@ pub struct ToolCtx<'a> {
     pub agent: &'a AgentIdentity,
     /// Server-owned implicit widget motion; never a model-visible parameter.
     pub widget_transition_ms: u32,
+    pub publication_defaults: &'a tze_hud_scene::PublicationDefaults,
 }
 
 /// The one error every mutating verb returns while the human has paused agents.
@@ -591,7 +592,6 @@ async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpRes
             format!("delay_ms is at most {MAX_DELAY_MS}"),
         ));
     }
-    let ttl_ms = p.ttl_ms.unwrap_or(DEFAULT_ZONE_TTL_MS);
     let lock_started = tracing::enabled!(target: "tze_hud_mcp_phases", tracing::Level::DEBUG)
         .then(std::time::Instant::now);
     if lock_started.is_some() {
@@ -617,11 +617,20 @@ async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpRes
         ));
     };
     let content = parse_zone_content(&with_inferred_type(raw, &def.accepted_media_types))?;
+    // Read the owner default exactly once, after resolving the content. Explicit
+    // zero remains held; ordinary zone content keeps its historical default.
+    let ttl_ms = p.ttl_ms.unwrap_or_else(|| {
+        if matches!(&content, ZoneContent::Notification(n) if !n.actions.is_empty()) {
+            u64::from(ctx.publication_defaults.answer_window_ms())
+        } else {
+            DEFAULT_ZONE_TTL_MS
+        }
+    });
     let lease_id = ensure_lease(ctx, &mut scene)?;
-    let ttl_us = (ttl_ms > 0).then(|| ttl_ms.saturating_mul(1_000));
+    let now = now_us(&scene);
+    let present_at = now.saturating_add(delay_ms.saturating_mul(1_000));
+    let expires_at = (ttl_ms > 0).then(|| present_at.saturating_add(ttl_ms.saturating_mul(1_000)));
     if delay_ms > 0 {
-        // Arrival is not presentation (invariant 1): hold until due.
-        let present_at = now_us(&scene).saturating_add(delay_ms * 1_000);
         let batch = MutationBatch {
             batch_id: SceneId::new(),
             agent_namespace: ns,
@@ -630,24 +639,23 @@ async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpRes
                 content,
                 publish_token: ZonePublishToken { token: Vec::new() },
                 merge_key: p.key,
-                expires_at_wall_us: ttl_us.map(|t| present_at.saturating_add(t)),
+                expires_at_wall_us: expires_at,
                 content_classification: None,
                 breakpoints: Vec::new(),
-                held: ttl_us.is_none(),
+                held: expires_at.is_none(),
             }],
             timing_hints: None,
             lease_id: Some(lease_id),
         };
         scene.schedule_batch(present_at, batch);
-        return Ok(ok_with_expiry((ttl_ms > 0).then_some(delay_ms + ttl_ms)));
+    } else {
+        scene
+            .publish_to_zone_until_with_lease(zone, content, &ns, lease_id, p.key, expires_at)
+            .map_err(|error| scene_error(&error))?;
     }
-    match ttl_us {
-        Some(_) => scene.publish_to_zone_with_lease(zone, content, &ns, lease_id, p.key, ttl_us),
-        // Held until cleared: no urgency-derived expiry either.
-        None => scene.publish_held_to_zone_with_lease(zone, content, &ns, lease_id, p.key),
-    }
-    .map_err(|e| scene_error(&e))?;
-    Ok(ok_with_expiry((ttl_ms > 0).then_some(ttl_ms)))
+    Ok(ok_with_expiry(
+        expires_at.map(|at| at.saturating_sub(now) / 1_000),
+    ))
 }
 
 async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> McpResult<Value> {

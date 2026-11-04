@@ -42,6 +42,8 @@ pub struct RawRuntime {
     pub grpc_port: Option<u16>,
     /// Frame rate cap, 1-240 (default 60). `--fps` and `TZE_HUD_FPS` win.
     pub fps: Option<u32>,
+    /// Default lifetime for action notifications, 1-300000 ms (default 60000).
+    pub answer_window_ms: Option<u32>,
     /// Log file level: `error`, `warn`, `info` (default), `debug` or
     /// `trace`. `TZE_HUD_FILE_LOG` wins.
     pub log_level: Option<String>,

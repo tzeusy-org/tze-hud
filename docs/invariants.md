@@ -16,6 +16,14 @@ disappears on schedule without the agent returning; content scheduled with
 `present_at` is not shown early. This is what makes a HUD different from a
 dashboard: an agent can say "show this for 8 seconds" in one call.
 
+For notifications with actions, omitted expiry uses the owner's live saved
+answer window (default one minute). MCP explicit `ttl_ms`, including held
+zero, wins; gRPC absolute expiry then positive TTL wins. Admission snapshots
+one value into the absolute deadline for immediate and scheduled content;
+panel changes only affect later accepted publications, never existing cards.
+`hud_publish` and `hud_surfaces` report that stored lifetime, including delay.
+The setting itself neither polls nor wakes the renderer.
+
 - `tze_hud_mcp` [`portal_flow_attach_publish_poll_ack_clear`](../crates/tze_hud_mcp/src/server/tests.rs) (atomic publish + portal hold),
   [`test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept`](../crates/tze_hud_mcp/src/server/tests.rs),
   [`delay_ms_holds_content_until_due`](../crates/tze_hud_mcp/src/server/tests.rs), [`notification_ttl_zero_is_held_and_hold_retimes_it`](../crates/tze_hud_mcp/src/server/tests.rs)
@@ -26,6 +34,12 @@ dashboard: an agent can say "show this for 8 seconds" in one call.
   [`grpc_zone_publish_expires_at_is_swept`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs), [`grpc_zone_publish_present_at_is_held_until_due`](../crates/tze_hud_protocol/src/session_server/tests/invariants.rs)
 - `integration` (POC acceptance, MCP end to end) [`poc_zone_notification_ttl_disappears_unattended`](../tests/integration/poc_acceptance.rs),
   [`poc_zone_delay_ms_appears_on_schedule`](../tests/integration/poc_acceptance.rs)
+
+The config writer's runtime round-trip, invalid-value and failed-rename
+parents, the Agents `answer_window_saves_applies_and_resets_only_after_success`
+row test, and `integration::poc_panel_runtime_rows_apply_save_and_stage_a_restart`
+cover saved/default source, save-first failure behavior and both live server
+bridges. Source tests are distinct from Windows owner interaction evidence.
 
 ## 2. Three message classes, kept distinct
 

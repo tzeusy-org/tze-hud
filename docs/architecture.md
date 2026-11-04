@@ -78,6 +78,15 @@ Network, Diagnostics and System cards go through
 which saves `[runtime]` with `tze_hud_config::set_runtime`, sets live values
 in [`LiveSettings`](../crates/tze_hud_runtime/src/launch.rs) (read by the
 compositor loop only when they change), and names each value's source. The
+Agents answer-window row saves first, then updates `LiveSettings`' shared
+[`PublicationDefaults`](../crates/tze_hud_scene/src/publication_defaults.rs)
+atomic handle. Windowed startup creates that handle before either server and
+threads the same clone through MCP config/ToolCtx and gRPC SessionDeps/session
+state. Each action-notification admission snapshots it once into the existing
+absolute deadline. Immediate MCP admission uses a lease-checked single-zone
+write; delayed admission retains that deadline in the scheduled mutation. Neither
+path retimes existing content, and changing the default does not wake rendering.
+The
 Layout card edits widget instances in the scene and their `[[tabs.widgets]]`
 entries (`tze_hud_config::set_widget`); the Input card's chord changes go
 through [`ChordControl`](../crates/tze_hud_runtime/src/shell/control_panel/chords.rs)

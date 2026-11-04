@@ -464,6 +464,16 @@ pub(crate) fn validate_runtime(runtime: &crate::raw::RawRuntime, errors: &mut Ve
             "MCP and gRPC need different ports",
         ));
     }
+    if let Some(ms) = runtime.answer_window_ms
+        && !(1..=tze_hud_scene::MAX_ANSWER_WINDOW_MS).contains(&ms)
+    {
+        errors.push(invalid(
+            "answer_window_ms",
+            "1-300000 milliseconds",
+            ms.to_string(),
+            "set answer_window_ms between 1 and 300000",
+        ));
+    }
     if let Some(fps) = runtime.fps
         && !(1..=MAX_FPS).contains(&fps)
     {

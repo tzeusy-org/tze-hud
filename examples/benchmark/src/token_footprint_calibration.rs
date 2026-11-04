@@ -338,6 +338,7 @@ mod calibration {
         );
         let shutdown = ShutdownToken::new();
         let config = McpServerConfig {
+            publication_defaults: Default::default(),
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
                 &Default::default(),
                 "motion.state.ms",

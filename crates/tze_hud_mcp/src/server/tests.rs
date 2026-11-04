@@ -624,6 +624,71 @@ async fn zone_publish_returns_only_ok_and_expiry() {
     )
     .await;
     assert_eq!(v, json!({"ok": true}));
+    let defaults = server.config.publication_defaults.clone();
+    defaults.set_answer_window_ms(30_000);
+    for (actions, ttl, expected) in [
+        (false, None, Some(60_000)),
+        (true, None, Some(30_000)),
+        (true, Some(5_000), Some(5_000)),
+        (true, Some(600_000), Some(600_000)),
+        (true, Some(0), None),
+    ] {
+        call(
+            &server,
+            "hud_clear",
+            json!({"surface":"zone:notification-area"}),
+        )
+        .await;
+        let mut args =
+            json!({"surface": "zone:notification-area", "content": {"body": "Continue?"}});
+        if actions {
+            args["content"]["actions"] = json!([{"label":"Yes","callback_id":"yes"}]);
+        }
+        if let Some(ttl) = ttl {
+            args["ttl_ms"] = json!(ttl);
+        }
+        let result = call(&server, "hud_publish", args).await;
+        assert_eq!(
+            result.get("expires_in_ms").and_then(Value::as_u64),
+            expected
+        );
+        let expiry = server.scene.lock().await.zone_registry.active_publishes["notification-area"]
+            [0]
+        .expires_at_wall_us;
+        assert_eq!(expiry, expected.map(|ms| 1_000_000 + ms * 1_000));
+        let surfaces = call(&server, "hud_surfaces", json!({})).await;
+        let held = surfaces["surfaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["s"] == "zone:notification-area")
+            .unwrap();
+        assert_eq!(held.get("expires_in_ms").and_then(Value::as_u64), expected);
+    }
+    // Concurrent updates may choose old or new; stored expiry and reply must agree.
+    let writer = std::thread::spawn(move || {
+        for _ in 0..4096 {
+            defaults.set_answer_window_ms(15_000);
+            defaults.set_answer_window_ms(120_000);
+        }
+    });
+    for _ in 0..32 {
+        call(
+            &server,
+            "hud_clear",
+            json!({"surface":"zone:notification-area"}),
+        )
+        .await;
+        let result = call(&server, "hud_publish", json!({"surface":"zone:notification-area", "content":{"body":"Choose", "actions":[{"label":"Yes","callback_id":"yes"}]}})).await;
+        let ms = result["expires_in_ms"].as_u64().unwrap();
+        assert!([15_000, 30_000, 120_000].contains(&ms));
+        assert_eq!(
+            server.scene.lock().await.zone_registry.active_publishes["notification-area"][0]
+                .expires_at_wall_us,
+            Some(1_000_000 + ms * 1_000)
+        );
+    }
+    writer.join().unwrap();
 }
 
 #[tokio::test]
@@ -653,6 +718,29 @@ async fn test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept() {
             .get("subtitle")
             .is_none_or(Vec::is_empty)
     );
+    drop(scene);
+    server
+        .config
+        .publication_defaults
+        .set_answer_window_ms(30_000);
+    let result = call(&server, "hud_publish", json!({"surface":"zone:notification-area", "content":{"body":"Choose", "actions":[{"label":"Yes","callback_id":"yes"}]}})).await;
+    assert_eq!(result["expires_in_ms"], 30_000);
+    let mut scene = server.scene.lock().await;
+    let expected = scene.now_wall_us() + 30_000_000;
+    assert_eq!(
+        scene.zone_registry.active_publishes["notification-area"][0].expires_at_wall_us,
+        Some(expected)
+    );
+    server
+        .config
+        .publication_defaults
+        .set_answer_window_ms(300_000);
+    clock.advance(30_000);
+    assert_eq!(
+        scene.drain_expired_zone_publications(),
+        1,
+        "active expiry remains fixed"
+    );
 }
 
 #[tokio::test]
@@ -674,6 +762,92 @@ async fn test_hud_publish_zone_contention_policy_latest_wins() {
     let publishes = &scene.zone_registry.active_publishes["subtitle"];
     assert_eq!(publishes.len(), 1);
     assert!(matches!(&publishes[0].content, ZoneContent::StreamText(s) if s == "second"));
+    drop(scene);
+
+    // Opt-in release comparison of the real JSON-RPC publish path. Unrelated
+    // retained transcript size must not turn a tiny subtitle into scene-wide work.
+    if std::env::var_os("TZE_HUD_ZONE_SCALING").is_some() {
+        use std::time::Instant;
+        use tze_hud_scene::types::{
+            FontFamily, Node, NodeData, Rect, TextAlign, TextMarkdownNode, TextOverflow,
+        };
+        assert!(!cfg!(debug_assertions), "scaling proof requires --release");
+        let mut servers = Vec::new();
+        for tile_count in [1, 64] {
+            let (candidate, _) = super::tests::server();
+            {
+                let mut scene = candidate.scene.lock().await;
+                let tab = scene.active_tab.unwrap();
+                let lease = scene.grant_lease("unrelated-transcript", 60_000);
+                for index in 0..tile_count {
+                    let tile = scene
+                        .create_tile(
+                            tab,
+                            "unrelated-transcript",
+                            lease,
+                            Rect::new(0.0, 0.0, 100.0, 100.0),
+                            index,
+                        )
+                        .unwrap();
+                    scene
+                        .set_tile_root(
+                            tile,
+                            Node {
+                                id: SceneId::new(),
+                                children: Vec::new(),
+                                layout: Default::default(),
+                                data: NodeData::TextMarkdown(TextMarkdownNode {
+                                    content: "x".repeat(65_535),
+                                    bounds: Rect::new(0.0, 0.0, 100.0, 100.0),
+                                    font_size_px: 16.0,
+                                    font_family: FontFamily::SystemSansSerif,
+                                    color: Rgba::WHITE,
+                                    background: None,
+                                    alignment: TextAlign::Start,
+                                    overflow: TextOverflow::Clip,
+                                    color_runs: Box::default(),
+                                }),
+                            },
+                        )
+                        .unwrap();
+                }
+            }
+            servers.push(candidate);
+        }
+        let payload = json!({"surface":"zone:subtitle", "content":"tiny update", "ttl_ms":20000});
+        for candidate in &servers {
+            for _ in 0..10 {
+                call(candidate, "hud_publish", payload.clone()).await;
+            }
+        }
+        let mut samples = [Vec::new(), Vec::new()];
+        // Alternate order each round to limit drift; setup and warmup are untimed.
+        for round in 0..7 {
+            for index in if round % 2 == 0 { [0, 1] } else { [1, 0] } {
+                let start = Instant::now();
+                for _ in 0..100 {
+                    let reply = call(&servers[index], "hud_publish", payload.clone()).await;
+                    assert_eq!(reply, json!({"ok":true,"expires_in_ms":20000}));
+                }
+                samples[index].push(start.elapsed().as_nanos() / 100);
+            }
+        }
+        println!(
+            "ZONE_SCALING payload={payload} tiles=[1,64] text_bytes_per_tile=65535 samples_ns_per_publish={samples:?}"
+        );
+        for sample in &mut samples {
+            sample.sort_unstable();
+        }
+        let ratio = samples[1][3] as f64 / samples[0][3] as f64;
+        println!(
+            "ZONE_SCALING median_ns=[{},{}] growth_ratio={ratio:.3}",
+            samples[0][3], samples[1][3]
+        );
+        assert!(
+            ratio < 4.0,
+            "unrelated scene growth amplified publish cost by {ratio:.3}x"
+        );
+    }
 }
 
 #[tokio::test]
@@ -726,45 +900,75 @@ async fn delay_ms_holds_content_until_due() {
 
 /// A delayed notification takes the same expiry as an immediate one: held
 /// for `ttl_ms:0` (and `hud_hold` then retimes it once it has materialized),
-/// otherwise the explicit expiry stamped at schedule time (the 60 s
-/// `DEFAULT_ZONE_TTL_MS` when `ttl_ms` is absent), counted from presentation.
-/// That case is unchanged from before the fix.
+/// otherwise the explicit or omission-default expiry stamped at acceptance,
+/// counted from presentation. A later owner change never retimes it.
 #[tokio::test]
 async fn delayed_notification_expiry_matches_immediate() {
-    for (ttl, expected) in [
-        (Some(0), None),
-        (None, Some(1_000_000 + 5_000_000 + 60_000_000)),
-    ] {
-        let (server, clock) = server();
-        let mut args = json!({"surface": "zone:notification-area",
-            "content": {"title": "t", "body": "b"}, "delay_ms": 5000});
-        if let Some(ttl) = ttl {
-            args["ttl_ms"] = json!(ttl);
-        }
-        call(&server, "hud_publish", args).await;
-        clock.advance(5_000);
-        {
-            let mut scene = server.scene.lock().await;
-            scene.apply_due_batches();
-            let rec = &scene.zone_registry.active_publishes["notification-area"][0];
-            assert_eq!(rec.expires_at_wall_us, expected, "ttl {ttl:?}");
-            clock.advance(120_000);
-            let drained = scene.drain_expired_zone_publications();
-            assert_eq!(drained, usize::from(expected.is_some()), "ttl {ttl:?}");
-        }
-        if ttl == Some(0) {
-            let v = call(
-                &server,
-                "hud_hold",
-                json!({"surface": "zone:notification-area", "ttl_ms": 5000}),
-            )
-            .await;
-            assert_eq!(v, json!({"ok": true, "expires_in_ms": 5000}));
-            let scene = server.scene.lock().await;
+    for actions in [false, true] {
+        for ttl in [None, Some(0), Some(10_000), Some(600_000)] {
+            let (server, clock) = server();
+            server
+                .config
+                .publication_defaults
+                .set_answer_window_ms(30_000);
+            let lifetime = ttl.unwrap_or(if actions { 30_000 } else { 60_000 });
+            let expected = (lifetime > 0).then_some(6_000_000 + lifetime * 1_000);
+            let mut args = json!({"surface": "zone:notification-area",
+                "content": {"title": "t", "body": "b"}, "delay_ms": 5000});
+            if actions {
+                args["content"]["actions"] = json!([{"label":"Yes","callback_id":"yes"}]);
+            }
+            if let Some(ttl) = ttl {
+                args["ttl_ms"] = json!(ttl);
+            }
+            let response = call(&server, "hud_publish", args).await;
             assert_eq!(
-                scene.zone_registry.active_publishes["notification-area"][0].expires_at_wall_us,
-                Some(scene.now_wall_us() + 5_000_000)
+                response.get("expires_in_ms").and_then(Value::as_u64),
+                expected.map(|at| (at - 1_000_000) / 1_000)
             );
+            server
+                .config
+                .publication_defaults
+                .set_answer_window_ms(120_000);
+            let surfaces = call(&server, "hud_surfaces", json!({})).await;
+            let held = surfaces["surfaces"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["s"] == "zone:notification-area")
+                .unwrap();
+            assert_eq!(
+                held.get("expires_in_ms").and_then(Value::as_u64),
+                response.get("expires_in_ms").and_then(Value::as_u64)
+            );
+            clock.advance(5_000);
+            {
+                let mut scene = server.scene.lock().await;
+                scene.apply_due_batches();
+                assert_eq!(
+                    scene.zone_registry.active_publishes["notification-area"][0].expires_at_wall_us,
+                    expected
+                );
+                clock.advance(600_001);
+                assert_eq!(
+                    scene.drain_expired_zone_publications(),
+                    usize::from(expected.is_some())
+                );
+            }
+            if ttl == Some(0) {
+                let response = call(
+                    &server,
+                    "hud_hold",
+                    json!({"surface":"zone:notification-area", "ttl_ms":5000}),
+                )
+                .await;
+                assert_eq!(response, json!({"ok":true,"expires_in_ms":5000}));
+                let scene = server.scene.lock().await;
+                assert_eq!(
+                    scene.zone_registry.active_publishes["notification-area"][0].expires_at_wall_us,
+                    Some(scene.now_wall_us() + 5_000_000)
+                );
+            }
         }
     }
 }
@@ -970,8 +1174,12 @@ async fn hold_extends_and_requires_a_holding() {
 #[tokio::test]
 async fn notification_ttl_zero_is_held_and_hold_retimes_it() {
     let (server, clock) = server();
+    server
+        .config
+        .publication_defaults
+        .set_answer_window_ms(15_000);
     let notif = json!({"surface": "zone:notification-area",
-        "content": {"title": "t", "body": "b"}});
+        "content": {"title": "t", "body": "b", "actions":[{"label":"Yes","callback_id":"yes"}]}});
     let mut held = notif.clone();
     held["ttl_ms"] = json!(0);
     let v = call(&server, "hud_publish", held).await;

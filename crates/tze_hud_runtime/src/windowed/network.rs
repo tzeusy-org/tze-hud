@@ -69,18 +69,20 @@ pub(super) fn start_network_services(
         agents,
         shared_state,
         runtime_context,
+        Default::default(),
         tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         None,
         Arc::default(),
     )
 }
 
-#[allow(clippy::type_complexity)]
+#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 pub(super) fn start_network_services_with_render_wake(
     grpc_port: u16,
     agents: SharedAgents,
     shared_state: Arc<Mutex<SharedState>>,
     runtime_context: SharedRuntimeContext,
+    publication_defaults: tze_hud_scene::PublicationDefaults,
     render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
     bind_gate: Option<crate::operator::handoff::BindGate>,
     grpc_binds: Arc<std::sync::Mutex<Vec<std::net::SocketAddr>>>,
@@ -100,6 +102,7 @@ pub(super) fn start_network_services_with_render_wake(
         agents,
         shared_state,
         runtime_context,
+        publication_defaults,
         render_wake,
         bind_gate,
         grpc_binds,
@@ -118,6 +121,7 @@ fn start_network_services_on_listener(
     agents: SharedAgents,
     shared_state: Arc<Mutex<SharedState>>,
     runtime_context: SharedRuntimeContext,
+    publication_defaults: tze_hud_scene::PublicationDefaults,
     tailnet_fixture: Option<crate::net_addrs::TailnetFixture>,
 ) -> Result<NetworkServices, Box<dyn std::error::Error>> {
     let grpc_port = listener.local_addr()?.port();
@@ -127,6 +131,7 @@ fn start_network_services_on_listener(
         agents,
         shared_state,
         runtime_context,
+        publication_defaults,
         tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         None,
         Arc::default(),
@@ -136,12 +141,13 @@ fn start_network_services_on_listener(
 }
 
 #[allow(clippy::type_complexity)]
-#[cfg_attr(test, allow(clippy::too_many_arguments))] // Test-only address source injection.
+#[allow(clippy::too_many_arguments)] // Shared runtime dependencies and test-only address injection.
 fn start_enabled_network_services(
     grpc_port: u16,
     agents: SharedAgents,
     shared_state: Arc<Mutex<SharedState>>,
     runtime_context: SharedRuntimeContext,
+    publication_defaults: tze_hud_scene::PublicationDefaults,
     render_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
     bind_gate: Option<crate::operator::handoff::BindGate>,
     grpc_binds: Arc<std::sync::Mutex<Vec<std::net::SocketAddr>>>,
@@ -162,6 +168,7 @@ fn start_enabled_network_services(
     let addrs = listen_addrs(&initial_ips, grpc_port);
 
     let service = HudSessionImpl::from_deps(SessionDeps {
+        publication_defaults,
         resource_budget: runtime_context.resource_budget(),
         budget_enforcer: Some(std::sync::Arc::new(
             crate::mutation_budget_bridge::RuntimeMutationBudgetEnforcer::with_limits(
@@ -640,6 +647,7 @@ mod tests {
                 Default::default(),
                 shared_state,
                 ctx,
+                Default::default(),
                 None,
             )
             .expect("start_network_services should not error for a valid port");
@@ -678,22 +686,103 @@ mod tests {
             .expect("failed to allocate ephemeral listener for loopback bind test");
         let shared_state = make_shared_state();
         let ctx: SharedRuntimeContext = Arc::new(RuntimeContext::headless_default());
+        let defaults = tze_hud_scene::PublicationDefaults::new(30_000);
+        let scene = Arc::clone(&shared_state.blocking_lock().scene);
+        scene.blocking_lock().zone_registry = tze_hud_scene::ZoneRegistry::with_defaults();
         let (rt, handles, _, _, _, _, grpc_addrs) = start_network_services_on_listener(
             listener,
-            Default::default(),
+            tze_hud_scene::config::AgentDirectory::unrestricted("bootstrap-key").shared(),
             shared_state,
             ctx,
+            defaults.clone(),
             None,
         )
         .expect("loopback startup must adopt the owned ephemeral listener");
         assert!(rt.is_some(), "loopback bind must create a NetworkRuntime");
         assert!(!handles.is_empty(), "loopback bind must spawn task handles");
-        rt.as_ref().unwrap().rt.block_on(async {
-            tze_hud_protocol::proto::session::hud_session_client::HudSessionClient::connect(
-                format!("http://{}", grpc_addrs[0]),
-            )
+        let verify_live_default = async {
+            use tze_hud_protocol::proto::session::client_message::Payload;
+            use tze_hud_protocol::proto::session::server_message::Payload as ServerPayload;
+            use tze_hud_protocol::proto::session::{ClientMessage, Publish, SessionInit};
+            use tze_hud_protocol::proto::{
+                NotificationActionProto, NotificationPayload, ZoneContent,
+            };
+
+            let mut client =
+                tze_hud_protocol::proto::session::hud_session_client::HudSessionClient::connect(
+                    format!("http://{}", grpc_addrs[0]),
+                )
+                .await
+                .expect("the real gRPC server accepts a transport connection");
+            let (tx, rx) = tokio::sync::mpsc::channel(8);
+            tx.send(ClientMessage {
+                sequence: 1,
+                payload: Some(Payload::SessionInit(SessionInit {
+                    agent_id: "bootstrap".into(),
+                    auth_credential: Some(tze_hud_protocol::auth::psk_credential("bootstrap-key")),
+                    ..Default::default()
+                })),
+                ..Default::default()
+            })
             .await
-            .expect("the real gRPC server must accept a transport connection");
+            .unwrap();
+            let mut stream = client
+                .session(tokio_stream::wrappers::ReceiverStream::new(rx))
+                .await
+                .unwrap()
+                .into_inner();
+            assert!(matches!(
+                stream.message().await.unwrap().unwrap().payload,
+                Some(ServerPayload::SessionEstablished(_))
+            ));
+            assert!(matches!(
+                stream.message().await.unwrap().unwrap().payload,
+                Some(ServerPayload::DegradationNotice(_))
+            ));
+            for (sequence, ms) in [(2, 30_000), (3, 120_000)] {
+                defaults.set_answer_window_ms(ms);
+                let now = scene.lock().await.now_wall_us();
+                let content = ZoneContent {
+                    payload: Some(
+                        tze_hud_protocol::proto::zone_content::Payload::Notification(
+                            NotificationPayload {
+                                text: "Choose".into(),
+                                actions: vec![NotificationActionProto {
+                                    label: "Yes".into(),
+                                    callback_id: "yes".into(),
+                                }],
+                                ..Default::default()
+                            },
+                        ),
+                    ),
+                };
+                tx.send(ClientMessage {
+                    sequence,
+                    payload: Some(Payload::Publish(Publish {
+                        surface: "zone:notification-area".into(),
+                        content: Some(content),
+                        ..Default::default()
+                    })),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+                let result = stream.message().await.unwrap().unwrap();
+                assert!(matches!(result.payload, Some(ServerPayload::RequestResult(r)) if r.ok));
+                let scene = scene.lock().await;
+                let expiry = scene.zone_registry.active_publishes["notification-area"]
+                    .last()
+                    .unwrap()
+                    .expires_at_wall_us
+                    .unwrap();
+                assert!(expiry >= now + u64::from(ms) * 1_000);
+                assert!(expiry <= scene.now_wall_us() + u64::from(ms) * 1_000);
+            }
+        };
+        rt.as_ref().unwrap().rt.block_on(async {
+            tokio::time::timeout(std::time::Duration::from_secs(5), verify_live_default)
+                .await
+                .expect("bootstrap session must finish");
         });
         for h in handles {
             h.abort();
@@ -715,6 +804,7 @@ mod tests {
             Default::default(),
             make_shared_state(),
             Arc::new(RuntimeContext::headless_default()),
+            Default::default(),
             tze_hud_scene::render_wake::RenderWakeNotifier::default(),
             Some(gate.clone()),
             Arc::clone(&grpc_binds),

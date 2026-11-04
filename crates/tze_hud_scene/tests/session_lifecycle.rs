@@ -1732,6 +1732,36 @@ fn test_zone_publish_rejected_when_lease_orphaned() {
         )
         .expect("publish while active must succeed");
 
+    // Direct absolute admission retains its acceptance snapshot even if the
+    // clock advances before insertion, and records the lease for later cleanup.
+    let deadline = clock.now_us() + 30_000_000;
+    clock.advance(250);
+    scene
+        .publish_to_zone_until_with_lease(
+            "subtitle",
+            ZoneContent::StreamText("resolved deadline".into()),
+            "agent.juliet",
+            lease_id,
+            None,
+            Some(deadline),
+        )
+        .unwrap();
+    let record = &scene.zone_registry.active_for_zone("subtitle")[0];
+    assert_eq!(record.expires_at_wall_us, Some(deadline));
+    assert_eq!(record.lease_id, Some(lease_id));
+    assert_eq!(record.publication_origin, None);
+    assert!(matches!(
+        scene.publish_to_zone_until_with_lease(
+            "subtitle",
+            ZoneContent::StreamText("foreign lease".into()),
+            "other-agent",
+            lease_id,
+            None,
+            Some(deadline),
+        ),
+        Err(ValidationError::ZonePublishLeaseNotFound { .. })
+    ));
+
     // Disconnect agent
     clock.advance(1_000);
     scene
@@ -1755,6 +1785,44 @@ fn test_zone_publish_rejected_when_lease_orphaned() {
             Err(ValidationError::ZonePublishLeaseOrphaned { .. })
         ),
         "zone publish from orphaned lease must return ZonePublishLeaseOrphaned, got: {result:?}"
+    );
+
+    // Both finite and held direct admission enforce every inactive lease state.
+    for state in [
+        LeaseState::Orphaned,
+        LeaseState::Suspended,
+        LeaseState::Expired,
+    ] {
+        scene.leases.get_mut(&lease_id).unwrap().state = state;
+        for expiry in [Some(deadline), None] {
+            let error = scene
+                .publish_to_zone_until_with_lease(
+                    "subtitle",
+                    ZoneContent::StreamText("rejected".into()),
+                    "agent.juliet",
+                    lease_id,
+                    None,
+                    expiry,
+                )
+                .unwrap_err();
+            assert!(matches!(
+                (state, error),
+                (
+                    LeaseState::Orphaned,
+                    ValidationError::ZonePublishLeaseOrphaned { .. }
+                ) | (
+                    LeaseState::Suspended,
+                    ValidationError::ZonePublishSafeModeActive { .. }
+                ) | (
+                    LeaseState::Expired,
+                    ValidationError::ZonePublishLeaseNotActive { .. }
+                )
+            ));
+        }
+    }
+    assert_eq!(
+        scene.zone_registry.active_for_zone("subtitle")[0].expires_at_wall_us,
+        Some(deadline)
     );
 
     // Existing publication must still be present (stale-badged)

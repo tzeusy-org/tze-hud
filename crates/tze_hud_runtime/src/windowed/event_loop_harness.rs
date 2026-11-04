@@ -340,8 +340,14 @@ impl HeadlessEventLoopHarness {
             ))
         });
         state.pairing = pairing.clone();
+        let render_wake = state.wake.render_notifier();
+        state.live = Arc::new(
+            crate::launch::LiveSettings::new(cfg.target_fps, cfg.debug_zones, render_wake.clone())
+                .with_answer_window(cfg.answer_window_ms),
+        );
         let mcp_config = crate::mcp::McpServerConfig {
             appearance: None,
+            publication_defaults: state.live.publication_defaults.clone(),
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
                 &global_tokens,
                 "motion.state.ms",
@@ -380,6 +386,7 @@ impl HeadlessEventLoopHarness {
         // builds it. Its lease-expiry channel is the one `tick` publishes
         // sweep results on.
         let service = HudSessionImpl::from_deps(SessionDeps {
+            publication_defaults: state.live.publication_defaults.clone(),
             resource_budget: runtime_context.resource_budget(),
             budget_enforcer: Some(Arc::new(
                 crate::mutation_budget_bridge::RuntimeMutationBudgetEnforcer::with_limits(
@@ -400,12 +407,6 @@ impl HeadlessEventLoopHarness {
                 )),
         );
 
-        let render_wake = state.wake.render_notifier();
-        state.live = Arc::new(crate::launch::LiveSettings::new(
-            cfg.target_fps,
-            cfg.debug_zones,
-            render_wake.clone(),
-        ));
         let panel_scene = Arc::clone(&state.shared_state.lock().await.scene);
         let appearance = Arc::new(crate::appearance::Appearance::for_startup(
             raw.as_ref(),
@@ -985,6 +986,24 @@ impl HeadlessEventLoopHarness {
             .instances
             .get(name)
             .map(|i| (i.geometry_override, i.auto_clear_ms))
+    }
+
+    /// Stored deadlines of this publisher's active and accepted scheduled
+    /// publications. This reads admission state without deriving new expiry.
+    pub fn zone_publication_deadlines(&self, zone: &str, namespace: &str) -> Vec<Option<u64>> {
+        let scene = self.scene();
+        let mut deadlines: Vec<_> = scene
+            .zone_registry
+            .active_publishes
+            .get(zone)
+            .into_iter()
+            .flatten()
+            .filter(|publication| publication.publisher_namespace == namespace)
+            .map(|publication| publication.expires_at_wall_us)
+            .chain(scene.scheduled_zone_publication_expiries(zone, namespace))
+            .collect();
+        deadlines.sort_unstable();
+        deadlines
     }
 
     /// Number of publications currently shown in zone `zone`.

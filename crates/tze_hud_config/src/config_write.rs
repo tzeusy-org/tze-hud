@@ -336,6 +336,7 @@ pub enum RuntimeUpdate {
     McpPort(Option<u16>),
     GrpcPort(Option<u16>),
     Fps(Option<u32>),
+    AnswerWindowMs(Option<u32>),
     LogLevel(Option<String>),
     DebugZones(Option<bool>),
     Hotkey(ChordRole, Option<String>),
@@ -348,6 +349,7 @@ impl RuntimeUpdate {
             Self::McpPort(_) => "mcp_port",
             Self::GrpcPort(_) => "grpc_port",
             Self::Fps(_) => "fps",
+            Self::AnswerWindowMs(_) => "answer_window_ms",
             Self::LogLevel(_) => "log_level",
             Self::DebugZones(_) => "debug_zones",
             Self::Hotkey(role, _) => role.config_key(),
@@ -357,7 +359,7 @@ impl RuntimeUpdate {
     fn value(&self) -> Option<Value> {
         match self {
             Self::McpPort(v) | Self::GrpcPort(v) => v.map(|p| Value::from(i64::from(p))),
-            Self::Fps(v) => v.map(|f| Value::from(i64::from(f))),
+            Self::Fps(v) | Self::AnswerWindowMs(v) => v.map(|f| Value::from(i64::from(f))),
             Self::LogLevel(v) | Self::Hotkey(_, v) => v.as_deref().map(Value::from),
             Self::DebugZones(v) => v.map(Value::from),
         }
@@ -712,6 +714,15 @@ mod tests {
         assert!(matches!(err, ConfigWriteError::Io(_)), "{err}");
         assert_eq!(std::fs::read_to_string(&path).unwrap(), DOC);
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        let err = edit_with(
+            &path,
+            |src| apply_runtime(src, &[RuntimeUpdate::AnswerWindowMs(Some(30_000))]),
+            |_, _| Err(std::io::Error::other("runtime rename refused")),
+        )
+        .unwrap_err();
+        assert!(matches!(err, ConfigWriteError::Io(_)));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), DOC);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[test]
@@ -745,6 +756,7 @@ mod tests {
             &[
                 RuntimeUpdate::GrpcPort(Some(50061)),
                 RuntimeUpdate::Fps(Some(30)),
+                RuntimeUpdate::AnswerWindowMs(Some(120_000)),
                 RuntimeUpdate::LogLevel(Some("debug".into())),
                 RuntimeUpdate::DebugZones(Some(true)),
                 RuntimeUpdate::Hotkey(ChordRole::Panel, Some("Ctrl+Alt+F9".into())),
@@ -763,6 +775,7 @@ mod tests {
         let runtime = crate::loader::runtime_section(&got).expect("valid [runtime]");
         assert_eq!(runtime.grpc_port, Some(50061));
         assert_eq!(runtime.fps, Some(30));
+        assert_eq!(runtime.answer_window_ms, Some(120_000));
         assert_eq!(runtime.log_level.as_deref(), Some("debug"));
         assert_eq!(runtime.debug_zones, Some(true));
         assert_eq!(runtime.panel_hotkey.as_deref(), Some("Ctrl+Alt+F9"));
@@ -772,6 +785,7 @@ mod tests {
             &[
                 RuntimeUpdate::GrpcPort(None),
                 RuntimeUpdate::Fps(None),
+                RuntimeUpdate::AnswerWindowMs(None),
                 RuntimeUpdate::LogLevel(None),
                 RuntimeUpdate::DebugZones(None),
                 RuntimeUpdate::Hotkey(ChordRole::Panel, None),
@@ -794,6 +808,14 @@ mod tests {
             (RuntimeUpdate::GrpcPort(Some(9290)), "runtime.grpc_port"),
             // gRPC is unset, so it would start on its default.
             (RuntimeUpdate::McpPort(Some(50051)), "runtime.grpc_port"),
+            (
+                RuntimeUpdate::AnswerWindowMs(Some(0)),
+                "runtime.answer_window_ms",
+            ),
+            (
+                RuntimeUpdate::AnswerWindowMs(Some(300_001)),
+                "runtime.answer_window_ms",
+            ),
             (RuntimeUpdate::Fps(Some(0)), "runtime.fps"),
             (RuntimeUpdate::Fps(Some(241)), "runtime.fps"),
             (
@@ -816,6 +838,11 @@ mod tests {
                 other => panic!("{bad:?}: {other:?}"),
             }
             assert_eq!(std::fs::read_to_string(&path).unwrap(), src);
+        }
+        for invalid in ["-1", "1.5", "nan", "inf"] {
+            let src =
+                format!("[runtime]\nprofile = \"full-display\"\nanswer_window_ms = {invalid}\n");
+            assert!(toml::from_str::<RawConfig>(&src).is_err(), "{invalid}");
         }
         // Port 0 (disabled) twice is fine.
         set_runtime(

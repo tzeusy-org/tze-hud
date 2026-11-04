@@ -256,6 +256,7 @@ pub(super) async fn handle_session_init(
         )
     };
     let mut session = StreamSession {
+        publication_defaults: Default::default(),
         session_id,
         namespace: namespace.clone(),
         agent_name: namespace.clone(),
@@ -446,6 +447,7 @@ pub(super) async fn handle_session_resume(
     };
 
     let mut session = StreamSession {
+        publication_defaults: Default::default(),
         session_id,
         namespace: namespace.clone(),
         agent_name: namespace.clone(),
