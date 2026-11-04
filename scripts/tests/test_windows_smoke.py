@@ -197,6 +197,7 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
             self.publishes, self.captures, self.clears = [], [], 0
             self.capture_bodies = []
             self.rpc_s, self.capture_s = (0.001, 0.0005) if case == "coarse monotonic" else (0.05, 0.05)
+            if case == "immediate readiness": self.rpc_s = 0.25
             self.log = tmp_path / (case + "-runtime.log")
             self.log.write_bytes(b"")
             self.activated = self.completed = False
@@ -323,6 +324,8 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                 self.emit("delayed_enqueued", request_span_id=9, batch_hi=10, batch_lo=11,
                           is_subtitle=True, present_at_wall_us=int(self.epoch + self.due * 1e6),
                           expires_at_wall_us=int(self.epoch + (self.due + 20) * 1e6))
+                if self.case == "uncertain acceptance":
+                    raise ws.urllib.error.URLError("synthetic lost acknowledgement")
                 payload = {"ok": self.case != "publish rejected", "expires_in_ms": 23000}
             self.clock.now += self.rpc_s if tool != "hud_publish" else 0
             result = {"content": [{"type": "text", "text": ws.json.dumps(payload)}]}
@@ -361,8 +364,8 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                     assert captures[3][0] >= acknowledged + 3
                     # Baseline and original due sleeps remain, followed only by
                     # condition polling when completion was not yet observed.
-                    assert len(clock.sleeps) == (invocation + 1) * 3
-                    assert clock.sleeps[-1] <= ws.POLL_S
+                    assert len(clock.sleeps) == (invocation + 1) * (2 if case == "immediate readiness" else 3)
+                    if case != "immediate readiness": assert clock.sleeps[-1] <= ws.POLL_S
                 else:
                     with pytest.raises(AssertionError):
                         ws.check_delay(smoke, endpoint.diagnostics, owned_log=endpoint.log, producer=endpoint)
@@ -370,6 +373,9 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                     assert len(endpoint.publishes) == (0 if baseline_failed else 1)
                     assert endpoint.clears == (1 if baseline_failed else 2)
                     assert len(endpoint.captures) <= 5  # No retry on invalid evidence.
+                    if case in ("producer exit", "ambiguous activation", "readiness timeout"):
+                        assert len(endpoint.captures) == 3  # No late PNG after failed readiness.
+                    if case == "uncertain acceptance": assert len(endpoint.captures) == 2
 
                 manifest = ws.json.loads((endpoint.diagnostics / "delay.json").read_text())
                 assert manifest["outcome"] == ("success" if success else "failure")
@@ -397,9 +403,10 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
     run("coarse monotonic", success=True)  # Coarse request bounds can under-sleep the actual acknowledgement.
     run("normal", success=True)
     run("ordinary readiness", success=True)
+    run("immediate readiness", success=True)
     run("slow decode", success=True)  # Capture timing ends before PNG CPU work.
     for case in (
-        "producer exit", "ambiguous activation", "readiness timeout", "missing capture bracket",
+        "producer exit", "ambiguous activation", "readiness timeout", "missing capture bracket", "uncertain acceptance",
         "premature", "missing", "too few pixels", "native observed footprint", "unstable baseline", "not restored",
         "baseline dimensions", "early dimensions", "late dimensions", "clear dimensions",
         "cross-due capture", "slow acknowledgement", "not held",
@@ -424,6 +431,7 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
         ("scheduled_activation", "active_publications", 2),
         ("scheduled_activation", "published_at_wall_us", 1),
         ("zone_fade_started", "published_at_wall_us", 1), ("zone_fade_started", "target_opacity", 0),
+        ("zone_fade_started", "target_opacity", True), ("zone_fade_started", "from_opacity", False),
         ("zone_fade_started", "duration_ms", 0), ("zone_fade_started", "from_opacity", -1),
         ("zone_fade_observed", "zones_shown", False), ("zone_fade_observed", "normal_animation", False),
         ("zone_fade_observed", "transition_duration_ms", 1),
@@ -503,7 +511,7 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                 with path.open("ab") as handle: handle.write(chunk)
             with pytest.raises(AssertionError):
                 reader.read(final=True)
-    for now in (manifest["latest_due"] + 2, manifest["latest_due"] + 3, float("nan")):
+    for now in (manifest["latest_due"] - 1, manifest["latest_due"] + 2, manifest["latest_due"] + 3, float("nan")):
         with monkeypatch.context() as patch:
             patch.setattr(ws.time, "perf_counter", lambda: now)
             reader = ws.DelayReadiness(seed.log, Alive())

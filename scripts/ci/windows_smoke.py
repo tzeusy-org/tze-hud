@@ -729,7 +729,8 @@ class DelayReadiness:
             assert published <= observed < expiry, "expired/backward delayed observation"
             if event["event"] == "zone_fade_started":
                 assert start is None, "ambiguous delayed fade"
-                assert event.get("target_opacity") == 1 and 0 <= event.get("from_opacity", -1) < 1
+                assert type(event.get("target_opacity")) in (int, float) and event["target_opacity"] == 1
+                assert type(event.get("from_opacity")) in (int, float) and 0 <= event["from_opacity"] < 1
                 assert self.integer(event, "duration_ms") > 0
                 start = event
             elif event["event"] in {"zone_fade_observed", "zone_text_sample"}:
@@ -739,7 +740,8 @@ class DelayReadiness:
                 assert type(opacity) in (int, float) and 0 <= opacity <= 1, "invalid delayed opacity"
                 complete = event.get("transition_complete") is True if event["event"] == "zone_fade_observed" else event.get("transition_active") is False
                 if event["event"] == "zone_fade_observed":
-                    assert event.get("from_opacity") == start["from_opacity"] and event.get("target_opacity") == 1
+                    assert type(event.get("from_opacity")) in (int, float) and event["from_opacity"] == start["from_opacity"]
+                    assert type(event.get("target_opacity")) in (int, float) and event["target_opacity"] == 1
                     assert self.integer(event, "transition_duration_ms") == start["duration_ms"]
                     if complete:
                         assert self.integer(event, "transition_elapsed_us") >= start["duration_ms"] * 1000
