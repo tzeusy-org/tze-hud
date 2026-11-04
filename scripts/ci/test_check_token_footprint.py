@@ -339,6 +339,7 @@ class CandidatePacketTests(unittest.TestCase):
                 "widget_publish": 80,
                 "portal": 250,
                 "error": 60,
+                "notification_choice": 120,
             },
         )
 
