@@ -46,6 +46,8 @@ use crate::threads::ShutdownToken;
 pub struct McpServerConfig {
     /// Implicit widget duration from the same resolved startup theme as the compositor.
     pub widget_transition_ms: u32,
+    /// Same live omission default as the production gRPC service.
+    pub publication_defaults: tze_hud_scene::PublicationDefaults,
     /// Addresses to listen on, one listener each. The windowed runtime passes
     /// loopback plus the local Tailscale addresses (see [`crate::net_addrs`]).
     pub bind_addrs: Vec<SocketAddr>,
@@ -227,6 +229,7 @@ async fn start_mcp_http_server_inner(
         .with_config(McpConfig {
             agents: config.agents.clone(),
             widget_transition_ms: config.widget_transition_ms,
+            publication_defaults: config.publication_defaults.clone(),
         })
         .with_render_wake_notifier(render_wake)
         .with_portal_ingress_wake_notifier(portal_ingress_wake)
@@ -732,6 +735,7 @@ mod tests {
     fn make_config(port: u16, psk: &str) -> McpServerConfig {
         McpServerConfig {
             appearance: None,
+            publication_defaults: Default::default(),
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
                 &Default::default(),
                 "motion.state.ms",
@@ -1354,6 +1358,7 @@ mod tests {
     async fn mcp_http_tools_list_on_every_listener() {
         let config = McpServerConfig {
             appearance: None,
+            publication_defaults: Default::default(),
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
                 &Default::default(),
                 "motion.state.ms",
@@ -1445,6 +1450,7 @@ mod tests {
         let agents = tze_hud_scene::config::AgentDirectory::unrestricted("k").shared();
         let cfg = |addrs: [&str; 2]| McpServerConfig {
             appearance: None,
+            publication_defaults: Default::default(),
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
                 &Default::default(),
                 "motion.state.ms",
@@ -1561,7 +1567,10 @@ mod tests {
                         width_pct: 1.0,
                         height_pct: 0.05,
                     },
-                    accepted_media_types: vec![ZoneMediaType::StreamText],
+                    accepted_media_types: vec![
+                        ZoneMediaType::StreamText,
+                        ZoneMediaType::ShortTextWithIcon,
+                    ],
                     rendering_policy: RenderingPolicy::default(),
                     contention_policy: ContentionPolicy::LatestWins,
                     max_publishers: 4,
@@ -1595,6 +1604,7 @@ mod tests {
             &std::collections::HashMap::from([("motion.state.ms".into(), "240".into())]),
             "motion.state.ms",
         );
+        let defaults = config.publication_defaults.clone();
         let shutdown = ShutdownToken::new();
 
         let (handle, addrs) = start_mcp_http_server(scene.clone(), config, shutdown.clone(), None)
@@ -1627,6 +1637,20 @@ mod tests {
                 tze_hud_scene::types::WidgetParameterValue::F32(0.75)
             );
         }
+
+        defaults.set_answer_window_ms(30_000);
+        let question = r#"{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"zone:test-zone","content":{"type":"notification","body":"Continue?","actions":[{"label":"Yes","callback_id":"yes"}]}}},"id":6}"#;
+        let response = http_post(addr, question, Some("test-key")).await;
+        assert!(
+            response.contains(r#"{\"expires_in_ms\":30000,\"ok\":true}"#),
+            "{response}"
+        );
+        defaults.set_answer_window_ms(120_000);
+        let response = http_post(addr, question, Some("test-key")).await;
+        assert!(
+            response.contains(r#"{\"expires_in_ms\":120000,\"ok\":true}"#),
+            "{response}"
+        );
 
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
         handle.await.expect("task");

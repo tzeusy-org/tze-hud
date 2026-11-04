@@ -13,6 +13,7 @@ pub mod error_codes;
 pub mod graph;
 pub mod mutation;
 pub mod perf_budget;
+pub mod publication_defaults;
 pub mod render_wake;
 pub mod svg_tokens;
 #[cfg(any(test, feature = "test-support"))]
@@ -49,6 +50,9 @@ pub use graph::{
 };
 pub use mutation::{
     BatchTimingHints, MAX_BATCH_SIZE, MutationBatch, MutationResult, SceneMutation,
+};
+pub use publication_defaults::{
+    DEFAULT_ANSWER_WINDOW_MS, MAX_ANSWER_WINDOW_MS, PublicationDefaults,
 };
 pub use svg_tokens::{is_valid_token_key, resolve_token_placeholders};
 #[cfg(any(test, feature = "test-support"))]

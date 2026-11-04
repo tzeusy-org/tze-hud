@@ -16,6 +16,7 @@ use super::budget_gate::SharedMutationBudgetEnforcer;
 /// Per-session state tracked by the streaming server.
 pub(super) struct StreamSession {
     pub(super) session_id: String,
+    pub(super) publication_defaults: tze_hud_scene::PublicationDefaults,
     pub(super) namespace: String,
     pub(super) agent_name: String,
     /// Permissions from the agent's `allow` list, fixed at handshake.

@@ -70,6 +70,7 @@ pub use runtime_widget_assets::{
     DEFAULT_MAX_TOTAL_BYTES as DEFAULT_WIDGET_RUNTIME_MAX_TOTAL_BYTES,
     RuntimeWidgetAssetStoreConfig, resolve_runtime_widget_asset_store, resolve_store_path,
 };
+pub use tze_hud_scene::{DEFAULT_ANSWER_WINDOW_MS, MAX_ANSWER_WINDOW_MS};
 pub use validate::validate_config;
 pub use widgets::{
     LoadedWidgetType, build_widget_instance, validate_widget_bundles, validate_widget_instances,

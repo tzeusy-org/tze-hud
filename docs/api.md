@@ -104,8 +104,13 @@ otherwise. Scheduled zone publications count as held before presentation;
   replaces the newest output
   with the same key (progress lines). Portals are per agent: another agent's
   `portal:<id>` with the same id is a separate portal.
-- `ttl_ms` defaults to 60000 for zones; widgets are durable unless given one.
-  0 means held until cleared. A widget's owner-set "Clears after" limit
+- Omitted zone `ttl_ms` uses 60000, except a notification with actions uses
+  the owner's live `[runtime] answer_window_ms` (default 60000). An explicit
+  `ttl_ms` always wins, including 0 (held until cleared); the owner window is
+  a default, not a cap. The accepted publication stores one absolute expiry,
+  counted from presentation, and both `hud_publish` and `hud_surfaces` report
+  it as `expires_in_ms`, including any delay. A later setting change does not
+  retime active or already-scheduled cards. Widgets are durable unless given one. A widget's owner-set "Clears after" limit
   (`[[tabs.widgets]] auto_clear_ms`) caps every publication, held or not, at
   that long after it was published; `hud_publish`, `hud_hold` and
   `hud_surfaces` report the capped expiry. On a portal, an optional `ttl_ms` holds the
@@ -383,10 +388,15 @@ and cannot enable the internal native composer flag.
   `expires_at_us` wins over `ttl_ms`, which counts from presentation.
 - **Zero means the surface default on `Publish`.** Omitted scalar fields
   arrive as zero. With both `ttl_ms` and `expires_at_us` zero, notifications
-  expire after 8 s (urgency 0/1), 15 s (2), or 30 s (3+), counted from
-  presentation. Other zone content and widget publications have no derived
-  content expiry. MCP differs: omitted zone `ttl_ms` gives 60 s, while an
-  explicit `ttl_ms: 0` holds even a notification until cleared.
+  with actions use the owner's live `[runtime] answer_window_ms` (default
+  60000), counted from `max(now, present_at_us)` and stored at acceptance.
+  Positive `ttl_ms` wins over this default, and `expires_at_us` wins over
+  both. Changing the setting affects later accepted publications only; it
+  never retimes active or already-scheduled cards. Notifications without
+  actions keep 8 s (urgency 0/1), 15 s (2), or 30 s (3+) from presentation.
+  Other zone content and widget publications have no derived content expiry.
+  MCP's ordinary omitted zone TTL remains 60 s, and its explicit `ttl_ms: 0`
+  holds even an action notification until cleared.
 - **Hold0 means until cleared for both zones and widgets.** Publish first,
   then `Hold{surface, ttl_ms: 0}`.
   Hold removes content expiry from the agent's active and pending publications
@@ -419,7 +429,10 @@ to a display.
 `mcp_port` (default 9090) and `grpc_port` (50051), 0 disabling either and
 the two different; `fps` (1-240, default 60); `log_level` for the log file
 (`error`, `warn`, `info` default, `debug`, `trace`); and `debug_zones`
-(zone outlines, default false). Precedence, highest first: a command-line
+(zone outlines, default false). `answer_window_ms` is the live saved default
+for action notifications (integer milliseconds, 1–300000 inclusive, default
+60000); invalid values fail configuration validation. It has no flag or
+variable override. For the launch settings, precedence, highest first: a command-line
 flag (`--mcp-port`, `--grpc-port`, `--fps`, `--debug-zones`), an
 environment variable (`TZE_HUD_MCP_PORT`, `TZE_HUD_GRPC_PORT`,
 `TZE_HUD_FPS`, `TZE_HUD_DEBUG_ZONES=1`, `TZE_HUD_FILE_LOG`), `[runtime]`, the
@@ -460,8 +473,8 @@ act; Esc clears the search, then closes. A row whose value differs from
 its default (an override that matches the theme does not) shows Reset:
 clicking it, or Delete on the row (not while typing in a field or the
 search), puts the default back live and removes the key from the config
-file. Visibility, Appearance, Advanced tokens, Input and Diagnostics rows
-offer it; ports and widget boxes take a typed value. Clicks outside the
+file. Visibility, Appearance, Advanced tokens, Input, Diagnostics and the
+Agents answer-window row offer it; ports and widget boxes take a typed value. Clicks outside the
 panel pass through to the desktop. Closing the panel always resumes
 agents. While paused, the pause tile and row turn caution-colored.
 
@@ -472,6 +485,19 @@ or focus; agents keep their leases and publications and are not told. While
 anything is hidden and the panel is closed, a pill at the bottom right of the
 primary display says what is hidden and which chord opens the panel (the
 pause chord when Windows refused the panel chord). A restart shows everything.
+
+The Agents card's **Questions wait for an answer** choice offers 15 s,
+30 s, 1 min, 2 min and 5 min. Its detail is "How long a question card waits
+before it hands the question back · Default" or "· Saved to config";
+search question, choice, answer, timeout or wait to find it. A valid custom
+config duration is also displayed. Keyboard arrows or a click save through
+the normal atomic config writer, then apply live to the next accepted
+publication on both planes. Reset removes the override and restores 1 min.
+A failed save, including no writable config, leaves the live value and its
+source unchanged and reports the error. This never changes existing or
+already-scheduled cards, and explicit agent expiry always wins. Agents learn
+the effective lifetime through existing `expires_in_ms`, with no setting or
+schema field added to discovery.
 
 The Agents card lists every paired agent, and any other agent that is
 connected or shows something, with a status dot and what it holds (portals,

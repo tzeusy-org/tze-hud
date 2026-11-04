@@ -25,7 +25,7 @@ use tze_hud_protocol::proto::session::hud_session_client::HudSessionClient;
 use tze_hud_protocol::proto::session::server_message::Payload as ServerPayload;
 use tze_hud_protocol::proto::session::{self as wire, ClientMessage, ServerMessage};
 use tze_hud_runtime::windowed::{HeadlessEventLoopHarness, WindowedConfig};
-use tze_hud_scene::TestClock;
+use tze_hud_scene::{Clock, TestClock};
 
 const PRODUCTION_CONFIG: &str = include_str!("../../app/tze_hud_app/config/production.toml");
 const PORTAL: &str = "portal:claude-main";
@@ -1716,6 +1716,193 @@ async fn poc_panel_runtime_rows_apply_save_and_stage_a_restart() {
     let saved = || std::fs::read_to_string(&config).expect("config");
     // A key the config sets (not a commented example).
     let sets = |key: &str| saved().lines().any(|l| l.trim_start().starts_with(key));
+
+    // Both production server bridges share the panel's live omission default.
+    let accepted_at = poc.clock.now_us();
+    let question = json!({"body":"Continue?", "actions":[{"label":"Yes", "callback_id":"yes"}]});
+    for (key, delay) in [("active-old", 0), ("scheduled-old", 5000)] {
+        let result = poc
+            .call(
+                "hud_publish",
+                json!({"surface":NOTIFICATION,"content":question,"key":key,"delay_ms":delay}),
+            )
+            .await;
+        assert_eq!(result.body["expires_in_ms"], 60_000 + delay);
+    }
+    let mut resident = poc.resident().await;
+    let grpc_question = |key: &str, present_at_us| wire::Publish {
+        surface: NOTIFICATION.into(),
+        key: key.into(),
+        present_at_us,
+        content: Some(proto::ZoneContent {
+            payload: Some(proto::zone_content::Payload::Notification(
+                proto::NotificationPayload {
+                    text: "Continue?".into(),
+                    actions: vec![proto::NotificationActionProto {
+                        label: "Yes".into(),
+                        callback_id: "yes".into(),
+                    }],
+                    ..Default::default()
+                },
+            )),
+        }),
+        ..Default::default()
+    };
+    let shown_at = poc.clock.now_us() + 5_000_000;
+    for (key, present_at) in [("grpc-active-old", 0), ("grpc-scheduled-old", shown_at)] {
+        assert!(
+            resident
+                .request(ClientPayload::Publish(grpc_question(key, present_at)))
+                .await
+                .ok
+        );
+    }
+    poc.hud.panel_type("question");
+    poc.wait_for("search finds and focuses the question window", |hud| {
+        hud.control_panel_focus()
+            == Some(tze_hud_compositor::PanelFocus::Row(
+                "agents.answer_window".into(),
+            ))
+    })
+    .await;
+    poc.hud.panel_press("ArrowRight");
+    poc.wait_for("the answer window saves and shows its source", |hud| {
+        saved().contains("answer_window_ms = 120000")
+            && hud
+                .control_panel_row("agents.answer_window")
+                .is_some_and(|item| {
+                    item.detail
+                        .as_deref()
+                        .is_some_and(|text| text.ends_with(" · Saved to config"))
+                })
+    })
+    .await;
+    for psk in [CLAUDE_PSK, RESIDENT_PSK] {
+        let surfaces = poc.call_as(psk, "hud_surfaces", json!({})).await;
+        let held = surfaces.body["surfaces"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|row| row["s"] == NOTIFICATION)
+            .unwrap();
+        assert_eq!(
+            held["expires_in_ms"], 65_000,
+            "accepted active and scheduled deadlines remain frozen"
+        );
+    }
+    // Check each stored deadline, rather than only the maximum exposed by
+    // discovery: one retimed active card must not hide behind a scheduled one.
+    for namespace in ["claude", "resident"] {
+        assert_eq!(
+            poc.hud
+                .zone_publication_deadlines("notification-area", namespace),
+            [
+                Some(accepted_at + 60_000_000),
+                Some(accepted_at + 65_000_000)
+            ],
+            "{namespace}'s active and scheduled deadlines remain unchanged"
+        );
+    }
+    let result = poc
+        .call(
+            "hud_publish",
+            json!({"surface":NOTIFICATION,"content":question,"key":"new"}),
+        )
+        .await;
+    assert_eq!(result.body["expires_in_ms"], 120_000);
+    assert!(
+        resident
+            .request(ClientPayload::Publish(grpc_question("grpc-new", 0)))
+            .await
+            .ok
+    );
+    let surfaces = poc.call_as(RESIDENT_PSK, "hud_surfaces", json!({})).await;
+    let held = surfaces.body["surfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["s"] == NOTIFICATION)
+        .unwrap();
+    assert_eq!(
+        held["expires_in_ms"], 120_000,
+        "gRPC sees the same panel change"
+    );
+    for namespace in ["claude", "resident"] {
+        assert_eq!(
+            poc.hud
+                .zone_publication_deadlines("notification-area", namespace),
+            [
+                Some(accepted_at + 60_000_000),
+                Some(accepted_at + 65_000_000),
+                Some(accepted_at + 120_000_000),
+            ]
+        );
+    }
+    // Race the next save with admission. Either complete value is coherent.
+    poc.hud.panel_press("ArrowRight");
+    let result = poc
+        .call(
+            "hud_publish",
+            json!({"surface":NOTIFICATION,"content":question,"key":"racing"}),
+        )
+        .await;
+    let lifetime = result.body["expires_in_ms"].as_u64().unwrap();
+    assert!([120_000, 300_000].contains(&lifetime));
+    let surfaces = poc.call("hud_surfaces", json!({})).await;
+    let held = surfaces.body["surfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["s"] == NOTIFICATION)
+        .unwrap();
+    assert_eq!(
+        held["expires_in_ms"], lifetime,
+        "the admitted expiry and reply use one snapshot"
+    );
+    poc.wait_for("the last answer window save completes", |_| {
+        saved().contains("answer_window_ms = 300000")
+    })
+    .await;
+    // Delete deliberately does not reset search results. Leave search, then
+    // pick the row with the pointer before using its keyboard Reset.
+    poc.hud.panel_press("Escape");
+    poc.wait_for("search is cleared", |hud| {
+        hud.control_panel_row("diagnostics.fps").is_some()
+    })
+    .await;
+    poc.click("agents.answer_window").await;
+    poc.wait_for(
+        "the pointer choice saves and focuses the answer window",
+        |hud| {
+            saved().contains("answer_window_ms = 15000")
+                && hud.control_panel_focus()
+                    == Some(tze_hud_compositor::PanelFocus::Row(
+                        "agents.answer_window".into(),
+                    ))
+                && hud.control_panel_row("agents.answer_window").is_some_and(
+                    |item| matches!(item.control, PanelControl::Choice(ref text) if text == "15 s"),
+                )
+        },
+    )
+    .await;
+    poc.hud.panel_press("Delete");
+    poc.wait_for(
+        "Reset removes the override and restores the default",
+        |hud| {
+            !sets("answer_window_ms")
+                && hud
+                    .control_panel_row("agents.answer_window")
+                    .is_some_and(|item| {
+                        !item.reset
+                            && item
+                                .detail
+                                .as_deref()
+                                .is_some_and(|text| text.ends_with(" · Default"))
+                            && matches!(item.control, PanelControl::Choice(ref text) if text == "1 min")
+                    })
+        },
+    )
+    .await;
 
     // Pinned by a flag: read-only, naming it.
     poc.wait_for("zone outlines row", |hud| {

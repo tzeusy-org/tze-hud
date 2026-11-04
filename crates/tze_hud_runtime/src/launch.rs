@@ -53,6 +53,7 @@ pub struct LaunchSources {
     pub mcp_port: Source,
     pub grpc_port: Source,
     pub fps: Source,
+    pub answer_window_ms: Source,
     pub log_level: Source,
     pub debug_zones: Source,
     /// `--window-mode` / `TZE_HUD_WINDOW_MODE` (no config key).
@@ -63,11 +64,12 @@ pub struct LaunchSources {
     pub window_height: Source,
 }
 
-/// The settings that change while the HUD runs: the frame rate cap and the
-/// zone outlines. The control panel writes them; the compositor thread reads
-/// them when [`LiveSettings::if_changed`] says they moved, so an unchanged
+/// The settings that change while the HUD runs. The answer window is read by
+/// publication admission only. The compositor reads the frame cap and outlines
+/// when [`LiveSettings::if_changed`] says they moved, so an unchanged
 /// setting costs nothing per frame.
 pub(crate) struct LiveSettings {
+    pub(crate) publication_defaults: tze_hud_scene::PublicationDefaults,
     fps: std::sync::atomic::AtomicU32,
     zone_outlines: std::sync::atomic::AtomicBool,
     generation: std::sync::atomic::AtomicU64,
@@ -81,11 +83,17 @@ impl LiveSettings {
         wake: tze_hud_scene::render_wake::RenderWakeNotifier,
     ) -> Self {
         Self {
+            publication_defaults: Default::default(),
             fps: fps.max(1).into(),
             zone_outlines: zone_outlines.into(),
             generation: 0.into(),
             wake,
         }
+    }
+
+    pub(crate) fn with_answer_window(mut self, ms: u32) -> Self {
+        self.publication_defaults = tze_hud_scene::PublicationDefaults::new(ms);
+        self
     }
 
     pub(crate) fn fps(&self) -> u32 {
@@ -203,6 +211,13 @@ mod tests {
         let live = LiveSettings::new(60, false, Default::default());
         let mut seen = 0;
         assert_eq!(live.if_changed(&mut seen), None);
+        live.publication_defaults.set_answer_window_ms(30_000);
+        assert_eq!(live.publication_defaults.answer_window_ms(), 30_000);
+        assert_eq!(
+            live.if_changed(&mut seen),
+            None,
+            "publication defaults do not wake rendering"
+        );
         live.set_fps(30);
         live.set_zone_outlines(true);
         assert_eq!(live.if_changed(&mut seen), Some((30, true)));

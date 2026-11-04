@@ -304,6 +304,7 @@ pub(crate) fn default_sections(deps: &ControlPanelDeps) -> Vec<Box<dyn Section>>
             deps.pause.clone(),
             deps.agents.clone(),
             deps.connect.is_some(),
+            deps.runtime.clone(),
         )),
         Box::new(sections::VisibilitySection::new(
             Arc::clone(&deps.scene),

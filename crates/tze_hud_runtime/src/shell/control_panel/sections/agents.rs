@@ -5,14 +5,20 @@
 use std::sync::Mutex;
 
 use tze_hud_compositor::PanelTone;
-use tze_hud_config::Grant;
+use tze_hud_config::{DEFAULT_ANSWER_WINDOW_MS, Grant, RuntimeUpdate};
+
+use super::super::runtime::RuntimeControl;
+use crate::launch::Source;
 
 use super::super::agents::{AgentControl, AgentEntry, Cleared};
 use super::super::pause::PauseControl;
 use super::super::row::{BoxFuture, Control, Edit, Row, Section};
 
+const ANSWER_CHOICES: [u32; 5] = [15_000, 30_000, 60_000, 120_000, 300_000];
+
 pub(crate) struct AgentsSection {
     pause: PauseControl,
+    runtime: Option<RuntimeControl>,
     /// `None` when the HUD has no agent services (no network runtime).
     agents: Option<AgentControl>,
     /// The agent whose actions are showing.
@@ -175,16 +181,82 @@ fn grant_question(grant: Grant, agent: &str) -> String {
 }
 
 impl AgentsSection {
+    pub(crate) const ANSWER_WINDOW: &'static str = "agents.answer_window";
     pub(crate) const PAUSE: &'static str = "agents.pause";
 
-    pub(crate) fn new(pause: PauseControl, agents: Option<AgentControl>, connect: bool) -> Self {
+    pub(crate) fn new(
+        pause: PauseControl,
+        agents: Option<AgentControl>,
+        connect: bool,
+        runtime: Option<RuntimeControl>,
+    ) -> Self {
         Self {
             pause,
+            runtime,
             agents,
             expanded: Mutex::new(None),
             roster: Mutex::new(Vec::new()),
             connect,
         }
+    }
+
+    fn answer_row(&self) -> Option<Row> {
+        let control = self.runtime.as_ref()?;
+        let current = control.live.publication_defaults.answer_window_ms();
+        let source = control.sources().answer_window_ms;
+        let options = answer_options(current);
+        let value = if source.is_pinned() {
+            Control::ReadOnly {
+                text: answer_label(current),
+                mono: false,
+            }
+        } else {
+            Control::Choice {
+                selected: options.iter().position(|ms| *ms == current).unwrap_or(2),
+                options: options.into_iter().map(answer_label).collect(),
+            }
+        };
+        Some(
+            Row::new(Self::ANSWER_WINDOW, "Questions wait for an answer", value)
+                .detail(format!(
+                    "How long a question card waits before it hands the question back · {}",
+                    source.describe()
+                ))
+                .keywords(&["question", "choice", "answer", "timeout", "wait"])
+                .resettable(
+                    !source.is_pinned()
+                        && (source == Source::Config || current != DEFAULT_ANSWER_WINDOW_MS),
+                ),
+        )
+    }
+
+    fn apply_answer(&self, edit: Edit) -> Result<(), String> {
+        let control = self.runtime.as_ref().ok_or("No runtime settings")?;
+        if control.sources().answer_window_ms.is_pinned() {
+            return Err("The answer window is pinned at launch".into());
+        }
+        let ms = match edit {
+            Edit::Choose(index) => {
+                let current = control.live.publication_defaults.answer_window_ms();
+                let ms = *answer_options(current)
+                    .get(index)
+                    .ok_or("No such answer window")?;
+                control.save(RuntimeUpdate::AnswerWindowMs(Some(ms)), |s| {
+                    &mut s.answer_window_ms
+                })?;
+                ms
+            }
+            Edit::Reset => {
+                control.clear(RuntimeUpdate::AnswerWindowMs(None), |s| {
+                    &mut s.answer_window_ms
+                })?;
+                DEFAULT_ANSWER_WINDOW_MS
+            }
+            _ => return Err("Choose an answer window or Reset".into()),
+        };
+        // A failed save leaves both the live value and its source untouched.
+        control.live.publication_defaults.set_answer_window_ms(ms);
+        Ok(())
     }
 
     fn expanded(&self) -> std::sync::MutexGuard<'_, Option<String>> {
@@ -299,6 +371,25 @@ impl AgentsSection {
     }
 }
 
+fn answer_options(current: u32) -> Vec<u32> {
+    let mut options = ANSWER_CHOICES.to_vec();
+    if !options.contains(&current) {
+        options.push(current);
+        options.sort_unstable();
+    }
+    options
+}
+
+fn answer_label(ms: u32) -> String {
+    if ms % 60_000 == 0 {
+        format!("{} min", ms / 60_000)
+    } else if ms % 1_000 == 0 {
+        format!("{} s", ms / 1_000)
+    } else {
+        format!("{ms} ms")
+    }
+}
+
 impl Section for AgentsSection {
     fn id(&self) -> &'static str {
         "agents"
@@ -327,6 +418,9 @@ impl Section for AgentsSection {
                     .keywords(&["safe mode", "resume", "suspend", "stop", "override"])
                     .caution(paused),
             ];
+            if let Some(row) = self.answer_row() {
+                rows.push(row);
+            }
             let roster = self
                 .roster
                 .lock()
@@ -359,6 +453,9 @@ impl Section for AgentsSection {
 
     fn apply<'a>(&'a self, row: &'a str, edit: Edit) -> BoxFuture<'a, Result<(), String>> {
         Box::pin(async move {
+            if row == Self::ANSWER_WINDOW {
+                return self.apply_answer(edit);
+            }
             if let (Self::PAUSE, Edit::Set(paused)) = (row, &edit) {
                 let paused = *paused;
                 self.pause.set(paused).await;
@@ -406,6 +503,129 @@ impl Section for AgentsSection {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn answer_window_saves_applies_and_resets_only_after_success() {
+        use super::super::super::runtime::tests::fake;
+        use std::sync::Arc;
+        let dir = tempfile::tempdir().unwrap();
+        let config = dir.path().join("c.toml");
+        let mut control = fake(&config, Arc::default(), None);
+        let service = tze_hud_protocol::session_server::HudSessionImpl::new(
+            tze_hud_scene::SceneGraph::new(800.0, 600.0),
+            "panel-test",
+        );
+        let pause = PauseControl::new(
+            service.state,
+            Arc::default(),
+            Arc::default(),
+            Default::default(),
+            None,
+            Default::default(),
+        );
+        let section = AgentsSection::new(pause, None, false, Some(control.clone()));
+        let row = section.answer_row().unwrap();
+        assert_eq!(row.label, "Questions wait for an answer");
+        assert_eq!(
+            row.control,
+            Control::Choice {
+                options: ["15 s", "30 s", "1 min", "2 min", "5 min"]
+                    .map(str::to_owned)
+                    .to_vec(),
+                selected: 2,
+            }
+        );
+        assert_eq!(
+            row.keywords,
+            ["question", "choice", "answer", "timeout", "wait"]
+        );
+        assert!(row.detail.unwrap().ends_with(" · Default"));
+        assert!(!row.reset);
+        for index in [0, 1, 2, 3, 4, 4] {
+            section
+                .apply(AgentsSection::ANSWER_WINDOW, Edit::Choose(index))
+                .await
+                .unwrap();
+            let expected = ANSWER_CHOICES[index];
+            assert_eq!(
+                control.live.publication_defaults.answer_window_ms(),
+                expected
+            );
+            let saved = std::fs::read_to_string(&config).unwrap();
+            assert_eq!(
+                tze_hud_config::runtime_section(&saved)
+                    .unwrap()
+                    .answer_window_ms,
+                Some(expected)
+            );
+            let restarted = crate::launch::LiveSettings::new(60, false, Default::default())
+                .with_answer_window(
+                    tze_hud_config::runtime_section(&saved)
+                        .unwrap()
+                        .answer_window_ms
+                        .unwrap(),
+                );
+            assert_eq!(restarted.publication_defaults.answer_window_ms(), expected);
+            assert!(
+                section
+                    .answer_row()
+                    .unwrap()
+                    .detail
+                    .unwrap()
+                    .ends_with(" · Saved to config")
+            );
+        }
+        for _ in 0..2 {
+            section
+                .apply(AgentsSection::ANSWER_WINDOW, Edit::Reset)
+                .await
+                .unwrap();
+            assert_eq!(control.live.publication_defaults.answer_window_ms(), 60_000);
+            assert!(
+                !std::fs::read_to_string(&config)
+                    .unwrap()
+                    .contains("answer_window_ms")
+            );
+            assert_eq!(control.sources().answer_window_ms, Source::Default);
+        }
+        control
+            .live
+            .publication_defaults
+            .set_answer_window_ms(12_345);
+        let custom = section.answer_row().unwrap();
+        assert!(
+            matches!(custom.control, Control::Choice { options, selected } if options[selected] == "12345 ms")
+        );
+        control.sources.lock().unwrap().answer_window_ms = Source::Flag("test pin");
+        assert!(
+            section
+                .apply(AgentsSection::ANSWER_WINDOW, Edit::Choose(0))
+                .await
+                .is_err()
+        );
+        assert!(
+            section
+                .apply(AgentsSection::ANSWER_WINDOW, Edit::Reset)
+                .await
+                .is_err()
+        );
+        control.sources.lock().unwrap().answer_window_ms = Source::Config;
+        // The same failed writer used for no-file/read-only config behavior.
+        control.config_path = None;
+        control.write = Arc::new(|_| Err("no config file to save to".into()));
+        let section = AgentsSection::new(section.pause, None, false, Some(control.clone()));
+        for edit in [Edit::Choose(0), Edit::Reset] {
+            assert_eq!(
+                section
+                    .apply(AgentsSection::ANSWER_WINDOW, edit)
+                    .await
+                    .unwrap_err(),
+                "no config file to save to"
+            );
+            assert_eq!(control.live.publication_defaults.answer_window_ms(), 12_345);
+            assert_eq!(control.sources().answer_window_ms, Source::Config);
+        }
+    }
 
     #[test]
     fn row_ids_round_trip_for_any_namespace() {

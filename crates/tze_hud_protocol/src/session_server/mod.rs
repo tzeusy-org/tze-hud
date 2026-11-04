@@ -247,6 +247,7 @@ impl HudSession for HudSessionImpl {
         let resource_budget = self.resource_budget.clone();
         let budget_enforcer = self.budget_enforcer.clone();
         let render_wake = self.render_wake.clone();
+        let publication_defaults = self.publication_defaults.clone();
         let degradation_notices = self.degradation_notices.clone();
         // Runtime → session feeds, subscribed before the handler task starts
         // so a terminal lease transition cannot race the session's setup.
@@ -305,6 +306,8 @@ impl HudSession for HudSessionImpl {
             let Some((ref mut session, ref mut budget_registration_guard)) = session else {
                 return; // Handshake failed, error already sent
             };
+
+            session.publication_defaults = publication_defaults;
 
             if session.state == SessionState::Resuming {
                 render_wake.notify();

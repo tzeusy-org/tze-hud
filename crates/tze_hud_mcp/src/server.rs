@@ -71,6 +71,7 @@ pub struct McpConfig {
     /// Implicit widget transition duration supplied by the HUD's resolved
     /// startup profile. Standalone unconfigured servers retain instant updates.
     pub widget_transition_ms: u32,
+    pub publication_defaults: tze_hud_scene::PublicationDefaults,
 }
 
 impl McpConfig {
@@ -84,6 +85,7 @@ impl McpConfig {
         Self {
             agents,
             widget_transition_ms: 0,
+            publication_defaults: Default::default(),
         }
     }
 
@@ -492,6 +494,7 @@ impl McpServer {
                     safe_mode: &self.safe_mode,
                     agent: &identity,
                     widget_transition_ms: self.config.widget_transition_ms,
+                    publication_defaults: &self.config.publication_defaults,
                 };
                 let portal_target = args
                     .get("surface")

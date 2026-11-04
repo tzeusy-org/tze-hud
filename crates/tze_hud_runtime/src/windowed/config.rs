@@ -66,6 +66,8 @@ pub struct WindowedConfig {
     pub agents: tze_hud_scene::config::SharedAgents,
     /// Target frames per second.  Default: 60.
     pub target_fps: u32,
+    /// Live saved omission default for notifications with actions.
+    pub answer_window_ms: u32,
     /// Raw TOML content of the configuration file, if one was loaded.
     ///
     /// When `Some`, the windowed runtime parses this at startup and builds the
@@ -123,6 +125,7 @@ impl Default for WindowedConfig {
             mcp_port: 9090,
             agents: Default::default(),
             target_fps: tze_hud_config::DEFAULT_FPS,
+            answer_window_ms: tze_hud_config::DEFAULT_ANSWER_WINDOW_MS,
             config_toml: None,
             config_file_path: None,
             debug_zones: false,
