@@ -1082,7 +1082,7 @@ async fn delayed_subtitle(server: &McpServer, who: &CallerContext, delay_ms: u64
 /// agent's.
 #[tokio::test]
 async fn clear_cancels_only_own_pending_delayed_publish() {
-    let (server, clock, a, b) = two_agents();
+    let (server, clock, a, b) = two_agents_for_zones(&["subtitle", "notification-area"]);
     delayed_subtitle(&server, &a, 5000, 0).await;
     delayed_subtitle(&server, &b, 8000, 0).await;
     for who in [&a, &b] {
@@ -1201,7 +1201,7 @@ async fn clear_cancels_only_own_pending_delayed_publish() {
 /// With nothing else pending, cancelling leaves no wake deadline at all.
 #[tokio::test]
 async fn clear_of_last_pending_publish_drops_the_wake_deadline() {
-    let (server, clock, a, _) = two_agents();
+    let (server, clock, a, _) = two_agents_for_zones(&["subtitle", "notification-area"]);
     delayed_subtitle(&server, &a, 5000, 0).await;
     call_as(
         &server,
@@ -1408,7 +1408,7 @@ async fn notification_ttl_zero_is_held_and_hold_retimes_it() {
         keyed["ttl_ms"] = json!(ttl);
         assert_eq!(
             call(&server, "hud_publish", keyed).await,
-            json!({"ok":true})
+            json!({"ok":true,"expires_in_ms":ttl})
         );
         let scene = server.scene.lock().await;
         let records = scene.zone_registry.active_for_zone("notification-area");
@@ -1794,7 +1794,7 @@ async fn action_presses_are_delivered_until_acked() {
 
     // Each agent exceeds the former global cap before either polls. Collection
     // and acknowledgement by one publisher must not evict the other's actions.
-    let (server, _, a, b) = two_agents();
+    let (server, _, a, b) = two_agents_for_zones(&["subtitle", "notification-area"]);
     let actions_per_agent = 257;
     {
         let mut scene = server.scene.lock().await;
