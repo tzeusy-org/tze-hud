@@ -72,6 +72,69 @@ bd update <id> --claim  # Claim work atomically
 bd close <id>         # Complete work
 ```
 
+## HUD dogfooding: use what we build
+
+The owner wants sessions working in this repository to actively use the HUD
+for concise status, attention and quick decisions. Treat this as standing
+opt-in for deliberate HUD publication using the existing paired connection.
+Prefer a useful HUD element over another chat progress paragraph when the HUD
+is available; keep the final outcome and durable evidence in chat or the PR.
+The main session owns this presence. Subagents report through their parent
+unless explicitly delegated an existing element; they do not each create a
+status entry, notification stream or portal.
+
+- **Status:** prefer one compact status element with a unique session/work
+  key and a recognizable label. Update it on meaningful changes such as
+  working, testing, blocked and done; coalesce updates under that key. Discover
+  surfaces first and verify their actual presentation. The current status bar
+  rendered as an intrusive slab in owner dogfooding (2026-11-04; tracked under
+  `hud-h51u7.4.4`); do not use it by default until its compact presentation is
+  accepted. Use brief milestone notifications meanwhile. Use an existing widget
+  only when its typed params fit and it is allocated to this work; do not
+  commandeer a shared widget.
+- **Attention and decisions:** prefer a short notification for an actionable
+  blocker, meaningful completion, or an actual owner choice. Use a concise
+  question with explicit action labels, such as Yes / No / Later, within the
+  running build's supported action limit. Give callback ids a unique session
+  and question identity. Publish only when ready to consume the answer.
+- **Replies:** use a session-named portal when a short typed answer or compact
+  ongoing exchange is useful and its presentation is accepted. The current
+  default portal is owner-rejected (2026-11-04): drag makes it transparent
+  (`hud-1wizi`) and its base card needs 3× the width and height at the existing
+  font size. Keep ordinary exchanges in chat until those defects are resolved;
+  use the portal only for an explicit validation step meanwhile. Do not mirror
+  every chat message or open a portal for each subagent. The owner's normal
+  coding workload is 4–12 main sessions, excluding subagents; keep attention
+  and screen space proportionate to that workload.
+- **Keep it glanceable:** status is a few words; a notification carries one
+  question and at most a couple of short lines. Keep long explanations,
+  logs, diffs and reports in chat, a PR or another reading surface; name or
+  link that destination. Do not invent link-action support on an older build.
+- **Own the interaction:** identify the originating work in each prompt.
+  Route input by surface and the current question's callback identity, handle
+  it once, then ACK only the items handled by this session. `hud_input` spans
+  all surfaces of the authenticated agent: sessions sharing a pairing must
+  coordinate one input consumer/demultiplexer or use separate identities.
+  Never run an indiscriminate auto-ACK poll or clear another session's surface.
+  Do not offer action buttons without safe answer routing; use chat instead.
+- **Bound the footprint:** use finite, appropriate TTLs, update existing
+  status instead of stacking repeats, and remove or let expire owned content
+  on completion/cancellation. Clear only an exclusively owned surface; for a
+  shared status bar, remove only this session's entry. No heartbeat, progress
+  spam or repeated model polling while waiting for the owner.
+- **Fail gracefully:** if the HUD is unavailable or rejects a call, continue
+  in chat and report the limitation once. Timeout, silence and dismiss are
+  not consent. HUD answers carry the same authority as a clear owner answer
+  in chat; destructive or otherwise unauthorized actions retain their normal
+  approval requirements. This opt-in does not install client hooks, change
+  pairing/permissions or authorize publishing secrets.
+
+Use **`th-hud-publish`** for zones/widgets and **`hud-projection`** for portal
+interactions; their scripts work without a client-specific hook. Follow
+`docs/api.md` and the running build, rather than assuming a planned feature
+has shipped. Record dogfooding defects against existing beads where possible;
+an accepted publish or runtime screenshot is not owner visual acceptance.
+
 ## LLM Self-Projection
 
 If you are an LLM session that wants to project itself onto the HUD — to show your output, status, or live transcript on screen — use the **`hud-projection`** skill (`.claude/skills/hud-projection/SKILL.md` / `.codex/skills/hud-projection/SKILL.md`).
