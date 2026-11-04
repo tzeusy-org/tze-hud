@@ -1414,12 +1414,13 @@ mod tests {
         };
         let shown = |open: &mut Open| {
             let (model, nav) = build(open, &rows, &ctx);
-            let PanelBody::Sections(sections) = &model.body else {
-                panic!("sections expected")
+            let items: Vec<_> = match &model.body {
+                PanelBody::Sections(sections) => sections.iter().flat_map(|s| &s.items).collect(),
+                PanelBody::Results { items, .. } => items.iter().collect(),
+                _ => panic!("field rows expected"),
             };
-            let item = sections
-                .iter()
-                .flat_map(|s| &s.items)
+            let item = items
+                .into_iter()
                 .find(|i| i.id == "network.mcp_port")
                 .unwrap()
                 .clone();
@@ -1465,6 +1466,93 @@ mod tests {
         on_text(&mut open, &nav, "1");
         on_key(&mut open, &nav, PanelKey::Down, None);
         assert_eq!(open.editing, None, "moving away drops the edit");
+
+        // Search auto-focus is not editing intent. Either a click or Enter
+        // explicitly selects the field, without throwing away the query.
+        for pointer in [true, false] {
+            let mut open = Open::new(PANEL);
+            let (_, nav) = shown(&mut open);
+            on_text(&mut open, &nav, "MCP");
+            let (_, nav) = shown(&mut open);
+            on_text(&mut open, &nav, " port");
+            let (_, nav) = shown(&mut open);
+            assert_eq!(open.query, "MCP port");
+            let field = PanelHitTarget::Row("network.mcp_port".into(), PanelPart::Body);
+            if pointer {
+                assert!(on_click(&mut open, &nav, &field, None).is_empty());
+            } else {
+                assert_eq!(
+                    on_key(&mut open, &nav, PanelKey::Enter, None),
+                    apply("network.mcp_port", Edit::Activate)
+                );
+            }
+            on_text(&mut open, &nav, "9191");
+            let (item, nav) = shown(&mut open);
+            assert_eq!(
+                open.query, "MCP port",
+                "explicit selection routes typing to the field"
+            );
+            assert!(
+                matches!(item.control, PanelControl::Value { ref text, .. } if text == "9191▏")
+            );
+            assert_eq!(item.detail.as_deref(), Some("Enter saves · Esc cancels"));
+            assert!(on_click(&mut open, &nav, &field, None).is_empty());
+            assert_eq!(
+                on_key(&mut open, &nav, PanelKey::Enter, None),
+                apply("network.mcp_port", Edit::Text("9191".into())),
+                "a repeated click preserves the draft"
+            );
+            assert_eq!(open.query, "MCP port");
+
+            // No new selection after save: typing resumes searching.
+            on_text(&mut open, &nav, "x");
+            assert_eq!(open.query, "MCP portx");
+            on_key(&mut open, &nav, PanelKey::Backspace, None);
+            let (_, nav) = shown(&mut open);
+            on_click(&mut open, &nav, &field, None);
+            let (item, _) = shown(&mut open);
+            assert!(
+                matches!(item.control, PanelControl::Value { ref text, .. } if text == "9090▏"),
+                "selection is visible before typing"
+            );
+            assert!(on_key(&mut open, &nav, PanelKey::Escape, None).is_empty());
+            assert_eq!(
+                open.query, "MCP port",
+                "Esc cancels selection before clearing search"
+            );
+            on_click(&mut open, &nav, &field, None);
+            on_text(&mut open, &nav, "9292");
+            assert!(on_key(&mut open, &nav, PanelKey::Escape, None).is_empty());
+            assert_eq!(open.query, "MCP port");
+            assert!(open.editing.is_none());
+            assert!(
+                matches!(shown(&mut open).0.control, PanelControl::Value { ref text, .. } if text == "9090")
+            );
+
+            // Moving or clicking away drops the draft, and search regains text.
+            on_click(&mut open, &nav, &field, None);
+            on_text(&mut open, &nav, "9393");
+            on_key(&mut open, &nav, PanelKey::Up, None);
+            assert_eq!(open.focus, PanelFocus::Search);
+            assert!(open.editing.is_none());
+            on_click(&mut open, &nav, &field, None);
+            on_text(&mut open, &nav, "9494");
+            on_click(&mut open, &nav, &PanelHitTarget::Search, None);
+            on_text(&mut open, &nav, "x");
+            assert_eq!(open.query, "MCP portx");
+            assert!(open.editing.is_none());
+        }
+
+        let mut open = Open::new(PANEL);
+        let (_, nav) = shown(&mut open);
+        on_text(&mut open, &nav, "MCP");
+        let (_, nav) = shown(&mut open);
+        assert!(on_key(&mut open, &nav, PanelKey::Space, None).is_empty());
+        on_text(&mut open, &nav, "port");
+        assert_eq!(
+            open.query, "MCP port",
+            "Space in an automatically focused field keeps searching"
+        );
     }
 
     /// Empty sections are not listed; chips and Alt keys follow the listed
