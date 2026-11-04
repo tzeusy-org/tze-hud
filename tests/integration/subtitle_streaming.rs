@@ -52,8 +52,7 @@ use tokio_stream::StreamExt;
 // lease_id_bytes) because zone-publish-only tests don't need those fields.
 // The shared connect_agent() requires full-session semantics; this file keeps
 // its own connect_agent_with_zone_publish_cap() instead.
-#[path = "common/mod.rs"]
-mod common;
+use crate::common;
 
 const TEST_PSK: &str = "subtitle-streaming-test-key";
 const DISPLAY_W: u32 = 1920;

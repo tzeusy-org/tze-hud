@@ -1,11 +1,11 @@
 //! Shared helpers for the compositor GPU integration tests.
 //!
-//! Each test binary compiles this module separately and uses a subset of it.
+//! The external test harness includes this module once for all GPU suites.
 #![allow(dead_code)]
 
 mod pixels;
 
-use tokio::sync::Mutex;
+use tokio::sync::{Mutex, MutexGuard};
 use tze_hud_compositor::{Compositor, CompositorError, surface::HeadlessSurface};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::{NotificationPayload, ZoneContent};
@@ -13,14 +13,17 @@ use tze_hud_scene::types::{NotificationPayload, ZoneContent};
 /// Serializes headless device creation within one test binary.
 ///
 /// Concurrent wgpu/Vulkan device construction from the default parallel libtest
-/// harness can wedge the driver. Every multi-test binary under `tests/` must
-/// create its device through this helper; single-test binaries (`gpu_canary`,
-/// `widget_raster_count`) need no guard. Run GPU suites with `just test-gpu`,
-/// which also pins the Vulkan loader to Mesa llvmpipe.
+/// harness can wedge the driver. Every GPU suite in the external harness uses
+/// this gate for initialization only, releasing it before clients or rendering.
+/// Run GPU suites with `just test-gpu`, which also pins Mesa llvmpipe.
 static GPU_INIT_MUTEX: Mutex<()> = Mutex::const_new(());
 
+pub(crate) async fn lock_gpu_init() -> MutexGuard<'static, ()> {
+    GPU_INIT_MUTEX.lock().await
+}
+
 pub async fn new_headless_serialized(w: u32, h: u32) -> Result<Compositor, CompositorError> {
-    let _guard = GPU_INIT_MUTEX.lock().await;
+    let _guard = lock_gpu_init().await;
     Compositor::new_headless(w, h).await
 }
 

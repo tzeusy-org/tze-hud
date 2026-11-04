@@ -1,10 +1,8 @@
 //! Shared gRPC session test harness for integration tests.
 //!
-//! Include this module in each integration test file with:
+//! The external test harness includes this module once. Suites import it with:
 //! ```rust,ignore
-//! #[path = "common/mod.rs"]
-//! mod common;
-//! use common::*;
+//! use crate::common::*;
 //! ```
 //!
 //! ## Design
@@ -15,11 +13,9 @@
 //! GPU initialization uses one test-only async gate per binary. Its guard is
 //! released before agent setup or rendering; separate processes are not locked.
 
-#![allow(dead_code)] // Items are selectively used across the test binaries.
+#![allow(dead_code)] // Items are selectively used across the suite modules.
 
-#[path = "../../../crates/tze_hud_runtime/src/test_support.rs"]
-mod gpu_init;
-pub(crate) use gpu_init::serialized_headless_init;
+pub(crate) use crate::gpu_init::serialized_headless_init;
 
 use tokio_stream::StreamExt;
 use tze_hud_protocol::proto;

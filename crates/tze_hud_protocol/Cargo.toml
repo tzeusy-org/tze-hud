@@ -4,6 +4,7 @@ description = "gRPC protocol layer for tze_hud agent communication"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+autotests = false
 
 [features]
 ## Enables constructors that are only safe in tests or local dev environments.
@@ -47,6 +48,10 @@ tonic-build = "0.13"
 [package.metadata.cargo-machete]
 # Referenced only by the tonic-build generated code (`::prost::Message` derives).
 ignored = ["prost"]
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
 
 [lints]
 workspace = true

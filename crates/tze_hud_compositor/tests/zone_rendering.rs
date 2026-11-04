@@ -6,7 +6,7 @@
 //! colour (linear 0.05, 0.05, 0.1 = sRGB 63, 63, 89), calibrated on llvmpipe.
 //! Run via `just test-gpu`, which pins llvmpipe.
 
-mod common;
+use crate::common;
 
 use std::sync::Arc;
 

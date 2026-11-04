@@ -120,7 +120,11 @@ async fn widget_param_update_rasterizes_only_that_instance() {
         eprintln!("SKIPPED: widget_raster_count TZE_HUD_SKIP_GPU_TESTS=1");
         return;
     }
-    let mut compositor = match Compositor::new_headless(512, 256).await {
+    let compositor_init = {
+        let _guard = crate::common::lock_gpu_init().await;
+        Compositor::new_headless(512, 256).await
+    };
+    let mut compositor = match compositor_init {
         Ok(c) => c,
         Err(CompositorError::NoAdapter) => {
             assert!(
@@ -604,7 +608,11 @@ async fn hidden_widgets_do_no_raster_work_and_draw_nothing() {
         eprintln!("SKIPPED: hidden widgets TZE_HUD_SKIP_GPU_TESTS=1");
         return;
     }
-    let mut compositor = match Compositor::new_headless(512, 256).await {
+    let compositor_init = {
+        let _guard = crate::common::lock_gpu_init().await;
+        Compositor::new_headless(512, 256).await
+    };
+    let mut compositor = match compositor_init {
         Ok(c) => c,
         Err(CompositorError::NoAdapter) => {
             assert!(
@@ -705,7 +713,11 @@ async fn resizing_a_widget_rerasters_it_and_moving_does_not() {
     if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
         return;
     }
-    let mut compositor = match Compositor::new_headless(512, 256).await {
+    let compositor_init = {
+        let _guard = crate::common::lock_gpu_init().await;
+        Compositor::new_headless(512, 256).await
+    };
+    let mut compositor = match compositor_init {
         Ok(c) => c,
         Err(CompositorError::NoAdapter) => {
             assert!(
@@ -778,7 +790,11 @@ async fn a_restyled_widget_type_rerasters_once() {
     if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
         return;
     }
-    let mut compositor = match Compositor::new_headless(512, 256).await {
+    let compositor_init = {
+        let _guard = crate::common::lock_gpu_init().await;
+        Compositor::new_headless(512, 256).await
+    };
+    let mut compositor = match compositor_init {
         Ok(c) => c,
         Err(CompositorError::NoAdapter) => {
             assert!(
@@ -894,7 +910,11 @@ async fn overlapping_widgets_stack_by_instance_name() {
     if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
         return;
     }
-    let mut compositor = match Compositor::new_headless(512, 256).await {
+    let compositor_init = {
+        let _guard = crate::common::lock_gpu_init().await;
+        Compositor::new_headless(512, 256).await
+    };
+    let mut compositor = match compositor_init {
         Ok(c) => c,
         Err(CompositorError::NoAdapter) => {
             assert!(

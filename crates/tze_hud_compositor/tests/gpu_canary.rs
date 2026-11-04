@@ -63,7 +63,11 @@ async fn gpu_adapter_available_when_required() {
     // TZE_HUD_REQUIRE_GPU=1 is set and GPU tests are not opted out.
     // Attempt to acquire a wgpu adapter.  Any outcome other than Ok is a hard
     // failure — the adapter is required and its absence is a CI regression.
-    match Compositor::new_headless(64, 64).await {
+    let compositor_init = {
+        let _guard = crate::common::lock_gpu_init().await;
+        Compositor::new_headless(64, 64).await
+    };
+    match compositor_init {
         Ok(_compositor) => {
             // Adapter found — GPU lane is healthy.
             eprintln!(

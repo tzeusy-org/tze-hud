@@ -80,19 +80,17 @@ pub const SCENE_H: u32 = 1080;
 /// a smaller runtime would cause `BoundsOutOfRange` at scene construction time.
 pub async fn make_scene_runtime() -> tze_hud_runtime::HeadlessRuntime {
     use tze_hud_runtime::headless::HeadlessConfig;
-    // Serialize device creation: `HeadlessRuntime::new` does not, and
-    // concurrent wgpu device construction from the parallel libtest harness
-    // can wedge the driver. (The lib-test `test_support` mutex is crate-private
-    // and not visible to this integration-test binary.)
-    static GPU_INIT_MUTEX: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-    let _guard = GPU_INIT_MUTEX.lock().await;
-    tze_hud_runtime::HeadlessRuntime::new(HeadlessConfig {
-        width: SCENE_W,
-        height: SCENE_H,
-        grpc_port: 0,
-        agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
-        config_toml: None,
-    })
+    // Share the harness initialization gate with present-ack. Release it before
+    // returning the runtime so clients and rendering remain parallel.
+    crate::gpu_init::serialized_headless_init(tze_hud_runtime::HeadlessRuntime::new(
+        HeadlessConfig {
+            width: SCENE_W,
+            height: SCENE_H,
+            grpc_port: 0,
+            agents: tze_hud_scene::config::AgentDirectory::unrestricted("test"),
+            config_toml: None,
+        },
+    ))
     .await
     .expect("HeadlessRuntime::new failed")
 }

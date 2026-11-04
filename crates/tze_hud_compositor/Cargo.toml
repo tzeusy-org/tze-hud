@@ -4,6 +4,7 @@ description = "wgpu compositor for tze_hud — renders scene graph to screen or 
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+autotests = false
 
 [features]
 # Observe actual headless frame work without changing rendering or live telemetry.
@@ -45,6 +46,10 @@ tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0", features = ["tes
 tokio = { workspace = true }
 proptest = { workspace = true }
 tze_hud_widget = { path = "../tze_hud_widget", version = "0.1.0" }
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
 
 [lints]
 workspace = true
