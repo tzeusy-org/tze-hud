@@ -2420,36 +2420,12 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 if let Some(source) = wake_source {
                     self.state.wake.mark_main_work_pending(source);
                 }
-                if button == MouseButton::Left
-                    && self.panel_left_button(state == ElementState::Pressed, secondary.is_none())
-                {
-                    return;
-                }
-                if button != MouseButton::Left
-                    && self.panel_other_button(
-                        button,
-                        state == ElementState::Pressed,
-                        secondary.is_none(),
-                    )
-                {
-                    return;
-                }
-                if button == MouseButton::Left {
-                    // Consume pending old loss before binding a newer Down.
-                    self.drain_chrome_capture_cancellation();
-                    let chrome_edge =
-                        lifecycle::ChromeAppEdge::begin(window_id, state == ElementState::Pressed);
-                    if !chrome_edge.retired() {
-                        self.handle_left_button(
-                            state == ElementState::Pressed,
-                            window_id,
-                            secondary,
-                        );
-                    }
-                } else if button == MouseButton::Right && state == ElementState::Released {
-                    // Right-click: show context menu if cursor is on a drag handle.
-                    self.handle_right_click_on_drag_handle();
-                }
+                self.handle_mouse_button(
+                    button,
+                    state == ElementState::Pressed,
+                    window_id,
+                    secondary,
+                );
             }
 
             // ── Pointer: wheel scroll ────────────────────────────────────────

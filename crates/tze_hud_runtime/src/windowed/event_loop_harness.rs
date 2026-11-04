@@ -2067,6 +2067,109 @@ mod tests {
     /// second click has nothing to land on (hud-paslt).
     #[test]
     fn action_click_queues_one_action_and_dismisses_the_notification() {
+        // Native callbacks surround delivery to winit. Panel-owned clicks must
+        // consume those same receipts even though they never reach the scene.
+        // Reuse the real panel task/factory and compositor-generated geometry.
+        {
+            use crate::shell::control_panel::PanelEvent;
+            use crate::windowed::lifecycle::ChromeCaptureTestScope;
+            use std::time::{Duration, Instant};
+            use tze_hud_scene::config::ChordRole;
+            use winit::event::MouseButton;
+
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            let _entered = runtime.enter();
+            let panel_fixture = super::super::panel_input::panel_task_tests::fixture();
+            let panel = panel_fixture.panel.clone();
+            let mut harness = approve_reject_notification_harness();
+            harness
+                .app
+                .state
+                .global_tokens
+                .insert("motion.exit.ms".into(), "120".into());
+            harness.app.state.control_panel = Some(panel.clone());
+            assert!(panel.send(PanelEvent::Chord(ChordRole::Panel)));
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while panel.current_model().is_none() {
+                assert!(Instant::now() < deadline, "panel opened");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let geometry = tze_hud_compositor::estimate_control_panel_geometry(
+                &Default::default(),
+                &panel.current_model().unwrap(),
+                1920.0,
+                1080.0,
+            );
+            let background = geometry
+                .hits
+                .iter()
+                .find(|hit| hit.target == tze_hud_compositor::PanelHitTarget::Panel)
+                .expect("panel background")
+                .rect;
+            panel.set_geometry(1, || geometry.clone());
+            // The top-left inset is background, outside every row/control.
+            (harness.app.state.cursor_x, harness.app.state.cursor_y) =
+                (background.x + 1.0, background.y + 1.0);
+            assert_eq!(
+                panel.hit(harness.app.state.cursor_x, harness.app.state.cursor_y),
+                Some(tze_hud_compositor::PanelHitTarget::Panel)
+            );
+            let window = winit::window::WindowId::dummy();
+            let native = ChromeCaptureTestScope::new(window);
+            for down in [true, false] {
+                let frame = native.begin(down);
+                harness
+                    .app
+                    .handle_mouse_button(MouseButton::Left, down, window, None);
+                native.complete(frame);
+                assert!(!harness.app.state.left_button_down, "panel owns the edge");
+            }
+            assert!(
+                take_action_ids(&harness).is_empty(),
+                "panel creates no callback"
+            );
+            assert!(panel.send(PanelEvent::Chord(ChordRole::Panel)));
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while panel.is_open() {
+                assert!(Instant::now() < deadline, "panel closed");
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            // Match the owner sequence: change exit motion live, then press a
+            // generated notification button. This is still the same publication.
+            harness
+                .app
+                .state
+                .global_tokens
+                .insert("motion.exit.ms".into(), "0".into());
+            let (x, y) = harness.notification_action_center("approve").unwrap();
+            (harness.app.state.cursor_x, harness.app.state.cursor_y) = (x, y);
+            for down in [true, false] {
+                let frame = native.begin(down);
+                harness
+                    .app
+                    .handle_mouse_button(MouseButton::Left, down, window, None);
+                native.complete(frame);
+                if down {
+                    assert!(chrome_state(&harness, "approve").pressed, "held feedback");
+                }
+            }
+            assert!(
+                native.healthy(),
+                "panel routing must not poison capture history"
+            );
+            assert_eq!(take_action_ids(&harness), ["approve"]);
+            assert_eq!(harness.zone_publication_count("notification-area"), 0);
+            let frame = native.begin(false);
+            harness
+                .app
+                .handle_mouse_button(MouseButton::Left, false, window, None);
+            native.complete(frame);
+            assert!(
+                take_action_ids(&harness).is_empty(),
+                "late Up never repeats"
+            );
+        }
+
         let mut harness = approve_reject_notification_harness();
         let (x, y) = harness.notification_action_center("approve").unwrap();
         harness.click(x, y);

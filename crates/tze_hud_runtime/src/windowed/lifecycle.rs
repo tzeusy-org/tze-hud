@@ -356,7 +356,7 @@ impl ChromeCaptureLedger {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 std::thread_local! {
     static CHROME_NATIVE_OWNER: std::cell::RefCell<ChromeNativeOwner> =
         std::cell::RefCell::new(ChromeNativeOwner::default());
@@ -364,12 +364,13 @@ std::thread_local! {
     static CHROME_NATIVE_FAULT_NOTIFIED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 #[derive(Default)]
 struct ChromeNativeOwner {
     ledger: ChromeCaptureLedger,
     app_edge: Option<bool>,
     fault_delivered: bool,
+    #[cfg(target_os = "windows")]
     registrations: Vec<std::rc::Weak<ChromeNativeRegistration>>,
 }
 
@@ -388,7 +389,7 @@ struct ChromeNativeRegistration {
 #[cfg(target_os = "windows")]
 const CHROME_CAPTURE_SUBCLASS_ID: usize = 0x545a4348;
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn chrome_native_fault() {
     let first = CHROME_NATIVE_FAULT.with(|fault| !fault.replace(true));
     let wakes = CHROME_NATIVE_OWNER.with(|owner| {
@@ -396,12 +397,16 @@ fn chrome_native_fault() {
             return Vec::new();
         };
         owner.ledger.fault();
-        owner
+        #[cfg(target_os = "windows")]
+        let wakes = owner
             .registrations
             .iter()
             .filter_map(std::rc::Weak::upgrade)
             .map(|registration| registration.wake.clone())
-            .collect::<Vec<_>>()
+            .collect::<Vec<_>>();
+        #[cfg(not(target_os = "windows"))]
+        let wakes: Vec<tze_hud_scene::render_wake::RenderWakeNotifier> = Vec::new();
+        wakes
     });
     if first {
         tracing::error!(
@@ -415,7 +420,7 @@ fn chrome_native_fault() {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", test))]
 fn chrome_native_update<T>(update: impl FnOnce(&mut ChromeCaptureLedger) -> T) -> Option<T> {
     let result = CHROME_NATIVE_OWNER.with(|owner| {
         let Ok(mut owner) = owner.try_borrow_mut() else {
@@ -591,18 +596,81 @@ fn remove_chrome_registration(registration: &std::rc::Rc<ChromeNativeRegistratio
     }
 }
 
+#[cfg(test)]
+std::thread_local! {
+    static CHROME_CAPTURE_UNDER_TEST: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+#[cfg(test)]
+fn chrome_capture_under_test() -> bool {
+    CHROME_CAPTURE_UNDER_TEST.with(std::cell::Cell::get)
+}
+
+/// Inject only the native message boundary; application routing, authorization
+/// and callback delivery below remain the production implementations.
+#[cfg(test)]
+pub(super) struct ChromeCaptureTestScope {
+    nonce: u64,
+}
+
+#[cfg(test)]
+impl ChromeCaptureTestScope {
+    pub(super) fn new(window: winit::window::WindowId) -> Self {
+        assert!(!CHROME_CAPTURE_UNDER_TEST.with(|active| active.replace(true)));
+        CHROME_NATIVE_OWNER.with(|owner| *owner.borrow_mut() = ChromeNativeOwner::default());
+        CHROME_NATIVE_FAULT.with(|fault| fault.set(false));
+        CHROME_NATIVE_FAULT_NOTIFIED.with(|fault| fault.set(false));
+        Self {
+            nonce: chrome_native_update(|ledger| ledger.install(window))
+                .flatten()
+                .unwrap(),
+        }
+    }
+
+    pub(super) fn begin(&self, down: bool) -> Option<u64> {
+        chrome_native_update(|ledger| ledger.begin(self.nonce, down)).flatten()
+    }
+
+    pub(super) fn complete(&self, frame: Option<u64>) {
+        if let Some(frame) = frame {
+            chrome_native_update(|ledger| ledger.complete(frame)).unwrap();
+        }
+    }
+
+    pub(super) fn healthy(&self) -> bool {
+        !CHROME_NATIVE_FAULT.with(std::cell::Cell::get)
+    }
+}
+
+#[cfg(test)]
+impl Drop for ChromeCaptureTestScope {
+    fn drop(&mut self) {
+        CHROME_CAPTURE_UNDER_TEST.with(|active| active.set(false));
+        CHROME_NATIVE_OWNER.with(|owner| *owner.borrow_mut() = ChromeNativeOwner::default());
+        CHROME_NATIVE_FAULT.with(|fault| fault.set(false));
+        CHROME_NATIVE_FAULT_NOTIFIED.with(|fault| fault.set(false));
+    }
+}
+
 /// Application delivery scope; native callbacks may update tokens, but never
 /// borrow the application's state. Retired-window edges do not release a newer
 /// HUD press. Faulted current edges still forward unrelated pointer input.
 pub(super) struct ChromeAppEdge {
     retired: bool,
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", test))]
     previous: Option<bool>,
 }
 
 impl ChromeAppEdge {
     pub(super) fn begin(window: winit::window::WindowId, down: bool) -> Self {
-        #[cfg(target_os = "windows")]
+        #[cfg(all(test, not(target_os = "windows")))]
+        if !chrome_capture_under_test() {
+            return Self {
+                retired: false,
+                previous: None,
+            };
+        }
+        #[cfg(any(target_os = "windows", test))]
         {
             let result = CHROME_NATIVE_OWNER.with(|owner| {
                 let Ok(mut owner) = owner.try_borrow_mut() else {
@@ -629,7 +697,7 @@ impl ChromeAppEdge {
                 }
             }
         }
-        #[cfg(not(target_os = "windows"))]
+        #[cfg(not(any(target_os = "windows", test)))]
         {
             let _ = (window, down);
             Self { retired: false }
@@ -643,7 +711,7 @@ impl ChromeAppEdge {
 
 impl Drop for ChromeAppEdge {
     fn drop(&mut self) {
-        #[cfg(target_os = "windows")]
+        #[cfg(any(target_os = "windows", test))]
         CHROME_NATIVE_OWNER.with(|owner| {
             if let Ok(mut owner) = owner.try_borrow_mut() {
                 owner.app_edge = self.previous;
@@ -655,7 +723,11 @@ impl Drop for ChromeAppEdge {
 }
 
 fn native_chrome_permits(window: Option<winit::window::WindowId>) -> bool {
-    #[cfg(target_os = "windows")]
+    #[cfg(all(test, not(target_os = "windows")))]
+    if !chrome_capture_under_test() {
+        return true;
+    }
+    #[cfg(any(target_os = "windows", test))]
     {
         if CHROME_NATIVE_FAULT.with(std::cell::Cell::get) {
             return false;
@@ -668,7 +740,7 @@ fn native_chrome_permits(window: Option<winit::window::WindowId>) -> bool {
             })
         })
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", test)))]
     {
         let _ = window;
         true
@@ -676,7 +748,7 @@ fn native_chrome_permits(window: Option<winit::window::WindowId>) -> bool {
 }
 
 fn native_chrome_take_cancel(window: Option<winit::window::WindowId>) -> bool {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", test))]
     {
         let result = CHROME_NATIVE_OWNER.with(|owner| {
             let Ok(mut owner) = owner.try_borrow_mut() else {
@@ -692,7 +764,7 @@ fn native_chrome_take_cancel(window: Option<winit::window::WindowId>) -> bool {
             true
         })
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", test)))]
     {
         let _ = window;
         false
@@ -700,11 +772,11 @@ fn native_chrome_take_cancel(window: Option<winit::window::WindowId>) -> bool {
 }
 
 fn native_chrome_finish_synthetic(window: Option<winit::window::WindowId>) {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", test))]
     if let Some(window) = window {
         let _ = chrome_native_update(|ledger| ledger.finish_synthetic(window));
     }
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", test)))]
     let _ = window;
 }
 
@@ -2123,6 +2195,46 @@ impl WinitApp {
         }
     }
 
+    fn notification_pointer_permitted(&self) -> bool {
+        #[cfg(test)]
+        if chrome_capture_under_test() {
+            return native_chrome_permits(self.state.press_window);
+        }
+        self.state.window.is_none() || native_chrome_permits(self.state.press_window)
+    }
+
+    /// Route a delivered mouse edge through panel ownership and native chrome
+    /// authorization before ordinary scene input.
+    pub(super) fn handle_mouse_button(
+        &mut self,
+        button: winit::event::MouseButton,
+        pressed: bool,
+        window_id: winit::window::WindowId,
+        secondary: Option<usize>,
+    ) {
+        if button == winit::event::MouseButton::Left
+            && self.panel_left_button(pressed, secondary.is_none())
+        {
+            return;
+        }
+        if button != winit::event::MouseButton::Left
+            && self.panel_other_button(button, pressed, secondary.is_none())
+        {
+            return;
+        }
+        if button == winit::event::MouseButton::Left {
+            // Consume pending old loss before binding a newer Down.
+            self.drain_chrome_capture_cancellation();
+            let chrome_edge = ChromeAppEdge::begin(window_id, pressed);
+            if !chrome_edge.retired() {
+                self.handle_left_button(pressed, window_id, secondary);
+            }
+        } else if button == winit::event::MouseButton::Right && !pressed {
+            // Right-click: show context menu if cursor is on a drag handle.
+            self.handle_right_click_on_drag_handle();
+        }
+    }
+
     /// A winit left-button press or release on `window_id` (`secondary` = the
     /// secondary overlay index, `None` for the primary).
     pub(super) fn handle_left_button(
@@ -2659,8 +2771,7 @@ impl WinitApp {
                                 kind,
                                 ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
                             );
-                            let allowed = self.state.window.is_none()
-                                || native_chrome_permits(self.state.press_window);
+                            let allowed = self.notification_pointer_permitted();
                             (!notification || allowed).then(|| interaction_id.clone())
                         }
                         _ => None,
@@ -2679,8 +2790,7 @@ impl WinitApp {
                         && (!matches!(
                             kind,
                             ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
-                        ) || self.state.window.is_none()
-                            || native_chrome_permits(self.state.press_window))
+                        ) || self.notification_pointer_permitted())
                     {
                         match kind {
                             ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. } => {
