@@ -77,7 +77,7 @@ impl SystemCardHandle {
         self.render_wake.notify();
     }
 
-    /// Replace the card with `new` only if `expected` is still the one showing
+    /// Transform the card only if `expected` is still the one showing
     /// (a newer code must not be overwritten by a late background result).
     pub fn replace_if_current(
         &self,

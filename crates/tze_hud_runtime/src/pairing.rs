@@ -502,9 +502,9 @@ impl Pairing {
         if verdict.is_blocked() {
             handle.replace_if_current(expected, |current| {
                 if clock.now() > expires_at
-                    || !current
+                    || current
                         .expires_at_wall_us
-                        .is_some_and(|at| at > clock.wall_us())
+                        .is_none_or(|at| at <= clock.wall_us())
                 {
                     return None;
                 }
@@ -542,9 +542,9 @@ impl Pairing {
                 || current.kind != tze_hud_compositor::SystemCardKind::Pairing
                 || current.lines.len() < 3
                 || current.lines[0] != issued.code
-                || !current
+                || current
                     .expires_at_wall_us
-                    .is_some_and(|at| at > self.clock.wall_us())
+                    .is_none_or(|at| at <= self.clock.wall_us())
             {
                 return None;
             }
