@@ -10,9 +10,7 @@
 //! require the TzeHouse Windows reference host and are recorded as discovered
 //! follow-up work in the worker report (see Discovered-Follow-Ups-JSON).
 
-#[path = "../../crates/tze_hud_runtime/src/test_support.rs"]
-mod gpu_init;
-use gpu_init::serialized_headless_init;
+use crate::gpu_init::serialized_headless_init;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;

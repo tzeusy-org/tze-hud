@@ -23,8 +23,8 @@
 #
 # To run locally:
 #   TZE_HUD_PERF_ASSERT=1 cargo test --workspace --all-targets --exclude integration
-#   TZE_HUD_PERF_ASSERT=1 cargo test -p integration --test dashboard_tile_input
-#   TZE_HUD_PERF_ASSERT=1 cargo test -p integration --test text_stream_portal_cadence
+#   TZE_HUD_PERF_ASSERT=1 cargo test -p integration --test it dashboard_tile_input::
+#   TZE_HUD_PERF_ASSERT=1 cargo test -p integration --test it text_stream_portal_cadence::
 #   TZE_HUD_PERF_ASSERT=1 cargo test -p vertical_slice --test budget_assertions
 
 name: Performance Assert
@@ -160,11 +160,20 @@ jobs:
 
       - name: cargo test -p integration (perf-assert targets, TZE_HUD_PERF_ASSERT=1)
         run: |
+          set -o pipefail
+          dashboard_status=0
           cargo test \
             -p integration \
-            --test dashboard_tile_input \
-            --test text_stream_portal_cadence \
-            -- --nocapture 2>&1 | tee /tmp/perf-assert-integration.log
+            --test it dashboard_tile_input:: \
+            -- --nocapture 2>&1 | tee /tmp/perf-assert-integration.log || dashboard_status=$?
+          cadence_status=0
+          cargo test \
+            -p integration \
+            --test it text_stream_portal_cadence:: \
+            -- --nocapture 2>&1 | tee -a /tmp/perf-assert-integration.log || cadence_status=$?
+          printf 'dashboard_tile_input=%s text_stream_portal_cadence=%s\n' "$dashboard_status" "$cadence_status"
+          if [ "$dashboard_status" -ne 0 ]; then exit "$dashboard_status"; fi
+          exit "$cadence_status"
 
   # ── Vertical slice budget assertions ─────────────────────────────────────────
   #

@@ -4,6 +4,7 @@ description = "Runtime kernel for tze_hud — frame pipeline, admission, budgets
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+autotests = false
 
 [features]
 ## Enable dev-mode: allows `HeadlessConfig { config_toml: None }` to start with
@@ -72,19 +73,11 @@ tempfile = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [[test]]
-name = "pixel_readback"
-path = "tests/pixel_readback.rs"
-# dev-mode required because pixel_helpers.rs uses config_toml: None.
-# Integration tests are separate binaries; cfg(test) is set in them but NOT
-# in the library they link, so the dev-mode feature must be explicit here.
-required-features = ["dev-mode"]
-
-[[test]]
-name = "present_ack"
-path = "tests/present_ack.rs"
-# hud-91uu6: headless present-ack producer test uses HeadlessConfig
-# { config_toml: None } (dev-mode) and the headless render surface.
-required-features = ["dev-mode"]
+name = "it"
+path = "tests/it/main.rs"
+# The idle tests remain available with default features. The it root gates
+# pixel readback, present-ack and their shared helpers on dev-mode: cfg(test)
+# in this binary does not enable headless constructors in the linked library.
 
 [lints]
 workspace = true

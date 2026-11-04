@@ -11,9 +11,7 @@
 //! present wall-clock is sampled at Stage 7 completion, distinct from the
 //! transport RTT of the mutation submit.
 
-#[path = "../src/test_support.rs"]
-mod gpu_init;
-use gpu_init::serialized_headless_init;
+use crate::gpu_init::serialized_headless_init;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 

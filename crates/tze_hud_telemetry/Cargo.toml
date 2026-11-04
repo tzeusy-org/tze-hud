@@ -4,6 +4,7 @@ description = "Structured telemetry for tze_hud"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+autotests = false
 
 [features]
 # Rust-only work observations; never enabled in a shipped default closure.
@@ -12,6 +13,10 @@ dev-mode = []
 [dependencies]
 serde = { workspace = true }
 serde_json = { workspace = true }
+
+[[test]]
+name = "it"
+path = "tests/it/main.rs"
 
 [lints]
 workspace = true

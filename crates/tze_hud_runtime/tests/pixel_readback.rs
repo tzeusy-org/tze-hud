@@ -49,7 +49,7 @@
 //! - input-model/spec.md lines 11-22: focus indicators
 //! - configuration/spec.md lines 123-134: zone types
 
-mod pixel_helpers;
+use crate::pixel_helpers;
 
 use pixel_helpers::{
     BG_SRGB, CI_BLEND_TOLERANCE, CI_SOLID_TOLERANCE, SCENE_H, SCENE_W, make_scene_runtime,

@@ -13,8 +13,7 @@ use serde::{Deserialize, Serialize};
 // ─── Shared gRPC session harness ─────────────────────────────────────────────
 // Extracted from duplicate copies in the former presence-card suite and
 // subtitle_streaming (hud-ls5pz). See common/mod.rs for drift reconciliation notes.
-#[path = "common/mod.rs"]
-mod common;
+use crate::common;
 use common::*;
 
 // ─── Test-local constants ─────────────────────────────────────────────────────

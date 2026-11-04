@@ -4,7 +4,7 @@
 //! Time is the scene's injected `TestClock`; nothing here sleeps.
 //! Set `TZE_HUD_SKIP_GPU_TESTS=1` to skip; run with `HEADLESS_FORCE_SOFTWARE=1`.
 
-mod common;
+use crate::common;
 
 use std::collections::HashMap;
 use std::sync::Arc;
