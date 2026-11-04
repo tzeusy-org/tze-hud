@@ -8,7 +8,8 @@ autotests = false
 
 [[test]]
 name = "it"
-path = "it/main.rs"
+# Keep the entry beside the suite files: cargo-machete scans target parent trees.
+path = "it.rs"
 
 # Integration tests always run headless (no display server required).
 #
