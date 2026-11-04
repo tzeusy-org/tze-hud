@@ -363,7 +363,7 @@
   },
   "approval": {
     "status": "pending_owner_review",
-    "decision_reference": "hud-bz9bv.6 keyed schema calibration on 7b98d667 against actual merged main 8a94fcf7; hud-7f5vg option A owner comment b00459ed-763e-54b4-b250-c45a53f53548 (2026-11-04) approves only the new complete-choice120 ceiling, not these baseline bytes",
-    "basis": "Actual same-checkout/source-guarded runtime measurements: tools/list adds203 model-visible UTF-8 bytes and45 o200k tokens (2248/517 to2451/562), within unchanged900 ceiling. All five other established flows and the complete real four-choice ask/retained-answer/normal-ACK flow are byte-identical to actual8a94; choice remains114=69+28+17 <=120. All six established ceilings, flow version4, public serialization/accounting and tokenizer remain unchanged. The canonical gate requires two byte-identical final-source measurements; baseline bytes remain pending owner review."
+    "decision_reference": "hud-bz9bv.6 keyed schema calibration on 7b98d667 against actual merged main 8a94fcf7; hud-7f5vg option A owner comment b00459ed-763e-54b4-b250-c45a53f53548 (2026-11-04) approves only the new complete choice flow ceiling of 120 tokens, not these baseline bytes",
+    "basis": "Actual same-checkout/source-guarded runtime measurements: tools/list adds 203 model-visible UTF-8 bytes and 45 o200k tokens (2248/517 to 2451/562), within unchanged 900 ceiling. All five other established flows and the complete real four-choice ask/retained-answer/normal-ACK flow are byte-identical to actual 8a94; choice remains 114 = 69 + 28 + 17 <= 120. All six established ceilings, flow version 4, public serialization/accounting and tokenizer remain unchanged. The canonical gate requires two byte-identical final-source measurements; baseline bytes remain pending owner review."
   }
 }
