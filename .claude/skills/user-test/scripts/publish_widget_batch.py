@@ -32,7 +32,7 @@ from typing import Any
 import hud_env
 
 
-def rpc_call(url: str, token: str, tool: str, arguments: dict[str, Any], request_id: int) -> dict[str, Any]:
+def rpc_call(url: str, token: str, tool: str, arguments: dict[str, Any], request_id: int, *, timeout: float = 20, response_limit: int | None = None) -> dict[str, Any]:
     """Call one MCP tool; returns {"result": ...} or {"error": ...}."""
     body = json.dumps(
         {
@@ -51,8 +51,11 @@ def rpc_call(url: str, token: str, tool: str, arguments: dict[str, Any], request
         },
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=20) as resp:
-        envelope = json.loads(resp.read().decode("utf-8"))
+    with urllib.request.urlopen(req, timeout=timeout) as resp:
+        raw = resp.read() if response_limit is None else resp.read(response_limit + 1)
+        if response_limit is not None and len(raw) > response_limit:
+            raise ValueError("oversized MCP response")
+        envelope = json.loads(raw.decode("utf-8"))
     if "error" in envelope:
         return {"error": envelope["error"]}
     result = envelope["result"]
