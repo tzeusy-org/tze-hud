@@ -507,6 +507,21 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
     },
     // Notification action buttons (docs/api.md notification `actions`).
     CanonicalToken {
+        key: "notification.action.height_px",
+        description: "Notification action height in dp",
+        default_value: "22",
+    },
+    CanonicalToken {
+        key: "notification.action.gap_px",
+        description: "Notification action gap in dp",
+        default_value: "4",
+    },
+    CanonicalToken {
+        key: "notification.action.padding_px",
+        description: "Notification action padding in dp",
+        default_value: "2",
+    },
+    CanonicalToken {
         key: "notification.action.background",
         description: "Fill of notification action buttons (RGBA hex)",
         default_value: "#FFFFFF26",

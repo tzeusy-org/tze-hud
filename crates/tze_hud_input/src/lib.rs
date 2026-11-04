@@ -381,6 +381,7 @@ impl InputProcessor {
     /// Scene setters invalidate geometry only when a visible flag changes.
     pub fn clear_chrome_feedback(&mut self, scene: &mut SceneGraph) -> bool {
         let before = scene.geometry_epoch;
+        scene.focus_notification(None);
         if let Some(id) = self.current_chrome_hover.take() {
             scene.set_chrome_hovered(&id, false);
         }

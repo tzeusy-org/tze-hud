@@ -260,6 +260,7 @@ impl SceneGraph {
         });
 
         let record = ZonePublishRecord {
+            publication_id: SceneId::new(),
             zone_name: zone_name.to_string(),
             publisher_namespace: publisher_namespace.to_string(),
             content,
@@ -763,6 +764,7 @@ impl SceneGraph {
     ) -> bool {
         let expires_at_wall_us = ttl_us.map(|t| self.clock.now_us().saturating_add(t));
         let mut held = self.hold_scheduled_zone_publishes(zone, publisher_namespace, ttl_us);
+        let choices = &self.overlay.notification_choices;
         for r in self
             .zone_registry
             .active_publishes
@@ -771,6 +773,9 @@ impl SceneGraph {
             .flatten()
             .filter(|r| r.publisher_namespace == publisher_namespace)
         {
+            if choices.contains_key(&r.publication_id) {
+                continue;
+            }
             r.expires_at_wall_us = expires_at_wall_us;
             held = true;
         }
@@ -849,7 +854,7 @@ impl SceneGraph {
 
     /// Dismiss a single notification by its publication key.
     ///
-    /// Removes the publication identified by `(zone_name, published_at_wall_us,
+    /// Removes the publication identified by `(zone_name, publication_id,
     /// publisher_namespace)` from `zone_registry.active_publishes`.  This is the
     /// primitive used by the zone interaction layer when the user clicks or
     /// activates a notification's dismiss (×) button.
@@ -867,7 +872,7 @@ impl SceneGraph {
     pub fn dismiss_notification(
         &mut self,
         zone_name: &str,
-        published_at_wall_us: u64,
+        publication_id: SceneId,
         publisher_namespace: &str,
     ) -> bool {
         let publishes = match self.zone_registry.active_publishes.get_mut(zone_name) {
@@ -876,8 +881,7 @@ impl SceneGraph {
         };
         let before = publishes.len();
         publishes.retain(|r| {
-            !(r.published_at_wall_us == published_at_wall_us
-                && r.publisher_namespace == publisher_namespace)
+            !(r.publication_id == publication_id && r.publisher_namespace == publisher_namespace)
         });
         let removed = publishes.len() < before;
         if removed {
@@ -891,7 +895,7 @@ impl SceneGraph {
             let overlay = &mut self.overlay;
             overlay.zone_hit_regions.retain(|r| {
                 let stale = r.zone_name == zone_name
-                    && r.published_at_wall_us == published_at_wall_us
+                    && r.publication_id == publication_id
                     && r.publisher_namespace == publisher_namespace;
                 if stale {
                     overlay.chrome_states.remove(&r.interaction_id);
@@ -902,6 +906,170 @@ impl SceneGraph {
             self.version += 1;
         }
         removed
+    }
+
+    /// Activate one exact, visible and unexpired notification control. Pointer
+    /// releases and keyboard activation both enter here. The FIFO remains the
+    /// authoritative answer; its readiness callback must run after unlocking.
+    pub fn activate_notification(
+        &mut self,
+        region: &ZoneHitRegion,
+        exit_ms: u32,
+    ) -> Option<crate::render_wake::RenderWakeNotifier> {
+        self.prune_notification_feedback();
+        if !self
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .any(|live| live == region)
+        {
+            return None;
+        }
+        let key = region.publication_id;
+        if self.overlay.notification_choices.contains_key(&key) {
+            return None;
+        }
+        let now = self.now_wall_us();
+        let record = self
+            .zone_registry
+            .active_for_zone(&region.zone_name)
+            .iter()
+            .find(|record| {
+                record.publication_id == region.publication_id
+                    && record.publisher_namespace == region.publisher_namespace
+                    && record.expires_at_wall_us.is_none_or(|expiry| expiry > now)
+            })?;
+        let ZoneContent::Notification(payload) = &record.content else {
+            return None;
+        };
+        let kind = match &region.kind {
+            ZoneInteractionKind::Dismiss => super::PendingActionKind::Dismiss,
+            ZoneInteractionKind::Action { callback_id }
+                if payload
+                    .actions
+                    .iter()
+                    .any(|a| &a.callback_id == callback_id) =>
+            {
+                super::PendingActionKind::Callback(callback_id.clone())
+            }
+            _ => return None,
+        };
+        if matches!(region.kind, ZoneInteractionKind::Dismiss) || exit_ms == 0 {
+            if !self.dismiss_notification(
+                &region.zone_name,
+                region.publication_id,
+                &region.publisher_namespace,
+            ) {
+                return None;
+            }
+        } else {
+            // Reuse the existing Stack fade/deadline scheduler. A held answer
+            // cannot extend this local, finite exit with hud_hold.
+            let record = self
+                .zone_registry
+                .active_publishes
+                .get_mut(&region.zone_name)?
+                .iter_mut()
+                .find(|r| {
+                    r.publication_id == region.publication_id
+                        && r.publisher_namespace == region.publisher_namespace
+                })?;
+            let exit_at = now.saturating_add(u64::from(exit_ms) * 1_000);
+            record.expires_at_wall_us = Some(
+                record
+                    .expires_at_wall_us
+                    .map_or(exit_at, |expiry| expiry.min(exit_at)),
+            );
+            self.overlay
+                .notification_choices
+                .insert(key, region.interaction_id.clone());
+            self.focus_notification(None);
+            self.overlay.zone_hit_regions.retain(|r| {
+                !(r.zone_name == region.zone_name
+                    && r.publication_id == region.publication_id
+                    && r.publisher_namespace == region.publisher_namespace)
+            });
+            self.overlay.chrome_states.insert(
+                region.interaction_id.clone(),
+                ChromeLocalState {
+                    pressed: true,
+                    ..Default::default()
+                },
+            );
+            self.prune_notification_feedback();
+            self.version += 1;
+        }
+        Some(self.push_pending_action(super::PendingAction {
+            publisher_namespace: region.publisher_namespace.clone(),
+            zone_name: region.zone_name.clone(),
+            kind,
+        }))
+    }
+
+    /// Drop ephemeral feedback whenever its exact publication is gone, hidden or
+    /// expired. Called by lifetime mutation owners and before input geometry.
+    pub fn prune_notification_feedback(&mut self) {
+        let now = self.now_wall_us();
+        let hidden = self.owner_hidden().zones;
+        let live = |zone: &str, id: SceneId, publisher: &str| {
+            self.zone_registry.active_for_zone(zone).iter().any(|r| {
+                r.publication_id == id
+                    && r.publisher_namespace == publisher
+                    && r.expires_at_wall_us.is_none_or(|expiry| expiry > now)
+            })
+        };
+        let keys: std::collections::HashSet<_> = self
+            .overlay
+            .notification_choices
+            .keys()
+            .filter(|id| {
+                self.zone_registry
+                    .active_publishes
+                    .values()
+                    .flatten()
+                    .any(|r| {
+                        r.publication_id == **id
+                            && r.expires_at_wall_us.is_none_or(|expiry| expiry > now)
+                    })
+            })
+            .cloned()
+            .collect();
+        let valid: std::collections::HashSet<_> = self
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .filter(|r| {
+                // Native chrome shares this list but has no notification publication.
+                !matches!(
+                    r.kind,
+                    ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
+                ) || (!hidden && live(&r.zone_name, r.publication_id, &r.publisher_namespace))
+            })
+            .map(|r| r.interaction_id.clone())
+            .collect();
+        self.overlay
+            .notification_choices
+            .retain(|key, _| keys.contains(key));
+        self.overlay
+            .zone_hit_regions
+            .retain(|r| valid.contains(&r.interaction_id));
+        self.overlay.chrome_states.retain(|id, _| {
+            !id.starts_with("zone:")
+                || valid.contains(id)
+                || self
+                    .overlay
+                    .notification_choices
+                    .values()
+                    .any(|chosen| chosen == id)
+        });
+        if self
+            .overlay
+            .notification_focus
+            .as_ref()
+            .is_some_and(|id| !valid.contains(id))
+        {
+            self.focus_notification(None);
+        }
     }
 
     /// Whether current content or a pending unleased batch still owns this origin.
@@ -925,6 +1093,7 @@ impl SceneGraph {
 
     /// Keep orphan state bounded by the current publications, never request history.
     pub(crate) fn prune_publication_orphans(&mut self) {
+        self.prune_notification_feedback();
         if self.publication_orphans.is_empty() {
             return;
         }

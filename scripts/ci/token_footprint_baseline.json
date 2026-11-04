@@ -8,10 +8,10 @@
     "vocab_fingerprint": "sha256:446a9538cb6c348e3516120d7c08b09f57c36495e2acfffe59a5bf8b0cfb1a2d",
     "counting_policy": "each canonical JSON-RPC body independently; UTF-8 bytes; encode_with_special_tokens; operation and flow totals are integer sums; model_visible counts tool name + arguments + result text only"
   },
-  "fixture_fingerprint": "blake3:d8b2281f2162d971247febe20f5468905ecea50692d3699e78fc12db1e20e435",
+  "fixture_fingerprint": "blake3:125c02b7d7d8ee201cb0ab7277d071b92e23927085ea677fbe2755c9f360c5c8",
   "flows": {
     "discover": {
-      "flow_version": 3,
+      "flow_version": 4,
       "flow_fingerprint": "blake3:cc4dff8555f55c50b9b1128d1c5d2b973d3ec9b6432c72da889c5cc7cc936f12",
       "operations": {
         "hud_surfaces": {
@@ -43,7 +43,7 @@
       }
     },
     "error": {
-      "flow_version": 3,
+      "flow_version": 4,
       "flow_fingerprint": "blake3:231d2c1864b13ecf6342cc100ae24bde413c965a89bbbc7c09c6eddf70ebb821",
       "operations": {
         "hud_publish": {
@@ -74,8 +74,76 @@
         "tokens": 45
       }
     },
+    "notification_choice": {
+      "flow_version": 4,
+      "flow_fingerprint": "blake3:86dc3983825d8abffec9bcfeb7d143d5c27fa22a185d777f6db17a5b47d1f1bf",
+      "operations": {
+        "1_ask": {
+          "request": {
+            "bytes": 307,
+            "tokens": 83
+          },
+          "response": {
+            "bytes": 111,
+            "tokens": 38
+          },
+          "total": {
+            "bytes": 418,
+            "tokens": 121
+          },
+          "model_visible": {
+            "bytes": 259,
+            "tokens": 69
+          }
+        },
+        "2_answer": {
+          "request": {
+            "bytes": 92,
+            "tokens": 30
+          },
+          "response": {
+            "bytes": 169,
+            "tokens": 53
+          },
+          "total": {
+            "bytes": 261,
+            "tokens": 83
+          },
+          "model_visible": {
+            "bytes": 90,
+            "tokens": 28
+          }
+        },
+        "3_ack": {
+          "request": {
+            "bytes": 104,
+            "tokens": 34
+          },
+          "response": {
+            "bytes": 104,
+            "tokens": 35
+          },
+          "total": {
+            "bytes": 208,
+            "tokens": 69
+          },
+          "model_visible": {
+            "bytes": 49,
+            "tokens": 17
+          }
+        }
+      },
+      "total": {
+        "bytes": 887,
+        "tokens": 273
+      },
+      "model_visible": {
+        "bytes": 398,
+        "tokens": 114
+      }
+    },
     "portal": {
-      "flow_version": 3,
+      "flow_version": 4,
       "flow_fingerprint": "blake3:d6f1d951533d70300e2260aebc84ed2aac676a58e99c5f40479e78c1ccba7168",
       "operations": {
         "1_publish_attach": {
@@ -161,7 +229,7 @@
       }
     },
     "tools_list": {
-      "flow_version": 3,
+      "flow_version": 4,
       "flow_fingerprint": "blake3:b050fb412f31b7724e2a8ab2b8a043f51e647902051aa74e07b92f9eea68c232",
       "operations": {
         "tools/list": {
@@ -193,7 +261,7 @@
       }
     },
     "widget_publish": {
-      "flow_version": 3,
+      "flow_version": 4,
       "flow_fingerprint": "blake3:d21c41f58ce472b20861dcc976f4dc882d43fbf633be0831e4eebaaf187b7fc1",
       "operations": {
         "hud_publish": {
@@ -225,7 +293,7 @@
       }
     },
     "zone_publish": {
-      "flow_version": 3,
+      "flow_version": 4,
       "flow_fingerprint": "blake3:b23b19459a1e296716916f4756166f99a634a962ba612d61cb65a33a48cbbee1",
       "operations": {
         "hud_publish": {
@@ -257,6 +325,30 @@
       }
     }
   },
+  "notification_action_limit_error": {
+    "transaction": {
+      "request": {
+        "bytes": 328,
+        "tokens": 91
+      },
+      "response": {
+        "bytes": 171,
+        "tokens": 47
+      },
+      "total": {
+        "bytes": 499,
+        "tokens": 138
+      },
+      "model_visible": {
+        "bytes": 321,
+        "tokens": 82
+      }
+    },
+    "result_text": {
+      "bytes": 74,
+      "tokens": 16
+    }
+  },
   "budgets": {
     "basis": "model_visible tokens per flow (tool name + arguments + result text); targets from docs/api.md",
     "flows": {
@@ -265,12 +357,13 @@
       "zone_publish": 80,
       "widget_publish": 80,
       "portal": 250,
-      "error": 60
+      "error": 60,
+      "notification_choice": 120
     }
   },
   "approval": {
     "status": "pending_owner_review",
-    "decision_reference": "hud-ximtf.3 implementation PR: owner review pending for the corrected MCP contracts and canonical flow version 3",
-    "basis": "Measured from the actual MCP handlers after truthful tools/list, portal publish responses, and atomic publish+hold updates. All original model-visible token budgets are unchanged. This re-recording is not owner approval."
+    "decision_reference": "hud-bz9bv.2 / hud-7f5vg option A: owner comment b00459ed-763e-54b4-b250-c45a53f53548 (2026-11-04); current-main4941cad9 runtime calibration and baseline bytes pending review",
+    "basis": "Two byte-identical current-main canonical version4 measurements: complete four-option ask, real retained answer and normal returned-ID ACK total114 model-visible o200k tokens (69+28+17), within the owner-approved new-flow120 ceiling. All six established flow request/response fingerprints, operation/flow metrics, public accounting and budgets are unchanged except shared flow_version3->4. Ceiling approval is not approval of these baseline bytes."
   }
 }

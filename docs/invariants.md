@@ -24,6 +24,14 @@ panel changes only affect later accepted publications, never existing cards.
 `hud_publish` and `hud_surfaces` report that stored lifetime, including delay.
 The setting itself neither polls nor wakes the renderer.
 
+A waiting choice card adds no timer or periodic layout work. Choosing one action
+retains that exact publication only for its finite local exit, makes all controls
+noninteractive and cannot be prolonged by hold. Clear, expiry, replacement,
+dismiss and owner hiding prune local focus and feedback without an answer.
+[`idle_with_notification_renders_only_at_fade`](../crates/tze_hud_compositor/src/renderer/tests/idle_gate.rs)
+and [`release_activates_only_the_button_the_press_began_on`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs)
+cover the waiting and terminal transitions.
+
 - `tze_hud_mcp` [`portal_flow_attach_publish_poll_ack_clear`](../crates/tze_hud_mcp/src/server/tests.rs) (atomic publish + portal hold),
   [`test_hud_publish_zone_ttl_sets_content_expiry_and_is_swept`](../crates/tze_hud_mcp/src/server/tests.rs),
   [`delay_ms_holds_content_until_due`](../crates/tze_hud_mcp/src/server/tests.rs), [`notification_ttl_zero_is_held_and_hold_retimes_it`](../crates/tze_hud_mcp/src/server/tests.rs)
@@ -94,6 +102,15 @@ flag change invalidates geometry. Agents cannot hold this chrome state or turn
 cancellation into an action. Existing local owner coverage:
 [`action_button_hover_and_press_are_local_and_frame_only_on_change`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs).
 Windows held-press/release acceptance remains separate.
+
+Notification controls join bare Tab / Shift+Tab traversal at the existing
+owner's boundary: X followed by live actions, with Enter or Space activating
+through the same exact-publication path as a pointer release. Publishing never
+steals focus or activates an OS window. Hidden, stale or already chosen controls
+cannot answer. Focus loss preserves the editor and quarantines matching consumed
+key releases; deferred cleanup also settles before a returned Character event.
+[`notification_keyboard_cycle_activation_and_return_preserve_portal_editor`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs)
+covers traversal, activation, hidden controls and focus return.
 
 Portal composer edits stay local; accepted submissions alone atomically enter
 input and native reply history. Repeated empty Enter, whitespace, cancel,

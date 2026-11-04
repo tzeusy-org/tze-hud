@@ -32,7 +32,7 @@ use tze_hud_scene::{
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 /// Build a 1920×1080 scene with a single Stack zone "notif" and a single
-/// notification publication from "agent-a" at `published_at_wall_us=100`.
+/// notification publication from "agent-a" at the actual scene clock time.
 ///
 /// Returns `(scene, published_at_wall_us, publisher_namespace)`.
 fn setup_single_notification_scene() -> (SceneGraph, u64, &'static str) {
@@ -91,9 +91,19 @@ fn insert_dismiss_region(
     bounds: Rect,
     tab_order: u32,
 ) {
-    let interaction_id =
-        format!("zone:{zone_name}:dismiss:{published_at_wall_us}:{publisher_namespace}");
+    let publication_id = scene
+        .zone_registry
+        .active_for_zone(zone_name)
+        .iter()
+        .find(|r| {
+            r.published_at_wall_us == published_at_wall_us
+                && r.publisher_namespace == publisher_namespace
+        })
+        .expect("fixture publication exists")
+        .publication_id;
+    let interaction_id = format!("zone:{zone_name}:dismiss:{publication_id}:{publisher_namespace}");
     scene.overlay.zone_hit_regions.push(ZoneHitRegion {
+        publication_id,
         zone_name: zone_name.to_string(),
         published_at_wall_us,
         publisher_namespace: publisher_namespace.to_string(),
@@ -109,7 +119,7 @@ fn insert_dismiss_region(
 /// `dismiss_notification()` MUST return `true` and remove the matching publication.
 #[test]
 fn dismiss_notification_removes_matching_publication() {
-    let (mut scene, published_at, ns) = setup_single_notification_scene();
+    let (mut scene, _published_at, ns) = setup_single_notification_scene();
 
     assert_eq!(
         scene.zone_registry.active_for_zone("notif").len(),
@@ -117,7 +127,11 @@ fn dismiss_notification_removes_matching_publication() {
         "precondition: one publication present"
     );
 
-    let removed = scene.dismiss_notification("notif", published_at, ns);
+    let removed = scene.dismiss_notification(
+        "notif",
+        scene.zone_registry.active_for_zone("notif")[0].publication_id,
+        ns,
+    );
 
     assert!(
         removed,
@@ -133,10 +147,14 @@ fn dismiss_notification_removes_matching_publication() {
 /// `dismiss_notification()` MUST increment `version` when a publication is removed.
 #[test]
 fn dismiss_notification_increments_version() {
-    let (mut scene, published_at, ns) = setup_single_notification_scene();
+    let (mut scene, _published_at, ns) = setup_single_notification_scene();
 
     let version_before = scene.version;
-    scene.dismiss_notification("notif", published_at, ns);
+    scene.dismiss_notification(
+        "notif",
+        scene.zone_registry.active_for_zone("notif")[0].publication_id,
+        ns,
+    );
 
     assert!(
         scene.version > version_before,
@@ -149,10 +167,14 @@ fn dismiss_notification_increments_version() {
 /// the zone does not exist.
 #[test]
 fn dismiss_notification_returns_false_for_unknown_zone() {
-    let (mut scene, published_at, ns) = setup_single_notification_scene();
+    let (mut scene, _published_at, ns) = setup_single_notification_scene();
 
     let version_before = scene.version;
-    let result = scene.dismiss_notification("nonexistent-zone", published_at, ns);
+    let result = scene.dismiss_notification(
+        "nonexistent-zone",
+        scene.zone_registry.active_for_zone("notif")[0].publication_id,
+        ns,
+    );
 
     assert!(!result, "must return false for unknown zone");
     assert_eq!(
@@ -162,16 +184,16 @@ fn dismiss_notification_returns_false_for_unknown_zone() {
 }
 
 /// `dismiss_notification()` MUST return `false` when the publication key does
-/// not match any active publication (wrong `published_at_wall_us`).
+/// not match any active publication (wrong runtime publication identity).
 #[test]
 fn dismiss_notification_returns_false_for_wrong_pub_key() {
     let (mut scene, _published_at, ns) = setup_single_notification_scene();
 
-    let result = scene.dismiss_notification("notif", 99999, ns);
+    let result = scene.dismiss_notification("notif", SceneId::new(), ns);
 
     assert!(
         !result,
-        "must return false when published_at does not match"
+        "must return false when publication identity does not match"
     );
     assert_eq!(
         scene.zone_registry.active_for_zone("notif").len(),
@@ -245,14 +267,14 @@ fn dismiss_notification_leaves_other_publications_untouched() {
     let pubs = scene.zone_registry.active_for_zone("notif");
     assert_eq!(pubs.len(), 2, "precondition: two publications");
 
-    // Find agent-a's published_at_wall_us.
-    let agent_a_pub_at = pubs
+    // Find agent-a's runtime publication identity.
+    let agent_a_publication = pubs
         .iter()
         .find(|r| r.publisher_namespace == "agent-a")
-        .map(|r| r.published_at_wall_us)
+        .map(|r| r.publication_id)
         .expect("agent-a publication must exist");
 
-    let removed = scene.dismiss_notification("notif", agent_a_pub_at, "agent-a");
+    let removed = scene.dismiss_notification("notif", agent_a_publication, "agent-a");
 
     assert!(
         removed,
@@ -327,7 +349,7 @@ fn hit_test_returns_passthrough_when_outside_zone_regions() {
 }
 
 /// `hit_test()` `ZoneInteraction` result MUST carry the correct `interaction_id`
-/// following the scheme `zone:{zone_name}:dismiss:{published_at_wall_us}:{publisher_namespace}`.
+/// following the scheme `zone:{zone_name}:dismiss:{publication_id}:{publisher_namespace}`.
 #[test]
 fn zone_interaction_result_has_correct_interaction_id_scheme() {
     let (mut scene, published_at, ns) = setup_single_notification_scene();
@@ -338,10 +360,11 @@ fn zone_interaction_result_has_correct_interaction_id_scheme() {
     let result = scene.hit_test(110.0, 110.0);
 
     if let HitResult::ZoneInteraction { interaction_id, .. } = result {
-        let expected = format!("zone:notif:dismiss:{published_at}:{ns}");
+        let publication_id = scene.zone_registry.active_for_zone("notif")[0].publication_id;
+        let expected = format!("zone:notif:dismiss:{publication_id}:{ns}");
         assert_eq!(
             interaction_id, expected,
-            "interaction_id must follow zone:{{name}}:dismiss:{{pub_at}}:{{ns}} scheme"
+            "interaction_id must follow zone:{{name}}:dismiss:{{publication_id}}:{{ns}} scheme"
         );
     } else {
         panic!("expected ZoneInteraction, got: {result:?}");
@@ -355,8 +378,10 @@ fn hit_test_returns_zone_interaction_for_action_button() {
     let (mut scene, published_at, ns) = setup_single_notification_scene();
 
     let action_bounds = Rect::new(1440.0, 12.0, 100.0, 22.0);
-    let action_id = format!("zone:notif:action:{published_at}:{ns}:confirm");
+    let publication_id = scene.zone_registry.active_for_zone("notif")[0].publication_id;
+    let action_id = format!("zone:notif:action:{publication_id}:{ns}:0:confirm");
     scene.overlay.zone_hit_regions.push(ZoneHitRegion {
+        publication_id,
         zone_name: "notif".to_string(),
         published_at_wall_us: published_at,
         publisher_namespace: ns.to_string(),
@@ -406,6 +431,7 @@ fn zone_interaction_kind_clones_correctly() {
 #[test]
 fn zone_hit_region_fields_round_trip() {
     let region = ZoneHitRegion {
+        publication_id: SceneId::null(),
         zone_name: "my-zone".to_string(),
         published_at_wall_us: 42_000_000,
         publisher_namespace: "my-agent".to_string(),

@@ -739,6 +739,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     // Warning notification (urgency 2): published at t=0, expires at t=15s.
     // Expected: 15_000 ms - 150 ms fade = 14_850 ms until fade starts.
     let record_warning = ZonePublishRecord {
+        publication_id: SceneId::new(),
         lease_id: None,
         publication_origin: None,
         zone_name: "alert-banner".to_string(),
@@ -771,6 +772,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     // Critical notification (urgency 3): published at t=0, expires at t=30s.
     // Expected: 30_000 ms - 150 ms fade = 29_850 ms until fade starts.
     let record_critical = ZonePublishRecord {
+        publication_id: SceneId::new(),
         lease_id: None,
         publication_origin: None,
         zone_name: "alert-banner".to_string(),
@@ -803,6 +805,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     // expires_at_wall_us takes priority over per-notification ttl_ms.
     // published=1s, expires=16s → duration=15s → 15_000 - 150 = 14_850 ms until fade.
     let record_both = ZonePublishRecord {
+        publication_id: SceneId::new(),
         lease_id: None,
         publication_origin: None,
         zone_name: "alert-banner".to_string(),
@@ -831,6 +834,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
 
     // No expires_at: held until cleared, whatever the payload ttl_ms says.
     let record_info = ZonePublishRecord {
+        publication_id: SceneId::new(),
         lease_id: None,
         publication_origin: None,
         zone_name: "alert-banner".to_string(),
@@ -1135,7 +1139,7 @@ async fn test_transition_interrupt_starts_fade_in_from_current_opacity() {
 #[test]
 fn test_stream_reveal_no_breakpoints_reveals_all() {
     let state = StreamRevealState::new(
-        (1_000_000, "agent".to_owned()),
+        SceneId::new(),
         vec![] as Vec<u64>, // no breakpoints
     );
     assert_eq!(
@@ -1149,7 +1153,7 @@ fn test_stream_reveal_no_breakpoints_reveals_all() {
 #[test]
 fn test_stream_reveal_starts_at_first_breakpoint() {
     let state = StreamRevealState::new(
-        (1_000_000, "agent".to_owned()),
+        SceneId::new(),
         vec![3, 9, 15], // "The" at 3, "The quick" at 9, etc.
     );
     assert_eq!(
@@ -1162,7 +1166,7 @@ fn test_stream_reveal_starts_at_first_breakpoint() {
 /// StreamRevealState.advance() progresses through breakpoints.
 #[test]
 fn test_stream_reveal_advance_progresses_breakpoints() {
-    let mut state = StreamRevealState::new((1_000_000, "agent".to_owned()), vec![3, 9, 15]);
+    let mut state = StreamRevealState::new(SceneId::new(), vec![3, 9, 15]);
     assert_eq!(state.visible_byte_offset(), 3, "initially at breakpoint 0");
 
     // Advance STREAM_REVEAL_FRAMES_PER_SEGMENT times to move to next.

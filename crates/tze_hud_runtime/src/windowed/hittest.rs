@@ -542,6 +542,7 @@ mod tests {
             .overlay
             .zone_hit_regions
             .push(tze_hud_scene::types::ZoneHitRegion {
+                publication_id: tze_hud_scene::SceneId::null(),
                 zone_name: "notification-area".to_string(),
                 published_at_wall_us: 123,
                 publisher_namespace: "test-agent".to_string(),

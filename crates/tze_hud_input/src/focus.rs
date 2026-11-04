@@ -359,6 +359,25 @@ impl FocusManager {
         self.navigate(tab_id, scene, true)
     }
 
+    /// Whether the next explicit Tab crosses this content cycle's boundary.
+    /// Runtime-owned notification controls join here without changing agent focus.
+    pub fn traversal_would_wrap(&self, tab_id: SceneId, scene: &SceneGraph, reverse: bool) -> bool {
+        let cycle = build_focus_cycle(tab_id, scene);
+        match cycle
+            .iter()
+            .position(|step| step.matches(self.current_owner(tab_id)))
+        {
+            Some(index) => {
+                if reverse {
+                    index == 0
+                } else {
+                    index + 1 == cycle.len()
+                }
+            }
+            None => cycle.is_empty(),
+        }
+    }
+
     fn navigate(&mut self, tab_id: SceneId, scene: &SceneGraph, reverse: bool) -> FocusTransition {
         let cycle = build_focus_cycle(tab_id, scene);
         if cycle.is_empty() {

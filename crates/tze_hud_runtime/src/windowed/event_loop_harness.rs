@@ -181,6 +181,7 @@ impl WindowedRuntimeState {
             overlay_refits: Default::default(),
             press_window: None,
             zone_press: None,
+            notification_keydowns: Default::default(),
             primary_drag_gesture: None,
             global_tokens: HashMap::new(),
             appearance: None,
@@ -1591,7 +1592,11 @@ mod tests {
         {
             let shared = harness.app.state.shared_state.blocking_lock();
             let mut scene = shared.scene.blocking_lock();
-            *scene = SceneGraph::new(1920.0, 1080.0);
+            *scene = SceneGraph::new_with_clock(
+                1920.0,
+                1080.0,
+                Arc::new(tze_hud_scene::TestClock::new(1_000)),
+            );
             scene.create_tab("Main", 0).unwrap();
             scene.register_zone(ZoneDefinition {
                 id: SceneId::new(),
@@ -1624,7 +1629,12 @@ mod tests {
                         urgency: 2,
                         ttl_ms: None,
                         title: "Action check".to_string(),
-                        actions: vec![action("approve", "Approve"), action("reject", "Reject")],
+                        actions: vec![
+                            action("approve", "Approve"),
+                            action("reject", "Reject"),
+                            action("wait", "Wait"),
+                            action("details", "Details"),
+                        ],
                     }),
                     "notif-agent",
                     None,
@@ -1633,6 +1643,11 @@ mod tests {
                 )
                 .unwrap();
         }
+        harness
+            .app
+            .state
+            .global_tokens
+            .insert("motion.exit.ms".into(), "0".into());
         while !harness.tick() {}
         harness
     }
@@ -1725,6 +1740,22 @@ mod tests {
         let approve = harness.notification_action_center("approve").unwrap();
         let reject = harness.notification_action_center("reject").unwrap();
 
+        let focus_id = harness.scene().overlay.zone_hit_regions.iter().find(|r| matches!(&r.kind, ZoneInteractionKind::Action { callback_id } if callback_id == "approve")).unwrap().interaction_id.clone();
+        let before_focus = geometry_epoch(&harness);
+        harness.scene().focus_notification(Some(focus_id.clone()));
+        assert!(geometry_epoch(&harness) > before_focus);
+        let focused_epoch = geometry_epoch(&harness);
+        harness.scene().focus_notification(Some(focus_id));
+        assert_eq!(
+            geometry_epoch(&harness),
+            focused_epoch,
+            "unchanged local focus stays idle"
+        );
+        harness.scene().focus_notification(None);
+        assert!(
+            take_action_ids(&harness).is_empty(),
+            "focus requires no model round trip"
+        );
         let epoch = geometry_epoch(&harness);
         harness.app.state.cursor_x = approve.0;
         harness.app.state.cursor_y = approve.1;
@@ -1857,18 +1888,10 @@ mod tests {
                                 None,
                             )
                             .unwrap();
-                        // Keep the identity transition deterministic, independent
-                        // of the real clock's resolution in this existing fixture.
-                        scene
-                            .zone_registry
-                            .active_publishes
-                            .get_mut("notification-area")
-                            .unwrap()[0]
-                            .published_at_wall_us = old.published_at_wall_us + 1;
                     }
                     "dismiss" => assert!(scene.dismiss_notification(
                         "notification-area",
-                        old.published_at_wall_us,
+                        old.publication_id,
                         "notif-agent"
                     )),
                     _ => unreachable!(),
@@ -2067,6 +2090,230 @@ mod tests {
         harness.click(x, y);
         harness.drain();
         assert!(take_action_ids(&harness).is_empty());
+        for terminal in ["expiry", "clear", "replacement", "dismiss", "hidden"] {
+            let mut harness = approve_reject_notification_harness();
+            harness.app.state.global_tokens =
+                tze_hud_config::themes::resolve_config_tokens(&std::collections::HashMap::from([
+                    ("theme".into(), "blueprint".into()),
+                    ("motion.exit.ms".into(), "240".into()),
+                ]));
+            let region = harness.scene().overlay.zone_hit_regions.iter().find(|r| matches!(&r.kind, ZoneInteractionKind::Action { callback_id } if callback_id == "approve")).unwrap().clone();
+            harness.click(
+                region.bounds.x + region.bounds.width / 2.0,
+                region.bounds.y + region.bounds.height / 2.0,
+            );
+            assert_eq!(take_action_ids(&harness), ["approve"]);
+            {
+                let mut scene = harness.scene();
+                assert!(scene.overlay.zone_hit_regions.is_empty());
+                assert!(scene.overlay.chrome_states[&region.interaction_id].pressed);
+                assert!(scene.overlay.notification_focus.is_none());
+                assert!(
+                    scene.activate_notification(&region, 240).is_none(),
+                    "already answered"
+                );
+                assert!(
+                    !scene.hold_zone_publications("notification-area", "notif-agent", None),
+                    "hold cannot prolong local exit"
+                );
+                match terminal {
+                    "expiry" => {
+                        scene
+                            .zone_registry
+                            .active_publishes
+                            .get_mut("notification-area")
+                            .unwrap()[0]
+                            .expires_at_wall_us = Some(0);
+                        scene.drain_expired_zone_publications();
+                    }
+                    "clear" | "replacement" => {
+                        let old =
+                            scene.zone_registry.active_for_zone("notification-area")[0].clone();
+                        scene.clear_zone("notification-area").unwrap();
+                        if terminal == "replacement" {
+                            scene
+                                .publish_to_zone(
+                                    "notification-area",
+                                    old.content,
+                                    "notif-agent",
+                                    None,
+                                    None,
+                                    None,
+                                )
+                                .unwrap();
+                        }
+                    }
+                    "dismiss" => {
+                        assert!(scene.dismiss_notification(
+                            "notification-area",
+                            region.publication_id,
+                            "notif-agent"
+                        ));
+                    }
+                    "hidden" => {
+                        scene.set_owner_hidden(tze_hud_scene::graph::visibility::SurfaceClasses {
+                            zones: true,
+                            ..Default::default()
+                        });
+                    }
+                    _ => unreachable!(),
+                }
+                if terminal == "hidden" {
+                    assert!(scene.overlay.zone_hit_regions.is_empty());
+                    assert_eq!(
+                        scene
+                            .zone_registry
+                            .active_for_zone("notification-area")
+                            .len(),
+                        1,
+                        "hiding changes the view, not publications"
+                    );
+                    scene
+                        .zone_registry
+                        .active_publishes
+                        .get_mut("notification-area")
+                        .unwrap()[0]
+                        .expires_at_wall_us = Some(0);
+                    scene.drain_expired_zone_publications();
+                }
+                assert!(scene.overlay.notification_choices.is_empty());
+                assert!(
+                    !scene
+                        .overlay
+                        .chrome_states
+                        .contains_key(&region.interaction_id)
+                );
+                assert!(
+                    scene.take_pending_actions("notif-agent").is_empty(),
+                    "automatic cleanup emits neither Callback nor human X"
+                );
+                assert!(scene.take_pending_actions("another-agent").is_empty());
+            }
+            harness.app.enqueue_pointer_event(PointerEventKind::Up);
+            harness.drain();
+            assert!(take_action_ids(&harness).is_empty());
+        }
+
+        // Same publisher, same fixed clock tick: each card owns its callback,
+        // controls and finite exit independently. No timestamp adjustment.
+        let mut harness = approve_reject_notification_harness();
+        let first = harness
+            .scene()
+            .zone_registry
+            .active_for_zone("notification-area")[0]
+            .clone();
+        let mut second_content = first.content.clone();
+        if let tze_hud_scene::ZoneContent::Notification(payload) = &mut second_content {
+            payload.actions[0].callback_id = "second".into();
+            payload.actions[0].label = "Second card".into();
+        }
+        harness
+            .scene()
+            .publish_to_zone(
+                "notification-area",
+                second_content.clone(),
+                "notif-agent",
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        assert!(harness.tick());
+        let second = harness.scene().overlay.zone_hit_regions.iter().find(|r| {
+            matches!(&r.kind, ZoneInteractionKind::Action { callback_id } if callback_id == "second")
+        }).unwrap().clone();
+        {
+            let mut scene = harness.scene();
+            let records = scene.zone_registry.active_for_zone("notification-area");
+            assert_eq!(records.len(), 2);
+            assert_eq!(
+                records[0].published_at_wall_us,
+                records[1].published_at_wall_us
+            );
+            assert_ne!(records[0].publication_id, records[1].publication_id);
+            // Snapshot format carries no runtime identity; restoration gives
+            // every record a distinct fresh identity at the unchanged time.
+            let json = serde_json::to_string(records).unwrap();
+            assert!(!json.contains("publication_id"));
+            let restored: Vec<tze_hud_scene::ZonePublishRecord> =
+                serde_json::from_str(&json).unwrap();
+            assert_ne!(restored[0].publication_id, restored[1].publication_id);
+            assert_ne!(restored[0].publication_id, records[0].publication_id);
+            assert_eq!(
+                restored[0].published_at_wall_us,
+                records[0].published_at_wall_us
+            );
+            assert!(scene.activate_notification(&second, 240).is_some());
+        }
+        assert_eq!(take_action_ids(&harness), ["second"]);
+        assert!(harness.tick());
+        {
+            let mut scene = harness.scene();
+            assert!(
+                scene
+                    .overlay
+                    .zone_hit_regions
+                    .iter()
+                    .any(|r| r.publication_id == first.publication_id)
+            );
+            assert!(
+                scene
+                    .overlay
+                    .zone_hit_regions
+                    .iter()
+                    .all(|r| r.publication_id != second.publication_id)
+            );
+            assert!(scene.hold_zone_publications("notification-area", "notif-agent", None));
+            let records = scene.zone_registry.active_for_zone("notification-area");
+            assert!(
+                records[0].expires_at_wall_us.is_none(),
+                "unanswered sibling can be held"
+            );
+            assert_eq!(
+                records[1].expires_at_wall_us,
+                Some(scene.now_wall_us() + 240_000)
+            );
+            // Stack eviction admits a same-time replacement while the chosen
+            // exit still exists. It must not inherit the previous answer.
+            scene
+                .zone_registry
+                .zones
+                .get_mut("notification-area")
+                .unwrap()
+                .contention_policy = tze_hud_scene::ContentionPolicy::Stack { max_depth: 1 };
+            scene
+                .publish_to_zone(
+                    "notification-area",
+                    second_content,
+                    "notif-agent",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+            assert!(scene.overlay.notification_choices.is_empty());
+            assert!(
+                !scene
+                    .overlay
+                    .chrome_states
+                    .contains_key(&second.interaction_id)
+            );
+            assert!(
+                scene.activate_notification(&second, 240).is_none(),
+                "stale answer cannot reach replacement"
+            );
+            assert!(scene.hold_zone_publications("notification-area", "notif-agent", None));
+            let replacement = &scene.zone_registry.active_for_zone("notification-area")[0];
+            assert_eq!(replacement.published_at_wall_us, first.published_at_wall_us);
+            assert_ne!(replacement.publication_id, second.publication_id);
+            assert!(replacement.expires_at_wall_us.is_none());
+        }
+        assert!(harness.tick());
+        let (x, y) = harness.notification_action_center("second").unwrap();
+        harness.click(x, y);
+        harness.drain();
+        assert_eq!(take_action_ids(&harness), ["second"]);
+        assert_eq!(harness.zone_publication_count("notification-area"), 0);
     }
 
     /// A release activates an action only when the press began on that same
@@ -2127,6 +2374,47 @@ mod tests {
             take_action_ids(&harness).is_empty(),
             "late/stale releases create no second event"
         );
+        for terminal in ["clear", "expiry", "replace"] {
+            let mut harness = approve_reject_notification_harness();
+            let approve = harness.notification_action_center("approve").unwrap();
+            harness.app.state.cursor_x = approve.0;
+            harness.app.state.cursor_y = approve.1;
+            harness.app.enqueue_pointer_event(PointerEventKind::Down);
+            {
+                let mut scene = harness.scene();
+                let old = scene.zone_registry.active_for_zone("notification-area")[0].clone();
+                if terminal == "expiry" {
+                    scene
+                        .zone_registry
+                        .active_publishes
+                        .get_mut("notification-area")
+                        .unwrap()[0]
+                        .expires_at_wall_us = Some(0);
+                    scene.drain_expired_zone_publications();
+                } else {
+                    scene.clear_zone("notification-area").unwrap();
+                    if terminal == "replace" {
+                        scene
+                            .publish_to_zone(
+                                "notification-area",
+                                old.content,
+                                "notif-agent",
+                                None,
+                                None,
+                                None,
+                            )
+                            .unwrap();
+                    }
+                }
+            }
+            harness.drain();
+            harness.app.enqueue_pointer_event(PointerEventKind::Up);
+            harness.drain();
+            assert!(
+                take_action_ids(&harness).is_empty(),
+                "{terminal} between Down/Up cannot answer"
+            );
+        }
     }
 
     /// A pointer press on a notification action button, dispatched through the
@@ -2184,6 +2472,11 @@ mod tests {
                 )
                 .unwrap();
         }
+        harness
+            .app
+            .state
+            .global_tokens
+            .insert("motion.exit.ms".into(), "0".into());
         while !harness.tick() {}
 
         let (x, y) = harness
@@ -2404,6 +2697,7 @@ mod tests {
             scene.set_tile_follow_tail_at_tail(untracked, false);
             // Typed input fixture only; this does not assert compositor button geometry.
             scene.overlay.zone_hit_regions.push(ZoneHitRegion {
+                publication_id: tze_hud_scene::SceneId::null(),
                 zone_name: "__jump_to_latest__".into(),
                 published_at_wall_us: 0,
                 publisher_namespace: "runtime".into(),
@@ -2412,6 +2706,9 @@ mod tests {
                 interaction_id: format!("jump-to-latest:{tile}"),
                 tab_order: 0,
             });
+            let version = scene.version;
+            scene.prune_notification_feedback();
+            assert_eq!(scene.version, version, "cleanup does not request a redraw");
             (tile, control, untracked, tail)
         };
         let target_scroll = || {
@@ -2550,6 +2847,7 @@ mod tests {
             .overlay
             .zone_hit_regions
             .push(ZoneHitRegion {
+                publication_id: tze_hud_scene::SceneId::null(),
                 zone_name: "__chrome_tile_close__".into(),
                 published_at_wall_us: 0,
                 publisher_namespace: "runtime".into(),
@@ -2558,6 +2856,12 @@ mod tests {
                 interaction_id: format!("tile-close:{tile_id}"),
                 tab_order: 0,
             });
+        {
+            let mut scene = harness.scene();
+            let version = scene.version;
+            scene.prune_notification_feedback();
+            assert_eq!(scene.version, version, "cleanup does not request a redraw");
+        }
         harness.click(bx, by);
         harness.drain();
 
@@ -3094,6 +3398,319 @@ mod tests {
                 "non-reserved {key} KeyUp must retain raw agent routing; got {events:?}"
             );
         }
+    }
+
+    #[test]
+    fn notification_keyboard_cycle_activation_and_return_preserve_portal_editor() {
+        fn press(harness: &mut HeadlessEventLoopHarness, code: &str, key: &str, reverse: bool) {
+            let mut down = key_down(code, key, 1_000);
+            if let PendingKeyboardEvent::KeyDown(raw) = &mut down {
+                raw.modifiers.shift = reverse;
+            }
+            harness.enqueue(down);
+            harness.enqueue(key_up(code, key, 1_100));
+            harness.drain();
+        }
+        for (code, key) in [("Enter", "Enter"), ("Space", " ")] {
+            let mut harness = approve_reject_notification_harness();
+            let (zone, content) = {
+                let scene = harness.scene();
+                (
+                    scene.zone_registry.zones["notification-area"].clone(),
+                    scene.zone_registry.active_for_zone("notification-area")[0]
+                        .content
+                        .clone(),
+                )
+            };
+            let tab = harness.focus_composer();
+            let (tile, composer) = match harness.app.state.focus_manager.current_owner(tab) {
+                tze_hud_input::FocusOwner::Node { tile_id, node_id } => (*tile_id, *node_id),
+                _ => unreachable!(),
+            };
+            let mut controls = Vec::new();
+            {
+                let mut scene = harness.scene();
+                for (i, name) in ["minimize", "submit"].into_iter().enumerate() {
+                    let id = SceneId::new();
+                    scene
+                        .add_node_to_tile(
+                            tile,
+                            Some(composer),
+                            Node {
+                                id,
+                                layout: Default::default(),
+                                children: vec![],
+                                data: NodeData::HitRegion(HitRegionNode {
+                                    bounds: Rect::new(10.0 + i as f32 * 80.0, 80.0, 60.0, 30.0),
+                                    interaction_id: name.into(),
+                                    accepts_focus: true,
+                                    accepts_pointer: true,
+                                    ..Default::default()
+                                }),
+                            },
+                        )
+                        .unwrap();
+                    controls.push(id);
+                }
+                scene
+                    .register_tile_scroll_config(tile, tze_hud_scene::TileScrollConfig::vertical())
+                    .unwrap();
+                scene.register_zone(zone);
+                scene
+                    .publish_to_zone(
+                        "notification-area",
+                        content,
+                        "notif-agent",
+                        None,
+                        None,
+                        None,
+                    )
+                    .unwrap();
+                assert!(
+                    scene.overlay.notification_focus.is_none(),
+                    "publishing never steals focus"
+                );
+            }
+            assert!(harness.tick());
+            let tx = tze_hud_protocol::session_server::InputEventSender::new(128);
+            let mut rx = tx.subscribe_all();
+            harness.app.state.input_event_tx = Some(tx);
+            // Existing portal stop order is preserved before the card's X.
+            for expected in &controls {
+                press(&mut harness, "Tab", "Tab", false);
+                assert!(
+                    matches!(harness.app.state.focus_manager.current_owner(tab), tze_hud_input::FocusOwner::Node { node_id, .. } if node_id == expected)
+                );
+            }
+            let saved = harness.app.state.focus_manager.current_owner(tab).clone();
+            press(&mut harness, "Tab", "Tab", false);
+            let dismiss = harness.scene().overlay.notification_focus.clone().unwrap();
+            assert!(dismiss.contains(":dismiss:"));
+            press(&mut harness, "Tab", "Tab", true);
+            assert!(harness.scene().overlay.notification_focus.is_none());
+            assert_eq!(
+                harness.app.state.focus_manager.current_owner(tab),
+                &saved,
+                "reversing X returns to submit without skipping"
+            );
+            press(&mut harness, "Tab", "Tab", false);
+            for _ in 0..4 {
+                press(&mut harness, "Tab", "Tab", false);
+            }
+            assert!(
+                harness
+                    .scene()
+                    .overlay
+                    .notification_focus
+                    .as_deref()
+                    .unwrap()
+                    .ends_with(":details")
+            );
+            press(&mut harness, "Tab", "Tab", false);
+            assert!(harness.scene().overlay.notification_focus.is_none());
+            assert!(
+                matches!(harness.app.state.focus_manager.current_owner(tab), tze_hud_input::FocusOwner::Node { node_id, .. } if *node_id == composer)
+            );
+            // Reverse entry and reversing again returns directly to the composer.
+            press(&mut harness, "Tab", "Tab", true);
+            assert!(
+                harness
+                    .scene()
+                    .overlay
+                    .notification_focus
+                    .as_deref()
+                    .unwrap()
+                    .ends_with(":details")
+            );
+            press(&mut harness, "Tab", "Tab", false);
+            assert!(harness.scene().overlay.notification_focus.is_none());
+            harness.enqueue(character("x", 2_000));
+            harness.drain();
+            assert_eq!(harness.composer_draft().as_deref(), Some("x"));
+            press(&mut harness, "Tab", "Tab", true);
+            // Pointer press and keyboard activation interleave on the same exact publication.
+            let point = harness.notification_action_center("approve").unwrap();
+            harness.app.state.cursor_x = point.0;
+            harness.app.state.cursor_y = point.1;
+            harness.app.enqueue_pointer_event(PointerEventKind::Down);
+            // Pointer clears local focus. Re-enter reverse from the composer's boundary.
+            press(&mut harness, "Tab", "Tab", true);
+            let _ = received_events(&mut rx);
+            let down = key_down(code, key, 3_000);
+            harness.enqueue(down);
+            let mut repeated = key_down(code, key, 3_100);
+            if let PendingKeyboardEvent::KeyDown(raw) = &mut repeated {
+                raw.repeat = true;
+            }
+            harness.enqueue(repeated);
+            harness.enqueue(character(" ", 3_110));
+            harness.enqueue(key_up(code, key, 3_200));
+            harness.drain();
+            harness.app.enqueue_pointer_event(PointerEventKind::Up);
+            assert_eq!(take_action_ids(&harness), ["details"]);
+            assert!(received_events(&mut rx).iter().all(|(_, event)| !matches!(
+                event,
+                ProtoInputEvent::KeyDown(_)
+                    | ProtoInputEvent::KeyUp(_)
+                    | ProtoInputEvent::Character(_)
+                    | ProtoInputEvent::CommandInput(_)
+            )));
+            assert!(harness.scene().overlay.notification_focus.is_none());
+            harness.enqueue(character("y", 4_000));
+            harness.drain();
+            assert_eq!(
+                harness.composer_draft().as_deref(),
+                Some("xy"),
+                "editing resumes at the still-valid owner"
+            );
+        }
+
+        // Keyboard focus belongs to the HUD window even when its pointer is
+        // over another overlay (or no HUD window). Drive the production focus
+        // event seam, including both existing nonblocking cleanup boundaries.
+        for cursor_window in [None, Some(winit::window::WindowId::from(22))] {
+            for busy_scene in [false, true] {
+                for character_first in [false, true] {
+                    let mut harness = approve_reject_notification_harness();
+                    let (zone, content) = {
+                        let scene = harness.scene();
+                        (
+                            scene.zone_registry.zones["notification-area"].clone(),
+                            scene.zone_registry.active_for_zone("notification-area")[0]
+                                .content
+                                .clone(),
+                        )
+                    };
+                    let tab = harness.focus_composer();
+                    let owner = harness.app.state.focus_manager.current_owner(tab).clone();
+                    {
+                        let mut scene = harness.scene();
+                        scene.register_zone(zone);
+                        scene
+                            .publish_to_zone(
+                                "notification-area",
+                                content,
+                                "notif-agent",
+                                None,
+                                None,
+                                None,
+                            )
+                            .unwrap();
+                    }
+                    assert!(harness.tick());
+                    harness.enqueue(character("kept", 5_000));
+                    harness.drain();
+                    let tx = tze_hud_protocol::session_server::InputEventSender::new(128);
+                    let mut rx = tx.subscribe_all();
+                    harness.app.state.input_event_tx = Some(tx);
+                    let mut tab_down = key_down("Tab", "Tab", 5_100);
+                    if let PendingKeyboardEvent::KeyDown(raw) = &mut tab_down {
+                        raw.modifiers.shift = true;
+                    }
+                    harness.enqueue(tab_down);
+                    harness.drain();
+                    assert!(harness.scene().overlay.notification_focus.is_some());
+                    harness.app.state.cursor_window = cursor_window;
+                    assert!(harness.app.state.press_window.is_none());
+                    let shared = harness.shared_state();
+                    let scene_handle = Arc::clone(&shared.blocking_lock().scene);
+                    let held_shared = (!busy_scene).then(|| shared.blocking_lock());
+                    let held_scene = busy_scene.then(|| scene_handle.blocking_lock());
+                    harness.app.handle_window_focus(None, false);
+                    assert!(harness.app.settle_scene_work().is_deferred());
+                    assert!(
+                        harness
+                            .app
+                            .state
+                            .input_processor
+                            .chrome_feedback_cancel_pending
+                    );
+                    drop(held_scene);
+                    drop(held_shared);
+                    if busy_scene {
+                        assert!(harness.tick());
+                    }
+                    harness.app.handle_window_focus(None, true);
+                    harness.enqueue(key_up("Tab", "Tab", 5_200));
+                    harness.drain();
+                    assert!(harness.app.state.notification_keydowns.is_empty());
+                    assert!(
+                        received_events(&mut rx)
+                            .iter()
+                            .all(|(_, event)| !matches!(event, ProtoInputEvent::KeyUp(_))),
+                        "focus loss preserves the consumed physical Tab release"
+                    );
+                    assert_eq!(harness.app.state.focus_manager.current_owner(tab), &owner);
+                    // A returned activation key has no stale card target. Editing
+                    // resumes at the preserved owner until deliberate navigation.
+                    if !character_first {
+                        press(&mut harness, "Space", " ", false);
+                    }
+                    // Character-first return must also settle deferred chrome cleanup.
+                    // In the Space-first case, named Space already edits the draft.
+                    harness.enqueue(character("resumed", 5_300));
+                    harness.drain();
+                    assert!(take_action_ids(&harness).is_empty());
+                    assert_eq!(
+                        harness.composer_draft().as_deref(),
+                        Some(if character_first {
+                            "keptresumed"
+                        } else {
+                            "kept resumed"
+                        })
+                    );
+                    assert!(harness.scene().overlay.notification_focus.is_none());
+                    assert!(harness.tick());
+                    assert!(
+                        !harness
+                            .app
+                            .state
+                            .input_processor
+                            .chrome_feedback_cancel_pending
+                    );
+                    assert!(
+                        harness
+                            .scene()
+                            .overlay
+                            .chrome_states
+                            .values()
+                            .all(|state| !state.focused)
+                    );
+                    press(&mut harness, "Tab", "Tab", true);
+                    press(&mut harness, "Enter", "Enter", false);
+                    assert_eq!(take_action_ids(&harness), ["details"]);
+                }
+            }
+        }
+
+        // Hiding a focused card removes its controls immediately without
+        // answering it, and traversal cannot re-enter those hidden controls.
+        let mut harness = approve_reject_notification_harness();
+        press(&mut harness, "Tab", "Tab", false);
+        assert!(harness.scene().overlay.notification_focus.is_some());
+        {
+            let mut scene = harness.scene();
+            scene.set_owner_hidden(tze_hud_scene::graph::SurfaceClasses {
+                zones: true,
+                ..Default::default()
+            });
+            assert!(scene.overlay.notification_focus.is_none());
+            assert!(scene.overlay.zone_hit_regions.is_empty());
+        }
+        for reverse in [false, true] {
+            press(&mut harness, "Tab", "Tab", reverse);
+            press(&mut harness, "Enter", "Enter", false);
+            assert!(harness.scene().overlay.notification_focus.is_none());
+            assert!(take_action_ids(&harness).is_empty());
+        }
+        assert_eq!(
+            harness
+                .scene()
+                .zone_registry
+                .active_for_zone("notification-area")
+                .len(),
+            1
+        );
     }
 
     /// RFC 0004 §10 production proof: keyboard is a concrete pointer-free

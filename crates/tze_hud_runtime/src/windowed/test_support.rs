@@ -336,6 +336,7 @@ pub(super) fn make_windowed_keyboard_test_app(
         portal_resize_states: std::collections::HashMap::new(),
         consumed_portal_resize_keydowns: std::collections::HashSet::new(),
         consumed_shell_shortcut_keydowns: std::collections::HashSet::new(),
+        notification_keydowns: std::collections::HashSet::new(),
         panel_input: crate::windowed::panel_input::PanelInputState::default(),
         keyboard_activation_nodes: std::collections::HashMap::new(),
         consumed_command_keydowns: std::collections::HashSet::new(),
@@ -991,6 +992,7 @@ mod tests {
 
         // Simulate the compositor injecting a dismiss ZoneHitRegion for this publication.
         scene.overlay.zone_hit_regions.push(ZoneHitRegion {
+            publication_id: scene.zone_registry.active_for_zone("alert-banner")[0].publication_id,
             zone_name: "alert-banner".to_string(),
             published_at_wall_us: record_published_at,
             publisher_namespace: publisher.to_string(),
@@ -1046,7 +1048,17 @@ mod tests {
             ..
         } = result_up.hit
         {
-            scene.dismiss_notification(zone_name, published_at_wall_us, publisher_namespace);
+            let id = scene
+                .zone_registry
+                .active_for_zone(zone_name)
+                .iter()
+                .find(|r| {
+                    r.published_at_wall_us == published_at_wall_us
+                        && r.publisher_namespace == *publisher_namespace
+                })
+                .unwrap()
+                .publication_id;
+            scene.dismiss_notification(zone_name, id, publisher_namespace);
         }
 
         // The notification must now be gone.
@@ -1097,6 +1109,7 @@ mod tests {
             scene.zone_registry.active_for_zone("alert-banner")[0].published_at_wall_us;
 
         scene.overlay.zone_hit_regions.push(ZoneHitRegion {
+            publication_id: scene.zone_registry.active_for_zone("alert-banner")[0].publication_id,
             zone_name: "alert-banner".to_string(),
             published_at_wall_us: record_published_at,
             publisher_namespace: "test-agent".to_string(),

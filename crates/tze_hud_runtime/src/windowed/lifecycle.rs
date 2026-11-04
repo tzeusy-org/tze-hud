@@ -1923,6 +1923,25 @@ fn observed_cpu_affinity() -> (u32, String) {
     (0, "unsupported".to_string())
 }
 
+/// Duration of a local chosen exit. Theme reduced motion resolves exit to zero;
+/// explicit zone transition settings otherwise retain their existing precedence.
+pub(super) fn notification_exit_ms(
+    scene: &SceneGraph,
+    zone: &str,
+    tokens: &std::collections::HashMap<String, String>,
+) -> u32 {
+    let duration = tze_hud_config::tokens::resolve_motion_duration_ms(tokens, "motion.exit.ms");
+    if duration == 0 {
+        return 0;
+    }
+    scene
+        .zone_registry
+        .zones
+        .get(zone)
+        .and_then(|zone| zone.rendering_policy.transition_out_ms)
+        .unwrap_or(duration)
+}
+
 impl WinitApp {
     /// Best-effort per-frame reconvergence of the lock-free `active_tab_mirror`
     /// from the authoritative scene (hud-dwcr7).  Non-blocking: uses `try_lock`
@@ -2145,6 +2164,17 @@ impl WinitApp {
         self.state.press_window = None;
         end_os_mouse_capture();
         self.update_overlay_cursor_hittest();
+    }
+
+    /// Winit keyboard-focus transition. Notification focus is global HUD
+    /// chrome and must end even when the pointer belongs to another overlay.
+    pub(super) fn handle_window_focus(&mut self, secondary: Option<usize>, focused: bool) {
+        if secondary.is_none() {
+            self.panel_window_focus(focused);
+        }
+        if !focused {
+            self.cancel_chrome_feedback();
+        }
     }
 
     /// Disarm only runtime chrome. This is not an Up and cannot activate a
@@ -2618,6 +2648,7 @@ impl WinitApp {
                 // moved, or a press that started off the button) never fires
                 // an action the user did not press.
                 if pointer_event.kind == PointerEventKind::Down {
+                    scene.focus_notification(None);
                     self.state.zone_press = match &result.hit {
                         HitResult::ZoneInteraction {
                             interaction_id,
@@ -2652,57 +2683,30 @@ impl WinitApp {
                             || native_chrome_permits(self.state.press_window))
                     {
                         match kind {
-                            ZoneInteractionKind::Dismiss => {
-                                let removed = scene.dismiss_notification(
-                                    zone_name,
-                                    published_at_wall_us,
-                                    publisher_namespace,
-                                );
-                                if removed {
-                                    pending_action_wakes.push(scene.push_pending_action(
-                                        tze_hud_scene::PendingAction {
-                                            publisher_namespace: publisher_namespace.clone(),
-                                            zone_name: zone_name.clone(),
-                                            kind: tze_hud_scene::graph::PendingActionKind::Dismiss,
-                                        },
-                                    ));
+                            ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. } => {
+                                let region = scene
+                                    .overlay
+                                    .zone_hit_regions
+                                    .iter()
+                                    .find(|region| {
+                                        region.interaction_id == *interaction_id
+                                            && region.zone_name == *zone_name
+                                            && region.published_at_wall_us == published_at_wall_us
+                                            && region.publisher_namespace == *publisher_namespace
+                                    })
+                                    .cloned();
+                                if let Some(region) = region {
+                                    let exit_ms = notification_exit_ms(
+                                        &scene,
+                                        zone_name,
+                                        &self.state.global_tokens,
+                                    );
+                                    if let Some(wake) =
+                                        scene.activate_notification(&region, exit_ms)
+                                    {
+                                        pending_action_wakes.push(wake);
+                                    }
                                 }
-                                tracing::debug!(
-                                    zone = %zone_name,
-                                    published_at_wall_us,
-                                    publisher = %publisher_namespace,
-                                    removed,
-                                    "zone dismiss: notification removed from scene"
-                                );
-                            }
-                            ZoneInteractionKind::Action { callback_id } => {
-                                // Delivered to the publisher via MCP `hud_input`.
-                                pending_action_wakes.push(scene.push_pending_action(
-                                    tze_hud_scene::PendingAction {
-                                        publisher_namespace: publisher_namespace.clone(),
-                                        zone_name: zone_name.clone(),
-                                        kind: tze_hud_scene::graph::PendingActionKind::Callback(
-                                            callback_id.clone(),
-                                        ),
-                                    },
-                                ));
-                                // An activated notification is answered: dismiss
-                                // it locally, as the × does, so the click has an
-                                // immediate visible result and cannot repeat
-                                // (hud-paslt).
-                                let removed = scene.dismiss_notification(
-                                    zone_name,
-                                    published_at_wall_us,
-                                    publisher_namespace,
-                                );
-                                tracing::debug!(
-                                    zone = %zone_name,
-                                    published_at_wall_us,
-                                    publisher = %publisher_namespace,
-                                    %callback_id,
-                                    removed,
-                                    "zone action: callback queued for agent delivery, notification dismissed"
-                                );
                             }
                             ZoneInteractionKind::DragHandle { .. } => {
                                 // Handled by the drag state machine below — not here.

@@ -652,6 +652,46 @@ async fn test_two_line_notifications_stack_correctly() {
         4,
         "all 4 TextItems must have distinct pixel_y values, got: {ys:?}"
     );
+    let before = compositor.zone_slot_layout(
+        "notification-area",
+        scene.zone_registry.active_for_zone("notification-area"),
+        &scene.zone_registry.zones["notification-area"].rendering_policy,
+        648.0,
+        640.0,
+    );
+    if let ZoneContent::Notification(payload) = &mut scene
+        .zone_registry
+        .active_publishes
+        .get_mut("notification-area")
+        .unwrap()[1]
+        .content
+    {
+        payload.actions = [
+            "Proceed only after checking the entire deployment and its rollback plan",
+            "Hold",
+            "Skip",
+            "Open",
+        ]
+        .into_iter()
+        .map(|label| NotificationAction {
+            label: label.into(),
+            callback_id: label.into(),
+        })
+        .collect();
+    }
+    let after = compositor.zone_slot_layout(
+        "notification-area",
+        scene.zone_registry.active_for_zone("notification-area"),
+        &scene.zone_registry.zones["notification-area"].rendering_policy,
+        648.0,
+        640.0,
+    );
+    assert!(after.slot_heights[0] > before.slot_heights[0]);
+    assert!(after.slot_offsets[1] > before.slot_offsets[1]);
+    assert_eq!(
+        after.slot_heights[1], before.slot_heights[1],
+        "following text height does not oscillate"
+    );
 }
 
 /// Rounded notification backdrops must use per-notification two-line slot heights.
@@ -916,9 +956,9 @@ async fn test_prune_faded_publications_removes_completed_fades() {
         .active_publishes
         .get("notification-area")
         .unwrap();
-    let (a_wall_us, a_ns) = {
+    let a_id = {
         let r = &publishes[0]; // agent-a is first (oldest)
-        (r.published_at_wall_us, r.publisher_namespace.clone())
+        r.publication_id
     };
 
     let mut completed_state =
@@ -933,7 +973,7 @@ async fn test_prune_faded_publications_removes_completed_fades() {
         .pub_animation_states
         .entry("notification-area".to_string())
         .or_default()
-        .insert((a_wall_us, a_ns), completed_state);
+        .insert(a_id, completed_state);
 
     // Before prune: 2 publications.
     assert_eq!(
@@ -1026,7 +1066,11 @@ fn test_simultaneous_independent_fades() {
 async fn test_stack_reflow_after_publication_pruned() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
 
-    let mut scene = SceneGraph::new(1280.0, 720.0);
+    let mut scene = SceneGraph::new_with_clock(
+        1280.0,
+        720.0,
+        std::sync::Arc::new(tze_hud_scene::TestClock::new(1_000)),
+    );
     // Zone at x=0, y=0 with font_size 16px default → slot_h = line_height(22.4) + 2*8 + 4 = 42.4px.
     scene.register_zone(ZoneDefinition {
         id: SceneId::new(),
@@ -1085,9 +1129,9 @@ async fn test_stack_reflow_after_publication_pruned() {
         .active_publishes
         .get("notification-area")
         .unwrap();
-    let (a_wall_us, a_ns) = {
+    let a_id = {
         let r = &publishes[0]; // agent-a is oldest (index 0)
-        (r.published_at_wall_us, r.publisher_namespace.clone())
+        r.publication_id
     };
 
     let mut completed_state =
@@ -1101,7 +1145,7 @@ async fn test_stack_reflow_after_publication_pruned() {
         .pub_animation_states
         .entry("notification-area".to_string())
         .or_default()
-        .insert((a_wall_us, a_ns), completed_state);
+        .insert(a_id, completed_state);
 
     // Prune: removes agent-a.
     compositor.prune_faded_publications(&mut scene);
@@ -1145,6 +1189,180 @@ async fn test_stack_reflow_after_publication_pruned() {
         59.4,
         "Beta (oldest remaining) must be at slot 1, pixel_y=59.4"
     );
+    let mut payload = NotificationPayload {
+        text: "Choose next".into(),
+        ..Default::default()
+    };
+    payload.actions = [
+        "Wait until all dependent service checks have finished successfully",
+        "Retry",
+        "Open",
+        "Skip",
+    ]
+    .into_iter()
+    .map(|label| NotificationAction {
+        label: label.into(),
+        callback_id: label.into(),
+    })
+    .collect();
+    scene
+        .zone_registry
+        .zones
+        .get_mut("notification-area")
+        .unwrap()
+        .geometry_policy = GeometryPolicy::Relative {
+        x_pct: 0.0,
+        y_pct: 0.0,
+        width_pct: 0.25,
+        height_pct: 1.0,
+    };
+    scene
+        .publish_to_zone(
+            "notification-area",
+            ZoneContent::Notification(payload),
+            "choice-agent",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    let before = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    let gamma_before = before
+        .iter()
+        .find(|item| &*item.text == "Gamma")
+        .unwrap()
+        .pixel_y;
+    let newest = scene
+        .zone_registry
+        .active_for_zone("notification-area")
+        .last()
+        .unwrap()
+        .clone();
+    let policy = &scene.zone_registry.zones["notification-area"].rendering_policy;
+    assert!(
+        compositor
+            .notification_action_layout("notification-area", &newest, policy, 320.0)
+            .stacked
+    );
+    scene.dismiss_notification("notification-area", newest.publication_id, "choice-agent");
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    let after = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    assert!(
+        gamma_before
+            > after
+                .iter()
+                .find(|item| &*item.text == "Gamma")
+                .unwrap()
+                .pixel_y
+    );
+
+    // Equal-time cards from one publisher retain separate shaped descriptors
+    // and fade state. Different labels would thrash a timestamp-keyed cache.
+    scene.clear_zone("notification-area").unwrap();
+    for long in [false, true] {
+        scene
+            .publish_to_zone(
+                "notification-area",
+                ZoneContent::Notification(NotificationPayload {
+                    text: if long { "Long" } else { "Short" }.into(),
+                    actions: ["Ship", "Hold", "Skip", "Open"]
+                        .into_iter()
+                        .map(|label| NotificationAction {
+                            label: if long {
+                                label.repeat(100)
+                            } else {
+                                label.into()
+                            },
+                            callback_id: label.into(),
+                        })
+                        .collect(),
+                    ..Default::default()
+                }),
+                "choice-agent",
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+    }
+    let records = scene
+        .zone_registry
+        .active_for_zone("notification-area")
+        .to_vec();
+    assert_eq!(
+        records[0].published_at_wall_us,
+        records[1].published_at_wall_us
+    );
+    let policy = &scene.zone_registry.zones["notification-area"].rendering_policy;
+    assert!(
+        !compositor
+            .notification_action_layout("notification-area", &records[0], policy, 320.0)
+            .stacked
+    );
+    assert!(
+        compositor
+            .notification_action_layout("notification-area", &records[1], policy, 320.0)
+            .stacked
+    );
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    let _ = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    let shapes = compositor.notification_layouts.borrow().shapes;
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    let _ = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    assert_eq!(
+        compositor.notification_layouts.borrow().shapes,
+        shapes,
+        "unchanged same-time cards reuse both layouts"
+    );
+    let action = scene
+        .overlay
+        .zone_hit_regions
+        .iter()
+        .find(|r| {
+            r.publication_id == records[1].publication_id
+                && matches!(r.kind, ZoneInteractionKind::Action { .. })
+        })
+        .unwrap()
+        .clone();
+    assert!(scene.activate_notification(&action, 240).is_some());
+    compositor.update_publication_animations(&scene);
+    let states = compositor
+        .pub_animation_states
+        .get_mut("notification-area")
+        .unwrap();
+    assert_eq!(states.len(), 2, "same tick still means independent fades");
+    assert_ne!(
+        states[&records[0].publication_id].source_expiry_us,
+        states[&records[1].publication_id].source_expiry_us
+    );
+    states
+        .get_mut(&records[1].publication_id)
+        .unwrap()
+        .fade_start = Some(std::time::Instant::now() - std::time::Duration::from_millis(241));
+    compositor.prune_faded_publications(&mut scene);
+    assert_eq!(
+        scene.zone_registry.active_for_zone("notification-area")[0].publication_id,
+        records[0].publication_id
+    );
+    assert_eq!(
+        scene
+            .zone_registry
+            .active_for_zone("notification-area")
+            .len(),
+        1
+    );
+    assert!(scene.overlay.notification_choices.is_empty());
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    assert!(
+        scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .all(|r| r.publication_id == records[0].publication_id)
+    );
+    let _ = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    assert_eq!(compositor.notification_layouts.borrow().shapes, shapes);
 }
 
 /// update_publication_animations creates fresh state for new publications.
@@ -1217,6 +1435,7 @@ fn test_update_publication_animations_seeds_fresh_state() {
 
     // No expiry: held, not the zone auto_clear_ms.
     let record_no_ttl = ZonePublishRecord {
+        publication_id: SceneId::new(),
         lease_id: None,
         publication_origin: None,
         zone_name: "notification-area".to_string(),

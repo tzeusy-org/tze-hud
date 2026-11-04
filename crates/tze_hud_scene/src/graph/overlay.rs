@@ -46,6 +46,15 @@ pub struct RuntimeOverlayState {
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
     pub chrome_states: HashMap<String, ChromeLocalState>,
+    /// Answered publications retained solely for their finite exit presentation.
+    /// The chosen interaction keeps its pressed fill; it has no hit region.
+    #[serde(skip, default)]
+    pub notification_choices: HashMap<SceneId, String>,
+    /// Owner-directed notification focus, independent of agent/editor focus.
+    #[serde(skip, default)]
+    pub notification_focus: Option<String>,
+    #[serde(skip, default)]
+    pub notification_focus_entered_reverse: bool,
     /// Set of element_ids that are currently being actively dragged.
     ///
     /// Written by the input processor on DragActivated and cleared on

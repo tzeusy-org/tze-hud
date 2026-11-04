@@ -419,6 +419,20 @@ impl SceneGraph {
         self.bump_geometry_epoch();
     }
 
+    /// Set visible local keyboard focus without changing an agent's focus owner.
+    pub fn focus_notification(&mut self, id: Option<String>) {
+        if self.overlay.notification_focus == id {
+            return;
+        }
+        if let Some(previous) = self.overlay.notification_focus.take() {
+            self.update_chrome_state(&previous, |state| state.focused = false);
+        }
+        self.overlay.notification_focus = id.clone();
+        if let Some(id) = id {
+            self.update_chrome_state(&id, |state| state.focused = true);
+        }
+    }
+
     /// Mark the viewer's drag-feedback target without invalidating content caches.
     pub fn set_drag_active(&mut self, element_id: SceneId) {
         if self.overlay.drag_active_elements.insert(element_id) {
@@ -441,6 +455,15 @@ impl SceneGraph {
     /// Set pressed state for a runtime chrome control, keyed by its
     /// interaction id (see [`Self::set_chrome_hovered`]).
     pub fn set_chrome_pressed(&mut self, interaction_id: &str, pressed: bool) {
+        if !pressed
+            && self
+                .overlay
+                .notification_choices
+                .values()
+                .any(|id| id == interaction_id)
+        {
+            return;
+        }
         self.update_chrome_state(interaction_id, |state| state.pressed = pressed);
     }
 

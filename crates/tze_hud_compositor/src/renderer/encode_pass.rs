@@ -24,6 +24,7 @@
 //! - `collect_tile_rounded_rect_cmds_from_node` — recursive per-node helper
 //! - `encode_rounded_rect_pass` — GPU pass for SDF rounded-rectangle rendering
 
+use std::collections::HashMap;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::*;
 use wgpu::util::DeviceExt;
@@ -39,10 +40,10 @@ use super::hit_regions::{notification_action_interaction_id, notification_dismis
 use super::tile_render::node_uses_display_tile_scroll;
 use super::token_colors::{
     NOTIFICATION_BORDER_WIDTH_PX, STATIC_IMAGE_PLACEHOLDER_COLOR, is_alert_banner_zone,
-    linear_to_srgb, notification_action_button_bounds, notification_backdrop_opacity,
-    notification_dismiss_bounds, notification_inset, resolve_border_default_color,
-    resolve_notification_action_tokens, resolve_notification_control_color, srgb_to_linear,
-    urgency_to_notification_color, urgency_to_severity_color, zone_opacity_ceiling,
+    linear_to_srgb, notification_backdrop_opacity, notification_dismiss_bounds, notification_inset,
+    resolve_border_default_color, resolve_notification_action_tokens,
+    resolve_notification_control_color, srgb_to_linear, urgency_to_notification_color,
+    urgency_to_severity_color, zone_opacity_ceiling,
 };
 
 #[inline]
@@ -337,6 +338,29 @@ impl super::Compositor {
         }
     }
 
+    fn notification_control_cmd(
+        &self,
+        bounds: Rect,
+        state: ChromeLocalState,
+        fill: Option<Rgba>,
+        mut outline: Rgba,
+        opacity: f32,
+        tokens: &HashMap<String, String>,
+    ) -> crate::pipeline::RoundedRectDrawCmd {
+        if state.focused {
+            outline = super::token_colors::resolve_token_color(tokens, "color.primary")
+                .unwrap_or(outline);
+            outline.a *= opacity;
+        }
+        let mut command = self.control_cmd(bounds, fill, outline, opacity);
+        if state.focused
+            && let Some(border) = command.border.as_mut()
+        {
+            border.width = tze_hud_config::tokens::token_px(tokens, "focus.ring.width", 2.0);
+        }
+        command
+    }
+
     /// Collect all zone draw commands for the SDF pipeline in a single pass,
     /// partitioned by layer.
     ///
@@ -418,7 +442,7 @@ impl super::Compositor {
                 ContentionPolicy::Stack { .. } => {
                     // Slot geometry is computed once by zone_slot_layout and shared
                     // with collect_text_items / render_zone_content (hud-qlerb).
-                    let layout = self.zone_slot_layout(zone_name, publishes, policy, h);
+                    let layout = self.zone_slot_layout(zone_name, publishes, policy, h, w);
                     for (pub_idx, slot_y, effective_slot_h) in layout.iter_visible(y) {
                         let record = &publishes[pub_idx];
                         let opacity = (anim_opacity * self.pub_opacity_at(zone_name, record, now))
@@ -459,41 +483,45 @@ impl super::Compositor {
                             let state = chrome_state(notification_dismiss_interaction_id(
                                 zone_name, record,
                             ));
-                            out.push(self.control_cmd(
+                            out.push(self.notification_control_cmd(
                                 b,
+                                state,
                                 action_tokens.state_fill(state, None),
                                 outline,
                                 opacity,
+                                zone_tokens,
                             ));
                         }
                         // Action buttons: at exactly the bounds
                         // `populate_notification_hit_regions` registers; labels
                         // are drawn by `collect_text_items`.
-                        let n_actions = payload.actions.len().min(MAX_NOTIFICATION_ACTIONS);
-                        for (action, b) in
-                            payload
-                                .actions
-                                .iter()
-                                .zip(notification_action_button_bounds(
-                                    x,
-                                    slot_y,
-                                    w,
-                                    effective_slot_h,
-                                    n_actions,
-                                    scale,
-                                    notification_inset(policy, scale),
-                                ))
+                        let action_layout =
+                            self.notification_action_layout(zone_name, record, policy, w);
+                        for (index, (action, b)) in payload
+                            .actions
+                            .iter()
+                            .zip(action_layout.bounds(
+                                x,
+                                slot_y,
+                                w,
+                                effective_slot_h,
+                                notification_inset(policy, scale),
+                            ))
+                            .enumerate()
                         {
                             let state = chrome_state(notification_action_interaction_id(
                                 zone_name,
                                 record,
                                 &action.callback_id,
+                                index,
                             ));
-                            out.push(self.control_cmd(
+                            out.push(self.notification_control_cmd(
                                 b,
+                                state,
                                 action_tokens.state_fill(state, Some(action_tokens.background)),
                                 outline,
                                 opacity,
+                                zone_tokens,
                             ));
                         }
                     }

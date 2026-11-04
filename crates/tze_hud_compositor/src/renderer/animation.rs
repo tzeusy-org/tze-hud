@@ -329,10 +329,7 @@ impl Compositor {
             {
                 continue;
             }
-            let pub_key: PubKey = (
-                latest.published_at_wall_us,
-                latest.publisher_namespace.clone(),
-            );
+            let pub_key: PubKey = latest.publication_id;
             active_keys.insert(zone_name.clone(), pub_key);
         }
 
@@ -353,7 +350,7 @@ impl Compositor {
 
             if need_reset {
                 // New publication (latest-wins replaced) or first reveal — start fresh.
-                let new_state = StreamRevealState::new(pub_key.clone(), latest.breakpoints.clone());
+                let new_state = StreamRevealState::new(*pub_key, latest.breakpoints.clone());
                 self.stream_reveal_states
                     .insert(zone_name.clone(), new_state);
             } else if let Some(state) = self.stream_reveal_states.get_mut(zone_name) {
@@ -555,20 +552,15 @@ impl Compositor {
                 .or_default();
 
             // Build the set of currently-active pub keys for this zone.
-            let active_keys: std::collections::HashSet<PubKey> = publishes
-                .iter()
-                .map(|r| (r.published_at_wall_us, r.publisher_namespace.clone()))
-                .collect();
+            let active_keys: std::collections::HashSet<PubKey> =
+                publishes.iter().map(|r| r.publication_id).collect();
 
             // Prune stale entries (publications removed from active_publishes).
             zone_states.retain(|k, _| active_keys.contains(k));
 
             // Ensure every active publication has an animation state; tick existing ones.
             for record in publishes {
-                let key: PubKey = (
-                    record.published_at_wall_us,
-                    record.publisher_namespace.clone(),
-                );
+                let key: PubKey = record.publication_id;
                 let state = zone_states.entry(key).or_insert_with(|| {
                     PublicationAnimationState::new_at(
                         Self::publication_fade_delay_ms(record, now_us, fade_duration_ms),
@@ -631,10 +623,7 @@ impl Compositor {
         if self.degradation_policy.level >= DegradationLevel::Simplified {
             return 1.0;
         }
-        let key: PubKey = (
-            record.published_at_wall_us,
-            record.publisher_namespace.clone(),
-        );
+        let key: PubKey = record.publication_id;
         self.pub_animation_states
             .get(zone_name)
             .and_then(|zone_states| zone_states.get(&key))
@@ -667,10 +656,7 @@ impl Compositor {
             };
             let before = publishes.len();
             publishes.retain(|record| {
-                let key: PubKey = (
-                    record.published_at_wall_us,
-                    record.publisher_namespace.clone(),
-                );
+                let key: PubKey = record.publication_id;
                 !zone_states
                     .get(&key)
                     .map(|s| s.is_fade_complete_at(now))
@@ -685,6 +671,7 @@ impl Compositor {
             .zone_registry
             .active_publishes
             .retain(|_, v| !v.is_empty());
+        scene.prune_notification_feedback();
     }
 
     /// Advance per-portal-tile scroll smoothing toward the scene's authoritative
@@ -800,14 +787,19 @@ impl Compositor {
             .filter(|_| !self.drawn_owner_hidden.zones)
             .flat_map(|zone| zone.values())
             .filter_map(|s| s.fade_start_deadline());
-        let caret_toggle = self.local_composer.as_ref().map(|_| {
-            let half = crate::renderer::image_cache::CARET_BLINK_HALF_PERIOD.as_nanos();
-            let elapsed = now
-                .saturating_duration_since(self.composer_caret_blink_start)
-                .as_nanos();
-            let next_toggle_ns = (elapsed / half + 1) * half;
-            self.composer_caret_blink_start + std::time::Duration::from_nanos(next_toggle_ns as u64)
-        });
+        let caret_toggle = self
+            .local_composer
+            .as_ref()
+            .filter(|_| !self.notification_keyboard_active)
+            .map(|_| {
+                let half = crate::renderer::image_cache::CARET_BLINK_HALF_PERIOD.as_nanos();
+                let elapsed = now
+                    .saturating_duration_since(self.composer_caret_blink_start)
+                    .as_nanos();
+                let next_toggle_ns = (elapsed / half + 1) * half;
+                self.composer_caret_blink_start
+                    + std::time::Duration::from_nanos(next_toggle_ns as u64)
+            });
         // A widget mid-transition changes pixels every tick until it lands;
         // an idle widget contributes nothing.
         let widget_tick = self

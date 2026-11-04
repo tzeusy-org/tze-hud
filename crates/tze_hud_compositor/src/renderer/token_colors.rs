@@ -1038,23 +1038,6 @@ pub(super) fn notification_inset(policy: &RenderingPolicy, scale: f32) -> f32 {
 /// Gap between a notification's text and its action-button row.
 pub(super) const NOTIFICATION_ACTION_ROW_GAP_PX: f32 = 4.0;
 
-/// Height a notification slot reserves below its text for the action row,
-/// so the buttons never draw over the body (hud-mskx5): the gap, the
-/// buttons, and the bottom inset that keeps them inside the card. Zero
-/// without actions, so plain notifications keep their height. Slot height
-/// adds it; text bounds subtract it.
-pub(super) fn notification_action_row_reserve(
-    payload: &NotificationPayload,
-    scale: f32,
-    inset: f32,
-) -> f32 {
-    if payload.actions.is_empty() {
-        0.0
-    } else {
-        (NOTIFICATION_ACTION_ROW_GAP_PX + NOTIFICATION_ACTION_BUTTON_H_PX) * scale + inset
-    }
-}
-
 /// Fallback gap between stacked notification cards when the
 /// `spacing.padding.medium` token is absent or invalid.
 pub(super) const NOTIFICATION_STACK_GAP_DEFAULT_PX: f32 = 8.0;
@@ -1068,39 +1051,6 @@ pub(super) fn notification_stack_gap(token_map: &HashMap<String, String>) -> f32
         .filter(|v| v.is_finite() && *v >= 0.0)
         .unwrap_or(NOTIFICATION_STACK_GAP_DEFAULT_PX)
         * px_scale(token_map)
-}
-
-/// Bounds of each notification action button, left to right.
-///
-/// The single geometry source for both the drawn buttons and the pointer hit
-/// regions (`populate_notification_hit_regions`), so a press always lands on
-/// what is drawn. `n_actions` must already be capped at
-/// `MAX_NOTIFICATION_ACTIONS`.
-pub(super) fn notification_action_button_bounds(
-    zx: f32,
-    slot_y: f32,
-    zw: f32,
-    effective_slot_h: f32,
-    n_actions: usize,
-    scale: f32,
-    inset: f32,
-) -> Vec<Rect> {
-    if n_actions == 0 {
-        return Vec::new();
-    }
-    let button_h = NOTIFICATION_ACTION_BUTTON_H_PX * scale;
-    let btn_w = (zw - inset * 2.0).max(1.0) / n_actions as f32;
-    let action_y = (slot_y + effective_slot_h - inset - button_h).max(slot_y);
-    (0..n_actions)
-        .map(|i| {
-            Rect::new(
-                zx + inset + i as f32 * btn_w,
-                action_y,
-                btn_w,
-                button_h.min(effective_slot_h),
-            )
-        })
-        .collect()
 }
 
 /// Resolved tokens for notification action buttons.

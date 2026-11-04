@@ -429,6 +429,7 @@ fn test_hit_test_zone_regions_without_active_tab() {
 
     // Add a zone hit region (as the compositor would do each frame)
     scene.overlay.zone_hit_regions.push(ZoneHitRegion {
+        publication_id: SceneId::null(),
         zone_name: "notifications".to_string(),
         published_at_wall_us: 123456,
         publisher_namespace: "test".to_string(),

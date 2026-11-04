@@ -60,6 +60,7 @@ pub mod frame;
 pub mod hit_regions;
 pub(crate) mod icon;
 pub(crate) mod image_cache;
+mod notification_layout;
 mod safe_mode_overlay;
 mod system_card;
 pub(crate) mod text;
@@ -276,7 +277,7 @@ pub struct Compositor {
     prev_portal_tile_has_content: HashMap<SceneId, bool>,
     /// Per-publication TTL fade-out animation state.
     ///
-    /// Outer key: zone name.  Inner key: `PubKey = (published_at_wall_us, publisher_namespace)`.
+    /// Outer key: zone name.  Inner key: the runtime publication identity (`PubKey`).
     ///
     /// Created when the compositor first encounters a publication in a Stack zone.
     /// Entries for publications no longer in `active_publishes` are pruned by
@@ -513,6 +514,10 @@ pub struct Compositor {
     /// [`Compositor::set_font_config`] and re-applied by
     /// [`Compositor::init_text_renderer`].
     configured_fonts: crate::fonts::FontConfig,
+    notification_layouts: std::cell::RefCell<notification_layout::NotificationLayoutCache>,
+    /// Saved editor state remains resident while explicit notification focus
+    /// suppresses its caret and focus ring.
+    notification_keyboard_active: bool,
     /// Surface format the text rasterizer was last initialized for, so a font
     /// config change can rebuild it.
     text_format: Option<wgpu::TextureFormat>,
@@ -956,6 +961,8 @@ impl Compositor {
             truncation_cache_scene_version: u64::MAX,
             truncation_cache_scene_instance: None,
             configured_max_truncation_input_bytes: None,
+            notification_layouts: Default::default(),
+            notification_keyboard_active: false,
             configured_fonts: crate::fonts::FontConfig::default(),
             text_format: None,
             resize_reprime_last_at: None,
@@ -1297,6 +1304,8 @@ impl Compositor {
             truncation_cache_scene_version: u64::MAX,
             truncation_cache_scene_instance: None,
             configured_max_truncation_input_bytes: None,
+            notification_layouts: Default::default(),
+            notification_keyboard_active: false,
             configured_fonts: crate::fonts::FontConfig::default(),
             text_format: None,
             resize_reprime_last_at: None,
@@ -1789,12 +1798,12 @@ impl Compositor {
     ///
     /// [`caret_visible_at`]: image_cache::caret_visible_at
     pub fn drain_local_composer_and_needs_render(&mut self) -> bool {
-        let was_active = self.local_composer.is_some();
+        let was_active = self.local_composer.is_some() && !self.notification_keyboard_active;
         let previous_focus_ring_owner = self.focus_ring_owner;
         let previous_resize_grip_hover = self.resize_grip_hover;
         let previous_tile_close_hover = self.tile_close_hover;
         let draft_applied = self.drain_local_composer_state();
-        let is_active = self.local_composer.is_some();
+        let is_active = self.local_composer.is_some() && !self.notification_keyboard_active;
         // The caret only changes pixels when its phase flips; between toggles an
         // idle focused composer costs nothing (`next_animation_deadline` wakes us
         // at the next toggle).

@@ -516,6 +516,7 @@ impl super::Compositor {
                 // next prime_truncation_cache call re-resolves all entries.
                 self.truncation_cache_scene_version = u64::MAX;
                 self.truncation_cache_scene_instance = None;
+                self.notification_layouts.borrow_mut().invalidate();
                 tracing::debug!(
                     resource_id = %crate::text::format_resource_id(&resource_id),
                     "load_font_bytes: new font loaded — truncation cache invalidated [hud-v2z6u]"

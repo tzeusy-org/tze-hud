@@ -26,9 +26,8 @@ use tze_hud_scene::types::*;
 use super::Compositor;
 use super::draw_cmds::DragHandleEntry;
 use super::token_colors::{
-    notification_action_button_bounds, notification_dismiss_bounds, notification_inset,
-    resolve_jump_to_latest_tokens, resolve_scroll_indicator_tokens, resolve_tile_close_tokens,
-    tile_close_button_bounds,
+    notification_dismiss_bounds, notification_inset, resolve_jump_to_latest_tokens,
+    resolve_scroll_indicator_tokens, resolve_tile_close_tokens, tile_close_button_bounds,
 };
 use crate::pipeline::{RectVertex, rect_vertices};
 
@@ -142,6 +141,7 @@ impl Compositor {
             sw,
             sh,
             &self.token_map,
+            &self.notification_layouts,
         );
 
         // ── Jump-to-latest pill hit region (hud-9ci61) ───────────────────────
@@ -214,6 +214,7 @@ impl Compositor {
                 pill.height_px,
             );
             scene.overlay.zone_hit_regions.push(ZoneHitRegion {
+                publication_id: tze_hud_scene::SceneId::null(),
                 zone_name: "__chrome_jump_to_latest__".to_string(),
                 published_at_wall_us: 0,
                 publisher_namespace: "runtime".to_string(),
@@ -236,6 +237,7 @@ impl Compositor {
             scene.overlay.zone_hit_regions.insert(
                 0,
                 ZoneHitRegion {
+                    publication_id: tze_hud_scene::SceneId::null(),
                     zone_name: "__chrome_tile_close__".to_string(),
                     published_at_wall_us: 0,
                     publisher_namespace: "runtime".to_string(),
@@ -263,7 +265,7 @@ impl Compositor {
 ///   See `notification_dismiss_bounds`.
 ///
 /// - **Action buttons**: a horizontal row at the bottom of the slot.
-///   See `notification_action_button_bounds` (shared with the renderer);
+///   See `NotificationActionLayout::bounds` (shared with the renderer);
 ///   `n_actions` is capped at `MAX_NOTIFICATION_ACTIONS`.
 ///
 /// Tab order within a slot: dismiss button first, then actions left-to-right.
@@ -288,18 +290,22 @@ pub fn populate_notification_hit_regions(
         sw,
         sh,
         token_map,
+        &Default::default(),
     )
 }
 
 /// [`populate_notification_hit_regions`] with zones resolved through a
 /// multi-display `layout` (regions land in scene coordinates).
-pub(crate) fn populate_notification_hit_regions_in(
+fn populate_notification_hit_regions_in(
     scene: &mut SceneGraph,
     layout: &crate::display::DisplayLayout,
     sw: f32,
     sh: f32,
     token_map: &HashMap<String, String>,
+    layouts: &std::cell::RefCell<super::notification_layout::NotificationLayoutCache>,
 ) -> u32 {
+    layouts.borrow_mut().retain(scene);
+    scene.prune_notification_feedback();
     scene.overlay.zone_hit_regions.clear();
     let mut tab_order: u32 = 0;
 
@@ -340,10 +346,19 @@ pub(crate) fn populate_notification_hit_regions_in(
             publishes,
             policy,
             zh,
+            zw,
+            layouts,
         );
 
         for (pub_idx, slot_y, effective_slot_h) in layout.iter_visible(zy) {
             let record = &publishes[pub_idx];
+            if scene
+                .overlay
+                .notification_choices
+                .contains_key(&record.publication_id)
+            {
+                continue;
+            }
 
             let n_payload = match &record.content {
                 ZoneContent::Notification(n) => n,
@@ -363,6 +378,7 @@ pub(crate) fn populate_notification_hit_regions_in(
             let dismiss_id = notification_dismiss_interaction_id(zone_name, record);
             scene.overlay.zone_hit_regions.push(ZoneHitRegion {
                 zone_name: zone_name.clone(),
+                publication_id: record.publication_id,
                 published_at_wall_us: record.published_at_wall_us,
                 publisher_namespace: record.publisher_namespace.clone(),
                 bounds: dismiss_bounds,
@@ -375,21 +391,29 @@ pub(crate) fn populate_notification_hit_regions_in(
             // ── Action buttons ────────────────────────────────────────────
             let n_actions = n_payload.actions.len().min(MAX_NOTIFICATION_ACTIONS);
             if n_actions > 0 {
-                let action_rects = notification_action_button_bounds(
-                    zx,
-                    slot_y,
-                    zw,
-                    effective_slot_h,
-                    n_actions,
-                    scale,
-                    notification_inset(policy, scale),
-                );
+                let action_rects = layouts
+                    .borrow_mut()
+                    .resolve(&zone_tokens, zone_name, record, policy, zw)
+                    .bounds(
+                        zx,
+                        slot_y,
+                        zw,
+                        effective_slot_h,
+                        notification_inset(policy, scale),
+                    );
 
-                for (action, action_bounds) in n_payload.actions.iter().zip(action_rects) {
-                    let action_id =
-                        notification_action_interaction_id(zone_name, record, &action.callback_id);
+                for (index, (action, action_bounds)) in
+                    n_payload.actions.iter().zip(action_rects).enumerate()
+                {
+                    let action_id = notification_action_interaction_id(
+                        zone_name,
+                        record,
+                        &action.callback_id,
+                        index,
+                    );
                     scene.overlay.zone_hit_regions.push(ZoneHitRegion {
                         zone_name: zone_name.clone(),
+                        publication_id: record.publication_id,
                         published_at_wall_us: record.published_at_wall_us,
                         publisher_namespace: record.publisher_namespace.clone(),
                         bounds: action_bounds,
@@ -416,7 +440,7 @@ pub(super) fn notification_dismiss_interaction_id(
 ) -> String {
     format!(
         "zone:{}:dismiss:{}:{}",
-        zone_name, record.published_at_wall_us, record.publisher_namespace,
+        zone_name, record.publication_id, record.publisher_namespace,
     )
 }
 
@@ -426,10 +450,11 @@ pub(super) fn notification_action_interaction_id(
     zone_name: &str,
     record: &ZonePublishRecord,
     callback_id: &str,
+    index: usize,
 ) -> String {
     format!(
-        "zone:{}:action:{}:{}:{}",
-        zone_name, record.published_at_wall_us, record.publisher_namespace, callback_id,
+        "zone:{}:action:{}:{}:{}:{}",
+        zone_name, record.publication_id, record.publisher_namespace, index, callback_id,
     )
 }
 
@@ -440,9 +465,13 @@ fn prune_chrome_states(scene: &mut SceneGraph) {
     let overlay = &mut scene.overlay;
     overlay.chrome_states.retain(|k, _| {
         overlay
-            .drag_handle_hit_regions
-            .iter()
-            .any(|r| &r.interaction_id == k)
+            .notification_choices
+            .values()
+            .any(|chosen| chosen == k)
+            || overlay
+                .drag_handle_hit_regions
+                .iter()
+                .any(|r| &r.interaction_id == k)
             || overlay
                 .zone_hit_regions
                 .iter()

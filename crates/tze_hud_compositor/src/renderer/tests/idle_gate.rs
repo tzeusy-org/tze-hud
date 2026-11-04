@@ -366,6 +366,31 @@ async fn idle_with_notification_renders_only_at_fade() {
     let clock = std::sync::Arc::new(tze_hud_scene::clock::TestClock::new(1_000));
     let mut scene =
         countdown_notification_scene_on(SceneGraph::new_with_clock(1280.0, 720.0, clock));
+    if let ZoneContent::Notification(payload) = &mut scene
+        .zone_registry
+        .active_publishes
+        .get_mut("notification-area")
+        .unwrap()[0]
+        .content
+    {
+        payload.actions = ["A", "B", "C", "D"]
+            .into_iter()
+            .map(|label| NotificationAction {
+                label: label.into(),
+                callback_id: label.into(),
+            })
+            .collect();
+    }
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    let shapes = compositor.notification_layouts.borrow().shapes;
+    for _ in 0..8 {
+        compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    }
+    assert_eq!(
+        compositor.notification_layouts.borrow().shapes,
+        shapes,
+        "waiting never reshapes labels"
+    );
     compositor.update_publication_animations(&scene);
     let (origin, ttl) = {
         let s = compositor.pub_animation_states["notification-area"]
@@ -424,6 +449,89 @@ async fn idle_with_notification_renders_only_at_fade() {
         None,
         "landed fade leaves no deadline"
     );
+    // The same finite scheduler owns accepted chosen exits; only its existing
+    // transition work renders and completion drops all ephemeral feedback.
+    let mut scene = countdown_notification_scene_on(SceneGraph::new(1280.0, 720.0));
+    if let ZoneContent::Notification(payload) = &mut scene
+        .zone_registry
+        .active_publishes
+        .get_mut("notification-area")
+        .unwrap()[0]
+        .content
+    {
+        payload.actions = ["A", "B", "C", "D"]
+            .into_iter()
+            .map(|label| NotificationAction {
+                label: label.into(),
+                callback_id: label.into(),
+            })
+            .collect();
+    }
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    let action = scene.overlay.zone_hit_regions.iter().find(|region| matches!(&region.kind, ZoneInteractionKind::Action { callback_id } if callback_id == "C")).unwrap().clone();
+    let wake = scene.activate_notification(&action, 240).unwrap();
+    wake.notify();
+    compositor.update_publication_animations(&scene);
+    assert!(scene.overlay.zone_hit_regions.is_empty());
+    assert!(scene.overlay.chrome_states[&action.interaction_id].pressed);
+    assert_eq!(
+        scene
+            .take_pending_actions(&action.publisher_namespace)
+            .len(),
+        1
+    );
+    let commands = compositor
+        .collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0)
+        .chrome;
+    let pressed = resolve_notification_action_tokens(&compositor.token_map).background_pressed;
+    let control = commands
+        .iter()
+        .find(|cmd| {
+            cmd.x == action.bounds.x
+                && cmd.y == action.bounds.y
+                && cmd.width == action.bounds.width
+                && cmd.height == action.bounds.height
+        })
+        .unwrap();
+    let expected = compositor.gpu_color(pressed);
+    assert!(
+        control
+            .color
+            .iter()
+            .zip(expected)
+            .all(|(actual, expected)| (*actual - expected).abs() < 0.01)
+    );
+    for state in compositor
+        .pub_animation_states
+        .values_mut()
+        .flat_map(|zone| zone.values_mut())
+    {
+        state.fade_start = Some(std::time::Instant::now() - std::time::Duration::from_millis(120));
+        assert!((state.current_opacity() - 0.75).abs() < 0.03);
+    }
+    assert!(
+        scene.overlay.chrome_states[&action.interaction_id].pressed,
+        "chosen fill remains through exit"
+    );
+    for state in compositor
+        .pub_animation_states
+        .values_mut()
+        .flat_map(|zone| zone.values_mut())
+    {
+        assert_eq!(state.fade_duration_ms, 240);
+        state.fade_start = Some(std::time::Instant::now() - std::time::Duration::from_millis(241));
+    }
+    compositor.prune_faded_publications(&mut scene);
+    compositor.update_publication_animations(&scene);
+    assert!(scene.overlay.notification_choices.is_empty());
+    assert!(scene.overlay.chrome_states.is_empty());
+    assert!(
+        scene
+            .take_pending_actions(&action.publisher_namespace)
+            .is_empty()
+    );
+    assert!(!compositor.has_inflight_animation(&scene));
+    assert_eq!(compositor.next_animation_deadline(), None);
 }
 
 /// Idle render gate — composer carve-out (hud-ilivg / hud-r3ax6).
@@ -495,6 +603,49 @@ async fn idle_render_gate_renders_for_composer_echo_and_caret_blink() {
         !compositor.drain_local_composer_and_needs_render(),
         "the toggled phase is rendered once, then idle again"
     );
+
+    // Explicit card focus suspends the saved editor's caret/ring without
+    // throwing away its draft or adding a wake source.
+    let mut scene = countdown_notification_scene_on(SceneGraph::new(320.0, 200.0));
+    compositor.populate_zone_hit_regions(&mut scene, 320.0, 200.0);
+    let dismiss = scene
+        .overlay
+        .zone_hit_regions
+        .iter()
+        .find(|region| matches!(region.kind, ZoneInteractionKind::Dismiss))
+        .unwrap()
+        .interaction_id
+        .clone();
+    scene.focus_notification(Some(dismiss));
+    compositor.build_frame_vertices(
+        &scene,
+        320.0,
+        200.0,
+        &mut tze_hud_telemetry::FrameTelemetry::new(0),
+    );
+    assert_eq!(
+        compositor.next_animation_deadline(),
+        None,
+        "card focus adds no caret deadline"
+    );
+    let _ = compositor.drain_local_composer_and_needs_render();
+    assert!(!compositor.drain_local_composer_and_needs_render());
+    assert_eq!(compositor.local_composer.as_ref().unwrap().text, "hi");
+    let mut caret = Vec::new();
+    compositor.append_composer_caret_vertices(&scene, &mut caret, 320.0, 200.0);
+    assert!(caret.is_empty());
+    scene.focus_notification(None);
+    compositor.build_frame_vertices(
+        &scene,
+        320.0,
+        200.0,
+        &mut tze_hud_telemetry::FrameTelemetry::new(1),
+    );
+    assert!(
+        compositor.next_animation_deadline().is_some(),
+        "saved editor caret resumes"
+    );
+    let _ = compositor.drain_local_composer_and_needs_render();
 
     // ── 4. Deactivation: slot delivers Some(None) → render once to clear. ──
     {
