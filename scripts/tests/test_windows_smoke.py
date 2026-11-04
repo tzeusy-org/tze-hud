@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import sys
+import copy
+from datetime import timezone
 from pathlib import Path
 
 import pytest
@@ -195,13 +197,77 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
             self.publishes, self.captures, self.clears = [], [], 0
             self.capture_bodies = []
             self.rpc_s, self.capture_s = (0.001, 0.0005) if case == "coarse monotonic" else (0.05, 0.05)
+            if case == "immediate readiness": self.rpc_s = 0.25
+            self.log = tmp_path / (case + "-runtime.log")
+            self.log.write_bytes(b"")
+            self.activated = self.completed = False
+            self.request_id = None
+            # Separate clocks, advanced explicitly by fixture actions. Client
+            # UTC is never used to construct producer timestamps or deadlines.
+            self.client_wall_ns = 1_800_000_000_000_000_000
+            self.producer_wall_us = 1_800_000_000_000_000
+            if case == "coarse client UTC":
+                self.client_wall_ns += 789_123
+                self.producer_wall_us += 789
+            self.due_wall_us = None
+            self.scheduled_wall_us = None
+            self.version = 7
+
+        def advance(self, seconds):
+            self.clock.now += seconds
+            self.client_wall_ns += round(seconds * 1e9)
+            self.producer_wall_us += round(seconds * 1e6)
+
+        def sleep(self, seconds):
+            self.clock.sleeps.append(seconds)
+            self.advance(seconds)
+
+        def emit(self, name, **fields):
+            event = {"target": "tze_hud_delay_diagnostic",
+                     "timestamp": ws.datetime.fromtimestamp(self.producer_wall_us / 1e6,
+                                                           timezone.utc).isoformat(),
+                     "fields": {"event": name, **fields}}
+            with self.log.open("ab") as handle:
+                handle.write(ws.json.dumps(event).encode() + b"\n")
+
+        def identity(self):
+            return dict(scene_version=self.version, active_publications=1,
+                        published_at_wall_us=self.due_wall_us,
+                        expires_at_wall_us=self.due_wall_us + 20_000_000)
+
+        def poll(self):
+            if self.case == "producer exit":
+                return 1
+            if self.due_wall_us is not None and self.producer_wall_us >= self.due_wall_us:
+                if not self.activated:
+                    self.activated = True
+                    self.emit("scheduled_activation", **self.identity(), batch_hi=10, batch_lo=11,
+                              present_at_wall_us=self.due_wall_us,
+                              applied_at_wall_us=self.producer_wall_us,
+                              accepted=True, identity_valid=self.case != "ambiguous activation")
+                    self.emit("zone_fade_started", **self.identity(), is_subtitle=True,
+                              observed_at_wall_us=self.producer_wall_us, frame=2,
+                              duration_ms=180, from_opacity=0.0, target_opacity=1.0)
+                if self.producer_wall_us >= self.due_wall_us + 180_000 and not self.completed and self.case != "readiness timeout":
+                    self.completed = True
+                    ordinary = self.case == "ordinary readiness"
+                    fields = dict(self.identity(), is_subtitle=True,
+                                  observed_at_wall_us=self.producer_wall_us, frame=3,
+                                  opacity=1.0, zones_shown=True, normal_animation=True,
+                                  transition_elapsed_us=180000, transition_duration_ms=180)
+                    if ordinary:
+                        fields["transition_active"] = False
+                    else:
+                        fields.update(transition_complete=True, from_opacity=0.0, target_opacity=1.0)
+                    self.emit("zone_text_sample" if ordinary else "zone_fade_observed", **fields)
+            return None
 
         def urlopen(self, request, timeout):
             if request.get_method() == "GET":
                 assert not (self.diagnostics / "delay.json").exists()  # No I/O before the witness.
                 assert request.full_url.endswith("/admin/screenshot") and timeout == 15
                 started = self.clock()
-                shot = len(self.captures) + 1
+                shot = len(self.captures) % 5 + 1
                 visible = self.due is not None and started >= self.due
                 pixels = shown if visible else background
                 width, height, status, ctype = 20, 20, 200, "image/png"
@@ -235,7 +301,15 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                         body = b"x" * (ws.MAX_PNG_BYTES + 1)
                     elif self.case == "transport":
                         raise ws.urllib.error.URLError("synthetic unavailable capture")
-                self.clock.now += 3 if self.case == "cross-due capture" and shot == 3 else self.capture_s
+                self.advance(3 if self.case == "cross-due capture" and shot == 3 else self.capture_s)
+                if shot == 4:
+                    self.emit("capture_build_begin", scene_version=self.version)
+                    self.emit("zone_text_sample", **self.identity(), is_subtitle=True,
+                              observed_at_wall_us=self.producer_wall_us, frame=4,
+                              opacity=1.0, transition_active=False, zones_shown=True, normal_animation=True)
+                    self.emit("capture_build_end", scene_version=self.version)
+                    if self.case != "missing capture bracket":
+                        self.emit("capture_render_end", success=True)
                 self.captures.append((started, self.clock()))
                 self.capture_bodies.append(body)
                 return Response(body, status, ctype)
@@ -252,17 +326,33 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
             elif tool == "hud_clear":
                 self.clears += 1
                 self.held = self.case == "clear failed" and bool(self.publishes)
-                self.due = None
+                self.due = self.due_wall_us = None
                 payload = {"ok": True}
             else:
                 assert tool == "hud_publish"
                 assert args == {"surface": "zone:subtitle", "content": "CI DELAYED CONTENT IS VISIBLE", "delay_ms": 3000, "ttl_ms": 20000}
+                if self.case == "independent wall domains":
+                    # A valid wall observation need not advance affinely with
+                    # perf_counter. This places due beyond the old affine upper
+                    # bound, reproducing the native guard's rejection shape.
+                    self.producer_wall_us += round(self.rpc_s * 1e6) + 173
+                self.scheduled_wall_us = self.producer_wall_us
+                self.due_wall_us = self.scheduled_wall_us + 3_000_000
                 self.held, self.due = True, self.clock() + 3
                 sent = self.clock()
-                self.clock.now += 4 if self.case == "slow acknowledgement" else self.rpc_s
+                self.advance(4 if self.case == "slow acknowledgement" else self.rpc_s)
                 self.publishes.append((sent, self.clock()))
+                self.activated = self.completed = False
+                self.request_id = rpc["id"]
+                self.emit("delayed_request", request_id=rpc["id"], request_span_id=9)
+                self.emit("delayed_enqueued", request_span_id=9, batch_hi=10, batch_lo=11,
+                          is_subtitle=True, scheduled_at_wall_us=self.scheduled_wall_us,
+                          present_at_wall_us=self.due_wall_us,
+                          expires_at_wall_us=self.due_wall_us + 20_000_000)
+                if self.case == "uncertain acceptance":
+                    raise ws.urllib.error.URLError("synthetic lost acknowledgement")
                 payload = {"ok": self.case != "publish rejected", "expires_in_ms": 23000}
-            self.clock.now += self.rpc_s if tool != "hud_publish" else 0
+            self.advance(self.rpc_s if tool != "hud_publish" else 0)
             result = {"content": [{"type": "text", "text": ws.json.dumps(payload)}]}
             return Response(ws.json.dumps({"result": result}).encode())
 
@@ -275,12 +365,14 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
             monotonic = (lambda: int(clock() * 64) / 64) if case == "coarse monotonic" else clock
             patch.setattr(ws.time, "monotonic", monotonic)
             patch.setattr(ws.time, "perf_counter", clock)
-            patch.setattr(ws.time, "sleep", clock.sleep)
+            patch.setattr(ws.time, "time_ns", lambda: endpoint.client_wall_ns // 1_000_000 * 1_000_000
+                          if case == "coarse client UTC" else endpoint.client_wall_ns)
+            patch.setattr(ws.time, "sleep", endpoint.sleep)
             patch.setattr(ws.urllib.request, "urlopen", endpoint.urlopen)
             if case == "slow decode":
                 def slow_decode(body):
                     frame = decode(body)
-                    clock.now += 1.5
+                    endpoint.advance(1.5)
                     return frame
 
                 patch.setattr(ws, "decode_png_rgba", slow_decode)
@@ -288,7 +380,7 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
             for invocation in range(2 if case == "normal" else 1):
                 endpoint.diagnostics = tmp_path / case / str(invocation)
                 if success:
-                    ws.check_delay(smoke, endpoint.diagnostics)
+                    ws.check_delay(smoke, endpoint.diagnostics, owned_log=endpoint.log, producer=endpoint)
                     assert endpoint.held is False and endpoint.due is None
                     assert len(endpoint.publishes) == invocation + 1
                     captures = endpoint.captures[invocation * 5 :]
@@ -296,14 +388,20 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                     assert len(captures) == 5
                     assert captures[2][1] < sent + 3
                     assert captures[3][0] >= acknowledged + 3
-                    assert len(clock.sleeps) == (invocation + 1) * 2  # Existing baseline and due sleeps only.
+                    # Baseline and original due sleeps remain, followed only by
+                    # condition polling when completion was not yet observed.
+                    assert len(clock.sleeps) == (invocation + 1) * (2 if case == "immediate readiness" else 3)
+                    if case != "immediate readiness": assert clock.sleeps[-1] <= ws.POLL_S
                 else:
                     with pytest.raises(AssertionError):
-                        ws.check_delay(smoke, endpoint.diagnostics)
+                        ws.check_delay(smoke, endpoint.diagnostics, owned_log=endpoint.log, producer=endpoint)
                     baseline_failed = case in ("unstable baseline", "baseline dimensions")
                     assert len(endpoint.publishes) == (0 if baseline_failed else 1)
                     assert endpoint.clears == (1 if baseline_failed else 2)
                     assert len(endpoint.captures) <= 5  # No retry on invalid evidence.
+                    if case in ("producer exit", "ambiguous activation", "readiness timeout"):
+                        assert len(endpoint.captures) == 3  # No late PNG after failed readiness.
+                    if case == "uncertain acceptance": assert len(endpoint.captures) == 2
 
                 manifest = ws.json.loads((endpoint.diagnostics / "delay.json").read_text())
                 assert manifest["outcome"] == ("success" if success else "failure")
@@ -326,10 +424,17 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                 output = capsys.readouterr()
                 assert "synthetic-unused-key" not in output.out + output.err
                 assert "CI DELAYED CONTENT IS VISIBLE" not in output.out + output.err
+        return endpoint, clock
+
     run("coarse monotonic", success=True)  # Coarse request bounds can under-sleep the actual acknowledgement.
     run("normal", success=True)
+    run("ordinary readiness", success=True)
+    run("immediate readiness", success=True)
+    independent, _ = run("independent wall domains", success=True)
+    coarse_utc, _ = run("coarse client UTC", success=True)
     run("slow decode", success=True)  # Capture timing ends before PNG CPU work.
     for case in (
+        "producer exit", "ambiguous activation", "readiness timeout", "missing capture bracket", "uncertain acceptance",
         "premature", "missing", "too few pixels", "native observed footprint", "unstable baseline", "not restored",
         "baseline dimensions", "early dimensions", "late dimensions", "clear dimensions",
         "cross-due capture", "slow acknowledgement", "not held",
@@ -338,6 +443,140 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
     ):
         with subtests.test(case=case):
             run(case, success=False)
+
+    # Exercise the finite parser failures in the same behavior parent. The
+    # socket/PNG path above supplies the canonical fixture and keeps first
+    # 192/199 failures; these mutations isolate each identity/limit guard.
+    seed, clock = run("parser seed", success=True)
+    manifest = ws.json.loads((seed.diagnostics / "delay.json").read_text())
+    valid = [ws.delay_event(line) for line in seed.log.read_bytes().splitlines()]
+    # The old one-microsecond affine admission would reject this otherwise
+    # valid witness. All local monotonic guards and producer-wall joins passed.
+    independent_manifest = ws.json.loads((independent.diagnostics / "delay.json").read_text())
+    independent_enqueue = next(e["fields"] for e in independent_manifest["observed_runtime_events"]
+                               if e["fields"]["event"] == "delayed_enqueued")
+    anchor = independent_manifest["clock_anchor"]
+    old_upper = anchor["wall_time_ns"] / 1000 + (independent_manifest["accepted"] - anchor["perf_counter_before"] + 3) * 1e6 + 1
+    assert independent_enqueue["present_at_wall_us"] > old_upper
+    assert independent_enqueue["present_at_wall_us"] == independent_enqueue["scheduled_at_wall_us"] + 3_000_000
+    coarse_manifest = ws.json.loads((coarse_utc.diagnostics / "delay.json").read_text())
+    coarse_enqueue = next(e["fields"] for e in coarse_manifest["observed_runtime_events"]
+                          if e["fields"]["event"] == "delayed_enqueued")
+    assert coarse_manifest["clock_anchor"]["wall_time_ns"] % 1_000_000 == 0
+    assert coarse_enqueue["scheduled_at_wall_us"] % 1000 == 789
+
+    assert ws.DelayReadiness(seed.log, seed).events == []  # Cursor starts now.
+    for event_name, field, value in [
+        ("delayed_request", "request_id", 999), ("delayed_request", "request_span_id", 88),
+        ("delayed_enqueued", "scheduled_at_wall_us", None),
+        ("delayed_enqueued", "scheduled_at_wall_us", True),
+        ("delayed_enqueued", "scheduled_at_wall_us", 1.5),
+        ("delayed_enqueued", "scheduled_at_wall_us", -1),
+        ("delayed_enqueued", "scheduled_at_wall_us", 2**64),
+        ("delayed_enqueued", "scheduled_at_wall_us", 1),
+        ("delayed_enqueued", "batch_hi", 88), ("delayed_enqueued", "expires_at_wall_us", 1),
+        ("delayed_enqueued", "is_subtitle", False), ("scheduled_activation", "accepted", False),
+        ("scheduled_activation", "identity_valid", False), ("scheduled_activation", "scene_version", 88),
+        ("scheduled_activation", "active_publications", 2),
+        ("scheduled_activation", "published_at_wall_us", 1),
+        ("zone_fade_started", "published_at_wall_us", 1), ("zone_fade_started", "target_opacity", 0),
+        ("zone_fade_started", "target_opacity", True), ("zone_fade_started", "from_opacity", False),
+        ("zone_fade_started", "duration_ms", 0), ("zone_fade_started", "from_opacity", -1),
+        ("zone_fade_observed", "zones_shown", False), ("zone_fade_observed", "normal_animation", False),
+        ("zone_fade_observed", "transition_duration_ms", 1),
+        ("zone_fade_observed", "transition_elapsed_us", 1), ("zone_fade_observed", "from_opacity", 0.5),
+        ("zone_fade_observed", "opacity", -1), ("zone_fade_observed", "scene_version", 8),
+        ("zone_fade_observed", "expires_at_wall_us", 1),
+        ("zone_fade_observed", "observed_at_wall_us", 2**63),
+    ]:
+        with subtests.test(event=event_name, field=field):
+            reader = ws.DelayReadiness(seed.log, seed)
+            reader.events = copy.deepcopy(valid)
+            next(e["fields"] for e in reader.events if e["fields"]["event"] == event_name)[field] = value
+            with pytest.raises(AssertionError):
+                reader.ready(seed.request_id, manifest)
+    for name in ("delayed_request", "delayed_enqueued", "scheduled_activation", "zone_fade_started"):
+        reader = ws.DelayReadiness(seed.log, seed)
+        reader.events = copy.deepcopy(valid)
+        selected = next(e for e in reader.events if e["fields"]["event"] == name)
+        reader.events.insert(reader.events.index(selected), copy.deepcopy(selected))
+        with pytest.raises(AssertionError):
+            reader.ready(seed.request_id, manifest)
+    for field, value in (("request_id", True), ("batch_hi", 1.5), ("batch_lo", -1), ("batch_lo", 2**64)):
+        reader = ws.DelayReadiness(seed.log, seed)
+        reader.events = copy.deepcopy(valid)
+        next(e["fields"] for e in reader.events if field in e["fields"])[field] = value
+        with pytest.raises(AssertionError):
+            reader.ready(seed.request_id, manifest)
+    for missing in ("delayed_request", "delayed_enqueued", "scheduled_activation"):
+        reader = ws.DelayReadiness(seed.log, seed)
+        reader.events = [e for e in valid if e["fields"]["event"] != missing]
+        assert reader.ready(seed.request_id, manifest) is None
+
+    offset = next(i for i, e in enumerate(valid) if e["fields"]["event"] == "capture_build_begin")
+    for fault in ("missing", "nested", "extra sample", "wrong scene", "partial fade", "failed readback", "expired render"):
+        with subtests.test(capture=fault):
+            reader = ws.DelayReadiness(seed.log, seed)
+            reader.events = copy.deepcopy(valid)
+            if fault == "missing": reader.events.pop(offset + 2)
+            if fault == "nested": reader.events.insert(offset + 1, copy.deepcopy(reader.events[offset]))
+            if fault == "extra sample": reader.events.insert(offset + 1, copy.deepcopy(reader.events[offset + 1]))
+            if fault == "wrong scene": reader.events[offset]["fields"]["scene_version"] = 99
+            if fault == "partial fade": reader.events[offset + 1]["fields"]["transition_active"] = True
+            if fault == "failed readback": reader.events[-1]["fields"]["success"] = False
+            if fault == "expired render":
+                reader.events[-1]["timestamp"] = ws.datetime.fromtimestamp(manifest["readiness"]["expires_at_wall_us"] / 1e6, timezone.utc).isoformat()
+            with pytest.raises(AssertionError): reader.capture(offset, seed.request_id, manifest)
+
+    # Read limits include unrelated noise and incomplete lines. None can renew
+    # the original finite deadline or expose arbitrary log content.
+    class Alive:
+        def poll(self):
+            return None
+    for case in ("bytes", "line", "partial", "malformed", "nan", "timestamp", "events", "truncate", "replace"):
+        with subtests.test(reader=case):
+            path = tmp_path / ("invalid-" + case)
+            path.write_bytes(b"prefix\n")
+            reader = ws.DelayReadiness(path, Alive())
+            if case == "truncate":
+                path.write_bytes(b"")
+            elif case == "replace":
+                replacement = path.with_suffix(".new")
+                replacement.write_bytes(b"replacement\n")
+                replacement.replace(path)
+            else:
+                event = {"target": "tze_hud_delay_diagnostic", "timestamp": "2027-01-15T08:00:00Z",
+                         "fields": {"event": "zone_text_sample", "opacity": 1}}
+                chunk = b""
+                if case == "bytes": chunk = b"x" * (reader.MAX_BYTES + 1)
+                if case == "line": chunk = b"x" * (reader.MAX_LINE + 1) + b"\n"
+                if case == "partial": chunk = b"unfinished"
+                if case == "malformed": chunk = b"{tze_hud_delay_diagnostic\n"
+                if case == "nan": event["fields"]["opacity"] = float("nan")
+                if case == "timestamp": event["timestamp"] = "bad"
+                if case in ("nan", "timestamp", "events"):
+                    chunk = (ws.json.dumps(event).encode() + b"\n") * (reader.MAX_EVENTS + 1 if case == "events" else 1)
+                    if case == "events": reader.MAX_BYTES = len(chunk) + 100
+                with path.open("ab") as handle: handle.write(chunk)
+            with pytest.raises(AssertionError):
+                reader.read(final=True)
+    for now in (manifest["latest_due"] - 1, manifest["latest_due"] + 2, manifest["latest_due"] + 3, float("nan")):
+        with monkeypatch.context() as patch:
+            patch.setattr(ws.time, "perf_counter", lambda: now)
+            reader = ws.DelayReadiness(seed.log, Alive())
+            with pytest.raises(AssertionError):
+                reader.wait(seed.request_id, manifest, manifest["latest_due"], manifest["earliest_due"])
+
+    for ttl_reserve, overshoot in ((True, False), (False, True)):
+        with monkeypatch.context() as patch:
+            fake = FakeClock()
+            fake.now = manifest["latest_due"]
+            patch.setattr(ws.time, "perf_counter", fake)
+            patch.setattr(ws.time, "sleep", lambda delay: fake.sleep(delay + (3 if overshoot else 0)))
+            reader = ws.DelayReadiness(seed.log, Alive())
+            earliest = fake.now - 6 if ttl_reserve else manifest["earliest_due"]
+            with pytest.raises(AssertionError): reader.wait(seed.request_id, manifest, fake.now, earliest)
+            assert len(fake.sleeps) == (1 if overshoot else 0)
 
     # A failing artifact sink preserves the original failure and its count.
     with monkeypatch.context() as patch:
@@ -351,7 +590,7 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
         endpoint = Endpoint(clock, "native observed footprint")
         endpoint.diagnostics = tmp_path / "unavailable"
         patch.setattr(ws.time, "perf_counter", clock)
-        patch.setattr(ws.time, "sleep", clock.sleep)
+        patch.setattr(ws.time, "sleep", endpoint.sleep)
         patch.setattr(ws.urllib.request, "urlopen", endpoint.urlopen)
         with pytest.raises(AssertionError, match="192"):
             ws.check_delay(ws.Smoke("http://offline-smoke/", "synthetic-unused-key"), endpoint.diagnostics)

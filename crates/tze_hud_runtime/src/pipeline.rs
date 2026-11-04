@@ -184,21 +184,58 @@ pub fn sweep_timed_scene_state(scene: &mut SceneGraph) -> Vec<tze_hud_scene::typ
             scene
                 .scheduled_batches
                 .iter()
-                .map(|s| (s.batch.batch_id, s.present_at_wall_us))
+                .map(|s| {
+                    let publication = match s.batch.mutations.as_slice() {
+                        [
+                            tze_hud_scene::mutation::SceneMutation::PublishToZone {
+                                zone_name,
+                                expires_at_wall_us,
+                                ..
+                            },
+                        ] if zone_name == "subtitle" => {
+                            Some((s.batch.agent_namespace.clone(), *expires_at_wall_us))
+                        }
+                        _ => None,
+                    };
+                    (s.batch.batch_id, (s.present_at_wall_us, publication))
+                })
                 .collect::<std::collections::HashMap<_, _>>()
         });
-    for late in scene.apply_due_batches() {
-        if let Some(present_at) = scheduled.as_ref().and_then(|s| s.get(&late.batch_id)) {
+    let applied = scene.apply_due_batches();
+    for late in &applied {
+        if let Some((present_at, publication)) =
+            scheduled.as_ref().and_then(|s| s.get(&late.batch_id))
+        {
+            let records = scene.zone_registry.active_publishes.get("subtitle");
+            let record = records.and_then(|records| match records.as_slice() {
+                [record]
+                    if applied.len() == 1
+                        && late.error.is_none()
+                        && publication.as_ref().is_some_and(|(namespace, expiry)| {
+                            record.publisher_namespace == *namespace
+                                && record.expires_at_wall_us == *expiry
+                                && record.published_at_wall_us >= *present_at
+                        }) =>
+                {
+                    Some(record)
+                }
+                _ => None,
+            });
+            let (batch_hi, batch_lo) = late.batch_id.as_uuid().as_u64_pair();
             tracing::debug!(
                 target: "tze_hud_delay_diagnostic",
-                event = "scheduled_activation",
+                event = "scheduled_activation", batch_hi, batch_lo,
                 present_at_wall_us = present_at,
                 applied_at_wall_us = scene.now_wall_us(),
                 scene_version = scene.version,
                 accepted = late.error.is_none(),
+                identity_valid = record.is_some(),
+                active_publications = records.map_or(0, Vec::len),
+                published_at_wall_us = record.map(|r| r.published_at_wall_us),
+                expires_at_wall_us = record.and_then(|r| r.expires_at_wall_us),
             );
         }
-        if let Some(err) = late.error {
+        if let Some(err) = &late.error {
             tracing::warn!(
                 batch_id = %late.batch_id,
                 error = %err,

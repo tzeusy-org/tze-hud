@@ -45,6 +45,8 @@ import hashlib
 import importlib.util
 import io
 import itertools
+import math
+from datetime import datetime, timedelta
 import json
 import os
 import re
@@ -563,37 +565,253 @@ def write_delay_evidence(directory: Path, evidence: dict) -> None:
     (directory / "delay.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
 
+# Numeric fields only: both live readiness and retained artifacts use this list.
+DELAY_NUMBERS = {
+    "request_id", "request_span_id", "batch_hi", "batch_lo", "scheduled_at_wall_us", "present_at_wall_us",
+    "expires_at_wall_us", "published_at_wall_us", "observed_at_wall_us", "applied_at_wall_us",
+    "scene_version", "accepted", "success", "identity_valid", "is_subtitle", "frame",
+    "duration_ms", "from_opacity", "target_opacity", "active_publications", "opacity",
+    "transition_active", "transition_complete", "transition_elapsed_us", "transition_duration_ms",
+    "zones_shown", "normal_animation",
+}
+
+
+DELAY_EVENTS = {"delayed_request", "delayed_enqueued", "scheduled_activation", "zone_fade_started",
+                "zone_fade_observed", "zone_text_sample", "capture_build_begin", "capture_build_end",
+                "capture_render_end"}
+
+
+def delay_event(line: bytes) -> dict | None:
+    """Allowlist the existing opt-in trace; never retain arbitrary log fields."""
+    try:
+        event = json.loads(line)
+    except (ValueError, UnicodeError):
+        assert b"tze_hud_delay_diagnostic" not in line, "malformed delayed diagnostic"
+        return None
+    if not isinstance(event, dict) or event.get("target") != "tze_hud_delay_diagnostic":
+        return None
+    fields = event.get("fields")
+    assert isinstance(fields, dict), "invalid delayed diagnostic fields"
+    name = fields.get("event")
+    assert isinstance(name, str) and name in DELAY_EVENTS, "invalid delayed event"
+    safe = {"event": name}
+    for key, value in fields.items():
+        if key in DELAY_NUMBERS and value is not None:
+            assert (type(value) is bool or type(value) is int and 0 <= value <= (1 << 64) - 1
+                    or type(value) is float and math.isfinite(value)), "invalid diagnostic number"
+            safe[key] = value
+    timestamp = event.get("timestamp")
+    assert isinstance(timestamp, str) and re.fullmatch(r"[0-9T:.Z+\-]+", timestamp), "invalid diagnostic timestamp"
+    try:
+        stamp = datetime.fromisoformat(timestamp.replace("Z", "+00:00"))
+        assert stamp.utcoffset() == timedelta(0)
+    except (ValueError, TypeError):
+        raise AssertionError("invalid diagnostic UTC clock") from None
+    return {"timestamp": timestamp, "fields": safe}
+
+
+class DelayReadiness:
+    """One owned smoke's bounded read of its directly written process log."""
+    MAX_BYTES, MAX_LINE, MAX_EVENTS = 1 << 20, 16 << 10, 4096
+
+    def __init__(self, path: Path, producer: subprocess.Popen) -> None:
+        self.path, self.producer = path, producer
+        self.identity = self.file_identity()
+        self.cursor = path.stat().st_size
+        self.total, self.partial, self.events = 0, b"", []
+        self.last_stamp = None
+
+    def file_identity(self):
+        stat = self.path.stat()
+        return stat.st_dev, stat.st_ino
+
+    def read(self, *, final=False) -> None:
+        assert self.producer.poll() is None, "owned delayed producer exited"
+        assert self.file_identity() == self.identity, "owned delayed log replaced"
+        size = self.path.stat().st_size
+        assert size >= self.cursor, "owned delayed log truncated"
+        assert self.total + size - self.cursor <= self.MAX_BYTES, "delayed log byte limit"
+        with self.path.open("rb") as handle:
+            opened = os.fstat(handle.fileno())
+            assert (opened.st_dev, opened.st_ino) == self.identity, "owned delayed log replaced"
+            handle.seek(self.cursor)
+            chunk = handle.read(self.MAX_BYTES - self.total + 1)
+        assert self.file_identity() == self.identity, "owned delayed log replaced"
+        self.cursor += len(chunk)
+        self.total += len(chunk)
+        assert self.total <= self.MAX_BYTES, "delayed log byte limit"
+        lines = (self.partial + chunk).split(b"\n")
+        self.partial = lines.pop()
+        assert len(self.partial) <= self.MAX_LINE, "delayed log line limit"
+        for line in lines:
+            assert len(line) <= self.MAX_LINE, "delayed log line limit"
+            event = delay_event(line)
+            if event is not None:
+                stamp = self.stamp(event)
+                assert self.last_stamp is None or stamp >= self.last_stamp, "backward diagnostic clock"
+                self.last_stamp = stamp
+                assert len(self.events) < self.MAX_EVENTS, "delayed diagnostic event limit"
+                self.events.append(event)
+        if final:
+            assert not self.partial, "incomplete delayed capture log"
+
+    @staticmethod
+    def stamp(event):
+        return datetime.fromisoformat(event["timestamp"].replace("Z", "+00:00")).timestamp() * 1_000_000
+
+    @staticmethod
+    def integer(fields, key):
+        value = fields.get(key)
+        assert type(value) is int and 0 <= value <= (1 << 64) - 1, "missing/invalid delayed identity"
+        return value
+
+    def ready(self, request_id: int, evidence: dict) -> dict | None:
+        """Recheck the full finite join; partial progress never moves a deadline."""
+        for event in self.events:
+            observed = event["fields"].get("observed_at_wall_us")
+            if observed is not None:
+                assert self.stamp(event) + 1 >= observed, "inconsistent diagnostic wall clock"
+        events = [e["fields"] for e in self.events]
+        requests = [e for e in events if e["event"] == "delayed_request"]
+        assert len(requests) <= 1, "ambiguous delayed request"
+        if not requests:
+            return None
+        request = requests[0]
+        assert self.integer(request, "request_id") == request_id, "wrong delayed request"
+        span = self.integer(request, "request_span_id")
+        enqueues = [e for e in events if e["event"] == "delayed_enqueued"]
+        assert len(enqueues) <= 1, "ambiguous delayed enqueue"
+        if not enqueues:
+            return None
+        enqueue = enqueues[0]
+        assert events.index(request) < events.index(enqueue), "enqueue precedes request"
+        assert self.integer(enqueue, "request_span_id") == span, "wrong delayed span"
+        batch = tuple(self.integer(enqueue, k) for k in ("batch_hi", "batch_lo"))
+        due, expiry = (self.integer(enqueue, k) for k in ("present_at_wall_us", "expires_at_wall_us"))
+        scheduled = self.integer(enqueue, "scheduled_at_wall_us")
+        assert enqueue.get("is_subtitle") is True and due == scheduled + 3_000_000, "wrong delayed schedule"
+        assert expiry == due + 20_000_000, "wrong delayed lifetime"
+        anchor = evidence["clock_anchor"]
+        self.integer(anchor, "wall_time_ns")  # Provenance format, never an admission bridge.
+        before, after = anchor["perf_counter_before"], anchor["perf_counter_after"]
+        assert all(math.isfinite(v) for v in (before, after, evidence["sent"], evidence["accepted"]))
+        assert before <= after <= evidence["sent"] <= evidence["accepted"], "invalid client clock"
+        # A UTC sample brackets an observation, not a permanent affine bridge
+        # from perf_counter to runtime UTC. Validate schedule/TTL above using the
+        # exact producer sample; client admission stays in its monotonic domain.
+        now = time.perf_counter()
+        assert math.isfinite(now) and now >= evidence["accepted"], "backward client clock"
+        activations = [e for e in events if e["event"] == "scheduled_activation"]
+        assert len(activations) <= 1, "ambiguous delayed activation"
+        if not activations:
+            return None
+        activation = activations[0]
+        assert events.index(enqueue) < events.index(activation), "activation precedes enqueue"
+        assert tuple(self.integer(activation, k) for k in ("batch_hi", "batch_lo")) == batch, "wrong delayed batch"
+        assert activation.get("accepted") is True and activation.get("identity_valid") is True, "ambiguous/rejected delayed application"
+        assert self.integer(activation, "present_at_wall_us") == due
+        published = self.integer(activation, "published_at_wall_us")
+        assert due <= published <= self.integer(activation, "applied_at_wall_us") < expiry, "expired/early delayed activation"
+        identity = {k: self.integer(activation, k) for k in ("scene_version", "published_at_wall_us", "expires_at_wall_us")}
+        assert identity["expires_at_wall_us"] == expiry
+        start = None
+        ready = None
+        assert all(self.stamp(e) < expiry for e in self.events[events.index(activation):]), "expired diagnostic observation"
+        for event in events[events.index(activation):]:
+            if "scene_version" in event:
+                assert self.integer(event, "scene_version") == identity["scene_version"], "delayed scene replaced"
+            if event.get("is_subtitle") is not True and event is not activation:
+                continue
+            assert self.integer(event, "active_publications") == 1, "delayed publication not sole"
+            assert all(self.integer(event, k) == v for k, v in identity.items()), "delayed publication replaced"
+            if event is activation:
+                continue
+            observed = self.integer(event, "observed_at_wall_us")
+            assert published <= observed < expiry, "expired/backward delayed observation"
+            if event["event"] == "zone_fade_started":
+                assert start is None, "ambiguous delayed fade"
+                assert type(event.get("target_opacity")) in (int, float) and event["target_opacity"] == 1
+                assert type(event.get("from_opacity")) in (int, float) and 0 <= event["from_opacity"] < 1
+                assert self.integer(event, "duration_ms") > 0
+                start = event
+            elif event["event"] in {"zone_fade_observed", "zone_text_sample"}:
+                assert start is not None, "delayed sample precedes fade"
+                assert event.get("zones_shown") is True and event.get("normal_animation") is True, "hidden/forced delayed opacity"
+                opacity = event.get("opacity")
+                assert type(opacity) in (int, float) and 0 <= opacity <= 1, "invalid delayed opacity"
+                complete = event.get("transition_complete") is True if event["event"] == "zone_fade_observed" else event.get("transition_active") is False
+                if event["event"] == "zone_fade_observed":
+                    assert type(event.get("from_opacity")) in (int, float) and event["from_opacity"] == start["from_opacity"]
+                    assert type(event.get("target_opacity")) in (int, float) and event["target_opacity"] == 1
+                    assert self.integer(event, "transition_duration_ms") == start["duration_ms"]
+                    if complete:
+                        assert self.integer(event, "transition_elapsed_us") >= start["duration_ms"] * 1000
+                assert ready is None or opacity == 1 and complete, "delayed readiness regressed"
+                if opacity == 1 and complete:
+                    ready = {**identity, "request_id": request_id, "request_span_id": span,
+                             "batch_hi": batch[0], "batch_lo": batch[1], "ready_event": event["event"]}
+        return ready
+
+    def wait(self, request_id, evidence, latest_due, earliest_due):
+        deadline = min(latest_due + 2.0, earliest_due + 20.0 - 15.0)
+        evidence["readiness"] = {"deadline": deadline, "status": "waiting"}
+        previous = latest_due
+        while True:
+            now = time.perf_counter()
+            assert math.isfinite(now) and previous <= now < deadline, "delayed readiness deadline/clock"
+            previous = now
+            self.read()
+            ready = self.ready(request_id, evidence)
+            checked = time.perf_counter()
+            assert now <= checked < deadline, "delayed readiness deadline/clock"
+            if ready is not None:
+                evidence["readiness"].update(status="ready", observed_at=checked, **ready)
+                return deadline
+            time.sleep(min(POLL_S, deadline - checked))
+
+    def capture(self, offset, request_id, evidence):
+        self.read(final=True)  # Available complete records once; no drain wait.
+        assert self.ready(request_id, evidence) is not None
+        events = self.events[offset:]
+        boundaries = [e for e in events if e["fields"]["event"].startswith("capture_")]
+        assert [e["fields"]["event"] for e in boundaries] == ["capture_build_begin", "capture_build_end", "capture_render_end"], "missing/ambiguous delayed capture bracket"
+        begin, end, rendered = (events.index(e) for e in boundaries)
+        samples = [e for e in events[begin + 1:end]
+                   if e["fields"]["event"] == "zone_text_sample" and e["fields"].get("is_subtitle") is True]
+        assert begin < end < rendered and len(samples) == 1, "missing/ambiguous delayed capture sample"
+        relevant = [boundaries[0], samples[0], boundaries[1], boundaries[2]]
+        sample = samples[0]["fields"]
+        assert sample.get("opacity") == 1 and sample.get("transition_active") is False, "unfinished delayed capture fade"
+        assert boundaries[-1]["fields"].get("success") is True
+        expiry = evidence["readiness"]["expires_at_wall_us"]
+        assert all(self.stamp(e) < expiry for e in relevant), "delayed capture expired"
+        evidence["readiness"]["capture_verified"] = True
+
+
 def write_delay_trace(directory: Path, log_path: Path) -> None:
-    """Keep only the dedicated numeric trace, never arbitrary HUD log payloads."""
+    """Retain the bounded numeric trace even when the original witness fails."""
     events = []
-    for line in log_path.read_text(errors="replace").splitlines():
-        try:
-            event = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(event, dict) or event.get("target") != "tze_hud_delay_diagnostic":
-            continue
-        fields = event.get("fields", {})
-        if not isinstance(fields, dict):
-            continue
-        numeric_fields = {"present_at_wall_us", "applied_at_wall_us", "scene_version", "accepted", "success",
-                          "is_subtitle", "frame", "duration_ms", "from_opacity", "target_opacity",
-                          "active_publications", "opacity", "transition_active", "transition_elapsed_us",
-                          "transition_duration_ms"}
-        safe = {key: value for key, value in fields.items()
-                if (key in numeric_fields and isinstance(value, (int, float, bool)))
-                or (key == "event" and isinstance(value, str) and re.fullmatch(r"[a-z_]+", value))}
-        timestamp = event.get("timestamp")
-        if not isinstance(timestamp, str) or not re.fullmatch(r"[0-9T:.Z+\-]+", timestamp):
-            timestamp = None
-        events.append({"timestamp": timestamp, "fields": safe})
+    with log_path.open("rb") as handle:
+        total = 0
+        while line := handle.readline(DelayReadiness.MAX_LINE + 1):
+            total += len(line)
+            if total > DelayReadiness.MAX_BYTES or len(line) > DelayReadiness.MAX_LINE:
+                break
+            try:
+                event = delay_event(line)
+            except AssertionError:
+                continue  # The live reader already fails closed on invalid evidence.
+            if event is not None:
+                events.append(event)
+                if len(events) == DelayReadiness.MAX_EVENTS:
+                    break
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "runtime-timing.json").write_text(json.dumps(events, indent=2) + "\n", encoding="utf-8")
 
 
-def check_delay(smoke: Smoke, diagnostics: Path | None = None) -> None:
+def check_delay(smoke: Smoke, diagnostics: Path | None = None, *, owned_log: Path | None = None, producer: subprocess.Popen | None = None) -> None:
     evidence = None
-    if diagnostics is not None:
+    if diagnostics is not None or owned_log is not None:
         anchor_start = time.perf_counter()
         wall_time_ns = time.time_ns()
         evidence = {"schema": 1, "minimum_changed_pixels": MIN_CHANGED_PIXELS, "captures": {},
@@ -602,16 +820,18 @@ def check_delay(smoke: Smoke, diagnostics: Path | None = None) -> None:
                     "provenance": {key: os.environ.get(key) for key in
                                    ("GITHUB_SHA", "GITHUB_RUN_ID", "GITHUB_RUN_ATTEMPT", "GITHUB_WORKFLOW")}}
     try:
-        _check_delay(smoke, evidence)
+        _check_delay(smoke, evidence, owned_log=owned_log, producer=producer)
     except Exception as error:
         if evidence is not None:
             evidence.update(outcome="failure", failure_class=type(error).__name__)
+            if "readiness" in evidence:
+                evidence["readiness"]["status"] = "failed"
         raise
     else:
         if evidence is not None:
             evidence["outcome"] = "success"
     finally:
-        if evidence is not None:
+        if diagnostics is not None and evidence is not None:
             try:
                 write_delay_evidence(diagnostics, evidence)
             except OSError:
@@ -621,7 +841,7 @@ def check_delay(smoke: Smoke, diagnostics: Path | None = None) -> None:
                     raise AssertionError("delayed smoke evidence unavailable") from None
 
 
-def _check_delay(smoke: Smoke, evidence: dict | None) -> None:
+def _check_delay(smoke: Smoke, evidence: dict | None, *, owned_log=None, producer=None) -> None:
     """Capture absence before due and presence after due without a second publish.
 
     Screenshots force an offscreen render, so this does not prove an autonomous
@@ -638,6 +858,8 @@ def _check_delay(smoke: Smoke, evidence: dict | None) -> None:
     width, height, before = baseline
 
     delay_ms = 3_000
+    observer = DelayReadiness(owned_log, producer) if owned_log is not None else None
+    request_id = smoke.next_id + 1
     sent = time.perf_counter()
     try:
         published = smoke.ok("hud_publish", {"surface": zone, "content": "CI DELAYED CONTENT IS VISIBLE", "delay_ms": delay_ms, "ttl_ms": 20_000})
@@ -659,7 +881,17 @@ def _check_delay(smoke: Smoke, evidence: dict | None) -> None:
         remaining = latest_due - time.perf_counter()
         if remaining > 0:
             time.sleep(remaining)
+        if observer is not None:
+            deadline = observer.wait(request_id, evidence, latest_due, earliest_due)
+            observer.read()
+            assert observer.ready(request_id, evidence) is not None
+            assert time.perf_counter() < deadline, "delayed readiness deadline"
+            offset = len(observer.events)
         late, late_started, late_finished = capture_frame(smoke, evidence=evidence, name="after-due")
+        if observer is not None:
+            assert late_finished >= late_started
+            assert late_finished < earliest_due + 20.0, "delayed capture exceeded TTL"
+            observer.capture(offset, request_id, evidence)
         assert late_started >= latest_due, "capture started before the latest due time"
         assert late[:2] == (width, height), "screenshot dimensions changed after due"
         after = late[2]
@@ -670,6 +902,8 @@ def _check_delay(smoke: Smoke, evidence: dict | None) -> None:
             f"{zone} delayed content changed only {changed} pixels after due (need {MIN_CHANGED_PIXELS})"
         )
     finally:
+        if observer is not None:
+            evidence["observed_runtime_events"] = observer.events
         # Includes an accepted publication whose response/observation failed.
         smoke.ok("hud_clear", {"surface": zone})
 
@@ -1403,7 +1637,7 @@ def main(argv=None) -> int:
         print("ok  HUD still running after the checks")
         check_widget(smoke)
         check_notification_ttl(smoke)
-        check_delay(smoke, args.diagnostics)
+        check_delay(smoke, args.diagnostics, owned_log=log_path, producer=proc)
         check_pair(smoke, args.exe)
         restarted_pid = check_restart(smoke, proc)
         return 0

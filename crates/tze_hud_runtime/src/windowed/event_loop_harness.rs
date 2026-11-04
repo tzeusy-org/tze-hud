@@ -1281,6 +1281,26 @@ mod tests {
         use crate::operator::screenshot::capture_channel;
         use tze_hud_scene::clock::TestClock;
 
+        #[derive(Clone, Default)]
+        struct Sink(Arc<std::sync::Mutex<Vec<u8>>>);
+        impl std::io::Write for Sink {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let sink = Sink::default();
+        let writer = sink.clone();
+        let _trace = tracing::subscriber::set_default(
+            tracing_subscriber::fmt()
+                .with_writer(move || writer.clone())
+                .json()
+                .with_max_level(tracing::Level::DEBUG)
+                .finish(),
+        );
         let _gpu = crate::test_support::lock_headless_runtime().await;
         let mut compositor = tze_hud_compositor::Compositor::new_headless(320, 200)
             .await
@@ -1289,7 +1309,8 @@ mod tests {
         let mut events = HeadlessEventLoopHarness::new();
         events.app.state.config.window.width = 320;
         events.app.state.config.window.height = 200;
-        *events.scene() = SceneGraph::new_with_clock(320.0, 200.0, Arc::new(TestClock::new(1_000)));
+        let clock = Arc::new(TestClock::new(1_000));
+        *events.scene() = SceneGraph::new_with_clock(320.0, 200.0, clock.clone());
         let queued = Arc::new(tokio::sync::Notify::new());
         let (endpoint, inbox) = capture_channel({
             let queued = Arc::clone(&queued);
@@ -1391,6 +1412,118 @@ mod tests {
             runtime.events.app.state.wake.counters().snapshot(),
             counters
         );
+        // The real sweep and capture owners emit one unambiguous identity.
+        // Two due batches deliberately cannot claim that identity, even when
+        // LatestWins leaves one record. No animation sleeps are needed here.
+        for batches in [1, 2] {
+            sink.0.lock().unwrap().clear();
+            let (batch_ids, expected_version) = {
+                use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
+                use tze_hud_scene::types::{ZoneContent, ZonePublishToken, ZoneRegistry};
+                let mut scene = runtime.events.scene();
+                scene.zone_registry = ZoneRegistry::with_defaults();
+                scene
+                    .zone_registry
+                    .zones
+                    .get_mut("subtitle")
+                    .unwrap()
+                    .rendering_policy
+                    .transition_in_ms = None;
+                let lease = scene.grant_lease("delayed", 120_000);
+                let due = scene.now_wall_us() + 3_000_000;
+                let mut ids = Vec::new();
+                for _ in 0..batches {
+                    let id = SceneId::new();
+                    ids.push(id);
+                    scene.schedule_batch(
+                        due,
+                        MutationBatch {
+                            batch_id: id,
+                            agent_namespace: "delayed".into(),
+                            lease_id: Some(lease),
+                            timing_hints: None,
+                            mutations: vec![SceneMutation::PublishToZone {
+                                zone_name: "subtitle".into(),
+                                content: ZoneContent::StreamText("capture".into()),
+                                publish_token: ZonePublishToken { token: Vec::new() },
+                                merge_key: None,
+                                expires_at_wall_us: Some(due + 20_000_000),
+                                content_classification: None,
+                                breakpoints: Vec::new(),
+                                held: false,
+                            }],
+                        },
+                    );
+                }
+                (ids, scene.version)
+            };
+            clock.advance(3_000);
+            let counters = runtime.events.app.state.wake.counters().snapshot();
+            let ledger = runtime.frames.last_rendered();
+            let capture = tokio::spawn({
+                let endpoint = endpoint.clone();
+                async move { endpoint.capture_frame(0).await }
+            });
+            queued.notified().await;
+            assert!(runtime.turn(false));
+            let (frame, permit) = capture.await.unwrap().unwrap();
+            assert_eq!((frame.width, frame.height), (320, 200));
+            drop(permit);
+            assert_eq!(runtime.frames.last_rendered(), ledger);
+            assert_eq!(
+                runtime.events.app.state.wake.counters().snapshot(),
+                counters
+            );
+            let applied_version = runtime.events.scene().version;
+            assert!(applied_version > expected_version);
+            let trace: Vec<serde_json::Value> = String::from_utf8(sink.0.lock().unwrap().clone())
+                .unwrap()
+                .lines()
+                .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+                .filter(|e| e["target"] == "tze_hud_delay_diagnostic")
+                .map(|e| e["fields"].clone())
+                .collect();
+            let applied: Vec<_> = trace
+                .iter()
+                .filter(|e| e["event"] == "scheduled_activation")
+                .collect();
+            assert_eq!(applied.len(), batches as usize);
+            for (event, id) in applied.iter().zip(batch_ids) {
+                let (hi, lo) = id.as_uuid().as_u64_pair();
+                assert_eq!(event["batch_hi"], hi);
+                assert_eq!(event["batch_lo"], lo);
+                assert_eq!(event["accepted"], true);
+                assert_eq!(event["identity_valid"], batches == 1);
+                assert_eq!(event["scene_version"], applied_version);
+                assert_eq!(event["active_publications"], 1);
+            }
+            let begin = trace
+                .iter()
+                .position(|e| e["event"] == "capture_build_begin")
+                .unwrap();
+            let end = trace
+                .iter()
+                .position(|e| e["event"] == "capture_build_end")
+                .unwrap();
+            let rendered = trace
+                .iter()
+                .position(|e| e["event"] == "capture_render_end")
+                .unwrap();
+            assert!(begin < end && end < rendered);
+            let sample = trace[begin + 1..end]
+                .iter()
+                .find(|e| e["event"] == "zone_text_sample")
+                .unwrap();
+            assert_eq!(sample["scene_version"], applied_version);
+            assert_eq!(sample["opacity"], 1.0);
+            assert_eq!(sample["transition_active"], false);
+            let scene = runtime.events.scene();
+            assert_eq!(
+                sample["published_at_wall_us"],
+                scene.zone_registry.active_publishes["subtitle"][0].published_at_wall_us
+            );
+            assert_eq!(trace[rendered]["success"], true);
+        }
     }
 
     fn character(ch: &str, ts: u64) -> PendingKeyboardEvent {

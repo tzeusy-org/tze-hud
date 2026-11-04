@@ -304,13 +304,28 @@ wait or retry. These are offscreen renders on request, not proof of autonomous
 on-screen presentation.
 
 For activation/fade evidence, set `TZE_HUD_LOG_JSON=1` and include
-`tze_hud_delay_diagnostic=debug` in `TZE_HUD_LOG`. `runtime-timing.json` retains
-only numeric timing/state fields from that target: scheduled application,
-screenshot build boundaries, fade starts and text opacity samples. The wall-clock
-anchor in `delay.json` relates Python capture bounds to the runtime timestamps;
-fade elapsed times use the renderer's monotonic clock. Tracing can perturb a
-timing-sensitive observation. Retain each run's first result and report that
-limit; a later pass alone does not explain an earlier undercount.
+`tze_hud_mcp_phases=debug,tze_hud_delay_diagnostic=debug` in `TZE_HUD_LOG`.
+The directly owned delayed-subtitle witness uses a bounded condition wait for
+its one accepted publication's existing fade before its one original late PNG,
+as approved by hud-q26ya FORM C (canonical O2). The new wait expires no later
+than two seconds after the latest-due bound and sooner if needed to preserve
+the original screenshot allowance before TTL expiry; it adds no publication,
+capture or retry. The unchanged 200-pixel assertion now proves settled-after-due
+presence, while the original early PNG still proves absence before due. Missing,
+stale or ambiguous identity/readiness evidence fails the check. `runtime-timing.json`
+retains only numeric request/span/batch/publication correlation, application,
+existing animation-check readiness, screenshot build boundaries and actual text
+opacity samples. Completion may be observed at an existing idle-gate check
+without another ordinary frame. The client UTC anchor in `delay.json` records
+one bracketed observation; it is not extrapolated with `perf_counter`. The enqueue
+trace carries the exact runtime wall sample used to construct due; integer
+producer-wall arithmetic validates delay and TTL. Client monotonic time bounds
+the wait and screenshot allowance, and the renderer's monotonic clock governs
+fade completion. A timestamp alone does not identify a publication. Public capture still returns composited current
+alpha and adds no production wake or idle poll. Tracing can perturb timing.
+The borrowed `--url` probe retains its legacy near-due sequence and cannot claim
+this owned O2 proof. Retain each first result and that limit; a later pass does not explain an earlier
+undercount or establish autonomous or owner-visible presentation.
 
 The informational `Quiescent with content` step uses a directly owned fullscreen
 HUD process. Measurement startup narrows its existing allowed affinity to two

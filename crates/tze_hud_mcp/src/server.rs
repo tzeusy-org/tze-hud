@@ -476,6 +476,26 @@ impl McpServer {
                     .filter(|a| !a.is_null())
                     .unwrap_or_else(|| serde_json::json!({}));
                 debug!(tool = name, agent = %identity.agent_id, "MCP: tools/call");
+                if name == "hud_publish"
+                    && args.get("surface").and_then(serde_json::Value::as_str)
+                        == Some("zone:subtitle")
+                    && args
+                        .get("delay_ms")
+                        .and_then(serde_json::Value::as_u64)
+                        .is_some_and(|ms| ms > 0)
+                    && tracing::enabled!(target: "tze_hud_delay_diagnostic", tracing::Level::DEBUG)
+                {
+                    let span = tracing::Span::current();
+                    if span.metadata().is_some_and(|m| {
+                        m.name() == "mcp_request" && m.target() == "tze_hud_mcp_phases"
+                    }) && let (Some(request_id), Some(span_id)) =
+                        (id.as_ref().and_then(serde_json::Value::as_u64), span.id())
+                    {
+                        debug!(target: "tze_hud_delay_diagnostic",
+                            event = "delayed_request", request_id,
+                            request_span_id = span_id.into_u64());
+                    }
+                }
                 #[cfg(any(test, feature = "test-harness"))]
                 let input_wait_probe = if name == "hud_input" {
                     self.input_notifiers

@@ -90,16 +90,25 @@ impl Compositor {
                                     ZoneAnimationState::fade_in_at(ms, now)
                                 };
                             new_state.easing = self.zone_motion.enter;
-                            tracing::debug!(
-                                target: "tze_hud_delay_diagnostic",
-                                event = "zone_fade_started",
-                                is_subtitle = zone_name == "subtitle",
-                                frame = self.frame_number,
-                                scene_version = scene.version,
-                                duration_ms = ms,
-                                from_opacity = new_state.from_opacity,
-                                target_opacity = new_state.target_opacity,
-                            );
+                            if tracing::enabled!(target: "tze_hud_delay_diagnostic", tracing::Level::DEBUG)
+                            {
+                                let records = scene.zone_registry.active_publishes.get(zone_name);
+                                let record = records.and_then(|r| (r.len() == 1).then(|| &r[0]));
+                                tracing::debug!(
+                                    target: "tze_hud_delay_diagnostic",
+                                    event = "zone_fade_started",
+                                    is_subtitle = zone_name == "subtitle",
+                                    frame = self.frame_number,
+                                    scene_version = scene.version,
+                                    active_publications = records.map_or(0, Vec::len),
+                                    published_at_wall_us = record.map(|r| r.published_at_wall_us),
+                                    expires_at_wall_us = record.and_then(|r| r.expires_at_wall_us),
+                                    observed_at_wall_us = scene.now_wall_us(),
+                                    duration_ms = ms,
+                                    from_opacity = new_state.from_opacity,
+                                    target_opacity = new_state.target_opacity,
+                                );
+                            }
                             self.zone_animation_states
                                 .insert(zone_name.clone(), new_state);
                         } else {
@@ -836,6 +845,28 @@ impl Compositor {
         // their state is kept, and the frame that shows them again resumes it.
         let zones_shown = scene.zones_shown();
         let tile_shown = |id: &SceneId| !scene.tile_id_hidden(*id);
+        // Observe the existing predicate before its early returns. A completed
+        // retained fade need not produce another ordinary frame. This reads no
+        // animation clock other than the same `now` used by the idle gate.
+        if tracing::enabled!(target: "tze_hud_delay_diagnostic", tracing::Level::DEBUG)
+            && let Some(state) = self.zone_animation_states.get("subtitle")
+        {
+            let records = scene.zone_registry.active_publishes.get("subtitle");
+            let record = records.and_then(|r| (r.len() == 1).then(|| &r[0]));
+            tracing::debug!(target: "tze_hud_delay_diagnostic",
+                event = "zone_fade_observed", is_subtitle = true,
+                scene_version = scene.version, frame = self.frame_number,
+                active_publications = records.map_or(0, Vec::len), zones_shown,
+                published_at_wall_us = record.map(|r| r.published_at_wall_us),
+                expires_at_wall_us = record.and_then(|r| r.expires_at_wall_us),
+                observed_at_wall_us = scene.now_wall_us(),
+                from_opacity = state.from_opacity, target_opacity = state.target_opacity,
+                opacity = state.current_opacity_at(now),
+                transition_elapsed_us = now.saturating_duration_since(state.transition_start).as_micros() as u64,
+                transition_duration_ms = state.duration_ms,
+                transition_complete = state.is_complete_at(now),
+                normal_animation = self.degradation_policy.level < DegradationLevel::Simplified);
+        }
 
         // Zone fade-in / fade-out transitions (subtitles, content/chrome zones).
         // Completed transitions are pruned by `update_zone_animations`, but a

@@ -485,6 +485,7 @@ impl super::Compositor {
             };
             if tracing::enabled!(target: "tze_hud_delay_diagnostic", tracing::Level::DEBUG) {
                 let transition = self.zone_animation_states.get(zone_name);
+                let record = (publishes.len() == 1).then(|| &publishes[0]);
                 tracing::debug!(
                     target: "tze_hud_delay_diagnostic",
                     event = "zone_text_sample",
@@ -492,6 +493,11 @@ impl super::Compositor {
                     frame = self.frame_number,
                     scene_version = scene.version,
                     active_publications = publishes.len(),
+                    published_at_wall_us = record.map(|r| r.published_at_wall_us),
+                    expires_at_wall_us = record.and_then(|r| r.expires_at_wall_us),
+                    observed_at_wall_us = scene.now_wall_us(),
+                    zones_shown = scene.zones_shown(),
+                    normal_animation = self.degradation_policy.level < DegradationLevel::Simplified,
                     opacity = anim_opacity,
                     transition_active = transition.is_some(),
                     transition_elapsed_us = transition
