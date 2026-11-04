@@ -1038,7 +1038,13 @@ impl SceneGraph {
             .overlay
             .zone_hit_regions
             .iter()
-            .filter(|r| !hidden && live(&r.zone_name, r.publication_id, &r.publisher_namespace))
+            .filter(|r| {
+                // Native chrome shares this list but has no notification publication.
+                !matches!(
+                    r.kind,
+                    ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. }
+                ) || (!hidden && live(&r.zone_name, r.publication_id, &r.publisher_namespace))
+            })
             .map(|r| r.interaction_id.clone())
             .collect();
         self.overlay
