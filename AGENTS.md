@@ -79,6 +79,9 @@ for concise status, attention and quick decisions. Treat this as standing
 opt-in for deliberate HUD publication using the existing paired connection.
 Prefer a useful HUD element over another chat progress paragraph when the HUD
 is available; keep the final outcome and durable evidence in chat or the PR.
+The main session owns this presence. Subagents report through their parent
+unless explicitly delegated an existing element; they do not each create a
+status entry, notification stream or portal.
 
 - **Status:** maintain one compact `zone:status-bar` entry with a unique
   session/work key and a recognizable label. Update it on meaningful changes
