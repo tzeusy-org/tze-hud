@@ -4,6 +4,8 @@ Mirror a main interactive Claude Code session onto the existing HUD portal
 without asking the model to call `hud_publish`. Explicit model/client verbs
 remain available. This is cooperative event delivery, not terminal capture.
 Nothing in this feature installs settings, pairs a host or changes permissions.
+The independent optional [five-hour usage gauge](claude-code-usage.md) uses the
+status line and typed widget parameters, with no model calls.
 
 Compatibility is qualified against the observed Claude Code **2.1.290** CLI and
 its [official hooks reference](https://code.claude.com/docs/en/hooks), checked

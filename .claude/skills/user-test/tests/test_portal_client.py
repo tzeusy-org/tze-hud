@@ -4,6 +4,7 @@ import importlib.util
 import http.server
 import json
 import os
+import signal
 from pathlib import Path
 import subprocess
 import sys
@@ -81,6 +82,18 @@ def test_publish_attaches_through_hud_publish(capsys):
         client.rpc("tools/call", {}, timeout=0.35)
         assert http.call_args.kwargs["timeout"] == 0.35
 
+    import publish_widget_batch as widgets
+    response.__enter__.return_value.read.return_value = json.dumps(tool_response({"ok": True})).encode()
+    with mock.patch.object(widgets.urllib.request, "urlopen", return_value=response) as http:
+        assert widgets.rpc_call("http://127.0.0.1/mcp", "synthetic", "hud_clear", {}, 1) == {"result": {"ok": True}}
+        assert http.call_args.kwargs["timeout"] == 20
+        response.__enter__.return_value.read.assert_called_with()
+        widgets.rpc_call("http://127.0.0.1/mcp", "synthetic", "hud_clear", {}, 1, timeout=0.2, response_limit=4096)
+        assert http.call_args.kwargs["timeout"] == 0.2
+        response.__enter__.return_value.read.assert_called_with(4097)
+        with pytest.raises(ValueError):
+            widgets.rpc_call("http://127.0.0.1/mcp", "synthetic", "hud_clear", {}, 1, response_limit=4)
+
 
 def test_poll_prints_ndjson_and_acks_on_next_call(capsys):
     item = {"id": "i1", "s": "portal:s1", "text": "yes"}
@@ -149,6 +162,13 @@ class HookHarness:
         home.mkdir()
         self.private_cwd = str(home.resolve())
         self.records = []
+        self.committed = []
+        self.hold_before_commit = False
+        self.hold_timeout = 2
+        self.drop_ack = False
+        self.tool_reply = None
+        self.ack_sent = threading.Event()
+        self.block_clear = False
         self.release = threading.Event()
         self.received = threading.Event()
         self.block_text = None
@@ -167,10 +187,19 @@ class HookHarness:
                 with harness.guard:
                     harness.records.append(request)
                 arguments = request["params"]["arguments"]
-                content = arguments.get("content")
-                if harness.block_text is not None and content == harness.block_text:
+                content = arguments.get("content", arguments.get("params", {}).get("readout"))
+                held = ((harness.block_text is not None and content == harness.block_text)
+                        or (harness.block_clear and request["params"]["name"] == "hud_clear"))
+                if not (harness.hold_before_commit and held):
+                    harness.committed.append(request)
+                if held:
                     harness.received.set()
-                    harness.release.wait(2)
+                    harness.release.wait(harness.hold_timeout)
+                if harness.hold_before_commit and held:
+                    harness.committed.append(request)
+                if harness.drop_ack:
+                    self.close_connection = True
+                    return
                 if content == harness.fail_text and harness.fail_remaining:
                     harness.fail_remaining -= 1
                     self.send_response(503)
@@ -178,7 +207,7 @@ class HookHarness:
                     return
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
-                response = json.dumps(tool_response({"ok": True})).encode()
+                response = json.dumps(harness.tool_reply or tool_response({"ok": True})).encode()
                 self.send_header("Content-Length", str(len(response)))
                 self.end_headers()
                 try:
@@ -191,6 +220,8 @@ class HookHarness:
                                 break
                     else:
                         self.wfile.write(response)
+                        self.wfile.flush()
+                        harness.ack_sent.set()
                 except (BrokenPipeError, ConnectionResetError):
                     pass
 
@@ -253,7 +284,7 @@ class HookHarness:
             try:
                 if os.readlink(entry / "cwd") == self.private_cwd:
                     args = (entry / "cmdline").read_bytes().split(b"\0")
-                    if str(HOOK).encode() in args:
+                    if str(getattr(self, "worker_script", HOOK)).encode() in args:
                         found.append(int(entry.name))
             except (OSError, RuntimeError):
                 continue
@@ -807,3 +838,463 @@ def test_hook_unavailable_malformed_privacy_and_state_failures(tmp_path):
         h.event("SessionStart", source="resume")
         assert len(h.records) == before and (h.marker().parent / "disabled.json").exists()
         assert not h.workers()
+
+
+USAGE = HOOK.with_name("hud_usage.py")
+
+
+class UsageHarness(HookHarness):
+    """Official-docs-derived SYNTHETIC statusline JSON, not owner recordings."""
+
+    def __init__(self, home):
+        super().__init__(home)
+        self.server.daemon_threads = False  # server_close also awaits owned HTTP handlers.
+        # Adopt this fixture's detached children so cancellation tests can
+        # collect actual exit status instead of leaving orphans to PID 1.
+        import ctypes
+        self.libc = ctypes.CDLL(None, use_errno=True)
+        previous = ctypes.c_int()
+        assert self.libc.prctl(37, ctypes.byref(previous), 0, 0, 0) == 0
+        self.previous_subreaper = previous.value
+        assert self.libc.prctl(36, 1, 0, 0, 0) == 0
+        (home / ".config/tze-hud").chmod(0o700)
+        self.env["TZ"] = "UTC"
+        self.reset = int(time.time()) + 3600
+        self.process_results = []
+        self.worker_script = USAGE
+        self.hold_timeout = 5
+
+    def __exit__(self, *args):
+        try:
+            super().__exit__(*args)
+        finally:
+            self.reap_detached()
+            assert self.libc.prctl(36, self.previous_subreaper, 0, 0, 0) == 0
+            receipt_root = os.environ.get("TZE_HUD_USAGE_TEST_RECEIPTS")
+            if receipt_root:
+                receipt = Path(receipt_root) / (self.home.name + ".json")
+                receipt.parent.mkdir(parents=True, exist_ok=True)
+                receipt.write_text(json.dumps({"provenance": "docs-derived synthetic loopback fixture",
+                                               "requests": self.records, "committed": self.committed,
+                                               "processes": self.process_results}, indent=2))
+
+    def reap_detached(self):
+        while True:
+            try:
+                pid, status = os.waitpid(-1, os.WNOHANG)
+            except ChildProcessError:
+                return
+            assert pid, "owned detached child remained live after fixture wait"
+            self.process_results.append({"detached_pid": pid, "returncode": os.waitstatus_to_exitcode(status)})
+
+    def payload(self, pct=41.2, reset=None):
+        return {"rate_limits": {"five_hour": {"used_percentage": pct, "resets_at": reset or self.reset}},
+                "context_window": {"used_percentage": 99}, "private_unknown": "discard-this-synthetic-text"}
+
+    def launch(self, payload):
+        raw = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+        p = subprocess.Popen([sys.executable, str(USAGE)], cwd=self.home, env=self.env,
+                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        p.started = time.monotonic()
+        p.stdin.write(raw)
+        p.stdin.close()
+        p.stdin = None
+        return p
+
+    def finish(self, process, expected=0):
+        out, err = process.communicate(timeout=2)
+        self.process_results.append({"returncode": process.returncode, "elapsed_s": time.monotonic() - process.started,
+                                     "stdout_bytes": len(out), "stderr_bytes": len(err)})
+        assert out == err == b""
+        assert process.returncode == expected
+
+    def replay(self, payload):
+        self.finish(self.launch(payload))
+
+    def state_path(self):
+        paths = list((self.home / ".cache/tze-hud/claude-usage").glob("*/state.json"))
+        assert len(paths) == 1
+        return paths[0]
+
+    def state(self):
+        path = self.state_path()
+        assert path.stat().st_size <= 2048
+        assert path.stat().st_mode & 0o077 == 0
+        raw = path.read_text()
+        assert "discard-this" not in raw and "synthetic-hook-pair" not in raw
+        return json.loads(raw)
+
+
+def test_usage_metric_steps_new_window_and_unavailable(tmp_path):
+    with UsageHarness(tmp_path / "usage") as h:
+        h.replay(h.payload())
+        first = h.publications()[0]
+        assert first["params"]["level"] == pytest.approx(0.412)
+        assert first == {"surface": "widget:usage", "params": {
+            "level": first["params"]["level"], "label": "5h usage", "severity": "info",
+            "readout": f'41% · resets {time.strftime("%H:%M", time.gmtime(h.reset))}'}}
+        h.replay(h.payload(41.9))
+        assert len(h.records) == 1
+        h.replay(h.payload(42))
+        h.replay(h.payload(42))
+        h.replay(h.payload(79.9))
+        h.replay(h.payload(80))
+        assert [r["params"]["arguments"]["params"]["severity"] for r in h.records] == ["info"] * 3 + ["warning"]
+        h.replay(h.payload(80, h.reset + 3600))
+        assert len(h.records) == 5
+        # Every unavailable spelling clears once, including pre-first-response,
+        # noneligible accounts, malformed metrics, and unrelated-only windows.
+        unavailable = [{}, {"rate_limits": {}}, {"rate_limits": {"five_hour": None}},
+                       {"rate_limits": {"seven_day": {"used_percentage": 20}}},
+                       h.payload(10, time.time() - 1), b"{", b"[]"]
+        unavailable += [h.payload(v) for v in (None, "42", True, -1, 101, float("nan"), float("inf"))]
+        unavailable += [{"rate_limits": {"five_hour": {"used_percentage": 20, "resets_at": v}}}
+                        for v in (None, "9999999999", True, float("nan"), 1e100)]
+        for value in unavailable:
+            h.replay(value)
+        assert len(h.records) == 6
+        assert h.records[-1]["params"] == {"name": "hud_clear", "arguments": {"surface": "widget:usage"}}
+        assert h.state()["ack"]["key"] == [0, -1]
+        h.env["HUD_USAGE_WIDGET"] = "other-usage"
+        h.replay(h.payload(0))
+        h.replay(h.payload(100))
+        assert h.publications()[-1]["surface"] == "widget:other-usage"
+        assert h.publications()[-1]["params"]["level"] == 1
+        h.tool_reply = tool_response({"code": "NOT_HELD"}, is_error=True)
+        h.replay({})
+        assert h.records[-1]["params"]["name"] == "hud_clear"
+        count = len(h.records)
+        h.replay({})
+        assert len(h.records) == count
+
+
+def test_usage_concurrent_claim_and_obsolete_ack_preserve_desire(tmp_path):
+    import fcntl
+    with UsageHarness(tmp_path / "concurrent") as h:
+        h.block_text = f'41% · resets {time.strftime("%H:%M", time.gmtime(h.reset))}'
+        first = h.launch(h.payload())
+        assert h.received.wait(1)
+        others = [h.launch(h.payload()) for _ in range(5)]
+        for process in others:
+            h.finish(process)
+        h.replay(h.payload(42))
+        h.replay(h.payload(43))
+        # The network is held; actual helper writers still acquired the short
+        # state lock and recorded the newest input without making another send.
+        assert len(h.records) == 1
+        assert h.state()["desired"]["pct"] == 43
+        # A real writer can still hold state.lock when the parsed ACK returns.
+        # Keep that overlap while the delivery owner waits to persist success.
+        with open(h.state_path().parent / "state.lock", "r+") as locked:
+            fcntl.flock(locked, fcntl.LOCK_EX)
+            h.release.set()
+            assert h.ack_sent.wait(0.2)
+            with pytest.raises(subprocess.TimeoutExpired):
+                first.wait(timeout=0.05)
+            assert len(h.records) == 1
+        h.finish(first)
+        assert [r["params"]["arguments"]["params"]["readout"].split("%")[0] for r in h.records] == ["41", "43"]
+        assert h.state()["desired"]["pct"] == 43 and h.state()["ack"] == {"generation": h.state()["generation"], "key": [h.reset, 43]}
+        h.replay(h.payload(43.9))
+        assert len(h.records) == 2
+        h.replay(h.payload(44))
+        assert len(h.records) == 3  # A distinct genuine transition gets its own attempt.
+
+        # Waiting for local ACK persistence shares the original process budget;
+        # an unresponsive local lock must not turn into an unbounded wait/send.
+        h.block_text = f'45% · resets {time.strftime("%H:%M", time.gmtime(h.reset))}'
+        h.received.clear()
+        h.release.clear()
+        h.ack_sent.clear()
+        blocked = h.launch(h.payload(45))
+        assert h.received.wait(1)
+        with open(h.state_path().parent / "state.lock", "r+") as locked:
+            fcntl.flock(locked, fcntl.LOCK_EX)
+            h.release.set()
+            assert h.ack_sent.wait(0.2)
+            h.finish(blocked, -signal.SIGALRM)
+        assert time.monotonic() - blocked.started < 1.5
+        assert len(h.records) == 4
+        assert h.state()["ack"]["key"] == [h.reset, 44]
+        assert h.state()["attempted"] == {"generation": h.state()["generation"], "key": [h.reset, 45]}
+        h.replay(h.payload(45))
+        assert len(h.records) == 4  # Parsed but unpersisted success remains uncertain.
+
+        h.block_text = f'46% · resets {time.strftime("%H:%M", time.gmtime(h.reset))}'
+        h.release.clear()
+        h.received.clear()
+        pending = h.launch(h.payload(46))
+        assert h.received.wait(1)
+        h.replay(h.payload(47))
+        admitted = h.state()["generation"]
+        assert len(h.records) == 5 and h.state()["desired"]["pct"] == 47
+        h.finish(pending, -signal.SIGALRM)
+        h.replay(h.payload(47))  # Same observation claims the distinct pending generation.
+        assert len(h.records) == 6
+        assert h.state()["ack"] == {"generation": admitted, "key": [h.reset, 47]}
+        h.release.set()
+
+        h.drop_ack = True
+        h.replay({})
+        assert h.state()["ack"]["generation"] == admitted
+        h.drop_ack = False
+        h.replay(h.payload(47))  # Historical ACK equality cannot suppress a new transition.
+        assert len(h.records) == 8
+        assert h.state()["ack"] == {"generation": admitted + 2, "key": [h.reset, 47]}
+
+
+@pytest.mark.parametrize("failure", ["ack-loss", "late-commit", "crash", "trickle", "oversized-ack"])
+def test_usage_uncertain_generation_allows_distinct_transition(tmp_path, failure):
+    with UsageHarness(tmp_path / failure) as h:
+        if failure == "ack-loss":
+            h.drop_ack = True
+        elif failure == "trickle":
+            h.trickle = True
+        elif failure == "oversized-ack":
+            h.tool_reply = tool_response({"ok": True, "padding": "x" * 5000})
+        else:
+            h.block_text = f'41% · resets {time.strftime("%H:%M", time.gmtime(h.reset))}'
+            h.hold_before_commit = True
+        p = h.launch(h.payload())
+        if failure in ("late-commit", "crash", "trickle"):
+            assert h.received.wait(1)
+            assert bool(h.committed) == (failure == "trickle")
+        if failure == "crash":
+            p.kill()  # Our known fixture child; its descriptor dies with it.
+            h.finish(p, -signal.SIGKILL)
+        else:
+            h.finish(p, -signal.SIGALRM if failure in ("late-commit", "trickle") else 0)
+        assert time.monotonic() - p.started < 1.5
+        uncertain = h.state()
+        h.drop_ack = h.trickle = False
+        h.tool_reply = None
+        h.replay(h.payload(41.9))
+        h.replay(h.payload())  # Another real process cannot retry this generation.
+        assert len(h.records) == 1 and h.state() == uncertain
+        for payload in (h.payload(42), {}):
+            h.replay(payload)
+            h.replay(payload)
+        assert [r["params"]["name"] for r in h.records] == ["hud_publish", "hud_publish", "hud_clear"]
+        assert uncertain["attempted"] == {"generation": uncertain["generation"], "key": [h.reset, 41]}
+        assert uncertain["ack"] is None
+        assert h.records[1]["params"]["arguments"]["params"]["level"] == 0.42
+        local = h.state()
+        assert local["ack"] == {"generation": local["generation"], "key": [0, -1]}
+        h.release.set()
+        deadline = time.monotonic() + 1
+        while len(h.committed) != 3 and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert len(h.committed) == 3
+        if failure in ("late-commit", "crash"):
+            # Production helper requests 41,42,clear; the old server mutation
+            # survives its client and resurrects 41 after acknowledged clear.
+            assert h.committed == [h.records[1], h.records[2], h.records[0]]
+        h.replay({})
+        assert len(h.records) == 3 and h.state() == local  # No same-generation repair.
+        h.replay(h.payload(1, h.reset + 3600))
+        h.replay(h.payload(1.9, h.reset + 3600))
+        assert len(h.records) == 4
+        assert h.state()["ack"]["key"] == [h.reset + 3600, 1]
+
+        if failure == "late-commit":
+            # The same unfenced seam also lets an old clear remove an ACKed
+            # new window at the same whole percentage. Release is not a fence.
+            h.block_clear = True
+            h.release.clear()
+            h.received.clear()
+            old_clear = h.launch({})
+            assert h.received.wait(1)
+            h.finish(old_clear, -signal.SIGALRM)
+            h.block_clear = False
+            h.replay(h.payload(1, h.reset + 7200))
+            newer = h.state()
+            assert newer["ack"] == {"generation": newer["generation"], "key": [h.reset + 7200, 1]}
+            assert h.committed[-1] == h.records[-1]
+            h.release.set()
+            deadline = time.monotonic() + 1
+            while len(h.committed) != len(h.records) and time.monotonic() < deadline:
+                time.sleep(0.005)
+            assert h.committed[-2:] == [h.records[-1], h.records[-2]]
+            assert h.committed[-1]["params"]["name"] == "hud_clear"
+            h.replay(h.payload(1, h.reset + 7200))
+            assert len(h.records) == 6 and h.state() == newer
+            h.replay(h.payload(2, h.reset + 7200))
+            assert len(h.records) == 7
+
+
+def test_usage_wrapper_stdout_and_detached_cancellation(tmp_path):
+    with UsageHarness(tmp_path / "wrapper") as h:
+        h.block_text = f'41% · resets {time.strftime("%H:%M", time.gmtime(h.reset))}'
+        script = h.home / "statusline.sh"
+        # This is the documented one-line addition. Existing stdout is emitted
+        # before deliberately holding the statusline parent for cancellation.
+        addition = f'(setsid "{sys.executable}" "{USAGE}" <<<"$input" >/dev/null 2>&1 & ) 2>/dev/null'
+        script.write_text('#!/bin/bash\ninput=$(cat)\n' + addition + '\nprintf "\\033[32mexisting Ω\\033[0m\\n"\nsleep 3\n')
+        p = subprocess.Popen(["bash", str(script)], cwd=h.home, env=h.env, stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+        started = time.monotonic()
+        p.stdin.write(json.dumps(h.payload()).encode())
+        p.stdin.close()
+        p.stdin = None
+        assert p.stdout.readline() == "\033[32mexisting Ω\033[0m\n".encode()
+        assert time.monotonic() - started < 0.5
+        assert h.received.wait(1)
+        os.killpg(p.pid, signal.SIGTERM)
+        out, err = p.communicate(timeout=1)
+        assert out == err == b""
+        h.release.set()
+        deadline = time.monotonic() + 0.8
+        while h.state()["ack"] is None and time.monotonic() < deadline:
+            time.sleep(0.005)
+        assert h.state()["ack"]["key"] == [h.reset, 41]
+        assert time.monotonic() - started < 1
+        h.wait_idle()
+        h.reap_detached()
+        assert any(r.get("detached_pid") and r["returncode"] == 0 for r in h.process_results)
+
+        h.hold_before_commit = True
+        h.block_text = f'42% · resets {time.strftime("%H:%M", time.gmtime(h.reset))}'
+        h.received.clear()
+        h.release.clear()
+        p = subprocess.Popen(["bash", str(script)], cwd=h.home, env=h.env, stdin=subprocess.PIPE,
+                             stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
+        started = time.monotonic()
+        p.stdin.write(json.dumps(h.payload(42)).encode())
+        p.stdin.close()
+        p.stdin = None
+        assert p.stdout.readline() == "\033[32mexisting Ω\033[0m\n".encode()
+        assert time.monotonic() - started < 0.5 and h.received.wait(1)
+        os.killpg(p.pid, signal.SIGTERM)
+        assert p.communicate(timeout=1) == (b"", b"")
+        h.wait_idle()  # Helper survives parent cancellation, then hits its original timer.
+        h.reap_detached()
+        assert any(r.get("detached_pid") and r["returncode"] == -signal.SIGALRM for r in h.process_results)
+        assert time.monotonic() - started < 1.5
+        before = len(h.records)
+        h.replay(h.payload(42))
+        assert len(h.records) == before
+        h.replay(h.payload(43))
+        assert len(h.records) == before + 1 and h.state()["ack"]["key"] == [h.reset, 43]
+        h.release.set()
+        # Each actual wrapper must return its existing output immediately even
+        # when the detached helper cannot publish. No shell wait is installed.
+        script.write_text(script.read_text().replace("sleep 3\n", ""))
+        state_path = h.state_path()
+        key = h.home / ".config/tze-hud/127.0.0.1.psk"
+        for failure in ("invalid-widget", "missing-pair", "unsafe-state", "lock", "down"):
+            if failure == "invalid-widget":
+                h.env["HUD_USAGE_WIDGET"] = "../invalid"
+            elif failure == "missing-pair":
+                key.rename(key.with_suffix(".saved"))
+            elif failure == "unsafe-state":
+                state_path.chmod(0o644)
+            elif failure == "down":
+                h.server.shutdown()
+                h.server.server_close()
+            import fcntl
+            with open(state_path.parent / "state.lock", "r+") as locked:
+                if failure == "lock":
+                    fcntl.flock(locked, fcntl.LOCK_EX)
+                started = time.monotonic()
+                result = subprocess.run(["bash", str(script)], cwd=h.home, env=h.env,
+                                        input=json.dumps(h.payload(42)).encode(), capture_output=True, timeout=1)
+                assert result.returncode == 0 and result.stderr == b""
+                assert result.stdout == "\033[32mexisting Ω\033[0m\n".encode()
+                elapsed = time.monotonic() - started
+                assert elapsed < 0.5
+                h.process_results.append({"wrapper_failure": failure, "elapsed_s": elapsed,
+                                          "stdout_bytes": len(result.stdout), "stderr_bytes": len(result.stderr)})
+                # Await the detached helper's fixed budget while retaining the
+                # fixture fault; there is no timer/retry in production code.
+                time.sleep(1.05)
+            h.env.pop("HUD_USAGE_WIDGET", None)
+            if failure == "missing-pair":
+                key.with_suffix(".saved").rename(key)
+            state_path.chmod(0o600)
+
+
+def test_usage_failures_are_silent_private_bounded_and_event_driven(tmp_path):
+    import fcntl
+    with UsageHarness(tmp_path / "failures") as h:
+        h.env["HUD_USAGE_WIDGET"] = "../unsafe"
+        h.replay(h.payload())
+        assert not h.records
+        h.env.pop("HUD_USAGE_WIDGET")
+        key = h.home / ".config/tze-hud/127.0.0.1.psk"
+        key.rename(key.with_suffix(".saved"))
+        h.replay(h.payload())
+        assert not h.records
+        key.with_suffix(".saved").rename(key)
+        h.replay(b"x" * 65537)
+        assert not h.records
+        h.replay(h.payload())
+        path = h.state_path()
+        for lock_name in ("state.lock", "delivery.lock"):
+            with open(path.parent / lock_name, "r+") as locked:
+                fcntl.flock(locked, fcntl.LOCK_EX)
+                started = time.monotonic()
+                h.replay(h.payload(42))
+                assert time.monotonic() - started < 0.4
+        assert len(h.records) == 1
+        # A crash may interrupt staging before rename. Its one bounded private
+        # inode is reused; repeated input must not accumulate orphan files.
+        pending = path.parent / "state.pending"
+        pending.write_text('{"interrupted":')
+        pending.chmod(0o600)
+        h.replay(h.payload(42))  # A real later invocation handles saved desire.
+        assert len(h.records) == 2
+        assert not pending.exists()
+        assert {p.name for p in path.parent.iterdir()} == {"state.json", "state.lock", "delivery.lock"}
+        inode = (path.parent / "state.lock").stat().st_ino
+        for pct in range(43, 63):
+            h.replay(h.payload(pct))
+        assert h.state()["generation"] == 22
+        assert set(h.state()) == {"version", "generation", "desired", "ack", "attempted"}
+        assert (path.parent / "state.lock").stat().st_ino == inode
+        assert {p.name for p in path.parent.iterdir()} == {"state.json", "state.lock", "delivery.lock"}
+        count = len(h.records)
+        # Version-1 state is a real externally persisted compatibility boundary.
+        # Preserve a matching old inflight claim instead of migrating into retry.
+        old = {"version": 1, "generation": 30, "desired": {"window": h.reset, "pct": 63, "level": 0.63},
+               "ack": [h.reset, 62], "inflight": [h.reset, 63]}
+        path.write_text(json.dumps(old))
+        h.replay(h.payload(63))
+        assert len(h.records) == count and json.loads(path.read_text()) == old
+        h.replay(h.payload(62))  # A real return to the old ACK value is distinct.
+        assert len(h.records) == count + 1
+        assert h.state()["ack"] == {"generation": 31, "key": [h.reset, 62]}
+        old["desired"] = {"window": h.reset, "pct": 64, "level": 0.64}
+        path.write_text(json.dumps(old))
+        h.replay(h.payload(64))  # A different pending desire already existed in old metadata.
+        assert len(h.records) == count + 2
+        exhausted = h.state()
+        exhausted["generation"] = 2**53 - 1
+        path.write_text(json.dumps(exhausted))
+        h.replay(h.payload(65))
+        assert json.loads(path.read_text()) == exhausted
+        count = len(h.records)
+        for raw in ("{}", "x" * 2049):
+            path.write_text(raw)
+            h.replay(h.payload(43))
+        path.chmod(0o644)
+        h.replay(h.payload(43))
+        path.unlink()
+        target = h.home / "untouched"
+        target.write_text("private synthetic fixture")
+        path.symlink_to(target)
+        h.replay(h.payload(43))
+        assert target.read_text() == "private synthetic fixture"
+        assert len(h.records) == count
+    # A genuine pre-send pairing failure did not poison a claim (above).
+    # Connection refusal is conservatively uncertain; no repeated attempts.
+    with UsageHarness(tmp_path / "down") as h:
+        h.server.shutdown()
+        h.server.server_close()
+        h.replay(h.payload())
+        assert h.state()["attempted"]["key"] == [h.reset, 41]
+        attempted = h.state()["attempted"]
+        h.replay(h.payload())
+        assert h.state()["attempted"] == attempted
+        h.replay(h.payload(42))
+        assert h.state()["attempted"]["generation"] > attempted["generation"]
+        assert not h.records

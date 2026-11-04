@@ -221,6 +221,18 @@ source links when implementation changes the status.
   (`hud-jm8nq.26`) remains blocked. The current owner host is hibernating;
   no new physical acceptance, owner obligation or host probe is claimed here.
   Existing owner decisions and activation holds remain separate and unchanged.
+- **Five-hour usage gauge [Source; native acceptance pending].** The optional
+  [status-line helper](../.claude/skills/hud-projection/references/claude-code-usage.md)
+  publishes typed gauge parameters directly with zero model tokens and a silent,
+  detached one-second total work budget. It keeps bounded desired/attempt/ACK
+  generations, one live delivery owner and no same-generation uncertain retry.
+  Owner-approved option C permits a later distinct percentage/window/clear
+  transition after ownership releases. Old server work can still overwrite a
+  newer window, resurrect cleared content, or remove newer content indefinitely;
+  unchanged input does not repair it and no finite convergence is promised.
+  Real-helper/fake-HTTP and Bash fixtures are synthetic source evidence; genuine
+  Claude recordings/cancellation/reset and Windows fill/readout/hover/caution/
+  clear/status-line latency acceptance remain unexecuted (`hud-o4ixb.3`).
 - **T7 — portal [Observed].** MCP tools now share
   [`PortalHandle`](../crates/tze_hud_mcp/src/server.rs) directly with the
   runtime's [portal driver](../crates/tze_hud_runtime/src/portal.rs).
