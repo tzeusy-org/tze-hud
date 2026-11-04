@@ -77,13 +77,35 @@ impl SystemCardHandle {
         self.render_wake.notify();
     }
 
-    /// Replace the card with `new` only if `expected` is still the one showing
+    /// Transform the card only if `expected` is still the one showing
     /// (a newer code must not be overwritten by a late background result).
-    pub fn replace_if_current(&self, expected: &SystemCard, new: SystemCard) -> bool {
+    pub fn replace_if_current(
+        &self,
+        expected: &SystemCard,
+        transform: impl FnOnce(&SystemCard) -> Option<SystemCard>,
+    ) -> bool {
+        self.transform_current(|current| {
+            if current == expected {
+                transform(current)
+            } else {
+                None
+            }
+        })
+    }
+
+    /// Transform the exact current card atomically. Notify only after a changed
+    /// model has been installed and the slot lock has been released.
+    pub(crate) fn transform_current(
+        &self,
+        transform: impl FnOnce(&SystemCard) -> Option<SystemCard>,
+    ) -> bool {
         let mut slot = self.slot.write().unwrap_or_else(|e| e.into_inner());
-        if slot.as_ref() != Some(expected) {
+        let Some(current) = slot.as_ref() else {
             return false;
-        }
+        };
+        let Some(new) = transform(current).filter(|new| new != current) else {
+            return false;
+        };
         *slot = Some(new);
         drop(slot);
         self.render_wake.notify();

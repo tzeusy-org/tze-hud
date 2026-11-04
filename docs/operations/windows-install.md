@@ -107,7 +107,12 @@ stores only the PSK's SHA-256 in `%APPDATA%\tze_hud\agents.toml`. Add
 agent, or re-pair one (which rotates its key), run `tze_hud.exe --pair` or press
 Ctrl+Shift+F10 (the pairing chord; no need to focus the HUD). A code works once and expires after 5
 minutes; five wrong codes replace it, and repeated failures pause pairing for
-60 seconds.
+60 seconds. After the pause, reopen pairing explicitly with the chord or `--pair`.
+
+If Tailscale binds successfully after the startup or `--pair` card appears,
+the open card updates its preferred MCP address while keeping the same code
+and its original expiry. Failed binds leave it alone; interface removal and
+gRPC-only changes do not refresh this card.
 
 The card states a fixed 5-minute validity rather than a countdown, and it
 clears when the code expires. The code is on screen, so an agent holding an

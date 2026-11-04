@@ -70,7 +70,10 @@ source links when implementation changes the status.
   MCP also verifies that status lists only successful binds. Pairing uses each
   transport's successful bind list independently, with `grpc: null` before a
   gRPC listener is adopted; the pairing fixture covers unavailable and later
-  successful gRPC addresses.
+  successful gRPC addresses. A successful late MCP bind refreshes an eligible
+  open startup/`--pair` system card with its original code and deadlines; the
+  pairing and MCP fixtures cover that update and stale/expired-card suppression.
+  This source evidence does not establish the displayed transition on Windows.
   The real [runtime capture gate](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs),
   `building_an_idle_frame_leaves_the_idle_gate_inputs_unchanged`, checks that
   capture leaves the primary scene/geometry and presentation bookkeeping unchanged,
