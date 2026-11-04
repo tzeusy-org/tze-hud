@@ -324,6 +324,9 @@ fn spawn_tailnet_watcher(
                             .lock()
                             .unwrap_or_else(|e| e.into_inner())
                             .push(local);
+                        if let Some(pairing) = &admin.pairing {
+                            pairing.refresh_open_system_card();
+                        }
                         tokio::spawn(run_accept_loop(
                             listener,
                             Arc::clone(&server),
@@ -362,7 +365,7 @@ async fn run_deferred_listeners(
     late_tailnet_port: Option<u16>,
     #[cfg(test)] tailnet_fixture: Option<crate::net_addrs::TailnetFixture>,
 ) {
-    use crate::operator::handoff::{BIND_RETRY, retry_bind};
+    use crate::operator::handoff::{retry_bind, BIND_RETRY};
     if !gate.wait().await {
         return;
     }
@@ -383,6 +386,9 @@ async fn run_deferred_listeners(
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .push(local);
+                if let Some(pairing) = &admin.pairing {
+                    pairing.refresh_open_system_card();
+                }
                 loops.push(tokio::spawn(run_accept_loop(
                     listener,
                     Arc::clone(&server),
@@ -658,7 +664,7 @@ async fn handle_admin(
     admin: &StatusSource,
 ) -> crate::http::Response {
     use crate::http::{
-        AdminRoute, OperatorCode, OperatorError, Response, admin_guard, query_param,
+        admin_guard, query_param, AdminRoute, OperatorCode, OperatorError, Response,
     };
     use crate::operator::handoff::RestartError;
     let unavailable = |why: &str| {
@@ -835,9 +841,9 @@ mod tests {
         StatusSource {
             appearance: None,
             agents: dir.shared(),
-            binds: Arc::new(std::sync::Mutex::new(vec![
-                "127.0.0.1:9090".parse().unwrap(),
-            ])),
+            binds: Arc::new(std::sync::Mutex::new(vec!["127.0.0.1:9090"
+                .parse()
+                .unwrap()])),
             safe_mode: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             presents: None,
             capture: None,
@@ -933,18 +939,16 @@ mod tests {
         use crate::http::AdminRoute::Screenshot;
         let mut src = admin_source(std::env::temp_dir().join("tze_hud_no_such.log"));
         let (endpoint, inbox) = crate::operator::screenshot::capture_channel(|| {});
-        std::thread::spawn(move || {
-            loop {
-                if let Some(req) = inbox.next_live() {
-                    let _ = req.reply.send(Ok(tze_hud_compositor::CapturedFrame {
-                        width: 1,
-                        height: 1,
-                        rgba: vec![1, 2, 3, 4],
-                    }));
-                    return;
-                }
-                std::thread::sleep(std::time::Duration::from_millis(5));
+        std::thread::spawn(move || loop {
+            if let Some(req) = inbox.next_live() {
+                let _ = req.reply.send(Ok(tze_hud_compositor::CapturedFrame {
+                    width: 1,
+                    height: 1,
+                    rgba: vec![1, 2, 3, 4],
+                }));
+                return;
             }
+            std::thread::sleep(std::time::Duration::from_millis(5));
         });
         src.capture = Some(endpoint);
         async fn get(src: &StatusSource, bearer: Option<&str>) -> crate::http::Response {
@@ -1356,6 +1360,7 @@ mod tests {
     /// interface address without needing Tailscale.
     #[tokio::test]
     async fn mcp_http_tools_list_on_every_listener() {
+        let rig = crate::pairing::tests::rig();
         let config = McpServerConfig {
             appearance: None,
             publication_defaults: Default::default(),
@@ -1374,13 +1379,14 @@ mod tests {
             restart: None,
             update: None,
             bind_gate: None,
-            pairing: None,
+            pairing: Some(Arc::clone(&rig.pairing)),
         };
+        rig.pairing.binds(&[]).lock().unwrap().clear();
         let shutdown = ShutdownToken::new();
         let (fixture, mut control) = crate::net_addrs::tailnet_fixture();
         let (handle, addrs) = start_mcp_http_server_inner(
             make_scene(),
-            config,
+            config.clone(),
             shutdown.clone(),
             None,
             tze_hud_scene::render_wake::RenderWakeNotifier::default(),
@@ -1391,6 +1397,14 @@ mod tests {
         .await
         .expect("bind");
         assert_eq!(addrs.len(), 2);
+        rig.pairing.open();
+        let eager = rig
+            .card
+            .frame_state(crate::pairing::PairClock::wall_us(rig.clock.as_ref()));
+        assert_eq!(
+            eager.model.as_ref().unwrap().lines[1],
+            format!("http://{}/pair", addrs[0])
+        );
 
         let body = r#"{"jsonrpc":"2.0","method":"tools/list","params":{},"id":1}"#;
         for addr in &addrs {
@@ -1432,13 +1446,78 @@ mod tests {
         let status: serde_json::Value =
             serde_json::from_str(status.split("\r\n\r\n").nth(1).unwrap()).unwrap();
         assert_eq!(status["binds"].as_array().unwrap().len(), 3);
-        assert!(
-            status["binds"]
-                .as_array()
-                .unwrap()
-                .contains(&serde_json::json!(late.to_string()))
+        assert_eq!(
+            rig.card
+                .frame_state(crate::pairing::PairClock::wall_us(rig.clock.as_ref())),
+            eager,
+            "appended loopback leaves preferred endpoint unchanged"
         );
+        assert!(status["binds"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!(late.to_string())));
 
+        shutdown.trigger(crate::threads::ShutdownReason::Clean);
+        handle.await.expect("task");
+
+        // Fixture-only empty startup: exercise the production late-bind callback
+        // on the first successful listener, without any real tailnet interface.
+        let rig = crate::pairing::tests::rig();
+        rig.pairing.binds(&[]).lock().unwrap().clear();
+        let shutdown = ShutdownToken::new();
+        let (fixture, mut control) = crate::net_addrs::tailnet_fixture();
+        let mut empty = config;
+        empty.bind_addrs.clear();
+        empty.pairing = Some(Arc::clone(&rig.pairing));
+        let (handle, addrs) = start_mcp_http_server_inner(
+            make_scene(),
+            empty,
+            shutdown.clone(),
+            None,
+            tze_hud_scene::render_wake::RenderWakeNotifier::default(),
+            tze_hud_scene::render_wake::RenderWakeNotifier::default(),
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            Some(fixture),
+        )
+        .await
+        .unwrap();
+        assert!(addrs.is_empty());
+        rig.pairing.open();
+        let before = rig
+            .card
+            .frame_state(crate::pairing::PairClock::wall_us(rig.clock.as_ref()));
+        let code = rig.pairing.code().unwrap();
+        assert_eq!(
+            before.model.as_ref().unwrap().lines[1],
+            "this machine, port 9090"
+        );
+        control.addresses.send(vec![control.v6]).unwrap();
+        assert_eq!(control.next_attempt().await, (control.v6, None));
+        assert_eq!(
+            rig.card
+                .frame_state(crate::pairing::PairClock::wall_us(rig.clock.as_ref())),
+            before
+        );
+        control
+            .fail
+            .store(false, std::sync::atomic::Ordering::Release);
+        control.addresses.send(vec![control.v6]).unwrap();
+        let late = control.next_bound(control.v6).await;
+        // A completed request also proves callback publication finished: the
+        // accept loop starts only after the pairing refresh has returned.
+        let response = http_post(late, body, Some("root-psk")).await;
+        assert!(response.contains("HTTP/1.1 200") && response.contains("hud_publish"));
+        let after = rig
+            .card
+            .frame_state(crate::pairing::PairClock::wall_us(rig.clock.as_ref()));
+        let mut expected = before;
+        expected.model.as_mut().unwrap().lines[1] = format!("http://{late}/pair");
+        assert_eq!(after, expected);
+        assert_eq!(
+            rig.pairing.code().unwrap(),
+            code,
+            "same code and monotonic deadline"
+        );
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
         handle.await.expect("task");
     }
@@ -1478,16 +1557,14 @@ mod tests {
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
         handle.await.expect("task");
 
-        assert!(
-            start_mcp_http_server(
-                make_scene(),
-                cfg(["192.0.2.1:0", "127.0.0.1:0"]),
-                ShutdownToken::new(),
-                None,
-            )
-            .await
-            .is_err()
-        );
+        assert!(start_mcp_http_server(
+            make_scene(),
+            cfg(["192.0.2.1:0", "127.0.0.1:0"]),
+            ShutdownToken::new(),
+            None,
+        )
+        .await
+        .is_err());
     }
 
     #[tokio::test]
