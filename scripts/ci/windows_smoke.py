@@ -567,7 +567,7 @@ def write_delay_evidence(directory: Path, evidence: dict) -> None:
 
 # Numeric fields only: both live readiness and retained artifacts use this list.
 DELAY_NUMBERS = {
-    "request_id", "request_span_id", "batch_hi", "batch_lo", "present_at_wall_us",
+    "request_id", "request_span_id", "batch_hi", "batch_lo", "scheduled_at_wall_us", "present_at_wall_us",
     "expires_at_wall_us", "published_at_wall_us", "observed_at_wall_us", "applied_at_wall_us",
     "scene_version", "accepted", "success", "identity_valid", "is_subtitle", "frame",
     "duration_ms", "from_opacity", "target_opacity", "active_publications", "opacity",
@@ -688,18 +688,19 @@ class DelayReadiness:
         assert self.integer(enqueue, "request_span_id") == span, "wrong delayed span"
         batch = tuple(self.integer(enqueue, k) for k in ("batch_hi", "batch_lo"))
         due, expiry = (self.integer(enqueue, k) for k in ("present_at_wall_us", "expires_at_wall_us"))
-        assert enqueue.get("is_subtitle") is True and expiry == due + 20_000_000, "wrong delayed lifetime"
+        scheduled = self.integer(enqueue, "scheduled_at_wall_us")
+        assert enqueue.get("is_subtitle") is True and due == scheduled + 3_000_000, "wrong delayed schedule"
+        assert expiry == due + 20_000_000, "wrong delayed lifetime"
         anchor = evidence["clock_anchor"]
+        self.integer(anchor, "wall_time_ns")  # Provenance format, never an admission bridge.
         before, after = anchor["perf_counter_before"], anchor["perf_counter_after"]
         assert all(math.isfinite(v) for v in (before, after, evidence["sent"], evidence["accepted"]))
         assert before <= after <= evidence["sent"] <= evidence["accepted"], "invalid client clock"
-        wall = anchor["wall_time_ns"] / 1000
-        assert wall + (evidence["sent"] - after + 3) * 1e6 - 1 <= due <= wall + (evidence["accepted"] - before + 3) * 1e6 + 1, "inconsistent delayed wall anchor"
+        # A UTC sample brackets an observation, not a permanent affine bridge
+        # from perf_counter to runtime UTC. Validate schedule/TTL above using the
+        # exact producer sample; client admission stays in its monotonic domain.
         now = time.perf_counter()
         assert math.isfinite(now) and now >= evidence["accepted"], "backward client clock"
-        lower = wall + (evidence["sent"] - after) * 1e6 - 1
-        upper = wall + (now - before) * 1e6 + 1
-        assert all(lower <= self.stamp(e) <= upper for e in self.events), "inconsistent producer/client clocks"
         activations = [e for e in events if e["event"] == "scheduled_activation"]
         assert len(activations) <= 1, "ambiguous delayed activation"
         if not activations:

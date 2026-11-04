@@ -316,10 +316,12 @@ stale or ambiguous identity/readiness evidence fails the check. `runtime-timing.
 retains only numeric request/span/batch/publication correlation, application,
 existing animation-check readiness, screenshot build boundaries and actual text
 opacity samples. Completion may be observed at an existing idle-gate check
-without another ordinary frame. The wall-clock anchor in `delay.json` brackets
-the Python/runtime clock relationship; runtime wall time governs due/expiry and
-the renderer's monotonic clock governs fade completion. A timestamp alone does
-not identify a publication. Public capture still returns composited current
+without another ordinary frame. The client UTC anchor in `delay.json` records
+one bracketed observation; it is not extrapolated with `perf_counter`. The enqueue
+trace carries the exact runtime wall sample used to construct due; integer
+producer-wall arithmetic validates delay and TTL. Client monotonic time bounds
+the wait and screenshot allowance, and the renderer's monotonic clock governs
+fade completion. A timestamp alone does not identify a publication. Public capture still returns composited current
 alpha and adds no production wake or idle poll. Tracing can perturb timing.
 The borrowed `--url` probe retains its legacy near-due sequence and cannot claim
 this owned O2 proof. Retain each first result and that limit; a later pass does not explain an earlier

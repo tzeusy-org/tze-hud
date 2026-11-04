@@ -202,12 +202,29 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
             self.log.write_bytes(b"")
             self.activated = self.completed = False
             self.request_id = None
-            self.epoch = 1_800_000_000_000_000
+            # Separate clocks, advanced explicitly by fixture actions. Client
+            # UTC is never used to construct producer timestamps or deadlines.
+            self.client_wall_ns = 1_800_000_000_000_000_000
+            self.producer_wall_us = 1_800_000_000_000_000
+            if case == "coarse client UTC":
+                self.client_wall_ns += 789_123
+                self.producer_wall_us += 789
+            self.due_wall_us = None
+            self.scheduled_wall_us = None
             self.version = 7
+
+        def advance(self, seconds):
+            self.clock.now += seconds
+            self.client_wall_ns += round(seconds * 1e9)
+            self.producer_wall_us += round(seconds * 1e6)
+
+        def sleep(self, seconds):
+            self.clock.sleeps.append(seconds)
+            self.advance(seconds)
 
         def emit(self, name, **fields):
             event = {"target": "tze_hud_delay_diagnostic",
-                     "timestamp": ws.datetime.fromtimestamp((self.epoch + self.clock() * 1e6) / 1e6,
+                     "timestamp": ws.datetime.fromtimestamp(self.producer_wall_us / 1e6,
                                                            timezone.utc).isoformat(),
                      "fields": {"event": name, **fields}}
             with self.log.open("ab") as handle:
@@ -215,27 +232,27 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
 
         def identity(self):
             return dict(scene_version=self.version, active_publications=1,
-                        published_at_wall_us=int(self.epoch + self.due * 1e6),
-                        expires_at_wall_us=int(self.epoch + (self.due + 20) * 1e6))
+                        published_at_wall_us=self.due_wall_us,
+                        expires_at_wall_us=self.due_wall_us + 20_000_000)
 
         def poll(self):
             if self.case == "producer exit":
                 return 1
-            if self.due is not None and self.clock() >= self.due:
+            if self.due_wall_us is not None and self.producer_wall_us >= self.due_wall_us:
                 if not self.activated:
                     self.activated = True
                     self.emit("scheduled_activation", **self.identity(), batch_hi=10, batch_lo=11,
-                              present_at_wall_us=int(self.epoch + self.due * 1e6),
-                              applied_at_wall_us=int(self.epoch + self.clock() * 1e6),
+                              present_at_wall_us=self.due_wall_us,
+                              applied_at_wall_us=self.producer_wall_us,
                               accepted=True, identity_valid=self.case != "ambiguous activation")
                     self.emit("zone_fade_started", **self.identity(), is_subtitle=True,
-                              observed_at_wall_us=int(self.epoch + self.clock() * 1e6), frame=2,
+                              observed_at_wall_us=self.producer_wall_us, frame=2,
                               duration_ms=180, from_opacity=0.0, target_opacity=1.0)
-                if self.clock() >= self.due + 0.18 and not self.completed and self.case != "readiness timeout":
+                if self.producer_wall_us >= self.due_wall_us + 180_000 and not self.completed and self.case != "readiness timeout":
                     self.completed = True
                     ordinary = self.case == "ordinary readiness"
                     fields = dict(self.identity(), is_subtitle=True,
-                                  observed_at_wall_us=int(self.epoch + self.clock() * 1e6), frame=3,
+                                  observed_at_wall_us=self.producer_wall_us, frame=3,
                                   opacity=1.0, zones_shown=True, normal_animation=True,
                                   transition_elapsed_us=180000, transition_duration_ms=180)
                     if ordinary:
@@ -284,11 +301,11 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                         body = b"x" * (ws.MAX_PNG_BYTES + 1)
                     elif self.case == "transport":
                         raise ws.urllib.error.URLError("synthetic unavailable capture")
-                self.clock.now += 3 if self.case == "cross-due capture" and shot == 3 else self.capture_s
+                self.advance(3 if self.case == "cross-due capture" and shot == 3 else self.capture_s)
                 if shot == 4:
                     self.emit("capture_build_begin", scene_version=self.version)
                     self.emit("zone_text_sample", **self.identity(), is_subtitle=True,
-                              observed_at_wall_us=int(self.epoch + self.clock() * 1e6), frame=4,
+                              observed_at_wall_us=self.producer_wall_us, frame=4,
                               opacity=1.0, transition_active=False, zones_shown=True, normal_animation=True)
                     self.emit("capture_build_end", scene_version=self.version)
                     if self.case != "missing capture bracket":
@@ -309,25 +326,33 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
             elif tool == "hud_clear":
                 self.clears += 1
                 self.held = self.case == "clear failed" and bool(self.publishes)
-                self.due = None
+                self.due = self.due_wall_us = None
                 payload = {"ok": True}
             else:
                 assert tool == "hud_publish"
                 assert args == {"surface": "zone:subtitle", "content": "CI DELAYED CONTENT IS VISIBLE", "delay_ms": 3000, "ttl_ms": 20000}
+                if self.case == "independent wall domains":
+                    # A valid wall observation need not advance affinely with
+                    # perf_counter. This places due beyond the old affine upper
+                    # bound, reproducing the native guard's rejection shape.
+                    self.producer_wall_us += round(self.rpc_s * 1e6) + 173
+                self.scheduled_wall_us = self.producer_wall_us
+                self.due_wall_us = self.scheduled_wall_us + 3_000_000
                 self.held, self.due = True, self.clock() + 3
                 sent = self.clock()
-                self.clock.now += 4 if self.case == "slow acknowledgement" else self.rpc_s
+                self.advance(4 if self.case == "slow acknowledgement" else self.rpc_s)
                 self.publishes.append((sent, self.clock()))
                 self.activated = self.completed = False
                 self.request_id = rpc["id"]
                 self.emit("delayed_request", request_id=rpc["id"], request_span_id=9)
                 self.emit("delayed_enqueued", request_span_id=9, batch_hi=10, batch_lo=11,
-                          is_subtitle=True, present_at_wall_us=int(self.epoch + self.due * 1e6),
-                          expires_at_wall_us=int(self.epoch + (self.due + 20) * 1e6))
+                          is_subtitle=True, scheduled_at_wall_us=self.scheduled_wall_us,
+                          present_at_wall_us=self.due_wall_us,
+                          expires_at_wall_us=self.due_wall_us + 20_000_000)
                 if self.case == "uncertain acceptance":
                     raise ws.urllib.error.URLError("synthetic lost acknowledgement")
                 payload = {"ok": self.case != "publish rejected", "expires_in_ms": 23000}
-            self.clock.now += self.rpc_s if tool != "hud_publish" else 0
+            self.advance(self.rpc_s if tool != "hud_publish" else 0)
             result = {"content": [{"type": "text", "text": ws.json.dumps(payload)}]}
             return Response(ws.json.dumps({"result": result}).encode())
 
@@ -340,13 +365,14 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
             monotonic = (lambda: int(clock() * 64) / 64) if case == "coarse monotonic" else clock
             patch.setattr(ws.time, "monotonic", monotonic)
             patch.setattr(ws.time, "perf_counter", clock)
-            patch.setattr(ws.time, "time_ns", lambda: int((endpoint.epoch + clock() * 1e6) * 1000))
-            patch.setattr(ws.time, "sleep", clock.sleep)
+            patch.setattr(ws.time, "time_ns", lambda: endpoint.client_wall_ns // 1_000_000 * 1_000_000
+                          if case == "coarse client UTC" else endpoint.client_wall_ns)
+            patch.setattr(ws.time, "sleep", endpoint.sleep)
             patch.setattr(ws.urllib.request, "urlopen", endpoint.urlopen)
             if case == "slow decode":
                 def slow_decode(body):
                     frame = decode(body)
-                    clock.now += 1.5
+                    endpoint.advance(1.5)
                     return frame
 
                 patch.setattr(ws, "decode_png_rgba", slow_decode)
@@ -404,6 +430,8 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
     run("normal", success=True)
     run("ordinary readiness", success=True)
     run("immediate readiness", success=True)
+    independent, _ = run("independent wall domains", success=True)
+    coarse_utc, _ = run("coarse client UTC", success=True)
     run("slow decode", success=True)  # Capture timing ends before PNG CPU work.
     for case in (
         "producer exit", "ambiguous activation", "readiness timeout", "missing capture bracket", "uncertain acceptance",
@@ -422,9 +450,30 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
     seed, clock = run("parser seed", success=True)
     manifest = ws.json.loads((seed.diagnostics / "delay.json").read_text())
     valid = [ws.delay_event(line) for line in seed.log.read_bytes().splitlines()]
+    # The old one-microsecond affine admission would reject this otherwise
+    # valid witness. All local monotonic guards and producer-wall joins passed.
+    independent_manifest = ws.json.loads((independent.diagnostics / "delay.json").read_text())
+    independent_enqueue = next(e["fields"] for e in independent_manifest["observed_runtime_events"]
+                               if e["fields"]["event"] == "delayed_enqueued")
+    anchor = independent_manifest["clock_anchor"]
+    old_upper = anchor["wall_time_ns"] / 1000 + (independent_manifest["accepted"] - anchor["perf_counter_before"] + 3) * 1e6 + 1
+    assert independent_enqueue["present_at_wall_us"] > old_upper
+    assert independent_enqueue["present_at_wall_us"] == independent_enqueue["scheduled_at_wall_us"] + 3_000_000
+    coarse_manifest = ws.json.loads((coarse_utc.diagnostics / "delay.json").read_text())
+    coarse_enqueue = next(e["fields"] for e in coarse_manifest["observed_runtime_events"]
+                          if e["fields"]["event"] == "delayed_enqueued")
+    assert coarse_manifest["clock_anchor"]["wall_time_ns"] % 1_000_000 == 0
+    assert coarse_enqueue["scheduled_at_wall_us"] % 1000 == 789
+
     assert ws.DelayReadiness(seed.log, seed).events == []  # Cursor starts now.
     for event_name, field, value in [
         ("delayed_request", "request_id", 999), ("delayed_request", "request_span_id", 88),
+        ("delayed_enqueued", "scheduled_at_wall_us", None),
+        ("delayed_enqueued", "scheduled_at_wall_us", True),
+        ("delayed_enqueued", "scheduled_at_wall_us", 1.5),
+        ("delayed_enqueued", "scheduled_at_wall_us", -1),
+        ("delayed_enqueued", "scheduled_at_wall_us", 2**64),
+        ("delayed_enqueued", "scheduled_at_wall_us", 1),
         ("delayed_enqueued", "batch_hi", 88), ("delayed_enqueued", "expires_at_wall_us", 1),
         ("delayed_enqueued", "is_subtitle", False), ("scheduled_activation", "accepted", False),
         ("scheduled_activation", "identity_valid", False), ("scheduled_activation", "scene_version", 88),
@@ -541,7 +590,7 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
         endpoint = Endpoint(clock, "native observed footprint")
         endpoint.diagnostics = tmp_path / "unavailable"
         patch.setattr(ws.time, "perf_counter", clock)
-        patch.setattr(ws.time, "sleep", clock.sleep)
+        patch.setattr(ws.time, "sleep", endpoint.sleep)
         patch.setattr(ws.urllib.request, "urlopen", endpoint.urlopen)
         with pytest.raises(AssertionError, match="192"):
             ws.check_delay(ws.Smoke("http://offline-smoke/", "synthetic-unused-key"), endpoint.diagnostics)

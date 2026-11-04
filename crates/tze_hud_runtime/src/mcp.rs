@@ -1701,6 +1701,11 @@ mod tests {
         assert_eq!(enqueue["batch_lo"], lo);
         assert_eq!(enqueue["present_at_wall_us"], batch.present_at_wall_us);
         assert_eq!(
+            enqueue["scheduled_at_wall_us"].as_u64().unwrap() + 3_000_000,
+            batch.present_at_wall_us,
+            "the emitted scheduling sample must be the one used for this batch"
+        );
+        assert_eq!(
             enqueue["expires_at_wall_us"],
             batch.present_at_wall_us + 20_000_000
         );

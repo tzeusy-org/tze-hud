@@ -661,7 +661,7 @@ async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpRes
                 let (batch_hi, batch_lo) = batch_id.as_uuid().as_u64_pair();
                 tracing::debug!(target: "tze_hud_delay_diagnostic",
                     event = "delayed_enqueued", request_span_id = span_id.into_u64(),
-                    batch_hi, batch_lo, present_at_wall_us = present_at,
+                    batch_hi, batch_lo, scheduled_at_wall_us = now, present_at_wall_us = present_at,
                     expires_at_wall_us = expires_at, is_subtitle = true);
             }
         }

@@ -230,6 +230,20 @@ source links when implementation changes the status.
   These remain separate outcomes; no production-cause finding, native witness
   pass or physical acceptance is inferred. The existing `hud-rnq52` watch remains.
 
+  PR #1555's first natural Windows run `41775443601` attempt 1 failed before
+  its original late PNG or 200-pixel comparison. Actual checkout `9127c4a8`, tree
+  `d82e065f7a2dda6d3586891cfb5fcc72e1ee2724`, matches reviewed `77335c5d`.
+  Build/runtime/parser passed; boot smoke rejected the runtime due time as
+  173.25 microseconds beyond an extrapolated client wall-clock upper bound.
+  Later validation/release steps were skipped; the original warm/baseline/early
+  PNGs and numeric trace are retained. That guard assumed an unsupported affine
+  relation between a prior UTC observation and later `perf_counter` readings.
+  The source correction validates delay/TTL from the producer's exact scheduling
+  sample, with client deadlines remaining monotonic. The first native guard
+  failure remains FAIL, not a 192-pixel result or an O2 native pass. Its OS clock
+  mechanism and the historical production undercount remain unproved; required
+  source checks and physical owner acceptance remain separate.
+
   This source/automated evidence does not establish current Windows owner acceptance.
   `hud-i2e10.13` is closed with six historical owner passes and two decisions
   recorded; those results do not accept the current host or a new build. Separate firewall
