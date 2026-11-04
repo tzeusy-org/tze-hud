@@ -265,6 +265,7 @@ async fn test_durable_widget_publish_receives_result() {
             &mut stream,
             34,
             ClientPayload::Clear(Clear {
+                key: String::new(),
                 surface: "widget:gauge".into()
             })
         )

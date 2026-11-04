@@ -24,15 +24,18 @@ async fn zone_publish_outside_allow_list_rejected() {
 #[tokio::test]
 async fn clear_outside_allow_list_rejected() {
     let (tx, mut stream, _state, server, _client) = verb_agent("widget-no-cap-agent").await;
-    for (seq, surface, entry) in [
-        (2, "zone:subtitle", "zone:subtitle"),
-        (3, "widget:gauge", "widget:gauge"),
+    for (seq, surface, entry, key) in [
+        (2, "zone:subtitle", "zone:subtitle", ""),
+        (3, "widget:gauge", "widget:gauge", ""),
+        (4, "zone:subtitle", "zone:subtitle", "slot"),
+        (5, "widget:gauge", "widget:gauge", "slot"),
     ] {
         let r = request(
             &tx,
             &mut stream,
             seq,
             ClientPayload::Clear(Clear {
+                key: key.into(),
                 surface: surface.to_string(),
             }),
         )
@@ -54,6 +57,7 @@ async fn clear_outside_allow_list_rejected() {
                 ..Default::default()
             }),
             ClientPayload::Clear(Clear {
+                key: String::new(),
                 surface: surface.clone(),
             }),
             ClientPayload::Hold(Hold {

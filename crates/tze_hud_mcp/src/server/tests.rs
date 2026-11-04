@@ -501,6 +501,72 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
             );
         }
     }
+
+    for key in ["x".repeat(257), format!("{}x", "é".repeat(128))] {
+        let before = {
+            let scene = server.scene.lock().await;
+            (
+                scene.zone_registry.active_publishes.clone(),
+                scene.scheduled_batches.len(),
+                scene.leases.len(),
+            )
+        };
+        for delay in [0, 1000] {
+            let error = call_err(&server, "hud_publish", json!({"surface":"zone:notification-area", "content":{"body":"bad"}, "key":key, "delay_ms":delay})).await;
+            assert_eq!(error["code"], "INVALID_ARGUMENT");
+        }
+        let error = call_err(
+            &server,
+            "hud_clear",
+            json!({"surface":"zone:notification-area", "key":key}),
+        )
+        .await;
+        assert_eq!(error["code"], "INVALID_ARGUMENT");
+        let scene = server.scene.lock().await;
+        assert_eq!(
+            (
+                scene.zone_registry.active_publishes.clone(),
+                scene.scheduled_batches.len(),
+                scene.leases.len()
+            ),
+            before
+        );
+    }
+    for surface in ["zone:subtitle", "widget:gauge", "portal:main"] {
+        let error = call_err(
+            &server,
+            "hud_clear",
+            json!({"surface":surface,"key":"slot"}),
+        )
+        .await;
+        assert_eq!(error["code"], "INVALID_ARGUMENT");
+    }
+    for key in [
+        "x".repeat(256),
+        "é".repeat(128),
+        " ".into(),
+        "A".into(),
+        "a".into(),
+        "é".into(),
+        "e\u{301}".into(),
+        String::new(),
+    ] {
+        call(
+            &server,
+            "hud_clear",
+            json!({"surface":"zone:notification-area"}),
+        )
+        .await;
+        let value = call(&server, "hud_publish", json!({"surface":"zone:notification-area","content":{"body":"valid"},"key":key,"ttl_ms":0})).await;
+        assert_eq!(value, json!({"ok":true}));
+        let scene = server.scene.lock().await;
+        assert_eq!(
+            scene.zone_registry.active_for_zone("notification-area")[0]
+                .merge_key
+                .as_deref(),
+            (!key.is_empty()).then_some(key.as_str())
+        );
+    }
 }
 
 #[tokio::test]
@@ -1064,6 +1130,72 @@ async fn clear_cancels_only_own_pending_delayed_publish() {
     assert_eq!(pubs[0].publisher_namespace, "b");
     // Own cancellation leaves no stale deadline behind.
     assert_eq!(scene.next_timed_content_wall_us(), None);
+
+    drop(scene);
+    for (who, key, delay) in [
+        (&a, "first", 0),
+        (&a, "first", 5000),
+        (&a, "second", 5000),
+        (&b, "first", 5000),
+    ] {
+        let (value, error) = call_as(&server, who, "hud_publish", json!({"surface":"zone:notification-area","content":{"body":key},"key":key,"ttl_ms":0,"delay_ms":delay})).await;
+        assert!(!error, "{value}");
+    }
+    {
+        let mut scene = server.scene.lock().await;
+        let pending = scene
+            .scheduled_batches
+            .iter_mut()
+            .find(|s| s.batch.agent_namespace == "a")
+            .unwrap();
+        let mut remainder = pending.batch.mutations[0].clone();
+        if let tze_hud_scene::mutation::SceneMutation::PublishToZone {
+            zone_name,
+            content,
+            merge_key,
+            ..
+        } = &mut remainder
+        {
+            *zone_name = "subtitle".into();
+            *content = tze_hud_scene::types::ZoneContent::StreamText("mixed remainder".into());
+            *merge_key = None;
+        }
+        pending.batch.mutations.push(remainder);
+    }
+    let (value, error) = call_as(
+        &server,
+        &a,
+        "hud_clear",
+        json!({"surface":"zone:notification-area","key":"first"}),
+    )
+    .await;
+    assert!(!error, "{value}");
+    assert!(
+        server
+            .scene
+            .lock()
+            .await
+            .zone_registry
+            .active_for_zone("notification-area")
+            .is_empty()
+    );
+    clock.advance(5000);
+    let mut scene = server.scene.lock().await;
+    assert!(scene.apply_due_batches().iter().all(|r| r.applied));
+    let notifications = scene.zone_registry.active_for_zone("notification-area");
+    assert_eq!(notifications.len(), 2);
+    assert!(
+        notifications
+            .iter()
+            .any(|r| r.publisher_namespace == "a" && r.merge_key.as_deref() == Some("second"))
+    );
+    assert!(
+        notifications
+            .iter()
+            .any(|r| r.publisher_namespace == "b" && r.merge_key.as_deref() == Some("first"))
+    );
+    assert!(scene.zone_registry.active_for_zone("subtitle").iter().any(|r| matches!(&r.content, tze_hud_scene::types::ZoneContent::StreamText(s) if s == "mixed remainder")));
+    assert_eq!(scene.next_timed_content_wall_us(), None);
 }
 
 /// With nothing else pending, cancelling leaves no wake deadline at all.
@@ -1083,6 +1215,29 @@ async fn clear_of_last_pending_publish_drops_the_wake_deadline() {
     assert_eq!(scene.next_timed_content_wall_us(), None);
     scene.apply_due_batches();
     assert!(scene.zone_registry.active_publishes.is_empty());
+
+    drop(scene);
+    let (value, error) = call_as(&server, &a, "hud_publish", json!({"surface":"zone:notification-area","content":{"body":"later"},"key":"only","delay_ms":5000,"ttl_ms":0})).await;
+    assert!(!error, "{value}");
+    let (value, error) = call_as(
+        &server,
+        &a,
+        "hud_clear",
+        json!({"surface":"zone:notification-area","key":"only"}),
+    )
+    .await;
+    assert!(!error, "{value}");
+    clock.advance(5000);
+    let mut scene = server.scene.lock().await;
+    assert!(scene.scheduled_batches.is_empty());
+    assert_eq!(scene.next_timed_content_wall_us(), None);
+    assert!(scene.apply_due_batches().is_empty());
+    assert!(
+        scene
+            .zone_registry
+            .active_for_zone("notification-area")
+            .is_empty()
+    );
 }
 
 /// `hud_hold` reaches a pending publish: the new ttl counts from
@@ -1245,6 +1400,24 @@ async fn notification_ttl_zero_is_held_and_hold_retimes_it() {
             .get("notification-area")
             .is_none_or(Vec::is_empty)
     );
+
+    drop(scene);
+    for ttl in [1000, 2500] {
+        let mut keyed = notif.clone();
+        keyed["key"] = json!("slot");
+        keyed["ttl_ms"] = json!(ttl);
+        assert_eq!(
+            call(&server, "hud_publish", keyed).await,
+            json!({"ok":true})
+        );
+        let scene = server.scene.lock().await;
+        let records = scene.zone_registry.active_for_zone("notification-area");
+        assert_eq!(records.len(), 1);
+        assert_eq!(
+            records[0].expires_at_wall_us,
+            Some(scene.now_wall_us() + ttl * 1000)
+        );
+    }
 }
 
 #[tokio::test]
@@ -1600,6 +1773,7 @@ async fn action_presses_are_delivered_until_acked() {
         .lock()
         .await
         .push_pending_action(PendingAction {
+            key: None,
             publisher_namespace: AgentDirectory::unrestricted(psk())
                 .resolve(&psk(), "")
                 .unwrap()
@@ -1627,6 +1801,7 @@ async fn action_presses_are_delivered_until_acked() {
         for index in 0..actions_per_agent {
             for namespace in ["a", "b"] {
                 scene.push_pending_action(PendingAction {
+                    key: None,
                     publisher_namespace: namespace.into(),
                     zone_name: "subtitle".into(),
                     kind: PendingActionKind::Callback(format!("{namespace}-{index}")),
@@ -1727,11 +1902,13 @@ async fn action_presses_are_delivered_until_acked() {
     {
         let mut scene = server.scene.lock().await;
         scene.push_pending_action(PendingAction {
+            key: None,
             publisher_namespace: "a".into(),
             zone_name: "subtitle".into(),
             kind: PendingActionKind::Callback("dismiss".into()),
         });
         scene.push_pending_action(PendingAction {
+            key: None,
             publisher_namespace: "a".into(),
             zone_name: "subtitle".into(),
             kind: PendingActionKind::Dismiss,
@@ -1782,6 +1959,70 @@ async fn action_presses_are_delivered_until_acked() {
     .await;
     assert!(!error);
     assert_eq!(acked, json!({"items":[],"remaining":0}));
+
+    // Accepted A is a value, not a lookup of the card currently occupying its key.
+    for retained in [false, true] {
+        for kind in [
+            PendingActionKind::Callback("dismiss".into()),
+            PendingActionKind::Dismiss,
+        ] {
+            server
+                .scene
+                .lock()
+                .await
+                .push_pending_action(PendingAction {
+                    publisher_namespace: "a".into(),
+                    zone_name: "notification-area".into(),
+                    kind: kind.clone(),
+                    key: Some("slot".into()),
+                });
+            let encoded = if retained {
+                Some(call_as(&server, &a, "hud_input", json!({})).await.0)
+            } else {
+                None
+            };
+            let (value, error) = call_as(&server, &a, "hud_publish", json!({"surface":"zone:notification-area","content":{"body":"B"},"key":"slot","ttl_ms":0})).await;
+            assert!(!error, "{value}");
+            let (value, error) = call_as(
+                &server,
+                &a,
+                "hud_clear",
+                json!({"surface":"zone:notification-area","key":"slot"}),
+            )
+            .await;
+            assert!(!error, "{value}");
+            let (accepted, error) = call_as(&server, &a, "hud_input", json!({})).await;
+            assert!(!error, "{accepted}");
+            assert_eq!(accepted["items"].as_array().unwrap().len(), 1);
+            assert_eq!(accepted["items"][0]["key"], "slot");
+            assert_eq!(accepted["items"][0]["action"], "dismiss");
+            assert_eq!(
+                accepted["items"][0].get("kind").is_some(),
+                kind == PendingActionKind::Dismiss
+            );
+            if let Some(encoded) = encoded {
+                assert_eq!(accepted, encoded);
+            }
+            let (again, _) = call_as(&server, &a, "hud_input", json!({})).await;
+            assert_eq!(again, accepted);
+            let (foreign, _) = call_as(
+                &server,
+                &b,
+                "hud_input",
+                json!({"ack":[accepted["items"][0]["id"]]}),
+            )
+            .await;
+            assert_eq!(foreign["items"], json!([]));
+            let (done, _) = call_as(
+                &server,
+                &a,
+                "hud_input",
+                json!({"ack":[accepted["items"][0]["id"]]}),
+            )
+            .await;
+            assert_eq!(done, json!({"items":[],"remaining":0}));
+        }
+    }
 }
 
 // ── Portal ───────────────────────────────────────────────────────────────────
@@ -2126,6 +2367,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
             .lock()
             .await
             .push_pending_action(PendingAction {
+                key: None,
                 publisher_namespace: "probe-a".into(),
                 zone_name: "subtitle".into(),
                 kind: PendingActionKind::Callback("probe-ready".into()),
@@ -2265,6 +2507,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         .lock()
         .await
         .push_pending_action(PendingAction {
+            key: None,
             publisher_namespace: psk_agent(),
             zone_name: "notification-area".into(),
             kind: PendingActionKind::Callback("approve".into()),
@@ -2328,6 +2571,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         let mut waiting = Box::pin(call_as(&isolated, &a, "hud_input", json!({"wait_ms":1000})));
         assert!(waiting.as_mut().poll(&mut cx).is_pending());
         scene.push_pending_action(PendingAction {
+            key: None,
             publisher_namespace: "a".into(),
             zone_name: "subtitle".into(),
             kind: PendingActionKind::Callback("before-check".into()),
@@ -2353,6 +2597,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
             .lock()
             .await
             .push_pending_action(PendingAction {
+                key: None,
                 publisher_namespace: "a".into(),
                 zone_name: "subtitle".into(),
                 kind: PendingActionKind::Callback("after-check".into()),
@@ -2389,6 +2634,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         let mut waiting = Box::pin(call_as(&isolated, &a, "hud_input", json!({"wait_ms":1000})));
         assert!(waiting.as_mut().poll(&mut cx).is_pending());
         scene.push_pending_action(PendingAction {
+            key: None,
             publisher_namespace: "a".into(),
             zone_name: "subtitle".into(),
             kind: PendingActionKind::Callback("cancelled".into()),
@@ -2407,6 +2653,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
             .lock()
             .await
             .push_pending_action(PendingAction {
+                key: None,
                 publisher_namespace: psk_agent(),
                 zone_name: "subtitle".into(),
                 kind: PendingActionKind::Callback("after-error".into()),
@@ -2742,6 +2989,7 @@ async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
         .lock()
         .await
         .push_pending_action(PendingAction {
+            key: None,
             publisher_namespace: AgentDirectory::unrestricted(psk())
                 .resolve(&psk(), "")
                 .unwrap()

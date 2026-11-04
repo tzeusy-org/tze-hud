@@ -304,6 +304,55 @@ async fn test_stack_slot_layout_five_notifications_distinct_y() {
         "slot 4 must be the oldest notification (N1), got: {}",
         items[4].text
     );
+
+    let old = scene
+        .zone_registry
+        .active_for_zone("notification-area")
+        .to_vec();
+    scene.clear_zone("notification-area").unwrap();
+    for (index, record) in old.into_iter().enumerate() {
+        scene
+            .publish_to_zone(
+                "notification-area",
+                record.content,
+                &record.publisher_namespace,
+                matches!(index, 0 | 2).then(|| "slot".into()),
+                None,
+                None,
+            )
+            .unwrap();
+    }
+    let before = scene
+        .zone_registry
+        .active_for_zone("notification-area")
+        .to_vec();
+    let before_items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    let mut content = before[2].content.clone();
+    if let ZoneContent::Notification(n) = &mut content {
+        n.text = "R3".into();
+    }
+    scene
+        .publish_to_zone(
+            "notification-area",
+            content,
+            &before[2].publisher_namespace,
+            Some("slot".into()),
+            None,
+            None,
+        )
+        .unwrap();
+    let after = scene.zone_registry.active_for_zone("notification-area");
+    assert_eq!(after.len(), 5);
+    for index in [0, 1, 3, 4] {
+        assert_eq!(after[index], before[index]);
+    }
+    assert_ne!(after[2].publication_id, before[2].publication_id);
+    let after_items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    assert_eq!(
+        before_items.iter().map(|i| i.pixel_y).collect::<Vec<_>>(),
+        after_items.iter().map(|i| i.pixel_y).collect::<Vec<_>>()
+    );
+    assert!(after_items.iter().any(|i| i.text.contains("R3")));
 }
 
 /// When a 6th notification is published to a Stack zone with max_depth=5,

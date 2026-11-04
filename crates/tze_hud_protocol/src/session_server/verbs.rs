@@ -12,6 +12,7 @@ use std::sync::Arc;
 
 use tokio::sync::Mutex;
 use tonic::Status;
+use tze_hud_scene::ValidationError;
 use tze_hud_scene::element_store::ElementType;
 use tze_hud_scene::error_codes::{ERROR_CODES, validation_error_code};
 use tze_hud_scene::mutation::{MutationBatch as SceneMutationBatch, SceneMutation};
@@ -290,6 +291,12 @@ fn publish_zone(
     {
         return fail(seq, "INVALID_ARGUMENT", hint);
     }
+    if matches!(&content, tze_hud_scene::types::ZoneContent::Notification(_))
+        && let Err(error) =
+            tze_hud_scene::graph::SceneGraph::validate_notification_key(Some(&publish.key))
+    {
+        return fail(seq, "INVALID_ARGUMENT", error.to_string());
+    }
     if !publish.breakpoints.is_empty()
         && !matches!(content, tze_hud_scene::types::ZoneContent::StreamText(_))
     {
@@ -439,7 +446,14 @@ pub(super) async fn handle_clear(
         let st = state.lock().await;
         let mut scene = st.scene.lock().await;
         let r = match &surface {
+            Surface::Zone(zone) if !clear.key.is_empty() => {
+                scene.clear_notification_key(zone, &session.namespace, &clear.key)
+            }
             Surface::Zone(zone) => scene.clear_zone_and_cancel_pending(zone, &session.namespace),
+            Surface::Widget(_) if !clear.key.is_empty() => Err(ValidationError::InvalidField {
+                field: "key".into(),
+                reason: "keyed clear requires a notification zone".into(),
+            }),
             Surface::Widget(widget) => scene.clear_widget_for_publisher(widget, &session.namespace),
         };
         match r {

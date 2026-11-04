@@ -374,6 +374,7 @@ message Publish {
 // Release this namespace's zone or widget publications.
 message Clear {
   string surface = 1;
+  string key = 2; // Notification zone only: exact own key; empty clears all own.
 }
 
 // Extend a holding without resending content.

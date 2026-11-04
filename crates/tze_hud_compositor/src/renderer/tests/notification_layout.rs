@@ -1363,6 +1363,79 @@ async fn test_stack_reflow_after_publication_pruned() {
     );
     let _ = compositor.collect_text_items(&scene, 1280.0, 720.0);
     assert_eq!(compositor.notification_layouts.borrow().shapes, shapes);
+
+    // Actual zone enter state survives in-place keyed replacement; fade state
+    // belongs to the new exact publication and its fresh absolute expiry.
+    let mut zone = scene.zone_registry.zones["notification-area"].clone();
+    zone.id = SceneId::new();
+    zone.name = "keyed-animation".into();
+    zone.rendering_policy.transition_in_ms = Some(200);
+    scene.register_zone(zone);
+    let content = ZoneContent::Notification(NotificationPayload {
+        text: "Before".into(),
+        ..Default::default()
+    });
+    let now_us = scene.now_wall_us();
+    scene
+        .publish_to_zone(
+            "keyed-animation",
+            content.clone(),
+            "a",
+            Some("slot".into()),
+            Some(now_us + 2_000_000),
+            None,
+        )
+        .unwrap();
+    scene
+        .publish_to_zone(
+            "keyed-animation",
+            content,
+            "b",
+            Some("slot".into()),
+            Some(now_us + 8_000_000),
+            None,
+        )
+        .unwrap();
+    let before = scene
+        .zone_registry
+        .active_for_zone("keyed-animation")
+        .to_vec();
+    let start = std::time::Instant::now();
+    compositor.update_zone_animations_at(&scene, start);
+    compositor.update_publication_animations_at(&scene, start);
+    let enter = compositor.zone_animation_states["keyed-animation"].transition_start;
+    scene
+        .publish_to_zone(
+            "keyed-animation",
+            ZoneContent::Notification(NotificationPayload {
+                title: "After".into(),
+                text: "Changed body with a new layout".into(),
+                ..Default::default()
+            }),
+            "a",
+            Some("slot".into()),
+            Some(now_us + 5_000_000),
+            None,
+        )
+        .unwrap();
+    let later = start + std::time::Duration::from_millis(80);
+    compositor.update_zone_animations_at(&scene, later);
+    compositor.update_publication_animations_at(&scene, later);
+    assert_eq!(
+        compositor.zone_animation_states["keyed-animation"].transition_start,
+        enter
+    );
+    let records = scene.zone_registry.active_for_zone("keyed-animation");
+    assert_eq!(records[1], before[1]);
+    assert_ne!(records[0].publication_id, before[0].publication_id);
+    let fades = &compositor.pub_animation_states["keyed-animation"];
+    assert!(!fades.contains_key(&before[0].publication_id));
+    assert_eq!(
+        fades[&records[0].publication_id].source_expiry_us,
+        Some(now_us + 5_000_000)
+    );
+    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+    assert!(items.iter().any(|i| i.text.contains("Changed body")));
 }
 
 /// update_publication_animations creates fresh state for new publications.

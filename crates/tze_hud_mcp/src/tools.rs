@@ -64,6 +64,7 @@ struct ActionItem {
     id: String,
     zone: String,
     kind: PendingActionKind,
+    key: Option<String>,
 }
 
 #[derive(Default, Debug)]
@@ -617,6 +618,9 @@ async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpRes
         ));
     };
     let content = parse_zone_content(&with_inferred_type(raw, &def.accepted_media_types))?;
+    if matches!(&content, ZoneContent::Notification(_)) {
+        SceneGraph::validate_notification_key(p.key.as_deref()).map_err(|e| scene_error(&e))?;
+    }
     // Read the owner default exactly once, after resolving the content. Explicit
     // zero remains held; ordinary zone content keeps its historical default.
     let ttl_ms = p.ttl_ms.unwrap_or_else(|| {
@@ -910,6 +914,8 @@ pub async fn hud_hold(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
 #[serde(deny_unknown_fields)]
 pub struct ClearParams {
     pub surface: String,
+    #[serde(default)]
+    pub key: Option<String>,
 }
 
 /// Release a zone publication, a widget publication, or a portal (detach).
@@ -917,13 +923,19 @@ pub async fn hud_clear(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     let p: ClearParams = parse_args(args)?;
     let surface = Surface::parse(&p.surface)?;
     check_allowed(ctx, &surface)?;
+    let key = p.key.as_deref().filter(|key| !key.is_empty());
+    if key.is_some() && !matches!(&surface, Surface::Zone(_)) {
+        return Err(invalid("keyed clear requires a notification zone"));
+    }
     let ns = ctx.agent.agent_id.clone();
     match surface {
         Surface::Zone(zone) => {
             let mut scene = ctx.scene.lock().await;
-            scene
-                .clear_zone_and_cancel_pending(&zone, &ns)
-                .map_err(|e| scene_error(&e))?;
+            match key {
+                Some(key) => scene.clear_notification_key(&zone, &ns, key),
+                None => scene.clear_zone_and_cancel_pending(&zone, &ns),
+            }
+            .map_err(|e| scene_error(&e))?;
         }
         Surface::Widget(widget) => {
             let mut scene = ctx.scene.lock().await;
@@ -1091,16 +1103,23 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
                         id: format!("a{}", NEXT_ACTION_ID.fetch_add(1, Ordering::Relaxed)),
                         zone: a.zone_name,
                         kind: a.kind,
+                        key: a.key,
                     });
                 }
                 let items: Vec<Value> = s.delivered.iter().take(max_items)
-                    .map(|a| match &a.kind {
+                    .map(|a| {
+                        let mut item = match &a.kind {
                         PendingActionKind::Callback(callback) => {
                             json!({"id":a.id,"s":format!("zone:{}",a.zone),"action":callback})
                         }
                         PendingActionKind::Dismiss => {
                             json!({"id":a.id,"s":format!("zone:{}",a.zone),"action":"dismiss","kind":"dismiss"})
                         }
+                        };
+                        if let Some(key) = &a.key {
+                            item["key"] = json!(key);
+                        }
+                        item
                     })
                     .collect();
                 let backlog = s.delivered.len() - items.len();

@@ -751,6 +751,7 @@ async fn grpc_zone_publish_ttl_sets_expiry_and_is_swept() {
             &mut stream,
             sequence,
             ClientPayload::Clear(Clear {
+                key: String::new(),
                 surface: surface.into(),
             }),
         )
@@ -800,6 +801,7 @@ async fn grpc_zone_publish_ttl_sets_expiry_and_is_swept() {
                 &mut stream,
                 sequence,
                 ClientPayload::Clear(Clear {
+                    key: String::new(),
                     surface: surface.into(),
                 }),
             )

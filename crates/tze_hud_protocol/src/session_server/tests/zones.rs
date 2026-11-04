@@ -207,6 +207,163 @@ async fn test_zone_publish_result() {
         assert!(result.ok, "valid publish after rejection: {result:?}");
         seq += 1;
     }
+
+    scene
+        .lock()
+        .await
+        .zone_registry
+        .zones
+        .get_mut("notification-area")
+        .unwrap()
+        .ephemeral = false;
+    let keyed = |key: String, delay: u64| {
+        ClientPayload::Publish(Publish {
+            surface: "zone:notification-area".into(),
+            key,
+            content: Some(crate::proto::ZoneContent {
+                payload: Some(crate::proto::zone_content::Payload::Notification(
+                    crate::proto::NotificationPayload {
+                        text: "keyed".into(),
+                        ..Default::default()
+                    },
+                )),
+            }),
+            present_at_us: if delay == 0 { 0 } else { now_wall_us() + delay },
+            ..Default::default()
+        })
+    };
+    for key in [
+        "x".repeat(256),
+        "é".repeat(128),
+        "A".into(),
+        "a".into(),
+        " ".into(),
+        "é".into(),
+        "e\u{301}".into(),
+    ] {
+        assert!(
+            request(
+                &tx,
+                &mut stream,
+                seq,
+                ClientPayload::Clear(Clear {
+                    surface: "zone:notification-area".into(),
+                    key: String::new()
+                })
+            )
+            .await
+            .ok
+        );
+        seq += 1;
+        for _ in 0..2 {
+            assert!(
+                request(&tx, &mut stream, seq, keyed(key.clone(), 0))
+                    .await
+                    .ok
+            );
+            seq += 1;
+        }
+        let current = scene.lock().await;
+        let own: Vec<_> = current
+            .zone_registry
+            .active_for_zone("notification-area")
+            .iter()
+            .filter(|r| r.publisher_namespace == "zone-publisher")
+            .collect();
+        assert_eq!(own.len(), 1);
+        assert_eq!(own[0].merge_key.as_ref(), Some(&key));
+    }
+    for key in ["x".repeat(257), format!("{}x", "é".repeat(128))] {
+        let before = {
+            let scene = scene.lock().await;
+            (
+                scene.zone_registry.active_publishes.clone(),
+                scene.scheduled_batches.len(),
+            )
+        };
+        for delay in [0, 60_000_000] {
+            let result = request(&tx, &mut stream, seq, keyed(key.clone(), delay)).await;
+            seq += 1;
+            assert_eq!(result.code, "INVALID_ARGUMENT");
+        }
+        let result = request(
+            &tx,
+            &mut stream,
+            seq,
+            ClientPayload::Clear(Clear {
+                surface: "zone:notification-area".into(),
+                key,
+            }),
+        )
+        .await;
+        seq += 1;
+        assert_eq!(result.code, "INVALID_ARGUMENT");
+        let scene = scene.lock().await;
+        assert_eq!(
+            (
+                scene.zone_registry.active_publishes.clone(),
+                scene.scheduled_batches.len()
+            ),
+            before
+        );
+    }
+
+    // The same wire key belongs independently to each authenticated session.
+    assert!(
+        request(&other_tx, &mut other_stream, 3, keyed("shared".into(), 0))
+            .await
+            .ok
+    );
+    for key in ["shared", "sibling"] {
+        assert!(
+            request(&tx, &mut stream, seq, keyed(key.into(), 0))
+                .await
+                .ok
+        );
+        seq += 1;
+    }
+    let foreign = scene
+        .lock()
+        .await
+        .zone_registry
+        .active_for_zone("notification-area")
+        .iter()
+        .find(|record| record.publisher_namespace == "other-publisher")
+        .unwrap()
+        .clone();
+    assert!(
+        request(
+            &tx,
+            &mut stream,
+            seq,
+            ClientPayload::Clear(Clear {
+                surface: "zone:notification-area".into(),
+                key: "shared".into(),
+            })
+        )
+        .await
+        .ok
+    );
+    {
+        let scene = scene.lock().await;
+        let records = scene.zone_registry.active_for_zone("notification-area");
+        assert!(
+            records.contains(&foreign),
+            "selective clear leaves the foreign same-key record unchanged"
+        );
+        assert!(
+            !records
+                .iter()
+                .any(|record| record.publisher_namespace == "zone-publisher"
+                    && record.merge_key.as_deref() == Some("shared"))
+        );
+        assert!(
+            records
+                .iter()
+                .any(|record| record.publisher_namespace == "zone-publisher"
+                    && record.merge_key.as_deref() == Some("sibling"))
+        );
+    }
     server.abort();
 }
 

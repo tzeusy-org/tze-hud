@@ -1076,6 +1076,136 @@ fn test_contention_stack() {
     } else {
         panic!("expected Notification");
     }
+
+    // Routing keys replace one own record in-place, even at capacity.
+    let mut keyed = SceneGraph::new(1920.0, 1080.0);
+    let mut zone = make_notification_zone();
+    zone.max_publishers = 2;
+    zone.contention_policy = ContentionPolicy::Stack { max_depth: 4 };
+    keyed.register_zone(zone);
+    for (publisher, key) in [("a", "slot"), ("a", "sibling"), ("b", "slot")] {
+        keyed
+            .publish_to_zone(
+                "notifications",
+                notification(key),
+                publisher,
+                Some(key.into()),
+                None,
+                None,
+            )
+            .unwrap();
+    }
+    let before = keyed
+        .zone_registry
+        .active_for_zone("notifications")
+        .to_vec();
+    keyed
+        .publish_to_zone(
+            "notifications",
+            notification("new"),
+            "a",
+            Some("slot".into()),
+            Some(u64::MAX),
+            None,
+        )
+        .unwrap();
+    let after = keyed.zone_registry.active_for_zone("notifications");
+    assert_eq!(after.len(), 3);
+    assert_ne!(after[0].publication_id, before[0].publication_id);
+    assert_eq!(&after[1..], &before[1..]);
+    assert_eq!(after[0].expires_at_wall_us, Some(u64::MAX));
+    assert!(matches!(&after[0].content, ZoneContent::Notification(n) if n.text == "new"));
+    assert!(
+        keyed
+            .publish_to_zone(
+                "notifications",
+                notification("new key"),
+                "a",
+                Some("third".into()),
+                None,
+                None
+            )
+            .is_err()
+    );
+    // Byte boundaries and exact spelling are admission behavior, not a string guard.
+    for key in [
+        "x".repeat(256),
+        "é".repeat(128),
+        " ".into(),
+        "A".into(),
+        "a".into(),
+        "é".into(),
+        "e\u{301}".into(),
+    ] {
+        keyed
+            .clear_zone_for_publisher("notifications", "boundary")
+            .unwrap();
+        keyed
+            .publish_to_zone(
+                "notifications",
+                notification("ok"),
+                "boundary",
+                Some(key.clone()),
+                None,
+                None,
+            )
+            .unwrap();
+        assert_eq!(
+            keyed
+                .zone_registry
+                .active_for_zone("notifications")
+                .last()
+                .unwrap()
+                .merge_key
+                .as_ref(),
+            Some(&key)
+        );
+    }
+    let before = keyed
+        .zone_registry
+        .active_for_zone("notifications")
+        .to_vec();
+    for key in ["x".repeat(257), format!("{}x", "é".repeat(128))] {
+        assert!(matches!(
+            keyed.publish_to_zone(
+                "notifications",
+                notification("bad"),
+                "boundary",
+                Some(key),
+                None,
+                None
+            ),
+            Err(ValidationError::InvalidField { .. })
+        ));
+        assert_eq!(
+            keyed.zone_registry.active_for_zone("notifications"),
+            before.as_slice()
+        );
+    }
+    keyed
+        .clear_zone_for_publisher("notifications", "boundary")
+        .unwrap();
+    for _ in 0..2 {
+        keyed
+            .publish_to_zone(
+                "notifications",
+                notification("legacy"),
+                "boundary",
+                Some(String::new()),
+                None,
+                None,
+            )
+            .unwrap();
+    }
+    assert_eq!(
+        keyed
+            .zone_registry
+            .active_for_zone("notifications")
+            .iter()
+            .filter(|r| r.publisher_namespace == "boundary" && r.merge_key.is_none())
+            .count(),
+        2
+    );
 }
 
 // ─── Alert-Banner Auto-Dismiss Tests ────────────────────────────────
@@ -1472,6 +1602,48 @@ fn test_contention_zone_max_publishers_rejected() {
             None,
         )
         .expect("publish from a different namespace must succeed");
+
+    scene
+        .clear_zone_for_publisher("single-pub", "agent.a")
+        .unwrap();
+    scene
+        .publish_to_zone(
+            "single-pub",
+            notification("keyed"),
+            "agent.a",
+            Some("slot".into()),
+            None,
+            None,
+        )
+        .unwrap();
+    let foreign = scene.zone_registry.active_for_zone("single-pub")[0].clone();
+    scene
+        .publish_to_zone(
+            "single-pub",
+            notification("replacement"),
+            "agent.a",
+            Some("slot".into()),
+            None,
+            None,
+        )
+        .unwrap();
+    assert_eq!(scene.zone_registry.active_for_zone("single-pub").len(), 2);
+    assert_eq!(
+        scene.zone_registry.active_for_zone("single-pub")[0],
+        foreign
+    );
+    assert!(
+        scene
+            .publish_to_zone(
+                "single-pub",
+                notification("other"),
+                "agent.a",
+                Some("other".into()),
+                None,
+                None
+            )
+            .is_err()
+    );
 }
 
 /// Zone Stack: WHEN max_depth == 0 THEN every publish is trimmed to zero
@@ -1949,6 +2121,69 @@ fn test_clear_zone_per_publisher_only_affects_own_publishes() {
     let pubs = scene.zone_registry.active_for_zone("shared");
     assert_eq!(pubs.len(), 1);
     assert_eq!(pubs[0].publisher_namespace, "a2");
+
+    let mut notification_zone = make_notification_zone();
+    notification_zone.contention_policy = ContentionPolicy::Stack { max_depth: 8 };
+    notification_zone.max_publishers = 8;
+    notification_zone
+        .accepted_media_types
+        .push(ZoneMediaType::StreamText);
+    scene.register_zone(notification_zone);
+    for (publisher, key) in [("a1", "slot"), ("a1", "sibling"), ("a2", "slot")] {
+        scene
+            .publish_to_zone(
+                "notifications",
+                ZoneContent::Notification(NotificationPayload {
+                    text: key.into(),
+                    ..Default::default()
+                }),
+                publisher,
+                Some(key.into()),
+                None,
+                None,
+            )
+            .unwrap();
+    }
+    scene
+        .publish_to_zone(
+            "notifications",
+            ZoneContent::StreamText("other media".into()),
+            "a1",
+            Some("slot".into()),
+            None,
+            None,
+        )
+        .unwrap();
+    scene
+        .clear_notification_key("notifications", "a1", "slot")
+        .unwrap();
+    scene
+        .clear_notification_key("notifications", "a1", "missing")
+        .unwrap();
+    let records = scene.zone_registry.active_for_zone("notifications");
+    assert_eq!(records.len(), 3);
+    assert!(
+        records
+            .iter()
+            .any(|r| r.publisher_namespace == "a2" && r.merge_key.as_deref() == Some("slot"))
+    );
+    assert!(
+        records
+            .iter()
+            .any(|r| matches!(&r.content, ZoneContent::StreamText(_)))
+    );
+    scene
+        .clear_notification_key("notifications", "a1", "")
+        .unwrap();
+    assert_eq!(
+        scene.zone_registry.active_for_zone("notifications").len(),
+        1
+    );
+    assert!(
+        scene
+            .clear_notification_key("shared", "a2", "slot")
+            .is_err()
+    );
 }
 
 // ─── StaticImageNode tests ────────────────────────────────────────────

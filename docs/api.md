@@ -72,8 +72,15 @@ otherwise. Scheduled zone publications count as held before presentation;
   retain the existing bounded Clip policy inside each full-width button; a
   label longer than that width cannot displace the later options. The zone's
   existing whole-card visibility bounds still apply. `type` may be
-  omitted; the runtime infers it from what the zone accepts. `key` is the
-  merge key. Supplied notification urgency must be an integer 0–3; only
+  omitted; the runtime infers it from what the zone accepts. For notifications,
+  a nonempty `key` addresses one card within that zone and authenticated
+  publisher. Matching publishes replace that card in the same slot before
+  capacity admission, with fresh content, expiry and activation identity;
+  the zone's enter motion does not restart. Sibling cards and another
+  publisher's identical key survive. Keys are exact, case-sensitive UTF-8,
+  at most 256 bytes: no trimming, normalization or truncation. Missing or
+  empty keys preserve existing notification behavior. Other content retains
+  its existing merge-key policy. Supplied notification urgency must be an integer 0–3; only
   omission defaults to 1. `status_bar.entries` must be a non-empty object
   whose every value is a string; an empty string removes that entry.
   Notification TTL belongs at the publish's top-level `ttl_ms`; an inner
@@ -178,9 +185,15 @@ or until `hud_clear` when 0, even with no other calls. Without a hold, a
 portal is degraded after 30 s with no publish, poll, or hold, and reclaimed
 30 s later.
 
-**`hud_clear`** `{surface*}` releases a zone publication, a widget
-instance, or a portal (detach). On a zone it also cancels the caller's own
-delayed publishes that haven't presented yet; other agents' are untouched.
+**`hud_clear`** `{surface*, key?}` releases a zone publication, a widget
+instance, or a portal (detach). With a nonempty key, it clears only that
+publisher's matching notification in a notification-capable zone, including
+matching delayed notification publishes. Sibling keys, foreign publishers and
+nonnotification content in mixed zones or scheduled batches survive. A missing
+match succeeds; emptied batches leave no wake deadline. Missing or empty keys
+retain clear-all-own behavior, including the caller's delayed publishes.
+The same exact 256-byte key bound applies before mutation. Nonempty keys on
+widget, portal or nonnotification-zone clears return `INVALID_ARGUMENT`.
 The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
 `ClearZone` mutation clears only active publications and never cancels pending ones.
 
@@ -193,12 +206,22 @@ The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
   human notification × uses `{"id":…,"s":"zone:notification-area","action":"dismiss","kind":"dismiss"}`.
   A publisher callback named `dismiss` has no `kind` field. Callback activation
   already disables its notification locally and finishes a finite chosen exit;
-  it emits no second human-X event.
+  it emits no second human-X event. Keyed callbacks and human-X items also
+  include `"key":"…"`, snapshotted from the exact activated card before its
+  removal. Unkeyed items omit it. Replacement, clear and expiry never rewrite
+  or retract input already accepted into the scene FIFO, retained by MCP or
+  encoded in a response; its key and ACK id remain stable.
   TTL expiry, `hud_clear` and stale/unmatched releases do not emit human-X input.
 - Accepted notification events are retained in a growable per-publisher FIFO,
   with stable ids until `ack`; one publisher cannot evict or acknowledge another's
   records. Retention is in memory, with no crash/disk durability claim. Portal
   replies keep their existing admission bounds, TTL, clear and reclaim rules.
+  A key identifies a reusable visual slot, not an answer-generation nonce.
+  Under owner option D, an old accepted human-X or delayed keyed clear may
+  cancel a replacement card, but must never answer it. Broker callback-nonce
+  routing, cancelled-question terminal fallback, cancelled-nudge silence and
+  the executing stale-X/old-callback race proof belong to `hud-bz9bv.7`;
+  this key API adds no revision, conditional clear or input-retirement rule.
 - `ack` confirms earlier items once per call; unacked items are redelivered.
   `max_items` limits the result and `remaining` reports the retained backlog;
   zero returns the backlog without consuming it. Notification FIFO items precede
@@ -394,9 +417,14 @@ down to the lifecycle.
 |---|---|
 | `SessionInit{agent_id, auth_credential, subscriptions, …}` / `SessionResume{resume_token, auth_credential}` | `SessionEstablished{session_id, namespace, resume_token, heartbeat_interval_ms, …}` / `SessionResumeResult`, then current `DegradationNotice` |
 | `Publish{surface, content \| params, ttl_ms, present_at_us?, expires_at_us?, key?}` | `RequestResult{seq, ok, code?, hint?, ttl_ms?}` |
-| `Clear{surface}` (zone or widget) | `EventBatch{…}` (input, focus, commands), `ElementRepositioned`, `FramePresented` |
+| `Clear{surface, key?}` (zone or widget) | `EventBatch{…}` (input, focus, commands), `ElementRepositioned`, `FramePresented` |
 | `Hold{surface, ttl_ms}` (zone or widget) | `SessionSuspended` / `SessionResumed` (safe mode) |
 | `ResourceUpload*` (images), `Heartbeat`, `SessionClose` | Resource upload replies, `Heartbeat`, `DegradationNotice` |
+
+`Publish.key` remains wire field 7. `Clear.key` is additive string field 2;
+its empty protobuf default preserves old clients. Keyed notification replacement,
+selective clear, byte validation and authenticated publisher isolation match MCP.
+There is no new gRPC notification callback/dismiss stream.
 
 Public `ClaimTile`, `MutationBatch`, `SceneSnapshot`, `Reclaimed`, placement
 and tile surfaces are removed. Their wire tags and names stay reserved.
