@@ -803,7 +803,7 @@ async fn test_hud_publish_zone_contention_policy_latest_wins() {
                                     font_family: FontFamily::SystemSansSerif,
                                     color: Rgba::WHITE,
                                     background: None,
-                                    alignment: TextAlign::Left,
+                                    alignment: TextAlign::Start,
                                     overflow: TextOverflow::Clip,
                                     color_runs: Box::default(),
                                 }),
