@@ -160,6 +160,7 @@ jobs:
 
       - name: cargo test -p integration (perf-assert targets, TZE_HUD_PERF_ASSERT=1)
         run: |
+          set -o pipefail
           dashboard_status=0
           cargo test \
             -p integration \
