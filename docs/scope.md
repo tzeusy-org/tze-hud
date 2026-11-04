@@ -205,14 +205,30 @@ source links when implementation changes the status.
   `hud-rnq52`/`hud-q26ya` retain those follow-ups.
 
   The later PR #1551 optional Windows run `41680170937` attempt 1 also
-  failed the unchanged first delayed-subtitle witness at 192 pixels versus 200,
+  failed the original first delayed-subtitle witness at 192 pixels versus 200,
   on actual checkout `1de703e6`, tree `2389a948745894882cfe49df7f4c50e0df8fab09`.
   Its original PNGs and timing artifacts are retained. The trace supports a
   first capture during an incomplete fade; a complete cause and production
   correction remain unproved. The aggregate failure, positive native parents,
-  separate required checks and actual PR merge remain distinct. The existing
-  disposition in `hud-rnq52` and unanswered `hud-q26ya` decision remain in force;
-  no replay, threshold/delay/TTL change, waiver or physical acceptance follows.
+  separate required checks and actual PR merge remain distinct. On 2026-11-04
+  the owner answered `hud-q26ya` FORM C (canonical O2): only the no-extra-waits
+  restriction may change to a bounded condition wait tied to this publication's
+  existing fade before the one original late PNG. The >=200 assertion, one
+  publication, original delay/TTL, current-alpha capture and user fade remain.
+  This changes proof from near-due to settled; the source now checks numeric identity and readiness before that PNG;
+  source checks, the first automatic native result and physical acceptance remain separate. It does not
+  explain the production cause, authorize replay or establish physical acceptance.
+
+  PR #1553 optional Windows run `41767996217` attempt 1 likewise failed the
+  original delayed-subtitle witness at 192 pixels versus 200. ROOT bound reported
+  head `d7edbc8e` to actual checkout `c68dfb56c941d717997966d8dc0b0b06a179bad5`
+  (parents `90b5cbf6` and `d7edbc8e`), tree
+  `a6d31afba904cf610787d4a0bfa38c5be312a0f5`, equal to reviewed and merged
+  `375fa96d`. Native runtime 576 and parser 2 passed before Boot smoke failed;
+  later quiescent/install/theme/artifact/release steps were skipped. Required
+  merge-group `41769390774` attempt 1 passed all three checks in 183 seconds.
+  These remain separate outcomes; no production-cause finding, native witness
+  pass or physical acceptance is inferred. The existing `hud-rnq52` watch remains.
 
   This source/automated evidence does not establish current Windows owner acceptance.
   `hud-i2e10.13` is closed with six historical owner passes and two decisions

@@ -1545,6 +1545,26 @@ mod tests {
 
     #[tokio::test]
     async fn mcp_http_hud_publish_authenticated() {
+        #[derive(Clone, Default)]
+        struct Sink(Arc<std::sync::Mutex<Vec<u8>>>);
+        impl std::io::Write for Sink {
+            fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+                self.0.lock().unwrap().extend_from_slice(bytes);
+                Ok(bytes.len())
+            }
+            fn flush(&mut self) -> std::io::Result<()> {
+                Ok(())
+            }
+        }
+        let sink = Sink::default();
+        let writer = sink.clone();
+        let _trace = tracing::subscriber::set_default(
+            tracing_subscriber::fmt()
+                .with_writer(move || writer.clone())
+                .json()
+                .with_max_level(tracing::Level::DEBUG)
+                .finish(),
+        );
         use tze_hud_scene::SceneId;
         use tze_hud_scene::types::{
             ContentionPolicy, GeometryPolicy, LayerAttachment, RenderingPolicy, ZoneDefinition,
@@ -1599,6 +1619,12 @@ mod tests {
             );
         }
 
+        {
+            let mut s = scene.lock().await;
+            let mut subtitle = s.zone_registry.zones["test-zone"].clone();
+            subtitle.name = "subtitle".into();
+            s.register_zone(subtitle);
+        }
         let mut config = make_config(0, "test-key");
         config.widget_transition_ms = tze_hud_config::tokens::resolve_motion_duration_ms(
             &std::collections::HashMap::from([("motion.state.ms".into(), "240".into())]),
@@ -1651,6 +1677,34 @@ mod tests {
             response.contains(r#"{\"expires_in_ms\":120000,\"ok\":true}"#),
             "{response}"
         );
+
+        let delayed = r#"{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"zone:subtitle","content":"delayed","delay_ms":3000,"ttl_ms":20000}},"id":8}"#;
+        let response = http_post(addr, delayed, Some("test-key")).await;
+        assert!(response.contains(r#"{\"expires_in_ms\":23000,\"ok\":true}"#));
+        let records: Vec<serde_json::Value> = String::from_utf8(sink.0.lock().unwrap().clone())
+            .unwrap()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .filter(|e| e["target"] == "tze_hud_delay_diagnostic")
+            .collect();
+        assert_eq!(records.len(), 2);
+        let request = &records[0]["fields"];
+        let enqueue = &records[1]["fields"];
+        assert_eq!(request["event"], "delayed_request");
+        assert_eq!(request["request_id"], 8);
+        assert_eq!(request["request_span_id"], enqueue["request_span_id"]);
+        assert!(request["request_span_id"].as_u64().is_some());
+        let scene_guard = scene.lock().await;
+        let batch = &scene_guard.scheduled_batches[0];
+        let (hi, lo) = batch.batch.batch_id.as_uuid().as_u64_pair();
+        assert_eq!(enqueue["batch_hi"], hi);
+        assert_eq!(enqueue["batch_lo"], lo);
+        assert_eq!(enqueue["present_at_wall_us"], batch.present_at_wall_us);
+        assert_eq!(
+            enqueue["expires_at_wall_us"],
+            batch.present_at_wall_us + 20_000_000
+        );
+        drop(scene_guard);
 
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
         handle.await.expect("task");

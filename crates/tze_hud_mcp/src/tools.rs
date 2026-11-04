@@ -647,7 +647,24 @@ async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpRes
             timing_hints: None,
             lease_id: Some(lease_id),
         };
+        let batch_id = batch.batch_id;
         scene.schedule_batch(present_at, batch);
+        if zone == "subtitle"
+            && tracing::enabled!(target: "tze_hud_delay_diagnostic", tracing::Level::DEBUG)
+        {
+            let span = tracing::Span::current();
+            if span
+                .metadata()
+                .is_some_and(|m| m.name() == "mcp_request" && m.target() == "tze_hud_mcp_phases")
+                && let Some(span_id) = span.id()
+            {
+                let (batch_hi, batch_lo) = batch_id.as_uuid().as_u64_pair();
+                tracing::debug!(target: "tze_hud_delay_diagnostic",
+                    event = "delayed_enqueued", request_span_id = span_id.into_u64(),
+                    batch_hi, batch_lo, present_at_wall_us = present_at,
+                    expires_at_wall_us = expires_at, is_subtitle = true);
+            }
+        }
     } else {
         scene
             .publish_to_zone_until_with_lease(zone, content, &ns, lease_id, p.key, expires_at)

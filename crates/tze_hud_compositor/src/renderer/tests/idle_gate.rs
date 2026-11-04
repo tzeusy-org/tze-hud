@@ -72,6 +72,135 @@ async fn idle_render_gate_skips_static_scene_renders_on_change_or_animation() {
         "a scene-version bump MUST force a render even with no animation"
     );
 
+    #[derive(Clone, Default)]
+    struct Sink(Arc<std::sync::Mutex<Vec<u8>>>);
+    impl std::io::Write for Sink {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    let sink = Sink::default();
+    let writer = sink.clone();
+    let _trace = tracing::subscriber::set_default(
+        tracing_subscriber::fmt()
+            .with_writer(move || writer.clone())
+            .json()
+            .with_max_level(tracing::Level::DEBUG)
+            .finish(),
+    );
+    let mut subtitle_scene = SceneGraph::new(720.0, 480.0);
+    subtitle_scene.zone_registry = ZoneRegistry::with_defaults();
+    subtitle_scene
+        .zone_registry
+        .zones
+        .get_mut("subtitle")
+        .unwrap()
+        .rendering_policy
+        .transition_in_ms = Some(180);
+    subtitle_scene
+        .publish_to_zone(
+            "subtitle",
+            ZoneContent::StreamText("readiness".into()),
+            "gate",
+            Some(subtitle_scene.now_wall_us() + 20_000_000),
+            None,
+            None,
+            vec![],
+        )
+        .unwrap();
+    let start = std::time::Instant::now();
+    compositor.update_zone_animations_at(&subtitle_scene, start);
+    let state = compositor.zone_animation_states["subtitle"].clone();
+    let records = subtitle_scene.zone_registry.active_publishes.clone();
+    let version = subtitle_scene.version;
+    let frame = compositor.frame_number;
+    let duration = std::time::Duration::from_millis(u64::from(state.duration_ms));
+    assert!(state.duration_ms > 0);
+    for (elapsed, expected) in [
+        (duration / 2, true),
+        (duration, false),
+        (duration * 2, false),
+    ] {
+        let now = start + elapsed;
+        let disabled =
+            tracing::subscriber::with_default(tracing::subscriber::NoSubscriber::default(), || {
+                compositor.has_inflight_animation_at(&subtitle_scene, now)
+            });
+        assert_eq!(disabled, expected);
+        assert_eq!(
+            compositor.has_inflight_animation_at(&subtitle_scene, now),
+            expected
+        );
+    }
+    assert_eq!(subtitle_scene.version, version);
+    assert_eq!(subtitle_scene.zone_registry.active_publishes, records);
+    assert_eq!(compositor.frame_number, frame);
+    assert_eq!(
+        compositor.zone_animation_states["subtitle"].transition_start,
+        state.transition_start
+    );
+    assert!(compositor.take_work_counts().is_none());
+    let observations: Vec<serde_json::Value> = String::from_utf8(sink.0.lock().unwrap().clone())
+        .unwrap()
+        .lines()
+        .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+        .filter(|e| e["fields"]["event"] == "zone_fade_observed")
+        .collect();
+    assert_eq!(observations.len(), 3);
+    let completed = &observations[1]["fields"];
+    assert_eq!(completed["transition_complete"], true);
+    assert_eq!(completed["opacity"], 1.0);
+    assert_eq!(completed["active_publications"], 1);
+    assert_eq!(completed["scene_version"], version);
+    assert_eq!(
+        completed["published_at_wall_us"],
+        records["subtitle"][0].published_at_wall_us
+    );
+    // No final build: the completed entry is still retained, yet idle is false.
+    assert!(compositor.zone_animation_states.contains_key("subtitle"));
+
+    for condition in ["hidden", "multiple", "fade_out"] {
+        sink.0.lock().unwrap().clear();
+        let mut observed_scene = subtitle_scene.clone();
+        if condition == "hidden" {
+            observed_scene.set_owner_hidden(tze_hud_scene::types::SurfaceClasses::ALL);
+        } else if condition == "multiple" {
+            let record = observed_scene.zone_registry.active_publishes["subtitle"][0].clone();
+            observed_scene
+                .zone_registry
+                .active_publishes
+                .get_mut("subtitle")
+                .unwrap()
+                .push(record);
+        } else {
+            compositor.zone_animation_states.insert(
+                "subtitle".into(),
+                ZoneAnimationState::fade_out_at(state.duration_ms, start),
+            );
+        }
+        assert!(!compositor.has_inflight_animation_at(&observed_scene, start + duration));
+        let event: serde_json::Value = String::from_utf8(sink.0.lock().unwrap().clone())
+            .unwrap()
+            .lines()
+            .filter_map(|line| serde_json::from_str::<serde_json::Value>(line).ok())
+            .find(|e| e["fields"]["event"] == "zone_fade_observed")
+            .unwrap();
+        let fields = &event["fields"];
+        if condition == "hidden" {
+            assert_eq!(fields["zones_shown"], false);
+        } else if condition == "multiple" {
+            assert_eq!(fields["active_publications"], 2);
+            assert!(fields.get("published_at_wall_us").is_none());
+        } else {
+            assert_eq!(fields["target_opacity"], 0.0);
+            assert_eq!(fields["opacity"], 0.0);
+        }
+    }
+
     // -- Case 3: in-flight animation, version pinned -> RENDER (no freeze). --
     // Move the authoritative scroll target far away and advance the smoother one
     // frame: it is now mid-flight (displayed offset still near 0, target 1500).
