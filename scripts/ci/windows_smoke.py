@@ -576,6 +576,11 @@ DELAY_NUMBERS = {
 }
 
 
+DELAY_EVENTS = {"delayed_request", "delayed_enqueued", "scheduled_activation", "zone_fade_started",
+                "zone_fade_observed", "zone_text_sample", "capture_build_begin", "capture_build_end",
+                "capture_render_end"}
+
+
 def delay_event(line: bytes) -> dict | None:
     """Allowlist the existing opt-in trace; never retain arbitrary log fields."""
     try:
@@ -588,7 +593,7 @@ def delay_event(line: bytes) -> dict | None:
     fields = event.get("fields")
     assert isinstance(fields, dict), "invalid delayed diagnostic fields"
     name = fields.get("event")
-    assert isinstance(name, str) and re.fullmatch(r"[a-z_]+", name), "invalid delayed event"
+    assert isinstance(name, str) and name in DELAY_EVENTS, "invalid delayed event"
     safe = {"event": name}
     for key, value in fields.items():
         if key in DELAY_NUMBERS and value is not None:
@@ -645,8 +650,8 @@ class DelayReadiness:
                 stamp = self.stamp(event)
                 assert self.last_stamp is None or stamp >= self.last_stamp, "backward diagnostic clock"
                 self.last_stamp = stamp
+                assert len(self.events) < self.MAX_EVENTS, "delayed diagnostic event limit"
                 self.events.append(event)
-                assert len(self.events) <= self.MAX_EVENTS, "delayed diagnostic event limit"
         if final:
             assert not self.partial, "incomplete delayed capture log"
 
@@ -690,6 +695,11 @@ class DelayReadiness:
         assert before <= after <= evidence["sent"] <= evidence["accepted"], "invalid client clock"
         wall = anchor["wall_time_ns"] / 1000
         assert wall + (evidence["sent"] - after + 3) * 1e6 - 1 <= due <= wall + (evidence["accepted"] - before + 3) * 1e6 + 1, "inconsistent delayed wall anchor"
+        now = time.perf_counter()
+        assert math.isfinite(now) and now >= evidence["accepted"], "backward client clock"
+        lower = wall + (evidence["sent"] - after) * 1e6 - 1
+        upper = wall + (now - before) * 1e6 + 1
+        assert all(lower <= self.stamp(e) <= upper for e in self.events), "inconsistent producer/client clocks"
         activations = [e for e in events if e["event"] == "scheduled_activation"]
         assert len(activations) <= 1, "ambiguous delayed activation"
         if not activations:
@@ -705,6 +715,7 @@ class DelayReadiness:
         assert identity["expires_at_wall_us"] == expiry
         start = None
         ready = None
+        assert all(self.stamp(e) < expiry for e in self.events[events.index(activation):]), "expired diagnostic observation"
         for event in events[events.index(activation):]:
             if "scene_version" in event:
                 assert self.integer(event, "scene_version") == identity["scene_version"], "delayed scene replaced"

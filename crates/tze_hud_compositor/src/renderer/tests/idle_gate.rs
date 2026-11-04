@@ -106,20 +106,20 @@ async fn idle_render_gate_skips_static_scene_renders_on_change_or_animation() {
             "subtitle",
             ZoneContent::StreamText("readiness".into()),
             "gate",
+            None,
             Some(subtitle_scene.now_wall_us() + 20_000_000),
             None,
-            None,
-            vec![],
         )
         .unwrap();
     let start = std::time::Instant::now();
     compositor.update_zone_animations_at(&subtitle_scene, start);
-    let state = compositor.zone_animation_states["subtitle"].clone();
+    let state = &compositor.zone_animation_states["subtitle"];
+    let (duration_ms, transition_start) = (state.duration_ms, state.transition_start);
     let records = subtitle_scene.zone_registry.active_publishes.clone();
     let version = subtitle_scene.version;
     let frame = compositor.frame_number;
-    let duration = std::time::Duration::from_millis(u64::from(state.duration_ms));
-    assert!(state.duration_ms > 0);
+    let duration = std::time::Duration::from_millis(u64::from(duration_ms));
+    assert!(duration_ms > 0);
     for (elapsed, expected) in [
         (duration / 2, true),
         (duration, false),
@@ -141,7 +141,7 @@ async fn idle_render_gate_skips_static_scene_renders_on_change_or_animation() {
     assert_eq!(compositor.frame_number, frame);
     assert_eq!(
         compositor.zone_animation_states["subtitle"].transition_start,
-        state.transition_start
+        transition_start
     );
     assert!(compositor.take_work_counts().is_none());
     let observations: Vec<serde_json::Value> = String::from_utf8(sink.0.lock().unwrap().clone())
@@ -167,7 +167,7 @@ async fn idle_render_gate_skips_static_scene_renders_on_change_or_animation() {
         sink.0.lock().unwrap().clear();
         let mut observed_scene = subtitle_scene.clone();
         if condition == "hidden" {
-            observed_scene.set_owner_hidden(tze_hud_scene::types::SurfaceClasses::ALL);
+            observed_scene.set_owner_hidden(tze_hud_scene::graph::SurfaceClasses::ALL);
         } else if condition == "multiple" {
             let record = observed_scene.zone_registry.active_publishes["subtitle"][0].clone();
             observed_scene
@@ -179,7 +179,7 @@ async fn idle_render_gate_skips_static_scene_renders_on_change_or_animation() {
         } else {
             compositor.zone_animation_states.insert(
                 "subtitle".into(),
-                ZoneAnimationState::fade_out_at(state.duration_ms, start),
+                ZoneAnimationState::fade_out_at(duration_ms, start),
             );
         }
         assert!(!compositor.has_inflight_animation_at(&observed_scene, start + duration));
@@ -200,6 +200,8 @@ async fn idle_render_gate_skips_static_scene_renders_on_change_or_animation() {
             assert_eq!(fields["opacity"], 0.0);
         }
     }
+
+    compositor.zone_animation_states.clear();
 
     // -- Case 3: in-flight animation, version pinned -> RENDER (no freeze). --
     // Move the authoritative scroll target far away and advance the smoother one
