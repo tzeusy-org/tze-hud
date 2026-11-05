@@ -2287,6 +2287,13 @@ impl WinitApp {
             self.panel_window_focus(focused);
         }
         if !focused {
+            let window = match secondary {
+                Some(index) => self.state.secondaries.get(index).map(|d| d.window.id()),
+                None => self.state.window.as_ref().map(|w| w.id()),
+            };
+            if secondary.is_none() || window.is_some() {
+                self.cancel_captured_zone_drag(window);
+            }
             self.cancel_chrome_feedback();
         }
     }
@@ -2298,8 +2305,33 @@ impl WinitApp {
         self.state.input_processor.chrome_feedback_cancel_pending = true;
     }
 
+    /// Disarm the captured Zone before taking any scene lock. Dropping its
+    /// retained terminal cannot activate, move or persist anything. The ordinary
+    /// chrome settle/prune turn reconciles feedback via its availability wake.
+    /// CursorLeft only clears notification feedback: crossing an overlay while
+    /// still captured is not a native cancellation.
+    fn cancel_captured_zone_drag(&mut self, window: Option<winit::window::WindowId>) {
+        let Some(gesture) = self.state.primary_drag_gesture.as_ref() else {
+            return;
+        };
+        if !matches!(gesture.target, DragTarget::Zone(_)) || gesture.window_id != window {
+            return;
+        }
+        if self
+            .state
+            .input_processor
+            .drag_states
+            .get(&0)
+            .is_some_and(|drag| gesture.matches(drag))
+        {
+            self.state.input_processor.drag_states.remove(&0);
+        }
+        self.state.primary_drag_gesture = None;
+    }
+
     pub(super) fn drain_chrome_capture_cancellation(&mut self) {
         if native_chrome_take_cancel(self.state.press_window) {
+            self.cancel_captured_zone_drag(self.state.press_window);
             self.cancel_chrome_feedback();
         }
     }
