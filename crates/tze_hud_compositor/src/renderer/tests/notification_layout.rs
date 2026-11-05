@@ -586,6 +586,21 @@ async fn test_two_line_notification_title_produces_two_text_items() {
                 compositor.prime_truncation_cache(&scene);
                 let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
                 let body_item = items.iter().find(|i| &*i.text == body).unwrap();
+                let raw_width = compositor
+                    .text_rasterizer
+                    .as_mut()
+                    .unwrap()
+                    .measure_single_line(
+                        &body_item.text,
+                        body_item.font_size_px,
+                        body_item.font_family,
+                        body_item.font_weight,
+                    );
+                assert_eq!(raw_width > body_item.bounds_width, truncated);
+                eprintln!(
+                    "notification overflow: scale={scale} actions={count} raw_width={raw_width} bounds_width={} bounds_height={}",
+                    body_item.bounds_width, body_item.bounds_height
+                );
                 let key = crate::text::effective_truncation_key(body_item)
                     .expect("notification body must participate in visible ellipsis");
                 let rasterizer = compositor.text_rasterizer.as_mut().unwrap();
