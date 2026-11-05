@@ -344,32 +344,119 @@ impl super::Compositor {
         items
     }
 
-    /// Prime only stack notification title/body bands, using the exact same
-    /// collector as drawing. Action/dismiss labels keep their existing Clip
-    /// policy, and non-notification zones retain their current priming path.
-    pub(super) fn collect_notification_ellipsis_items(
-        &self,
-        scene: &SceneGraph,
-        sw: f32,
-        sh: f32,
-    ) -> Vec<TextItem> {
-        let mut items = Vec::new();
-        self.collect_zone_text_items(scene, sw, sh, true, &mut items);
-        items.retain(|item| item.overflow == TextOverflow::Ellipsis);
-        items
-    }
-
-    /// Shared zone draw collection; the notification-only projection is used
-    /// off-frame to prime the existing truncation cache without walking tiles.
-    fn collect_zone_text_items(
-        &self,
-        scene: &SceneGraph,
-        sw: f32,
-        sh: f32,
-        notifications_only: bool,
-        items: &mut Vec<TextItem>,
-    ) {
+    /// Collect `TextItem`s for all TextMarkdownNode tiles and zone StreamText
+    /// and ShortTextWithIcon/Notification content in the scene.
+    ///
+    /// All zone `TextItem`s are constructed from `RenderingPolicy` fields —
+    /// no hardcoded colors or font choices.  Animation opacity is applied to
+    /// the color channels so text fades with the backdrop.
+    ///
+    /// Returns a flat `Vec<TextItem>` ready for `TextRasterizer::prepare_text_items`.
+    pub(super) fn collect_text_items(&self, scene: &SceneGraph, sw: f32, sh: f32) -> Vec<TextItem> {
         let now = std::time::Instant::now();
+        let mut items: Vec<TextItem> = Vec::new();
+
+        // Transcript optimal-measure cap (hud-rivcy): resolve once per frame; a
+        // positive value narrows portal-surface transcript wrapping, `0` leaves
+        // it unbounded. Gated to portal (scrollable) tiles per-tile below, the
+        // same surface signal that selects the portal markdown token scope.
+        let transcript_max_measure_px = resolve_transcript_max_measure_px(&self.token_map);
+
+        // ── TextMarkdownNode tiles ────────────────────────────────────────────
+        for tile in &Self::sort_tiles_with_drag_boost(self.policy_visible_tiles(scene), scene) {
+            if let Some(root_id) = tile.root_node {
+                // Whole-tile opacity, split into its two components:
+                //
+                //   • `base_opacity` — the DURABLE scene-level `tile.opacity`
+                //     (× drag boost). The exemplar minimize path drives this to 0
+                //     via `update_tile_opacity(0.0)`; it is a persistent state, not
+                //     a per-frame animation.
+                //   • the §6.3 portal-transition animation opacity — a TRANSIENT
+                //     per-frame fade that a portal passes through while collapsing
+                //     or expanding.
+                //
+                // Skip shaping ONLY on durable invisibility. A tile fading IN still
+                // has `base_opacity == 1` while its animation opacity ramps up from
+                // 0; shaping it now (and blending the item alpha down) warms the
+                // shaped-buffer cache so the fade reuses one shape instead of
+                // re-shaping when it crosses the visibility threshold (hud-991cj).
+                // Gating the skip on the *combined* value would defer that shape
+                // into the middle of the animation — a per-frame re-shape hitch.
+                let base_opacity = self.rendered_tile_opacity(tile, scene);
+                if base_opacity <= TILE_TEXT_OPACITY_EPSILON {
+                    // Durably invisible (minimized / dragged to zero): collect,
+                    // shape, truncate, and draw nothing — no floating glyphs
+                    // (hud-dat3x). Matches the quad/backdrop path, which paints
+                    // nothing at a zero-alpha tile.
+                    continue;
+                }
+                // The value the quad/backdrop path applies via
+                // `tile_effective_opacity` (== base × portal anim). Text fades in
+                // lockstep with the tile's solid-color backdrop.
+                let tile_opacity = self.tile_effective_opacity(tile, scene);
+
+                // Compute scroll offset once per tile and pass it down so text
+                // glyph positions track the scrolled content (Bounded Transcript
+                // Viewport requirement — hud-w5ih).
+                let (scroll_x, scroll_y) = self.display_tile_scroll_offset(scene, tile.id);
+                // Determine follow-tail state so Ellipsis TextItems receive the
+                // correct TruncationViewport (TailAnchored vs HeadAnchored).
+                // Uses the shared helper that prime_truncation_cache /
+                // collect_ellipsis_text_items_from_node also calls, so the
+                // per-frame key always matches the primed cache entry (hud-lu50e,
+                // hud-plz8q).
+                let at_tail = super::tile_at_tail_for_ellipsis(tile.id, scene);
+
+                // Track item count before so the tile's whole-tile opacity can be
+                // folded into exactly the glyphs this tile just contributed.
+                let items_before = items.len();
+                // Only portal (scrollable) surfaces are transcripts; other
+                // markdown tiles wrap to full width unchanged. Pass 0.0 (no
+                // clamp) for non-portal tiles so the collector is a no-op there.
+                let transcript_measure_px = if scene.tile_scroll_config(tile.id).is_some() {
+                    transcript_max_measure_px
+                } else {
+                    0.0
+                };
+                // Per-part portal-surface consumption (hud-s4lrw): when the tile
+                // declares a `PortalSurface`, resolve each node's part so the
+                // recursion applies transcript scope + a per-part clip band only
+                // where the schema says. `None` preserves legacy tile-level
+                // overflow/clip behavior; geometry-only resident surfaces still
+                // resolve their chrome-vs-document translation per node below.
+                let part_index = portal_part_index(scene, tile.id);
+                self.collect_text_items_from_node(
+                    root_id,
+                    tile,
+                    scene,
+                    scroll_x,
+                    scroll_y,
+                    at_tail,
+                    transcript_measure_px,
+                    part_index,
+                    None,
+                    &mut items,
+                );
+
+                // Fractional opacity: blend every glyph (transcript, cached
+                // markdown, plain, and ellipsis/truncation items alike) the tile
+                // just contributed, proportionally — matching the backdrop fade.
+                // This includes the §6.3 portal animation opacity, since
+                // `tile_effective_opacity` already folds it in.
+                if tile_opacity < 1.0 {
+                    for item in &mut items[items_before..] {
+                        item.opacity *= tile_opacity;
+                    }
+                }
+
+                // The per-segment streaming-reveal fade (hud-bl7yi) is applied
+                // inline in `collect_text_items_from_node`, routed by
+                // `(tile, node)` identity (hud-g8xpg), so it never cross-fades a
+                // settled node onto a same-text revealing sibling. Nothing to do
+                // here.
+            }
+        }
+
         // ── Zone StreamText, Notification, and StatusBar content ─────────────
         for (zone_name, publishes) in scene.shown_zone_publishes() {
             if publishes.is_empty() {
@@ -379,11 +466,6 @@ impl super::Compositor {
                 Some(z) => z,
                 None => continue,
             };
-            if notifications_only
-                && !matches!(zone_def.contention_policy, ContentionPolicy::Stack { .. })
-            {
-                continue;
-            }
             let zone_tokens = self.zone_tokens(zone_name);
             let scale = tze_hud_config::tokens::px_scale(zone_tokens);
 
@@ -477,11 +559,6 @@ impl super::Compositor {
 
                     for (pub_idx, slot_y, effective_slot_h) in layout.iter_visible(zy) {
                         let record = &publishes[pub_idx];
-                        if notifications_only
-                            && !matches!(&record.content, ZoneContent::Notification(_))
-                        {
-                            continue;
-                        }
 
                         // Per-publication fade-out opacity (1.0 when no fade active).
                         let pub_opacity = self.pub_opacity_at(zone_name, record, now);
@@ -512,7 +589,7 @@ impl super::Compositor {
                                 // through to the token/default path.
                                 //
                                 // Layout: left-aligned at the card inset (`notification_inset`),
-                                // keeps the existing one-line title/body bands; overflow is visibly ellipsized.
+                                // clips at content area boundary (no wrapping in v1).
                                 // When a valid icon texture is cached, the text is additionally
                                 // inset to the right of the icon (icon_size + gap).
                                 // Spec-defined inset for notification-area zones:
@@ -611,7 +688,7 @@ impl super::Compositor {
                                         font_weight,
                                         color,
                                         tze_hud_scene::types::TextAlign::Start,
-                                        tze_hud_scene::types::TextOverflow::Ellipsis,
+                                        tze_hud_scene::types::TextOverflow::Clip,
                                         oc,
                                         ow,
                                         effective_opacity,
@@ -638,7 +715,7 @@ impl super::Compositor {
                                         notif_title_weight,
                                         color,
                                         tze_hud_scene::types::TextAlign::Start,
-                                        tze_hud_scene::types::TextOverflow::Ellipsis,
+                                        tze_hud_scene::types::TextOverflow::Clip,
                                         oc,
                                         ow,
                                         effective_opacity,
@@ -661,7 +738,7 @@ impl super::Compositor {
                                         400,
                                         color,
                                         tze_hud_scene::types::TextAlign::Start,
-                                        tze_hud_scene::types::TextOverflow::Ellipsis,
+                                        tze_hud_scene::types::TextOverflow::Clip,
                                         oc,
                                         ow,
                                         effective_opacity,
@@ -1078,121 +1155,6 @@ impl super::Compositor {
                 }
             }
         }
-    }
-
-    /// Collect `TextItem`s for all TextMarkdownNode tiles and zone StreamText
-    /// and ShortTextWithIcon/Notification content in the scene.
-    ///
-    /// All zone `TextItem`s are constructed from `RenderingPolicy` fields —
-    /// no hardcoded colors or font choices.  Animation opacity is applied to
-    /// the color channels so text fades with the backdrop.
-    ///
-    /// Returns a flat `Vec<TextItem>` ready for `TextRasterizer::prepare_text_items`.
-    pub(super) fn collect_text_items(&self, scene: &SceneGraph, sw: f32, sh: f32) -> Vec<TextItem> {
-        let mut items: Vec<TextItem> = Vec::new();
-
-        // Transcript optimal-measure cap (hud-rivcy): resolve once per frame; a
-        // positive value narrows portal-surface transcript wrapping, `0` leaves
-        // it unbounded. Gated to portal (scrollable) tiles per-tile below, the
-        // same surface signal that selects the portal markdown token scope.
-        let transcript_max_measure_px = resolve_transcript_max_measure_px(&self.token_map);
-
-        // ── TextMarkdownNode tiles ────────────────────────────────────────────
-        for tile in &Self::sort_tiles_with_drag_boost(self.policy_visible_tiles(scene), scene) {
-            if let Some(root_id) = tile.root_node {
-                // Whole-tile opacity, split into its two components:
-                //
-                //   • `base_opacity` — the DURABLE scene-level `tile.opacity`
-                //     (× drag boost). The exemplar minimize path drives this to 0
-                //     via `update_tile_opacity(0.0)`; it is a persistent state, not
-                //     a per-frame animation.
-                //   • the §6.3 portal-transition animation opacity — a TRANSIENT
-                //     per-frame fade that a portal passes through while collapsing
-                //     or expanding.
-                //
-                // Skip shaping ONLY on durable invisibility. A tile fading IN still
-                // has `base_opacity == 1` while its animation opacity ramps up from
-                // 0; shaping it now (and blending the item alpha down) warms the
-                // shaped-buffer cache so the fade reuses one shape instead of
-                // re-shaping when it crosses the visibility threshold (hud-991cj).
-                // Gating the skip on the *combined* value would defer that shape
-                // into the middle of the animation — a per-frame re-shape hitch.
-                let base_opacity = self.rendered_tile_opacity(tile, scene);
-                if base_opacity <= TILE_TEXT_OPACITY_EPSILON {
-                    // Durably invisible (minimized / dragged to zero): collect,
-                    // shape, truncate, and draw nothing — no floating glyphs
-                    // (hud-dat3x). Matches the quad/backdrop path, which paints
-                    // nothing at a zero-alpha tile.
-                    continue;
-                }
-                // The value the quad/backdrop path applies via
-                // `tile_effective_opacity` (== base × portal anim). Text fades in
-                // lockstep with the tile's solid-color backdrop.
-                let tile_opacity = self.tile_effective_opacity(tile, scene);
-
-                // Compute scroll offset once per tile and pass it down so text
-                // glyph positions track the scrolled content (Bounded Transcript
-                // Viewport requirement — hud-w5ih).
-                let (scroll_x, scroll_y) = self.display_tile_scroll_offset(scene, tile.id);
-                // Determine follow-tail state so Ellipsis TextItems receive the
-                // correct TruncationViewport (TailAnchored vs HeadAnchored).
-                // Uses the shared helper that prime_truncation_cache /
-                // collect_ellipsis_text_items_from_node also calls, so the
-                // per-frame key always matches the primed cache entry (hud-lu50e,
-                // hud-plz8q).
-                let at_tail = super::tile_at_tail_for_ellipsis(tile.id, scene);
-
-                // Track item count before so the tile's whole-tile opacity can be
-                // folded into exactly the glyphs this tile just contributed.
-                let items_before = items.len();
-                // Only portal (scrollable) surfaces are transcripts; other
-                // markdown tiles wrap to full width unchanged. Pass 0.0 (no
-                // clamp) for non-portal tiles so the collector is a no-op there.
-                let transcript_measure_px = if scene.tile_scroll_config(tile.id).is_some() {
-                    transcript_max_measure_px
-                } else {
-                    0.0
-                };
-                // Per-part portal-surface consumption (hud-s4lrw): when the tile
-                // declares a `PortalSurface`, resolve each node's part so the
-                // recursion applies transcript scope + a per-part clip band only
-                // where the schema says. `None` preserves legacy tile-level
-                // overflow/clip behavior; geometry-only resident surfaces still
-                // resolve their chrome-vs-document translation per node below.
-                let part_index = portal_part_index(scene, tile.id);
-                self.collect_text_items_from_node(
-                    root_id,
-                    tile,
-                    scene,
-                    scroll_x,
-                    scroll_y,
-                    at_tail,
-                    transcript_measure_px,
-                    part_index,
-                    None,
-                    &mut items,
-                );
-
-                // Fractional opacity: blend every glyph (transcript, cached
-                // markdown, plain, and ellipsis/truncation items alike) the tile
-                // just contributed, proportionally — matching the backdrop fade.
-                // This includes the §6.3 portal animation opacity, since
-                // `tile_effective_opacity` already folds it in.
-                if tile_opacity < 1.0 {
-                    for item in &mut items[items_before..] {
-                        item.opacity *= tile_opacity;
-                    }
-                }
-
-                // The per-segment streaming-reveal fade (hud-bl7yi) is applied
-                // inline in `collect_text_items_from_node`, routed by
-                // `(tile, node)` identity (hud-g8xpg), so it never cross-fades a
-                // settled node onto a same-text revealing sibling. Nothing to do
-                // here.
-            }
-        }
-
-        self.collect_zone_text_items(scene, sw, sh, false, &mut items);
 
         // ── Composer echo text (hud-r3ax6) ───────────────────────────────────
         // Inject a TextItem for the local composer draft + caret glyph on top of

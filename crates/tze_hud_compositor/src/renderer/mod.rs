@@ -2094,19 +2094,11 @@ impl Compositor {
         //
         // Computed here (before the &mut self.text_rasterizer borrow below) so
         // the &self collector does not conflict with that borrow.
-        let mut zone_ellipsis_items = self.collect_zone_stream_text_ellipsis_items(
+        let zone_stream_items = self.collect_zone_stream_text_ellipsis_items(
             scene,
             scene.display_area.width,
             scene.display_area.height,
         );
-
-        // Notification title/body bands share draw geometry and the existing
-        // bounded ellipsis machinery; Clip action labels are not primed.
-        zone_ellipsis_items.extend(self.collect_notification_ellipsis_items(
-            scene,
-            scene.display_area.width,
-            scene.display_area.height,
-        ));
 
         // Record the version and timestamp now that priming will proceed.
         self.truncation_cache_scene_version = scene.version;
@@ -2187,10 +2179,10 @@ impl Compositor {
             }
         }
 
-        // Append the zone StreamText/notification Ellipsis items computed before the
+        // Append the zone StreamText Ellipsis items computed before the
         // rasterizer borrow (see comment above) so they are primed alongside the
         // tile-node items.
-        live_items.extend(zone_ellipsis_items);
+        live_items.extend(zone_stream_items);
 
         // Update the cached content byte count for the adaptive cadence gate on
         // the *next* call.  Summing item lengths is O(n) in item count here, but
