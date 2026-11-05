@@ -355,6 +355,21 @@ pub struct WindowSurface {
     timeout_log: LogThrottle,
 }
 
+/// Result of a main-thread swapchain presentation attempt.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PendingPresent {
+    Presented,
+    Empty,
+    DeferredEncoding,
+}
+
+fn wait_for_encoding(slot: &std::sync::Mutex<SwapchainSlot>, done: &std::sync::Condvar) {
+    let mut slot = slot.lock().expect("swapchain lock poisoned");
+    while slot.encoding {
+        slot = done.wait(slot).expect("swapchain condvar poisoned");
+    }
+}
+
 /// Lets one log line through per `interval` and counts the ones it drops.
 #[derive(Debug)]
 pub(crate) struct LogThrottle {
@@ -637,6 +652,12 @@ impl WindowSurface {
     /// `TextureView` still references — which previously produced
     /// "Surface Texture has been destroyed" on `queue.submit()`.
     pub fn present_pending_texture(&self) -> bool {
+        self.present_pending_texture_status() == PendingPresent::Presented
+    }
+
+    /// Preserve the distinction between no owed image and an image whose
+    /// encode is still in flight. A deferred owner must retry on availability.
+    pub fn present_pending_texture_status(&self) -> PendingPresent {
         let mut slot = self.swapchain.lock().expect("swapchain lock poisoned");
 
         // Wait for the compositor thread to finish encoding + submitting before
@@ -668,7 +689,7 @@ impl WindowSurface {
                     "present_pending_texture: encoding still in progress after timeout; \
                      skipping present this tick (compositor may be stalled)"
                 );
-                return false;
+                return PendingPresent::DeferredEncoding;
             }
         }
 
@@ -677,10 +698,17 @@ impl WindowSurface {
             texture.present();
             self.presented_frame_count
                 .fetch_add(1, std::sync::atomic::Ordering::Release);
-            true
+            PendingPresent::Presented
         } else {
-            false
+            PendingPresent::Empty
         }
+    }
+
+    /// Wait off the main thread for the dependency that deferred presentation.
+    /// EncodingGuard closes this predicate under the same mutex and notifies
+    /// the condvar, including when an encode unwinds. No timer or scene work.
+    pub fn wait_for_present_availability(&self) {
+        wait_for_encoding(&self.swapchain, &self.swapchain_done);
     }
 
     /// Finish a successful acquire: release the swapchain lock, then build the

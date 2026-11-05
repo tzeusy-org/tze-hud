@@ -142,6 +142,7 @@ impl WindowedRuntimeState {
             input_ring: Arc::new(StdMutex::new(VecDeque::new())),
             pending_input_latency: Arc::new(StdMutex::new(VecDeque::new())),
             frame_ready_rx,
+            deferred_present: false,
             frame_ready_tx: Some(frame_ready_tx),
             frame_presented_tx: None,
             degradation_notices: None,

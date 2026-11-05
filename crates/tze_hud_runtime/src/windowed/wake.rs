@@ -263,6 +263,7 @@ pub(super) struct WindowedWake {
     main_availability_waiting: Arc<AtomicBool>,
     /// Coalesces a lock-availability waiter for a compositor `try_lock` miss.
     compositor_availability_waiting: Arc<AtomicBool>,
+    present_availability_waiting: Arc<AtomicBool>,
     compositor: CompositorWake,
     counters: Arc<IdleEfficiencyCounters>,
 }
@@ -275,6 +276,7 @@ impl WindowedWake {
             main_work: Arc::new(Mutex::new(MainWorkState::default())),
             main_availability_waiting: Arc::new(AtomicBool::new(false)),
             compositor_availability_waiting: Arc::new(AtomicBool::new(false)),
+            present_availability_waiting: Arc::new(AtomicBool::new(false)),
             compositor: CompositorWake::default(),
             counters: Arc::new(IdleEfficiencyCounters::default()),
         }
@@ -288,6 +290,7 @@ impl WindowedWake {
             main_work: Arc::new(Mutex::new(MainWorkState::default())),
             main_availability_waiting: Arc::new(AtomicBool::new(false)),
             compositor_availability_waiting: Arc::new(AtomicBool::new(false)),
+            present_availability_waiting: Arc::new(AtomicBool::new(false)),
             compositor: CompositorWake::default(),
             counters: Arc::new(IdleEfficiencyCounters::default()),
         }
@@ -443,6 +446,19 @@ impl WindowedWake {
         );
     }
 
+    /// A swapchain completion owes presentation only: it must not create
+    /// scene-work debt or cause another compositor submission.
+    pub(super) fn schedule_present_after_availability(
+        &self,
+        wait_until_available: impl FnOnce() + Send + 'static,
+    ) {
+        self.schedule_after_availability(
+            Arc::clone(&self.present_availability_waiting),
+            AvailabilityWakeTarget::Present,
+            wait_until_available,
+        );
+    }
+
     fn schedule_after_availability(
         &self,
         waiting: Arc<AtomicBool>,
@@ -466,6 +482,9 @@ impl WindowedWake {
                     AvailabilityWakeTarget::Main => {
                         wake.mark_main_work_pending(RuntimeWakeupSource::SceneChange);
                         wake.notify_main(RuntimeWakeupSource::SceneChange);
+                    }
+                    AvailabilityWakeTarget::Present => {
+                        wake.notify_main(RuntimeWakeupSource::FrameReady);
                     }
                     AvailabilityWakeTarget::Compositor => {
                         wake.notify_compositor(RuntimeWakeupSource::SceneChange);
@@ -529,6 +548,7 @@ impl WindowedWake {
 #[derive(Clone, Copy)]
 enum AvailabilityWakeTarget {
     Main,
+    Present,
     Compositor,
 }
 

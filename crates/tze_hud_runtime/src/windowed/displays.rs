@@ -1205,12 +1205,20 @@ impl super::WinitApp {
     }
 
     /// Present every secondary's pending frame (main thread).
-    pub(super) fn present_secondaries(&self) -> bool {
+    pub(super) fn present_secondaries(
+        &self,
+    ) -> (bool, Vec<Arc<tze_hud_compositor::WindowSurface>>) {
+        use tze_hud_compositor::surface::PendingPresent;
         let mut presented = false;
+        let mut deferred = Vec::new();
         for display in &self.state.secondaries {
-            presented |= display.surface.present_pending_texture();
+            match display.surface.present_pending_texture_status() {
+                PendingPresent::Presented => presented = true,
+                PendingPresent::Empty => {}
+                PendingPresent::DeferredEncoding => deferred.push(Arc::clone(&display.surface)),
+            }
         }
-        presented
+        (presented, deferred)
     }
 
     /// Apply the overlay capture decision per window (see [`capture_window`]).
