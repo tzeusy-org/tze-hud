@@ -401,7 +401,7 @@ mod tests {
 }
 
 #[cfg(test)]
-mod panel_task_tests {
+pub(super) mod panel_task_tests {
     use crate::shell::control_panel::{
         ControlPanelDeps, ControlPanelHandle, PanelEvent, PanelKey, PauseControl, default_sections,
         spawn_control_panel,
@@ -417,15 +417,15 @@ mod panel_task_tests {
     use tze_hud_scene::render_wake::RenderWakeNotifier;
     use tze_hud_scene::types::LeaseState;
 
-    struct Fixture {
+    pub(in crate::windowed) struct Fixture {
         state: WindowedRuntimeState,
-        panel: ControlPanelHandle,
+        pub(in crate::windowed) panel: ControlPanelHandle,
         wakes: Arc<AtomicUsize>,
         main_work: RenderWakeNotifier,
         main_work_calls: Arc<AtomicUsize>,
     }
 
-    fn fixture() -> Fixture {
+    pub(in crate::windowed) fn fixture() -> Fixture {
         fixture_with(default_sections)
     }
 

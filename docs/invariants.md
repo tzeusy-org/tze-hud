@@ -367,7 +367,10 @@ zone is shown again.
 
 Notification capture delivery (source proposal; Windows owner acceptance separate):
 The UI-thread observer retains per-installation/per-press cancellation history
-until the corresponding application edge is delivered. Normal native Up and
+until the corresponding application edge is delivered. Every delivered left
+edge consumes its receipt before control-panel routing, including panel-owned
+presses and releases that never reach the scene. This prevents a panel click
+from leaving history that disables the next notification action. Normal native Up and
 valid synthesized release activate once; cancelled or retired-window edges and
 late Up do not impersonate an action. Callback code borrows no scene/runtime
 owner and forwards native messages; local feedback cleanup uses the existing
