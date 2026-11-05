@@ -1951,13 +1951,15 @@ mod tests {
         // Admission, activation, native ledger loss, focus cancellation, retained
         // Up and scene settling below are the production routes, not reset helpers.
         // The render parent separately proves actual compositor handle production.
+        let mut cancellations_not_disarmed = Vec::new();
         for native_loss in [false, true] {
             for held_terminal in [false, true] {
                 use crate::windowed::lifecycle::{ChromeAppEdge, ChromeCaptureTestScope};
                 let mut harness = approve_reject_notification_harness();
-                let (fixture, ..) = super::super::test_support::scene_with_drag_handle_tile(
-                    400.0, 300.0, 600.0, 200.0,
-                );
+                let (fixture, tile_id, ..) =
+                    super::super::test_support::scene_with_drag_handle_tile(
+                        400.0, 300.0, 600.0, 200.0,
+                    );
                 let id = {
                     let mut scene = harness.scene();
                     let id = scene.zone_registry.zones["notification-area"].id;
@@ -1967,6 +1969,7 @@ mod tests {
                     (harness.app.state.cursor_x, harness.app.state.cursor_y) =
                         (handle.bounds.x + 1.0, handle.bounds.y + 1.0);
                     scene.overlay.drag_handle_hit_regions.push(handle);
+                    scene.tiles.extend(fixture.tiles.clone());
                     id
                 };
                 let (tx, mut repositioned) = tokio::sync::broadcast::channel(4);
@@ -1978,6 +1981,16 @@ mod tests {
                 harness.app.enqueue_pointer_event(PointerEventKind::Move);
                 assert!(harness.scene().is_drag_active(id));
                 let placement = harness.scene().overlay.zone_placements[&id];
+                let mut other_device = harness.app.state.input_processor.drag_states[&0].clone();
+                other_device.element_id = tile_id;
+                other_device.element_kind = tze_hud_scene::DragHandleElementKind::Tile;
+                harness
+                    .app
+                    .state
+                    .input_processor
+                    .drag_states
+                    .insert(1, other_device);
+                harness.scene().set_drag_active(tile_id);
                 let window = winit::window::WindowId::dummy();
                 let native = native_loss.then(|| {
                     let native = ChromeCaptureTestScope::new(window);
@@ -2014,22 +2027,28 @@ mod tests {
                 let ring = harness.app.state.input_ring.lock().unwrap().len();
                 if let Some(native) = &native {
                     native.lose();
+                    harness.app.state.press_window = Some(winit::window::WindowId::from(77));
+                    harness.app.drain_chrome_capture_cancellation();
+                    assert!(
+                        harness.app.state.primary_drag_gesture.is_some(),
+                        "another window cannot consume this capture cancellation"
+                    );
+                    harness.app.state.press_window = Some(window);
                     harness.app.drain_chrome_capture_cancellation();
                 } else {
                     harness.app.handle_window_focus(None, false);
                 }
-                assert!(
-                    harness.app.state.primary_drag_gesture.is_none(),
-                    "accepted cancellation disarms the captured Zone and retained Up immediately"
-                );
-                assert!(
-                    !harness
+                if harness.app.state.primary_drag_gesture.is_some()
+                    || harness
                         .app
                         .state
                         .input_processor
                         .drag_states
                         .contains_key(&0)
-                );
+                {
+                    cancellations_not_disarmed.push((native_loss, held_terminal));
+                    continue;
+                }
                 assert_eq!(
                     harness.app.state.input_ring.lock().unwrap().len(),
                     ring,
@@ -2046,6 +2065,18 @@ mod tests {
                     std::thread::yield_now();
                 }
                 assert!(!harness.scene().is_drag_active(id));
+                assert!(
+                    harness.scene().is_drag_active(tile_id),
+                    "other device keeps Tile feedback"
+                );
+                assert!(
+                    harness
+                        .app
+                        .state
+                        .input_processor
+                        .drag_states
+                        .contains_key(&1)
+                );
                 let epoch = geometry_epoch(&harness);
                 assert!(harness.tick());
                 assert_eq!(geometry_epoch(&harness), epoch, "cancel settles once");
@@ -2075,6 +2106,11 @@ mod tests {
                 assert!(!harness.scene().is_drag_active(id));
             }
         }
+
+        assert!(
+            cancellations_not_disarmed.is_empty(),
+            "accepted cancellation must immediately disarm Zone/retained Up; failed (native, held): {cancellations_not_disarmed:?}"
+        );
 
         // A known terminal cancellation must disarm before the physical-Up
         // fallback, even if the ordinary late Up follows in the same turn.
