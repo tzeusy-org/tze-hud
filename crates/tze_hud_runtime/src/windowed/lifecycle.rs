@@ -3145,6 +3145,17 @@ impl WinitApp {
         });
     }
 
+    pub(super) fn defer_present_until_available(
+        &self,
+        availability: tze_hud_compositor::surface::PresentAvailability,
+    ) -> bool {
+        let wake = self.state.wake.clone();
+        availability.notify_when_ready(move || {
+            tracing::debug!(target: "tze_hud_delay_diagnostic", event = "present_availability_ready");
+            wake.notify_main(crate::idle_efficiency::RuntimeWakeupSource::FrameReady);
+        })
+    }
+
     /// Keep signal consumption and actual-present accounting on the production
     /// path while the headless harness substitutes only the swapchain operation.
     /// `Some(false)` means deferred encoding; `None` means no pending image.
@@ -3181,14 +3192,8 @@ impl WinitApp {
                 }
             }
             self.state.deferred_present |= !deferred.is_empty();
-            if !deferred.is_empty() {
-                self.state
-                    .wake
-                    .schedule_present_after_availability(move || {
-                        for surface in deferred {
-                            surface.wait_for_present_availability();
-                        }
-                    });
+            for surface in deferred {
+                self.defer_present_until_available(surface.present_availability());
             }
             tracing::debug!(
                 target: "tze_hud_delay_diagnostic",

@@ -1446,19 +1446,33 @@ mod tests {
         let main_work_before = wake.main_work_generation();
         wake.notify_main(crate::idle_efficiency::RuntimeWakeupSource::OperatorCapture);
         wake.take_main_source();
-        let (wait, encoding) = tze_hud_compositor::WindowSurface::pending_encoding_for_test();
-        wake.schedule_present_after_availability(wait);
-        let duplicate = Arc::new(std::sync::atomic::AtomicBool::new(false));
-        wake.schedule_present_after_availability({
-            let duplicate = duplicate.clone();
-            move || {
-                duplicate.store(true, std::sync::atomic::Ordering::Release);
-            }
-        });
+        let (availability, encoding) =
+            tze_hud_compositor::WindowSurface::pending_encoding_for_test();
+        let (other_window, other_encoding) =
+            tze_hud_compositor::WindowSurface::pending_encoding_for_test();
+        assert!(
+            runtime
+                .events
+                .app
+                .defer_present_until_available(other_window)
+        );
+        assert!(
+            runtime
+                .events
+                .app
+                .defer_present_until_available(availability.clone())
+        );
+        assert!(
+            !runtime
+                .events
+                .app
+                .defer_present_until_available(availability)
+        );
         assert_ne!(
             wake.take_main_source(),
             crate::idle_efficiency::RuntimeWakeupSource::FrameReady
         );
+        // A second window remains encoding; it must not block this completion.
         drop(encoding);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
         while wake.take_main_source() != crate::idle_efficiency::RuntimeWakeupSource::FrameReady {
@@ -1468,7 +1482,7 @@ mod tests {
             );
             std::thread::yield_now();
         }
-        assert!(!duplicate.load(std::sync::atomic::Ordering::Acquire));
+        drop(other_encoding);
         assert_eq!(wake.compositor().checkpoint(), compositor_before);
         assert_eq!(wake.main_work_generation(), main_work_before);
         assert!(
@@ -1578,7 +1592,7 @@ mod tests {
         assert!(!runtime.turn(true));
         for delay in [0, 10] {
             let checkpoint = wake.compositor().checkpoint();
-            let presents = wake.counters().snapshot().presents;
+            let mut presents = wake.counters().snapshot().presents;
             call(
                 addr,
                 "hud_publish",
@@ -1594,10 +1608,18 @@ mod tests {
             );
             assert!(!runtime.events.control_panel_open());
             if delay > 0 {
+                // Scheduling changes scene.version and may render admission once.
+                // The future publication must remain absent, then settle idle.
+                runtime.turn(true);
+                assert_eq!(
+                    runtime.events.zone_publication_count("notification-area"),
+                    0
+                );
                 assert!(
                     !runtime.turn(true),
-                    "scheduled held content remains idle before due"
+                    "future publication settles back to idle"
                 );
+                presents = wake.counters().snapshot().presents;
                 clock.advance(delay);
             }
             assert!(
@@ -5093,6 +5115,33 @@ mod tests {
         assert_eq!(wake.compositor().checkpoint(), compositor_before);
         assert_eq!(wake.main_work_generation(), main_work_before);
         assert_eq!(wake.counters().snapshot(), counters_before);
+
+        // A FrameReady user event can be followed by raw mouse motion before
+        // about_to_wait. An unchanged cursor must not suppress present-only work.
+        let sender = harness.app.state.frame_ready_tx.as_ref().unwrap().clone();
+        sender.send(true).unwrap();
+        harness.app.state.wake.take_main_source();
+        harness.app.state.cursor_entry.tick = true;
+        assert_eq!(
+            harness.app.cursor_entry_turn(),
+            CursorEntryTurn::FullTurn,
+            "ready image bypasses cursor-only early return"
+        );
+        assert_eq!(wake.main_work_generation(), main_work_before);
+        harness.app.maybe_present_frame_with(|| Some(false));
+        assert!(!harness.app.state.frame_ready_rx.has_changed().unwrap());
+        assert_eq!(
+            harness.app.cursor_entry_turn(),
+            CursorEntryTurn::FullTurn,
+            "deferred image also bypasses cursor-only early return"
+        );
+        assert_eq!(wake.main_work_generation(), main_work_before);
+        harness.app.maybe_present_frame_with(|| None);
+        assert!(matches!(
+            harness.app.cursor_entry_turn(),
+            CursorEntryTurn::Quiet { next: None }
+        ));
+        assert_eq!(wake.compositor().checkpoint(), compositor_before);
 
         // Entering a region is a hover change: one full turn, one wake.
         harness.app.state.cursor_x = 120.0;
