@@ -836,6 +836,7 @@ mod tests {
             "hidden",
             "removed",
             "wrong-window",
+            "old-tile-press",
             "native-missing-up",
             "native-mismatched-up",
             "native-cancel",
@@ -845,6 +846,9 @@ mod tests {
             "no-op",
             "release-only",
         ] {
+            let native = (case.starts_with("native-") || case == "old-tile-press")
+                .then(|| super::super::lifecycle::ChromeCaptureTestScope::new(window));
+            let old_grip;
             let definition;
             {
                 let shared = app.state.shared_state.try_lock().unwrap();
@@ -865,6 +869,13 @@ mod tests {
                 compositor.prime_truncation_cache(&scene);
                 compositor.render_frame(&mut scene, &surface);
                 refresh_interaction_hit_regions_after_render(&compositor, &mut scene, &surface);
+                old_grip = scene
+                    .overlay
+                    .drag_handle_hit_regions
+                    .iter()
+                    .find(|h| h.element_id == tile_id)
+                    .unwrap()
+                    .bounds;
                 let grip = scene
                     .overlay
                     .drag_handle_hit_regions
@@ -873,6 +884,22 @@ mod tests {
                     .unwrap();
                 app.state.cursor_x = grip.bounds.x + grip.bounds.width / 2.0;
                 app.state.cursor_y = grip.bounds.y + grip.bounds.height / 2.0;
+            }
+            if case == "old-tile-press" {
+                let zone_cursor = (app.state.cursor_x, app.state.cursor_y);
+                app.state.cursor_x = old_grip.x + old_grip.width / 2.0;
+                app.state.cursor_y = old_grip.y + old_grip.height / 2.0;
+                let native = native.as_ref().unwrap();
+                let receipt = native.begin(true);
+                app.handle_mouse_button(winit::event::MouseButton::Left, true, window, None);
+                native.complete(receipt);
+                assert_eq!(
+                    app.state.input_processor.drag_states[&0].element_id, tile_id,
+                    "the old press really belongs to the unrelated rendered Tile grip"
+                );
+                // Deliberately omit its delivered Up. No about-to-wait or
+                // cursor-motion fallback intervenes before the fresh menu Down.
+                (app.state.cursor_x, app.state.cursor_y) = zone_cursor;
             }
             app.handle_mouse_button(winit::event::MouseButton::Right, false, window, None);
             let action;
@@ -915,9 +942,6 @@ mod tests {
             let shared_state = std::sync::Arc::clone(&app.state.shared_state);
             let availability = app.state.wake.main_work_generation();
             let held = (case == "busy").then(|| shared_state.try_lock().unwrap());
-            let native = case
-                .starts_with("native-")
-                .then(|| super::super::lifecycle::ChromeCaptureTestScope::new(window));
             if case != "release-only" {
                 let receipt = native.as_ref().and_then(|n| n.begin(true));
                 app.handle_mouse_button(winit::event::MouseButton::Left, true, window, None);
