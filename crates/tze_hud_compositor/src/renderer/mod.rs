@@ -2084,6 +2084,11 @@ impl Compositor {
             return; // text renderer not yet initialized; retry next version change
         }
 
+        // Commit-time truncation precedes frame geometry. Resolve action rows
+        // with the live rasterizer fonts first, so visible slots and text keys
+        // already match the draw pass (including uploaded-font fallback).
+        self.prime_notification_layouts(scene, scene.display_area.width, scene.display_area.height);
+
         // Zone StreamText items are not produced by the tile-node walk below, so
         // prime them separately.  Without this, an overflowing streaming zone
         // would hit the render path with no cache entry and fall back to raw
