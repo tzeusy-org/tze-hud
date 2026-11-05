@@ -2084,6 +2084,11 @@ impl Compositor {
             return; // text renderer not yet initialized; retry next version change
         }
 
+        // Commit-time truncation precedes frame geometry. Resolve action rows
+        // with the live rasterizer fonts first, so visible slots and text keys
+        // already match the draw pass (including uploaded-font fallback).
+        self.prime_notification_layouts(scene, scene.display_area.width, scene.display_area.height);
+
         // Zone StreamText items are not produced by the tile-node walk below, so
         // prime them separately.  Without this, an overflowing streaming zone
         // would hit the render path with no cache entry and fall back to raw
@@ -2094,11 +2099,19 @@ impl Compositor {
         //
         // Computed here (before the &mut self.text_rasterizer borrow below) so
         // the &self collector does not conflict with that borrow.
-        let zone_stream_items = self.collect_zone_stream_text_ellipsis_items(
+        let mut zone_ellipsis_items = self.collect_zone_stream_text_ellipsis_items(
             scene,
             scene.display_area.width,
             scene.display_area.height,
         );
+
+        // Notification title/body bands share draw geometry and the existing
+        // bounded ellipsis machinery; Clip action labels are not primed.
+        zone_ellipsis_items.extend(self.collect_notification_ellipsis_items(
+            scene,
+            scene.display_area.width,
+            scene.display_area.height,
+        ));
 
         // Record the version and timestamp now that priming will proceed.
         self.truncation_cache_scene_version = scene.version;
@@ -2179,10 +2192,10 @@ impl Compositor {
             }
         }
 
-        // Append the zone StreamText Ellipsis items computed before the
+        // Append the zone StreamText/notification Ellipsis items computed before the
         // rasterizer borrow (see comment above) so they are primed alongside the
         // tile-node items.
-        live_items.extend(zone_stream_items);
+        live_items.extend(zone_ellipsis_items);
 
         // Update the cached content byte count for the adaptive cadence gate on
         // the *next* call.  Summing item lengths is O(n) in item count here, but

@@ -70,7 +70,11 @@ otherwise. Scheduled zone publications count as held before presentation;
   width. Layout uses the owner's font, theme, scale and action metric tokens,
   and unchanged frames reuse the publication's measured geometry. Long labels
   retain the existing bounded Clip policy inside each full-width button; a
-  label longer than that width cannot displace the later options. The zone's
+  label longer than that width cannot displace the later options. Stacked
+  notification title and body each retain their bounded line: text that fits
+  is shown in full, while overflow ends with a visible ellipsis. The body does
+  not grow the card or displace actions; keep instructions longer than this
+  budget in chat or another reading surface. The zone's
   existing whole-card visibility bounds still apply. `type` may be
   omitted; the runtime infers it from what the zone accepts. For notifications,
   a nonempty `key` addresses one card within that zone and authenticated
