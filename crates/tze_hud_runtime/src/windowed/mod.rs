@@ -723,7 +723,11 @@ fn shutdown_after_terminal_surface_recovery(
 // Temporary bounded checkpoints for the retained Windows uninstall timeout.
 // PID binding separates the tracked fullscreen instance from installer/boot logs.
 fn trace_shutdown_phase(phase: &'static str) {
-    tracing::info!(pid = std::process::id(), phase, "[DEBUG-hud-lks0i] lifecycle");
+    tracing::info!(
+        pid = std::process::id(),
+        phase,
+        "[DEBUG-hud-lks0i] lifecycle"
+    );
 }
 
 /// The part of winit's [`ActiveEventLoop`] that leaving the loop uses.
