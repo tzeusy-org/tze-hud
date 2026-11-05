@@ -2023,8 +2023,9 @@ mod tests {
             1080.0,
         );
 
-        let released =
-            released_on_up.expect("PointerUp after activated drag must return released data");
+        let Some(DragRelease::Tile(released)) = released_on_up else {
+            panic!("PointerUp after activated tile drag must return tile persistence data");
+        };
         assert_eq!(
             released.element_id, element_id,
             "released element_id must match the dragged tile"
