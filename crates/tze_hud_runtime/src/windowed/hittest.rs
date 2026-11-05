@@ -911,7 +911,7 @@ mod tests {
                 app.state.cursor_y = action.y + action.height + 8.0;
             }
             let shared_state = std::sync::Arc::clone(&app.state.shared_state);
-            let availability = app.state.wake.main_work_checkpoint().generation;
+            let availability = app.state.wake.main_work_generation();
             let held = (case == "busy").then(|| shared_state.try_lock().unwrap());
             let native = case
                 .starts_with("native-")
@@ -986,13 +986,13 @@ mod tests {
             drop(held);
             if case == "busy" {
                 let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
-                while app.state.wake.main_work_checkpoint().generation == availability
+                while app.state.wake.main_work_generation() == availability
                     && std::time::Instant::now() < deadline
                 {
                     tokio::task::yield_now().await;
                 }
                 assert!(
-                    app.state.wake.main_work_checkpoint().generation > availability,
+                    app.state.wake.main_work_generation() > availability,
                     "lock release delivers the existing completion wake before settlement"
                 );
             }
