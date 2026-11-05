@@ -5121,7 +5121,11 @@ mod tests {
         let sender = harness.app.state.frame_ready_tx.as_ref().unwrap().clone();
         sender.send(true).unwrap();
         harness.app.state.wake.take_main_source();
-        harness.app.state.cursor_entry.tick = true;
+        harness.app.sync_cursor_entry_listening();
+        harness
+            .app
+            .on_device_event(&winit::event::DeviceEvent::MouseMotion { delta: (1.0, 0.0) });
+        assert!(harness.app.state.cursor_entry.tick);
         assert_eq!(
             harness.app.cursor_entry_turn(),
             CursorEntryTurn::FullTurn,
@@ -5130,6 +5134,9 @@ mod tests {
         assert_eq!(wake.main_work_generation(), main_work_before);
         harness.app.maybe_present_frame_with(|| Some(false));
         assert!(!harness.app.state.frame_ready_rx.has_changed().unwrap());
+        harness
+            .app
+            .on_device_event(&winit::event::DeviceEvent::MouseMotion { delta: (1.0, 0.0) });
         assert_eq!(
             harness.app.cursor_entry_turn(),
             CursorEntryTurn::FullTurn,
