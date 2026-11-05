@@ -381,51 +381,93 @@ mod calibration {
         }
     }
 
-    // The existing producer's scheduling boundary, shared with its no-GPU
-    // regression. Choice work still owns SharedState -> scene and live activation.
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum PortalPhase {
+        AwaitAttach,
+        AwaitClear,
+        ChoiceAllowed,
+        ChoiceActivated,
+    }
+
+    // Fixture ordering only. Choice work still owns SharedState -> scene and
+    // real activation; no runtime input/deadline/retention contract changes.
     struct FixtureProducer {
         portals: PortalHandle,
-        agent: String,
-        input_injected: bool,
-        choice_activated: bool,
+        key: PortalKey,
+        phase: std::sync::Arc<std::sync::Mutex<PortalPhase>>,
+        input_ready: std::sync::Arc<tokio::sync::Notify>,
         changed: std::sync::Arc<tokio::sync::Notify>,
     }
 
     impl FixtureProducer {
         fn new(portals: PortalHandle, agent: String) -> Self {
+            let input_ready = portals
+                .input_notify(&agent)
+                .expect("calibration input readiness");
             Self {
                 portals,
-                agent,
-                input_injected: false,
-                choice_activated: false,
+                key: PortalKey::new(agent, "claude-main"),
+                phase: std::sync::Arc::new(std::sync::Mutex::new(PortalPhase::AwaitAttach)),
+                input_ready,
                 changed: Default::default(),
             }
         }
 
         fn ingress_wake(&self) -> tze_hud_scene::render_wake::RenderWakeNotifier {
-            Default::default()
+            let (portals, key, phase, input_ready, changed) = (
+                self.portals.clone(),
+                self.key.clone(),
+                self.phase.clone(),
+                self.input_ready.clone(),
+                self.changed.clone(),
+            );
+            tze_hud_scene::render_wake::RenderWakeNotifier::new(move || {
+                // MCP calls this synchronously after Hub unlock, before sending
+                // its already-snapshotted response. Never acquire the scene here.
+                let (injected, cleared) = {
+                    let mut phase = phase.lock().expect("calibration phase");
+                    if matches!(
+                        *phase,
+                        PortalPhase::ChoiceAllowed | PortalPhase::ChoiceActivated
+                    ) {
+                        return;
+                    }
+                    let mut hub = portals.hub.lock().expect("calibration hub");
+                    match *phase {
+                        PortalPhase::AwaitAttach if hub.get(&key).is_some() => {
+                            hub.inject_input(
+                                &key,
+                                "canonical-input-0001",
+                                "Canonical HUD-originated input.",
+                            )
+                            .expect("inject canonical portal input");
+                            *phase = PortalPhase::AwaitClear;
+                            (true, false)
+                        }
+                        PortalPhase::AwaitClear if hub.get(&key).is_none() => {
+                            *phase = PortalPhase::ChoiceAllowed;
+                            (false, true)
+                        }
+                        _ => (false, false),
+                    }
+                };
+                // Readiness never owns an answer, and no guard crosses a signal.
+                if injected {
+                    input_ready.notify_waiters();
+                }
+                if cleared {
+                    changed.notify_one();
+                }
+            })
         }
 
         fn choice_work_pending(&self) -> bool {
-            !self.choice_activated
+            *self.phase.lock().expect("calibration phase") == PortalPhase::ChoiceAllowed
         }
 
         async fn step(&mut self, choice_work: impl std::future::Future<Output = bool>) -> bool {
-            if !self.input_injected {
-                let mut hub = self.portals.hub.lock().expect("calibration hub");
-                if let Some(first) = hub.list(&self.agent).first() {
-                    let key = PortalKey::new(self.agent.clone(), first.id.clone());
-                    hub.inject_input(
-                        &key,
-                        "canonical-input-0001",
-                        "Canonical HUD-originated input.",
-                    )
-                    .expect("inject canonical portal input");
-                    self.input_injected = true;
-                }
-            }
-            if !self.choice_activated && choice_work.await {
-                self.choice_activated = true;
+            if self.choice_work_pending() && choice_work.await {
+                *self.phase.lock().expect("calibration phase") = PortalPhase::ChoiceActivated;
                 return true;
             }
             false
