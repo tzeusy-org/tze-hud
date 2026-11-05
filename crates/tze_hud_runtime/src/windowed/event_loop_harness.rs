@@ -2175,6 +2175,7 @@ mod tests {
                 harness.app.enqueue_pointer_event(PointerEventKind::Move);
                 assert!(harness.scene().is_drag_active(id));
                 let stale = harness.app.state.primary_drag_gesture.clone();
+                harness.app.state.cursor_y = 291.0;
                 harness.app.enqueue_pointer_event(PointerEventKind::Down);
                 harness.app.state.cursor_y += 1.0;
                 harness.app.enqueue_pointer_event(PointerEventKind::Move);
