@@ -454,7 +454,12 @@ impl WinitApp {
             {
                 return false;
             }
-            let current = menu.as_ref().and_then(|m| m.as_ref());
+            // Cancellation is authoritative immediately, even before its
+            // deferred scene teardown can acquire the lock.
+            let current = menu
+                .as_ref()
+                .and_then(|m| m.as_ref())
+                .filter(|_| !self.state.context_menu_dismiss_pending);
             self.state.context_menu_press = Some(ContextMenuPress {
                 menu: current.map(|m| (m.element_id, m.shown_at_ns)),
                 window,
@@ -489,6 +494,7 @@ impl WinitApp {
                 if scene.overlay.drag_handle_context_menu.take().is_some() {
                     scene.bump_geometry_epoch();
                 }
+                self.state.context_menu_dismiss_pending = false;
             } else {
                 self.state.context_menu_dismiss_pending = true;
             }
