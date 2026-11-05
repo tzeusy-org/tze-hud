@@ -3172,7 +3172,7 @@ impl WinitApp {
                 } else {
                     self.state.deferred_present = true;
                     if let Some(surface) = &self.state.window_surface {
-                        deferred.push(Arc::clone(surface));
+                        deferred.push(std::sync::Arc::clone(surface));
                     }
                 }
             }
