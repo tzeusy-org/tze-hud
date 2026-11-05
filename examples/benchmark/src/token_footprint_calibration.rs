@@ -12,7 +12,7 @@ mod calibration {
     use tze_hud_runtime::headless::{HeadlessConfig, HeadlessRuntime};
     use tze_hud_runtime::portal::{PortalHandle, PortalHub, PortalKey};
     use tze_hud_runtime::threads::{ShutdownReason, ShutdownToken};
-    use tze_hud_runtime::{McpServerConfig, start_mcp_http_server};
+    use tze_hud_runtime::{McpServerConfig, start_mcp_http_server_with_render_wake};
     use tze_hud_scene::types::{
         ContentionPolicy, GeometryPolicy, RenderingPolicy, SceneId, WidgetDefinition,
         WidgetInstance, WidgetParamConstraints, WidgetParamType, WidgetParameterDeclaration,
@@ -361,17 +361,8 @@ mod calibration {
         }
     }
 
-    pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
-        let output_path = parse_output_path();
-        let runtime = HeadlessRuntime::new(headless_config()).await?;
-        prepare_scene(&runtime).await;
-        let scene = scene_handle(&runtime).await;
-        let portals = PortalHandle::new(
-            PortalHub::default(),
-            std::sync::Arc::new(tze_hud_scene::SystemClock::new()),
-        );
-        let shutdown = ShutdownToken::new();
-        let config = McpServerConfig {
+    fn server_config() -> McpServerConfig {
+        McpServerConfig {
             publication_defaults: Default::default(),
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
                 &Default::default(),
@@ -387,33 +378,133 @@ mod calibration {
             bind_gate: None,
             pairing: None,
             appearance: None,
-        };
-        let (server_task, addresses) =
-            start_mcp_http_server(scene, config, shutdown.clone(), Some(portals.clone())).await?;
-        let (choice_ready_tx, choice_ready_rx) = mpsc::channel();
-        let mut python =
-            tokio::task::spawn_blocking(move || run_python_driver(addresses[0], choice_ready_rx));
+        }
+    }
+
+    #[derive(Clone, Copy, PartialEq, Eq)]
+    enum PortalPhase {
+        AwaitAttach,
+        AwaitClear,
+        ChoiceAllowed,
+        ChoiceActivated,
+    }
+
+    // Fixture ordering only. Choice work still owns SharedState -> scene and
+    // real activation; no runtime input/deadline/retention contract changes.
+    struct FixtureProducer {
+        portals: PortalHandle,
+        key: PortalKey,
+        phase: std::sync::Arc<std::sync::Mutex<PortalPhase>>,
+        input_ready: std::sync::Arc<tokio::sync::Notify>,
+        changed: std::sync::Arc<tokio::sync::Notify>,
+    }
+
+    impl FixtureProducer {
+        fn new(portals: PortalHandle, agent: String) -> Self {
+            let input_ready = portals
+                .input_notify(&agent)
+                .expect("calibration input readiness");
+            Self {
+                portals,
+                key: PortalKey::new(agent, "claude-main"),
+                phase: std::sync::Arc::new(std::sync::Mutex::new(PortalPhase::AwaitAttach)),
+                input_ready,
+                changed: Default::default(),
+            }
+        }
+
+        fn ingress_wake(&self) -> tze_hud_scene::render_wake::RenderWakeNotifier {
+            let (portals, key, phase, input_ready, changed) = (
+                self.portals.clone(),
+                self.key.clone(),
+                self.phase.clone(),
+                self.input_ready.clone(),
+                self.changed.clone(),
+            );
+            tze_hud_scene::render_wake::RenderWakeNotifier::new(move || {
+                // MCP calls this synchronously after Hub unlock, before sending
+                // its already-snapshotted response. Never acquire the scene here.
+                let (injected, cleared) = {
+                    let mut phase = phase.lock().expect("calibration phase");
+                    if matches!(
+                        *phase,
+                        PortalPhase::ChoiceAllowed | PortalPhase::ChoiceActivated
+                    ) {
+                        return;
+                    }
+                    let mut hub = portals.hub.lock().expect("calibration hub");
+                    match *phase {
+                        PortalPhase::AwaitAttach if hub.get(&key).is_some() => {
+                            hub.inject_input(
+                                &key,
+                                "canonical-input-0001",
+                                "Canonical HUD-originated input.",
+                            )
+                            .expect("inject canonical portal input");
+                            *phase = PortalPhase::AwaitClear;
+                            (true, false)
+                        }
+                        PortalPhase::AwaitClear if hub.get(&key).is_none() => {
+                            *phase = PortalPhase::ChoiceAllowed;
+                            (false, true)
+                        }
+                        _ => (false, false),
+                    }
+                };
+                // Readiness never owns an answer, and no guard crosses a signal.
+                if injected {
+                    input_ready.notify_waiters();
+                }
+                if cleared {
+                    changed.notify_one();
+                }
+            })
+        }
+
+        fn choice_work_pending(&self) -> bool {
+            *self.phase.lock().expect("calibration phase") == PortalPhase::ChoiceAllowed
+        }
+
+        async fn step(&mut self, choice_work: impl std::future::Future<Output = bool>) -> bool {
+            if self.choice_work_pending() && choice_work.await {
+                *self.phase.lock().expect("calibration phase") = PortalPhase::ChoiceActivated;
+                return true;
+            }
+            false
+        }
+    }
+
+    pub async fn run() -> Result<(), Box<dyn std::error::Error>> {
+        let output_path = parse_output_path();
+        let runtime = HeadlessRuntime::new(headless_config()).await?;
+        prepare_scene(&runtime).await;
+        let scene = scene_handle(&runtime).await;
+        let portals = PortalHandle::new(
+            PortalHub::default(),
+            std::sync::Arc::new(tze_hud_scene::SystemClock::new()),
+        );
+        let shutdown = ShutdownToken::new();
         let agent = tze_hud_scene::config::AgentDirectory::unrestricted(PSK)
             .resolve(PSK, "")
             .expect("calibration agent")
             .agent_id;
-        let mut input_injected = false;
-        let mut choice_activated = false;
+        let mut producer = FixtureProducer::new(portals.clone(), agent.clone());
+        let changed = producer.changed.clone();
+        let (server_task, addresses) = start_mcp_http_server_with_render_wake(
+            scene,
+            server_config(),
+            shutdown.clone(),
+            Some(portals.clone()),
+            Default::default(),
+            producer.ingress_wake(),
+            Default::default(),
+        )
+        .await?;
+        let (choice_ready_tx, choice_ready_rx) = mpsc::channel();
+        let mut python =
+            tokio::task::spawn_blocking(move || run_python_driver(addresses[0], choice_ready_rx));
         let driver_output = loop {
-            if !input_injected {
-                let mut hub = portals.hub.lock().expect("calibration hub");
-                if let Some(first) = hub.list(&agent).first() {
-                    let key = PortalKey::new(agent.clone(), first.id.clone());
-                    hub.inject_input(
-                        &key,
-                        "canonical-input-0001",
-                        "Canonical HUD-originated input.",
-                    )
-                    .expect("inject canonical portal input");
-                    input_injected = true;
-                }
-            }
-            if !choice_activated {
+            let activated = producer.step(async {
                 let shared = runtime.shared_state().lock().await;
                 let mut scene = shared.scene.lock().await;
                 // Do not shape earlier notifications while the independent
@@ -456,19 +547,25 @@ mod calibration {
                 } else {
                     None
                 };
-                choice_activated = wake.is_some();
                 drop(scene);
                 drop(shared);
                 if let Some(wake) = wake {
                     wake.notify();
-                    choice_ready_tx
-                        .send(())
-                        .expect("notify driver after shared choice activation");
+                    true
+                } else {
+                    false
                 }
+            }).await;
+            if activated {
+                choice_ready_tx
+                    .send(())
+                    .expect("notify driver after shared choice activation");
             }
             tokio::select! {
                 result = &mut python => break result?,
-                _ = tokio::time::sleep(std::time::Duration::from_millis(1)) => {}
+                _ = changed.notified() => {},
+                _ = tokio::time::sleep(std::time::Duration::from_millis(1)),
+                    if producer.choice_work_pending() => {}
             }
         };
         let output = build_output(driver_output);
@@ -484,6 +581,168 @@ mod calibration {
     #[cfg(test)]
     mod tests {
         use super::*;
+
+        // A plain scene and loopback MCP exercise the real producer scheduling
+        // boundary; neither this parent nor its injected work constructs a GPU.
+        #[tokio::test]
+        async fn portal_lifecycle_excludes_fixture_scene_work_from_input() {
+            use serde_json::{Value, json};
+            use std::future::Future;
+            use std::sync::{
+                Arc,
+                atomic::{AtomicUsize, Ordering},
+            };
+            use std::task::{Context, Waker};
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+            async fn call(address: SocketAddr, name: &str, args: Value) -> (bool, Value) {
+                let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+                    "params":{"name":name,"arguments":args}})
+                .to_string();
+                let mut stream = tokio::net::TcpStream::connect(address).await.unwrap();
+                let request = format!(
+                    "POST /mcp HTTP/1.0\r\nAuthorization: Bearer {PSK}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                    body.len()
+                );
+                stream.write_all(request.as_bytes()).await.unwrap();
+                let mut raw = Vec::new();
+                stream.read_to_end(&mut raw).await.unwrap();
+                let raw = String::from_utf8(raw).unwrap();
+                let (header, body) = raw.split_once("\r\n\r\n").unwrap();
+                assert!(
+                    header.starts_with("HTTP/1.1 200") || header.starts_with("HTTP/1.0 200"),
+                    "{raw}"
+                );
+                let response: Value = serde_json::from_str(body).unwrap();
+                assert!(response.get("error").is_none(), "{response}");
+                let result = &response["result"];
+                (
+                    result["isError"].as_bool().unwrap_or(false),
+                    serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap(),
+                )
+            }
+
+            tokio::time::timeout(std::time::Duration::from_secs(15), async {
+                let mut overlap_failures = Vec::new();
+                for case in ["poll", "ack", "controls"] {
+                    if case == "controls" && !overlap_failures.is_empty() {
+                        continue; // Report both semantic RED rows before positive controls.
+                    }
+                    let mut graph = tze_hud_scene::graph::SceneGraph::new(1920.0, 1080.0);
+                    graph.zone_registry = tze_hud_scene::ZoneRegistry::with_defaults();
+                    let scene = Arc::new(tokio::sync::Mutex::new(graph));
+                    let portals = PortalHandle::new(PortalHub::default(), Arc::new(tze_hud_scene::SystemClock::new()));
+                    let agent = tze_hud_scene::config::AgentDirectory::unrestricted(PSK).resolve(PSK, "").unwrap().agent_id;
+                    let key = PortalKey::new(agent.clone(), "claude-main");
+                    let mut producer = FixtureProducer::new(portals.clone(), agent.clone());
+                    let ingress = producer.ingress_wake();
+                    let shutdown = ShutdownToken::new();
+                    let (server, addresses) = start_mcp_http_server_with_render_wake(
+                        scene.clone(), server_config(), shutdown.clone(), Some(portals.clone()),
+                        Default::default(), ingress.clone(), Default::default(),
+                    ).await.unwrap();
+                    let address = addresses[0];
+
+                    if case == "controls" {
+                        let work = AtomicUsize::new(0);
+                        ingress.notify(); // Boot absence never means clear.
+                        producer.step(async { work.fetch_add(1, Ordering::SeqCst); false }).await;
+                        assert_eq!(work.load(Ordering::SeqCst), 0);
+                        assert!(!producer.choice_work_pending());
+                        let foreign = call(address, "hud_publish", json!({"surface":"portal:foreign", "content":"other"})).await;
+                        assert!(!foreign.0);
+                        ingress.notify();
+                        producer.step(async { work.fetch_add(1, Ordering::SeqCst); false }).await;
+                        assert_eq!(work.load(Ordering::SeqCst), 0);
+                        assert!(portals.hub.lock().unwrap().get(&PortalKey::new(agent.clone(), "foreign")).unwrap().inputs.is_empty());
+                        let attached = call(address, "hud_publish", json!({"surface":"portal:claude-main", "content":"Tests pass. Ship it?", "status":"active", "expects_reply":true, "ttl_ms":120000})).await;
+                        assert_eq!(attached, (false, json!({"ok":true,"reattached":false,"pending_input":0,"expires_in_ms":120000})));
+                        // Repeated ingress, real delivery/lease and ACK must neither
+                        // re-inject nor authorize choice work while this key exists.
+                        ingress.notify();
+                        ingress.notify();
+                        assert_eq!(portals.hub.lock().unwrap().get(&key).unwrap().inputs.len(), 1);
+                        let polled = call(address, "hud_input", json!({"wait_ms":1000})).await;
+                        assert_eq!(polled, (false, json!({"items":[{"id":"canonical-input-0001","s":"portal:claude-main","text":"Canonical HUD-originated input."}],"remaining":0})));
+                        let acked = call(address, "hud_input", json!({"ack":[polled.1["items"][0]["id"]]})).await;
+                        assert_eq!(acked, (false, json!({"items":[],"remaining":0})));
+                        assert!(portals.hub.lock().unwrap().get(&key).unwrap().inputs.is_empty());
+                        call(address, "hud_clear", json!({"surface":"portal:foreign"})).await;
+                        producer.step(async { work.fetch_add(1, Ordering::SeqCst); false }).await;
+                        assert_eq!(work.load(Ordering::SeqCst), 0, "foreign clear is not this portal clear");
+                        assert!(!call(address, "hud_clear", json!({"surface":"portal:claude-main"})).await.0);
+                        assert!(producer.choice_work_pending());
+                        let before = {
+                            let scene = scene.lock().await;
+                            (scene.version, scene.leases.clone(), scene.zone_registry.active_publishes.len())
+                        };
+                        let rejected = call(address, "hud_publish", json!({"surface":"zone:subtitles","content":"hello"})).await;
+                        let mut names: Vec<_> = scene.lock().await.zone_registry.zones.keys().cloned().collect();
+                        names.sort();
+                        assert_eq!(rejected, (true, json!({"code":"ZONE_NOT_FOUND","hint":format!("no zone subtitles; known: {}", names.join(", "))})));
+                        let after = scene.lock().await;
+                        assert_eq!((after.version, after.leases.clone(), after.zone_registry.active_publishes.len()), before);
+                        drop(after);
+                        // This closure witnesses only permission for scene work;
+                        // canonical calibration retains actual layout/live activation.
+                        assert!(producer.step(async { work.fetch_add(1, Ordering::SeqCst); true }).await);
+                        assert_eq!(work.load(Ordering::SeqCst), 1);
+                        ingress.notify();
+                        assert!(portals.hub.lock().unwrap().get(&key).is_none());
+                        assert!(!producer.step(async { panic!("no post-readiness scene work"); }).await);
+                        assert!(!producer.choice_work_pending());
+                    } else {
+                        let attached = call(address, "hud_publish", json!({"surface":"portal:claude-main", "content":"Tests pass. Ship it?", "status":"active", "expects_reply":true, "ttl_ms":120000})).await;
+                        assert_eq!(attached, (false, json!({"ok":true,"reattached":false,"pending_input":0,"expires_in_ms":120000})));
+                        let mut returned_id = None;
+                        if case == "ack" {
+                            producer.step(async { let _held = scene.lock().await; false }).await;
+                            let polled = call(address, "hud_input", json!({"wait_ms":1000})).await;
+                            assert!(!polled.0, "{polled:?}");
+                            returned_id = Some(polled.1["items"][0]["id"].as_str().unwrap().to_string());
+                        }
+                        let acquired = AtomicUsize::new(0);
+                        // Manually poll the actual step once. Only if it acquires
+                        // its actual scene-work guard does this test-only seam hold
+                        // it pending across real HTTP; no sleep decides ownership.
+                        let mut step = Box::pin(producer.step(async {
+                            let _held = scene.lock().await;
+                            acquired.fetch_add(1, Ordering::SeqCst);
+                            std::future::pending::<()>().await;
+                            false
+                        }));
+                        let _ = step.as_mut().poll(&mut Context::from_waker(Waker::noop()));
+                        let args = match &returned_id {
+                            Some(id) => json!({"ack":[id]}), // omitted wait_ms remains0
+                            None => json!({"wait_ms":1000}),
+                        };
+                        let result = call(address, "hud_input", args.clone()).await;
+                        drop(step);
+                        if result.0 {
+                            assert_eq!(acquired.load(Ordering::SeqCst), 1);
+                            assert_eq!(result.1, json!({"code":"INTERNAL","hint":"input state busy; retry hud_input"}));
+                            eprintln!("controlled overlap RED: {case} args={args} result={:?}", result.1);
+                            overlap_failures.push(case);
+                        } else {
+                            assert_eq!(acquired.load(Ordering::SeqCst), 0, "fixture must not probe scene through poll/ACK");
+                            let expected = if case == "poll" {
+                                json!({"items":[{"id":"canonical-input-0001","s":"portal:claude-main","text":"Canonical HUD-originated input."}],"remaining":0})
+                            } else { json!({"items":[],"remaining":0}) };
+                            assert_eq!(result.1, expected);
+                            // A different owner's real scene contention remains a
+                            // bounded error after the fixture overlap is repaired.
+                            let held = scene.lock().await;
+                            let busy = call(address, "hud_input", args).await;
+                            assert_eq!(busy, (true, json!({"code":"INTERNAL","hint":"input state busy; retry hud_input"})));
+                            drop(held);
+                        }
+                    }
+                    shutdown.trigger(ShutdownReason::Clean);
+                    server.await.unwrap();
+                }
+                assert!(overlap_failures.is_empty(), "fixture must avoid controlled scene overlap for real MCP calls; failed rows: {overlap_failures:?}");
+            }).await.expect("bounded calibration scheduling parent");
+        }
 
         #[test]
         fn summing_counts_is_exact_integer_addition() {

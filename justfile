@@ -86,9 +86,9 @@ fmt-fix:
     {{py}} scripts/cargo_source_guard.py --refuse-frozen-helper
     cargo fmt
 
-# cargo clippy: lint gate — all targets, deny warnings (mirror CI clippy job, first step)
+# cargo clippy: all targets + calibration headless cfg, deny warnings (mirror CI)
 clippy:
-    {{cargo}} clippy --workspace --all-targets -- -D warnings
+    {{cargo}} clippy --workspace --all-targets --features benchmark/headless -- -D warnings
 
 # Git supplies all proposed ref tuples; direct invocation checks current HEAD.
 [positional-arguments]
@@ -96,11 +96,11 @@ pre-push mode="head":
     #!/usr/bin/env sh
     exec {{py}} scripts/pre_push.py "$1"
 
-# Selection belongs to pre-push; never select only the changed crates.
+# Selection belongs to pre-push; include calibration headless cfg, not only changed crates.
 [private]
 pre-push-check:
     {{cargo}} fmt --all --check
-    {{cargo}} clippy --workspace --all-targets -- -D warnings
+    {{cargo}} clippy --workspace --all-targets --features benchmark/headless -- -D warnings
 
 # ── Tests ────────────────────────────────────────────────────────────────────
 
@@ -160,6 +160,7 @@ test-python:
 # Deterministic LLM-facing token-footprint gate (mirror CI test job, last step)
 token-footprint:
     mkdir -p test_results/token-footprint
+    {{cargo}} test -p benchmark --features headless --bin token_footprint_calibration
     if [ -f {{lvp}} ]; then export VK_ICD_FILENAMES={{lvp}}; fi; \
     HEADLESS_FORCE_SOFTWARE=1 {{cargo}} run -p benchmark --features headless \
         --bin token_footprint_calibration -- \

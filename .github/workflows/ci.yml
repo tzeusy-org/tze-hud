@@ -24,7 +24,7 @@
 #             cargo deny advisories (advisory on PR/queue, fatal on main push:
 #             a new RUSTSEC entry must not block unrelated merges),
 #             pure-Python suites (user-test skill, scripts/tests, scripts/ci)
-#   clippy  — cargo clippy --workspace --all-targets -D warnings (subsumes
+#   clippy  — workspace all-targets + benchmark/headless, -D warnings (subsumes
 #             cargo check), then the cfg(windows) crates on the windows-gnu
 #             cross-target, which the Linux pass never compiles
 #   test    — pinned cargo nextest over the workspace minus `integration`
@@ -155,7 +155,7 @@ jobs:
         with:
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - name: cargo clippy (workspace, all targets, deny warnings)
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --features benchmark/headless -- -D warnings
       - name: cargo clippy (windows-gnu, cfg(windows) crates, deny warnings)
         env:
           # Lint only; real Windows builds retain their compiler/hash backend.
@@ -295,6 +295,8 @@ jobs:
           HEADLESS_FORCE_SOFTWARE: "1"
         run: |
           mkdir -p test_results/token-footprint
+          # Three calibration parents use plain scenes/HTTP, without GPU init.
+          cargo test -p benchmark --features headless --bin token_footprint_calibration
           cargo run -p benchmark --features headless \
             --bin token_footprint_calibration -- \
             --output test_results/token-footprint/measurement.json
