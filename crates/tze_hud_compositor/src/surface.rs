@@ -336,6 +336,7 @@ pub struct WindowSurface {
     /// `present_pending_texture()` (main thread) and `reconfigure()`
     /// (compositor thread) can wait for an in-flight submit without spinning.
     swapchain_done: std::sync::Arc<std::sync::Condvar>,
+    present_availability_waiting: std::sync::Arc<std::sync::atomic::AtomicBool>,
     /// Pending recovery lifecycle state, written by actual acquire failures and
     /// consumed by the compositor thread before its next frame build.
     surface_recovery: std::sync::Mutex<SurfaceRecoveryState>,
@@ -361,6 +362,42 @@ pub enum PendingPresent {
     Presented,
     Empty,
     DeferredEncoding,
+}
+
+/// Coalesced availability of one window's actual swapchain encoding guard.
+/// Different windows never wait behind one another's stalled encode.
+#[derive(Clone)]
+pub struct PresentAvailability {
+    slot: std::sync::Arc<std::sync::Mutex<SwapchainSlot>>,
+    done: std::sync::Arc<std::sync::Condvar>,
+    waiting: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl PresentAvailability {
+    /// Register one completion callback without blocking the event loop.
+    /// Returns false if an existing registration already owns this dependency.
+    pub fn notify_when_ready(&self, ready: impl FnOnce() + Send + 'static) -> bool {
+        if self.waiting.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            return false;
+        }
+        let availability = self.clone();
+        if let Err(error) = std::thread::Builder::new()
+            .name("tze-present-availability".into())
+            .spawn(move || {
+                wait_for_encoding(&availability.slot, &availability.done);
+                availability
+                    .waiting
+                    .store(false, std::sync::atomic::Ordering::Release);
+                ready();
+            })
+        {
+            self.waiting
+                .store(false, std::sync::atomic::Ordering::Release);
+            tracing::error!(%error, "failed to start present-availability waiter");
+            return false;
+        }
+        true
+    }
 }
 
 fn wait_for_encoding(slot: &std::sync::Mutex<SwapchainSlot>, done: &std::sync::Condvar) {
@@ -470,6 +507,9 @@ impl WindowSurface {
                 encoding: false,
             })),
             swapchain_done: std::sync::Arc::new(std::sync::Condvar::new()),
+            present_availability_waiting: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+                false,
+            )),
             surface_recovery: std::sync::Mutex::new(SurfaceRecoveryState::default()),
             pending_resize: std::sync::atomic::AtomicU64::new(0),
             presented_frame_count: std::sync::atomic::AtomicU64::new(0),
@@ -707,14 +747,18 @@ impl WindowSurface {
     /// Wait off the main thread for the dependency that deferred presentation.
     /// EncodingGuard closes this predicate under the same mutex and notifies
     /// the condvar, including when an encode unwinds. No timer or scene work.
-    pub fn wait_for_present_availability(&self) {
-        wait_for_encoding(&self.swapchain, &self.swapchain_done);
+    pub fn present_availability(&self) -> PresentAvailability {
+        PresentAvailability {
+            slot: self.swapchain.clone(),
+            done: self.swapchain_done.clone(),
+            waiting: self.present_availability_waiting.clone(),
+        }
     }
 
     /// Exercise the real encoding guard and availability predicate without a
     /// native swapchain. Only the final GPU resource is absent in this fixture.
     #[cfg(feature = "dev-mode")]
-    pub fn pending_encoding_for_test() -> (impl FnOnce() + Send, impl Send) {
+    pub fn pending_encoding_for_test() -> (PresentAvailability, impl Send) {
         let slot = std::sync::Arc::new(std::sync::Mutex::new(SwapchainSlot {
             pending: None,
             encoding: true,
@@ -724,7 +768,14 @@ impl WindowSurface {
             slot: slot.clone(),
             done: done.clone(),
         };
-        (move || wait_for_encoding(&slot, &done), guard)
+        (
+            PresentAvailability {
+                slot,
+                done,
+                waiting: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            },
+            guard,
+        )
     }
 
     /// Finish a successful acquire: release the swapchain lock, then build the
