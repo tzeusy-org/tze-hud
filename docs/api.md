@@ -661,8 +661,8 @@ stay unchanged. Right-click the grip for the labelled Reset to default action;
 its menu fits the originating display at that display's DPI times UI scale.
 Press and release the same menu action to restore the ordinary box. Outside
 click, timeout, focus/capture loss or a removed/hidden target dismisses without
-activating content underneath. Restart also restores the ordinary box. Clear, expiry and republishing keep the session placement. Zone
-moves/reset do not write saved geometry or emit agent reposition events.
+activating content underneath. Restart also restores the ordinary box. Clear,
+expiry and republishing keep the session placement. Zone moves/reset do not write saved geometry or emit agent reposition events.
 Unassigned zones, explicit primary assignments and disconnected-display
 fallbacks retain their primary-canvas grips. Connected-secondary zones keep
 content and controls on that display, with no zone grip; dragging does not

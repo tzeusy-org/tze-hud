@@ -137,7 +137,7 @@ nor layout admission. The single-item Reset menu publishes one frame-resolved
 paint/action/capture rect, measured with the renderer's font owner and clamped
 to the originating display. Its text has a separate prepared renderer sharing
 the same font system/atlas, above its plate and below safe-mode/system chrome;
-o stale glyphs replay after close. Menu Down/Up and captured moves stay local,
+no stale glyphs replay after close. Menu Down/Up and captured moves stay local,
 with matching menu/window identity required to reset and cancellation consumed.
 Menu open/close dirties geometry, using the existing deadline and availability
 wake paths rather than polling. The existing compositor drag feedback, chrome
