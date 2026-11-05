@@ -602,6 +602,7 @@ mod tests {
                 return;
             }
         };
+        compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
         let surface = HeadlessSurface::new(&compositor.device, 1920, 1080);
         let (mut scene, tile_id, _element_id, _interaction_id) =
             scene_with_drag_handle_tile(400.0, 300.0, 600.0, 200.0);
