@@ -1856,7 +1856,33 @@ mod tests {
         // replacement changes publication identity even when its labels match.
         for terminal in ["clear", "expiry", "replacement", "dismiss"] {
             let mut harness = approve_reject_notification_harness();
+            let original = harness.notification_action_center("approve").unwrap();
+            let placement = tze_hud_scene::GeometryPolicy::Relative {
+                x_pct: 0.5,
+                y_pct: 0.2,
+                width_pct: 0.35,
+                height_pct: 0.3,
+            };
+            {
+                let mut scene = harness.scene();
+                let id = scene.zone_registry.zones["notification-area"].id;
+                let version = scene.version;
+                let epoch = scene.geometry_epoch;
+                assert!(scene.set_zone_placement(id, placement));
+                assert_eq!(scene.geometry_epoch, epoch + 1);
+                assert!(!scene.set_zone_placement(id, placement));
+                assert_eq!(scene.geometry_epoch, epoch + 1);
+                assert_eq!(scene.version, version);
+            }
+            assert!(harness.tick());
             let approve = harness.notification_action_center("approve").unwrap();
+            assert!((approve.0 - original.0 + 192.0).abs() < 0.1);
+            assert!((approve.1 - original.1 - 216.0).abs() < 0.1);
+            assert_eq!(
+                harness.scene().overlay.zone_hit_regions.len(),
+                5,
+                "all four actions plus dismiss move together"
+            );
             harness.app.state.cursor_x = approve.0;
             harness.app.state.cursor_y = approve.1;
             harness.app.enqueue_pointer_event(PointerEventKind::Move);
@@ -1914,6 +1940,11 @@ mod tests {
             let epoch = geometry_epoch(&harness);
             assert!(harness.tick());
             assert_eq!(geometry_epoch(&harness), epoch, "{terminal} settles idle");
+            let scene = harness.scene();
+            assert_eq!(
+                scene.effective_zone_geometry(&scene.zone_registry.zones["notification-area"]),
+                placement
+            );
         }
 
         // A known terminal cancellation must disarm before the physical-Up

@@ -142,8 +142,9 @@ impl SceneGraph {
     /// Apply a session-only relative placement. No publication/version change.
     pub fn set_zone_placement(&mut self, id: SceneId, placement: GeometryPolicy) -> bool {
         if !matches!(placement, GeometryPolicy::Relative { .. })
-            || self.zone_by_id(id).is_none()
-            || self.overlay.zone_placements.get(&id) == Some(&placement)
+            || self
+                .zone_by_id(id)
+                .is_none_or(|zone| self.effective_zone_geometry(zone) == placement)
         {
             return false;
         }
@@ -168,8 +169,7 @@ impl SceneGraph {
     }
 
     /// Unregister a zone by name. Returns the removed definition if found.
-    #[cfg(test)]
-    pub(crate) fn unregister_zone(&mut self, name: &str) -> Option<ZoneDefinition> {
+    pub fn unregister_zone(&mut self, name: &str) -> Option<ZoneDefinition> {
         let removed = self.zone_registry.unregister(name);
         if removed.is_some() {
             self.prune_publication_orphans();
