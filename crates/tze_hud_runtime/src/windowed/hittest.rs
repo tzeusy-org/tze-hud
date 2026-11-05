@@ -836,6 +836,10 @@ mod tests {
             "hidden",
             "removed",
             "wrong-window",
+            "native-missing-up",
+            "native-mismatched-up",
+            "native-cancel",
+            "native-allowed",
             "busy",
             "overlap",
             "no-op",
@@ -907,10 +911,22 @@ mod tests {
                 app.state.cursor_y = action.y + action.height + 8.0;
             }
             let shared_state = std::sync::Arc::clone(&app.state.shared_state);
+            let availability = app.state.wake.main_work_checkpoint().generation;
             let held = (case == "busy").then(|| shared_state.try_lock().unwrap());
+            let native = case
+                .starts_with("native-")
+                .then(|| super::super::lifecycle::ChromeCaptureTestScope::new(window));
             if case != "release-only" {
+                let receipt = native.as_ref().and_then(|n| n.begin(true));
                 app.handle_mouse_button(winit::event::MouseButton::Left, true, window, None);
+                if let Some(native) = native.as_ref() {
+                    native.complete(receipt);
+                }
                 app.enqueue_pointer_event(PointerEventKind::Move);
+            }
+            if case == "native-cancel" {
+                native.as_ref().unwrap().lose();
+                app.drain_chrome_capture_cancellation();
             }
             if ["focus", "cancel-reentry"].contains(&case) {
                 app.handle_window_focus(None, false);
@@ -955,8 +971,31 @@ mod tests {
             } else {
                 window
             };
+            let receipt = native.as_ref().and_then(|n| {
+                if case == "native-missing-up" {
+                    None
+                } else {
+                    n.begin(case == "native-mismatched-up")
+                }
+            });
             app.handle_mouse_button(winit::event::MouseButton::Left, false, release_window, None);
+            if let Some(native) = native.as_ref() {
+                native.complete(receipt);
+            }
+            drop(native);
             drop(held);
+            if case == "busy" {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+                while app.state.wake.main_work_checkpoint().generation == availability
+                    && std::time::Instant::now() < deadline
+                {
+                    tokio::task::yield_now().await;
+                }
+                assert!(
+                    app.state.wake.main_work_checkpoint().generation > availability,
+                    "lock release delivers the existing completion wake before settlement"
+                );
+            }
             app.tick_context_menu_auto_dismiss();
             assert!(
                 !app.state.left_button_down && app.state.press_window.is_none(),
@@ -980,7 +1019,7 @@ mod tests {
                 if case == "hidden" {
                     scene.set_owner_hidden(Default::default());
                 }
-                let expected = if ["overlap", "no-op"].contains(&case) {
+                let expected = if ["overlap", "no-op", "native-allowed"].contains(&case) {
                     definition.geometry_policy
                 } else {
                     before
