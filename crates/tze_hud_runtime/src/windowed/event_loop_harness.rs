@@ -1219,6 +1219,10 @@ mod tests {
 
     impl CaptureRenderHarness {
         fn turn(&mut self, primary_succeeds: bool) -> bool {
+            self.turn_with_present(primary_succeeds, true)
+        }
+
+        fn turn_with_present(&mut self, primary_succeeds: bool, encoding_complete: bool) -> bool {
             use super::super::frame_work::RenderTriggers;
             use tze_hud_compositor::renderer::frame::WindowedPresentOutcome;
 
@@ -1268,7 +1272,9 @@ mod tests {
             }
             self.events
                 .app
-                .maybe_present_frame_with(|| Some(std::mem::take(&mut self.pending_texture)));
+                .maybe_present_frame_with(|| {
+                    Some(encoding_complete && std::mem::take(&mut self.pending_texture))
+                });
             prepared.plan.full
         }
     }
@@ -1413,6 +1419,30 @@ mod tests {
             runtime.events.app.state.wake.counters().snapshot(),
             counters
         );
+        // A submitted image can be reused by a later encode before the main
+        // thread presents it. If that encode is still busy, consuming the ready
+        // signal must not discard the pending image's presentation obligation.
+        runtime.events.scene().create_tab("deferred present", 1).unwrap();
+        let before = runtime.events.app.state.wake.counters().snapshot();
+        assert!(runtime.turn_with_present(true, false));
+        assert!(runtime.pending_texture);
+        assert_eq!(
+            runtime.events.app.state.wake.counters().snapshot().presents,
+            before.presents,
+            "busy encode is not a successful present"
+        );
+        assert!(!runtime.turn(true), "completion must not rebuild unchanged content");
+        assert_eq!(
+            runtime.events.app.state.wake.counters().snapshot().presents,
+            before.presents + 1,
+            "deferred image presents without another submission or panel wake"
+        );
+        assert!(!runtime.pending_texture);
+        let completed = runtime.events.app.state.wake.counters().snapshot();
+        assert_eq!(completed.gpu_queue_submissions, before.gpu_queue_submissions + 1);
+        assert!(!runtime.turn(true));
+        assert_eq!(runtime.events.app.state.wake.counters().snapshot(), completed);
+
         // The real sweep and capture owners emit one unambiguous identity.
         // Two due batches deliberately cannot claim that identity, even when
         // LatestWins leaves one record. No animation sleeps are needed here.
