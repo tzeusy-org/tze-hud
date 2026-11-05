@@ -383,8 +383,6 @@ pub(crate) struct TextRasterizer {
     /// other pass so runtime chrome text (the system card) cannot be covered by
     /// content, widgets, focus rings, menus or the safe-mode overlay (hud-w5zon).
     overlay_renderer: TextRenderer,
-    /// Grip menu text, replayed after its plate and before final system chrome.
-    menu_renderer: TextRenderer,
     /// Content-addressed IDs of agent-uploaded fonts already loaded into
     /// `font_system`.  Used to skip redundant `load_font_data` calls (which
     /// would add duplicate entries to fontdb).
@@ -439,7 +437,6 @@ pub(crate) struct TextRasterizer {
     /// Shaped-buffer cache for the overlay layer, kept apart so a frame that
     /// prepares overlay text does not evict the content layer's buffers.
     overlay_shape_cache: HashMap<[u8; 32], Vec<Buffer>>,
-    menu_shape_cache: HashMap<[u8; 32], Vec<Buffer>>,
 }
 
 /// Which glyphon renderer (and shaped-buffer cache) a prepare call targets.
@@ -449,7 +446,6 @@ enum TextLayer {
     Content,
     /// Runtime chrome text, drawn in the final pass above everything else.
     Overlay,
-    Menu,
 }
 
 /// Wrap policy for wrapped text (composer draft and every
@@ -755,9 +751,6 @@ impl TextRasterizer {
         let overlay_renderer =
             TextRenderer::new(&mut atlas, device, MultisampleState::default(), None);
 
-        let menu_renderer =
-            TextRenderer::new(&mut atlas, device, MultisampleState::default(), None);
-
         Self {
             font_system,
             swash_cache,
@@ -765,7 +758,6 @@ impl TextRasterizer {
             atlas,
             renderer,
             overlay_renderer,
-            menu_renderer,
             loaded_font_ids: HashSet::new(),
             uploaded_fonts: Vec::new(),
             #[cfg(test)]
@@ -774,7 +766,6 @@ impl TextRasterizer {
             shape_call_count: 0,
             shape_cache: HashMap::new(),
             overlay_shape_cache: HashMap::new(),
-            menu_shape_cache: HashMap::new(),
         }
     }
 
@@ -1282,15 +1273,6 @@ impl TextRasterizer {
         self.prepare_layer(TextLayer::Overlay, device, queue, items)
     }
 
-    pub(crate) fn prepare_menu_text_items(
-        &mut self,
-        device: &Device,
-        queue: &Queue,
-        items: &[TextItem],
-    ) -> Result<Vec<InlineBackdropQuad>, String> {
-        self.prepare_layer(TextLayer::Menu, device, queue, items)
-    }
-
     fn prepare_layer(
         &mut self,
         layer: TextLayer,
@@ -1380,7 +1362,6 @@ impl TextRasterizer {
         let mut old_cache = std::mem::take(match layer {
             TextLayer::Content => &mut self.shape_cache,
             TextLayer::Overlay => &mut self.overlay_shape_cache,
-            TextLayer::Menu => &mut self.menu_shape_cache,
         });
         let mut shape_keys: Vec<[u8; 32]> = Vec::with_capacity(items.len());
         let mut buffers: Vec<Buffer> = Vec::with_capacity(items.len());
@@ -1480,7 +1461,6 @@ impl TextRasterizer {
         let renderer = match layer {
             TextLayer::Content => &mut self.renderer,
             TextLayer::Overlay => &mut self.overlay_renderer,
-            TextLayer::Menu => &mut self.menu_renderer,
         };
         let prepare_result = renderer
             .prepare(
@@ -1505,7 +1485,6 @@ impl TextRasterizer {
         match layer {
             TextLayer::Content => self.shape_cache = rebuilt,
             TextLayer::Overlay => self.overlay_shape_cache = rebuilt,
-            TextLayer::Menu => self.menu_shape_cache = rebuilt,
         }
 
         prepare_result.map(|()| inline_backdrop_quads)
@@ -1686,15 +1665,6 @@ impl TextRasterizer {
         self.overlay_renderer
             .render(&self.atlas, &self.viewport, render_pass)
             .map_err(|e| format!("glyphon overlay render: {e:?}"))
-    }
-
-    pub(crate) fn render_menu_text_pass<'rp>(
-        &'rp self,
-        render_pass: &mut wgpu::RenderPass<'rp>,
-    ) -> Result<(), String> {
-        self.menu_renderer
-            .render(&self.atlas, &self.viewport, render_pass)
-            .map_err(|e| format!("glyphon menu render: {e:?}"))
     }
 
     /// Trim the atlas after the frame is presented.

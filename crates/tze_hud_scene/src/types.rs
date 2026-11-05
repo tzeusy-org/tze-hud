@@ -2207,7 +2207,7 @@ pub struct ChromeLocalState {
 ///
 /// Stored in `SceneGraph::overlay.drag_handle_context_menu` (ephemerally; never
 /// serialised).  The compositor renders it as a chrome-layer overlay and
-/// registers its pixel bounds in `reset_button_rect` so the input path
+/// registers its pixel bounds in `context_menu_hit_rect` so the input path
 /// can route a left-click to the reset action.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DragHandleContextMenuState {
@@ -2223,12 +2223,6 @@ pub struct DragHandleContextMenuState {
     /// by the compositor after each render pass (used for hit-testing).
     #[serde(skip, default)]
     pub reset_button_rect: Option<Rect>,
-    /// Originating window's viewport in scene physical pixels; no desktop-wide capture.
-    #[serde(skip, default)]
-    pub viewport: Option<Rect>,
-    /// Monitor DPI times owner UI scale, supplied by the originating window.
-    #[serde(skip, default)]
-    pub px_scale: Option<f32>,
 }
 
 /// Status-bar payload: key → display string map.

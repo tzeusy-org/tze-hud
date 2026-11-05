@@ -113,27 +113,6 @@ fn resolve_composer_placeholder(override_config: Option<String>) -> Option<Strin
     }
 }
 
-/// Runtime-only press identity. It survives menu dismissal until the matching
-/// release so cancelled/stale edges can never reach agent content underneath.
-#[derive(Clone, Copy)]
-pub(super) struct ContextMenuPress {
-    menu: Option<(tze_hud_scene::SceneId, u64)>,
-    window: winit::window::WindowId,
-    pub(super) armed: bool,
-}
-
-fn menu_target_live(scene: &tze_hud_scene::SceneGraph, id: tze_hud_scene::SceneId) -> bool {
-    scene.tile_id_shown(id)
-        || (scene.zones_shown()
-            && scene.zone_by_id(id).is_some_and(|zone| {
-                scene
-                    .zone_registry
-                    .active_publishes
-                    .get(&zone.name)
-                    .is_some_and(|p| !p.is_empty())
-            }))
-}
-
 impl WinitApp {
     /// Push the current composer draft snapshot to the compositor thread for
     /// local echo rendering (hud-r3ax6).
@@ -374,187 +353,142 @@ impl WinitApp {
     ///
     /// Called on right-click (desktop).  No-op if the cursor is not on a
     /// drag handle.
-    pub(super) fn handle_right_click_on_drag_handle(&mut self, secondary: Option<usize>) {
-        let (cx, cy) = (self.state.cursor_x, self.state.cursor_y);
-        let opened = {
+    pub(super) fn handle_right_click_on_drag_handle(&mut self) {
+        let cx = self.state.cursor_x;
+        let cy = self.state.cursor_y;
+
+        // Find the drag handle under the cursor.
+        let element_id = {
             let Ok(state) = self.state.shared_state.try_lock() else {
                 return;
             };
-            let Ok(mut scene) = state.scene.try_lock() else {
+            let Ok(scene) = state.scene.try_lock() else {
                 return;
             };
-            let Some(element_id) = scene
+            scene
                 .overlay
                 .drag_handle_hit_regions
                 .iter()
-                .find(|r| r.bounds.contains_point(cx, cy) && menu_target_live(&scene, r.element_id))
+                .find(|r| {
+                    cx >= r.bounds.x
+                        && cx < r.bounds.x + r.bounds.width
+                        && cy >= r.bounds.y
+                        && cy < r.bounds.y + r.bounds.height
+                })
                 .map(|r| r.element_id)
-            else {
+        };
+
+        let Some(element_id) = element_id else {
+            return; // Cursor is not on a drag handle — nothing to show.
+        };
+
+        // Anchor the menu to the right-click position.
+        // Pre-compute the reset button rect (constant throughout the menu's lifetime).
+        const MENU_W: f32 = 160.0;
+        const MENU_H: f32 = 32.0;
+        const PADDING: f32 = 4.0;
+        let menu = DragHandleContextMenuState {
+            element_id,
+            anchor_x: cx,
+            anchor_y: cy,
+            shown_at_ns: nanoseconds_since_start(),
+            reset_button_rect: Some(tze_hud_scene::Rect::new(
+                cx + PADDING,
+                cy + PADDING,
+                MENU_W - PADDING * 2.0,
+                MENU_H - PADDING * 2.0,
+            )),
+        };
+
+        if let Ok(state) = self.state.shared_state.try_lock() {
+            if let Ok(mut scene) = state.scene.try_lock() {
+                scene.overlay.drag_handle_context_menu = Some(menu);
+                tracing::debug!(
+                    element_id = %element_id,
+                    x = cx,
+                    y = cy,
+                    "chrome context menu shown for drag handle"
+                );
+            }
+        }
+    }
+
+    /// Handle a left-click when the chrome context menu is showing.
+    ///
+    /// - If the click lands on the "Reset to default" button rect → trigger reset.
+    /// - Otherwise → dismiss the menu (click-outside).
+    ///
+    /// Called synchronously on `MouseButton::Left` release, before the normal
+    /// `enqueue_pointer_event` path.
+    pub(super) fn handle_left_click_with_context_menu(&mut self) {
+        let cx = self.state.cursor_x;
+        let cy = self.state.cursor_y;
+
+        // Extract context menu state, then immediately drop the scene lock.
+        let menu_state = {
+            let Ok(state) = self.state.shared_state.try_lock() else {
                 return;
             };
-            let monitor = secondary
-                .and_then(|i| self.state.secondaries.get(i).map(|s| &s.spec))
-                .or(self.state.primary_monitor.as_ref());
-            let viewport = monitor
-                .zip(self.state.primary_monitor.as_ref())
-                .map(|(monitor, primary)| monitor.scene_rect(primary));
-            let px_scale = monitor.map(|m| {
-                m.scale as f32 * tze_hud_config::tokens::ui_scale(&self.state.global_tokens)
-            });
-            scene.overlay.drag_handle_context_menu = Some(DragHandleContextMenuState {
-                element_id,
-                anchor_x: cx,
-                anchor_y: cy,
-                shown_at_ns: nanoseconds_since_start(),
-                reset_button_rect: None,
-                viewport,
-                px_scale,
-            });
-            scene.bump_geometry_epoch();
-            true
+            let Ok(scene) = state.scene.try_lock() else {
+                return;
+            };
+            scene.overlay.drag_handle_context_menu.clone()
         };
-        if opened {
-            self.state.context_menu_open = true;
-            self.state.context_menu_dismiss_pending = false;
-            if let Some(press) = self.state.context_menu_press.as_mut() {
-                press.armed = false;
-            }
-        }
-    }
 
-    /// Own both delivered edges before generic pointer dispatch. Reset requires
-    /// the same painted menu, item and window on Down and Up. Busy/stale input
-    /// is consumed and dismissed, never replayed against a newer menu or agent.
-    pub(super) fn handle_context_menu_edge(
-        &mut self,
-        pressed: bool,
-        window: winit::window::WindowId,
-    ) -> bool {
-        let native_allowed = self.notification_pointer_permitted();
-        let menu = {
-            self.state.shared_state.try_lock().ok().and_then(|shared| {
-                shared
-                    .scene
-                    .try_lock()
-                    .ok()
-                    .map(|scene| scene.overlay.drag_handle_context_menu.clone())
-            })
+        let Some(menu) = menu_state else {
+            return; // Menu not showing — nothing to do.
         };
-        let (x, y) = (self.state.cursor_x, self.state.cursor_y);
-        if pressed {
-            let snapshot_has_menu = self
-                .state
-                .pipeline
-                .hit_test_snapshot
-                .load()
-                .context_menu
-                .is_some();
-            if !self.state.context_menu_open
-                && !snapshot_has_menu
-                && menu.as_ref().is_none_or(|m| m.is_none())
-            {
-                return false;
-            }
-            if !native_allowed {
-                self.cancel_context_menu();
-            }
-            // Cancellation is authoritative immediately, even before its
-            // deferred scene teardown can acquire the lock.
-            let current = menu
-                .as_ref()
-                .and_then(|m| m.as_ref())
-                .filter(|_| !self.state.context_menu_dismiss_pending);
-            self.state.context_menu_press = Some(ContextMenuPress {
-                menu: current.map(|m| (m.element_id, m.shown_at_ns)),
-                window,
-                armed: current
-                    .is_some_and(|m| m.reset_button_rect.is_some_and(|r| r.contains_point(x, y))),
-            });
-            if menu.is_none() {
-                self.cancel_context_menu();
-            }
-            return true;
-        }
-        let Some(press) = self.state.context_menu_press.take() else {
-            return false;
-        };
-        let reset = {
-            let mut reset = None;
-            if let Ok(shared) = self.state.shared_state.try_lock()
-                && let Ok(mut scene) = shared.scene.try_lock()
-            {
-                if let Some(menu) = scene.overlay.drag_handle_context_menu.as_ref()
-                    && press.armed
-                    && native_allowed
-                    && press.window == window
-                    && press.menu == Some((menu.element_id, menu.shown_at_ns))
-                    && nanoseconds_since_start().saturating_sub(menu.shown_at_ns) < 3_000_000_000
-                    && menu
-                        .reset_button_rect
-                        .is_some_and(|r| r.contains_point(x, y))
-                    && menu_target_live(&scene, menu.element_id)
-                {
-                    reset = Some(menu.element_id);
-                }
-                if scene.overlay.drag_handle_context_menu.take().is_some() {
-                    scene.bump_geometry_epoch();
-                }
-                self.state.context_menu_dismiss_pending = false;
-            } else {
-                self.state.context_menu_dismiss_pending = true;
-            }
-            reset
-        };
-        self.state.context_menu_open = false;
-        if self.state.context_menu_dismiss_pending {
-            self.schedule_shared_scene_availability_wake();
-        }
-        if let Some(id) = reset {
-            self.perform_reset_element_geometry(id);
-        }
-        true
-    }
 
-    pub(super) fn cancel_context_menu(&mut self) {
-        if let Some(press) = self.state.context_menu_press.as_mut() {
-            press.armed = false;
+        // Check if the click landed on the Reset button.
+        let hit_reset = menu
+            .reset_button_rect
+            .is_some_and(|r| cx >= r.x && cx < r.x + r.width && cy >= r.y && cy < r.y + r.height);
+
+        // Dismiss the menu in all cases.
+        if let Ok(state) = self.state.shared_state.try_lock() {
+            if let Ok(mut scene) = state.scene.try_lock() {
+                scene.overlay.drag_handle_context_menu = None;
+            }
         }
-        if self.state.context_menu_open {
-            self.state.context_menu_dismiss_pending = true;
-            self.state.context_menu_open = false;
+
+        if !hit_reset {
+            tracing::debug!("chrome context menu dismissed (click-outside)");
+            return;
         }
+
+        // Reset the element geometry.
+        self.perform_reset_element_geometry(menu.element_id);
     }
 
     /// Auto-dismiss the context menu after 3 seconds.
     ///
     /// Called each frame from `RedrawRequested`.  No-op when no menu is showing.
     pub(super) fn tick_context_menu_auto_dismiss(&mut self) {
-        let settled = {
-            if let Ok(shared) = self.state.shared_state.try_lock()
-                && let Ok(mut scene) = shared.scene.try_lock()
-            {
-                let expired = scene
-                    .overlay
-                    .drag_handle_context_menu
-                    .as_ref()
-                    .is_some_and(|m| {
-                        nanoseconds_since_start().saturating_sub(m.shown_at_ns) >= 3_000_000_000
-                            || !menu_target_live(&scene, m.element_id)
-                    });
-                if (expired || self.state.context_menu_dismiss_pending)
-                    && scene.overlay.drag_handle_context_menu.take().is_some()
-                {
-                    scene.bump_geometry_epoch();
-                }
-                self.state.context_menu_open = scene.overlay.drag_handle_context_menu.is_some();
-                self.state.context_menu_dismiss_pending = false;
-                true
-            } else {
-                false
-            }
+        const AUTO_DISMISS_NS: u64 = 3_000_000_000; // 3 seconds
+
+        let now_ns = nanoseconds_since_start();
+
+        let should_dismiss = {
+            let Ok(state) = self.state.shared_state.try_lock() else {
+                return;
+            };
+            let Ok(scene) = state.scene.try_lock() else {
+                return;
+            };
+            scene
+                .overlay
+                .drag_handle_context_menu
+                .as_ref()
+                .is_some_and(|m| now_ns.saturating_sub(m.shown_at_ns) >= AUTO_DISMISS_NS)
         };
-        if !settled && self.state.context_menu_dismiss_pending {
-            self.schedule_shared_scene_availability_wake();
+
+        if should_dismiss {
+            if let Ok(state) = self.state.shared_state.try_lock() {
+                if let Ok(mut scene) = state.scene.try_lock() {
+                    scene.overlay.drag_handle_context_menu = None;
+                    tracing::debug!("chrome context menu auto-dismissed after 3s");
+                }
+            }
         }
     }
 

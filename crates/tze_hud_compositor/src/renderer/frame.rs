@@ -20,7 +20,6 @@ struct TargetView<'a> {
     drag_highlight_cmds: Cow<'a, [RoundedRectDrawCmd]>,
     focus_ring_vertices: Cow<'a, [RectVertex]>,
     context_menu_vertices: Cow<'a, [RectVertex]>,
-    context_menu_text: Cow<'a, [TextItem]>,
     safe_mode_vertices: Cow<'a, [RectVertex]>,
     system_card_vertices: &'a [RectVertex],
     system_card_rounded_rects: &'a [RoundedRectDrawCmd],
@@ -93,7 +92,6 @@ pub struct WindowedFrameBuild {
     focus_ring_vertices: Vec<RectVertex>,
     /// Precomputed drag-handle reset context-menu chrome vertices.
     context_menu_vertices: Vec<RectVertex>,
-    context_menu_text: Vec<TextItem>,
     /// Safe-mode overlay quads (empty unless safe mode is active).
     safe_mode_vertices: Vec<RectVertex>,
     /// System card backdrop quads (empty unless a card is set), or the control
@@ -660,7 +658,7 @@ impl Compositor {
         self.append_composer_caret_vertices(scene, &mut focus_ring_vertices, sw, sh);
 
         // ── Chrome context menu (hud-zc7f) ─────────────────────────────────
-        let (context_menu_vertices, context_menu_text) = self.collect_context_menu(scene, sw, sh);
+        let context_menu_vertices = self.collect_context_menu_vertices(scene, sw, sh);
         // The open panel shows the paused state itself; its scrim replaces the
         // safe-mode dim on the primary display (other displays keep it).
         let control_panel_open = self.control_panel_open();
@@ -690,7 +688,6 @@ impl Compositor {
             drag_highlight_cmds,
             focus_ring_vertices,
             context_menu_vertices,
-            context_menu_text,
             safe_mode_vertices,
             system_card_vertices,
             system_card_rounded_rects,
@@ -848,7 +845,6 @@ impl Compositor {
 
         // Glyphon prepare for this target (its viewport and pixel space), right
         // before the encode that replays it.
-        let render_menu_text = self.prepare_menu_text(&tv.context_menu_text, tv.width, tv.height);
         let inputs = self.prepare_encode_inputs(
             tv.rr_background.into_owned(),
             tv.rr_content.into_owned(),
@@ -889,9 +885,6 @@ impl Compositor {
         // Render the drag-handle reset context menu on top of everything.
         if !tv.context_menu_vertices.is_empty() {
             self.encode_drag_handle_pass(&mut encoder, view, &tv.context_menu_vertices);
-        }
-        if render_menu_text {
-            self.encode_menu_text_pass(&mut encoder, view);
         }
 
         // ── Safe-mode overlay (hud-jm8nq.10): above all scene content and chrome.
@@ -938,7 +931,6 @@ impl Compositor {
                 drag_highlight_cmds: Cow::Borrowed(&build.drag_highlight_cmds),
                 focus_ring_vertices: Cow::Borrowed(&build.focus_ring_vertices),
                 context_menu_vertices: Cow::Borrowed(&build.context_menu_vertices),
-                context_menu_text: Cow::Borrowed(&build.context_menu_text),
                 safe_mode_vertices: Cow::Borrowed(&build.safe_mode_vertices),
                 system_card_vertices: &build.system_card_vertices,
                 system_card_rounded_rects: &build.system_card_rounded_rects,
@@ -1022,20 +1014,6 @@ impl Compositor {
             drag_highlight_cmds: Cow::Owned(shift_rr(&build.drag_highlight_cmds)),
             focus_ring_vertices: Cow::Owned(map(&build.focus_ring_vertices)),
             context_menu_vertices: Cow::Owned(map(&build.context_menu_vertices)),
-            context_menu_text: Cow::Owned(
-                build
-                    .context_menu_text
-                    .iter()
-                    .map(|item| {
-                        let mut item = item.clone();
-                        item.pixel_x += dx;
-                        item.pixel_y += dy;
-                        item.clip_pixel_x += dx;
-                        item.clip_pixel_y += dy;
-                        item
-                    })
-                    .collect(),
-            ),
             safe_mode_vertices: Cow::Owned(self.safe_mode_overlay_vertices(tw as f32, th as f32)),
             system_card_vertices: primary_only(&build.system_card_vertices),
             system_card_rounded_rects: if target.primary {
@@ -1048,44 +1026,6 @@ impl Compositor {
             } else {
                 &[]
             },
-        }
-    }
-
-    fn prepare_menu_text(&mut self, items: &[TextItem], width: u32, height: u32) -> bool {
-        if items.is_empty() {
-            return false;
-        }
-        let Some(tr) = self.text_rasterizer.as_mut() else {
-            return false;
-        };
-        tr.update_viewport(&self.queue, width, height);
-        if let Err(error) = tr.prepare_menu_text_items(&self.device, &self.queue, items) {
-            tracing::warn!(%error, "context menu text prepare failed");
-            return false;
-        }
-        true
-    }
-
-    fn encode_menu_text_pass(&self, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView) {
-        let Some(tr) = self.text_rasterizer.as_ref() else {
-            return;
-        };
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("context_menu_text"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
-                resolve_target: None,
-                ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Load,
-                    store: wgpu::StoreOp::Store,
-                },
-            })],
-            depth_stencil_attachment: None,
-            timestamp_writes: None,
-            occlusion_query_set: None,
-        });
-        if let Err(error) = tr.render_menu_text_pass(&mut pass) {
-            tracing::warn!(%error, "context menu text render failed");
         }
     }
 
@@ -1179,19 +1119,14 @@ impl Compositor {
                 }
             }
         }
-        for item in tv
-            .text_items
-            .iter()
-            .chain(tv.context_menu_text.iter())
-            .filter(|i| {
-                visible(
-                    i.clip_pixel_x,
-                    i.clip_pixel_y,
-                    i.clip_bounds_width,
-                    i.clip_bounds_height,
-                )
-            })
-        {
+        for item in tv.text_items.iter().filter(|i| {
+            visible(
+                i.clip_pixel_x,
+                i.clip_pixel_y,
+                i.clip_bounds_width,
+                i.clip_bounds_height,
+            )
+        }) {
             // Every TextItem field affects pixels; Debug covers them all.
             format!("{item:?}").hash(&mut hasher);
         }
@@ -1345,9 +1280,6 @@ impl Compositor {
             }
         };
 
-        let (context_menu_vertices, context_menu_text) = self.collect_context_menu(scene, sw, sh);
-        let render_menu_text = self.prepare_menu_text(&context_menu_text, surf_w, surf_h);
-
         // Headless never uses overlay mode — pass false for the pipeline selector.
         let (mut encoder, encode_us, encode_inputs) = self.encode_frame(
             &vertices,
@@ -1381,11 +1313,9 @@ impl Compositor {
         }
 
         // ── Chrome context menu (hud-zc7f) ─────────────────────────────────
+        let context_menu_vertices = self.collect_context_menu_vertices(scene, sw, sh);
         if !context_menu_vertices.is_empty() {
             self.encode_drag_handle_pass(&mut encoder, &frame.view, &context_menu_vertices);
-        }
-        if render_menu_text {
-            self.encode_menu_text_pass(&mut encoder, &frame.view);
         }
 
         // System card last, above everything (hud-w5zon).

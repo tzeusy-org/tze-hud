@@ -2199,7 +2199,7 @@ impl WinitApp {
         }
     }
 
-    pub(super) fn notification_pointer_permitted(&self) -> bool {
+    fn notification_pointer_permitted(&self) -> bool {
         #[cfg(test)]
         if chrome_capture_under_test() {
             return native_chrome_permits(self.state.press_window);
@@ -2233,7 +2233,7 @@ impl WinitApp {
             && !pressed
         {
             // Right-click: show context menu if cursor is on a drag handle.
-            self.handle_right_click_on_drag_handle(secondary);
+            self.handle_right_click_on_drag_handle();
         }
     }
 
@@ -2245,25 +2245,6 @@ impl WinitApp {
         window_id: winit::window::WindowId,
         secondary: Option<usize>,
     ) {
-        if self.handle_context_menu_edge(pressed, window_id) {
-            if pressed {
-                self.state.left_button_down = true;
-                self.state.press_window = Some(window_id);
-                let window = secondary
-                    .and_then(|i| self.state.secondaries.get(i).map(|s| &s.window))
-                    .or(self.state.window.as_ref());
-                if let Some(window) = window {
-                    focus_window_for_text_input(window);
-                    begin_os_mouse_capture(window);
-                }
-            } else {
-                self.state.left_button_down = false;
-                self.state.press_window = None;
-                end_os_mouse_capture();
-            }
-            self.update_overlay_cursor_hittest();
-            return;
-        }
         if pressed {
             if self.state.left_button_down {
                 self.enqueue_pointer_event(PointerEventKind::Up);
@@ -2289,6 +2270,9 @@ impl WinitApp {
         if !self.state.left_button_down {
             return;
         }
+        // If the context menu is showing, a release on its Reset button
+        // triggers the reset; anywhere else dismisses the menu.
+        self.handle_left_click_with_context_menu();
         self.enqueue_pointer_event(PointerEventKind::Up);
         self.state.left_button_down = false;
         self.state.press_window = None;
@@ -2317,7 +2301,6 @@ impl WinitApp {
     /// Disarm only runtime chrome. This is not an Up and cannot activate a
     /// callback or human X; ordinary button/capture ownership remains intact.
     pub(super) fn cancel_chrome_feedback(&mut self) {
-        self.cancel_context_menu();
         self.state.zone_press = None;
         self.state.input_processor.chrome_feedback_cancel_pending = true;
     }
@@ -2367,11 +2350,7 @@ impl WinitApp {
     /// End the current left press with an Up, as if its release arrived.
     pub(super) fn release_left_press(&mut self) {
         self.drain_chrome_capture_cancellation();
-        if self.state.context_menu_press.take().is_some() {
-            self.cancel_context_menu();
-        } else {
-            self.enqueue_pointer_event(PointerEventKind::Up);
-        }
+        self.enqueue_pointer_event(PointerEventKind::Up);
         native_chrome_finish_synthetic(self.state.press_window);
         self.state.left_button_down = false;
         self.state.press_window = None;
@@ -2476,9 +2455,6 @@ impl WinitApp {
     /// - Inside a hit-region → `set_cursor_hittest(true)` (window captures events).
     /// - Outside all hit-regions → `set_cursor_hittest(false)` (events pass through).
     pub(super) fn enqueue_pointer_event(&mut self, kind: PointerEventKind) {
-        if self.state.context_menu_press.is_some() {
-            return;
-        }
         // Settle the old terminal before admitting any newer drag. If the lock
         // is still busy, retain the original Up instead of retargeting it to a
         // new Down or moving the already-released gesture.

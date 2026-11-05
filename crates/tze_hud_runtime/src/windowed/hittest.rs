@@ -141,14 +141,6 @@ pub(super) fn combined_overlay_hit_regions(
     let mut regions = static_regions.to_vec();
     regions.extend(zone_hit_regions_to_overlay_regions(scene));
     regions.extend(content_tile_hit_regions_from_scene(scene));
-    if let Some(rect) = scene
-        .overlay
-        .drag_handle_context_menu
-        .as_ref()
-        .and_then(|m| m.reset_button_rect)
-    {
-        regions.push(HitRegion::new(rect.x, rect.y, rect.width, rect.height));
-    }
     regions
 }
 
@@ -246,7 +238,6 @@ impl WinitApp {
         let snapshot = self.state.pipeline.hit_test_snapshot.load();
         let interactive = !self.state.hit_regions.is_empty()
             || !snapshot.drag_handles.is_empty()
-            || snapshot.context_menu.is_some()
             || snapshot
                 .tiles
                 .iter()
@@ -321,14 +312,7 @@ impl WinitApp {
                 y,
                 &self.state.hit_regions,
             ) || self.cursor_over_focused_portal_affordance()
-                || self.panel_captures_cursor()
-                || self
-                    .state
-                    .pipeline
-                    .hit_test_snapshot
-                    .load()
-                    .context_menu
-                    .is_some_and(|r| r.contains_point(x, y)),
+                || self.panel_captures_cursor(),
             grip: self.resize_grip_hover_target(),
             close_target: self.close_hover_target(),
             widget_regions: self
@@ -387,14 +371,7 @@ impl WinitApp {
             &self.state.hit_regions,
         ) || self.state.left_button_down
             || self.cursor_over_focused_portal_affordance()
-            || self.panel_captures_cursor()
-            || self
-                .state
-                .pipeline
-                .hit_test_snapshot
-                .load()
-                .context_menu
-                .is_some_and(|r| r.contains_point(self.state.cursor_x, self.state.cursor_y));
+            || self.panel_captures_cursor();
         self.state.overlay_capturing = should_capture;
         self.apply_overlay_hittest(should_capture);
     }
