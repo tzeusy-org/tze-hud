@@ -134,7 +134,13 @@ async fn test_chrome_always_above_max_zorder_tile() {
         let bright = captured
             .rgba
             .chunks_exact(4)
-            .filter(|p| p[0] > 150 && p[1] > 150 && p[2] > 150)
+            .enumerate()
+            .filter(|(i, p)| {
+                button.contains_point((i % 256) as f32, (i / 256) as f32)
+                    && p[0] > 150
+                    && p[1] > 150
+                    && p[2] > 150
+            })
             .count();
         assert!(
             bright > 20,
@@ -149,7 +155,13 @@ async fn test_chrome_always_above_max_zorder_tile() {
             captured
                 .rgba
                 .chunks_exact(4)
-                .filter(|p| p[0] > 150 && p[1] > 150 && p[2] > 150)
+                .enumerate()
+                .filter(
+                    |(i, p)| button.contains_point((i % 256) as f32, (i / 256) as f32)
+                        && p[0] > 150
+                        && p[1] > 150
+                        && p[2] > 150
+                )
                 .count(),
             0,
             "closing the menu must not replay prepared glyphs"
@@ -624,7 +636,12 @@ async fn frame_signature_ignores_content_outside_the_target() {
         mapped
             .rgba
             .chunks_exact(4)
-            .any(|p| p[0] > 150 && p[1] > 150 && p[2] > 150),
+            .enumerate()
+            .any(|(i, p)| (144..256).contains(&(i % 256))
+                && (144..176).contains(&(i / 256))
+                && p[0] > 150
+                && p[1] > 150
+                && p[2] > 150),
         "menu text must translate into overlapping display targets"
     );
     scene.overlay.drag_handle_context_menu = None;
