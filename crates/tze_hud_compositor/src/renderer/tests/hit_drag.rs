@@ -1152,6 +1152,134 @@ async fn drag_visual_feedback_applied_during_active_drag() {
             .collect::<Vec<_>>(),
         original_order
     );
+
+    // The logical zone remains a large placement box; feedback outlines only
+    // the slots the production layout actually admits, including their gaps.
+    use tze_hud_scene::{GeometryPolicy, NotificationAction, ZoneDefinition};
+    let mut compositor = compositor;
+    let zone_id = SceneId::new();
+    scene.register_zone(ZoneDefinition {
+        id: zone_id,
+        name: "notif".into(),
+        description: "Feedback fixture".into(),
+        geometry_policy: GeometryPolicy::Relative {
+            x_pct: 0.6,
+            y_pct: 0.1,
+            width_pct: 0.35,
+            height_pct: 0.7,
+        },
+        accepted_media_types: vec![tze_hud_scene::ZoneMediaType::ShortTextWithIcon],
+        rendering_policy: RenderingPolicy::default(),
+        contention_policy: ContentionPolicy::Stack { max_depth: 5 },
+        max_publishers: 8,
+        auto_clear_ms: None,
+        layer_attachment: LayerAttachment::Chrome,
+        ephemeral: false,
+    });
+    for scale in [1.0, 1.5, 1.875] {
+        compositor.set_token_map(HashMap::from([(
+            "runtime.px_scale".into(),
+            scale.to_string(),
+        )]));
+        scene.reset_zone_placement(zone_id);
+        scene.clear_zone("notif").unwrap();
+        for count in 1..=3 {
+            scene
+                .publish_to_zone(
+                    "notif",
+                    ZoneContent::Notification(NotificationPayload {
+                        text: "Body".into(),
+                        title: if count == 1 {
+                            String::new()
+                        } else {
+                            "Title".into()
+                        },
+                        icon: String::new(),
+                        urgency: 1,
+                        ttl_ms: None,
+                        actions: (0..if count == 3 { 4 } else { 0 })
+                            .map(|n| NotificationAction {
+                                label: format!("Action {n}"),
+                                callback_id: format!("action-{n}"),
+                            })
+                            .collect(),
+                    }),
+                    "feedback-owner",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+            compositor.prime_markdown_cache(&scene);
+            compositor.prime_truncation_cache(&scene);
+            let zone = &scene.zone_registry.zones["notif"];
+            let (_, zy, zw, zh) = Compositor::resolve_zone_geometry(
+                &scene.effective_zone_geometry(zone),
+                1920.0,
+                1080.0,
+            );
+            let slots = compositor.zone_slot_layout(
+                "notif",
+                &scene.zone_registry.active_publishes["notif"],
+                &zone.rendering_policy,
+                zh,
+                zw,
+            );
+            let admitted: Vec<_> = slots.iter_visible(zy).collect();
+            let bottom = admitted.last().map(|(_, y, h)| y + h).unwrap();
+            assert!(bottom - zy < zh, "fixture has unused zone capacity");
+            scene.set_drag_active(zone_id);
+            let handles = compositor.collect_drag_handle_entries(&scene, 1920.0, 1080.0);
+            let handle = handles.iter().find(|h| h.element_id == zone_id).unwrap();
+            assert_eq!(
+                handle.element_bounds.height, zh,
+                "movement keeps the placement box"
+            );
+            let feedback = compositor.drag_highlight_cmds(&scene, std::slice::from_ref(handle));
+            assert_eq!(feedback.len(), 1);
+            assert!(
+                (feedback[0].height - (bottom - zy)).abs() < 0.01,
+                "notification feedback must end at the last visible slot, not reserved zone capacity"
+            );
+            scene.clear_drag_active(zone_id);
+            assert!(compositor.drag_highlight_cmds(&scene, &handles).is_empty());
+        }
+        // A translated, capacity-limited stack must exclude non-admitted cards.
+        scene.set_zone_placement(
+            zone_id,
+            GeometryPolicy::Relative {
+                x_pct: 0.25,
+                y_pct: 0.3,
+                width_pct: 0.35,
+                height_pct: 0.12,
+            },
+        );
+        scene.set_drag_active(zone_id);
+        let handles = compositor.collect_drag_handle_entries(&scene, 1920.0, 1080.0);
+        let handle = handles.iter().find(|h| h.element_id == zone_id).unwrap();
+        let zone = &scene.zone_registry.zones["notif"];
+        let slots = compositor.zone_slot_layout(
+            "notif",
+            &scene.zone_registry.active_publishes["notif"],
+            &zone.rendering_policy,
+            handle.element_bounds.height,
+            handle.element_bounds.width,
+        );
+        let admitted: Vec<_> = slots.iter_visible(handle.element_bounds.y).collect();
+        assert!(admitted.len() < 3, "fixture excludes overflowing cards");
+        let (_, y, h) = admitted.last().unwrap();
+        let feedback = compositor.drag_highlight_cmds(&scene, std::slice::from_ref(handle));
+        assert_eq!(
+            (feedback[0].x, feedback[0].y),
+            (handle.element_bounds.x, handle.element_bounds.y)
+        );
+        assert!((feedback[0].height - (y + h - handle.element_bounds.y)).abs() < 0.01);
+        scene.clear_zone("notif").unwrap();
+        let handles = compositor.collect_drag_handle_entries(&scene, 1920.0, 1080.0);
+        assert!(!handles.iter().any(|h| h.element_id == zone_id));
+        assert!(compositor.drag_highlight_cmds(&scene, &handles).is_empty());
+        scene.clear_drag_active(zone_id);
+    }
 }
 
 // ─── Drag z-order + opacity boost unit tests [hud-17c8p] ─────────────────

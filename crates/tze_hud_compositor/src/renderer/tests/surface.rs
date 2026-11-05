@@ -36,7 +36,7 @@ fn adapter_identity_preserves_actual_wgpu_fields_without_a_gpu() {
 /// tile is dimmed.
 #[tokio::test]
 async fn test_chrome_always_above_max_zorder_tile() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
 
     // Agent tiles must use z_order < ZONE_TILE_Z_MIN (0x8000_0000); u32::MAX is
@@ -95,6 +95,116 @@ async fn test_chrome_always_above_max_zorder_tile() {
         "the safe-mode overlay must cover the max-z tile: {:?}",
         &dimmed.rgba[center..center + 4]
     );
+
+    compositor.set_safe_mode_overlay(false);
+    for (scale, anchor, light) in [
+        (1.0, 80.0, false),
+        (1.5, 250.0, false),
+        (1.875, 250.0, true),
+    ] {
+        compositor.set_token_map(HashMap::from([
+            ("runtime.px_scale".into(), scale.to_string()),
+            (
+                "font.sans".into(),
+                if light {
+                    "IBM Plex Sans"
+                } else {
+                    "DejaVu Sans"
+                }
+                .into(),
+            ),
+            (
+                "color.surface.container.highest".into(),
+                if light { "#F8F8F8" } else { "#2A313D" }.into(),
+            ),
+            (
+                "color.on_surface".into(),
+                if light { "#101010" } else { "#E8EBF0" }.into(),
+            ),
+        ]));
+        scene.overlay.drag_handle_context_menu = Some(
+            serde_json::from_value(serde_json::json!({
+                "element_id": tile_id, "anchor_x": anchor, "anchor_y": anchor, "shown_at_ns": 1
+            }))
+            .unwrap(),
+        );
+        scene
+            .overlay
+            .drag_handle_context_menu
+            .as_mut()
+            .unwrap()
+            .reset_button_rect = Some(Rect::new(anchor + 4.0, anchor + 4.0, 152.0, 24.0));
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
+        let build = compositor.build_windowed_frame(&mut scene, 256, 256);
+        let menu = scene.overlay.drag_handle_context_menu.as_ref().unwrap();
+        let button = menu
+            .reset_button_rect
+            .expect("the painted menu publishes its action bounds");
+        assert!(
+            button.x >= 0.0
+                && button.y >= 0.0
+                && button.x + button.width <= 256.01
+                && button.y + button.height <= 256.01,
+            "the complete scaled menu must fit its display"
+        );
+        let captured = compositor
+            .capture_windowed_frame(&build, &primary_of(&build), format)
+            .unwrap();
+        let bright = captured
+            .rgba
+            .chunks_exact(4)
+            .enumerate()
+            .filter(|(i, p)| {
+                button.contains_point((i % 256) as f32, (i / 256) as f32)
+                    && p[0] > 150
+                    && p[1] > 150
+                    && p[2] > 150
+            })
+            .count();
+        assert!(
+            bright > 20,
+            "Reset to default must contain visible glyphs above its plate"
+        );
+        compositor.render_frame_headless(&mut scene, &surface);
+        let headless = surface.read_pixels(&compositor.device);
+        assert!(
+            headless
+                .chunks_exact(4)
+                .enumerate()
+                .filter(
+                    |(i, p)| button.contains_point((i % 256) as f32, (i / 256) as f32)
+                        && if light {
+                            p[0] < 100 && p[1] < 100 && p[2] < 100
+                        } else {
+                            p[0] > 150 && p[1] > 150 && p[2] > 150
+                        }
+                )
+                .count()
+                > 20,
+            "headless and windowed menu paths both paint the label"
+        );
+        scene.overlay.drag_handle_context_menu = None;
+        let closed = compositor.build_windowed_frame(&mut scene, 256, 256);
+        let captured = compositor
+            .capture_windowed_frame(&closed, &primary_of(&closed), format)
+            .unwrap();
+        assert_eq!(
+            captured
+                .rgba
+                .chunks_exact(4)
+                .enumerate()
+                .filter(
+                    |(i, p)| button.contains_point((i % 256) as f32, (i / 256) as f32)
+                        && p[0] > 150
+                        && p[1] > 150
+                        && p[2] > 150
+                )
+                .count(),
+            0,
+            "closing the menu must not replay prepared glyphs"
+        );
+    }
 }
 
 /// hud-w5zon: the system card (backdrop AND text) is the last pass, above a
@@ -542,6 +652,40 @@ async fn frame_signature_ignores_content_outside_the_target() {
     let cleared = compositor.build_windowed_frame(&mut scene, 256, 256);
     assert_eq!(
         compositor.frame_signature(&cleared, &overlapping),
+        idle_overlap
+    );
+
+    scene.overlay.drag_handle_context_menu = Some(
+        serde_json::from_value(serde_json::json!({
+            "element_id": tile_id, "anchor_x": 80.0, "anchor_y": 80.0, "shown_at_ns": 1
+        }))
+        .unwrap(),
+    );
+    let menu = compositor.build_windowed_frame(&mut scene, 256, 256);
+    assert_eq!(compositor.frame_signature(&menu, &away), idle_away);
+    assert_ne!(
+        compositor.frame_signature(&menu, &overlapping),
+        idle_overlap
+    );
+    let mapped = compositor
+        .capture_windowed_frame(&menu, &overlapping, wgpu::TextureFormat::Rgba8UnormSrgb)
+        .unwrap();
+    assert!(
+        mapped
+            .rgba
+            .chunks_exact(4)
+            .enumerate()
+            .any(|(i, p)| (144..256).contains(&(i % 256))
+                && (144..176).contains(&(i / 256))
+                && p[0] > 150
+                && p[1] > 150
+                && p[2] > 150),
+        "menu text must translate into overlapping display targets"
+    );
+    scene.overlay.drag_handle_context_menu = None;
+    let closed = compositor.build_windowed_frame(&mut scene, 256, 256);
+    assert_eq!(
+        compositor.frame_signature(&closed, &overlapping),
         idle_overlap
     );
 }

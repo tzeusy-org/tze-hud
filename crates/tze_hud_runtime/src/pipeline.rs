@@ -42,6 +42,8 @@ pub struct HitTestSnapshot {
     pub tiles: Vec<TileBoundsEntry>,
     /// Runtime chrome drag-handle bounds used by the main-thread input path.
     pub drag_handles: Vec<DragHandleBoundsEntry>,
+    /// Current painted Reset action; chrome only, never agent hit testing.
+    pub context_menu: Option<Rect>,
 }
 
 /// One entry in the hit-test snapshot.
@@ -76,6 +78,7 @@ impl HitTestSnapshot {
         Self {
             tiles: Vec::new(),
             drag_handles: Vec::new(),
+            context_menu: None,
         }
     }
 
@@ -110,6 +113,11 @@ impl HitTestSnapshot {
         Self {
             tiles,
             drag_handles,
+            context_menu: scene
+                .overlay
+                .drag_handle_context_menu
+                .as_ref()
+                .and_then(|m| m.reset_button_rect),
         }
     }
 

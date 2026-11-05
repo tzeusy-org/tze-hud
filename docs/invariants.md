@@ -131,6 +131,19 @@ Regression owners (existing parents extended, Tests: +0 ~6 -0):
 - Compositor [`drag_handle_regions_cover_visible_tile_and_zone_but_not_widget`](../crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs): actual monitor-assignment/scale producer matrix, including connected-secondary controls without a grip.
 - Compositor [`zone_hit_regions_and_slot_pitch_scale_with_px_scale`](../crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs): moved controls, shared human reset and no-op reset at existing scales.
 
+Grip feedback uses `zone_slot_layout.iter_visible` to enclose the occupied
+notification slots, not the reserved capacity. It changes neither zone geometry
+nor layout admission. The single-item Reset menu publishes one frame-resolved
+paint/action/capture rect, measured with the renderer's font owner and clamped
+to the originating display. Its text has a separate prepared renderer sharing
+the same font system/atlas, above its plate and below safe-mode/system chrome;
+no stale glyphs replay after close. Menu Down/Up and captured moves stay local,
+with matching menu/window identity required to reset and cancellation consumed.
+Menu open/close dirties geometry, using the existing deadline and availability
+wake paths rather than polling. The existing compositor drag feedback, chrome
+pixel and target-signature parents and runtime hit-region/real-drag parents
+cover these source seams (Tests: +0 ~5 -0 for the grip-chrome repair).
+
 These are source/headless proofs. Exact-deployed-SHA Windows motion/drop,
 reset/restart, native capture/focus and four-action pointer/keyboard owner
 acceptance remain pending; title passthrough is not a defect claim.

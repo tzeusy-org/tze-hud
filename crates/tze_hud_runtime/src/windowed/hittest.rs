@@ -141,6 +141,14 @@ pub(super) fn combined_overlay_hit_regions(
     let mut regions = static_regions.to_vec();
     regions.extend(zone_hit_regions_to_overlay_regions(scene));
     regions.extend(content_tile_hit_regions_from_scene(scene));
+    if let Some(rect) = scene
+        .overlay
+        .drag_handle_context_menu
+        .as_ref()
+        .and_then(|m| m.reset_button_rect)
+    {
+        regions.push(HitRegion::new(rect.x, rect.y, rect.width, rect.height));
+    }
     regions
 }
 
@@ -238,6 +246,7 @@ impl WinitApp {
         let snapshot = self.state.pipeline.hit_test_snapshot.load();
         let interactive = !self.state.hit_regions.is_empty()
             || !snapshot.drag_handles.is_empty()
+            || snapshot.context_menu.is_some()
             || snapshot
                 .tiles
                 .iter()
@@ -312,7 +321,14 @@ impl WinitApp {
                 y,
                 &self.state.hit_regions,
             ) || self.cursor_over_focused_portal_affordance()
-                || self.panel_captures_cursor(),
+                || self.panel_captures_cursor()
+                || self
+                    .state
+                    .pipeline
+                    .hit_test_snapshot
+                    .load()
+                    .context_menu
+                    .is_some_and(|r| r.contains_point(x, y)),
             grip: self.resize_grip_hover_target(),
             close_target: self.close_hover_target(),
             widget_regions: self
@@ -371,7 +387,14 @@ impl WinitApp {
             &self.state.hit_regions,
         ) || self.state.left_button_down
             || self.cursor_over_focused_portal_affordance()
-            || self.panel_captures_cursor();
+            || self.panel_captures_cursor()
+            || self
+                .state
+                .pipeline
+                .hit_test_snapshot
+                .load()
+                .context_menu
+                .is_some_and(|r| r.contains_point(self.state.cursor_x, self.state.cursor_y));
         self.state.overlay_capturing = should_capture;
         self.apply_overlay_hittest(should_capture);
     }
@@ -570,6 +593,26 @@ mod tests {
             HitRegion::new(100.0, 200.0, 20.0, 20.0),
             "zone hit region must be exposed to overlay click-capture"
         );
+
+        let mut menu: tze_hud_scene::DragHandleContextMenuState = serde_json::from_value(serde_json::json!({
+            "element_id": tze_hud_scene::SceneId::new(), "anchor_x": 400.0, "anchor_y": 300.0, "shown_at_ns": 1
+        })).unwrap();
+        menu.reset_button_rect = Some(tze_hud_scene::Rect::new(404.0, 304.0, 152.0, 24.0));
+        scene.overlay.drag_handle_context_menu = Some(menu);
+        let combined = combined_overlay_hit_regions(&static_regions, &scene);
+        assert!(
+            combined.iter().any(|r| r.contains(480.0, 316.0)),
+            "a painted menu action must capture independently of underlying content"
+        );
+        assert!(
+            !combined.iter().any(|r| r.contains(600.0, 316.0)),
+            "a menu must not turn adjacent desktop into a capture region"
+        );
+        scene.overlay.drag_handle_context_menu = None;
+        assert_eq!(
+            combined_overlay_hit_regions(&static_regions, &scene).len(),
+            2
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -582,6 +625,7 @@ mod tests {
                 return;
             }
         };
+        compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
         let surface = HeadlessSurface::new(&compositor.device, 1920, 1080);
         let (mut scene, tile_id, _element_id, _interaction_id) =
             scene_with_drag_handle_tile(400.0, 300.0, 600.0, 200.0);
@@ -662,7 +706,7 @@ mod tests {
         let controls = scene.overlay.zone_hit_regions.clone();
         assert_eq!(controls.len(), 2, "dismiss and action were generated");
         let tile_bounds = scene.tiles[&tile_id].bounds;
-        let (mut app, _rx) =
+        let (mut app, mut rx) =
             make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
         app.state.cursor_x = handle.bounds.x + handle.bounds.width / 2.0;
         app.state.cursor_y = handle.bounds.y + handle.bounds.height / 2.0;
@@ -721,6 +765,341 @@ mod tests {
                 moved.bounds.x + moved.bounds.width / 2.0,
                 moved.bounds.y + moved.bounds.height / 2.0
             ));
+        }
+
+        let moved = moved.clone();
+        drop(scene);
+        drop(shared);
+        app.state.cursor_x = moved.bounds.x + moved.bounds.width / 2.0;
+        app.state.cursor_y = moved.bounds.y + moved.bounds.height / 2.0;
+        let window = winit::window::WindowId::dummy();
+        let native = super::super::lifecycle::ChromeCaptureTestScope::new(window);
+        app.handle_mouse_button(winit::event::MouseButton::Right, false, window, None);
+        {
+            let shared = app.state.shared_state.try_lock().unwrap();
+            let mut scene = shared.scene.try_lock().unwrap();
+            compositor.render_frame(&mut scene, &surface);
+            refresh_interaction_hit_regions_after_render(&compositor, &mut scene, &surface);
+            let menu = scene.overlay.drag_handle_context_menu.as_ref().unwrap();
+            let button = menu.reset_button_rect.unwrap();
+            let capture = combined_overlay_hit_regions(&[], &scene);
+            assert!(
+                capture.iter().any(|r| r.contains(
+                    button.x + button.width / 2.0,
+                    button.y + button.height / 2.0
+                )),
+                "the actual opened and rendered menu must admit its reset click"
+            );
+            app.state.cursor_x = button.x + button.width / 2.0;
+            app.state.cursor_y = button.y + button.height / 2.0;
+        }
+        let receipt = native.begin(true);
+        app.handle_mouse_button(winit::event::MouseButton::Left, true, window, None);
+        native.complete(receipt);
+        assert!(
+            app.state.input_processor.drag_states.is_empty(),
+            "menu Down never starts an underlying drag"
+        );
+        let receipt = native.begin(false);
+        app.handle_mouse_button(winit::event::MouseButton::Left, false, window, None);
+        native.complete(receipt);
+        assert!(
+            native.healthy(),
+            "matching Reset edges have native receipts"
+        );
+        app.handle_mouse_button(winit::event::MouseButton::Left, false, window, None);
+        drop(native);
+        let shared = app.state.shared_state.try_lock().unwrap();
+        let mut scene = shared.scene.try_lock().unwrap();
+        assert!(scene.overlay.drag_handle_context_menu.is_none());
+        assert!(
+            shared
+                .element_store
+                .entries
+                .values()
+                .all(|e| e.geometry_override.is_none())
+        );
+        compositor.render_frame(&mut scene, &surface);
+        let reset = scene
+            .overlay
+            .drag_handle_hit_regions
+            .iter()
+            .find(|h| h.element_id == zone_id)
+            .unwrap();
+        assert_eq!(
+            reset.bounds, handle.bounds,
+            "matching menu Down/Up restores default zone placement"
+        );
+        assert_eq!(scene.tiles[&tile_id].bounds, tile_bounds);
+        drop(scene);
+        drop(shared);
+        while rx.try_recv().is_ok() {}
+        // Exercise delivered edges at the same real menu seam. Teardown rows
+        // represent the existing timeout/clear lifecycle, not a replacement timer.
+        for case in [
+            "outside",
+            "release-outside",
+            "cancel-reentry",
+            "focus",
+            "replaced",
+            "expired",
+            "hidden",
+            "removed",
+            "wrong-window",
+            "old-tile-press",
+            "native-missing-up",
+            "native-mismatched-up",
+            "native-cancel",
+            "native-allowed",
+            "busy",
+            "overlap",
+            "no-op",
+            "release-only",
+        ] {
+            // Every delivered edge traverses the native ledger on Windows;
+            // ordinary positive rows need the same receipt setup as controls.
+            let native = super::super::lifecycle::ChromeCaptureTestScope::new(window);
+            let old_grip;
+            let definition;
+            {
+                let shared = app.state.shared_state.try_lock().unwrap();
+                let mut scene = shared.scene.try_lock().unwrap();
+                definition = scene.zone_by_id(zone_id).unwrap().clone();
+                if case != "no-op" {
+                    scene.set_zone_placement(
+                        zone_id,
+                        GeometryPolicy::Relative {
+                            x_pct: 0.4,
+                            y_pct: 0.3,
+                            width_pct: 0.35,
+                            height_pct: 0.4,
+                        },
+                    );
+                }
+                compositor.prime_markdown_cache(&scene);
+                compositor.prime_truncation_cache(&scene);
+                compositor.render_frame(&mut scene, &surface);
+                refresh_interaction_hit_regions_after_render(&compositor, &mut scene, &surface);
+                old_grip = scene
+                    .overlay
+                    .drag_handle_hit_regions
+                    .iter()
+                    .find(|h| h.element_id == tile_id)
+                    .unwrap()
+                    .bounds;
+                let grip = scene
+                    .overlay
+                    .drag_handle_hit_regions
+                    .iter()
+                    .find(|h| h.element_id == zone_id)
+                    .unwrap();
+                app.state.cursor_x = grip.bounds.x + grip.bounds.width / 2.0;
+                app.state.cursor_y = grip.bounds.y + grip.bounds.height / 2.0;
+            }
+            if case == "old-tile-press" {
+                let zone_cursor = (app.state.cursor_x, app.state.cursor_y);
+                app.state.cursor_x = old_grip.x + old_grip.width / 2.0;
+                app.state.cursor_y = old_grip.y + old_grip.height / 2.0;
+                let receipt = native.begin(true);
+                app.handle_mouse_button(winit::event::MouseButton::Left, true, window, None);
+                native.complete(receipt);
+                assert_eq!(
+                    app.state.input_processor.drag_states[&0].element_id, tile_id,
+                    "the old press really belongs to the unrelated rendered Tile grip"
+                );
+                // Deliberately omit its delivered Up. No about-to-wait or
+                // cursor-motion fallback intervenes before the fresh menu Down.
+                (app.state.cursor_x, app.state.cursor_y) = zone_cursor;
+            }
+            app.handle_mouse_button(winit::event::MouseButton::Right, false, window, None);
+            let action;
+            let before;
+            {
+                let shared = app.state.shared_state.try_lock().unwrap();
+                let mut scene = shared.scene.try_lock().unwrap();
+                before = scene.effective_zone_geometry(scene.zone_by_id(zone_id).unwrap());
+                if case == "overlap" {
+                    // Put the actual menu request over an actual rendered action:
+                    // a leaked Down/Up would dispatch its real callback.
+                    let action = scene
+                        .overlay
+                        .zone_hit_regions
+                        .iter()
+                        .find(|r| {
+                            matches!(r.kind, tze_hud_scene::ZoneInteractionKind::Action { .. })
+                        })
+                        .unwrap()
+                        .bounds;
+                    let menu = scene.overlay.drag_handle_context_menu.as_mut().unwrap();
+                    menu.anchor_x = action.x;
+                    menu.anchor_y = action.y;
+                }
+                compositor.render_frame(&mut scene, &surface);
+                refresh_interaction_hit_regions_after_render(&compositor, &mut scene, &surface);
+                action = scene
+                    .overlay
+                    .drag_handle_context_menu
+                    .as_ref()
+                    .unwrap()
+                    .reset_button_rect
+                    .unwrap();
+            }
+            app.state.cursor_x = action.x + 8.0;
+            app.state.cursor_y = action.y + 8.0;
+            if case == "outside" {
+                app.state.cursor_y = action.y + action.height + 8.0;
+            }
+            let shared_state = std::sync::Arc::clone(&app.state.shared_state);
+            let availability = app.state.wake.main_work_generation();
+            let held = (case == "busy").then(|| shared_state.try_lock().unwrap());
+            if case != "release-only" {
+                let receipt = native.begin(true);
+                app.handle_mouse_button(winit::event::MouseButton::Left, true, window, None);
+                native.complete(receipt);
+                app.enqueue_pointer_event(PointerEventKind::Move);
+            }
+            if case == "native-cancel" {
+                native.lose();
+                app.drain_chrome_capture_cancellation();
+            }
+            if ["focus", "cancel-reentry"].contains(&case) {
+                app.handle_window_focus(None, false);
+                if case == "cancel-reentry" {
+                    // No settle/timer turn intervenes: the cancelled painted
+                    // request must not be re-armed by a newly delivered press.
+                    let receipt = native.begin(true);
+                    app.handle_mouse_button(winit::event::MouseButton::Left, true, window, None);
+                    native.complete(receipt);
+                }
+            }
+            if case == "replaced" {
+                let shared = app.state.shared_state.try_lock().unwrap();
+                let mut scene = shared.scene.try_lock().unwrap();
+                scene
+                    .overlay
+                    .drag_handle_context_menu
+                    .as_mut()
+                    .unwrap()
+                    .shown_at_ns += 1;
+            }
+            if ["expired", "hidden", "removed"].contains(&case) {
+                let shared = app.state.shared_state.try_lock().unwrap();
+                let mut scene = shared.scene.try_lock().unwrap();
+                match case {
+                    "expired" => scene.overlay.drag_handle_context_menu = None,
+                    "hidden" => {
+                        scene.set_owner_hidden(tze_hud_scene::graph::SurfaceClasses {
+                            zones: true,
+                            ..Default::default()
+                        });
+                    }
+                    "removed" => {
+                        scene.unregister_zone("notifications");
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            if case == "release-outside" {
+                app.state.cursor_y = action.y + action.height + 8.0;
+            }
+            let release_window = if case == "wrong-window" {
+                winit::window::WindowId::from(77)
+            } else {
+                window
+            };
+            let receipt = if case == "native-missing-up" {
+                None
+            } else {
+                native.begin(case == "native-mismatched-up")
+            };
+            app.handle_mouse_button(winit::event::MouseButton::Left, false, release_window, None);
+            native.complete(receipt);
+            drop(native);
+            drop(held);
+            if case == "busy" {
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+                while app.state.wake.main_work_generation() == availability
+                    && std::time::Instant::now() < deadline
+                {
+                    tokio::task::yield_now().await;
+                }
+                assert!(
+                    app.state.wake.main_work_generation() > availability,
+                    "lock release delivers the existing completion wake before settlement"
+                );
+            }
+            app.tick_context_menu_auto_dismiss();
+            assert!(
+                !app.state.left_button_down && app.state.press_window.is_none(),
+                "{case}: capture ends"
+            );
+            assert!(
+                app.state.input_processor.drag_states.is_empty(),
+                "{case}: no underlying drag"
+            );
+            assert!(
+                rx.try_recv().is_err(),
+                "{case}: menu edges cannot dispatch an agent callback"
+            );
+            {
+                let shared = app.state.shared_state.try_lock().unwrap();
+                let mut scene = shared.scene.try_lock().unwrap();
+                if case == "removed" {
+                    scene.register_zone(definition.clone());
+                    scene.set_zone_placement(zone_id, before);
+                }
+                if case == "hidden" {
+                    scene.set_owner_hidden(Default::default());
+                }
+                let expected = if ["overlap", "no-op", "native-allowed"].contains(&case) {
+                    definition.geometry_policy
+                } else {
+                    before
+                };
+                assert_eq!(
+                    scene.effective_zone_geometry(scene.zone_by_id(zone_id).unwrap()),
+                    expected,
+                    "{case}: only a matching actionable press resets geometry"
+                );
+                if case != "release-only" {
+                    assert!(
+                        scene.overlay.drag_handle_context_menu.is_none(),
+                        "{case}: menu closes"
+                    );
+                }
+                assert!(
+                    shared
+                        .element_store
+                        .entries
+                        .values()
+                        .all(|e| e.geometry_override.is_none())
+                );
+                scene.overlay.drag_handle_context_menu = None;
+                scene.reset_zone_placement(zone_id);
+                if case == "removed" {
+                    scene
+                        .publish_to_zone(
+                            "notifications",
+                            ZoneContent::Notification(NotificationPayload {
+                                text: "Move the stack".into(),
+                                title: "Placement".into(),
+                                icon: String::new(),
+                                urgency: 1,
+                                ttl_ms: None,
+                                actions: vec![NotificationAction {
+                                    label: "Open".into(),
+                                    callback_id: "open".into(),
+                                }],
+                            }),
+                            "zone-owner",
+                            None,
+                            None,
+                            None,
+                        )
+                        .unwrap();
+                }
+            }
+            app.tick_context_menu_auto_dismiss();
         }
     }
 

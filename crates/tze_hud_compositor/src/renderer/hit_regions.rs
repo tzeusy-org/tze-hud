@@ -4,14 +4,14 @@
 //! formerly ~L7346–7899 at plan date) by Step R-8 of the renderer module
 //! split (hud-fgryk).  No logic was changed; only the `pub(super)` visibility
 //! modifier was added to `populate_drag_handle_hit_regions_from` and
-//! `collect_context_menu_vertices` so that callers in sibling modules can
+//! `collect_context_menu` so that callers in sibling modules can
 //! access them.
 //!
 //! ## Methods in this file
 //!
 //! - `populate_drag_handle_hit_regions_from` — populate drag-handle hit regions
 //!   from the `collect_drag_handle_entries` result a frame already holds.
-//! - `collect_context_menu_vertices` — build vertices for the drag-handle reset
+//! - `collect_context_menu` — build vertices for the drag-handle reset
 //!   context menu popup when one is showing.
 //! - `populate_zone_hit_regions` — recompute zone interaction hit regions
 //!   (dismiss and action buttons) for the current frame. Also recomputes the
@@ -68,59 +68,114 @@ impl Compositor {
 
     // ── Chrome context menu rendering (hud-zc7f) ─────────────────────────────
 
-    /// Dimensions for the "Reset to default" context menu popup.
-    const CONTEXT_MENU_W: f32 = 160.0;
-    const CONTEXT_MENU_H: f32 = 32.0;
-    const CONTEXT_MENU_PADDING: f32 = 4.0;
-
-    /// Build vertices for the drag-handle reset context menu, if one is showing.
-    ///
-    /// Returns an empty `Vec` when `scene.overlay.drag_handle_context_menu` is `None`.
-    /// The menu is rendered as two rects:
-    /// - A semi-transparent dark background (the popup container).
-    /// - A lighter "Reset to default" button inside it.
-    pub(super) fn collect_context_menu_vertices(
-        &self,
-        scene: &SceneGraph,
+    /// Resolve the single-item menu once for this frame. Its one action rect is
+    /// also its painted footprint and OS capture region; no invisible padding
+    /// can activate a different surface. Text shares the compositor's font owner.
+    pub(super) fn collect_context_menu(
+        &mut self,
+        scene: &mut SceneGraph,
         sw: f32,
         sh: f32,
-    ) -> Vec<RectVertex> {
-        let Some(ref menu) = scene.overlay.drag_handle_context_menu else {
-            return Vec::new();
+    ) -> (Vec<RectVertex>, Vec<crate::text::TextItem>) {
+        let Some(menu) = scene.overlay.drag_handle_context_menu.as_ref() else {
+            return (Vec::new(), Vec::new());
         };
-
-        let mut vertices = Vec::with_capacity(12); // 2 quads × 6 vertices
-
-        // Menu background.
-        let bg_rgba = [0.12_f32, 0.12, 0.12, 0.92];
-        let bg_color = self.gpu_color_raw(bg_rgba);
-        let bg_verts = rect_vertices(
-            menu.anchor_x,
-            menu.anchor_y,
-            Self::CONTEXT_MENU_W,
-            Self::CONTEXT_MENU_H,
-            sw,
-            sh,
-            bg_color,
+        if !self
+            .collect_drag_handle_entries(scene, sw, sh)
+            .iter()
+            .any(|h| h.element_id == menu.element_id)
+        {
+            scene.overlay.drag_handle_context_menu = None;
+            scene.bump_geometry_epoch();
+            return (Vec::new(), Vec::new());
+        }
+        let viewport = menu.viewport.unwrap_or(Rect::new(0.0, 0.0, sw, sh));
+        let scale = menu
+            .px_scale
+            .unwrap_or_else(|| tze_hud_config::tokens::px_scale(&self.token_map));
+        let font_px = self
+            .token_map
+            .get("system_card.body.font_size_px")
+            .and_then(|s| s.trim_end_matches("px").parse::<f32>().ok())
+            .filter(|n| n.is_finite() && *n > 0.0)
+            .unwrap_or(14.0)
+            * scale;
+        let Some(tr) = self.text_rasterizer.as_mut() else {
+            // A plate without its label is not an actionable menu.
+            scene
+                .overlay
+                .drag_handle_context_menu
+                .as_mut()
+                .unwrap()
+                .reset_button_rect = None;
+            return (Vec::new(), Vec::new());
+        };
+        let label = "Reset to default";
+        let label_w = tr.measure_single_line(label, font_px, FontFamily::SystemSansSerif, 400);
+        let padding = 8.0 * scale;
+        let w = (160.0 * scale)
+            .max(label_w + padding * 2.0)
+            .min(viewport.width.max(1.0));
+        let h = (32.0 * scale)
+            .max(font_px * crate::text::LINE_HEIGHT_MULTIPLIER + padding)
+            .min(viewport.height.max(1.0));
+        let rect = Rect::new(
+            menu.anchor_x
+                .clamp(viewport.x, viewport.x + (viewport.width - w).max(0.0)),
+            menu.anchor_y
+                .clamp(viewport.y, viewport.y + (viewport.height - h).max(0.0)),
+            w,
+            h,
         );
-        vertices.extend_from_slice(&bg_verts);
-
-        // "Reset to default" button.
-        let btn_rgba = [0.22_f32, 0.22, 0.22, 0.95];
-        let btn_color = self.gpu_color_raw(btn_rgba);
-        let p = Self::CONTEXT_MENU_PADDING;
-        let btn_verts = rect_vertices(
-            menu.anchor_x + p,
-            menu.anchor_y + p,
-            Self::CONTEXT_MENU_W - p * 2.0,
-            Self::CONTEXT_MENU_H - p * 2.0,
-            sw,
-            sh,
-            btn_color,
+        let color = |key, fallback| {
+            super::token_colors::resolve_token_color(&self.token_map, key).unwrap_or(fallback)
+        };
+        let background = color(
+            "color.surface.container.highest",
+            Rgba::new(0.165, 0.192, 0.239, 1.0),
         );
-        vertices.extend_from_slice(&btn_verts);
-
-        vertices
+        let foreground = color("color.on_surface", Rgba::new(0.91, 0.922, 0.941, 1.0));
+        let policy = RenderingPolicy {
+            font_size_px: Some(font_px),
+            font_weight: Some(400),
+            text_color: Some(foreground),
+            margin_px: Some(0.0),
+            ..Default::default()
+        };
+        let text_h = font_px * crate::text::LINE_HEIGHT_MULTIPLIER;
+        let mut text = crate::text::TextItem::from_zone_policy(
+            label,
+            rect.x + padding,
+            rect.y + (rect.height - text_h) * 0.5,
+            (w - padding * 2.0).max(1.0),
+            text_h,
+            &policy,
+            1.0,
+            1.0,
+        );
+        text.clip_pixel_x = rect.x;
+        text.clip_pixel_y = rect.y;
+        text.clip_bounds_width = rect.width;
+        text.clip_bounds_height = rect.height;
+        scene
+            .overlay
+            .drag_handle_context_menu
+            .as_mut()
+            .unwrap()
+            .reset_button_rect = Some(rect);
+        (
+            rect_vertices(
+                rect.x,
+                rect.y,
+                rect.width,
+                rect.height,
+                sw,
+                sh,
+                self.gpu_color_raw(background.to_array()),
+            )
+            .to_vec(),
+            vec![text],
+        )
     }
 
     /// Recompute the zone interaction hit regions for the current frame:
