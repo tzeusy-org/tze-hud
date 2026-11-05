@@ -1951,6 +1951,78 @@ mod tests {
         // Admission, activation, native ledger loss, focus cancellation, retained
         // Up and scene settling below are the production routes, not reset helpers.
         // The render parent separately proves actual compositor handle production.
+        // Tile cancellation semantics remain unchanged at both real routing seams.
+        {
+            use crate::windowed::lifecycle::{ChromeAppEdge, ChromeCaptureTestScope};
+            let mut harness = approve_reject_notification_harness();
+            let (scene, tile_id, ..) =
+                super::super::test_support::scene_with_drag_handle_tile(400.0, 300.0, 600.0, 200.0);
+            let handle = scene.overlay.drag_handle_hit_regions[0].bounds;
+            *harness.scene() = scene;
+            (harness.app.state.cursor_x, harness.app.state.cursor_y) =
+                (handle.x + 1.0, handle.y + 1.0);
+            harness.app.enqueue_pointer_event(PointerEventKind::Down);
+            harness.app.state.cursor_y += 1.0;
+            harness.app.enqueue_pointer_event(PointerEventKind::Move);
+            let press_start = harness
+                .app
+                .state
+                .primary_drag_gesture
+                .as_ref()
+                .unwrap()
+                .press_start;
+            harness.app.handle_window_focus(None, false);
+            let window = winit::window::WindowId::dummy();
+            let native = ChromeCaptureTestScope::new(window);
+            let frame = native.begin(true);
+            let edge = ChromeAppEdge::begin(window, true);
+            drop(edge);
+            native.complete(frame);
+            harness.app.state.press_window = Some(window);
+            harness
+                .app
+                .state
+                .primary_drag_gesture
+                .as_mut()
+                .unwrap()
+                .window_id = Some(window);
+            native.lose();
+            harness.app.drain_chrome_capture_cancellation();
+            assert_eq!(
+                harness
+                    .app
+                    .state
+                    .primary_drag_gesture
+                    .as_ref()
+                    .unwrap()
+                    .press_start,
+                press_start
+            );
+            assert!(
+                harness
+                    .app
+                    .state
+                    .input_processor
+                    .drag_states
+                    .contains_key(&0)
+            );
+            harness
+                .app
+                .state
+                .primary_drag_gesture
+                .as_mut()
+                .unwrap()
+                .window_id = None;
+            harness.app.state.press_window = None;
+            drop(native);
+            harness.app.state.cursor_y += 43.2;
+            harness.app.enqueue_pointer_event(PointerEventKind::Move);
+            harness.app.enqueue_pointer_event(PointerEventKind::Up);
+            assert!(harness.scene().tiles[&tile_id].bounds.y > 300.0);
+            assert!(!harness.scene().is_drag_active(tile_id));
+            assert!(harness.app.state.primary_drag_gesture.is_none());
+        }
+
         let mut cancellations_not_disarmed = Vec::new();
         for native_loss in [false, true] {
             for held_terminal in [false, true] {
@@ -2101,6 +2173,20 @@ mod tests {
                 harness.app.enqueue_pointer_event(PointerEventKind::Move);
                 harness.app.state.cursor_y += 43.2;
                 harness.app.enqueue_pointer_event(PointerEventKind::Move);
+                assert!(harness.scene().is_drag_active(id));
+                let stale = harness.app.state.primary_drag_gesture.clone();
+                harness.app.enqueue_pointer_event(PointerEventKind::Down);
+                harness.app.state.cursor_y += 1.0;
+                harness.app.enqueue_pointer_event(PointerEventKind::Move);
+                let newer_press = harness.app.state.input_processor.drag_states[&0].press_start;
+                // Retained identity can never remove a newer same-device Down.
+                harness.app.state.primary_drag_gesture = stale;
+                harness.app.handle_window_focus(None, false);
+                assert_eq!(
+                    harness.app.state.input_processor.drag_states[&0].press_start,
+                    newer_press
+                );
+                assert!(harness.tick());
                 assert!(harness.scene().is_drag_active(id));
                 harness.app.enqueue_pointer_event(PointerEventKind::Up);
                 assert!(!harness.scene().is_drag_active(id));
