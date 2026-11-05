@@ -1496,7 +1496,11 @@ mod tests {
             std::thread::yield_now();
         }
         drop(other_encoding);
-        assert_eq!(wake.compositor().checkpoint(), compositor_before);
+        assert_eq!(
+            wake.compositor().checkpoint(),
+            compositor_before + 1,
+            "only the explicit OperatorCapture notification advances compositor generation"
+        );
         assert_eq!(wake.main_work_generation(), main_work_before);
         assert!(
             !runtime.turn(true),
