@@ -6,7 +6,7 @@ use super::*;
 //   - typography.body.size (16px default) font size
 //   - color.text.primary text color
 //   - left-aligned, 9px inset (8px padding + 1px border)
-//   - clips at content area boundary (no wrapping in v1)
+//   - bounded title/body bands visibly ellipsize incomplete text
 
 /// `typography.body.size` sets the notification font size (with or without a `px`
 /// suffix); absent, it is 16px.
@@ -319,11 +319,11 @@ async fn test_notification_text_inset_from_backdrop_edges() {
         TextAlign::Start,
         "notification text must be left-aligned (TextAlign::Start)"
     );
-    // Overflow is Clip.
+    // Overflow is visible while the original content bounds stay unchanged.
     assert_eq!(
         item.overflow,
-        TextOverflow::Clip,
-        "notification text must clip at content area (no wrapping)"
+        TextOverflow::Ellipsis,
+        "notification text must visibly mark overflow inside its bounded line"
     );
 }
 
