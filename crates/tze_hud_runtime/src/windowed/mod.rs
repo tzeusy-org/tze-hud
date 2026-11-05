@@ -720,6 +720,12 @@ fn shutdown_after_terminal_surface_recovery(
     wake.notify_main(crate::idle_efficiency::RuntimeWakeupSource::Shutdown);
 }
 
+// Temporary bounded checkpoints for the retained Windows uninstall timeout.
+// PID binding separates the tracked fullscreen instance from installer/boot logs.
+fn trace_shutdown_phase(phase: &'static str) {
+    tracing::info!(pid = std::process::id(), phase, "[DEBUG-hud-lks0i] lifecycle");
+}
+
 /// The part of winit's [`ActiveEventLoop`] that leaving the loop uses.
 trait LoopExit {
     fn set_control_flow(&self, control_flow: ControlFlow);
@@ -756,6 +762,7 @@ impl WinitApp {
         if !self.state.shutdown.is_triggered() {
             return false;
         }
+        trace_shutdown_phase("main_shutdown_observed");
         tracing::info!("main thread: shutdown observed; leaving event loop");
         leave_event_loop(event_loop);
         true
@@ -1154,6 +1161,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             return; // Already initialised.
         }
 
+        trace_shutdown_phase("resumed_enter");
         // ── Create winit window ────────────────────────────────────────────
         // Clone the title and snapshot configured dimensions before any mutation
         // to avoid borrow conflicts when we later update the config in-place for
@@ -1360,6 +1368,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
 
         let is_overlay = self.state.effective_mode == WindowMode::Overlay;
         let constrained_measurement = cfg.quiescent_efficiency.is_some();
+        trace_shutdown_phase("startup_compositor_begin");
         let (mut compositor, window_surface) = rt.block_on(async {
             let mut c = if constrained_measurement {
                 Compositor::new_windowed_constrained(
@@ -1380,6 +1389,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             c
         });
 
+        trace_shutdown_phase("startup_compositor_ready");
         // ── Initialize text renderer ──────────────────────────────────────
         // Must be called after surface configuration so we know the negotiated
         // swapchain format. glyphon text rendering is inert until this runs.
@@ -1406,6 +1416,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             compositor.widget_renderer_mut(),
             self.state.pending_widget_svgs.drain(..),
         );
+        trace_shutdown_phase("startup_renderers_ready");
         tracing::info!(format = ?surface_format, "windowed: text + widget renderers initialized");
 
         // Apply resolved design tokens to the compositor so severity colors are
@@ -2219,6 +2230,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             .enable_all()
             .build()
             .expect("startup runtime 2");
+        trace_shutdown_phase("compositor_ready_wait_begin");
         let compositor_ok = tmp_rt
             .block_on(async {
                 tokio::time::timeout(std::time::Duration::from_secs(5), ready_rx).await
@@ -2228,6 +2240,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             .map(|r| r.ok)
             .unwrap_or(false);
 
+        trace_shutdown_phase("compositor_ready_wait_end");
         if !compositor_ok {
             tracing::warn!("compositor thread did not signal ready in time");
         } else {
@@ -2237,6 +2250,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
 
         // Request first frame.
         window.request_redraw();
+        trace_shutdown_phase("resumed_return");
     }
 
     fn window_event(
@@ -2833,6 +2847,7 @@ impl WindowedRuntime {
             Arc::new(move || {
                 tracing::info!("quit requested; waking main thread");
                 shutdown.trigger(crate::threads::ShutdownReason::Clean);
+                trace_shutdown_phase("quit_requested");
                 wake.notify_main(crate::idle_efficiency::RuntimeWakeupSource::Shutdown);
             })
         };
@@ -3250,7 +3265,9 @@ impl WindowedRuntime {
         // Create winit event loop and run.
         // Per spec §Main Thread Responsibilities: winit event loop MUST run on main thread.
         let mut chrome_observers = lifecycle::ChromeObserverScope::new();
+        trace_shutdown_phase("event_loop_enter");
         event_loop.run_app(&mut app)?;
+        trace_shutdown_phase("event_loop_returned");
         tracing::info!("event loop returned");
         chrome_observers.detach();
 
@@ -3285,6 +3302,7 @@ impl WindowedRuntime {
         // (WindowEvent::CloseRequested calls shutdown.trigger()), so the
         // compositor frame loop should exit promptly.
         if let Some(handle) = app.state.compositor_handle.take() {
+            trace_shutdown_phase("compositor_join_begin");
             tracing::info!("waiting for compositor thread to exit...");
             if let Err(e) = handle.join() {
                 tracing::error!("compositor thread panicked: {e:?}");
@@ -3293,6 +3311,7 @@ impl WindowedRuntime {
             }
         }
 
+        trace_shutdown_phase("compositor_join_end");
         // Shutdown the network runtime (drains gRPC + MCP tasks).
         //
         // `shutdown_timeout` gives tasks 500 ms to exit cleanly after the
@@ -3307,6 +3326,7 @@ impl WindowedRuntime {
             tracing::info!("network runtime shutdown complete");
         }
 
+        trace_shutdown_phase("network_shutdown_end");
         let terminal_surface_recovery_failed = app
             .state
             .terminal_surface_recovery_failed
@@ -3318,7 +3338,9 @@ impl WindowedRuntime {
         // Every runtime thread has stopped; bound what teardown remains.
         crate::threads::arm_exit_deadline(crate::threads::EXIT_DEADLINE);
         tracing::info!("releasing windows and GPU surfaces");
+        trace_shutdown_phase("app_drop_begin");
         drop(app);
+        trace_shutdown_phase("app_drop_end");
         tracing::info!("windows and GPU surfaces released");
 
         if terminal_surface_recovery_failed {
@@ -3328,6 +3350,7 @@ impl WindowedRuntime {
             return Err("windowed quiescent-efficiency artifact write or validation failed".into());
         }
 
+        trace_shutdown_phase("runtime_return");
         Ok(())
     }
 }

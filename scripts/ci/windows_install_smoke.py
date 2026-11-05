@@ -23,6 +23,7 @@ import ctypes
 from ctypes import wintypes
 import hashlib
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -70,6 +71,24 @@ def wait_until(predicate, timeout_s: float, what: str) -> None:
             return
         time.sleep(0.5)
     raise AssertionError(f"timed out after {timeout_s:.0f}s waiting for {what}")
+
+
+def report_lifecycle(log: Path, instance: subprocess.Popen, checkpoint: str) -> None:
+    """Report bounded phase evidence, never substitute it for process exit."""
+    lines = log.read_text(errors="replace").splitlines() if log.exists() else []
+    phases = []
+    for line in lines:
+        if "[DEBUG-hud-lks0i] lifecycle" not in line:
+            continue
+        match = re.search(r'\bpid=(\d+)\s+phase="?([a-z_]+)', line)
+        if match and int(match[1]) == instance.pid:
+            phases.append(match[2])
+    print(
+        f"lifecycle checkpoint={checkpoint} tracked_pid={instance.pid} "
+        f"exit={instance.poll()} graphical_ready={'resumed_return' in phases} "
+        f"phases={phases}",
+        flush=True,
+    )
 
 
 def dump_logs(local: Path) -> None:
@@ -147,6 +166,8 @@ def main() -> int:
     def run(exe: Path, *flags: str, timeout: float) -> subprocess.CompletedProcess:
         return subprocess.run([str(exe), *flags], env=env, timeout=timeout)
 
+    instance = None
+    log = local / "tze_hud" / "logs" / "tze_hud.log"
     try:
         # Execute the real startup and install consumers under a kernel error,
         # before the positive install/duplicate/uninstall cases below. Requiring
@@ -191,7 +212,6 @@ def main() -> int:
         # needs Vulkan; the CI runner only has WARP, so it cannot serve. Prove
         # it launched from its log, then stand in for it with a fullscreen
         # instance started from the installed exe with the same config.
-        log = local / "tze_hud" / "logs" / "tze_hud.log"
         wait_until(
             lambda: log.exists() and log.read_text(errors="replace").count("tze_hud runtime starting") >= 1,
             30,
@@ -208,6 +228,7 @@ def main() -> int:
         wait_until(lambda: mcp_answers(smoke), 90, "installed instance to answer on loopback")
         assert instance.poll() is None, "installed instance exited"
         print("ok  installed instance answers on loopback")
+        report_lifecycle(log, instance, "mcp_ready")
 
         start = time.monotonic()
         second = run(installed, timeout=10)
@@ -221,17 +242,21 @@ def main() -> int:
         assert explicit.returncode != 0, "second launch with explicit args exited 0; it must fail loudly"
         print(f"ok  second launch with explicit args exited {explicit.returncode}")
 
+        report_lifecycle(log, instance, "before_uninstall")
         done = run(installed, "--uninstall", "--purge", timeout=30)
         assert done.returncode == 0, f"--uninstall exited {done.returncode}"
         assert run_value() is None, "Run value still present after uninstall"
         assert not app_paths_exists(), "App Paths key still present after uninstall"
         wait_until(lambda: instance.poll() is not None, 10, "instance to exit after uninstall")
+        report_lifecycle(log, instance, "process_exited")
         wait_until(lambda: not install_dir.exists(), 20, "install dir to be deleted")
         wait_until(lambda: not config_dir.exists(), 20, "config dir to be purged")
         print("ok  --uninstall --purge: Run value gone, instance exited, dirs removed")
         return 0
     except (AssertionError, subprocess.TimeoutExpired) as err:
         print(f"FAIL {err}", file=sys.stderr)
+        if instance is not None:
+            report_lifecycle(log, instance, "failure")
         for d in (install_dir, config_dir, local / "tze_hud"):
             left = [str(f.relative_to(root)) for f in d.rglob("*")] if d.exists() else []
             print(f"leftover in {d.name}: {left}", file=sys.stderr)
