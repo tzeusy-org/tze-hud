@@ -2248,6 +2248,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         if !compositor_ok {
             tracing::warn!("compositor thread did not signal ready in time");
         } else {
+            trace_shutdown_phase("graphical_ready");
             tracing::info!("windowed runtime initialised successfully");
             tracing::info!(target: "tze_hud::resident_accounting", snapshot = %self.state.runtime_context.resident_accounting_snapshot(), "windowed runtime resident accounting initialised");
         }

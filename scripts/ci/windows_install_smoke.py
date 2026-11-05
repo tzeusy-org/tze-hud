@@ -75,7 +75,15 @@ def wait_until(predicate, timeout_s: float, what: str) -> None:
 
 def report_lifecycle(log: Path, instance: subprocess.Popen, checkpoint: str) -> None:
     """Report bounded phase evidence, never substitute it for process exit."""
-    lines = log.read_text(errors="replace").splitlines() if log.exists() else []
+    try:
+        lines = log.read_text(errors="replace").splitlines()
+    except OSError as error:
+        print(
+            f"lifecycle checkpoint={checkpoint} tracked_pid={instance.pid} "
+            f"exit={instance.poll()} log_unavailable={type(error).__name__}",
+            flush=True,
+        )
+        return  # Diagnostic failure must not replace the original smoke failure.
     phases = []
     for line in lines:
         if "[DEBUG-hud-lks0i] lifecycle" not in line:
@@ -85,7 +93,8 @@ def report_lifecycle(log: Path, instance: subprocess.Popen, checkpoint: str) -> 
             phases.append(match[2])
     print(
         f"lifecycle checkpoint={checkpoint} tracked_pid={instance.pid} "
-        f"exit={instance.poll()} graphical_ready={'resumed_return' in phases} "
+        f"exit={instance.poll()} graphical_ready={'graphical_ready' in phases} "
+        f"startup_returned={'resumed_return' in phases} "
         f"phases={phases}",
         flush=True,
     )
