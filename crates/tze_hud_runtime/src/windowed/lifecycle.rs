@@ -3164,19 +3164,18 @@ impl WinitApp {
         &mut self,
         present_primary: impl FnOnce() -> Option<bool>,
     ) {
-        if self.state.frame_ready_rx.has_changed().unwrap_or(false) || self.state.deferred_present {
-            let secondary = self.present_secondaries();
-            self.maybe_present_frame_after_secondaries(present_primary, secondary);
-        }
+        self.maybe_present_frame_with_secondaries(present_primary, Self::present_secondaries);
     }
 
-    /// The final swapchain outcomes may be substituted by the harness; signal
-    /// consumption, retained debt, availability registration and accounting are
-    /// still the same code used by the native primary and secondary windows.
-    pub(super) fn maybe_present_frame_after_secondaries(
+    /// Substitute only final swapchain operations in the headless harness.
+    /// Consume the observed ready generation before either display operation:
+    /// a new secondary submission during a slow present must remain unread.
+    pub(super) fn maybe_present_frame_with_secondaries(
         &mut self,
         present_primary: impl FnOnce() -> Option<bool>,
-        (secondary_presented, mut deferred): (
+        present_secondaries: impl FnOnce(
+            &Self,
+        ) -> (
             bool,
             Vec<tze_hud_compositor::surface::PresentAvailability>,
         ),
@@ -3188,6 +3187,7 @@ impl WinitApp {
             if ready {
                 let _ = self.state.frame_ready_rx.borrow_and_update();
             }
+            let (secondary_presented, mut deferred) = present_secondaries(self);
             self.state.deferred_present = false;
             let mut primary_presented = false;
             if let Some(presented) = present_primary() {

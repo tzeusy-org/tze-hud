@@ -1591,7 +1591,7 @@ mod tests {
         runtime
             .events
             .app
-            .maybe_present_frame_after_secondaries(|| None, (false, vec![secondary]));
+            .maybe_present_frame_with_secondaries(|| None, |_| (false, vec![secondary]));
         assert!(runtime.events.app.state.deferred_present);
         wake.notify_main(crate::idle_efficiency::RuntimeWakeupSource::OperatorCapture);
         wake.take_main_source();
@@ -1604,8 +1604,36 @@ mod tests {
         runtime
             .events
             .app
-            .maybe_present_frame_after_secondaries(|| None, (true, vec![]));
+            .maybe_present_frame_with_secondaries(|| None, |_| (true, vec![]));
         assert!(!runtime.events.app.state.deferred_present);
+        assert_eq!(wake.counters().snapshot(), primary_counters);
+        let sender = runtime
+            .events
+            .app
+            .state
+            .frame_ready_tx
+            .as_ref()
+            .unwrap()
+            .clone();
+        sender.send(true).unwrap();
+        runtime.events.app.maybe_present_frame_with_secondaries(
+            || None,
+            |_| {
+                sender.send(true).unwrap();
+                (true, vec![])
+            },
+        );
+        assert!(
+            runtime
+                .events
+                .app
+                .state
+                .frame_ready_rx
+                .has_changed()
+                .unwrap(),
+            "new secondary ready during present remains owed to the next turn"
+        );
+        runtime.events.app.maybe_present_frame_with(|| None);
         assert_eq!(wake.counters().snapshot(), primary_counters);
 
         // The actual MCP server owns publication and emits the render wake.
