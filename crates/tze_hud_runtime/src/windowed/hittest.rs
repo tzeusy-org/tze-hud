@@ -603,6 +603,119 @@ mod tests {
             refreshed_snapshot.hit_test_drag_handle(800.0, 330.0),
             "snapshot built after the windowed post-render refresh must match the newly displayed drag-handle geometry"
         );
+
+        // Use the actual renderer's Zone handle, not a tile-shaped synthetic hit.
+        use super::super::test_support::{make_test_zone, make_windowed_keyboard_test_app};
+        use tze_hud_input::{FocusManager, InputProcessor, PointerEventKind};
+        use tze_hud_scene::{GeometryPolicy, NotificationAction, NotificationPayload, ZoneContent};
+        let mut zone = make_test_zone("notifications");
+        zone.geometry_policy = GeometryPolicy::Relative {
+            x_pct: 0.6,
+            y_pct: 0.1,
+            width_pct: 0.35,
+            height_pct: 0.4,
+        };
+        let zone_id = zone.id;
+        scene.register_zone(zone);
+        scene
+            .publish_to_zone(
+                "notifications",
+                ZoneContent::Notification(NotificationPayload {
+                    text: "Move the stack".into(),
+                    title: "Placement".into(),
+                    icon: String::new(),
+                    urgency: 1,
+                    ttl_ms: None,
+                    actions: vec![NotificationAction {
+                        label: "Open".into(),
+                        callback_id: "open".into(),
+                    }],
+                }),
+                "zone-owner",
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
+        compositor.render_frame(&mut scene, &surface);
+        refresh_interaction_hit_regions_after_render(&compositor, &mut scene, &surface);
+        let handle = scene
+            .overlay
+            .drag_handle_hit_regions
+            .iter()
+            .find(|h| h.element_id == zone_id)
+            .unwrap()
+            .clone();
+        assert_eq!(
+            handle.element_kind,
+            tze_hud_scene::DragHandleElementKind::Zone
+        );
+        assert!(!scene.tiles.contains_key(&zone_id));
+        let controls = scene.overlay.zone_hit_regions.clone();
+        assert_eq!(controls.len(), 2, "dismiss and action were generated");
+        let tile_bounds = scene.tiles[&tile_id].bounds;
+        let (mut app, _rx) =
+            make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
+        app.state.cursor_x = handle.bounds.x + handle.bounds.width / 2.0;
+        app.state.cursor_y = handle.bounds.y + handle.bounds.height / 2.0;
+        let (x, y) = (app.state.cursor_x, app.state.cursor_y);
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        assert!(
+            app.state.input_processor.drag_states.contains_key(&0),
+            "the emitted Zone grip must admit a real runtime drag despite having no tile"
+        );
+        app.state.cursor_x += 1.0;
+        app.enqueue_pointer_event(PointerEventKind::Move);
+        app.state.cursor_x = x - 76.8;
+        app.state.cursor_y = y + 43.2;
+        app.enqueue_pointer_event(PointerEventKind::Move);
+        app.enqueue_pointer_event(PointerEventKind::Up);
+        assert!(app.state.input_processor.drag_states.is_empty());
+        assert!(app.state.primary_drag_gesture.is_none());
+        let shared = app.state.shared_state.try_lock().unwrap();
+        assert!(
+            shared
+                .element_store
+                .entries
+                .values()
+                .all(|e| e.geometry_override.is_none())
+        );
+        let mut scene = shared.scene.try_lock().unwrap();
+        assert_eq!(scene.tiles[&tile_id].bounds, tile_bounds);
+        assert!(scene.overlay.drag_active_elements.is_empty());
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
+        compositor.render_frame(&mut scene, &surface);
+        refresh_interaction_hit_regions_after_render(&compositor, &mut scene, &surface);
+        let moved = scene
+            .overlay
+            .drag_handle_hit_regions
+            .iter()
+            .find(|h| h.element_id == zone_id)
+            .unwrap();
+        let delta = (
+            moved.bounds.x - handle.bounds.x,
+            moved.bounds.y - handle.bounds.y,
+        );
+        assert!((delta.0 + 76.8).abs() < 0.1 && (delta.1 - 43.2).abs() < 0.1);
+        assert_eq!(scene.overlay.zone_hit_regions.len(), controls.len());
+        for before in controls {
+            let after = scene
+                .overlay
+                .zone_hit_regions
+                .iter()
+                .find(|h| h.interaction_id == before.interaction_id)
+                .unwrap();
+            assert!((after.bounds.x - before.bounds.x - delta.0).abs() < 0.1);
+            assert!((after.bounds.y - before.bounds.y - delta.1).abs() < 0.1);
+            let snapshot = crate::pipeline::HitTestSnapshot::from_scene(&scene);
+            assert!(snapshot.hit_test_drag_handle(
+                moved.bounds.x + moved.bounds.width / 2.0,
+                moved.bounds.y + moved.bounds.height / 2.0
+            ));
+        }
     }
 
     #[test]
