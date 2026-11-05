@@ -926,8 +926,14 @@ pipe before issuing the choice's default `hud_input {}` poll. `wait_ms` already
 defaults to zero; omitting it measures the supported concise form without a
 producer race. This fixture signal is outside MCP and carries no answer;
 the returned answer and its ACK still pass through the real MCP handler.
-The fixture defers notification layout until that choice is published, keeping
-its producer work out of the preceding portal flow's scene-lock deadline.
+The fixture injects its one fixed portal reply in the synchronous post-Hub-unlock
+callback for the exact canonical attachment, preserving the snapshotted publish
+response. It performs no scene probes or periodic Hub work through the portal's
+1000ms poll and default-zero ACK. Only that observed portal's subsequent clear
+allows choice probes, and layout waits for the actual choice publication.
+All fixture scene work stops before choice readiness, protecting its default-zero
+answer/ACK calls too. This fixture ordering does not promise success under
+external scene contention or change the finite public input contract.
 
 The same calibration separately executes an over-limit notification publish.
 Its `notification_action_limit_error` candidate records full wire and

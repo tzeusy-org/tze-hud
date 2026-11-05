@@ -18,6 +18,16 @@ requests. The fixture fixes ids, content, order, and the portal input. HTTP
 headers and credentials are excluded. No model or external network call
 occurs.
 
+The exact canonical portal attachment synchronously injects the one fixed reply
+after the Hub unlocks and before its snapshotted response returns. Fixture work
+then waits for that same portal's clear, which follows the real 1000ms input poll
+and default-zero ACK; an initially absent or foreign portal does not permit
+choice work. Choice probes/layout stop before the existing readiness pipe releases
+the driver's default-zero choice poll/ACK. This removes fixture overlap, not
+external contention: the runtime's finite busy/error and retention semantics stay
+unchanged. The three calibration test parents run without initializing a GPU;
+the two measured executions still use the real headless runtime.
+
 Each operation records two measures:
 
 - **Wire** (`request`, `response`, `total`): the full JSON-RPC bodies.
