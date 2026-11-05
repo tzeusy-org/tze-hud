@@ -161,7 +161,7 @@ impl Compositor {
     }
 
     /// The active-drag highlight: a `DRAG_HIGHLIGHT_BORDER_PX` inside border
-    /// on the dragged element's bounds, drawn by the SDF pipeline just before
+    /// on the dragged element (occupied slots for notification stacks), drawn just before
     /// the drag-handle pass (so above widgets). Per the drag-to-reposition
     /// spec: no drop shadows, scale pulses, or animated transitions.
     pub(super) fn drag_highlight_cmds(
@@ -179,13 +179,35 @@ impl Compositor {
         handles
             .iter()
             .filter(|entry| scene.is_drag_active(entry.element_id))
-            .map(|entry| {
-                self.border_only_cmd(
-                    entry.element_bounds,
+            .filter_map(|entry| {
+                let mut bounds = entry.element_bounds;
+                if entry.element_kind == DragHandleElementKind::Zone {
+                    let zone = scene.zone_by_id(entry.element_id)?;
+                    let publishes = scene.zone_registry.active_publishes.get(&zone.name)?;
+                    if matches!(zone.contention_policy, ContentionPolicy::Stack { .. })
+                        && publishes
+                            .iter()
+                            .any(|p| matches!(p.content, ZoneContent::Notification(_)))
+                    {
+                        // Draw the occupied envelope from the very same admitted
+                        // slots as the card/text/control passes, including gaps.
+                        let slots = self.zone_slot_layout(
+                            &zone.name,
+                            publishes,
+                            &zone.rendering_policy,
+                            bounds.height,
+                            bounds.width,
+                        );
+                        let (_, y, h) = slots.iter_visible(bounds.y).last()?;
+                        bounds.height = y + h - bounds.y;
+                    }
+                }
+                Some(self.border_only_cmd(
+                    bounds,
                     0.0,
                     tze_hud_input::DRAG_HIGHLIGHT_BORDER_PX,
                     HIGHLIGHT,
-                )
+                ))
             })
             .collect()
     }
