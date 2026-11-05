@@ -442,7 +442,7 @@ passed to the exe must be Windows paths (`wslpath -w` converts a WSL path).
 After that first launch, update the running development HUD with one command:
 
 ```sh
-just dev-run 'C:\Users\<you>\tze_hud-dev' tzehouse-windows:9090
+just dev-run 'C:\Users\<you>\tze_hud-dev' hud-host.example:9090
 ```
 
 This requires local WSL Windows interop (`powershell.exe` and `wslpath`) and a
@@ -557,8 +557,9 @@ visual sign-off: Mesa/WARP antialiasing, fonts and desktop/DPI remain distinct.
 
 ## Beads
 
-`.beads/config.yaml` points `bd` at the Dolt server
-`dolt.parrot-hen.ts.net:3307`, so you need to be on the tailnet. The Beads git
+`.beads/config.yaml` selects the team's Dolt server (for example,
+`beads-host.example:3307`). Obtain the actual endpoint through private
+configuration and connect to the tailnet. The Beads git
 hooks are shell scripts, and Git for Windows runs them through its bundled
 `sh`. The ~4–5 minute `bd import` stall on `git pull --rebase` described in
 `AGENTS.md` applies on Windows too.
