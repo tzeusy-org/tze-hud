@@ -515,7 +515,21 @@ impl WinitApp {
             // WHOLE portal group so every constituent surface becomes
             // adapter-controlled again — not just the one the reset menu was
             // opened on.
-            if let Ok(mut scene) = state.scene.try_lock() {
+            {
+                // Classify under the scene lock before touching saved overrides.
+                // A busy or removed Zone menu must never fall into Tile persistence.
+                let Ok(mut scene) = state.scene.try_lock() else {
+                    return;
+                };
+                let stored_zone = state
+                    .element_store
+                    .entries
+                    .get(&element_id)
+                    .is_some_and(|entry| entry.element_type == tze_hud_scene::ElementType::Zone);
+                if scene.zone_by_id(element_id).is_some() || stored_zone {
+                    scene.reset_zone_placement(element_id);
+                    return;
+                }
                 match super::portal::resolve_portal_group(&scene, element_id) {
                     Some(group) => {
                         for member_id in group.member_ids {

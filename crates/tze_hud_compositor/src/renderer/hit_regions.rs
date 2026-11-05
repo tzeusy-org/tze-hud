@@ -338,8 +338,13 @@ fn populate_notification_hit_regions_in(
         let policy = &zone_def.rendering_policy;
         let zone_tokens = tze_hud_config::tokens::for_zone(token_map, zone_name);
         let scale = tze_hud_config::tokens::px_scale(&zone_tokens);
-        let (zx, zy, zw, zh) =
-            super::zone_geometry_in(layout, zone_name, &zone_def.geometry_policy, sw, sh);
+        let (zx, zy, zw, zh) = super::zone_geometry_in(
+            layout,
+            zone_name,
+            &scene.effective_zone_geometry(zone_def),
+            sw,
+            sh,
+        );
         let layout = Compositor::zone_slot_layout_with_tokens(
             &zone_tokens,
             zone_name,

@@ -126,6 +126,41 @@ impl SceneGraph {
 
     // ─── Zone operations ─────────────────────────────────────────────────
 
+    pub fn zone_by_id(&self, id: SceneId) -> Option<&ZoneDefinition> {
+        self.zone_registry.zones.values().find(|z| z.id == id)
+    }
+
+    /// Live owner placement takes precedence without rewriting the definition.
+    pub fn effective_zone_geometry(&self, zone: &ZoneDefinition) -> GeometryPolicy {
+        self.overlay
+            .zone_placements
+            .get(&zone.id)
+            .copied()
+            .unwrap_or(zone.geometry_policy)
+    }
+
+    /// Apply a session-only relative placement. No publication/version change.
+    pub fn set_zone_placement(&mut self, id: SceneId, placement: GeometryPolicy) -> bool {
+        if !matches!(placement, GeometryPolicy::Relative { .. })
+            || self
+                .zone_by_id(id)
+                .is_none_or(|zone| self.effective_zone_geometry(zone) == placement)
+        {
+            return false;
+        }
+        self.overlay.zone_placements.insert(id, placement);
+        self.bump_geometry_epoch();
+        true
+    }
+
+    pub fn reset_zone_placement(&mut self, id: SceneId) -> bool {
+        if self.overlay.zone_placements.remove(&id).is_none() {
+            return false;
+        }
+        self.bump_geometry_epoch();
+        true
+    }
+
     /// Register a zone definition in the zone registry.
     pub fn register_zone(&mut self, zone: ZoneDefinition) {
         self.zone_registry.register(zone);
@@ -134,8 +169,7 @@ impl SceneGraph {
     }
 
     /// Unregister a zone by name. Returns the removed definition if found.
-    #[cfg(test)]
-    pub(crate) fn unregister_zone(&mut self, name: &str) -> Option<ZoneDefinition> {
+    pub fn unregister_zone(&mut self, name: &str) -> Option<ZoneDefinition> {
         let removed = self.zone_registry.unregister(name);
         if removed.is_some() {
             self.prune_publication_orphans();
@@ -1187,6 +1221,9 @@ impl SceneGraph {
 
     /// Keep orphan state bounded by the current publications, never request history.
     pub(crate) fn prune_publication_orphans(&mut self) {
+        self.overlay
+            .zone_placements
+            .retain(|id, _| self.zone_registry.zones.values().any(|z| z.id == *id));
         self.prune_notification_feedback();
         if self.publication_orphans.is_empty() {
             return;

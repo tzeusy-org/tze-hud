@@ -2,19 +2,52 @@ use tze_hud_input::{
     DragEventOutcome, InputProcessor, PointerEvent, PointerEventKind, PortalRect,
     PortalResizeState, PortalWindowTokens, ResizeBounds, ResizeEdge, ResizeOutcome, hit_affordance,
 };
-use tze_hud_scene::HitResult;
 use tze_hud_scene::types::{DragHandleElementKind, ZoneInteractionKind};
+use tze_hud_scene::{HitResult, Rect, SceneGraph, SceneId};
 
 use super::WinitApp;
 use super::input_dispatch::dispatch_portal_geometry_event;
 use super::lifecycle::{INTERACTION_LOCK_BUDGET, spin_acquire};
+
+/// Captured definition identity; a zone is a slot, never an agent tile.
+#[derive(Clone, Debug)]
+pub(super) enum DragTarget {
+    Tile(SceneId),
+    Zone(String),
+}
+
+impl DragTarget {
+    pub(super) fn capture(
+        scene: &SceneGraph,
+        id: SceneId,
+        kind: DragHandleElementKind,
+    ) -> Option<Self> {
+        match kind {
+            DragHandleElementKind::Tile => scene.tiles.get(&id).map(|t| Self::Tile(t.lease_id)),
+            DragHandleElementKind::Zone if scene.zones_shown() => {
+                scene.zone_by_id(id).map(|z| Self::Zone(z.name.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    fn bounds(&self, scene: &SceneGraph, id: SceneId, sw: f32, sh: f32) -> Option<Rect> {
+        let zone = match self {
+            Self::Tile(_) => return scene.tiles.get(&id).map(|t| t.bounds),
+            Self::Zone(name) => scene.zone_registry.zones.get(name).filter(|z| z.id == id)?,
+        };
+        let (x, y, w, h) =
+            tze_hud_scene::resolve_zone_geometry(&scene.effective_zone_geometry(zone), sw, sh);
+        Some(Rect::new(x, y, w, h))
+    }
+}
 
 /// Identity of the primary drag that actually entered the recognizer under lock.
 /// A missed Up retains only this gesture's terminal event, never generic input.
 #[derive(Clone, Debug)]
 pub(super) struct PrimaryDragGesture {
     pub(super) element_id: tze_hud_scene::SceneId,
-    pub(super) lease_id: tze_hud_scene::SceneId,
+    pub(super) target: DragTarget,
     pub(super) feedback_target: tze_hud_scene::SceneId,
     pub(super) interaction_id: String,
     pub(super) press_start: std::time::Instant,
@@ -31,14 +64,22 @@ impl PrimaryDragGesture {
     }
 
     pub(super) fn target_is_live(&self, scene: &tze_hud_scene::SceneGraph) -> bool {
-        scene
-            .tiles
-            .get(&self.element_id)
-            .is_some_and(|tile| tile.lease_id == self.lease_id)
-            && scene
-                .tiles
-                .get(&self.feedback_target)
-                .is_some_and(|tile| tile.lease_id == self.lease_id)
+        match &self.target {
+            DragTarget::Tile(lease) => [self.element_id, self.feedback_target].iter().all(|id| {
+                scene
+                    .tiles
+                    .get(id)
+                    .is_some_and(|tile| tile.lease_id == *lease)
+            }),
+            DragTarget::Zone(name) => {
+                scene.zones_shown()
+                    && scene
+                        .zone_registry
+                        .zones
+                        .get(name)
+                        .is_some_and(|zone| zone.id == self.element_id)
+            }
+        }
     }
 }
 
@@ -89,7 +130,7 @@ pub(super) fn reconcile_drag_feedback(
         .values()
         .filter(|drag| {
             drag.phase == tze_hud_input::drag::DragPhase::Activated
-                && scene.tiles.contains_key(&drag.element_id)
+                && DragTarget::capture(scene, drag.element_id, drag.element_kind).is_some()
         })
         .map(|drag| drag_feedback_target(scene, drag.element_id))
         .collect();
@@ -136,33 +177,23 @@ impl PortalProjectionDrain {
 
 /// Payload returned by [`apply_drag_handle_pointer_event`] when a drag is
 /// completed and the geometry must be persisted outside the scene lock.
+pub(super) enum DragRelease {
+    Tile(DragReleasedData),
+    Zone,
+}
+
 pub(super) struct DragReleasedData {
     /// Scene-level ID of the element that was dragged.
     element_id: tze_hud_scene::SceneId,
-    /// Final snapped+clamped top-left X in display pixels.
-    final_x: f32,
-    /// Final snapped+clamped top-left Y in display pixels.
-    final_y: f32,
-    /// Element width in display pixels (unchanged during drag).
-    width: f32,
-    /// Element height in display pixels (unchanged during drag).
-    height: f32,
-    /// Display width at time of release, used for `GeometryPolicy::Relative` normalisation.
-    display_width: f32,
-    /// Display height at time of release.
-    display_height: f32,
+    /// Final snapped/clamped bounds; dragging preserves the original dimensions.
+    bounds: Rect,
+    /// Primary canvas dimensions for relative geometry normalization.
+    display: (f32, f32),
     /// Agent namespace that owns the tile, used for `ElementRepositionedEvent` routing.
     namespace: String,
-    /// When the release ended a **whole-portal** drag, the final bounds of every
-    /// group member (including the grabbed tile), keyed by SceneId. Empty for a
-    /// plain single-tile move.
-    ///
-    /// A text-stream portal is N tiles that share one namespace, so the
-    /// namespace-matched `persist_drag_geometry` path reaches only one arbitrary
-    /// member. To give *every* member a durable geometry override — so
-    /// `list_elements` reports `has_user_override=true` for all of them and an
-    /// adapter republish cannot pull any member back post-restart — the release
-    /// carries each member's id + final rect for an id-keyed persist (hud-8vejp).
+    /// Final whole-portal member bounds, including the grabbed tile; empty
+    /// for single tiles. [`write_member_geometry_overrides`] owns the id-keyed
+    /// persistence contract for shared namespaces (hud-8vejp).
     group_members: Vec<(tze_hud_scene::SceneId, tze_hud_scene::types::Rect)>,
 }
 
@@ -209,7 +240,7 @@ pub(super) fn apply_drag_handle_pointer_event(
     scene: &mut tze_hud_scene::graph::SceneGraph,
     display_width: f32,
     display_height: f32,
-) -> Option<DragReleasedData> {
+) -> Option<DragRelease> {
     let device_id = pointer_event.device_id;
 
     // Determine which drag handle (if any) was hit on this event.
@@ -237,7 +268,20 @@ pub(super) fn apply_drag_handle_pointer_event(
     if pointer_event.kind == PointerEventKind::Down {
         input_processor.drag_states.remove(&device_id);
         if let Some((interaction_id, element_id, element_kind, is_header_band)) = hit_drag_info {
-            let Some(element_bounds) = scene.tiles.get(&element_id).map(|tile| tile.bounds) else {
+            let target = DragTarget::capture(scene, element_id, element_kind);
+            let live_handle = !matches!(target, Some(DragTarget::Zone(_)))
+                || scene.overlay.drag_handle_hit_regions.iter().any(|h| {
+                    h.element_id == element_id
+                        && h.element_kind == element_kind
+                        && h.interaction_id == interaction_id
+                        && scene.shown_zone_publishes().any(|(name, p)| {
+                            !p.is_empty() && scene.zone_registry.zones[name].id == element_id
+                        })
+                });
+            let Some(element_bounds) = target
+                .filter(|_| live_handle)
+                .and_then(|t| t.bounds(scene, element_id, display_width, display_height))
+            else {
                 reconcile_drag_feedback(input_processor, scene);
                 return None;
             };
@@ -274,8 +318,11 @@ pub(super) fn apply_drag_handle_pointer_event(
         return None;
     };
 
-    // Snapshot element bounds; element_id is the tile being dragged.
-    let Some(element_bounds) = scene.tiles.get(&element_id).map(|tile| tile.bounds) else {
+    let target = DragTarget::capture(scene, element_id, element_kind);
+    let Some(element_bounds) = target
+        .as_ref()
+        .and_then(|t| t.bounds(scene, element_id, display_width, display_height))
+    else {
         input_processor.drag_states.remove(&device_id);
         reconcile_drag_feedback(input_processor, scene);
         return None;
@@ -294,6 +341,31 @@ pub(super) fn apply_drag_handle_pointer_event(
         display_height,
         false,
     );
+
+    if let Some(DragTarget::Zone(_)) = target {
+        let position = match outcome {
+            DragEventOutcome::Moved { new_x, new_y, .. } => Some((new_x, new_y)),
+            DragEventOutcome::Released {
+                final_x, final_y, ..
+            } => Some((final_x, final_y)),
+            _ => None,
+        };
+        if let Some((x, y)) = position {
+            scene.set_zone_placement(
+                element_id,
+                tze_hud_input::drag::final_position_to_geometry(
+                    x,
+                    y,
+                    element_bounds.width,
+                    element_bounds.height,
+                    display_width,
+                    display_height,
+                ),
+            );
+        }
+        reconcile_drag_feedback(input_processor, scene);
+        return matches!(outcome, DragEventOutcome::Released { .. }).then_some(DragRelease::Zone);
+    }
 
     let released = match outcome {
         DragEventOutcome::Idle | DragEventOutcome::Accumulating { .. } => {
@@ -320,38 +392,7 @@ pub(super) fn apply_drag_handle_pointer_event(
             new_y,
             ..
         } => {
-            // Update tile bounds directly (chrome-layer bypass — no lease check).
-            // For a text-stream portal the drag moves the WHOLE portal as one
-            // unit (hud-lyqun): translate every group member by the same delta so
-            // the constituents never fracture. Falls back to a single-tile move
-            // for non-portal drags.
-            let old = scene.tiles.get(&eid).map(|t| t.bounds);
-            if let Some(old) = old {
-                let dx = new_x - old.x;
-                let dy = new_y - old.y;
-                if !translate_portal_group_on_drag(scene, eid, dx, dy) {
-                    let moved = if let Some(tile) = scene.tiles.get_mut(&eid) {
-                        tile.bounds.x = new_x;
-                        tile.bounds.y = new_y;
-                        true
-                    } else {
-                        false
-                    };
-                    if moved {
-                        // Position-only single-tile move: geometry epoch, not
-                        // version — same reasoning as the group path (hud-uyhpn).
-                        scene.bump_geometry_epoch();
-                    }
-                }
-                tracing::trace!(
-                    element_id = %eid,
-                    old_x = old.x,
-                    old_y = old.y,
-                    new_x,
-                    new_y,
-                    "drag-handle: tile moved"
-                );
-            }
+            move_drag_tile(scene, eid, new_x, new_y);
             None
         }
         DragEventOutcome::Released {
@@ -360,54 +401,19 @@ pub(super) fn apply_drag_handle_pointer_event(
             final_y,
             element_kind: _,
         } => {
-            let (old_x, old_y, width, height) = scene
-                .tiles
-                .get(&eid)
-                .map(|t| (t.bounds.x, t.bounds.y, t.bounds.width, t.bounds.height))
-                .unwrap_or((0.0, 0.0, 0.0, 0.0));
+            let (width, height) = (element_bounds.width, element_bounds.height);
+            let group_members = if move_drag_tile(scene, eid, final_x, final_y) {
+                resolve_portal_group(scene, eid)
+                    .expect("translated portal group remains live under the scene lock")
+                    .member_ids
+                    .into_iter()
+                    .map(|id| (id, scene.tiles[&id].bounds))
+                    .collect()
+            } else {
+                Vec::new()
+            };
 
-            // Apply the final position. As with move, a portal drag relocates the
-            // whole group coherently (hud-lyqun); non-portal drags move the single
-            // tile.
-            let dx = final_x - old_x;
-            let dy = final_y - old_y;
-            let group_members: Vec<(tze_hud_scene::SceneId, tze_hud_scene::types::Rect)> =
-                if translate_portal_group_on_drag(scene, eid, dx, dy) {
-                    // Whole-portal move applied: snapshot every member's final
-                    // bounds so the caller can persist a durable per-member
-                    // geometry override keyed by SceneId (hud-8vejp). Without
-                    // this only the grabbed member's namespace-matched entry
-                    // gets an override.
-                    resolve_portal_group(scene, eid)
-                        .map(|group| {
-                            group
-                                .member_ids
-                                .iter()
-                                .filter_map(|id| scene.tiles.get(id).map(|t| (*id, t.bounds)))
-                                .collect()
-                        })
-                        .unwrap_or_default()
-                } else {
-                    let moved = if let Some(tile) = scene.tiles.get_mut(&eid) {
-                        tile.bounds.x = final_x;
-                        tile.bounds.y = final_y;
-                        true
-                    } else {
-                        false
-                    };
-                    if moved {
-                        // Position-only single-tile move: geometry epoch, not
-                        // version — same reasoning as the group path (hud-uyhpn).
-                        scene.bump_geometry_epoch();
-                    }
-                    Vec::new()
-                };
-
-            let namespace = scene
-                .tiles
-                .get(&eid)
-                .map(|t| t.namespace.clone())
-                .unwrap_or_default();
+            let namespace = scene.tiles[&eid].namespace.clone();
 
             tracing::debug!(
                 element_id = %eid,
@@ -419,21 +425,33 @@ pub(super) fn apply_drag_handle_pointer_event(
             );
 
             // Return data the caller will use to persist after releasing locks.
-            Some(DragReleasedData {
+            Some(DragRelease::Tile(DragReleasedData {
                 element_id: eid,
-                final_x,
-                final_y,
-                width,
-                height,
-                display_width,
-                display_height,
+                bounds: Rect::new(final_x, final_y, width, height),
+                display: (display_width, display_height),
                 namespace,
                 group_members,
-            })
+            }))
         }
     };
     reconcile_drag_feedback(input_processor, scene);
     released
+}
+
+/// Move the existing tile/portal owner once; return whether its group moved.
+/// Release alone snapshots group members for durable post-lock persistence.
+fn move_drag_tile(scene: &mut SceneGraph, id: SceneId, x: f32, y: f32) -> bool {
+    let Some(old) = scene.tiles.get(&id).map(|t| t.bounds) else {
+        return false;
+    };
+    if translate_portal_group_on_drag(scene, id, x - old.x, y - old.y) {
+        return true;
+    }
+    let tile = scene.tiles.get_mut(&id).expect("live single tile");
+    tile.bounds.x = x;
+    tile.bounds.y = y;
+    scene.bump_geometry_epoch();
+    false
 }
 
 /// Compute the maximum resize dimensions for a portal tile, combining the
@@ -1300,8 +1318,10 @@ impl WinitApp {
     ///
     /// Called after all scene locks are released to avoid holding locks during
     /// disk I/O (element store atomic write + fsync).
-    pub(super) fn persist_drag_release(&mut self, released: DragReleasedData) {
-        use tze_hud_input::InputProcessor;
+    pub(super) fn persist_drag_release(&mut self, released: DragRelease) {
+        let DragRelease::Tile(released) = released else {
+            return;
+        };
         use tze_hud_scene::element_store::ElementType;
 
         let (store_snapshot, persist_path, new_geometry) = {
@@ -1311,41 +1331,30 @@ impl WinitApp {
             };
 
             let new_geometry = tze_hud_input::drag::final_position_to_geometry(
-                released.final_x,
-                released.final_y,
-                released.width,
-                released.height,
-                released.display_width,
-                released.display_height,
+                released.bounds.x,
+                released.bounds.y,
+                released.bounds.width,
+                released.bounds.height,
+                released.display.0,
+                released.display.1,
             );
 
             if released.group_members.is_empty() {
                 // Plain single-tile move: match the store entry by namespace and
                 // write its geometry override (the pre-existing path).
-                InputProcessor::persist_drag_geometry(
+                tze_hud_input::drag::persist_geometry_override(
                     &mut state.element_store,
                     ElementType::Tile,
                     &released.namespace,
-                    released.final_x,
-                    released.final_y,
-                    released.width,
-                    released.height,
-                    released.display_width,
-                    released.display_height,
+                    new_geometry,
                 );
             } else {
-                // Whole-portal move (hud-8vejp): a portal's constituent tiles
-                // share one namespace, so a namespace match would give only one
-                // arbitrary member a durable override. Write a Relative override
-                // for EVERY member keyed by its own SceneId so `list_elements`
-                // reports `has_user_override=true` for all of them and an adapter
-                // republish can never pull a member back — in-session or after a
-                // restart (the override is authoritative at the publish ingress).
+                // Shared namespaces need the canonical per-member writer.
                 write_member_geometry_overrides(
                     &mut state.element_store,
                     &released.group_members,
-                    released.display_width,
-                    released.display_height,
+                    released.display.0,
+                    released.display.1,
                 );
             }
 
@@ -1374,8 +1383,8 @@ impl WinitApp {
             tx.send(event).unwrap_or_default();
             tracing::debug!(
                 element_id = %released.element_id,
-                final_x = released.final_x,
-                final_y = released.final_y,
+                final_x = released.bounds.x,
+                final_y = released.bounds.y,
                 "ElementRepositionedEvent broadcast after drag release"
             );
         }
@@ -1522,10 +1531,9 @@ impl WinitApp {
         };
         let epoch_before = scene.geometry_epoch;
 
-        self.state
-            .input_processor
-            .drag_states
-            .retain(|_, drag| scene.tiles.contains_key(&drag.element_id));
+        self.state.input_processor.drag_states.retain(|_, drag| {
+            DragTarget::capture(&scene, drag.element_id, drag.element_kind).is_some()
+        });
         if self
             .state
             .primary_drag_gesture
@@ -1925,18 +1933,19 @@ mod tests {
             1080.0,
         );
 
-        let released =
-            released_on_up.expect("PointerUp after activated drag must return released data");
+        let Some(DragRelease::Tile(released)) = released_on_up else {
+            panic!("PointerUp after activated tile drag must return tile persistence data");
+        };
         assert_eq!(
             released.element_id, element_id,
             "released element_id must match the dragged tile"
         );
         assert!(
-            released.final_x >= 0.0 && released.final_x + released.width <= 1920.0,
+            released.bounds.x >= 0.0 && released.bounds.x + released.bounds.width <= 1920.0,
             "final X must be within display bounds"
         );
         assert!(
-            released.final_y >= 0.0 && released.final_y + released.height <= 1080.0,
+            released.bounds.y >= 0.0 && released.bounds.y + released.bounds.height <= 1080.0,
             "final Y must be within display bounds"
         );
 
@@ -3320,16 +3329,12 @@ mod tests {
 
         let released = DragReleasedData {
             element_id: frame_id,
-            final_x: frame_final.x,
-            final_y: frame_final.y,
-            width: frame_final.width,
-            height: frame_final.height,
-            display_width: 1920.0,
-            display_height: 1080.0,
+            bounds: frame_final,
+            display: (1920.0, 1080.0),
             namespace: "portal-agent".to_string(),
             group_members,
         };
-        app.persist_drag_release(released);
+        app.persist_drag_release(DragRelease::Tile(released));
 
         // Every spatial portal member has a durable override.
         for id in [frame_id, transcript_id, composer_id] {
@@ -4376,6 +4381,19 @@ mod tests {
     /// (leverages the #991 geometry-epoch path: no `scene.version` bump).
     #[test]
     fn header_band_anchor_is_the_frame_and_band_drag_is_position_only() {
+        fn release_and_wait<T>(app: &WinitApp, held: T) {
+            let generation = app.state.wake.main_work_generation();
+            drop(held);
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+            while app.state.wake.main_work_generation() == generation {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "release availability must precede settlement"
+                );
+                std::thread::yield_now();
+            }
+        }
+
         let (mut scene, _tab, frame_id, transcript_id, composer_id, _shield, _fm) =
             multi_surface_portal_scene();
 
@@ -4503,14 +4521,8 @@ mod tests {
                 !scene.is_drag_active(frame_id),
                 "the real outside gesture cannot mark the portal frame"
             );
-            assert_eq!(
-                app.state
-                    .primary_drag_gesture
-                    .as_ref()
-                    .unwrap()
-                    .feedback_target,
-                _shield
-            );
+            let gesture = app.state.primary_drag_gesture.as_ref().unwrap();
+            assert_eq!(gesture.feedback_target, _shield);
         }
         app.state.cursor_x = band.x + 50.0;
         app.state.cursor_y = band.y + 12.0;
@@ -4553,18 +4565,9 @@ mod tests {
             original_press
         );
         assert_eq!(app.state.input_ring.lock().unwrap().len(), ring_after_up);
-        let main_work_before = app.state.wake.main_work_generation();
-        drop(held);
         // The real availability waiter briefly reacquires both scene locks.
         // Settle only after its completion, as the event loop does on its wake.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
-        while app.state.wake.main_work_generation() == main_work_before {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "release availability must schedule the retained terminal"
-            );
-            std::thread::yield_now();
-        }
+        release_and_wait(&app, held);
         let checkpoint = app.state.wake.main_work_checkpoint();
         let settled = app.settle_scene_work();
         assert!(
@@ -4625,16 +4628,7 @@ mod tests {
                 .terminal
                 .is_some()
         );
-        let main_work_before = app.state.wake.main_work_generation();
-        drop(held);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
-        while app.state.wake.main_work_generation() == main_work_before {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "scene release availability must precede the replacement Down"
-            );
-            std::thread::yield_now();
-        }
+        release_and_wait(&app, held);
         app.enqueue_pointer_event(PointerEventKind::Down);
         let replacement = app.state.primary_drag_gesture.as_ref().unwrap();
         assert_ne!(replacement.press_start, original_press);
@@ -4656,28 +4650,15 @@ mod tests {
             app.enqueue_pointer_event(PointerEventKind::Up);
             let saved_override = held.element_store.entries[&frame_id].geometry_override;
             if invalid_window {
-                app.state.primary_drag_gesture.as_mut().unwrap().window_id =
-                    Some(winit::window::WindowId::dummy());
-                app.state
-                    .primary_drag_gesture
-                    .as_mut()
-                    .unwrap()
-                    .window_allocation = Some(std::sync::Weak::new());
+                let gesture = app.state.primary_drag_gesture.as_mut().unwrap();
+                gesture.window_id = Some(winit::window::WindowId::dummy());
+                gesture.window_allocation = Some(std::sync::Weak::new());
             } else {
                 let mut scene = held.scene.try_lock().unwrap();
                 let different_lease = scene.grant_lease("portal-agent", 60_000);
                 scene.tiles.get_mut(&frame_id).unwrap().lease_id = different_lease;
             }
-            let main_work_before = app.state.wake.main_work_generation();
-            drop(held);
-            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
-            while app.state.wake.main_work_generation() == main_work_before {
-                assert!(
-                    std::time::Instant::now() < deadline,
-                    "invalid-identity release availability must precede cancellation"
-                );
-                std::thread::yield_now();
-            }
+            release_and_wait(&app, held);
             app.settle_scene_work();
             assert!(app.state.primary_drag_gesture.is_none());
             assert!(!app.state.input_processor.drag_states.contains_key(&0));
@@ -4704,16 +4685,7 @@ mod tests {
             .unwrap()
             .delete_tile(frame_id, "portal-agent")
             .unwrap();
-        let main_work_before = app.state.wake.main_work_generation();
-        drop(held);
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
-        while app.state.wake.main_work_generation() == main_work_before {
-            assert!(
-                std::time::Instant::now() < deadline,
-                "removed-target release availability must precede cancellation"
-            );
-            std::thread::yield_now();
-        }
+        release_and_wait(&app, held);
         app.settle_scene_work();
         assert!(app.state.primary_drag_gesture.is_none());
         assert!(!app.state.input_processor.drag_states.contains_key(&0));
@@ -4725,6 +4697,111 @@ mod tests {
             shared.element_store.entries[&frame_id].geometry_override,
             saved_override
         );
+        drop(scene);
+        drop(shared);
+        // Zone identity is the slot, even across clear or publication replacement.
+        // This CPU fixture models its emitted handle; the render parent proves
+        // admission using the actual compositor-produced handle.
+        for terminal in [
+            "clear",
+            "publication",
+            "removed",
+            "definition",
+            "window",
+            "hidden",
+        ] {
+            let (mut scene, ..) =
+                super::super::test_support::scene_with_drag_handle_tile(400.0, 300.0, 600.0, 200.0);
+            let zone = super::super::test_support::make_test_zone("slot");
+            let id = zone.id;
+            scene.register_zone(zone.clone());
+            let content = tze_hud_scene::ZoneContent::Notification(Default::default());
+            scene
+                .publish_to_zone("slot", content.clone(), "owner", None, None, None)
+                .unwrap();
+            let handle = &mut scene.overlay.drag_handle_hit_regions[0];
+            handle.element_id = id;
+            handle.element_kind = DragHandleElementKind::Zone;
+            handle.interaction_id = format!("drag-handle:{id}");
+            handle.hit_region.interaction_id = handle.interaction_id.clone();
+            let (x, y) = (
+                handle.bounds.x + handle.bounds.width / 2.0,
+                handle.bounds.y + handle.bounds.height / 2.0,
+            );
+            let (mut app, _rx) =
+                make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
+            let (tx, mut events) = tokio::sync::broadcast::channel(4);
+            app.state.element_repositioned_tx = Some(tx);
+            app.state.cursor_x = x;
+            app.state.cursor_y = y;
+            app.enqueue_pointer_event(PointerEventKind::Down);
+            app.state.cursor_y += 1.0;
+            app.enqueue_pointer_event(PointerEventKind::Move);
+            app.state.cursor_y += 43.2;
+            app.enqueue_pointer_event(PointerEventKind::Move);
+            let shared_state = Arc::clone(&app.state.shared_state);
+            let held = shared_state.try_lock().unwrap();
+            app.enqueue_pointer_event(PointerEventKind::Up);
+            assert!(
+                app.state
+                    .primary_drag_gesture
+                    .as_ref()
+                    .unwrap()
+                    .terminal
+                    .is_some()
+            );
+            let ring = app.state.input_ring.lock().unwrap().len();
+            app.enqueue_pointer_event(PointerEventKind::Down);
+            assert_eq!(app.state.input_ring.lock().unwrap().len(), ring);
+            {
+                let mut scene = held.scene.try_lock().unwrap();
+                match terminal {
+                    "clear" => scene.clear_zone("slot").unwrap(),
+                    "publication" => {
+                        scene.clear_zone("slot").unwrap();
+                        scene
+                            .publish_to_zone("slot", content, "other", None, None, None)
+                            .unwrap();
+                    }
+                    "removed" => {
+                        scene.unregister_zone("slot");
+                    }
+                    "definition" => {
+                        let mut replacement = zone;
+                        replacement.id = SceneId::new();
+                        scene.register_zone(replacement);
+                    }
+                    "hidden" => {
+                        let mut hidden = scene.owner_hidden();
+                        hidden.zones = true;
+                        scene.set_owner_hidden(hidden);
+                    }
+                    "window" => {
+                        let gesture = app.state.primary_drag_gesture.as_mut().unwrap();
+                        gesture.window_id = Some(winit::window::WindowId::dummy());
+                        gesture.window_allocation = Some(std::sync::Weak::new());
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            release_and_wait(&app, held);
+            app.settle_scene_work();
+            assert!(app.state.primary_drag_gesture.is_none());
+            assert!(app.state.input_processor.drag_states.is_empty());
+            assert_eq!(app.state.input_ring.lock().unwrap().len(), ring);
+            let shared = shared_state.try_lock().unwrap();
+            let scene = shared.scene.try_lock().unwrap();
+            assert!(!scene.is_drag_active(id));
+            assert!(shared.element_store.entries.is_empty());
+            assert!(events.try_recv().is_err(), "zone completion is owner-local");
+            assert_eq!(
+                scene.overlay.zone_placements.contains_key(&id),
+                !matches!(terminal, "removed" | "definition")
+            );
+            if terminal == "clear" {
+                assert!(scene.zone_registry.active_for_zone("slot").is_empty());
+            }
+        }
     }
 
     /// A single non-portal tile drag must NOT engage the whole-portal translate

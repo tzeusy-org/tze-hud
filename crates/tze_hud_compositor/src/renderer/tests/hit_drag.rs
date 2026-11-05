@@ -487,7 +487,7 @@ fn populate_drag_handles(compositor: &Compositor, scene: &mut SceneGraph, sw: f3
 
 #[tokio::test]
 async fn drag_handle_regions_cover_visible_tile_and_zone_but_not_widget() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
 
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab = scene.create_tab("Main", 0).unwrap();
@@ -660,6 +660,138 @@ async fn drag_handle_regions_cover_visible_tile_and_zone_but_not_widget() {
             "drag handles must not participate in focus cycle"
         );
     }
+    use crate::display::{DisplayLayout, DisplayRect};
+    let default = scene.zone_registry.zones["drag-zone"].geometry_policy;
+    let mut second = scene.zone_registry.zones["drag-zone"].clone();
+    second.name = "other-zone".into();
+    second.id = SceneId::new();
+    let second_id = second.id;
+    scene.register_zone(second);
+    scene
+        .publish_to_zone(
+            "other-zone",
+            ZoneContent::StreamText("other".into()),
+            "agent-b",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    scene
+        .zone_registry
+        .zones
+        .get_mut("drag-zone")
+        .unwrap()
+        .accepted_media_types
+        .push(ZoneMediaType::ShortTextWithIcon);
+    scene.clear_zone("drag-zone").unwrap();
+    scene
+        .zone_registry
+        .zones
+        .get_mut("drag-zone")
+        .unwrap()
+        .contention_policy = ContentionPolicy::Stack { max_depth: 4 };
+    scene
+        .publish_to_zone(
+            "drag-zone",
+            ZoneContent::Notification(NotificationPayload {
+                text: "content".into(),
+                actions: vec![tze_hud_scene::NotificationAction {
+                    label: "Open".into(),
+                    callback_id: "open".into(),
+                }],
+                ..Default::default()
+            }),
+            "agent-a",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    let placement = GeometryPolicy::Relative {
+        x_pct: 0.2,
+        y_pct: 0.3,
+        width_pct: 0.3,
+        height_pct: 0.2,
+    };
+    for scale in [1.0, 1.5, 1.875] {
+        compositor.set_token_map(HashMap::from([(
+            tze_hud_config::tokens::PX_SCALE_KEY.into(),
+            scale.to_string(),
+        )]));
+        for assigned in [None, Some("PRIMARY"), Some("MISSING"), Some("SECONDARY")] {
+            let assignments = assigned
+                .map(|name| HashMap::from([("drag-zone".into(), name.into())]))
+                .unwrap_or_default();
+            compositor.set_display_layout(DisplayLayout::new(
+                vec![
+                    DisplayRect {
+                        name: "PRIMARY".into(),
+                        rect: Rect::new(0.0, 0.0, 1920.0, 1080.0),
+                        primary: true,
+                    },
+                    DisplayRect {
+                        name: "SECONDARY".into(),
+                        rect: Rect::new(-1280.0, 80.0, 1280.0, 720.0),
+                        primary: false,
+                    },
+                ],
+                &assignments,
+            ));
+            scene.set_zone_placement(visible_zone_id, placement);
+            populate_drag_handles(&compositor, &mut scene, 1920.0, 1080.0);
+            compositor.populate_zone_hit_regions(&mut scene, 1920.0, 1080.0);
+            let emitted = scene
+                .overlay
+                .drag_handle_hit_regions
+                .iter()
+                .find(|h| h.element_id == visible_zone_id);
+            assert_eq!(emitted.is_some(), assigned != Some("SECONDARY"));
+            assert!(
+                scene
+                    .overlay
+                    .drag_handle_hit_regions
+                    .iter()
+                    .any(|h| h.element_id == second_id)
+            );
+            assert_eq!(
+                scene.overlay.zone_hit_regions.len(),
+                2,
+                "{assigned:?} at {scale}x keeps dismiss/action controls"
+            );
+            let rect = compositor.zone_geometry("drag-zone", &placement, 1920.0, 1080.0);
+            for region in &scene.overlay.zone_hit_regions {
+                assert!(
+                    region.bounds.x >= rect.0
+                        && region.bounds.x + region.bounds.width <= rect.0 + rect.2 + 0.01
+                );
+            }
+            if let Some(handle) = emitted {
+                assert!(
+                    (handle.bounds.x + handle.bounds.width / 2.0 - (rect.0 + rect.2 / 2.0)).abs()
+                        < 0.01
+                );
+                assert_eq!(handle.element_kind, DragHandleElementKind::Zone);
+            }
+            assert!(scene.reset_zone_placement(visible_zone_id));
+            assert_eq!(
+                scene.effective_zone_geometry(&scene.zone_registry.zones["drag-zone"]),
+                default
+            );
+        }
+    }
+    scene.set_owner_hidden(tze_hud_scene::graph::visibility::SurfaceClasses {
+        zones: true,
+        ..Default::default()
+    });
+    populate_drag_handles(&compositor, &mut scene, 1920.0, 1080.0);
+    assert!(
+        scene
+            .overlay
+            .drag_handle_hit_regions
+            .iter()
+            .all(|h| h.element_kind == DragHandleElementKind::Tile)
+    );
 }
 
 #[tokio::test]
@@ -1263,6 +1395,40 @@ fn zone_hit_regions_and_slot_pitch_scale_with_px_scale() {
         super::super::hit_regions::populate_notification_hit_regions(
             &mut scene, 1920.0, 1080.0, &tokens,
         );
+        let original = scene.overlay.zone_hit_regions.clone();
+        let zone = scene.zone_registry.zones["notif"].clone();
+        let version = scene.version;
+        let placement = GeometryPolicy::Relative {
+            x_pct: 0.5,
+            y_pct: 0.2,
+            width_pct: 0.24,
+            height_pct: 0.6,
+        };
+        assert!(scene.set_zone_placement(zone.id, placement));
+        let moved_epoch = scene.geometry_epoch;
+        assert!(!scene.set_zone_placement(zone.id, placement));
+        assert_eq!(scene.geometry_epoch, moved_epoch);
+        super::super::hit_regions::populate_notification_hit_regions(
+            &mut scene, 1920.0, 1080.0, &tokens,
+        );
+        for (before, after) in original.iter().zip(&scene.overlay.zone_hit_regions) {
+            assert_eq!(before.interaction_id, after.interaction_id);
+            assert!((after.bounds.x - before.bounds.x + 480.0).abs() < 0.01);
+            assert!((after.bounds.y - before.bounds.y - 216.0).abs() < 0.01);
+            assert_eq!(
+                (after.bounds.width, after.bounds.height),
+                (before.bounds.width, before.bounds.height)
+            );
+        }
+        assert!(scene.reset_zone_placement(zone.id));
+        let reset_epoch = scene.geometry_epoch;
+        assert!(!scene.reset_zone_placement(zone.id));
+        assert_eq!(scene.geometry_epoch, reset_epoch);
+        assert_eq!(scene.version, version);
+        super::super::hit_regions::populate_notification_hit_regions(
+            &mut scene, 1920.0, 1080.0, &tokens,
+        );
+        assert_eq!(scene.overlay.zone_hit_regions, original);
         let mut out: Vec<[f32; 4]> = scene
             .overlay
             .zone_hit_regions

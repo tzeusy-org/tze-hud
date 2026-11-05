@@ -30,7 +30,7 @@ use super::input_dispatch::{
     dispatch_scroll_offset_event, enqueue_input, nanoseconds_since_start,
 };
 use super::portal::{
-    DragReleasedData, PortalResizePointerOutcome, PrimaryDragGesture,
+    DragRelease, DragTarget, PortalResizePointerOutcome, PrimaryDragGesture,
     apply_drag_handle_pointer_event, apply_portal_resize_pointer_event, drag_feedback_target,
     reconcile_drag_feedback,
 };
@@ -635,6 +635,10 @@ impl ChromeCaptureTestScope {
         if let Some(frame) = frame {
             chrome_native_update(|ledger| ledger.complete(frame)).unwrap();
         }
+    }
+
+    pub(super) fn lose(&self) {
+        assert!(chrome_native_update(|ledger| ledger.lose(self.nonce)).unwrap());
     }
 
     pub(super) fn healthy(&self) -> bool {
@@ -2283,6 +2287,13 @@ impl WinitApp {
             self.panel_window_focus(focused);
         }
         if !focused {
+            let window = match secondary {
+                Some(index) => self.state.secondaries.get(index).map(|d| d.window.id()),
+                None => self.state.window.as_ref().map(|w| w.id()),
+            };
+            if secondary.is_none() || window.is_some() {
+                self.cancel_captured_zone_drag(window);
+            }
             self.cancel_chrome_feedback();
         }
     }
@@ -2294,8 +2305,33 @@ impl WinitApp {
         self.state.input_processor.chrome_feedback_cancel_pending = true;
     }
 
+    /// Disarm the captured Zone before taking any scene lock. Dropping its
+    /// retained terminal cannot activate, move or persist anything. The ordinary
+    /// chrome settle/prune turn reconciles feedback via its availability wake.
+    /// CursorLeft only clears notification feedback: crossing an overlay while
+    /// still captured is not a native cancellation.
+    fn cancel_captured_zone_drag(&mut self, window: Option<winit::window::WindowId>) {
+        let Some(gesture) = self.state.primary_drag_gesture.as_ref() else {
+            return;
+        };
+        if !matches!(gesture.target, DragTarget::Zone(_)) || gesture.window_id != window {
+            return;
+        }
+        if self
+            .state
+            .input_processor
+            .drag_states
+            .get(&0)
+            .is_some_and(|drag| gesture.matches(drag))
+        {
+            self.state.input_processor.drag_states.remove(&0);
+        }
+        self.state.primary_drag_gesture = None;
+    }
+
     pub(super) fn drain_chrome_capture_cancellation(&mut self) {
         if native_chrome_take_cancel(self.state.press_window) {
+            self.cancel_captured_zone_drag(self.state.press_window);
             self.cancel_chrome_feedback();
         }
     }
@@ -2488,7 +2524,7 @@ impl WinitApp {
         // portal resize step so that `dispatch_portal_geometry_event` can be called
         // without holding the scene lock.
         let mut pending_action_wakes = Vec::new();
-        let drag_released: Option<DragReleasedData>;
+        let drag_released: Option<DragRelease>;
         let portal_resize_outcome: Option<PortalResizePointerOutcome>;
         // Flag set when a composer focus-lost transition is detected inside the
         // locked block below; consumed after the lock is released to call
@@ -2899,12 +2935,10 @@ impl WinitApp {
                         .drag_states
                         .get(&0)
                         .and_then(|drag| {
-                            scene
-                                .tiles
-                                .get(&drag.element_id)
-                                .map(|tile| PrimaryDragGesture {
+                            DragTarget::capture(&scene, drag.element_id, drag.element_kind).map(
+                                |target| PrimaryDragGesture {
                                     element_id: drag.element_id,
-                                    lease_id: tile.lease_id,
+                                    target,
                                     feedback_target: drag_feedback_target(&scene, drag.element_id),
                                     interaction_id: drag.interaction_id.clone(),
                                     press_start: drag.press_start,
@@ -2912,7 +2946,8 @@ impl WinitApp {
                                     window_allocation: self
                                         .primary_drag_window_allocation(self.state.press_window),
                                     terminal: None,
-                                })
+                                },
+                            )
                         });
                 } else if !self.state.input_processor.drag_states.contains_key(&0) {
                     self.state.primary_drag_gesture = None;

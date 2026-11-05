@@ -112,6 +112,29 @@ cancellation into an action. Existing local owner coverage:
 [`action_button_hover_and_press_are_local_and_frame_only_on_change`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs).
 Windows held-press/release acceptance remains separate.
 
+Existing zone grips move the zone slot for the runtime session. The effective
+scene policy feeds every draw, text, layout-cache and hit consumer. Moves/reset
+change only geometry readiness, with unchanged values remaining idle; no Zone
+agent event, tile creation or disk override is produced. Clear, expiry, chosen
+exit and publisher replacement retain placement. An existing gesture may finish
+on an empty live slot; new Down requires a shown, emitted live handle. Hidden
+zones, removed/replaced definitions or lost original window allocations cancel
+without resurrection. Capture remains pinned to the press window, and deferred
+Up settles once on availability without another ring enqueue. Reset restores
+the default in-session; fresh bootstrap retains IDs and starts with defaults.
+Regression owners (existing parents extended, Tests: +0 ~6 -0):
+
+- Runtime [`windowed_post_render_refresh_updates_drag_handles_before_snapshot`](../crates/tze_hud_runtime/src/windowed/hittest.rs): actual rendered handle, runtime drag and refreshed grip/X/action translation.
+- Runtime [`header_band_anchor_is_the_frame_and_band_drag_is_position_only`](../crates/tze_hud_runtime/src/windowed/portal.rs): Tile controls and Zone deferred terminal, replacement, cancellation and no persistence/event.
+- Runtime [`action_button_hover_and_press_are_local_and_frame_only_on_change`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs): moved four-action controls, lifetime and epoch accounting.
+- Runtime [`bootstrap_round_trip_reuses_ids_across_restart`](../crates/tze_hud_runtime/src/element_store.rs): clear/republish retains placement; restart restores defaults without new saved overrides.
+- Compositor [`drag_handle_regions_cover_visible_tile_and_zone_but_not_widget`](../crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs): actual monitor-assignment/scale producer matrix, including connected-secondary controls without a grip.
+- Compositor [`zone_hit_regions_and_slot_pitch_scale_with_px_scale`](../crates/tze_hud_compositor/src/renderer/tests/hit_drag.rs): moved controls, shared human reset and no-op reset at existing scales.
+
+These are source/headless proofs. Exact-deployed-SHA Windows motion/drop,
+reset/restart, native capture/focus and four-action pointer/keyboard owner
+acceptance remain pending; title passthrough is not a defect claim.
+
 Notification controls join bare Tab / Shift+Tab traversal at the existing
 owner's boundary: X followed by live actions, with Enter or Space activating
 through the same exact-publication path as a pointer release. Publishing never

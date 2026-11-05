@@ -662,9 +662,51 @@ mod tests {
         );
         let first_zone_id = first_scene.zone_registry.zones["subtitle"].id;
         let first_widget_id = first_scene.widget_registry.instances["gauge-main"].id;
+        let default = first_scene.zone_registry.zones["subtitle"].geometry_policy;
+        let saved = std::fs::read(&path).unwrap();
+        let placement = tze_hud_scene::GeometryPolicy::Relative {
+            x_pct: 0.1,
+            y_pct: 0.2,
+            width_pct: 0.8,
+            height_pct: 0.1,
+        };
+        assert!(first_scene.set_zone_placement(first_zone_id, placement));
+        for content in ["before clear", "after clear"] {
+            first_scene
+                .publish_to_zone(
+                    "subtitle",
+                    tze_hud_scene::ZoneContent::StreamText(content.into()),
+                    "owner",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+            assert_eq!(
+                first_scene.effective_zone_geometry(&first_scene.zone_registry.zones["subtitle"]),
+                placement
+            );
+            first_scene.clear_zone("subtitle").unwrap();
+            assert_eq!(
+                first_scene.effective_zone_geometry(&first_scene.zone_registry.zones["subtitle"]),
+                placement
+            );
+        }
+        assert_eq!(std::fs::read(&path).unwrap(), saved);
+        assert!(
+            first.store.entries[&first_zone_id]
+                .geometry_override
+                .is_none()
+        );
 
         let mut second_scene = make_scene_with_zone_and_widget();
         let _second = bootstrap_scene_element_store_with_path(&mut second_scene, path.clone());
+        assert!(second_scene.overlay.zone_placements.is_empty());
+        assert_eq!(
+            second_scene.effective_zone_geometry(&second_scene.zone_registry.zones["subtitle"]),
+            default
+        );
+
         assert_eq!(
             second_scene.zone_registry.zones["subtitle"].id,
             first_zone_id

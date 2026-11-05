@@ -648,7 +648,20 @@ shows now, unless the agent asked for less. Both are saved into the
 widget's own `[[tabs.widgets]]` entry with the file's comments kept; when the
 save fails the change lasts the session and the row says so. A
 `[displays.<NAME>]` table's zones show read-only until monitor names are
-stable across reboots.
+stable across reboots. This read-only assignment does not prevent live zone
+placement: drag an existing zone grip to move the whole zone for this runtime
+session. Its Reset to default menu restores the ordinary box; restart also
+restores it. Clear, expiry and republishing keep the session placement. Zone
+moves/reset do not write saved geometry or emit agent reposition events.
+Unassigned zones, explicit primary assignments and disconnected-display
+fallbacks retain their primary-canvas grips. Connected-secondary zones keep
+content and controls on that display, with no zone grip; dragging does not
+change a zone's monitor. Notification titles/bodies remain passthrough, while
+X/actions and their existing keyboard navigation keep their normal roles.
+Native capture cancellation or focus loss on the captured window disarms its
+Zone drag immediately, including a retained release under lock contention;
+later Move/Up cannot finish it. Feedback settles through the existing scene
+availability path. Crossing an overlay while still captured is not cancellation.
 
 The Appearance card picks the theme and the sans, mono and serif fonts
 (type a family name; an empty value or Reset gives the theme's), and
