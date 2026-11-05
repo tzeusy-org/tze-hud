@@ -1176,11 +1176,12 @@ async fn drag_visual_feedback_applied_during_active_drag() {
         layer_attachment: LayerAttachment::Chrome,
         ephemeral: false,
     });
-    for scale in [1.0, 1.5, 2.0] {
+    for scale in [1.0, 1.5, 1.875] {
         compositor.set_token_map(HashMap::from([(
             "runtime.px_scale".into(),
             scale.to_string(),
         )]));
+        scene.reset_zone_placement(zone_id);
         scene.clear_zone("notif").unwrap();
         for count in 1..=3 {
             scene
@@ -1243,6 +1244,41 @@ async fn drag_visual_feedback_applied_during_active_drag() {
             scene.clear_drag_active(zone_id);
             assert!(compositor.drag_highlight_cmds(&scene, &handles).is_empty());
         }
+        // A translated, capacity-limited stack must exclude non-admitted cards.
+        scene.set_zone_placement(
+            zone_id,
+            GeometryPolicy::Relative {
+                x_pct: 0.25,
+                y_pct: 0.3,
+                width_pct: 0.35,
+                height_pct: 0.12,
+            },
+        );
+        scene.set_drag_active(zone_id);
+        let handles = compositor.collect_drag_handle_entries(&scene, 1920.0, 1080.0);
+        let handle = handles.iter().find(|h| h.element_id == zone_id).unwrap();
+        let zone = &scene.zone_registry.zones["notif"];
+        let slots = compositor.zone_slot_layout(
+            "notif",
+            &scene.zone_registry.active_publishes["notif"],
+            &zone.rendering_policy,
+            handle.element_bounds.height,
+            handle.element_bounds.width,
+        );
+        let admitted: Vec<_> = slots.iter_visible(handle.element_bounds.y).collect();
+        assert!(admitted.len() < 3, "fixture excludes overflowing cards");
+        let (_, y, h) = admitted.last().unwrap();
+        let feedback = compositor.drag_highlight_cmds(&scene, std::slice::from_ref(handle));
+        assert_eq!(
+            (feedback[0].x, feedback[0].y),
+            (handle.element_bounds.x, handle.element_bounds.y)
+        );
+        assert!((feedback[0].height - (y + h - handle.element_bounds.y)).abs() < 0.01);
+        scene.clear_zone("notif").unwrap();
+        let handles = compositor.collect_drag_handle_entries(&scene, 1920.0, 1080.0);
+        assert!(!handles.iter().any(|h| h.element_id == zone_id));
+        assert!(compositor.drag_highlight_cmds(&scene, &handles).is_empty());
+        scene.clear_drag_active(zone_id);
     }
 }
 

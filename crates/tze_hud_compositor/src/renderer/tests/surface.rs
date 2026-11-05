@@ -36,7 +36,7 @@ fn adapter_identity_preserves_actual_wgpu_fields_without_a_gpu() {
 /// tile is dimmed.
 #[tokio::test]
 async fn test_chrome_always_above_max_zorder_tile() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
 
     // Agent tiles must use z_order < ZONE_TILE_Z_MIN (0x8000_0000); u32::MAX is
@@ -97,11 +97,31 @@ async fn test_chrome_always_above_max_zorder_tile() {
     );
 
     compositor.set_safe_mode_overlay(false);
-    for (scale, anchor) in [(1.0, 80.0), (1.5, 250.0)] {
-        compositor.set_token_map(HashMap::from([(
-            "runtime.px_scale".into(),
-            scale.to_string(),
-        )]));
+    for (scale, anchor, light) in [
+        (1.0, 80.0, false),
+        (1.5, 250.0, false),
+        (1.875, 250.0, true),
+    ] {
+        compositor.set_token_map(HashMap::from([
+            ("runtime.px_scale".into(), scale.to_string()),
+            (
+                "font.sans".into(),
+                if light {
+                    "IBM Plex Sans"
+                } else {
+                    "DejaVu Sans"
+                }
+                .into(),
+            ),
+            (
+                "color.surface.container.highest".into(),
+                if light { "#F8F8F8" } else { "#2A313D" }.into(),
+            ),
+            (
+                "color.on_surface".into(),
+                if light { "#101010" } else { "#E8EBF0" }.into(),
+            ),
+        ]));
         scene.overlay.drag_handle_context_menu = Some(
             serde_json::from_value(serde_json::json!({
                 "element_id": tile_id, "anchor_x": anchor, "anchor_y": anchor, "shown_at_ns": 1
@@ -145,6 +165,24 @@ async fn test_chrome_always_above_max_zorder_tile() {
         assert!(
             bright > 20,
             "Reset to default must contain visible glyphs above its plate"
+        );
+        compositor.render_frame_headless(&mut scene, &surface);
+        let headless = surface.read_pixels(&compositor.device);
+        assert!(
+            headless
+                .chunks_exact(4)
+                .enumerate()
+                .filter(
+                    |(i, p)| button.contains_point((i % 256) as f32, (i / 256) as f32)
+                        && if light {
+                            p[0] < 100 && p[1] < 100 && p[2] < 100
+                        } else {
+                            p[0] > 150 && p[1] > 150 && p[2] > 150
+                        }
+                )
+                .count()
+                > 20,
+            "headless and windowed menu paths both paint the label"
         );
         scene.overlay.drag_handle_context_menu = None;
         let closed = compositor.build_windowed_frame(&mut scene, 256, 256);

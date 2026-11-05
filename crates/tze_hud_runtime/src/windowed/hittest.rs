@@ -706,7 +706,7 @@ mod tests {
         let controls = scene.overlay.zone_hit_regions.clone();
         assert_eq!(controls.len(), 2, "dismiss and action were generated");
         let tile_bounds = scene.tiles[&tile_id].bounds;
-        let (mut app, _rx) =
+        let (mut app, mut rx) =
             make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
         app.state.cursor_x = handle.bounds.x + handle.bounds.width / 2.0;
         app.state.cursor_y = handle.bounds.y + handle.bounds.height / 2.0;
@@ -821,6 +821,215 @@ mod tests {
             "matching menu Down/Up restores default zone placement"
         );
         assert_eq!(scene.tiles[&tile_id].bounds, tile_bounds);
+        drop(scene);
+        drop(shared);
+        while rx.try_recv().is_ok() {}
+        // Exercise delivered edges at the same real menu seam. Teardown rows
+        // represent the existing timeout/clear lifecycle, not a replacement timer.
+        for case in [
+            "outside",
+            "release-outside",
+            "cancel-reentry",
+            "focus",
+            "replaced",
+            "expired",
+            "hidden",
+            "removed",
+            "wrong-window",
+            "busy",
+            "overlap",
+            "no-op",
+            "release-only",
+        ] {
+            let definition;
+            {
+                let shared = app.state.shared_state.try_lock().unwrap();
+                let mut scene = shared.scene.try_lock().unwrap();
+                definition = scene.zone_by_id(zone_id).unwrap().clone();
+                if case != "no-op" {
+                    scene.set_zone_placement(
+                        zone_id,
+                        GeometryPolicy::Relative {
+                            x_pct: 0.4,
+                            y_pct: 0.3,
+                            width_pct: 0.35,
+                            height_pct: 0.4,
+                        },
+                    );
+                }
+                compositor.prime_markdown_cache(&scene);
+                compositor.prime_truncation_cache(&scene);
+                compositor.render_frame(&mut scene, &surface);
+                let grip = scene
+                    .overlay
+                    .drag_handle_hit_regions
+                    .iter()
+                    .find(|h| h.element_id == zone_id)
+                    .unwrap();
+                app.state.cursor_x = grip.bounds.x + grip.bounds.width / 2.0;
+                app.state.cursor_y = grip.bounds.y + grip.bounds.height / 2.0;
+            }
+            app.handle_mouse_button(winit::event::MouseButton::Right, false, window, None);
+            let action;
+            let before;
+            {
+                let shared = app.state.shared_state.try_lock().unwrap();
+                let mut scene = shared.scene.try_lock().unwrap();
+                before = scene.effective_zone_geometry(scene.zone_by_id(zone_id).unwrap());
+                if case == "overlap" {
+                    // Put the actual menu request over an actual rendered action:
+                    // a leaked Down/Up would dispatch its real callback.
+                    let action = scene
+                        .overlay
+                        .zone_hit_regions
+                        .iter()
+                        .find(|r| {
+                            matches!(r.kind, tze_hud_scene::ZoneInteractionKind::Action { .. })
+                        })
+                        .unwrap()
+                        .bounds;
+                    let menu = scene.overlay.drag_handle_context_menu.as_mut().unwrap();
+                    menu.anchor_x = action.x;
+                    menu.anchor_y = action.y;
+                }
+                compositor.render_frame(&mut scene, &surface);
+                action = scene
+                    .overlay
+                    .drag_handle_context_menu
+                    .as_ref()
+                    .unwrap()
+                    .reset_button_rect
+                    .unwrap();
+            }
+            app.state.cursor_x = action.x + 8.0;
+            app.state.cursor_y = action.y + 8.0;
+            if case == "outside" {
+                app.state.cursor_y = action.y + action.height + 8.0;
+            }
+            let shared_state = std::sync::Arc::clone(&app.state.shared_state);
+            let held = (case == "busy").then(|| shared_state.try_lock().unwrap());
+            if case != "release-only" {
+                app.handle_mouse_button(winit::event::MouseButton::Left, true, window, None);
+                app.enqueue_pointer_event(PointerEventKind::Move);
+            }
+            if ["focus", "cancel-reentry"].contains(&case) {
+                app.handle_window_focus(None, false);
+                if case == "cancel-reentry" {
+                    // No settle/timer turn intervenes: the cancelled painted
+                    // request must not be re-armed by a newly delivered press.
+                    app.handle_mouse_button(winit::event::MouseButton::Left, true, window, None);
+                }
+            }
+            if case == "replaced" {
+                let shared = app.state.shared_state.try_lock().unwrap();
+                let mut scene = shared.scene.try_lock().unwrap();
+                scene
+                    .overlay
+                    .drag_handle_context_menu
+                    .as_mut()
+                    .unwrap()
+                    .shown_at_ns += 1;
+            }
+            if ["expired", "hidden", "removed"].contains(&case) {
+                let shared = app.state.shared_state.try_lock().unwrap();
+                let mut scene = shared.scene.try_lock().unwrap();
+                match case {
+                    "expired" => scene.overlay.drag_handle_context_menu = None,
+                    "hidden" => {
+                        scene.set_owner_hidden(tze_hud_scene::graph::SurfaceClasses {
+                            zones: true,
+                            ..Default::default()
+                        });
+                    }
+                    "removed" => {
+                        scene.unregister_zone("notifications");
+                    }
+                    _ => unreachable!(),
+                }
+            }
+            if case == "release-outside" {
+                app.state.cursor_y = action.y + action.height + 8.0;
+            }
+            let release_window = if case == "wrong-window" {
+                winit::window::WindowId::from(77)
+            } else {
+                window
+            };
+            app.handle_mouse_button(winit::event::MouseButton::Left, false, release_window, None);
+            drop(held);
+            app.tick_context_menu_auto_dismiss();
+            assert!(
+                !app.state.left_button_down && app.state.press_window.is_none(),
+                "{case}: capture ends"
+            );
+            assert!(
+                app.state.input_processor.drag_states.is_empty(),
+                "{case}: no underlying drag"
+            );
+            assert!(
+                rx.try_recv().is_err(),
+                "{case}: menu edges cannot dispatch an agent callback"
+            );
+            {
+                let shared = app.state.shared_state.try_lock().unwrap();
+                let mut scene = shared.scene.try_lock().unwrap();
+                if case == "removed" {
+                    scene.register_zone(definition.clone());
+                    scene.set_zone_placement(zone_id, before);
+                }
+                if case == "hidden" {
+                    scene.set_owner_hidden(Default::default());
+                }
+                let expected = if ["overlap", "no-op"].contains(&case) {
+                    definition.geometry_policy
+                } else {
+                    before
+                };
+                assert_eq!(
+                    scene.effective_zone_geometry(scene.zone_by_id(zone_id).unwrap()),
+                    expected,
+                    "{case}: only a matching actionable press resets geometry"
+                );
+                if case != "release-only" {
+                    assert!(
+                        scene.overlay.drag_handle_context_menu.is_none(),
+                        "{case}: menu closes"
+                    );
+                }
+                assert!(
+                    shared
+                        .element_store
+                        .entries
+                        .values()
+                        .all(|e| e.geometry_override.is_none())
+                );
+                scene.overlay.drag_handle_context_menu = None;
+                scene.reset_zone_placement(zone_id);
+                if case == "removed" {
+                    scene
+                        .publish_to_zone(
+                            "notifications",
+                            ZoneContent::Notification(NotificationPayload {
+                                text: "Move the stack".into(),
+                                title: "Placement".into(),
+                                icon: String::new(),
+                                urgency: 1,
+                                ttl_ms: None,
+                                actions: vec![NotificationAction {
+                                    label: "Open".into(),
+                                    callback_id: "open".into(),
+                                }],
+                            }),
+                            "zone-owner",
+                            None,
+                            None,
+                            None,
+                        )
+                        .unwrap();
+                }
+            }
+            app.tick_context_menu_auto_dismiss();
+        }
     }
 
     #[test]
