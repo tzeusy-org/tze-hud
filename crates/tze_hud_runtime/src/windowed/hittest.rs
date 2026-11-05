@@ -803,7 +803,10 @@ mod tests {
         let receipt = native.begin(false);
         app.handle_mouse_button(winit::event::MouseButton::Left, false, window, None);
         native.complete(receipt);
-        assert!(native.healthy(), "matching Reset edges have native receipts");
+        assert!(
+            native.healthy(),
+            "matching Reset edges have native receipts"
+        );
         app.handle_mouse_button(winit::event::MouseButton::Left, false, window, None);
         drop(native);
         let shared = app.state.shared_state.try_lock().unwrap();
