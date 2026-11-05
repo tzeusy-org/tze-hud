@@ -108,6 +108,14 @@ async fn test_chrome_always_above_max_zorder_tile() {
             }))
             .unwrap(),
         );
+        scene
+            .overlay
+            .drag_handle_context_menu
+            .as_mut()
+            .unwrap()
+            .reset_button_rect = Some(Rect::new(anchor + 4.0, anchor + 4.0, 152.0, 24.0));
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
         let build = compositor.build_windowed_frame(&mut scene, 256, 256);
         let menu = scene.overlay.drag_handle_context_menu.as_ref().unwrap();
         let button = menu
