@@ -6,7 +6,7 @@ use super::*;
 //   - typography.body.size (16px default) font size
 //   - color.text.primary text color
 //   - left-aligned, 9px inset (8px padding + 1px border)
-//   - clips at content area boundary (no wrapping in v1)
+//   - bounded title/body bands visibly ellipsize incomplete text
 
 /// `typography.body.size` sets the notification font size (with or without a `px`
 /// suffix); absent, it is 16px.
@@ -319,11 +319,11 @@ async fn test_notification_text_inset_from_backdrop_edges() {
         TextAlign::Start,
         "notification text must be left-aligned (TextAlign::Start)"
     );
-    // Overflow is Clip.
+    // Overflow is visible while the original content bounds stay unchanged.
     assert_eq!(
         item.overflow,
-        TextOverflow::Clip,
-        "notification text must clip at content area (no wrapping)"
+        TextOverflow::Ellipsis,
+        "notification text must visibly mark overflow inside its bounded line"
     );
 }
 
@@ -413,7 +413,7 @@ async fn test_two_line_notification_empty_title_produces_one_text_item() {
 ///   4. Body item pixel_y > title item pixel_y.
 #[tokio::test]
 async fn test_two_line_notification_title_produces_two_text_items() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
 
     let mut scene = SceneGraph::new(1280.0, 720.0);
     // Zone at x=0 (x_pct=0) so items are easy to find (pixel_x near 0).
@@ -514,6 +514,226 @@ async fn test_two_line_notification_title_produces_two_text_items() {
         title_item.pixel_y,
         body_item.pixel_y
     );
+
+    // The owner's admitted instruction must be visibly incomplete in the
+    // bounded body line, rather than silently losing "title changes.".
+    let owner_body =
+        "Held-input check: press and hold Hold here; keep holding until the title changes.";
+    let template = scene.zone_registry.zones["notification-area"].clone();
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    for scale in [1.0, 1.5] {
+        compositor.set_token_map(HashMap::from([
+            ("font.sans".into(), "IBM Plex Sans".into()),
+            ("font.mono".into(), "IBM Plex Mono".into()),
+            (
+                tze_hud_config::tokens::PX_SCALE_KEY.into(),
+                scale.to_string(),
+            ),
+        ]));
+        for width in [320.0, 640.0] {
+            for count in [2, 0, 4] {
+                for (title, body, overflows) in [
+                    (
+                        "Codex · Target · Before".to_owned(),
+                        owner_body.to_owned(),
+                        true,
+                    ),
+                    (String::new(), "Ready".to_owned(), false),
+                    (
+                        "確認してください — résumé — 完了まで待機してください".repeat(4),
+                        "待機 café 👩‍💻 — ".repeat(16),
+                        true,
+                    ),
+                ] {
+                    let truncated = overflows && (body != owner_body || width == 320.0);
+                    let mut scene = SceneGraph::new(1280.0, 720.0);
+                    let mut zone = template.clone();
+                    zone.geometry_policy = GeometryPolicy::Relative {
+                        x_pct: 0.0,
+                        y_pct: 0.0,
+                        width_pct: width * scale / 1280.0,
+                        height_pct: 1.0,
+                    };
+                    zone.rendering_policy.font_size_px = Some(16.0 * scale);
+                    scene.register_zone(zone);
+                    let labels = ["Hold here", "Leave alone", "Skip", "Open"];
+                    for payload in [
+                        NotificationPayload {
+                            title: "Next".into(),
+                            text: "Following card".into(),
+                            ..Default::default()
+                        },
+                        NotificationPayload {
+                            title: title.clone(),
+                            text: body.clone(),
+                            actions: labels[..count]
+                                .iter()
+                                .map(|label| NotificationAction {
+                                    label: (*label).into(),
+                                    callback_id: (*label).into(),
+                                })
+                                .collect(),
+                            ..Default::default()
+                        },
+                    ] {
+                        scene
+                            .publish_to_zone(
+                                "notification-area",
+                                ZoneContent::Notification(payload),
+                                "test-agent",
+                                None,
+                                None,
+                                None,
+                            )
+                            .unwrap();
+                    }
+                    // Production commits prime truncation before the draw pass
+                    // resolves notification geometry with the live font system.
+                    compositor.prime_truncation_cache(&scene);
+                    let commit_shapes = compositor.notification_layouts.borrow().shapes;
+                    compositor.prime_notification_layouts(&scene, 1280.0, 720.0);
+                    assert_eq!(
+                        compositor.notification_layouts.borrow().shapes,
+                        commit_shapes,
+                        "commit prime must resolve live-font geometry before drawing"
+                    );
+                    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+                    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+                    let body_item = items
+                        .iter()
+                        .find(|i| i.text.as_ref() == body.as_str())
+                        .unwrap();
+                    let raw_width = compositor
+                        .text_rasterizer
+                        .as_mut()
+                        .unwrap()
+                        .measure_single_line(
+                            &body_item.text,
+                            body_item.font_size_px,
+                            body_item.font_family,
+                            body_item.font_weight,
+                        );
+                    assert_eq!(raw_width > body_item.bounds_width, truncated);
+                    eprintln!(
+                        "notification overflow: scale={scale} actions={count} raw_width={raw_width} bounds_width={} bounds_height={}",
+                        body_item.bounds_width, body_item.bounds_height
+                    );
+                    let key = crate::text::effective_truncation_key(body_item)
+                        .expect("notification body must participate in visible ellipsis");
+                    let rasterizer = compositor.text_rasterizer.as_mut().unwrap();
+                    let result = rasterizer
+                        .truncation_cache
+                        .get_by_key(&key)
+                        .expect("actual frame geometry must be primed before drawing")
+                        .clone();
+                    assert_eq!(result.was_truncated, truncated, "{scale}/{count}/{body}");
+                    if truncated {
+                        assert!(result.text.ends_with(crate::overflow::ELLIPSIS));
+                        assert!(!result.text.is_empty());
+                    } else {
+                        assert_eq!(result.text, body);
+                    }
+                    assert!(
+                        rasterizer.measure_single_line(
+                            &result.text,
+                            body_item.font_size_px,
+                            body_item.font_family,
+                            body_item.font_weight
+                        ) <= body_item.bounds_width + 0.01
+                    );
+                    if !title.is_empty() {
+                        let item = items
+                            .iter()
+                            .find(|i| i.text.as_ref() == title.as_str())
+                            .unwrap();
+                        let key = crate::text::effective_truncation_key(item).unwrap();
+                        let result = rasterizer
+                            .truncation_cache
+                            .get_by_key(&key)
+                            .unwrap()
+                            .clone();
+                        assert_eq!(result.was_truncated, title.starts_with('確'));
+                        assert!(
+                            rasterizer.measure_single_line(
+                                &result.text,
+                                item.font_size_px,
+                                item.font_family,
+                                item.font_weight
+                            ) <= item.bounds_width + 0.01
+                        );
+                        assert!(item.pixel_y + item.bounds_height <= body_item.pixel_y);
+                    }
+                    let records = scene.zone_registry.active_for_zone("notification-area");
+                    let policy = &scene.zone_registry.zones["notification-area"].rendering_policy;
+                    let layout = compositor.zone_slot_layout(
+                        "notification-area",
+                        records,
+                        policy,
+                        720.0,
+                        width * scale,
+                    );
+                    assert!(layout.slot_offsets[1] >= layout.slot_heights[0]);
+                    let following = items.iter().find(|i| &*i.text == "Following card").unwrap();
+                    assert!(body_item.pixel_y + body_item.bounds_height <= following.pixel_y);
+                    let actions: Vec<_> = scene
+                        .overlay
+                        .zone_hit_regions
+                        .iter()
+                        .filter(|r| {
+                            r.publication_id == records[1].publication_id
+                                && matches!(r.kind, ZoneInteractionKind::Action { .. })
+                        })
+                        .collect();
+                    assert_eq!(actions.len(), count);
+                    for (action, label) in actions.iter().zip(labels) {
+                        let item = items.iter().find(|i| &*i.text == label).unwrap();
+                        assert!(body_item.pixel_y + body_item.bounds_height <= action.bounds.y);
+                        assert!(
+                            action.bounds.x >= 0.0
+                                && action.bounds.x + action.bounds.width <= width * scale
+                        );
+                        assert!(action.bounds.y + action.bounds.height <= layout.slot_heights[0]);
+                        assert!(item.pixel_x >= action.bounds.x && item.pixel_y >= action.bounds.y);
+                        assert!(
+                            item.pixel_x + item.clip_bounds_width
+                                <= action.bounds.x + action.bounds.width
+                        );
+                        assert!(
+                            item.pixel_y + item.clip_bounds_height
+                                <= action.bounds.y + action.bounds.height
+                        );
+                    }
+                    let shapes = compositor.notification_layouts.borrow().shapes;
+                    let rasterizer = compositor.text_rasterizer.as_mut().unwrap();
+                    rasterizer.update_viewport(&compositor.queue, 1280, 720);
+                    rasterizer
+                        .prepare_text_items(&compositor.device, &compositor.queue, &items)
+                        .unwrap();
+                    let shaped = rasterizer.shape_call_count;
+                    let cached = rasterizer.truncation_cache.len();
+                    rasterizer
+                        .prepare_text_items(&compositor.device, &compositor.queue, &items)
+                        .unwrap();
+                    assert_eq!(
+                        rasterizer.shape_call_count, shaped,
+                        "unchanged labels reuse shaped buffers"
+                    );
+                    compositor.prime_truncation_cache(&scene);
+                    let _ = compositor.collect_text_items(&scene, 1280.0, 720.0);
+                    assert_eq!(
+                        compositor
+                            .text_rasterizer
+                            .as_ref()
+                            .unwrap()
+                            .truncation_cache
+                            .len(),
+                        cached
+                    );
+                    assert_eq!(compositor.notification_layouts.borrow().shapes, shapes);
+                }
+            }
+        }
+    }
 }
 
 /// Two-line slot height: `notification_slot_height` returns a larger height for
