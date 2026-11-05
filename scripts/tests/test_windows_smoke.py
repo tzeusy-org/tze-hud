@@ -171,6 +171,13 @@ def test_assert_not_early_allows_slack_but_rejects_an_early_event():
 
 def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subtests, capsys, tmp_path):
     """Exercise the real smoke/PNG path with one publish and an offline clock."""
+    presentation = {
+        "ordinary_primary_submission": dict(scene_version=6, geometry_epoch=0, acquired=True,
+                                            gpu_submitted=True, ready=True),
+        "ordinary_present_poll": dict(ready=True, deferred=False, secondary_presented=False,
+                                      primary_presented=True),
+        "present_availability_ready": {},
+    }
     background = b"\x10\x20\x30\xff" * 400
     shown = b"\x90\xa0\xb0\xff" * 200 + background[800:]
     baseline_png = ws.encode_png_rgba(20, 20, background)
@@ -245,6 +252,10 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                               present_at_wall_us=self.due_wall_us,
                               applied_at_wall_us=self.producer_wall_us,
                               accepted=True, identity_valid=self.case != "ambiguous activation")
+                    if self.case in presentation:
+                        # A completed older submission is telemetry, not the
+                        # authoritative scene identity of this publication.
+                        self.emit(self.case, **presentation[self.case])
                     self.emit("zone_fade_started", **self.identity(), is_subtitle=True,
                               observed_at_wall_us=self.producer_wall_us, frame=2,
                               duration_ms=180, from_opacity=0.0, target_opacity=1.0)
@@ -349,6 +360,8 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                           is_subtitle=True, scheduled_at_wall_us=self.scheduled_wall_us,
                           present_at_wall_us=self.due_wall_us,
                           expires_at_wall_us=self.due_wall_us + 20_000_000)
+                if self.case in presentation:
+                    self.emit(self.case, **presentation[self.case])
                 if self.case == "uncertain acceptance":
                     raise ws.urllib.error.URLError("synthetic lost acknowledgement")
                 payload = {"ok": self.case != "publish rejected", "expires_in_ms": 23000}
@@ -430,6 +443,27 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
     run("normal", success=True)
     run("ordinary readiness", success=True)
     run("immediate readiness", success=True)
+    for name, fields in presentation.items():
+        with subtests.test(telemetry=name):
+            endpoint, _ = run(name, success=True)
+            manifest = ws.json.loads((endpoint.diagnostics / "delay.json").read_text())
+            events = manifest["observed_runtime_events"]
+            assert [e["fields"] for e in events if e["fields"]["event"] == name] == [
+                {"event": name, **fields}, {"event": name, **fields}]
+            ws.write_delay_trace(endpoint.diagnostics, endpoint.log)
+            retained = ws.json.loads((endpoint.diagnostics / "runtime-timing.json").read_text())
+            assert [e["fields"] for e in retained if e["fields"]["event"] == name] == [
+                {"event": name, **fields}, {"event": name, **fields}]
+            reader = ws.DelayReadiness(endpoint.log, endpoint)
+            reader.events = [e for e in events if e["fields"]["event"] not in
+                             {"zone_fade_observed", "zone_text_sample"}]
+            # Successful submit/present flags cannot replace the fade witness.
+            assert reader.ready(endpoint.request_id, manifest) is None
+            for key in fields:
+                invalid = {"target": "tze_hud_delay_diagnostic", "timestamp": events[0]["timestamp"],
+                           "fields": {"event": name, **fields, key: "invalid-scalar"}}
+                with pytest.raises(AssertionError, match="invalid diagnostic number"):
+                    ws.delay_event(ws.json.dumps(invalid).encode())
     independent, _ = run("independent wall domains", success=True)
     coarse_utc, _ = run("coarse client UTC", success=True)
     run("slow decode", success=True)  # Capture timing ends before PNG CPU work.
@@ -533,7 +567,7 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
     class Alive:
         def poll(self):
             return None
-    for case in ("bytes", "line", "partial", "malformed", "nan", "timestamp", "events", "truncate", "replace"):
+    for case in ("bytes", "line", "partial", "malformed", "unknown", "nan", "timestamp", "events", "truncate", "replace"):
         with subtests.test(reader=case):
             path = tmp_path / ("invalid-" + case)
             path.write_bytes(b"prefix\n")
@@ -553,8 +587,9 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
                 if case == "partial": chunk = b"unfinished"
                 if case == "malformed": chunk = b"{tze_hud_delay_diagnostic\n"
                 if case == "nan": event["fields"]["opacity"] = float("nan")
+                if case == "unknown": event["fields"]["event"] = "unrecognized"
                 if case == "timestamp": event["timestamp"] = "bad"
-                if case in ("nan", "timestamp", "events"):
+                if case in ("unknown", "nan", "timestamp", "events"):
                     chunk = (ws.json.dumps(event).encode() + b"\n") * (reader.MAX_EVENTS + 1 if case == "events" else 1)
                     if case == "events": reader.MAX_BYTES = len(chunk) + 100
                 with path.open("ab") as handle: handle.write(chunk)
