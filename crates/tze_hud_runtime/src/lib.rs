@@ -74,7 +74,7 @@ pub mod windowed;
 pub use firewall::remote as remote_firewall;
 pub use headless::HeadlessRuntime;
 pub use idle_efficiency::{IdleEfficiencyCounters, RuntimeWakeupSource};
-pub use mcp::{McpServerConfig, start_mcp_http_server};
+pub use mcp::{McpServerConfig, start_mcp_http_server, start_mcp_http_server_with_render_wake};
 pub use pipeline::{
     INPUT_TO_NEXT_PRESENT_BUDGET_US, STAGE3_BUDGET_US, STAGE4_BUDGET_US, STAGE5_BUDGET_US,
 };
