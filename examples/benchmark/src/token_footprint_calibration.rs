@@ -614,7 +614,7 @@ mod calibration {
                         assert_eq!(work.load(Ordering::SeqCst), 0);
                         assert!(portals.hub.lock().unwrap().get(&PortalKey::new(agent.clone(), "foreign")).unwrap().inputs.is_empty());
                         let attached = call(address, "hud_publish", json!({"surface":"portal:claude-main", "content":"Tests pass. Ship it?", "status":"active", "expects_reply":true, "ttl_ms":120000})).await;
-                        assert_eq!(attached, (false, json!({"ok":true,"reattached":false,"pending_input":0})));
+                        assert_eq!(attached, (false, json!({"ok":true,"reattached":false,"pending_input":0,"expires_in_ms":120000})));
                         // Repeated ingress, real delivery/lease and ACK must neither
                         // re-inject nor authorize choice work while this key exists.
                         ingress.notify();
@@ -651,7 +651,7 @@ mod calibration {
                         assert!(!producer.choice_work_pending());
                     } else {
                         let attached = call(address, "hud_publish", json!({"surface":"portal:claude-main", "content":"Tests pass. Ship it?", "status":"active", "expects_reply":true, "ttl_ms":120000})).await;
-                        assert_eq!(attached, (false, json!({"ok":true,"reattached":false,"pending_input":0})));
+                        assert_eq!(attached, (false, json!({"ok":true,"reattached":false,"pending_input":0,"expires_in_ms":120000})));
                         let mut returned_id = None;
                         if case == "ack" {
                             producer.step(async { let _held = scene.lock().await; false }).await;
