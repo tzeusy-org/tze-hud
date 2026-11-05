@@ -573,12 +573,15 @@ DELAY_NUMBERS = {
     "duration_ms", "from_opacity", "target_opacity", "active_publications", "opacity",
     "transition_active", "transition_complete", "transition_elapsed_us", "transition_duration_ms",
     "zones_shown", "normal_animation",
+    "geometry_epoch", "acquired", "gpu_submitted", "ready", "deferred",
+    "secondary_presented", "primary_presented",
 }
 
 
+PRESENTATION_EVENTS = {"ordinary_primary_submission", "ordinary_present_poll", "present_availability_ready"}
 DELAY_EVENTS = {"delayed_request", "delayed_enqueued", "scheduled_activation", "zone_fade_started",
                 "zone_fade_observed", "zone_text_sample", "capture_build_begin", "capture_build_end",
-                "capture_render_end"}
+                "capture_render_end"} | PRESENTATION_EVENTS
 
 
 def delay_event(line: bytes) -> dict | None:
@@ -667,11 +670,15 @@ class DelayReadiness:
 
     def ready(self, request_id: int, evidence: dict) -> dict | None:
         """Recheck the full finite join; partial progress never moves a deadline."""
-        for event in self.events:
+        # Submission/present telemetry may describe an older in-flight scene.
+        # Retain it in the bounded trace, but never use it as delayed-publication
+        # identity, fade readiness, or evidence of an authoritative replacement.
+        observations = [e for e in self.events if e["fields"]["event"] not in PRESENTATION_EVENTS]
+        for event in observations:
             observed = event["fields"].get("observed_at_wall_us")
             if observed is not None:
                 assert self.stamp(event) + 1 >= observed, "inconsistent diagnostic wall clock"
-        events = [e["fields"] for e in self.events]
+        events = [e["fields"] for e in observations]
         requests = [e for e in events if e["event"] == "delayed_request"]
         assert len(requests) <= 1, "ambiguous delayed request"
         if not requests:
@@ -716,7 +723,7 @@ class DelayReadiness:
         assert identity["expires_at_wall_us"] == expiry
         start = None
         ready = None
-        assert all(self.stamp(e) < expiry for e in self.events[events.index(activation):]), "expired diagnostic observation"
+        assert all(self.stamp(e) < expiry for e in observations[events.index(activation):]), "expired diagnostic observation"
         for event in events[events.index(activation):]:
             if "scene_version" in event:
                 assert self.integer(event, "scene_version") == identity["scene_version"], "delayed scene replaced"
