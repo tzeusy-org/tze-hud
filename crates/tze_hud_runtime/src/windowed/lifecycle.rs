@@ -2245,6 +2245,17 @@ impl WinitApp {
         window_id: winit::window::WindowId,
         secondary: Option<usize>,
     ) {
+        // Finish the preceding delivered press before admitting a new owner.
+        // A missing old Up still needs its ordinary terminal even when the new
+        // Down belongs to a menu; native cancellation only disarms chrome.
+        if pressed && self.state.left_button_down {
+            if self.state.context_menu_press.take().is_some() {
+                self.cancel_context_menu();
+            } else {
+                self.enqueue_pointer_event(PointerEventKind::Up);
+            }
+            end_os_mouse_capture();
+        }
         if self.handle_context_menu_edge(pressed, window_id) {
             if pressed {
                 self.state.left_button_down = true;
@@ -2265,10 +2276,6 @@ impl WinitApp {
             return;
         }
         if pressed {
-            if self.state.left_button_down {
-                self.enqueue_pointer_event(PointerEventKind::Up);
-                end_os_mouse_capture();
-            }
             self.state.left_button_down = true;
             self.state.press_window = Some(window_id);
             let window = match secondary {
