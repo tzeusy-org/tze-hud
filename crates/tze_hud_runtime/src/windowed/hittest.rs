@@ -773,6 +773,7 @@ mod tests {
         app.state.cursor_x = moved.bounds.x + moved.bounds.width / 2.0;
         app.state.cursor_y = moved.bounds.y + moved.bounds.height / 2.0;
         let window = winit::window::WindowId::dummy();
+        let native = super::super::lifecycle::ChromeCaptureTestScope::new(window);
         app.handle_mouse_button(winit::event::MouseButton::Right, false, window, None);
         {
             let shared = app.state.shared_state.try_lock().unwrap();
@@ -792,13 +793,19 @@ mod tests {
             app.state.cursor_x = button.x + button.width / 2.0;
             app.state.cursor_y = button.y + button.height / 2.0;
         }
+        let receipt = native.begin(true);
         app.handle_mouse_button(winit::event::MouseButton::Left, true, window, None);
+        native.complete(receipt);
         assert!(
             app.state.input_processor.drag_states.is_empty(),
             "menu Down never starts an underlying drag"
         );
+        let receipt = native.begin(false);
         app.handle_mouse_button(winit::event::MouseButton::Left, false, window, None);
+        native.complete(receipt);
+        assert!(native.healthy(), "matching Reset edges have native receipts");
         app.handle_mouse_button(winit::event::MouseButton::Left, false, window, None);
+        drop(native);
         let shared = app.state.shared_state.try_lock().unwrap();
         let mut scene = shared.scene.try_lock().unwrap();
         assert!(scene.overlay.drag_handle_context_menu.is_none());
@@ -846,8 +853,9 @@ mod tests {
             "no-op",
             "release-only",
         ] {
-            let native = (case.starts_with("native-") || case == "old-tile-press")
-                .then(|| super::super::lifecycle::ChromeCaptureTestScope::new(window));
+            // Every delivered edge traverses the native ledger on Windows;
+            // ordinary positive rows need the same receipt setup as controls.
+            let native = super::super::lifecycle::ChromeCaptureTestScope::new(window);
             let old_grip;
             let definition;
             {
@@ -889,7 +897,6 @@ mod tests {
                 let zone_cursor = (app.state.cursor_x, app.state.cursor_y);
                 app.state.cursor_x = old_grip.x + old_grip.width / 2.0;
                 app.state.cursor_y = old_grip.y + old_grip.height / 2.0;
-                let native = native.as_ref().unwrap();
                 let receipt = native.begin(true);
                 app.handle_mouse_button(winit::event::MouseButton::Left, true, window, None);
                 native.complete(receipt);
@@ -943,15 +950,13 @@ mod tests {
             let availability = app.state.wake.main_work_generation();
             let held = (case == "busy").then(|| shared_state.try_lock().unwrap());
             if case != "release-only" {
-                let receipt = native.as_ref().and_then(|n| n.begin(true));
+                let receipt = native.begin(true);
                 app.handle_mouse_button(winit::event::MouseButton::Left, true, window, None);
-                if let Some(native) = native.as_ref() {
-                    native.complete(receipt);
-                }
+                native.complete(receipt);
                 app.enqueue_pointer_event(PointerEventKind::Move);
             }
             if case == "native-cancel" {
-                native.as_ref().unwrap().lose();
+                native.lose();
                 app.drain_chrome_capture_cancellation();
             }
             if ["focus", "cancel-reentry"].contains(&case) {
@@ -959,7 +964,9 @@ mod tests {
                 if case == "cancel-reentry" {
                     // No settle/timer turn intervenes: the cancelled painted
                     // request must not be re-armed by a newly delivered press.
+                    let receipt = native.begin(true);
                     app.handle_mouse_button(winit::event::MouseButton::Left, true, window, None);
+                    native.complete(receipt);
                 }
             }
             if case == "replaced" {
@@ -997,17 +1004,13 @@ mod tests {
             } else {
                 window
             };
-            let receipt = native.as_ref().and_then(|n| {
-                if case == "native-missing-up" {
-                    None
-                } else {
-                    n.begin(case == "native-mismatched-up")
-                }
-            });
+            let receipt = if case == "native-missing-up" {
+                None
+            } else {
+                native.begin(case == "native-mismatched-up")
+            };
             app.handle_mouse_button(winit::event::MouseButton::Left, false, release_window, None);
-            if let Some(native) = native.as_ref() {
-                native.complete(receipt);
-            }
+            native.complete(receipt);
             drop(native);
             drop(held);
             if case == "busy" {
