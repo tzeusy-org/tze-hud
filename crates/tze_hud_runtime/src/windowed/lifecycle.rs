@@ -30,7 +30,7 @@ use super::input_dispatch::{
     dispatch_scroll_offset_event, enqueue_input, nanoseconds_since_start,
 };
 use super::portal::{
-    DragReleasedData, PortalResizePointerOutcome, PrimaryDragGesture,
+    DragRelease, DragTarget, PortalResizePointerOutcome, PrimaryDragGesture,
     apply_drag_handle_pointer_event, apply_portal_resize_pointer_event, drag_feedback_target,
     reconcile_drag_feedback,
 };
@@ -2488,7 +2488,7 @@ impl WinitApp {
         // portal resize step so that `dispatch_portal_geometry_event` can be called
         // without holding the scene lock.
         let mut pending_action_wakes = Vec::new();
-        let drag_released: Option<DragReleasedData>;
+        let drag_released: Option<DragRelease>;
         let portal_resize_outcome: Option<PortalResizePointerOutcome>;
         // Flag set when a composer focus-lost transition is detected inside the
         // locked block below; consumed after the lock is released to call
@@ -2899,12 +2899,10 @@ impl WinitApp {
                         .drag_states
                         .get(&0)
                         .and_then(|drag| {
-                            scene
-                                .tiles
-                                .get(&drag.element_id)
-                                .map(|tile| PrimaryDragGesture {
+                            DragTarget::capture(&scene, drag.element_id, drag.element_kind).map(
+                                |target| PrimaryDragGesture {
                                     element_id: drag.element_id,
-                                    lease_id: tile.lease_id,
+                                    target,
                                     feedback_target: drag_feedback_target(&scene, drag.element_id),
                                     interaction_id: drag.interaction_id.clone(),
                                     press_start: drag.press_start,
@@ -2912,7 +2910,8 @@ impl WinitApp {
                                     window_allocation: self
                                         .primary_drag_window_allocation(self.state.press_window),
                                     terminal: None,
-                                })
+                                },
+                            )
                         });
                 } else if !self.state.input_processor.drag_states.contains_key(&0) {
                     self.state.primary_drag_gesture = None;

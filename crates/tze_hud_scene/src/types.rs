@@ -1537,6 +1537,41 @@ pub enum GeometryPolicy {
     },
 }
 
+/// Resolve rendered zone bounds. Kept shared with owner drag admission so
+/// edge anchoring, margins and relative dimensions match draw/hit geometry.
+pub fn resolve_zone_geometry(policy: &GeometryPolicy, sw: f32, sh: f32) -> (f32, f32, f32, f32) {
+    match policy {
+        GeometryPolicy::EdgeAnchored {
+            edge,
+            height_pct,
+            width_pct,
+            margin_px,
+        } => {
+            let zw = sw * width_pct;
+            let zh = sh * height_pct;
+            let zx = (sw - zw) / 2.0;
+            let zy = match edge {
+                DisplayEdge::Top => *margin_px,
+                DisplayEdge::Bottom => sh - zh - margin_px,
+                DisplayEdge::Left | DisplayEdge::Right => 0.0,
+            };
+            (zx, zy, zw, zh)
+        }
+        GeometryPolicy::Relative {
+            x_pct,
+            y_pct,
+            width_pct,
+            height_pct,
+        } => {
+            let zx = sw * x_pct;
+            let zy = sh * y_pct;
+            let zw = sw * width_pct;
+            let zh = sh * height_pct;
+            (zx, zy, zw, zh)
+        }
+    }
+}
+
 impl GeometryPolicy {
     /// This box at `factor` times its size. A relative box keeps a display
     /// edge it is flush with, else grows from its centre, and stays on the

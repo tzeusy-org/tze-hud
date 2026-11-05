@@ -116,7 +116,8 @@ impl Compositor {
                     continue;
                 }
             }
-            let (x, y, w, h) = self.zone_geometry(zone_name, &zone_def.geometry_policy, sw, sh);
+            let (x, y, w, h) =
+                self.zone_geometry(zone_name, &scene.effective_zone_geometry(zone_def), sw, sh);
 
             let policy = &zone_def.rendering_policy;
 
@@ -517,7 +518,8 @@ impl Compositor {
             ];
             for (idx, (zone_name, zone_def)) in scene.zone_registry.zones.iter().enumerate() {
                 let color = palette[idx % palette.len()];
-                let (x, y, w, h) = self.zone_geometry(zone_name, &zone_def.geometry_policy, sw, sh);
+                let (x, y, w, h) =
+                    self.zone_geometry(zone_name, &scene.effective_zone_geometry(zone_def), sw, sh);
                 vertices.extend_from_slice(&rect_vertices(x, y, w, h, sw, sh, color));
             }
         }
@@ -693,8 +695,13 @@ impl Compositor {
                 continue;
             };
             let tokens = tze_hud_config::tokens::for_zone(&self.token_map, name);
-            let (_, _, width, _) =
-                super::zone_geometry_in(&self.display_layout, name, &zone.geometry_policy, sw, sh);
+            let (_, _, width, _) = super::zone_geometry_in(
+                &self.display_layout,
+                name,
+                &scene.effective_zone_geometry(zone),
+                sw,
+                sh,
+            );
             for record in records {
                 cache.resolve_with_fonts(
                     &tokens,
@@ -843,35 +850,6 @@ impl Compositor {
         sw: f32,
         sh: f32,
     ) -> (f32, f32, f32, f32) {
-        match policy {
-            GeometryPolicy::EdgeAnchored {
-                edge,
-                height_pct,
-                width_pct,
-                margin_px,
-            } => {
-                let zw = sw * width_pct;
-                let zh = sh * height_pct;
-                let zx = (sw - zw) / 2.0;
-                let zy = match edge {
-                    DisplayEdge::Top => *margin_px,
-                    DisplayEdge::Bottom => sh - zh - margin_px,
-                    DisplayEdge::Left | DisplayEdge::Right => 0.0,
-                };
-                (zx, zy, zw, zh)
-            }
-            GeometryPolicy::Relative {
-                x_pct,
-                y_pct,
-                width_pct,
-                height_pct,
-            } => {
-                let zx = sw * x_pct;
-                let zy = sh * y_pct;
-                let zw = sw * width_pct;
-                let zh = sh * height_pct;
-                (zx, zy, zw, zh)
-            }
-        }
+        tze_hud_scene::resolve_zone_geometry(policy, sw, sh)
     }
 }

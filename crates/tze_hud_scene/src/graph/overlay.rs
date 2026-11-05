@@ -14,6 +14,10 @@ use std::collections::{HashMap, HashSet};
 /// clears them; the runtime drains pending SVG assets before the render loop.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct RuntimeOverlayState {
+    /// Owner placement of a zone slot for this runtime session, independent
+    /// of publications. Restart and the human Reset restore its policy.
+    #[serde(skip, default)]
+    pub zone_placements: HashMap<SceneId, GeometryPolicy>,
     /// Runtime-managed zone interaction hit regions.
     ///
     /// Populated by the compositor each frame during `render_zone_content`.

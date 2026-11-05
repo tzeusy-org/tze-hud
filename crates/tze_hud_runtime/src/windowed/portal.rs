@@ -2,19 +2,61 @@ use tze_hud_input::{
     DragEventOutcome, InputProcessor, PointerEvent, PointerEventKind, PortalRect,
     PortalResizeState, PortalWindowTokens, ResizeBounds, ResizeEdge, ResizeOutcome, hit_affordance,
 };
-use tze_hud_scene::HitResult;
 use tze_hud_scene::types::{DragHandleElementKind, ZoneInteractionKind};
+use tze_hud_scene::{HitResult, Rect, SceneGraph, SceneId};
 
 use super::WinitApp;
 use super::input_dispatch::dispatch_portal_geometry_event;
 use super::lifecycle::{INTERACTION_LOCK_BUDGET, spin_acquire};
+
+/// Captured definition identity; a zone is a slot, never an agent tile.
+#[derive(Clone, Debug)]
+pub(super) enum DragTarget {
+    Tile(SceneId),
+    Zone(String),
+}
+
+impl DragTarget {
+    pub(super) fn capture(
+        scene: &SceneGraph,
+        id: SceneId,
+        kind: DragHandleElementKind,
+    ) -> Option<Self> {
+        match kind {
+            DragHandleElementKind::Tile => scene.tiles.get(&id).map(|t| Self::Tile(t.lease_id)),
+            DragHandleElementKind::Zone if scene.zones_shown() => {
+                scene.zone_by_id(id).map(|z| Self::Zone(z.name.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    fn bounds(&self, scene: &SceneGraph, id: SceneId, sw: f32, sh: f32) -> Option<Rect> {
+        match self {
+            Self::Tile(_) => scene.tiles.get(&id).map(|t| t.bounds),
+            Self::Zone(name) => scene
+                .zone_registry
+                .zones
+                .get(name)
+                .filter(|z| z.id == id)
+                .map(|z| {
+                    let (x, y, w, h) = tze_hud_scene::resolve_zone_geometry(
+                        &scene.effective_zone_geometry(z),
+                        sw,
+                        sh,
+                    );
+                    Rect::new(x, y, w, h)
+                }),
+        }
+    }
+}
 
 /// Identity of the primary drag that actually entered the recognizer under lock.
 /// A missed Up retains only this gesture's terminal event, never generic input.
 #[derive(Clone, Debug)]
 pub(super) struct PrimaryDragGesture {
     pub(super) element_id: tze_hud_scene::SceneId,
-    pub(super) lease_id: tze_hud_scene::SceneId,
+    pub(super) target: DragTarget,
     pub(super) feedback_target: tze_hud_scene::SceneId,
     pub(super) interaction_id: String,
     pub(super) press_start: std::time::Instant,
@@ -31,14 +73,22 @@ impl PrimaryDragGesture {
     }
 
     pub(super) fn target_is_live(&self, scene: &tze_hud_scene::SceneGraph) -> bool {
-        scene
-            .tiles
-            .get(&self.element_id)
-            .is_some_and(|tile| tile.lease_id == self.lease_id)
-            && scene
-                .tiles
-                .get(&self.feedback_target)
-                .is_some_and(|tile| tile.lease_id == self.lease_id)
+        match &self.target {
+            DragTarget::Tile(lease) => [self.element_id, self.feedback_target].iter().all(|id| {
+                scene
+                    .tiles
+                    .get(id)
+                    .is_some_and(|tile| tile.lease_id == *lease)
+            }),
+            DragTarget::Zone(name) => {
+                scene.zones_shown()
+                    && scene
+                        .zone_registry
+                        .zones
+                        .get(name)
+                        .is_some_and(|zone| zone.id == self.element_id)
+            }
+        }
     }
 }
 
@@ -89,7 +139,7 @@ pub(super) fn reconcile_drag_feedback(
         .values()
         .filter(|drag| {
             drag.phase == tze_hud_input::drag::DragPhase::Activated
-                && scene.tiles.contains_key(&drag.element_id)
+                && DragTarget::capture(scene, drag.element_id, drag.element_kind).is_some()
         })
         .map(|drag| drag_feedback_target(scene, drag.element_id))
         .collect();
@@ -136,6 +186,11 @@ impl PortalProjectionDrain {
 
 /// Payload returned by [`apply_drag_handle_pointer_event`] when a drag is
 /// completed and the geometry must be persisted outside the scene lock.
+pub(super) enum DragRelease {
+    Tile(DragReleasedData),
+    Zone,
+}
+
 pub(super) struct DragReleasedData {
     /// Scene-level ID of the element that was dragged.
     element_id: tze_hud_scene::SceneId,
@@ -209,7 +264,7 @@ pub(super) fn apply_drag_handle_pointer_event(
     scene: &mut tze_hud_scene::graph::SceneGraph,
     display_width: f32,
     display_height: f32,
-) -> Option<DragReleasedData> {
+) -> Option<DragRelease> {
     let device_id = pointer_event.device_id;
 
     // Determine which drag handle (if any) was hit on this event.
@@ -237,7 +292,20 @@ pub(super) fn apply_drag_handle_pointer_event(
     if pointer_event.kind == PointerEventKind::Down {
         input_processor.drag_states.remove(&device_id);
         if let Some((interaction_id, element_id, element_kind, is_header_band)) = hit_drag_info {
-            let Some(element_bounds) = scene.tiles.get(&element_id).map(|tile| tile.bounds) else {
+            let target = DragTarget::capture(scene, element_id, element_kind);
+            let live_handle = !matches!(target, Some(DragTarget::Zone(_)))
+                || scene.overlay.drag_handle_hit_regions.iter().any(|h| {
+                    h.element_id == element_id
+                        && h.element_kind == element_kind
+                        && h.interaction_id == interaction_id
+                        && scene.shown_zone_publishes().any(|(name, p)| {
+                            !p.is_empty() && scene.zone_registry.zones[name].id == element_id
+                        })
+                });
+            let Some(element_bounds) = target
+                .filter(|_| live_handle)
+                .and_then(|t| t.bounds(scene, element_id, display_width, display_height))
+            else {
                 reconcile_drag_feedback(input_processor, scene);
                 return None;
             };
@@ -274,8 +342,11 @@ pub(super) fn apply_drag_handle_pointer_event(
         return None;
     };
 
-    // Snapshot element bounds; element_id is the tile being dragged.
-    let Some(element_bounds) = scene.tiles.get(&element_id).map(|tile| tile.bounds) else {
+    let target = DragTarget::capture(scene, element_id, element_kind);
+    let Some(element_bounds) = target
+        .as_ref()
+        .and_then(|t| t.bounds(scene, element_id, display_width, display_height))
+    else {
         input_processor.drag_states.remove(&device_id);
         reconcile_drag_feedback(input_processor, scene);
         return None;
@@ -294,6 +365,31 @@ pub(super) fn apply_drag_handle_pointer_event(
         display_height,
         false,
     );
+
+    if let Some(DragTarget::Zone(_)) = target {
+        let position = match outcome {
+            DragEventOutcome::Moved { new_x, new_y, .. } => Some((new_x, new_y)),
+            DragEventOutcome::Released {
+                final_x, final_y, ..
+            } => Some((final_x, final_y)),
+            _ => None,
+        };
+        if let Some((x, y)) = position {
+            scene.set_zone_placement(
+                element_id,
+                tze_hud_input::drag::final_position_to_geometry(
+                    x,
+                    y,
+                    element_bounds.width,
+                    element_bounds.height,
+                    display_width,
+                    display_height,
+                ),
+            );
+        }
+        reconcile_drag_feedback(input_processor, scene);
+        return matches!(outcome, DragEventOutcome::Released { .. }).then_some(DragRelease::Zone);
+    }
 
     let released = match outcome {
         DragEventOutcome::Idle | DragEventOutcome::Accumulating { .. } => {
@@ -419,7 +515,7 @@ pub(super) fn apply_drag_handle_pointer_event(
             );
 
             // Return data the caller will use to persist after releasing locks.
-            Some(DragReleasedData {
+            Some(DragRelease::Tile(DragReleasedData {
                 element_id: eid,
                 final_x,
                 final_y,
@@ -429,7 +525,7 @@ pub(super) fn apply_drag_handle_pointer_event(
                 display_height,
                 namespace,
                 group_members,
-            })
+            }))
         }
     };
     reconcile_drag_feedback(input_processor, scene);
@@ -1300,7 +1396,10 @@ impl WinitApp {
     ///
     /// Called after all scene locks are released to avoid holding locks during
     /// disk I/O (element store atomic write + fsync).
-    pub(super) fn persist_drag_release(&mut self, released: DragReleasedData) {
+    pub(super) fn persist_drag_release(&mut self, released: DragRelease) {
+        let DragRelease::Tile(released) = released else {
+            return;
+        };
         use tze_hud_input::InputProcessor;
         use tze_hud_scene::element_store::ElementType;
 
@@ -1522,10 +1621,9 @@ impl WinitApp {
         };
         let epoch_before = scene.geometry_epoch;
 
-        self.state
-            .input_processor
-            .drag_states
-            .retain(|_, drag| scene.tiles.contains_key(&drag.element_id));
+        self.state.input_processor.drag_states.retain(|_, drag| {
+            DragTarget::capture(&scene, drag.element_id, drag.element_kind).is_some()
+        });
         if self
             .state
             .primary_drag_gesture
@@ -3329,7 +3427,7 @@ mod tests {
             namespace: "portal-agent".to_string(),
             group_members,
         };
-        app.persist_drag_release(released);
+        app.persist_drag_release(DragRelease::Tile(released));
 
         // Every spatial portal member has a durable override.
         for id in [frame_id, transcript_id, composer_id] {

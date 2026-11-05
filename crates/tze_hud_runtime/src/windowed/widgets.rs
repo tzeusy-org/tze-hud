@@ -516,6 +516,10 @@ impl WinitApp {
             // adapter-controlled again — not just the one the reset menu was
             // opened on.
             if let Ok(mut scene) = state.scene.try_lock() {
+                if scene.zone_by_id(element_id).is_some() {
+                    scene.reset_zone_placement(element_id);
+                    return;
+                }
                 match super::portal::resolve_portal_group(&scene, element_id) {
                     Some(group) => {
                         for member_id in group.member_ids {

@@ -138,7 +138,8 @@ impl Compositor {
             if self.display_layout.zone_display_rect(zone_name).is_some() {
                 continue;
             }
-            let (x, y, w, h) = Self::resolve_zone_geometry(&zone_def.geometry_policy, sw, sh);
+            let (x, y, w, h) =
+                Self::resolve_zone_geometry(&scene.effective_zone_geometry(zone_def), sw, sh);
             let element_bounds_zone = Rect::new(x, y, w, h);
             let bounds = Self::drag_handle_bounds(element_bounds_zone, style, scale, sw, sh);
             let interaction_id = format!("drag-handle:{}", Self::scene_id_hex(zone_def.id));
