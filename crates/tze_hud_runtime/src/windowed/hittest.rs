@@ -570,6 +570,26 @@ mod tests {
             HitRegion::new(100.0, 200.0, 20.0, 20.0),
             "zone hit region must be exposed to overlay click-capture"
         );
+
+        let mut menu: tze_hud_scene::DragHandleContextMenuState = serde_json::from_value(serde_json::json!({
+            "element_id": tze_hud_scene::SceneId::new(), "anchor_x": 400.0, "anchor_y": 300.0, "shown_at_ns": 1
+        })).unwrap();
+        menu.reset_button_rect = Some(tze_hud_scene::Rect::new(404.0, 304.0, 152.0, 24.0));
+        scene.overlay.drag_handle_context_menu = Some(menu);
+        let combined = combined_overlay_hit_regions(&static_regions, &scene);
+        assert!(
+            combined.iter().any(|r| r.contains(480.0, 316.0)),
+            "a painted menu action must capture independently of underlying content"
+        );
+        assert!(
+            !combined.iter().any(|r| r.contains(600.0, 316.0)),
+            "a menu must not turn adjacent desktop into a capture region"
+        );
+        scene.overlay.drag_handle_context_menu = None;
+        assert_eq!(
+            combined_overlay_hit_regions(&static_regions, &scene).len(),
+            2
+        );
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -722,6 +742,61 @@ mod tests {
                 moved.bounds.y + moved.bounds.height / 2.0
             ));
         }
+
+        let moved = moved.clone();
+        drop(scene);
+        drop(shared);
+        app.state.cursor_x = moved.bounds.x + moved.bounds.width / 2.0;
+        app.state.cursor_y = moved.bounds.y + moved.bounds.height / 2.0;
+        let window = winit::window::WindowId::dummy();
+        app.handle_mouse_button(winit::event::MouseButton::Right, false, window, None);
+        {
+            let shared = app.state.shared_state.try_lock().unwrap();
+            let mut scene = shared.scene.try_lock().unwrap();
+            compositor.render_frame(&mut scene, &surface);
+            refresh_interaction_hit_regions_after_render(&compositor, &mut scene, &surface);
+            let menu = scene.overlay.drag_handle_context_menu.as_ref().unwrap();
+            let button = menu.reset_button_rect.unwrap();
+            let capture = combined_overlay_hit_regions(&[], &scene);
+            assert!(
+                capture.iter().any(|r| r.contains(
+                    button.x + button.width / 2.0,
+                    button.y + button.height / 2.0
+                )),
+                "the actual opened and rendered menu must admit its reset click"
+            );
+            app.state.cursor_x = button.x + button.width / 2.0;
+            app.state.cursor_y = button.y + button.height / 2.0;
+        }
+        app.handle_mouse_button(winit::event::MouseButton::Left, true, window, None);
+        assert!(
+            app.state.input_processor.drag_states.is_empty(),
+            "menu Down never starts an underlying drag"
+        );
+        app.handle_mouse_button(winit::event::MouseButton::Left, false, window, None);
+        app.handle_mouse_button(winit::event::MouseButton::Left, false, window, None);
+        let shared = app.state.shared_state.try_lock().unwrap();
+        let mut scene = shared.scene.try_lock().unwrap();
+        assert!(scene.overlay.drag_handle_context_menu.is_none());
+        assert!(
+            shared
+                .element_store
+                .entries
+                .values()
+                .all(|e| e.geometry_override.is_none())
+        );
+        compositor.render_frame(&mut scene, &surface);
+        let reset = scene
+            .overlay
+            .drag_handle_hit_regions
+            .iter()
+            .find(|h| h.element_id == zone_id)
+            .unwrap();
+        assert_eq!(
+            reset.bounds, handle.bounds,
+            "matching menu Down/Up restores default zone placement"
+        );
+        assert_eq!(scene.tiles[&tile_id].bounds, tile_bounds);
     }
 
     #[test]
