@@ -20,9 +20,12 @@ from __future__ import annotations
 import argparse
 from contextlib import contextmanager
 import ctypes
+from datetime import datetime
 from ctypes import wintypes
 import hashlib
+import json
 import os
+import re
 import secrets
 import shutil
 import subprocess
@@ -70,6 +73,108 @@ def wait_until(predicate, timeout_s: float, what: str) -> None:
             return
         time.sleep(0.5)
     raise AssertionError(f"timed out after {timeout_s:.0f}s waiting for {what}")
+
+
+def lifecycle_events(log: Path, pid: int, after: int = 0) -> list[dict]:
+    """Read only this launch's PID-bound checkpoints, retaining their times."""
+    with log.open("rb") as stream:
+        stream.seek(after)
+        lines = stream.read().decode("utf-8", errors="replace").splitlines()
+    events = []
+    for line in lines:
+        if "[DEBUG-hud-lks0i] lifecycle" not in line:
+            continue
+        match = re.search(r'\bpid=(\d+)\s+phase="?([a-z_]+)', line)
+        if match and int(match[1]) == pid:
+            events.append({"timestamp": line.split()[0], "pid": pid, "phase": match[2]})
+    return events
+
+
+def early_quit_coverage(events: list[dict]) -> str:
+    """Require positive, ordered checkpoints; missing evidence is unexercised."""
+    names = ("startup_compositor_begin", "quit_requested", "startup_compositor_ready")
+    try:
+        indices = [next(i for i, event in enumerate(events) if event["phase"] == name)
+                   for name in names]
+        times = [datetime.fromisoformat(events[i]["timestamp"].replace("Z", "+00:00"))
+                 for i in indices]
+    except (StopIteration, KeyError, TypeError, ValueError):
+        return "UNEXERCISED"
+    pids = {events[i].get("pid") for i in indices}
+    if len(pids) != 1 or None in pids or any(time.tzinfo is None for time in times):
+        return "UNEXERCISED"
+    ordered = indices[0] < indices[1] < indices[2] and times[0] < times[1] < times[2]
+    return "EXERCISED" if ordered else "UNEXERCISED"
+
+
+def report_lifecycle(log: Path, instance: subprocess.Popen, checkpoint: str,
+                     after: int = 0) -> list[dict]:
+    """Report bounded phase evidence, never substitute it for process exit."""
+    try:
+        events = lifecycle_events(log, instance.pid, after)
+    except OSError as error:
+        print(
+            f"lifecycle checkpoint={checkpoint} tracked_pid={instance.pid} "
+            f"exit={instance.poll()} log_unavailable={type(error).__name__}",
+            flush=True,
+        )
+        return []  # Diagnostic failure must not replace the original smoke failure.
+    phases = [event["phase"] for event in events]
+    print(
+        f"lifecycle checkpoint={checkpoint} tracked_pid={instance.pid} "
+        f"exit={instance.poll()} graphical_ready={'graphical_ready' in phases} "
+        f"startup_returned={'resumed_return' in phases} "
+        f"phases={phases[-32:]} events={json.dumps(events[-32:])}",
+        flush=True,
+    )
+    return events
+
+
+def request_quit() -> None:
+    """Signal the production installer's existing event once, without cleanup."""
+    kernel = ctypes.WinDLL("kernel32", use_last_error=True)
+    kernel.OpenEventW.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel.OpenEventW.restype = wintypes.HANDLE
+    kernel.SetEvent.argtypes = [wintypes.HANDLE]
+    kernel.SetEvent.restype = wintypes.BOOL
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    # Same EVENT_MODIFY_STATE access and name as operator::install::win::signal.
+    handle = kernel.OpenEventW(0x0002, False, r"Local\tze_hud.quit")
+    if not handle:
+        raise AssertionError(f"OpenEventW quit failed: {ctypes.get_last_error()}")
+    signal_error = None
+    try:
+        if not kernel.SetEvent(handle):
+            signal_error = ctypes.get_last_error()
+    finally:
+        closed = kernel.CloseHandle(handle)
+        close_error = ctypes.get_last_error() if not closed else None
+    if signal_error is not None:
+        raise AssertionError(f"SetEvent quit failed: {signal_error}; close_error={close_error}")
+    assert closed, f"CloseHandle quit failed: {close_error}"
+
+
+def probe_early_quit(command: list[str], env: dict[str, str], smoke: Smoke, log: Path) -> None:
+    """One early ordering sample; never replay it to obtain coverage."""
+    after = log.stat().st_size if log.exists() else 0
+    instance = subprocess.Popen(command, env=env)
+    try:
+        wait_until(lambda: mcp_answers(smoke), 90, "early instance to answer on loopback")
+        assert instance.poll() is None, "early instance exited before quit"
+        request_quit()  # No duplicate-launch subprocess or sleep before the signal.
+        wait_until(lambda: instance.poll() is not None, 10, "early instance to exit after quit")
+        assert instance.returncode == 0, f"early quit exited {instance.returncode}"
+    finally:
+        events = report_lifecycle(log, instance, "early_quit_terminal", after)
+        print(f"early-quit tracked_pid={instance.pid} coverage={early_quit_coverage(events)}", flush=True)
+
+
+def graphical_ready(log: Path, pid: int, after: int) -> bool:
+    try:
+        return any(event["phase"] == "graphical_ready" for event in lifecycle_events(log, pid, after))
+    except OSError:
+        return False
 
 
 def dump_logs(local: Path) -> None:
@@ -147,6 +252,8 @@ def main() -> int:
     def run(exe: Path, *flags: str, timeout: float) -> subprocess.CompletedProcess:
         return subprocess.run([str(exe), *flags], env=env, timeout=timeout)
 
+    instance = None
+    log = local / "tze_hud" / "logs" / "tze_hud.log"
     try:
         # Execute the real startup and install consumers under a kernel error,
         # before the positive install/duplicate/uninstall cases below. Requiring
@@ -191,7 +298,6 @@ def main() -> int:
         # needs Vulkan; the CI runner only has WARP, so it cannot serve. Prove
         # it launched from its log, then stand in for it with a fullscreen
         # instance started from the installed exe with the same config.
-        log = local / "tze_hud" / "logs" / "tze_hud.log"
         wait_until(
             lambda: log.exists() and log.read_text(errors="replace").count("tze_hud runtime starting") >= 1,
             30,
@@ -200,6 +306,13 @@ def main() -> int:
         print("ok  --install relaunched the installed exe")
         subprocess.run(["taskkill", "/F", "/IM", "tze_hud.exe"], capture_output=True)
         time.sleep(2)
+        probe_early_quit(
+            [str(installed), "--config", str(config_dir / "config.toml"), "--window-mode", "fullscreen",
+             "--mcp-port", str(args.mcp_port)],
+            env, smoke, log,
+        )
+        instance_log_start = log.stat().st_size if log.exists() else 0
+        late_startup_deadline = time.monotonic() + 90
         instance = subprocess.Popen(
             [str(installed), "--config", str(config_dir / "config.toml"), "--window-mode", "fullscreen",
              "--mcp-port", str(args.mcp_port)],
@@ -208,6 +321,10 @@ def main() -> int:
         wait_until(lambda: mcp_answers(smoke), 90, "installed instance to answer on loopback")
         assert instance.poll() is None, "installed instance exited"
         print("ok  installed instance answers on loopback")
+        report_lifecycle(log, instance, "mcp_ready", instance_log_start)
+        wait_until(lambda: graphical_ready(log, instance.pid, instance_log_start),
+                   max(0, late_startup_deadline - time.monotonic()),
+                   "late instance to complete graphical initialization")
 
         start = time.monotonic()
         second = run(installed, timeout=10)
@@ -221,17 +338,21 @@ def main() -> int:
         assert explicit.returncode != 0, "second launch with explicit args exited 0; it must fail loudly"
         print(f"ok  second launch with explicit args exited {explicit.returncode}")
 
+        report_lifecycle(log, instance, "before_uninstall", instance_log_start)
         done = run(installed, "--uninstall", "--purge", timeout=30)
         assert done.returncode == 0, f"--uninstall exited {done.returncode}"
         assert run_value() is None, "Run value still present after uninstall"
         assert not app_paths_exists(), "App Paths key still present after uninstall"
         wait_until(lambda: instance.poll() is not None, 10, "instance to exit after uninstall")
+        report_lifecycle(log, instance, "process_exited", instance_log_start)
         wait_until(lambda: not install_dir.exists(), 20, "install dir to be deleted")
         wait_until(lambda: not config_dir.exists(), 20, "config dir to be purged")
         print("ok  --uninstall --purge: Run value gone, instance exited, dirs removed")
         return 0
     except (AssertionError, subprocess.TimeoutExpired) as err:
         print(f"FAIL {err}", file=sys.stderr)
+        if instance is not None:
+            report_lifecycle(log, instance, "failure", instance_log_start)
         for d in (install_dir, config_dir, local / "tze_hud"):
             left = [str(f.relative_to(root)) for f in d.rglob("*")] if d.exists() else []
             print(f"leftover in {d.name}: {left}", file=sys.stderr)

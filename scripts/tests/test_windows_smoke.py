@@ -929,7 +929,7 @@ def test_quiescent_summary_reports_the_gate_counters(tmp_path, monkeypatch, caps
 
 
 
-def test_request_boundaries_and_startup_readiness(monkeypatch, subtests):
+def test_request_boundaries_and_startup_readiness(monkeypatch, subtests, tmp_path, capsys):
     import io
     import json
     import urllib.error
@@ -1228,6 +1228,109 @@ def test_request_boundaries_and_startup_readiness(monkeypatch, subtests):
             assert "URLError" in str(failure.value) and "RequestFailure" not in str(failure.value)
             assert marker not in output.getvalue() + str(failure.value)
             assert url not in output.getvalue() + str(failure.value)
+
+
+    # The installer shares this startup seam. Import its actual helpers without
+    # requiring the registry module on the Linux static-check host.
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+
+    with monkeypatch.context() as patch:
+        patch.setitem(sys.modules, "winreg", SimpleNamespace())
+        import windows_install_smoke as install
+
+    def line(phase, second, pid=101):
+        return (f'2026-11-05T21:00:{second:02d}.000000Z INFO '
+                f'[DEBUG-hud-lks0i] lifecycle pid={pid} phase="{phase}"\n')
+
+    log = tmp_path / "install.log"
+    begin, quit, ready = "startup_compositor_begin", "quit_requested", "startup_compositor_ready"
+    for case, phases, expected in (
+        ("actual early ordering", [(begin, 1), (quit, 2), (ready, 3)], "EXERCISED"),
+        ("startup wins race", [(begin, 1), (ready, 2), (quit, 3)], "UNEXERCISED"),
+        ("MCP alone is not quit", [(begin, 1), (ready, 3)], "UNEXERCISED"),
+        ("incomplete trace", [(begin, 1), (quit, 2)], "UNEXERCISED"),
+        ("clock order contradicts rows", [(begin, 3), (quit, 2), (ready, 4)], "UNEXERCISED"),
+    ):
+        with subtests.test(case=case):
+            log.write_text("".join(line(phase, second) for phase, second in phases), encoding="utf-8")
+            events = install.lifecycle_events(log, 101)
+            assert install.early_quit_coverage(events) == expected
+            assert all(event["pid"] == 101 for event in events)
+
+    with subtests.test(case="PID and launch offset exclude other-instance readiness"):
+        log.write_text(line(begin, 1) + line(quit, 2) + line(ready, 3)
+                       + line("graphical_ready", 4), encoding="utf-8")
+        after = log.stat().st_size
+        with log.open("a", encoding="utf-8") as out:
+            out.write(line(begin, 5) + line(quit, 6, pid=202) + line(ready, 7))
+        assert install.early_quit_coverage(install.lifecycle_events(log, 101, after)) == "UNEXERCISED"
+        assert not install.graphical_ready(log, 101, after)
+        assert not install.graphical_ready(tmp_path / "missing", 101, 0)
+        events = install.lifecycle_events(log, 101)
+        events[1]["pid"] = 202
+        assert install.early_quit_coverage(events) == "UNEXERCISED"
+        events[1]["pid"] = 101
+        events[1]["timestamp"] = "missing-time"
+        assert install.early_quit_coverage(events) == "UNEXERCISED"
+
+    for opened, signalled, closed in ((0, 1, 1), (8, 0, 1), (8, 1, 0), (8, 1, 1)):
+        with subtests.test(case=f"native quit handle {opened}/{signalled}/{closed}"):
+            kernel = SimpleNamespace(OpenEventW=Mock(return_value=opened),
+                                     SetEvent=Mock(return_value=signalled),
+                                     CloseHandle=Mock(return_value=closed))
+            with monkeypatch.context() as patch:
+                patch.setattr(install.ctypes, "WinDLL", lambda *a, **kw: kernel, raising=False)
+                patch.setattr(install.ctypes, "get_last_error", lambda: 5, raising=False)
+                if opened and signalled and closed:
+                    install.request_quit()
+                else:
+                    with pytest.raises(AssertionError, match="quit failed"):
+                        install.request_quit()
+            kernel.OpenEventW.assert_called_once_with(0x0002, False, r"Local\tze_hud.quit")
+            assert kernel.SetEvent.call_count == int(bool(opened))
+            assert kernel.CloseHandle.call_count == int(bool(opened))
+
+    for late, exit_code in ((False, 0), (True, 0), (False, 1)):
+        with subtests.test(case=f"single early probe late={late} exit={exit_code}"):
+            calls = []
+            child = SimpleNamespace(pid=101, returncode=None)
+            child.poll = lambda: child.returncode
+            log.write_text("", encoding="utf-8")
+
+            def spawn(command, env):
+                calls.append("spawn")
+                log.write_text(line(begin, 1) + (line(ready, 2) if late else ""), encoding="utf-8")
+                return child
+
+            def rpc(*args):
+                calls.append("mcp")
+                return {}
+
+            def signal(handle):
+                calls.append("signal")
+                with log.open("a", encoding="utf-8") as out:
+                    out.write(line(quit, 3 if late else 2) + ("" if late else line(ready, 3)))
+                child.returncode = exit_code
+                return 1
+
+            kernel = SimpleNamespace(OpenEventW=Mock(return_value=8), SetEvent=Mock(side_effect=signal),
+                                     CloseHandle=Mock(return_value=1))
+            with monkeypatch.context() as patch:
+                patch.setattr(install.ctypes, "WinDLL", lambda *a, **kw: kernel, raising=False)
+                patch.setattr(install.subprocess, "Popen", spawn)
+                patch.setattr(install.time, "sleep", lambda _: pytest.fail("unexpected sleep/retry"))
+                if exit_code:
+                    with pytest.raises(AssertionError, match="early quit exited 1"):
+                        install.probe_early_quit(["installed.exe"], {}, SimpleNamespace(rpc=rpc), log)
+                else:
+                    install.probe_early_quit(["installed.exe"], {}, SimpleNamespace(rpc=rpc), log)
+            output = capsys.readouterr().out
+            assert calls == ["spawn", "mcp", "signal"]
+            assert f"coverage={'UNEXERCISED' if late else 'EXERCISED'}" in output
+            assert '"timestamp": "2026-11-05T21:00:' in output
+            kernel.SetEvent.assert_called_once_with(8)
+            kernel.CloseHandle.assert_called_once_with(8)
 
 
 def test_capture_png_pixels_baseline_and_changed_only_comment(tmp_path, monkeypatch):
