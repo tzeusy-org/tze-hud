@@ -637,6 +637,10 @@ impl ChromeCaptureTestScope {
         }
     }
 
+    pub(super) fn lose(&self) {
+        assert!(chrome_native_update(|ledger| ledger.lose(self.nonce)).unwrap());
+    }
+
     pub(super) fn healthy(&self) -> bool {
         !CHROME_NATIVE_FAULT.with(std::cell::Cell::get)
     }

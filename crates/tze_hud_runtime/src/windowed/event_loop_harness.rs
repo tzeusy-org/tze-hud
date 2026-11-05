@@ -1947,6 +1947,135 @@ mod tests {
             );
         }
 
+        // Model only the emitted handle/window identity at the headless boundary.
+        // Admission, activation, native ledger loss, focus cancellation, retained
+        // Up and scene settling below are the production routes, not reset helpers.
+        // The render parent separately proves actual compositor handle production.
+        for native_loss in [false, true] {
+            for held_terminal in [false, true] {
+                use crate::windowed::lifecycle::{ChromeAppEdge, ChromeCaptureTestScope};
+                let mut harness = approve_reject_notification_harness();
+                let (fixture, ..) = super::super::test_support::scene_with_drag_handle_tile(
+                    400.0, 300.0, 600.0, 200.0,
+                );
+                let id = {
+                    let mut scene = harness.scene();
+                    let id = scene.zone_registry.zones["notification-area"].id;
+                    let mut handle = fixture.overlay.drag_handle_hit_regions[0].clone();
+                    handle.element_id = id;
+                    handle.element_kind = tze_hud_scene::DragHandleElementKind::Zone;
+                    (harness.app.state.cursor_x, harness.app.state.cursor_y) =
+                        (handle.bounds.x + 1.0, handle.bounds.y + 1.0);
+                    scene.overlay.drag_handle_hit_regions.push(handle);
+                    id
+                };
+                let (tx, mut repositioned) = tokio::sync::broadcast::channel(4);
+                harness.app.state.element_repositioned_tx = Some(tx);
+                harness.app.enqueue_pointer_event(PointerEventKind::Down);
+                harness.app.state.cursor_y += 1.0;
+                harness.app.enqueue_pointer_event(PointerEventKind::Move);
+                harness.app.state.cursor_y += 43.2;
+                harness.app.enqueue_pointer_event(PointerEventKind::Move);
+                assert!(harness.scene().is_drag_active(id));
+                let placement = harness.scene().overlay.zone_placements[&id];
+                let window = winit::window::WindowId::dummy();
+                let native = native_loss.then(|| {
+                    let native = ChromeCaptureTestScope::new(window);
+                    let frame = native.begin(true);
+                    let edge = ChromeAppEdge::begin(window, true);
+                    drop(edge);
+                    native.complete(frame);
+                    harness.app.state.press_window = Some(window);
+                    harness
+                        .app
+                        .state
+                        .primary_drag_gesture
+                        .as_mut()
+                        .unwrap()
+                        .window_id = Some(window);
+                    native
+                });
+                let shared = harness.shared_state();
+                let held = held_terminal.then(|| shared.blocking_lock());
+                if held_terminal {
+                    harness.app.state.cursor_y += 43.2;
+                    harness.app.enqueue_pointer_event(PointerEventKind::Up);
+                    assert!(
+                        harness
+                            .app
+                            .state
+                            .primary_drag_gesture
+                            .as_ref()
+                            .unwrap()
+                            .terminal
+                            .is_some()
+                    );
+                }
+                let ring = harness.app.state.input_ring.lock().unwrap().len();
+                if let Some(native) = &native {
+                    native.lose();
+                    harness.app.drain_chrome_capture_cancellation();
+                } else {
+                    harness.app.handle_window_focus(None, false);
+                }
+                assert!(
+                    harness.app.state.primary_drag_gesture.is_none(),
+                    "accepted cancellation disarms the captured Zone and retained Up immediately"
+                );
+                assert!(
+                    !harness
+                        .app
+                        .state
+                        .input_processor
+                        .drag_states
+                        .contains_key(&0)
+                );
+                assert_eq!(
+                    harness.app.state.input_ring.lock().unwrap().len(),
+                    ring,
+                    "cancel creates no synthetic input"
+                );
+                if held_terminal {
+                    assert!(harness.app.settle_scene_work().is_deferred());
+                    harness.schedule_shared_scene_availability_wake();
+                }
+                drop(held);
+                let deadline = std::time::Instant::now() + SCENE_WAIT;
+                while !harness.tick() {
+                    assert!(std::time::Instant::now() < deadline);
+                    std::thread::yield_now();
+                }
+                assert!(!harness.scene().is_drag_active(id));
+                let epoch = geometry_epoch(&harness);
+                assert!(harness.tick());
+                assert_eq!(geometry_epoch(&harness), epoch, "cancel settles once");
+                harness.app.state.cursor_y += 43.2;
+                harness.app.enqueue_pointer_event(PointerEventKind::Move);
+                harness.app.enqueue_pointer_event(PointerEventKind::Up);
+                assert_eq!(
+                    harness.scene().overlay.zone_placements[&id],
+                    placement,
+                    "late ordinary or retained terminal cannot move cancelled placement"
+                );
+                assert!(repositioned.try_recv().is_err());
+                assert!(shared.blocking_lock().element_store.entries.is_empty());
+                assert!(take_action_ids(&harness).is_empty());
+                assert_eq!(harness.zone_publication_count("notification-area"), 1);
+                drop(native);
+                harness.app.state.press_window = None;
+                // A deliberate new Down still owns a fresh gesture after cancellation.
+                harness.app.state.cursor_y = 291.0;
+                harness.app.enqueue_pointer_event(PointerEventKind::Down);
+                harness.app.state.cursor_y += 1.0;
+                harness.app.enqueue_pointer_event(PointerEventKind::Move);
+                harness.app.state.cursor_y += 43.2;
+                harness.app.enqueue_pointer_event(PointerEventKind::Move);
+                assert!(harness.scene().is_drag_active(id));
+                harness.app.enqueue_pointer_event(PointerEventKind::Up);
+                assert!(!harness.scene().is_drag_active(id));
+            }
+        }
+
         // A known terminal cancellation must disarm before the physical-Up
         // fallback, even if the ordinary late Up follows in the same turn.
         // This exercises ordering after an observation, not native delivery.
