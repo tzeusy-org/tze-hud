@@ -587,11 +587,22 @@ async fn test_two_line_notification_title_produces_two_text_items() {
                             )
                             .unwrap();
                     }
-                    compositor.prime_notification_layouts(&scene, 1280.0, 720.0);
-                    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+                    // Production commits prime truncation before the draw pass
+                    // resolves notification geometry with the live font system.
                     compositor.prime_truncation_cache(&scene);
+                    let commit_shapes = compositor.notification_layouts.borrow().shapes;
+                    compositor.prime_notification_layouts(&scene, 1280.0, 720.0);
+                    assert_eq!(
+                        compositor.notification_layouts.borrow().shapes,
+                        commit_shapes,
+                        "commit prime must resolve live-font geometry before drawing"
+                    );
+                    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
                     let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-                    let body_item = items.iter().find(|i| &*i.text == body).unwrap();
+                    let body_item = items
+                        .iter()
+                        .find(|i| i.text.as_ref() == body.as_str())
+                        .unwrap();
                     let raw_width = compositor
                         .text_rasterizer
                         .as_mut()
@@ -631,7 +642,10 @@ async fn test_two_line_notification_title_produces_two_text_items() {
                         ) <= body_item.bounds_width + 0.01
                     );
                     if !title.is_empty() {
-                        let item = items.iter().find(|i| &*i.text == title).unwrap();
+                        let item = items
+                            .iter()
+                            .find(|i| i.text.as_ref() == title.as_str())
+                            .unwrap();
                         let key = crate::text::effective_truncation_key(item).unwrap();
                         let result = rasterizer
                             .truncation_cache
