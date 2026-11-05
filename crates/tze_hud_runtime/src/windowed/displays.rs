@@ -435,6 +435,10 @@ pub(super) fn secondary_index(secondaries: &[SecondaryDisplay], id: WindowId) ->
     secondaries.iter().position(|s| s.window.id() == id)
 }
 
+/// Final swapchain outcomes: successful secondary present and deferred encodes.
+pub(super) type SecondaryPresentation =
+    (bool, Vec<tze_hud_compositor::surface::PresentAvailability>);
+
 /// One of the overlay windows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum OverlayWindow {
@@ -1205,12 +1209,22 @@ impl super::WinitApp {
     }
 
     /// Present every secondary's pending frame (main thread).
-    pub(super) fn present_secondaries(&self) -> bool {
+    pub(super) fn present_secondaries(
+        &self,
+    ) -> (bool, Vec<tze_hud_compositor::surface::PresentAvailability>) {
+        use tze_hud_compositor::surface::PendingPresent;
         let mut presented = false;
+        let mut deferred = Vec::new();
         for display in &self.state.secondaries {
-            presented |= display.surface.present_pending_texture();
+            match display.surface.present_pending_texture_status() {
+                PendingPresent::Presented => presented = true,
+                PendingPresent::Empty => {}
+                PendingPresent::DeferredEncoding => {
+                    deferred.push(display.surface.present_availability())
+                }
+            }
         }
-        presented
+        (presented, deferred)
     }
 
     /// Apply the overlay capture decision per window (see [`capture_window`]).

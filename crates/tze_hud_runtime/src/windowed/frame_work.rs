@@ -105,6 +105,15 @@ impl WindowedFrameWork {
             self.wake.counters().record_gpu_submission();
         }
         let submitted = outcome.telemetry.stage7_gpu_submit_us > 0;
+        tracing::debug!(
+            target: "tze_hud_delay_diagnostic",
+            event = "ordinary_primary_submission",
+            scene_version = built_versions.0,
+            geometry_epoch = built_versions.1,
+            acquired = outcome.surface_acquired,
+            gpu_submitted = outcome.gpu_submitted,
+            ready = outcome.telemetry.stage7_gpu_submit_us > 0,
+        );
         if submitted {
             self.last_rendered = built_versions;
             let _ = self.frame_ready.send(true);

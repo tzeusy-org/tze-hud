@@ -348,6 +348,9 @@ struct WindowedRuntimeState {
     pending_input_latency: PendingInputLatencySamples,
     /// Frame-ready signal: compositor → main thread.
     frame_ready_rx: FrameReadyRx,
+    /// A consumed ready signal whose image is still encoding. Cleared only
+    /// after present or explicit absence/invalidation, never by capture.
+    deferred_present: bool,
     /// Frame-ready sender (compositor thread will own this; stored here until
     /// the compositor thread is spawned and takes it).
     frame_ready_tx: Option<FrameReadyTx>,
@@ -3165,6 +3168,7 @@ impl WindowedRuntime {
             input_ring,
             pending_input_latency,
             frame_ready_rx,
+            deferred_present: false,
             frame_ready_tx: Some(frame_ready_tx),
             frame_presented_tx,
             degradation_notices,

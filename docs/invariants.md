@@ -341,12 +341,28 @@ An admin screenshot builds and reads back without advancing the last-rendered
 scene/geometry ledger or primary presentation counters. An ordinary scene
 change still presents, including after a capture alongside a failed acquire.
 
+A ready signal is a submission notification, not a successful-present receipt.
+If encoding defers presentation, the runtime retains that obligation and waits
+for the actual per-window encoding dependency; another window cannot hold up
+its completion wake. This wake adds no scene work or compositor generation.
+The cursor-only quiet path services ready/deferred images even if raw mouse
+motion follows the user event. New ready generations arriving during either
+primary or secondary presentation remain unread for the next turn. Empty or
+invalidated images retire only the existing obligation; unchanged held content
+returns to quiescence. None of this proves Windows owner-visible pixels or
+closes the separate overnight visibility acceptance.
+
 - `tze_hud_runtime` [`building_an_idle_frame_leaves_the_idle_gate_inputs_unchanged`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs)
-  drives the real endpoint/inbox, frame build, idle ledger and main-thread
-  present accounting with a fixed clock and queue synchronization. Only GPU
+  drives real MCP immediate/delayed held publication, encoding-guard completion,
+  per-window coalescing, endpoint/inbox, frame build, idle ledger and main-thread
+  primary/secondary present accounting with a fixed clock and queue synchronization. Only GPU
   readback and swapchain operations are synthetic here; actual capture pixels
   remain covered by compositor `capture_windowed_frame_reads_back_the_built_frame`
   in [surface.rs](../crates/tze_hud_compositor/src/renderer/tests/surface.rs).
+
+- `tze_hud_runtime` [`armed_cursor_entry_never_wakes_compositor_until_hover_changes`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs)
+  also routes actual raw mouse motion before the present gate, preserving zero
+  scene-work generations for presentation-only service.
 
 ## 10. Owner hiding changes the view, never state
 

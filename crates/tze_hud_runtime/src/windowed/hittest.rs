@@ -348,6 +348,12 @@ impl WinitApp {
                 .mark_main_work_pending(RuntimeWakeupSource::AnimationDeadline);
             return CursorEntryTurn::FullTurn;
         }
+        // A FrameReady user event may be followed by raw mouse motion before
+        // about_to_wait. Service its image even with unchanged hover, without
+        // turning presentation-only debt into another scene/compositor wake.
+        if self.state.deferred_present || self.state.frame_ready_rx.has_changed().unwrap_or(false) {
+            return CursorEntryTurn::FullTurn;
+        }
         CursorEntryTurn::Quiet {
             next: self.state.scheduled_main_deadline,
         }

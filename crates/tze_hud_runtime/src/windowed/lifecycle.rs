@@ -3135,41 +3135,85 @@ impl WinitApp {
     /// texture the compositor actually rendered into.
     pub(super) fn maybe_present_frame(&mut self) {
         let surface = self.state.window_surface.clone();
-        self.maybe_present_frame_with(|| surface.map(|surface| surface.present_pending_texture()));
+        self.maybe_present_frame_with(|| {
+            use tze_hud_compositor::surface::PendingPresent;
+            surface.and_then(|surface| match surface.present_pending_texture_status() {
+                PendingPresent::Presented => Some(true),
+                PendingPresent::Empty => None,
+                PendingPresent::DeferredEncoding => Some(false),
+            })
+        });
+    }
+
+    pub(super) fn defer_present_until_available(
+        &self,
+        availability: tze_hud_compositor::surface::PresentAvailability,
+    ) -> bool {
+        let wake = self.state.wake.clone();
+        availability.notify_when_ready(move || {
+            tracing::debug!(target: "tze_hud_delay_diagnostic", event = "present_availability_ready");
+            wake.notify_main(crate::idle_efficiency::RuntimeWakeupSource::FrameReady);
+        })
     }
 
     /// Keep signal consumption and actual-present accounting on the production
     /// path while the headless harness substitutes only the swapchain operation.
+    /// `Some(false)` means deferred encoding; `None` means no pending image.
+    /// A newer ready generation arriving during this attempt remains unread.
     pub(super) fn maybe_present_frame_with(
         &mut self,
         present_primary: impl FnOnce() -> Option<bool>,
     ) {
-        if self.state.frame_ready_rx.has_changed().unwrap_or(false) {
-            // Acknowledge the signal.
-            let _ = self.state.frame_ready_rx.borrow_and_update();
+        self.maybe_present_frame_with_secondaries(present_primary, Self::present_secondaries);
+    }
 
-            // Secondary overlays first: they never carry the primary's
-            // present accounting.
-            let secondary_presented = self.present_secondaries();
+    /// Substitute only final swapchain operations in the headless harness.
+    /// Consume the observed ready generation before either display operation:
+    /// a new secondary submission during a slow present must remain unread.
+    pub(super) fn maybe_present_frame_with_secondaries(
+        &mut self,
+        present_primary: impl FnOnce() -> Option<bool>,
+        present_secondaries: impl FnOnce(&Self) -> super::displays::SecondaryPresentation,
+    ) {
+        let ready = self.state.frame_ready_rx.has_changed().unwrap_or(false);
+        if ready || self.state.deferred_present {
+            // Consume only the observed generation before presenting. A newer
+            // submission racing with this attempt remains changed for next turn.
+            if ready {
+                let _ = self.state.frame_ready_rx.borrow_and_update();
+            }
+            let (secondary_presented, mut deferred) = present_secondaries(self);
+            self.state.deferred_present = false;
+            let mut primary_presented = false;
             if let Some(presented) = present_primary() {
                 // Present under the same mutex that guards pending swapchain
                 // ownership so acquire/present cannot interleave into a
                 // double-acquire validation error on some backends.
                 if presented {
+                    primary_presented = true;
                     self.state.wake.counters().record_present();
                     if let Some(measurement) = self.state.quiescent_efficiency.as_mut() {
                         measurement.record_first_present(Instant::now());
                     }
-                } else if !secondary_presented {
-                    // FrameReady signal fired but no texture is pending —
-                    // this can happen if acquire_frame() failed on the
-                    // compositor thread (error already logged there).
-                    tracing::debug!(
-                        "main thread: FrameReady received but no pending texture; \
-                         compositor likely skipped frame due to surface error"
-                    );
+                } else {
+                    self.state.deferred_present = true;
+                    if let Some(surface) = &self.state.window_surface {
+                        deferred.push(surface.present_availability());
+                    }
                 }
             }
+            self.state.deferred_present |= !deferred.is_empty();
+            for availability in deferred {
+                self.defer_present_until_available(availability);
+            }
+            tracing::debug!(
+                target: "tze_hud_delay_diagnostic",
+                event = "ordinary_present_poll",
+                ready,
+                deferred = self.state.deferred_present,
+                secondary_presented,
+                primary_presented,
+            );
         }
     }
 }
