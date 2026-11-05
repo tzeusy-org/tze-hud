@@ -312,6 +312,7 @@ def main() -> int:
             env, smoke, log,
         )
         instance_log_start = log.stat().st_size if log.exists() else 0
+        late_startup_deadline = time.monotonic() + 90
         instance = subprocess.Popen(
             [str(installed), "--config", str(config_dir / "config.toml"), "--window-mode", "fullscreen",
              "--mcp-port", str(args.mcp_port)],
@@ -321,7 +322,8 @@ def main() -> int:
         assert instance.poll() is None, "installed instance exited"
         print("ok  installed instance answers on loopback")
         report_lifecycle(log, instance, "mcp_ready", instance_log_start)
-        wait_until(lambda: graphical_ready(log, instance.pid, instance_log_start), 90,
+        wait_until(lambda: graphical_ready(log, instance.pid, instance_log_start),
+                   max(0, late_startup_deadline - time.monotonic()),
                    "late instance to complete graphical initialization")
 
         start = time.monotonic()
