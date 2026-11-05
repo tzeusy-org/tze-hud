@@ -1472,6 +1472,19 @@ mod tests {
             wake.take_main_source(),
             crate::idle_efficiency::RuntimeWakeupSource::FrameReady
         );
+        // A capture while the image is still encoding must leave its debt and
+        // primary counters untouched. The native capture queue/build is real.
+        let pending_counters = wake.counters().snapshot();
+        let capture = tokio::spawn({
+            let endpoint = endpoint.clone();
+            async move { endpoint.capture_frame(0).await }
+        });
+        queued.notified().await;
+        assert!(!runtime.turn_with_present(false, false));
+        let (_, permit) = capture.await.unwrap().unwrap();
+        drop(permit);
+        assert!(runtime.events.app.state.deferred_present && runtime.pending_texture);
+        assert_eq!(wake.counters().snapshot(), pending_counters);
         // A second window remains encoding; it must not block this completion.
         drop(encoding);
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
@@ -1557,6 +1570,39 @@ mod tests {
                 .has_changed()
                 .unwrap()
         );
+
+        // Secondary-only outcomes use the same consumer and independently
+        // coalesced dependency, without ever counting a primary present.
+        let primary_counters = wake.counters().snapshot();
+        runtime
+            .events
+            .app
+            .state
+            .frame_ready_tx
+            .as_ref()
+            .unwrap()
+            .send(true)
+            .unwrap();
+        let (secondary, encoding) = tze_hud_compositor::WindowSurface::pending_encoding_for_test();
+        runtime
+            .events
+            .app
+            .maybe_present_frame_after_secondaries(|| None, (false, vec![secondary]));
+        assert!(runtime.events.app.state.deferred_present);
+        wake.notify_main(crate::idle_efficiency::RuntimeWakeupSource::OperatorCapture);
+        wake.take_main_source();
+        drop(encoding);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while wake.take_main_source() != crate::idle_efficiency::RuntimeWakeupSource::FrameReady {
+            assert!(std::time::Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        runtime
+            .events
+            .app
+            .maybe_present_frame_after_secondaries(|| None, (true, vec![]));
+        assert!(!runtime.events.app.state.deferred_present);
+        assert_eq!(wake.counters().snapshot(), primary_counters);
 
         // The actual MCP server owns publication and emits the render wake.
         // Network I/O is loopback and credentials are a local fixture literal.

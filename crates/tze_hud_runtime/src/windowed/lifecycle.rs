@@ -3164,6 +3164,23 @@ impl WinitApp {
         &mut self,
         present_primary: impl FnOnce() -> Option<bool>,
     ) {
+        if self.state.frame_ready_rx.has_changed().unwrap_or(false) || self.state.deferred_present {
+            let secondary = self.present_secondaries();
+            self.maybe_present_frame_after_secondaries(present_primary, secondary);
+        }
+    }
+
+    /// The final swapchain outcomes may be substituted by the harness; signal
+    /// consumption, retained debt, availability registration and accounting are
+    /// still the same code used by the native primary and secondary windows.
+    pub(super) fn maybe_present_frame_after_secondaries(
+        &mut self,
+        present_primary: impl FnOnce() -> Option<bool>,
+        (secondary_presented, mut deferred): (
+            bool,
+            Vec<tze_hud_compositor::surface::PresentAvailability>,
+        ),
+    ) {
         let ready = self.state.frame_ready_rx.has_changed().unwrap_or(false);
         if ready || self.state.deferred_present {
             // Consume only the observed generation before presenting. A newer
@@ -3171,7 +3188,6 @@ impl WinitApp {
             if ready {
                 let _ = self.state.frame_ready_rx.borrow_and_update();
             }
-            let (secondary_presented, mut deferred) = self.present_secondaries();
             self.state.deferred_present = false;
             let mut primary_presented = false;
             if let Some(presented) = present_primary() {
@@ -3187,13 +3203,13 @@ impl WinitApp {
                 } else {
                     self.state.deferred_present = true;
                     if let Some(surface) = &self.state.window_surface {
-                        deferred.push(std::sync::Arc::clone(surface));
+                        deferred.push(surface.present_availability());
                     }
                 }
             }
             self.state.deferred_present |= !deferred.is_empty();
-            for surface in deferred {
-                self.defer_present_until_available(surface.present_availability());
+            for availability in deferred {
+                self.defer_present_until_available(availability);
             }
             tracing::debug!(
                 target: "tze_hud_delay_diagnostic",
