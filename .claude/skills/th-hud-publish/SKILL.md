@@ -1,177 +1,141 @@
 ---
 name: th-hud-publish
-description: Use when publishing content to a user's HUD display, showing notifications or status on screen, sending text/color/alerts to tze_hud display zones, or giving an LLM visual presence on a user's GUI via MCP zone publishing.
+description: Publish notifications, short text, status entries, colors, or typed widget parameters to a paired tze_hud display over MCP. Use for "show this on my HUD", "notify me when tests finish", or "ask me on screen". For session transcripts and portal replies, use hud-projection.
+metadata:
+  owner: tze
+  authors:
+    - Claude
+    - OpenAI Codex
+  status: active
+  last_reviewed: "2026-11-05"
 ---
 
 # HUD Publish
 
-Publish content to a running tze_hud instance over MCP. Agents show text,
-notifications, status entries, and colors on the user's screen through named
-zones; the runtime owns layout, rendering, and contention.
+Publish glanceable content through the five MCP verbs. The runtime owns layout,
+styling and contention. Follow [the API](../../../docs/api.md) for contracts and
+[invariants](../../../docs/invariants.md) for lifecycle evidence. Discover the
+running build before using features added after its release; accepted requests
+prove admission, not owner visual acceptance.
 
-The MCP surface has five tools (`docs/api.md`): `hud_surfaces`,
-`hud_publish`, `hud_hold`, `hud_clear`, `hud_input`. One-shot zone publishing
-uses the first two (and `hud_clear` to take content down early).
+Use for requests such as "show this on my HUD", "notify me when tests finish",
+"ask me on screen", and "update my allocated progress widget". Use
+[hud-projection](../hud-projection/SKILL.md) for session attachment, transcripts
+and portal replies; [user-test](../user-test/SKILL.md) for screenshots, logs,
+updates or end-to-end Windows validation.
 
-## Quick Start
+## Choose a surface
 
-If the `hud_*` tools are connected:
+1. Call `hud_surfaces {}` for allowed zones, accepted content and typed widget
+   params. Names and available widgets are instance-specific. `held` marks your
+   holdings, including scheduled content; expiry may include presentation delay.
+2. Use a brief notification for a milestone or actionable question. Keep one
+   work item under a unique session/work `key`; replace it on meaningful changes.
+   A card carries one question and at most a couple of short lines. Put depth in
+   chat or a PR and name that destination; no notification link-action field exists.
+3. Follow [repository instructions](../../../AGENTS.md) and owner presentation
+   constraints. Current owner dogfooding rejects the status bar's large slab
+   and default portal presentation; prefer
+   finite milestone notifications until those surfaces are accepted. Use a widget
+   only when allocated to this work and its discovered params fit.
+4. Set a finite, appropriate `ttl_ms`; let owned content expire or clear only
+   your keyed notification. Avoid heartbeat updates and repeated empty polling.
 
-```
-1. hud_surfaces {}                       → zones you may use and what each accepts
-2. hud_publish {"surface": "zone:subtitle", "content": "Build passed"}
-```
+If the tools are absent, read [connection setup](references/connection.md) for
+pairing, the MCP adapter, and the CLI's explicit host requirement. If the HUD is
+unreachable or rejects the call, continue in chat and report the limitation once.
 
-If not connected, see **Setup**.
+## Publish and maintain
 
-## Setup
-
-### 1. Pair once
-
-Set `HUD_HOST` to the HUD's host. With no paired agent the HUD shows a
-6-digit code; trade it for your PSK:
-
-```bash
-python3 .claude/skills/user-test/scripts/hud_pair.py --host <host[:port]> --code 482913
-```
-
-The PSK lands in `~/.config/tze-hud/<host>.psk` (mode 0600) and is never
-printed. Pairing again rotates it. Identity comes from the PSK: the agent id
-is your namespace, and its `allow` list decides which surfaces you see and
-may publish to.
-
-### 2. MCP server configuration
-
-The repo's `.mcp.json` defines `tze-hud` through the Linux/WSL stdio adapter
-(template: `mcp.template.json`). A sole paired host is selected without
-`HUD_HOST`; multiple hosts require explicit selection, and explicit `HUD_HOST`
-wins. New pairs privately persist their actual port in nonsecret endpoint
-metadata. Old key-only pairs use 9090; old custom ports need re-pairing or
-explicit `HUD_HOST`. Invalid/stale metadata fails closed. No PSK sits in the
-MCP config or process arguments. Ordinary explicit Python clients are unchanged.
-Project trust and same-name local/user overrides remain normal client controls.
-Requests have absolute 60s deadlines and four owned worker slots. Cancellation,
-EOF and termination stop local work with one global 1s TERM + 1s KILL/reap
-budget; already delivered remote work remains uncertain, with no POST replay.
-Abrupt-parent cleanup is Linux/WSL kernel termination with OS adoption, not a
-claim that a dead parent can reap. Native Windows/macOS client conformance and
-hard real-time startup/cleanup are not established.
-
-### 3. Verify connectivity
-
-In a fresh Claude session with `HUD_HOST` genuinely unset and one paired host,
-observe authenticated upstream discovery and the five `hud_*` tools, then call
-`hud_surfaces`. Cached names or a CLI exit code alone do not prove connectivity.
-
-## Tools
-
-### `hud_surfaces` — discover
-
-No parameters. Returns one compact entry per surface you may use:
+`hud_publish` takes `surface` plus zone `content` or widget `params`:
 
 ```json
-{"surfaces":[
-  {"s":"zone:alert-banner","accepts":"notification|text"},
-  {"s":"zone:notification-area","accepts":"notification"},
-  {"s":"zone:status-bar","accepts":"status_bar"},
-  {"s":"zone:subtitle","accepts":"text","held":true,"expires_in_ms":4200},
-  {"s":"widget:gauge","params":{"level":"f32 0..1","label":"string"}}
-]}
+{"surface":"zone:notification-area","content":{"title":"Tests","body":"All checks passed","urgency":0},"key":"session-a:tests","ttl_ms":10000}
 ```
 
-`held` and `expires_in_ms` appear on surfaces where your content is showing.
-
-### `hud_publish` — show content
-
-| Field | Type | Notes |
-|---|---|---|
-| `surface` | string | From `hud_surfaces`, e.g. `zone:subtitle` |
-| `content` | string or object | Text, or an object for structured zones (below) |
-| `ttl_ms` | integer | Lifetime. Zone default 60000; `0` = until cleared |
-| `key` | string | Merge key: a publish with the same key replaces the earlier one |
-| `delay_ms` | integer | Show later (≤ 300000) |
-
-Returns `{"ok":true,"expires_in_ms":60000}`.
-
-Content by `accepts` value (`type` is optional; it is inferred from the zone):
-
-| `accepts` | Content |
+| Surface accepts | Payload |
 |---|---|
-| `text` | `"Build passed"` |
-| `notification` | `{"title": "Deploy", "body": "v2.1.0 is live", "urgency": 1, "actions": [{"label": "Open", "callback_id": "open"}]}` |
-| `status_bar` | `{"entries": {"build": "passing"}}` with a `key` |
-| `solid_color` | `{"r": 0.05, "g": 0.1, "b": 0.2, "a": 1.0}` |
+| `text` | `"Build passed"` as `content` |
+| `notification` | `{"title":"Tests","body":"Passed","urgency":0}` as `content` |
+| `status_bar` | `{"entries":{"session-a":"testing"}}` as `content`, with a work `key` |
+| `solid_color` | `{"r":0.05,"g":0.1,"b":0.2,"a":1.0}` as `content` |
+| Widget `params` declaration | `{"progress":0.5,"label":"Tests"}` as `params`, using discovered names/types |
 
-- Notification `urgency`: 0 low, 1 normal, 2 urgent, 3 critical. `body` and
-  `text` are the same field. Action presses come back through `hud_input`.
-- Status bar: entries with the same `key` replace each other; an empty value
-  removes that entry.
+- Structured zone `type` is inferred from the zone; set it explicitly when
+  selecting another accepted type in a mixed zone. Unknown fields are rejected.
+  Notifications need a nonempty title or body; `text` is an alias for `body`.
+  Urgency is an integer 0–3 (default 1). TTL belongs at the publish top level.
+- A nonempty notification `key` replaces that publisher's card in the same zone
+  and slot, including fresh content/expiry. Missing or empty keys append. Keys
+  are exact, case-sensitive UTF-8, at most 256 bytes. This replacement contract
+  is specific to notifications; other surfaces retain their own merge policies.
+- Zone TTL defaults to 60000 ms. Action cards instead default to the owner's
+  live answer window (currently 60000 ms by default). Explicit `ttl_ms`, including
+  `0` for held content, wins; later settings changes do not retime admitted cards.
+  Zone-only `delay_ms` is 0–300000; TTL counts from presentation.
+- Widgets are durable unless given a TTL; the owner's "Clears after" limit can
+  cap even held content. F32 params must be finite and in their declared bounds;
+  colors are `#RRGGBB` or numeric `{r,g,b,a?}` channels in 0–1. No geometry or
+  transition parameter belongs in an MCP publish.
+- Status entries require string values. An empty string removes that entry;
+  remove only this session's entry on a shared status surface.
 
-### `hud_hold` / `hud_clear`
+`hud_hold {"surface":"zone:notification-area","ttl_ms":15000}` resets the
+holding's expiry without resending. It has no key selector: on a notification
+zone it can affect sibling cards held by the same agent. Prefer republishing
+one key when extending only that card. Owner widget limits still apply.
 
-- `hud_hold {"surface": "zone:status-bar", "ttl_ms": 120000}` keeps your
-  content without resending it.
-- `hud_clear {"surface": "zone:subtitle"}` takes your content down.
+`hud_clear {"surface":"zone:notification-area","key":"session-a:tests"}`
+clears only that publisher's matching active and delayed notifications; a missing
+match succeeds. Omitted/empty keys clear **all this agent's content** in that
+zone, including pending publishes. A nonempty clear key is only supported for
+notification-capable zones. Never use a broad clear on a shared pairing's zone.
 
-### Errors
+## Questions and input ownership
 
-A failed call is a tool result with `isError: true` and
-`{"code": "...", "hint": "..."}`. The hint names the next step.
+Offer buttons only with safe answer routing and an active consumer. Notifications
+accept at most **four** `{label, callback_id}` actions; both strings must be
+nonempty. Use explicit labels such as Yes / No / Later. Callback ids must identify
+the session, question and fresh generation; a reusable visual key is not a nonce.
 
-| Code | Meaning |
-|---|---|
-| `ZONE_NOT_FOUND` | No such zone; the hint lists known zones |
-| `NOT_ALLOWED` | Your agent's `allow` list doesn't include the surface |
-| `CONTENT_REJECTED` | The zone doesn't accept this content type, or is full |
-| `INVALID_ARGUMENT` | Bad or unknown field |
-| `NOT_HELD` | `hud_hold` on a surface where you have nothing |
+```json
+{"surface":"zone:notification-area","content":{"title":"Release tests","body":"Run the soak now?","actions":[{"label":"Run","callback_id":"session-a:soak:q1:run"},{"label":"Later","callback_id":"session-a:soak:q1:later"}]},"key":"session-a:soak"}
+```
 
-The full closed set is in `docs/api.md`.
+`hud_input {"wait_ms":30000,"max_items":20}` returns `items` and `remaining`.
+Items have `id`, `s`, and `action` (or portal `text`); keyed notification events
+also carry `key`. A human × has `action:"dismiss", kind:"dismiss"`; a callback
+named `dismiss` has no `kind`. Timeout, silence, expiry and dismiss are not consent.
 
-## Default zones
+Route by surface **and** the current callback identity, handle once, then send
+`hud_input {"ack":["<handled-id>"]}`. Unacked input repeats with stable ids;
+ACKs are idempotent. Input covers every surface of the authenticated agent.
+Sessions sharing a pairing need one coordinated consumer/demultiplexer or
+separate identities. Do not auto-ACK another session's records. `wait_ms` defaults
+to 0 and caps at 30000; a CLI/network timeout does not establish a user's answer.
 
-| Zone | Accepts | Contention | Use for |
-|---|---|---|---|
-| `alert-banner` | notification, text | Stack | Important alerts |
-| `subtitle` | text | LatestWins | Captions, transient text |
-| `status-bar` | status_bar | MergeByKey | Persistent key/value status |
-| `notification-area` | notification | Stack | Toasts |
-| `ambient-background` | solid_color, static_image | Replace | Background color |
-| `pip` | solid_color, static_image | Replace | Picture-in-picture |
+Clicking an action disables its card and starts its exit locally. Replacement,
+clear and TTL never retract accepted input: validate the callback generation
+even if its old card has disappeared. Safe mode returns `SAFE_MODE_ACTIVE` for
+mutations; polling remains available. Do not replay uncertain publishes blindly.
 
-Zone sets are instance-specific; discover with `hud_surfaces`.
+## CLI fallback
 
-## Common mistakes
-
-- **Hardcoding zones** — call `hud_surfaces` first.
-- **Microseconds** — every time is milliseconds (`ttl_ms`, `delay_ms`).
-- **Text to a structured zone** — status bar and color zones need objects.
-- **No `key` on status-bar** — without one, entries can't be updated in place.
-- **Long content on the HUD** — the HUD catches attention and takes quick
-  decisions. If the owner needs more than two lines to decide, put the detail
-  on a page built for reading (a claude.ai artifact, a PR, a Codex page) and
-  name it in the card's body; keep the card to the decision.
-
-## Script
-
-For batch publishing or diagnostics outside an MCP client (reads `HUD_HOST`
-and the paired PSK file):
+Use [scripts/publish.py](scripts/publish.py) when native tools are unavailable;
+it reads the paired key internally and supports zones, widgets, hold, selective
+clear and explicit input ACKs. Requires Python 3.10+ and a reachable paired HUD.
+Run from the repo root with `HUD_HOST` set (or pass `--host`). `uv run` also
+works. See `--help` for flags and batch format.
 
 ```bash
+export HUD_HOST=tzehouse-windows
 S=.claude/skills/th-hud-publish/scripts/publish.py
-python3 $S --list-surfaces
-python3 $S --zone alert-banner --content "Build passed"
-python3 $S --zone status-bar --content '{"entries":{"build":"passing"}}' --key build-status
-python3 $S --zone subtitle --clear
-python3 $S --messages-file /tmp/messages.json
+python3 "$S" --list-surfaces
+python3 "$S" --zone notification-area --content '{"title":"Tests","body":"Passed","urgency":0}' --key session-a:tests --ttl-ms 10000
+python3 "$S" --zone notification-area --clear --key session-a:tests
 ```
 
-Message file:
-
-```json
-[
-  {"zone": "alert-banner", "content": "Deploy started", "ttl_ms": 30000},
-  {"zone": "status-bar", "content": {"entries": {"build": "passing"}}, "key": "build-status"},
-  {"zone": "notification-area", "content": {"title": "Deploy", "body": "complete"}}
-]
-```
+Tool failures carry `isError:true` and `{code,hint}`. Follow the hint; rediscover
+for missing zones/widgets, fix fields for `INVALID_ARGUMENT` or
+`WIDGET_PARAMETER_INVALID`, and respect `NOT_ALLOWED`. The CLI exits nonzero
+on discovery or mutation failure. See the API for the complete error set.
