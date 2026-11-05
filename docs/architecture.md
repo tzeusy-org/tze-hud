@@ -148,6 +148,14 @@ the raw-tile queue/store renderer and periodic draft flush are removed.
 Notification input retains Callback versus human-X Dismiss through MCP
 serialization. Only a validated X that removed its exact publication emits the
 runtime kind; callback auto-removal, TTL and clear do not.
+Scene `graph/overlay.rs` owns serde-skipped session zone placement keyed by
+zone ID; `graph/zone_ops.rs` owns effective policy, placement and human reset.
+The shared scene resolver preserves rendered edge anchoring for compositor
+geometry and runtime drag admission. Windowed `portal.rs` distinguishes Tile
+and Zone capture/release: only Tile completion reaches persistence or agent
+reposition events. The human grip menu clears live Zone placement directly;
+the agent service reset and saved element-store contracts remain unchanged.
+
 Scene `graph/zone_ops.rs` owns notification-key validation, publisher-scoped
 replacement and selective clear; `graph/timed.rs` cancels matching delayed
 notifications while retaining mixed-batch remainder. Central

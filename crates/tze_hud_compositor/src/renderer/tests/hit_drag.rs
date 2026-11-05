@@ -684,6 +684,13 @@ async fn drag_handle_regions_cover_visible_tile_and_zone_but_not_widget() {
         .unwrap()
         .accepted_media_types
         .push(ZoneMediaType::ShortTextWithIcon);
+    scene.clear_zone("drag-zone").unwrap();
+    scene
+        .zone_registry
+        .zones
+        .get_mut("drag-zone")
+        .unwrap()
+        .contention_policy = ContentionPolicy::Stack { max_depth: 4 };
     scene
         .publish_to_zone(
             "drag-zone",
@@ -750,7 +757,7 @@ async fn drag_handle_regions_cover_visible_tile_and_zone_but_not_widget() {
             assert_eq!(
                 scene.overlay.zone_hit_regions.len(),
                 2,
-                "connected-secondary keeps dismiss/action controls"
+                "{assigned:?} at {scale}x keeps dismiss/action controls"
             );
             let rect = compositor.zone_geometry("drag-zone", &placement, 1920.0, 1080.0);
             for region in &scene.overlay.zone_hit_regions {

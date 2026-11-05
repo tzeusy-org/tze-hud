@@ -51,6 +51,22 @@ source links when implementation changes the status.
 
 ## Current implementation evidence
 
+- **Zone grips — session placement [Source].** `hud-3to0a` routes existing
+  notification-zone grips through scene-owned transient placement and shared
+  effective geometry. The existing human Reset restores defaults; clear,
+  expiry and republish retain placement, while restart restores defaults.
+  Primary/unassigned/disconnected fallback grips are retained; connected
+  secondary content/actions keep their existing no-grip behavior. Display
+  assignment remains read-only. No saved-zone feature, new agent event,
+  secondary/widget grip or restyle is introduced. Six existing parents cover
+  the source contract, including actual-render/input red→green; the original
+  Windows ef39 report remains physically unverified on a repaired build.
+  The unchanged T7 four-group/eight-file denominator now measures 13,995
+  physical Rust lines including tests/comments/blanks (was 13,918; +77),
+  within the owner's separately recorded 14,000 cap. This repair precedes D5;
+  the final mechanical rename, .12 owner acceptance and .13 reconciliation
+  remain outstanding. The T7 target-row amendment remains assigned to .11.
+
 - **T6 — delivery [Observed].** The [Windows workflow](../.github/workflows/windows.yml)
   builds, tests, smoke-checks, and publishes signed releases. The runtime has
   [self-install](../crates/tze_hud_runtime/src/operator/install.rs),
