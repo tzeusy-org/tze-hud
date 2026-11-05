@@ -474,6 +474,9 @@ struct WindowedRuntimeState {
     /// began on. A release activates a dismiss/action button only when it
     /// lands on the same affordance the press started on (hud-z21e9).
     zone_press: Option<String>,
+    context_menu_press: Option<widgets::ContextMenuPress>,
+    context_menu_open: bool,
+    context_menu_dismiss_pending: bool,
     notification_keydowns: std::collections::HashSet<String>,
     /// Original primary drag identity and, only on a missed Up, its terminal event.
     primary_drag_gesture: Option<portal::PrimaryDragGesture>,
@@ -3208,6 +3211,9 @@ impl WindowedRuntime {
             overlay_refits: Default::default(),
             press_window: None,
             zone_press: None,
+            context_menu_press: None,
+            context_menu_open: false,
+            context_menu_dismiss_pending: false,
             notification_keydowns: Default::default(),
             primary_drag_gesture: None,
             global_tokens: startup_compositor_tokens,
