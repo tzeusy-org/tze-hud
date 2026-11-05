@@ -2199,7 +2199,7 @@ impl WinitApp {
         }
     }
 
-    fn notification_pointer_permitted(&self) -> bool {
+    pub(super) fn notification_pointer_permitted(&self) -> bool {
         #[cfg(test)]
         if chrome_capture_under_test() {
             return native_chrome_permits(self.state.press_window);

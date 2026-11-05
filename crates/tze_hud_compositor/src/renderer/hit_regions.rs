@@ -96,7 +96,7 @@ impl Compositor {
         let font_px = self
             .token_map
             .get("system_card.body.font_size_px")
-            .and_then(|s| s.parse::<f32>().ok())
+            .and_then(|s| s.trim_end_matches("px").parse::<f32>().ok())
             .filter(|n| n.is_finite() && *n > 0.0)
             .unwrap_or(14.0)
             * scale;

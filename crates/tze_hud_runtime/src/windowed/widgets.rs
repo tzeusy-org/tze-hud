@@ -430,6 +430,7 @@ impl WinitApp {
         pressed: bool,
         window: winit::window::WindowId,
     ) -> bool {
+        let native_allowed = self.notification_pointer_permitted();
         let menu = {
             self.state.shared_state.try_lock().ok().and_then(|shared| {
                 shared
@@ -453,6 +454,9 @@ impl WinitApp {
                 && menu.as_ref().is_none_or(|m| m.is_none())
             {
                 return false;
+            }
+            if !native_allowed {
+                self.cancel_context_menu();
             }
             // Cancellation is authoritative immediately, even before its
             // deferred scene teardown can acquire the lock.
@@ -481,6 +485,7 @@ impl WinitApp {
             {
                 if let Some(menu) = scene.overlay.drag_handle_context_menu.as_ref()
                     && press.armed
+                    && native_allowed
                     && press.window == window
                     && press.menu == Some((menu.element_id, menu.shown_at_ns))
                     && nanoseconds_since_start().saturating_sub(menu.shown_at_ns) < 3_000_000_000
