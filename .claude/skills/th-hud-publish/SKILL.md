@@ -128,7 +128,7 @@ Run from the repo root with `HUD_HOST` set (or pass `--host`). `uv run` also
 works. See `--help` for flags and batch format.
 
 ```bash
-export HUD_HOST=tzehouse-windows
+export HUD_HOST=hud-host.example
 S=.claude/skills/th-hud-publish/scripts/publish.py
 python3 "$S" --list-surfaces
 python3 "$S" --zone notification-area --content '{"title":"Tests","body":"Passed","urgency":0}' --key session-a:tests --ttl-ms 10000

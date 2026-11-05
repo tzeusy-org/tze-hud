@@ -45,7 +45,7 @@ custom port explicitly. `--url` remains an alias for selecting the MCP endpoint.
 The helper loads only the selected pairing's PSK internally.
 
 ```bash
-python3 .claude/skills/th-hud-publish/scripts/publish.py --host tzehouse-windows --list-surfaces
+python3 .claude/skills/th-hud-publish/scripts/publish.py --host hud-host.example --list-surfaces
 ```
 
 Successful authenticated discovery proves connectivity. Follow it with a brief,
