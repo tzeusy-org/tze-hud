@@ -864,6 +864,7 @@ mod tests {
                 compositor.prime_markdown_cache(&scene);
                 compositor.prime_truncation_cache(&scene);
                 compositor.render_frame(&mut scene, &surface);
+                refresh_interaction_hit_regions_after_render(&compositor, &mut scene, &surface);
                 let grip = scene
                     .overlay
                     .drag_handle_hit_regions
@@ -897,6 +898,7 @@ mod tests {
                     menu.anchor_y = action.y;
                 }
                 compositor.render_frame(&mut scene, &surface);
+                refresh_interaction_hit_regions_after_render(&compositor, &mut scene, &surface);
                 action = scene
                     .overlay
                     .drag_handle_context_menu
