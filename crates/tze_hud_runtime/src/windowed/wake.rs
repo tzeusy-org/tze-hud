@@ -484,6 +484,7 @@ impl WindowedWake {
                         wake.notify_main(RuntimeWakeupSource::SceneChange);
                     }
                     AvailabilityWakeTarget::Present => {
+                        tracing::debug!(target: "tze_hud_delay_diagnostic", event = "present_availability_ready");
                         wake.notify_main(RuntimeWakeupSource::FrameReady);
                     }
                     AvailabilityWakeTarget::Compositor => {
@@ -529,6 +530,7 @@ impl WindowedWake {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         main_event.proxy_event_pending = false;
+        tracing::debug!(target: "tze_hud_delay_diagnostic", event = "main_wake_consumed", source = ?main_event.source);
         main_event.source
     }
 

@@ -711,6 +711,22 @@ impl WindowSurface {
         wait_for_encoding(&self.swapchain, &self.swapchain_done);
     }
 
+    /// Exercise the real encoding guard and availability predicate without a
+    /// native swapchain. Only the final GPU resource is absent in this fixture.
+    #[cfg(feature = "dev-mode")]
+    pub fn pending_encoding_for_test() -> (impl FnOnce() + Send, impl Send) {
+        let slot = std::sync::Arc::new(std::sync::Mutex::new(SwapchainSlot {
+            pending: None,
+            encoding: true,
+        }));
+        let done = std::sync::Arc::new(std::sync::Condvar::new());
+        let guard = EncodingGuard {
+            slot: slot.clone(),
+            done: done.clone(),
+        };
+        (move || wait_for_encoding(&slot, &done), guard)
+    }
+
     /// Finish a successful acquire: release the swapchain lock, then build the
     /// `EncodingGuard` and the `CompositorFrame`.
     ///

@@ -369,8 +369,8 @@ impl HeadlessEventLoopHarness {
             mcp_config,
             state.shutdown.clone(),
             Some(portals.clone()),
-            Default::default(),
-            Default::default(),
+            render_wake.clone(),
+            state.wake.main_work_notifier(),
             Arc::clone(&state.safe_mode_atomic),
         )
         .await?;
@@ -1271,11 +1271,9 @@ mod tests {
                     })
                 });
             }
-            self.events
-                .app
-                .maybe_present_frame_with(|| {
-                    Some(encoding_complete && std::mem::take(&mut self.pending_texture))
-                });
+            self.events.app.maybe_present_frame_with(|| {
+                Some(encoding_complete && std::mem::take(&mut self.pending_texture))
+            });
             prepared.plan.full
         }
     }
@@ -1314,11 +1312,18 @@ mod tests {
             .await
             .expect("software compositor for real frame builds");
         compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-        let mut events = HeadlessEventLoopHarness::new();
-        events.app.state.config.window.width = 320;
-        events.app.state.config.window.height = 200;
         let clock = Arc::new(TestClock::new(1_000));
-        *events.scene() = SceneGraph::new_with_clock(320.0, 200.0, clock.clone());
+        let mut cfg = super::super::WindowedConfig::default();
+        cfg.window.width = 320;
+        cfg.window.height = 200;
+        cfg.agents = tze_hud_config::agents_file::AgentsFile::default()
+            .with_agent("fixture", "present-fixture-key", &["*"])
+            .directory()
+            .unwrap()
+            .shared();
+        let mut events = HeadlessEventLoopHarness::with_network(cfg, clock.clone())
+            .await
+            .unwrap();
         let queued = Arc::new(tokio::sync::Notify::new());
         let (endpoint, inbox) = capture_channel({
             let queued = Arc::clone(&queued);
@@ -1423,7 +1428,11 @@ mod tests {
         // A submitted image can be reused by a later encode before the main
         // thread presents it. If that encode is still busy, consuming the ready
         // signal must not discard the pending image's presentation obligation.
-        runtime.events.scene().create_tab("deferred present", 1).unwrap();
+        runtime
+            .events
+            .scene()
+            .create_tab("deferred present", 1)
+            .unwrap();
         let before = runtime.events.app.state.wake.counters().snapshot();
         assert!(runtime.turn_with_present(true, false));
         assert!(runtime.pending_texture);
@@ -1432,7 +1441,40 @@ mod tests {
             before.presents,
             "busy encode is not a successful present"
         );
-        assert!(!runtime.turn(true), "completion must not rebuild unchanged content");
+        let wake = runtime.events.app.state.wake.clone();
+        let compositor_before = wake.compositor().checkpoint();
+        let main_work_before = wake.main_work_generation();
+        wake.notify_main(crate::idle_efficiency::RuntimeWakeupSource::OperatorCapture);
+        wake.take_main_source();
+        let (wait, encoding) = tze_hud_compositor::WindowSurface::pending_encoding_for_test();
+        wake.schedule_present_after_availability(wait);
+        let duplicate = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        wake.schedule_present_after_availability({
+            let duplicate = duplicate.clone();
+            move || {
+                duplicate.store(true, std::sync::atomic::Ordering::Release);
+            }
+        });
+        assert_ne!(
+            wake.take_main_source(),
+            crate::idle_efficiency::RuntimeWakeupSource::FrameReady
+        );
+        drop(encoding);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while wake.take_main_source() != crate::idle_efficiency::RuntimeWakeupSource::FrameReady {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "encoding completion must wake main"
+            );
+            std::thread::yield_now();
+        }
+        assert!(!duplicate.load(std::sync::atomic::Ordering::Acquire));
+        assert_eq!(wake.compositor().checkpoint(), compositor_before);
+        assert_eq!(wake.main_work_generation(), main_work_before);
+        assert!(
+            !runtime.turn(true),
+            "completion must not rebuild unchanged content"
+        );
         assert_eq!(
             runtime.events.app.state.wake.counters().snapshot().presents,
             before.presents + 1,
@@ -1440,9 +1482,155 @@ mod tests {
         );
         assert!(!runtime.pending_texture);
         let completed = runtime.events.app.state.wake.counters().snapshot();
-        assert_eq!(completed.gpu_queue_submissions, before.gpu_queue_submissions + 1);
+        assert_eq!(
+            completed.gpu_queue_submissions,
+            before.gpu_queue_submissions + 1
+        );
         assert!(!runtime.turn(true));
-        assert_eq!(runtime.events.app.state.wake.counters().snapshot(), completed);
+        assert_eq!(
+            runtime.events.app.state.wake.counters().snapshot(),
+            completed
+        );
+
+        // Explicit invalidation/no-pending retires deferred debt, while a newer
+        // submission during presentation retains its own changed watch version.
+        runtime
+            .events
+            .scene()
+            .create_tab("invalidate pending", 2)
+            .unwrap();
+        assert!(runtime.turn_with_present(true, false));
+        runtime.pending_texture = false;
+        runtime.events.app.maybe_present_frame_with(|| None);
+        assert!(!runtime.events.app.state.deferred_present);
+        runtime
+            .events
+            .app
+            .maybe_present_frame_with(|| panic!("empty means idle"));
+        runtime.events.scene().create_tab("newer ready", 3).unwrap();
+        assert!(runtime.turn_with_present(true, false));
+        let frames = &mut runtime.frames;
+        let versions = frames.last_rendered();
+        runtime.events.app.maybe_present_frame_with(|| {
+            let mut telemetry = tze_hud_telemetry::FrameTelemetry::new(2);
+            telemetry.stage7_gpu_submit_us = 1;
+            frames.record_primary_submission(
+                &tze_hud_compositor::renderer::frame::WindowedPresentOutcome {
+                    telemetry,
+                    surface_acquired: false,
+                    gpu_submitted: true,
+                },
+                versions,
+            );
+            Some(true)
+        });
+        assert!(
+            runtime
+                .events
+                .app
+                .state
+                .frame_ready_rx
+                .has_changed()
+                .unwrap()
+        );
+        runtime.events.app.maybe_present_frame_with(|| None);
+        assert!(
+            !runtime
+                .events
+                .app
+                .state
+                .frame_ready_rx
+                .has_changed()
+                .unwrap()
+        );
+
+        // The actual MCP server owns publication and emits the render wake.
+        // Network I/O is loopback and credentials are a local fixture literal.
+        async fn call(addr: SocketAddr, tool: &str, arguments: serde_json::Value) {
+            use tokio::io::{AsyncReadExt, AsyncWriteExt};
+            let body = serde_json::json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+                "params":{"name":tool,"arguments":arguments}})
+            .to_string();
+            let mut conn = tokio::net::TcpStream::connect(addr).await.unwrap();
+            conn.write_all(format!("POST / HTTP/1.0\r\nContent-Type: application/json\r\nAuthorization: Bearer present-fixture-key\r\nContent-Length: {}\r\n\r\n{body}", body.len()).as_bytes()).await.unwrap();
+            let mut response = String::new();
+            conn.read_to_string(&mut response).await.unwrap();
+            let response: serde_json::Value =
+                serde_json::from_str(response.split_once("\r\n\r\n").unwrap().1).unwrap();
+            assert!(response.get("error").is_none(), "{response}");
+            assert_ne!(response["result"]["isError"], true, "{response}");
+        }
+        let addr = runtime.events.mcp_addr();
+        {
+            let mut scene = runtime.events.scene();
+            let policy = &mut scene
+                .zone_registry
+                .zones
+                .get_mut("notification-area")
+                .unwrap()
+                .rendering_policy;
+            policy.transition_in_ms = None;
+            policy.transition_out_ms = None;
+        }
+        // Retire the prior synthetic pending image before the ordinary network
+        // cases. These cases start from a settled quiet scene with panel closed.
+        runtime.pending_texture = false;
+        assert!(!runtime.turn(true));
+        for delay in [0, 10] {
+            let checkpoint = wake.compositor().checkpoint();
+            let presents = wake.counters().snapshot().presents;
+            call(
+                addr,
+                "hud_publish",
+                serde_json::json!({
+                    "surface":"zone:notification-area","key":"held","ttl_ms":0,"delay_ms":delay,
+                    "content":{"title":"held","body":"ordinary presentation"}
+                }),
+            )
+            .await;
+            assert!(
+                wake.compositor().checkpoint() > checkpoint,
+                "MCP publish must notify compositor"
+            );
+            assert!(!runtime.events.control_panel_open());
+            if delay > 0 {
+                assert!(
+                    !runtime.turn(true),
+                    "scheduled held content remains idle before due"
+                );
+                clock.advance(delay);
+            }
+            assert!(
+                runtime.turn(true),
+                "accepted immediate/due held content renders"
+            );
+            assert_eq!(wake.counters().snapshot().presents, presents + 1);
+            assert_eq!(
+                runtime
+                    .events
+                    .zone_publication_deadlines("notification-area", "fixture"),
+                vec![None]
+            );
+            let settled = wake.counters().snapshot();
+            assert!(!runtime.turn(true));
+            assert_eq!(
+                wake.counters().snapshot(),
+                settled,
+                "unchanged held card is quiescent"
+            );
+            call(
+                addr,
+                "hud_clear",
+                serde_json::json!({"surface":"zone:notification-area","key":"held"}),
+            )
+            .await;
+            assert!(runtime.turn(true));
+            assert_eq!(
+                runtime.events.zone_publication_count("notification-area"),
+                0
+            );
+            assert!(!runtime.turn(true));
+        }
 
         // The real sweep and capture owners emit one unambiguous identity.
         // Two due batches deliberately cannot claim that identity, even when

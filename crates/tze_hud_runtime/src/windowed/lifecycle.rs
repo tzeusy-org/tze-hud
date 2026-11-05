@@ -3147,6 +3147,8 @@ impl WinitApp {
 
     /// Keep signal consumption and actual-present accounting on the production
     /// path while the headless harness substitutes only the swapchain operation.
+    /// `Some(false)` means deferred encoding; `None` means no pending image.
+    /// A newer ready generation arriving during this attempt remains unread.
     pub(super) fn maybe_present_frame_with(
         &mut self,
         present_primary: impl FnOnce() -> Option<bool>,
@@ -3160,11 +3162,13 @@ impl WinitApp {
             }
             let (secondary_presented, mut deferred) = self.present_secondaries();
             self.state.deferred_present = false;
+            let mut primary_presented = false;
             if let Some(presented) = present_primary() {
                 // Present under the same mutex that guards pending swapchain
                 // ownership so acquire/present cannot interleave into a
                 // double-acquire validation error on some backends.
                 if presented {
+                    primary_presented = true;
                     self.state.wake.counters().record_present();
                     if let Some(measurement) = self.state.quiescent_efficiency.as_mut() {
                         measurement.record_first_present(Instant::now());
@@ -3192,6 +3196,7 @@ impl WinitApp {
                 ready,
                 deferred = self.state.deferred_present,
                 secondary_presented,
+                primary_presented,
             );
         }
     }
