@@ -3173,12 +3173,7 @@ impl WinitApp {
     pub(super) fn maybe_present_frame_with_secondaries(
         &mut self,
         present_primary: impl FnOnce() -> Option<bool>,
-        present_secondaries: impl FnOnce(
-            &Self,
-        ) -> (
-            bool,
-            Vec<tze_hud_compositor::surface::PresentAvailability>,
-        ),
+        present_secondaries: impl FnOnce(&Self) -> super::displays::SecondaryPresentation,
     ) {
         let ready = self.state.frame_ready_rx.has_changed().unwrap_or(false);
         if ready || self.state.deferred_present {

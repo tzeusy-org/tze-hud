@@ -340,6 +340,11 @@ agents until one is paired.
   display power-on also trigger that check; there is no per-frame polling.
   Shell cloaking can remain after reassertion and is still reported; a present
   counter or compositor screenshot does not establish owner-visible pixels.
+  Ordinary presentation retains an image deferred by an in-flight encode until
+  it presents or is explicitly invalidated. Each window registers one coalesced
+  encoding-completion wake; this does not create a scene mutation or periodic
+  redraw. Ready images also bypass an unchanged-cursor idle shortcut. A panel
+  interaction or another publish is not required to retry that owed image.
   `unplaced_zones` lists `{zone, display, reason}` placements with no overlay
   window, rendering on the primary instead: `reason` is `not_connected`, or
   `overlay_failed` when that monitor's overlay surface was lost and recreated

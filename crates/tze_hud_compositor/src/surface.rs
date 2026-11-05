@@ -744,7 +744,7 @@ impl WindowSurface {
         }
     }
 
-    /// Wait off the main thread for the dependency that deferred presentation.
+    /// Obtain the per-window dependency that deferred presentation.
     /// EncodingGuard closes this predicate under the same mutex and notifies
     /// the condvar, including when an encode unwinds. No timer or scene work.
     pub fn present_availability(&self) -> PresentAvailability {

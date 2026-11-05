@@ -435,6 +435,10 @@ pub(super) fn secondary_index(secondaries: &[SecondaryDisplay], id: WindowId) ->
     secondaries.iter().position(|s| s.window.id() == id)
 }
 
+/// Final swapchain outcomes: successful secondary present and deferred encodes.
+pub(super) type SecondaryPresentation =
+    (bool, Vec<tze_hud_compositor::surface::PresentAvailability>);
+
 /// One of the overlay windows.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum OverlayWindow {
