@@ -590,7 +590,7 @@ mod calibration {
                     graph.zone_registry = tze_hud_scene::ZoneRegistry::with_defaults();
                     let scene = Arc::new(tokio::sync::Mutex::new(graph));
                     let portals = PortalHandle::new(PortalHub::default(), Arc::new(tze_hud_scene::SystemClock::new()));
-                    let agent = server_config().agents.resolve(PSK, "").unwrap().agent_id;
+                    let agent = tze_hud_scene::config::AgentDirectory::unrestricted(PSK).resolve(PSK, "").unwrap().agent_id;
                     let key = PortalKey::new(agent.clone(), "claude-main");
                     let mut producer = FixtureProducer::new(portals.clone(), agent.clone());
                     let ingress = producer.ingress_wake();
@@ -645,9 +645,8 @@ mod calibration {
                         // canonical calibration retains actual layout/live activation.
                         assert!(producer.step(async { work.fetch_add(1, Ordering::SeqCst); true }).await);
                         assert_eq!(work.load(Ordering::SeqCst), 1);
-                        let held_hub = portals.hub.lock().unwrap();
-                        ingress.notify(); // Activated callback does not touch Hub again.
-                        drop(held_hub);
+                        ingress.notify();
+                        assert!(portals.hub.lock().unwrap().get(&key).is_none());
                         assert!(!producer.step(async { panic!("no post-readiness scene work"); }).await);
                         assert!(!producer.choice_work_pending());
                     } else {
