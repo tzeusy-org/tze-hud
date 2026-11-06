@@ -679,7 +679,6 @@ mod tests {
                     actions: vec![NotificationAction {
                         label: "Open".into(),
                         callback_id: Some("open".into()),
-
                         url: None,
                     }],
                 }),
@@ -1091,7 +1090,6 @@ mod tests {
                                 actions: vec![NotificationAction {
                                     label: "Open".into(),
                                     callback_id: Some("open".into()),
-
                                     url: None,
                                 }],
                             }),

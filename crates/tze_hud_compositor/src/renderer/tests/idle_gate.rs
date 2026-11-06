@@ -378,7 +378,6 @@ async fn idle_with_notification_renders_only_at_fade() {
             .map(|label| NotificationAction {
                 label: label.into(),
                 callback_id: Some(label.into()),
-
                 url: None,
             })
             .collect();
@@ -466,7 +465,6 @@ async fn idle_with_notification_renders_only_at_fade() {
             .map(|label| NotificationAction {
                 label: label.into(),
                 callback_id: Some(label.into()),
-
                 url: None,
             })
             .collect();

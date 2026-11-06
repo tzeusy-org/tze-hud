@@ -451,7 +451,6 @@ async fn check_notification_action_row(margin: Option<f32>) {
     let action = |label: &str| tze_hud_scene::types::NotificationAction {
         label: label.to_owned(),
         callback_id: Some(label.to_lowercase()),
-
         url: None,
     };
     let payload = |title: &str, text: &str, labels: &[&str]| NotificationPayload {
@@ -707,7 +706,6 @@ async fn notification_action_button_is_visible_and_hover_brightens_it() {
                 actions: vec![tze_hud_scene::types::NotificationAction {
                     label: "Approve".to_owned(),
                     callback_id: Some("approve".to_owned()),
-
                     url: None,
                 }],
             }),

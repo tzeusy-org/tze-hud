@@ -571,7 +571,6 @@ async fn test_two_line_notification_title_produces_two_text_items() {
                                 .map(|label| NotificationAction {
                                     label: (*label).into(),
                                     callback_id: Some((*label).into()),
-
                                     url: None,
                                 })
                                 .collect(),
@@ -898,7 +897,6 @@ async fn test_two_line_notifications_stack_correctly() {
         .map(|label| NotificationAction {
             label: label.into(),
             callback_id: Some(label.into()),
-
             url: None,
         })
         .collect();
@@ -1427,7 +1425,6 @@ async fn test_stack_reflow_after_publication_pruned() {
     .map(|label| NotificationAction {
         label: label.into(),
         callback_id: Some(label.into()),
-
         url: None,
     })
     .collect();
@@ -1501,7 +1498,6 @@ async fn test_stack_reflow_after_publication_pruned() {
                                 label.into()
                             },
                             callback_id: Some(label.into()),
-
                             url: None,
                         })
                         .collect(),

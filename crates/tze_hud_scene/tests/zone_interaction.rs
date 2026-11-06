@@ -451,7 +451,6 @@ fn notification_action_fields_accessible() {
     let action = NotificationAction {
         label: "Confirm".to_string(),
         callback_id: Some("confirm-action".to_string()),
-
         url: None,
     };
 
@@ -472,13 +471,11 @@ fn notification_payload_with_actions_serializes() {
             NotificationAction {
                 label: "Yes".to_string(),
                 callback_id: Some("yes".to_string()),
-
                 url: None,
             },
             NotificationAction {
                 label: "No".to_string(),
                 callback_id: Some("no".to_string()),
-
                 url: None,
             },
         ],

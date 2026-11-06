@@ -197,13 +197,11 @@ async fn zone_hit_notification_with_two_actions_produces_three_regions() {
                     NotificationAction {
                         label: "Yes".to_string(),
                         callback_id: Some("yes".to_string()),
-
                         url: None,
                     },
                     NotificationAction {
                         label: "No".to_string(),
                         callback_id: Some("no".to_string()),
-
                         url: None,
                     },
                 ],
@@ -286,13 +284,11 @@ async fn zone_hit_tab_order_is_sequential() {
                     NotificationAction {
                         label: "A".to_string(),
                         callback_id: Some("a".to_string()),
-
                         url: None,
                     },
                     NotificationAction {
                         label: "B".to_string(),
                         callback_id: Some("b".to_string()),
-
                         url: None,
                     },
                 ],
@@ -705,7 +701,6 @@ async fn drag_handle_regions_cover_visible_tile_and_zone_but_not_widget() {
                 actions: vec![tze_hud_scene::NotificationAction {
                     label: "Open".into(),
                     callback_id: Some("open".into()),
-
                     url: None,
                 }],
                 ..Default::default()
@@ -1502,7 +1497,6 @@ fn zone_hit_regions_and_slot_pitch_scale_with_px_scale() {
         let action = |label: &str| NotificationAction {
             label: label.to_string(),
             callback_id: Some(label.to_lowercase()),
-
             url: None,
         };
         for (text, actions) in [

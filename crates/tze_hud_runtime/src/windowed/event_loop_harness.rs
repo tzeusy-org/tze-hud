@@ -59,6 +59,7 @@ use tze_hud_input::{
     RawCharacterEvent, RawKeyDownEvent, RawKeyUpEvent,
 };
 use tze_hud_scene::graph::SceneGraph;
+#[cfg(test)]
 use tze_hud_scene::types::ZoneInteractionKind;
 use tze_hud_scene::{Clock, MonoUs, NodeData, SceneId};
 #[cfg(test)]
@@ -2044,7 +2045,6 @@ mod tests {
             let action = |id: &str, label: &str| NotificationAction {
                 label: label.to_string(),
                 callback_id: Some(id.to_string()),
-
                 url: None,
             };
             scene
@@ -2837,7 +2837,7 @@ mod tests {
                 }),
             );
             let window = winit::window::WindowId::dummy();
-            let native = ChromeCaptureTestScope::new(window);
+            let mut native = ChromeCaptureTestScope::new(window);
             let click = |h: &mut HeadlessEventLoopHarness, point: (f32, f32)| {
                 (h.app.state.cursor_x, h.app.state.cursor_y) = point;
                 for down in [true, false] {
@@ -2903,7 +2903,7 @@ mod tests {
             click(&mut harness, points[0]);
             rx.recv_timeout(Duration::from_secs(2)).unwrap();
             // Lost native Up, focus cancellation and safe mode never open links.
-            for denied in ["focus", "safe-mode", "native-up"] {
+            for denied in ["focus", "safe-mode", "native-up", "native-mismatched-up"] {
                 let workers_before = harness.app.state.notification_link_opener.workers.len();
                 clock.advance(2000);
                 (harness.app.state.cursor_x, harness.app.state.cursor_y) = points[0];
@@ -2925,7 +2925,7 @@ mod tests {
                 let receipt = if denied == "native-up" {
                     None
                 } else {
-                    native.begin(false)
+                    native.begin(denied == "native-mismatched-up")
                 };
                 harness
                     .app
@@ -2946,10 +2946,12 @@ mod tests {
                 if denied == "focus" {
                     harness.app.handle_window_focus(None, true);
                 }
-                // A lost native ledger is terminal; the following independent
-                // controls below use direct scene retirement, never revive it.
-                if denied == "native-up" {
-                    break;
+                if denied.starts_with("native-") {
+                    assert!(!native.healthy(), "denied delivery faults its native ledger");
+                    // Start an independent injected native lifetime for the next
+                    // case; production never rearms a faulted installation.
+                    drop(native);
+                    native = super::super::lifecycle::ChromeCaptureTestScope::new(window);
                 }
             }
             for worker in harness.app.state.notification_link_opener.workers.drain(..) {
@@ -3750,7 +3752,6 @@ mod tests {
                         actions: vec![NotificationAction {
                             label: "Ship".to_string(),
                             callback_id: Some("ship".to_string()),
-
                             url: None,
                         }],
                     }),
@@ -3832,7 +3833,6 @@ mod tests {
                         actions: vec![NotificationAction {
                             label: "Keep".into(),
                             callback_id: Some("keep".into()),
-
                             url: None,
                         }],
                     }),
