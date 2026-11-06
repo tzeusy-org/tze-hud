@@ -24,7 +24,7 @@ panel changes only affect later accepted publications, never existing cards.
 `hud_publish` and `hud_surfaces` report that stored lifetime, including delay.
 The setting itself neither polls nor wakes the renderer.
 
-A waiting choice card adds no timer or periodic layout work. Choosing one action
+A waiting choice card adds no timer or periodic layout work. Choosing a callback action
 retains that exact publication only for its finite local exit, makes all controls
 noninteractive and cannot be prolonged by hold. Clear, expiry, replacement,
 dismiss and owner hiding prune local focus and feedback without an answer.
@@ -72,10 +72,31 @@ owner option D permits stale cancellation, never a stale answer. The broker
 owns per-request callback routing and its accepted-race proof.
 
 Notification hover/press is ephemeral runtime state: it never enters the
-accepted input FIFO or changes ACK ownership. One matching live activation
+accepted input FIFO or changes ACK ownership. One matching live callback activation
 produces one callback; unclicked, foreign, replaced, and stale controls produce
 none. Existing end-to-end coverage:
 [`poc_notification_action_reaches_hud_input`](../tests/integration/poc_acceptance.rs).
+
+A notification action has exactly one callback or HTTPS URL target, validated
+by the shared payload contract on both planes before mutation/scheduling. MCP
+member presence and gRPC empty-string defaults retain their documented
+difference; valid absent-URL callback payloads remain compatible. Invalid
+combinations use `action needs callback_id or url, not both`; URLs require a
+parsed HTTPS host and at most 2048 supplied UTF-8 bytes, otherwise
+`action url must be https`. All four mixed actions share one admission cap.
+
+Links resolve by exact publication/publisher/zone and action index, never by
+label or callback text. Permitted pointer and keyboard activation leaves the
+card/lifetime/hold and controls intact and queues no input, readiness, human-X
+or chosen exit. Transient monotonic two-second per-button debounce stamps
+before attempting a launch, including failure; retirement removes it without
+a timer or repaint. Safe mode, native permission and local cancellation remain
+fail-closed. The owned parser-encoded target leaves all scene/shared guards
+before a dedicated COM/ShellExecuteExW worker; blocking it cannot block scene
+or frame progress. Opener failures neither expose URLs nor change chrome state.
+The existing event-loop action/keyboard/idle parents and compositor layout/scale
+parents exercise these contracts; physical Windows browser foreground remains
+separate acceptance.
 
 - `tze_hud_mcp` [`action_presses_are_delivered_until_acked`](../crates/tze_hud_mcp/src/server/tests.rs)
   (>256 interleaved events, isolation, typed dismiss, stable ACK/max/backlog),

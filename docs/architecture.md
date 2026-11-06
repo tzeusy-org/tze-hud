@@ -132,8 +132,12 @@ They retain SceneChange, AnimationDeadline and TtlDeadline wake accounting. Comp
 input and reply history under the hub lock, then signals the owning agent after
 unlock. Windowed text submissions use the tile binding and complete handle;
 the private tile/text route resets submitted history to the tail once. Unknown
-tiles and known refusals produce no accepted input or history. Notification actions return an agent readiness callback that the pointer
-producer invokes after scene and shared-state unlock; queues remain authoritative.
+tiles and known refusals produce no accepted input or history. Notification activation returns either an agent readiness callback or an owned
+encoded URL. Pointer and keyboard producers deliver it after scene/shared-state
+unlock; queues remain authoritative for callbacks. `shell/link.rs` owns the
+dedicated Windows COM/ShellExecuteExW worker (non-Windows logs a no-op).
+Scene activation owns transient per-publication/index two-second attempt
+debounce; retirement prunes it. Links create no agent input or chosen exit.
 Input readiness is separate from render/main-work wake delivery. `hud_input`
 arms the agent Notify before checking retained action and portal queues, releases
 model guards before awaiting, and rechecks once at its unchanged absolute deadline.
@@ -160,7 +164,9 @@ Scene `graph/zone_ops.rs` owns notification-key validation, publisher-scoped
 replacement and selective clear; `graph/timed.rs` cancels matching delayed
 notifications while retaining mixed-batch remainder. Central
 `SceneGraph::activate_notification` validates the exact publication and snapshots
-its existing `merge_key` into `PendingAction` before removal or finite exit.
+its existing `merge_key` into `PendingAction` for callback activation before
+removal or finite exit. URL activation resolves the same indexed live action
+and returns its parsed serialization without changing publication lifetime.
 MCP retains that value in `ActionItem` through serialization and ACK. Pointer
 and keyboard callers share this producer; neither hit regions nor zone records
 need a second routing-key field. MCP tools and gRPC lifecycle verbs validate

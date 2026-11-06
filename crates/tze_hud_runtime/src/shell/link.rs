@@ -1,8 +1,11 @@
 //! Owner-pressed notification links. Call only after all scene/state guards drop.
+#[cfg(test)]
+type TestLinkWorker = std::sync::Arc<dyn Fn(String) -> Result<(), String> + Send + Sync>;
+
 #[derive(Default)]
 pub(crate) struct LinkOpener {
     #[cfg(test)]
-    pub(crate) worker: Option<std::sync::Arc<dyn Fn(String) -> Result<(), String> + Send + Sync>>,
+    pub(crate) worker: Option<TestLinkWorker>,
     #[cfg(test)]
     pub(crate) workers: Vec<std::thread::JoinHandle<()>>,
     #[cfg(test)]
