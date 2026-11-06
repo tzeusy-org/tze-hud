@@ -1360,6 +1360,7 @@ mod tests {
             pending_texture: false,
         };
         assert!(runtime.turn(true), "startup presents once");
+        let versions = runtime.frames.last_rendered();
         let counters = runtime.events.app.state.wake.counters().snapshot();
         assert_eq!(
             (
@@ -1370,100 +1371,6 @@ mod tests {
             (1, 1, 1)
         );
 
-        {
-            let (entered_tx, entered_rx) = std::sync::mpsc::channel();
-            let (release_tx, release_rx) = std::sync::mpsc::channel();
-            let release = Arc::new(std::sync::Mutex::new(release_rx));
-            let shared = runtime.events.shared_state();
-            runtime.events.app.state.notification_link_opener.worker = Some(Arc::new(move |url| {
-                let state = shared
-                    .try_lock()
-                    .expect("worker owns no shared-state guard");
-                assert!(state.scene.try_lock().is_ok(), "worker owns no scene guard");
-                drop(state);
-                entered_tx.send((url, std::thread::current().id())).unwrap();
-                release.lock().unwrap().recv().unwrap();
-                Ok(())
-            }));
-            {
-                let mut scene = runtime.events.scene();
-                let mut zone = tze_hud_scene::ZoneRegistry::with_defaults()
-                    .zones
-                    .remove("notification-area")
-                    .unwrap();
-                zone.geometry_policy = tze_hud_scene::GeometryPolicy::Relative {
-                    x_pct: 0.0,
-                    y_pct: 0.0,
-                    width_pct: 1.0,
-                    height_pct: 1.0,
-                };
-                scene.register_zone(zone);
-                scene
-                    .publish_to_zone(
-                        "notification-area",
-                        tze_hud_scene::ZoneContent::Notification(
-                            tze_hud_scene::NotificationPayload {
-                                text: "Blocked browser".into(),
-                                actions: vec![tze_hud_scene::NotificationAction {
-                                    label: "Open".into(),
-                                    callback_id: None,
-                                    url: Some("https://example.com/frame".into()),
-                                }],
-                                ..Default::default()
-                            },
-                        ),
-                        "fixture",
-                        None,
-                        None,
-                        None,
-                    )
-                    .unwrap();
-            }
-            assert!(runtime.events.tick());
-            let point = runtime
-                .events
-                .notification_link_center("https://example.com/frame")
-                .unwrap();
-            runtime.events.click(point.0, point.1);
-            runtime.events.drain();
-            let (url, worker) = entered_rx
-                .recv_timeout(std::time::Duration::from_secs(2))
-                .unwrap();
-            assert_eq!(url, "https://example.com/frame");
-            assert_ne!(worker, std::thread::current().id());
-            runtime.events.scene().bump_geometry_epoch();
-            let before = runtime.events.app.state.wake.counters().snapshot();
-            assert!(
-                runtime.turn(true),
-                "real frame preparation advances while opener waits"
-            );
-            let after = runtime.events.app.state.wake.counters().snapshot();
-            assert_eq!(after.presents, before.presents + 1);
-            assert_eq!(
-                after.gpu_queue_submissions,
-                before.gpu_queue_submissions + 1
-            );
-            assert!(runtime.events.scene().pending_actions.is_empty());
-            release_tx.send(()).unwrap();
-            for worker in runtime
-                .events
-                .app
-                .state
-                .notification_link_opener
-                .workers
-                .drain(..)
-            {
-                worker.join().unwrap();
-            }
-            runtime
-                .events
-                .scene()
-                .clear_zone("notification-area")
-                .unwrap();
-            runtime.turn(true);
-        }
-        let versions = runtime.frames.last_rendered();
-        let counters = runtime.events.app.state.wake.counters().snapshot();
         for changed_scene in [false, true] {
             if changed_scene {
                 let mut scene = runtime.events.scene();
@@ -1950,6 +1857,98 @@ mod tests {
                 scene.zone_registry.active_publishes["subtitle"][0].published_at_wall_us
             );
             assert_eq!(trace[rendered]["success"], true);
+        }
+        {
+            let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let release = Arc::new(std::sync::Mutex::new(release_rx));
+            let shared = runtime.events.shared_state();
+            runtime.events.app.state.notification_link_opener.worker = Some(Arc::new(move |url| {
+                let state = shared
+                    .try_lock()
+                    .expect("worker owns no shared-state guard");
+                assert!(state.scene.try_lock().is_ok(), "worker owns no scene guard");
+                drop(state);
+                entered_tx.send((url, std::thread::current().id())).unwrap();
+                release.lock().unwrap().recv().unwrap();
+                Ok(())
+            }));
+            {
+                let mut scene = runtime.events.scene();
+                let mut zone = tze_hud_scene::ZoneRegistry::with_defaults()
+                    .zones
+                    .remove("notification-area")
+                    .unwrap();
+                zone.geometry_policy = tze_hud_scene::GeometryPolicy::Relative {
+                    x_pct: 0.0,
+                    y_pct: 0.0,
+                    width_pct: 1.0,
+                    height_pct: 1.0,
+                };
+                scene.register_zone(zone);
+                scene
+                    .publish_to_zone(
+                        "notification-area",
+                        tze_hud_scene::ZoneContent::Notification(
+                            tze_hud_scene::NotificationPayload {
+                                text: "Blocked browser".into(),
+                                actions: vec![tze_hud_scene::NotificationAction {
+                                    label: "Open".into(),
+                                    callback_id: None,
+                                    url: Some("https://example.com/frame".into()),
+                                }],
+                                ..Default::default()
+                            },
+                        ),
+                        "fixture",
+                        None,
+                        None,
+                        None,
+                    )
+                    .unwrap();
+            }
+            assert!(runtime.events.tick());
+            let point = runtime
+                .events
+                .notification_link_center("https://example.com/frame")
+                .unwrap();
+            runtime.events.click(point.0, point.1);
+            runtime.events.drain();
+            let (url, worker) = entered_rx
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap();
+            assert_eq!(url, "https://example.com/frame");
+            assert_ne!(worker, std::thread::current().id());
+            runtime.events.scene().bump_geometry_epoch();
+            let before = runtime.events.app.state.wake.counters().snapshot();
+            assert!(
+                runtime.turn(true),
+                "real frame preparation advances while opener waits"
+            );
+            let after = runtime.events.app.state.wake.counters().snapshot();
+            assert_eq!(after.presents, before.presents + 1);
+            assert_eq!(
+                after.gpu_queue_submissions,
+                before.gpu_queue_submissions + 1
+            );
+            assert!(runtime.events.scene().pending_actions.is_empty());
+            release_tx.send(()).unwrap();
+            for worker in runtime
+                .events
+                .app
+                .state
+                .notification_link_opener
+                .workers
+                .drain(..)
+            {
+                worker.join().unwrap();
+            }
+            runtime
+                .events
+                .scene()
+                .clear_zone("notification-area")
+                .unwrap();
+            runtime.turn(true);
         }
     }
 
