@@ -3484,7 +3484,14 @@ mod tests {
             let scene = shared.scene.try_lock().unwrap();
             scene.tile_scroll_offset_local(tile_id).1
         };
-        assert!(tail_after_first > 0.0, "native history must overflow");
+        assert!(
+            tail_after_first > 0.0,
+            "native history must overflow: content={} viewport={} tail={tail_after_first}",
+            app.state
+                .input_processor
+                .tile_total_content_height_px(tile_id),
+            tile_bounds.height
+        );
         app.dispatch_key_down_event_inner(
             &RawKeyDownEvent {
                 key_code: "Tab".into(),
