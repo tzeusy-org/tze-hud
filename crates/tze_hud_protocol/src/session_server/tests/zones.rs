@@ -121,8 +121,11 @@ async fn test_zone_publish_result() {
             scene.next_timed_content_wall_us(),
         )
     };
+    let mut seq = 4;
     // Plain proto3 defaults carry neither target, so they must reject.
-    for (sequence, delay) in [(900, 0), (901, 1_000_000)] {
+    for delay in [0, 1_000_000] {
+        let sequence = seq;
+        seq += 1;
         let result = request(
             &tx,
             &mut stream,
@@ -158,7 +161,6 @@ async fn test_zone_publish_result() {
             .hint
         );
     }
-    let mut seq = 4;
     for delay_us in [0, 1_000_000] {
         let publish = |count| {
             ClientPayload::Publish(Publish {
