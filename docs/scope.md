@@ -63,14 +63,16 @@ source links when implementation changes the status.
   Windows acceptance now covers movement, drop/action, cancellation and
   session/restart lifetimes on the repaired build (14/15 original parent
   clauses); the remaining parent clause is not inferred from source tests.
-  F7 HTTPS link actions (`hud-bz9bv.8`) add shared strict target validation,
-  indexed local opening, token-derived marks and unlocked worker handoff;
-  Windows default-browser foreground/card-stays acceptance is unexecuted.
   The unchanged T7 four-group/eight-file denominator now measures 13,995
   physical Rust lines including tests/comments/blanks (was 13,918; +77),
   within the owner's separately recorded 14,000 cap. This repair precedes D5;
   the final mechanical rename, .12 owner acceptance and .13 reconciliation
   remain outstanding. The T7 target-row amendment remains assigned to .11.
+
+- **F7 — HTTPS link actions [Source].** `hud-bz9bv.8` adds shared strict
+  target validation, indexed local opening, token-derived marks and unlocked
+  worker handoff. Windows default-browser foreground/card-stays acceptance
+  remains unexecuted.
 
 - **T6 — delivery [Observed].** The [Windows workflow](../.github/workflows/windows.yml)
   builds, tests, smoke-checks, and publishes signed releases. The runtime has

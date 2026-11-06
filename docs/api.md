@@ -62,8 +62,8 @@ otherwise. Scheduled zone publications count as held before presentation;
 - Zone: `content` is a string, or a typed object for structured zones
   (`notification` with optional `title`, `body`, integer `urgency` 0–3
   (default 1), and optional `actions: [{label, callback_id|url}]`). Each
-  action has exactly one target. MCP requires a non-empty label and callback
-  string; supplying both target members (even empty) or neither rejects with
+  action has exactly one target. MCP requires a non-empty label; a callback string must be non-empty
+  when supplied. supplying both target members (even empty) or neither rejects with
   `INVALID_ARGUMENT` and hint `action needs callback_id or url, not both`.
   An empty URL gets `action url must be https`; an empty callback retains
   its existing non-empty argument error. gRPC plain-string defaults map empty
@@ -932,7 +932,7 @@ baselined against regressions.
 
 | Measure | Before T5 (wire) | Wire | Model-visible | Budget (model-visible) |
 |---|---|---|---|---|
-| `tools/list` | 4,418 | 599 | 562 | ≤ 900 |
+| `tools/list` | 4,418 | 601 | 564 | ≤ 900 |
 | Discover (default scene) | ~430 (`list_zones`) | 181 | 113 | ≤ 150 |
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
 | Four-option notification ask + returned answer + ACK | — | 273 | 114 | ≤ 120 |
@@ -941,10 +941,9 @@ baselined against regressions.
 | Discover (`production.toml`: 6 zones, 3 built-in widgets) | n/a | n/a | ~232 | ≤ 250 |
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
 
-All seven measurements use canonical flow version 4. Runtime calibration of
-notification keys against actual merged main `8a94fcf7` changes `tools/list`
-from 2,248 to 2,451 model-visible UTF-8 bytes and 517 to 562 o200k tokens
-(+203 bytes, +45 tokens). The tokenizer is `tiktoken-rs` 0.12.0, `o200k_base`.
+All seven measurements use canonical flow version 4. F7 source calibration on `53ef94b3` against the
+retained `b52bc65c` baseline changes `tools/list` from 2,451 to 2,455
+model-visible UTF-8 bytes and 562 to 564 o200k tokens (+4 bytes, +2 tokens). The tokenizer is `tiktoken-rs` 0.12.0, `o200k_base`.
 The five other established flows and the complete choice flow retain identical
 request/response fingerprints and metrics; every ceiling is unchanged.
 The complete choice remains 114 tokens (69 ask + 28 retained answer + 17 ACK).
