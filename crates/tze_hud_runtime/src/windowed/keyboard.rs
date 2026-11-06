@@ -1434,7 +1434,15 @@ impl WinitApp {
             {
                 if is_escape_key(&raw.key, &raw.key_code) {
                     scene.focus_notification(None);
-                } else if activation && !raw.repeat {
+                } else if activation
+                    && !raw.repeat
+                    && !self
+                        .state
+                        .safe_mode_atomic
+                        .load(std::sync::atomic::Ordering::Acquire)
+                {
+                    // The pending-keyboard drain bypasses the outer FIFO guard;
+                    // a key queued before pause must not activate a card afterward.
                     let duration = super::lifecycle::notification_exit_ms(
                         &scene,
                         &control.zone_name,
