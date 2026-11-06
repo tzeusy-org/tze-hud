@@ -161,7 +161,12 @@ otherwise. Scheduled zone publications count as held before presentation;
   (`active` or `degraded`), and `expects_reply` arms the composer. `key`
   replaces the newest output
   with the same key (progress lines). Portals are per agent: another agent's
-  `portal:<id>` with the same id is a separate portal.
+  `portal:<id>` with the same id is a separate portal. Fresh expanded portals
+  request 1440×1080 before fitting each dimension to the display, subject to
+  the existing scaled legibility minima. Fitting adds reading room at the same
+  base font; compact portals remain 420×96. Existing live geometry and saved
+  overrides retain their current ownership. This size change is separate from
+  the portal theme migration and later owner visual acceptance.
 - Omitted zone `ttl_ms` uses 60000, except a notification with actions uses
   the owner's live `[runtime] answer_window_ms` (default 60000). An explicit
   `ttl_ms` always wins, including 0 (held until cleared); the owner window is
@@ -846,8 +851,8 @@ roles: frame and transcript use `color.surface.container`, composer uses
 content uses the low container. Text uses the corresponding on-surface roles;
 status cues keep the theme's primary, success, caution and error meanings.
 Composer selection keeps the portal default, since no theme role is a
-selection highlight. Portal sizes,
-fonts, numeric defaults and behavior are unchanged. Explicit `[design_tokens]`
+selection highlight. These theme mappings do not change portal sizes,
+fonts, numeric defaults or behavior. Explicit `[design_tokens]`
 color overrides still take precedence.
 
 **Semantic families** (Tonal Glass values; sizes are dp):

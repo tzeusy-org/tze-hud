@@ -32,8 +32,8 @@ pub struct Size {
     pub height: f32,
 }
 pub const DEFAULT_PORTAL_SIZE: Size = Size {
-    width: 720.0,
-    height: 360.0,
+    width: 1440.0,
+    height: 1080.0,
 };
 pub const DEFAULT_COMPACT_SIZE: Size = Size {
     width: 420.0,

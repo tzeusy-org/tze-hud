@@ -325,11 +325,26 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
         (transcript_bounds.x + transcript_bounds.width - 8.0) as u32,
         (transcript_bounds.y + transcript_bounds.height - 8.0) as u32,
     );
-    let mut scene = SceneGraph::new(800.0, 480.0);
+    let (frame_w, frame_h) = (
+        DEFAULT_PORTAL_SIZE.width as u32 + 80,
+        DEFAULT_PORTAL_SIZE.height as u32 + 120,
+    );
+    let mut scene = SceneGraph::new(frame_w as f32, frame_h as f32);
     let tab = scene.create_tab("portal", 0).unwrap();
     let lease = scene.grant_lease("portal", 60_000);
     let tile_id = scene
-        .create_tile(tab, "portal", lease, Rect::new(10.0, 10.0, 720.0, 360.0), 1)
+        .create_tile(
+            tab,
+            "portal",
+            lease,
+            Rect::new(
+                10.0,
+                10.0,
+                DEFAULT_PORTAL_SIZE.width,
+                DEFAULT_PORTAL_SIZE.height,
+            ),
+            1,
+        )
         .unwrap();
     scene
         .set_tile_root_tree(tile_id, rendered.root, rendered.children)
@@ -339,7 +354,7 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
         .unwrap();
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
-    compositor.build_windowed_frame(&mut scene, 800, 480);
+    compositor.build_windowed_frame(&mut scene, frame_w, frame_h);
     compositor.portal_tile_anim_states.clear(); // settled attachment, as above
     let version = scene.version;
     let mut settled_output_alpha = None;
@@ -368,11 +383,11 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
             level,
             ..Default::default()
         });
-        let build = compositor.build_windowed_frame(&mut scene, 800, 480);
+        let build = compositor.build_windowed_frame(&mut scene, frame_w, frame_h);
         let frame = compositor
             .capture_windowed_frame(
                 &build,
-                &crate::FrameTarget::primary(800, 480),
+                &crate::FrameTarget::primary(frame_w, frame_h),
                 wgpu::TextureFormat::Rgba8UnormSrgb,
             )
             .expect("real windowed overlay capture");

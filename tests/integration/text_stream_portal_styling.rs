@@ -181,8 +181,23 @@ fn per_turn_timestamps_render_stamp_and_token_sentinel() {
 fn resize_and_interaction_changes_keep_surface_and_nodes_in_sync() {
     let mut view = build_expanded_state();
     let tokens = PortalVisualTokens::default();
+    let old_size = Size {
+        width: 720.0,
+        height: 360.0,
+    };
+    let old = render(&view, &tokens, old_size, 100);
+    let old_bounds = transcript(&old).bounds;
+    let old_fonts: Vec<_> = text_nodes(&old)
+        .iter()
+        .map(|text| text.font_size_px)
+        .collect();
     for size in [
+        old_size,
         DEFAULT_PORTAL_SIZE,
+        Size {
+            width: 1280.0,
+            height: 720.0,
+        },
         Size {
             width: 180.0,
             height: 140.0,
@@ -194,6 +209,18 @@ fn resize_and_interaction_changes_keep_surface_and_nodes_in_sync() {
     ] {
         let rendered = render(&view, &tokens, size, 100);
         assert_eq!(rendered.root.children.len(), rendered.children.len());
+        let fonts: Vec<_> = text_nodes(&rendered)
+            .iter()
+            .map(|text| text.font_size_px)
+            .collect();
+        assert_eq!(
+            fonts, old_fonts,
+            "additional reading room never changes base fonts"
+        );
+        let bounds = transcript(&rendered).bounds;
+        if size.width > old_size.width && size.height > old_size.height {
+            assert!(bounds.width > old_bounds.width && bounds.height > old_bounds.height);
+        }
         for (id, node) in rendered.root.children.iter().zip(&rendered.children) {
             assert_eq!(*id, node.id);
         }

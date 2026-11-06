@@ -1837,10 +1837,8 @@ mod tests {
         // return `Moved` and update the tile bounds.
         let move1 = PointerEvent {
             x: handle_cx + 5.0, // small nudge triggers Activated
-            y: handle_cy,
             kind: PointerEventKind::Move,
-            device_id: 0,
-            timestamp: None,
+            ..down
         };
         let result_move1 = processor.process(&move1, &mut scene);
         let released_on_move1 = super::apply_drag_handle_pointer_event(
@@ -1896,11 +1894,8 @@ mod tests {
         // ── Step 4: PointerUp — should release and return persist data ────────
         // Release at the same position as the last move.
         let up = PointerEvent {
-            x: handle_cx + 100.0,
-            y: handle_cy + 50.0,
             kind: PointerEventKind::Up,
-            device_id: 0,
-            timestamp: None,
+            ..move2
         };
         let result_up = processor.process(&up, &mut scene);
         // A second activated device owns the same feedback target independently.
@@ -2079,11 +2074,8 @@ mod tests {
 
         // PointerUp immediately — no long-press threshold met.
         let up = PointerEvent {
-            x: handle_cx,
-            y: handle_cy,
             kind: PointerEventKind::Up,
-            device_id: 0,
-            timestamp: None,
+            ..down
         };
         let result_up = processor.process(&up, &mut scene);
         let released_on_up = super::apply_drag_handle_pointer_event(
@@ -2242,10 +2234,8 @@ mod tests {
         // Move pointer 20px to the right → right edge should grow by 20px.
         let mv = PointerEvent {
             x: 516.0,
-            y: 250.0,
             kind: PointerEventKind::Move,
-            device_id: 1,
-            timestamp: None,
+            ..down
         };
         let outcome = apply_portal_resize_pointer_event(
             &mv,
@@ -2303,10 +2293,8 @@ mod tests {
         // Move to establish a drag delta.
         let mv = PointerEvent {
             x: 530.0,
-            y: 250.0,
             kind: PointerEventKind::Move,
-            device_id: 1,
-            timestamp: None,
+            ..down
         };
         apply_portal_resize_pointer_event(
             &mv,
@@ -2321,11 +2309,8 @@ mod tests {
 
         // Release pointer.
         let up = PointerEvent {
-            x: 530.0,
-            y: 250.0,
             kind: PointerEventKind::Up,
-            device_id: 1,
-            timestamp: None,
+            ..mv
         };
         let outcome = apply_portal_resize_pointer_event(
             &up,
@@ -2506,11 +2491,8 @@ mod tests {
         );
 
         let up = PointerEvent {
-            x: target_left_x + 430.0,
-            y: 250.0,
             kind: PointerEventKind::Up,
-            device_id: target_device_id,
-            timestamp: None,
+            ..mv
         };
         let up_outcome = apply_portal_resize_pointer_event(
             &up,
@@ -2581,10 +2563,8 @@ mod tests {
 
         let up = PointerEvent {
             x: 510.0,
-            y: 250.0,
             kind: PointerEventKind::Up,
-            device_id: 1,
-            timestamp: None,
+            ..down
         };
         apply_portal_resize_pointer_event(
             &up,
@@ -2717,10 +2697,8 @@ mod tests {
         // Drag far to the right — would grow the tile to >> 450px without a lease clamp.
         let mv = PointerEvent {
             x: 800.0,
-            y: 250.0,
             kind: PointerEventKind::Move,
-            device_id: 1,
-            timestamp: None,
+            ..down
         };
         apply_portal_resize_pointer_event(
             &mv,
@@ -2793,10 +2771,8 @@ mod tests {
         let version_before_move = scene.version;
         let mv_grow = PointerEvent {
             x: 516.0,
-            y: 250.0,
             kind: PointerEventKind::Move,
-            device_id: 1,
-            timestamp: None,
+            ..down
         };
         apply_portal_resize_pointer_event(
             &mv_grow,
@@ -3452,8 +3428,7 @@ mod tests {
             x: 570.0,
             y: 470.0,
             kind: PointerEventKind::Move,
-            device_id: 0,
-            timestamp: None,
+            ..down
         };
         let out_move = apply_portal_resize_pointer_event(
             &mv,
@@ -3510,11 +3485,8 @@ mod tests {
 
         // End the gesture cleanly.
         let up = PointerEvent {
-            x: 570.0,
-            y: 470.0,
             kind: PointerEventKind::Up,
-            device_id: 0,
-            timestamp: None,
+            ..mv
         };
         apply_portal_resize_pointer_event(
             &up,
@@ -3615,8 +3587,7 @@ mod tests {
             x: 570.0,
             y: 470.0,
             kind: PointerEventKind::Move,
-            device_id: 0,
-            timestamp: None,
+            ..down
         };
         let out_move = apply_portal_resize_pointer_event(
             &mv,
@@ -3663,11 +3634,8 @@ mod tests {
 
         // End the gesture cleanly.
         let up = PointerEvent {
-            x: 570.0,
-            y: 470.0,
             kind: PointerEventKind::Up,
-            device_id: 0,
-            timestamp: None,
+            ..mv
         };
         apply_portal_resize_pointer_event(
             &up,

@@ -786,12 +786,20 @@ impl PortalDriver {
             tracing::warn!(portal = %key.id, "portal: no lease for a new portal tile");
             return false;
         };
+        let tokens = resolve_portal_tokens(&self.token_overrides);
+        let area = scene.display_area;
         let entry = self.entry(key);
         let bounds = Rect::new(
-            0.0,
-            0.0,
-            DEFAULT_PORTAL_SIZE.width,
-            DEFAULT_PORTAL_SIZE.height,
+            area.x,
+            area.y,
+            DEFAULT_PORTAL_SIZE
+                .width
+                .min(area.width)
+                .max(tokens.window_min_width_px),
+            DEFAULT_PORTAL_SIZE
+                .height
+                .min(area.height)
+                .max(tokens.window_min_height_px),
         );
         match scene.create_tile(
             host_tab,
@@ -1746,37 +1754,70 @@ mod tests {
     /// tab, activated only once the tile exists, or into a new "Main" tab.
     #[test]
     fn drain_with_no_active_tab_activates_tab_and_paints() {
-        let mut driver = PortalDriver::new(PortalHandle::default());
-        let mut scene = SceneGraph::new(1920.0, 1080.0);
-        let main = scene.create_tab("Main", 0).unwrap();
-        scene.active_tab = None; // a widget-less default tab boots inactive
-        let mut processor = InputProcessor::new();
-        publish(&mut driver, "p1", "NO-ACTIVE-TAB-MARKER-1", 100);
-        driver.drain_inner(&mut scene, &mut processor, None, 200);
-        assert_eq!(scene.active_tab, Some(main));
-        assert!(tile_markdown(&scene, tile(&driver, "p1")).contains("NO-ACTIVE-TAB-MARKER-1"));
-
-        let mut driver = PortalDriver::new(PortalHandle::default());
-        let mut scene = SceneGraph::new(1920.0, 1080.0);
-        publish(&mut driver, "p2", "NO-TABS-MARKER-2", 100);
-        driver.drain_inner(&mut scene, &mut processor, None, 200);
-        assert!(scene.active_tab.is_some());
-        assert_eq!(scene.tabs.len(), 1, "exactly one default tab created");
-        assert!(tile_markdown(&scene, tile(&driver, "p2")).contains("NO-TABS-MARKER-2"));
+        for (width, height, expected) in [
+            (1920.0, 1080.0, (1440.0, 1080.0)),
+            (1280.0, 720.0, (1280.0, 720.0)),
+            (2560.0, 1440.0, (1440.0, 1080.0)),
+        ] {
+            for (id, marker, existing_tab) in [
+                ("p1", "NO-ACTIVE-TAB-MARKER-1", true),
+                ("p2", "NO-TABS-MARKER-2", false),
+            ] {
+                let mut driver = PortalDriver::new(PortalHandle::default());
+                let mut scene = SceneGraph::new(width, height);
+                let main = existing_tab.then(|| scene.create_tab("Main", 0).unwrap());
+                scene.active_tab = None; // a widget-less default tab boots inactive
+                let mut processor = InputProcessor::new();
+                publish(&mut driver, id, marker, 100);
+                driver.drain_inner(&mut scene, &mut processor, None, 200);
+                assert!(scene.active_tab.is_some());
+                if let Some(main) = main {
+                    assert_eq!(scene.active_tab, Some(main));
+                }
+                assert_eq!(scene.tabs.len(), 1, "exactly one default tab created");
+                let tile_id = tile(&driver, id);
+                assert!(tile_markdown(&scene, tile_id).contains(marker));
+                let bounds = scene.tiles[&tile_id].bounds;
+                assert_eq!((bounds.width, bounds.height), expected);
+                assert!(bounds.is_within(&scene.display_area));
+                assert_eq!(scene.tile_font_scale(tile_id), 1.0);
+            }
+        }
     }
 
     #[test]
     fn create_portal_tile_failure_does_not_mutate_active_tab() {
-        let mut driver = PortalDriver::new(PortalHandle::default());
-        // A 1×1 display rejects the portal's bounds.
-        let mut scene = SceneGraph::new(1.0, 1.0);
-        scene.create_tab("Main", 0).unwrap();
-        scene.active_tab = None;
-        let mut processor = InputProcessor::new();
-        publish(&mut driver, "p", "hello", 100);
-        driver.drain_inner(&mut scene, &mut processor, None, 200);
-        assert_eq!(scene.active_tab, None, "hud-zccuf");
-        assert!(driver.entries[&key("p")].tile_scene_id.is_none());
+        for (width, height, scale, min_width, min_height) in [
+            (1.0, 1.0, "1", "240", "160"),
+            (479.0, 319.0, "2", "240", "160"),
+            (600.0, 360.0, "2", "320", "200"),
+        ] {
+            let mut driver = PortalDriver::new(PortalHandle::default());
+            driver.update_binding_tokens(DesignTokenMap::from([
+                ("runtime.px_scale".into(), scale.into()),
+                ("portal.window.min_width_px".into(), min_width.into()),
+                ("portal.window.min_height_px".into(), min_height.into()),
+            ]));
+            let mut scene = SceneGraph::new(width, height);
+            scene.create_tab("Main", 0).unwrap();
+            scene.active_tab = None;
+            let mut processor = InputProcessor::new();
+            publish(&mut driver, "p", "hello", 100);
+            driver.drain_inner(&mut scene, &mut processor, None, 200);
+            assert_eq!(scene.active_tab, None, "hud-zccuf");
+            assert!(driver.entries[&key("p")].tile_scene_id.is_none());
+            assert_eq!(scene.tile_count(), 0);
+            let original_lease = lease(&driver, "p");
+            scene.display_area = Rect::new(10.0, 20.0, 1920.0, 1080.0);
+            publish(&mut driver, "p", "retry", 200 + FRAME_US);
+            driver.drain_inner(&mut scene, &mut processor, None, 200 + FRAME_US);
+            assert_eq!(scene.tile_count(), 1);
+            assert_eq!(lease(&driver, "p"), original_lease);
+            assert_eq!(
+                scene.tiles[&tile(&driver, "p")].bounds,
+                Rect::new(10.0, 20.0, 1440.0, 1080.0)
+            );
+        }
     }
 
     /// A height-only head trim (same bytes, fewer lines) still reaches
