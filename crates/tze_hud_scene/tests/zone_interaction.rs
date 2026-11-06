@@ -492,6 +492,20 @@ fn notification_payload_with_actions_serializes() {
     assert_eq!(back.actions.len(), 2);
     assert_eq!(back.actions[0].callback_id.as_deref(), Some("yes"));
     assert_eq!(back.actions[1].label, "No");
+    assert!(
+        !json.contains("url"),
+        "valid legacy callback JSON is unchanged"
+    );
+    let mut linked = payload.clone();
+    linked.actions[1].callback_id = None;
+    linked.actions[1].url = Some("https://éxample.com/a\"b".into());
+    let roundtrip: NotificationPayload =
+        serde_json::from_str(&serde_json::to_string(&linked).unwrap()).unwrap();
+    assert_eq!(roundtrip, linked);
+    assert_eq!(
+        roundtrip.actions[1].encoded_url().unwrap(),
+        "https://xn--xample-9ua.com/a%22b"
+    );
 }
 
 /// `NotificationPayload` WITHOUT actions field in JSON MUST deserialize with

@@ -523,7 +523,7 @@ mod calibration {
                                 ZoneContent::Notification(notification) => notification
                                     .actions
                                     .iter()
-                                    .any(|action| action.callback_id == "c"),
+                                    .any(|action| action.callback_id.as_deref() == Some("c")),
                                 _ => false,
                             }
                         });

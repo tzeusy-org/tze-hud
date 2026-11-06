@@ -262,6 +262,7 @@ async fn notification_actions_layout_matches_hit_regions() {
     ] {
         let mut tokens = HashMap::from([
             ("runtime.px_scale".into(), "1.5".into()),
+            ("notification.action.link_mark".into(), "↗︎".into()),
             ("font.sans".into(), "IBM Plex Mono".into()),
             ("notification.action.background".into(), "#336699".into()),
             ("notification.action.padding_px".into(), "3".into()),
@@ -360,7 +361,27 @@ async fn notification_actions_layout_matches_hit_regions() {
                 .find(|item| &*item.text == labels[index])
                 .unwrap();
             assert_eq!(item.pixel_x, bounds.x + descriptor.padding);
-            assert_eq!(item.bounds_width, bounds.width - descriptor.padding * 2.0);
+            let mark = descriptor.link_marks[index].as_ref();
+            let mark_width = mark.map_or(0.0, |(_, width)| *width);
+            assert_eq!(
+                item.bounds_width,
+                bounds.width - descriptor.padding * 2.0 - mark_width
+            );
+            assert!(region.interaction_id.ends_with(&format!(":{index}")));
+            if let Some((mark, width)) = mark {
+                let glyph = items
+                    .iter()
+                    .find(|i| {
+                        &*i.text == mark
+                            && i.pixel_x == bounds.x + bounds.width - descriptor.padding - width
+                            && i.pixel_y == item.pixel_y
+                    })
+                    .unwrap();
+                assert_eq!(glyph.bounds_width, *width);
+                assert_eq!(glyph.pixel_x, item.pixel_x + item.bounds_width);
+                assert_eq!(glyph.font_size, item.font_size);
+                assert_eq!(glyph.color, item.color);
+            }
             assert!(
                 item.pixel_y >= bounds.y
                     && item.pixel_y + item.bounds_height <= bounds.y + bounds.height

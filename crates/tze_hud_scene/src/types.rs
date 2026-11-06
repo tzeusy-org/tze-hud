@@ -1981,11 +1981,11 @@ impl NotificationAction {
 
     pub fn encoded_url(&self) -> Result<String, String> {
         let raw = self.url.as_deref().ok_or(ACTION_URL_HINT)?;
+        if raw.len() > 2048 {
+            return Err(ACTION_URL_HINT.into());
+        }
         let parsed = url::Url::parse(raw).map_err(|_| ACTION_URL_HINT)?;
-        if raw.len() > 2048
-            || parsed.scheme() != "https"
-            || parsed.host_str().is_none_or(str::is_empty)
-        {
+        if parsed.scheme() != "https" || parsed.host_str().is_none_or(str::is_empty) {
             return Err(ACTION_URL_HINT.into());
         }
         Ok(parsed.into())

@@ -249,6 +249,126 @@ async fn test_zone_publish_result() {
         seq += 1;
     }
 
+    // Real tonic admission and scheduling share the scene target/URL validator.
+    let prefix = "https://example.com/";
+    let boundary = format!("{prefix}{}", "a".repeat(2048 - prefix.len()));
+    let unicode_boundary = format!("{prefix}{}", "é".repeat((2048 - prefix.len()) / 2));
+    let mut cases: Vec<(String, String, Option<&str>)> = vec![
+        (
+            "go".into(),
+            "https://example.com/".into(),
+            Some("action needs callback_id or url, not both"),
+        ),
+        (
+            "".into(),
+            "".into(),
+            Some("action needs callback_id or url, not both"),
+        ),
+        ("legacy".into(), "".into(), None),
+        ("".into(), boundary.clone(), None),
+        ("".into(), unicode_boundary.clone(), None),
+        ("".into(), "https://éxample.com/a\"b".into(), None),
+    ];
+    for url in [
+        "http://example.com/".into(),
+        "file:///a".into(),
+        "javascript:alert(1)".into(),
+        "/relative".into(),
+        "https://".into(),
+        "https://[bad]/".into(),
+        format!("{boundary}a"),
+        format!("{unicode_boundary}é"),
+    ] {
+        cases.push(("".into(), url, Some("action url must be https")));
+    }
+    for delay in [0, 1_000_000] {
+        for (callback_id, url, hint) in &cases {
+            let before = snapshot(&*scene.lock().await);
+            let wake_count = wakes.load(Ordering::Relaxed);
+            let result = request(
+                &tx,
+                &mut stream,
+                seq,
+                ClientPayload::Publish(Publish {
+                    surface: "zone:notification-area".into(),
+                    content: Some(crate::proto::ZoneContent {
+                        payload: Some(crate::proto::zone_content::Payload::Notification(
+                            crate::proto::NotificationPayload {
+                                text: "Targets".into(),
+                                actions: vec![
+                                    crate::proto::NotificationActionProto {
+                                        label: "Legacy".into(),
+                                        callback_id: "legacy".into(),
+                                        url: String::new(),
+                                    },
+                                    // Blank labels on gRPC retain their existing semantics.
+                                    crate::proto::NotificationActionProto {
+                                        label: String::new(),
+                                        callback_id: callback_id.clone(),
+                                        url: url.clone(),
+                                    },
+                                ],
+                                ..Default::default()
+                            },
+                        )),
+                    }),
+                    present_at_us: if delay == 0 { 0 } else { now_wall_us() + delay },
+                    ..Default::default()
+                }),
+            )
+            .await;
+            assert_eq!(result.seq, seq);
+            if let Some(hint) = hint {
+                assert!(!result.ok, "{result:?}");
+                assert_eq!(result.code, "INVALID_ARGUMENT");
+                assert_eq!(
+                    result.hint,
+                    super::verbs::fail(seq, "INVALID_ARGUMENT", *hint).hint
+                );
+                assert_eq!(snapshot(&*scene.lock().await), before);
+                assert_eq!(wakes.load(Ordering::Relaxed), wake_count);
+            } else {
+                assert!(result.ok, "{result:?}");
+                let scene = scene.lock().await;
+                let content = if delay == 0 {
+                    &scene
+                        .zone_registry
+                        .active_for_zone("notification-area")
+                        .last()
+                        .unwrap()
+                        .content
+                } else {
+                    match &scene.scheduled_batches.last().unwrap().batch.mutations[0] {
+                        tze_hud_scene::mutation::SceneMutation::PublishToZone {
+                            content, ..
+                        } => content,
+                        _ => panic!("publish"),
+                    }
+                };
+                let tze_hud_scene::ZoneContent::Notification(n) = content else {
+                    panic!("notification")
+                };
+                assert_eq!(
+                    n.actions[1].url.as_deref(),
+                    (!url.is_empty()).then_some(url.as_str())
+                );
+                if url == "https://éxample.com/a\"b" {
+                    assert_eq!(
+                        n.actions[1].encoded_url().unwrap(),
+                        "https://xn--xample-9ua.com/a%22b"
+                    );
+                }
+                if url == &unicode_boundary {
+                    assert_eq!(
+                        n.actions[1].encoded_url().unwrap(),
+                        format!("{prefix}{}", "%C3%A9".repeat((2048 - prefix.len()) / 2))
+                    );
+                }
+            }
+            seq += 1;
+        }
+    }
+
     scene
         .lock()
         .await

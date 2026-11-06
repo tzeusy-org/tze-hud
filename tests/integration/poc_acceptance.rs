@@ -920,7 +920,8 @@ async fn poc_notification_action_reaches_hud_input() {
                     "surface": NOTIFICATION,
                     "content": {"title": "Deploy", "body": "Ship v2?",
                         "actions": [{"label": "Approve", "callback_id": "approve"},
-                                    {"label": "Reject", "callback_id": "reject"}]},
+                                    {"label": "Reject", "callback_id": "reject"},
+                                    {"label": "Docs", "url": "https://example.com/poc"}]},
                 }),
             )
             .await;
@@ -929,6 +930,19 @@ async fn poc_notification_action_reaches_hud_input() {
             poc.shown(NOTIFICATION),
             2,
             "foreign holding survives own replacement"
+        );
+        assert!(input_items(&poc.call("hud_input", json!({})).await).is_empty());
+        assert!(input_items(&poc.call_as(RESIDENT_PSK, "hud_input", json!({})).await).is_empty());
+        let (lx, ly) = poc
+            .hud
+            .notification_link_center("https://example.com/poc")
+            .unwrap();
+        poc.hud.click(lx, ly);
+        poc.settle().await;
+        assert!(
+            poc.hud
+                .notification_link_center("https://example.com/poc")
+                .is_some()
         );
         assert!(input_items(&poc.call("hud_input", json!({})).await).is_empty());
         assert!(input_items(&poc.call_as(RESIDENT_PSK, "hud_input", json!({})).await).is_empty());

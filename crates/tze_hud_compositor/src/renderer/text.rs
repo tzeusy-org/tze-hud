@@ -671,25 +671,31 @@ impl super::Compositor {
                                 if self.text_rasterizer.is_some() {
                                     let action_layout = self
                                         .notification_action_layout(zone_name, record, policy, zw);
-                                    for (action, b) in
-                                        payload.actions.iter().zip(action_layout.bounds(
+                                    for (index, (action, b)) in payload
+                                        .actions
+                                        .iter()
+                                        .zip(action_layout.bounds(
                                             zx,
                                             slot_y,
                                             zw,
                                             effective_slot_h,
                                             inset_h,
                                         ))
+                                        .enumerate()
                                     {
+                                        let available =
+                                            (b.width - action_layout.padding * 2.0).max(1.0);
+                                        let mark = action_layout
+                                            .link_marks
+                                            .get(index)
+                                            .and_then(Option::as_ref);
+                                        let mark_width =
+                                            mark.map_or(0.0, |(_, width)| (*width).min(available));
                                         items.push(Self::make_zone_text_item(
-                                            Arc::from(
-                                                super::token_colors::notification_action_label(
-                                                    zone_tokens,
-                                                    action,
-                                                ),
-                                            ),
+                                            Arc::from(action.label.as_str()),
                                             b.x + action_layout.padding,
                                             b.y + action_layout.padding,
-                                            (b.width - action_layout.padding * 2.0).max(1.0),
+                                            (available - mark_width).max(1.0),
                                             (b.height - action_layout.padding * 2.0).max(1.0),
                                             notif_action_font_size_px,
                                             font_family,
@@ -701,6 +707,24 @@ impl super::Compositor {
                                             None,
                                             effective_opacity,
                                         ));
+                                        if let Some((mark, _)) = mark {
+                                            items.push(Self::make_zone_text_item(
+                                                Arc::from(mark.as_str()),
+                                                b.x + b.width - action_layout.padding - mark_width,
+                                                b.y + action_layout.padding,
+                                                mark_width,
+                                                (b.height - action_layout.padding * 2.0).max(1.0),
+                                                notif_action_font_size_px,
+                                                font_family,
+                                                notif_action_font_weight,
+                                                color,
+                                                tze_hud_scene::types::TextAlign::Start,
+                                                tze_hud_scene::types::TextOverflow::Clip,
+                                                None,
+                                                None,
+                                                effective_opacity,
+                                            ));
+                                        }
                                     }
                                 }
 
