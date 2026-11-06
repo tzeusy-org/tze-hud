@@ -1920,6 +1920,19 @@ mod tests {
                 .unwrap();
             assert_eq!(url, "https://example.com/frame");
             assert_ne!(worker, std::thread::current().id());
+            // The worker is still waiting on release_rx. Drive the actual
+            // pending-keyboard drain and observe local consumption before
+            // releasing it, independently of the frame/scene progress below.
+            assert!(runtime.events.scene().overlay.notification_focus.is_none());
+            runtime.events.enqueue(key_down("Tab", "Tab", 2_000));
+            runtime.events.drain();
+            assert!(runtime.events.scene().overlay.notification_focus.is_some());
+            assert_eq!(runtime.events.app.state.notification_keydowns.len(), 1);
+            runtime.events.enqueue(key_up("Tab", "Tab", 2_100));
+            runtime.events.drain();
+            assert!(runtime.events.app.state.notification_keydowns.is_empty());
+            assert!(runtime.events.app.state.pending_keyboard_events.is_empty());
+            assert!(runtime.events.scene().pending_actions.is_empty());
             runtime.events.scene().bump_geometry_epoch();
             let before = runtime.events.app.state.wake.counters().snapshot();
             assert!(
