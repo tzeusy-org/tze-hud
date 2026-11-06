@@ -2947,7 +2947,10 @@ mod tests {
                     harness.app.handle_window_focus(None, true);
                 }
                 if denied.starts_with("native-") {
-                    assert!(!native.healthy(), "denied delivery faults its native ledger");
+                    assert!(
+                        !native.healthy(),
+                        "denied delivery faults its native ledger"
+                    );
                     // Start an independent injected native lifetime for the next
                     // case; production never rearms a faulted installation.
                     drop(native);
