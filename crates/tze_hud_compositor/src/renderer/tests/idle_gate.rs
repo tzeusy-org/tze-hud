@@ -377,7 +377,9 @@ async fn idle_with_notification_renders_only_at_fade() {
             .into_iter()
             .map(|label| NotificationAction {
                 label: label.into(),
-                callback_id: label.into(),
+                callback_id: Some(label.into()),
+
+                url: None,
             })
             .collect();
     }
@@ -463,13 +465,24 @@ async fn idle_with_notification_renders_only_at_fade() {
             .into_iter()
             .map(|label| NotificationAction {
                 label: label.into(),
-                callback_id: label.into(),
+                callback_id: Some(label.into()),
+
+                url: None,
             })
             .collect();
     }
     compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
-    let action = scene.overlay.zone_hit_regions.iter().find(|region| matches!(&region.kind, ZoneInteractionKind::Action { callback_id } if callback_id == "C")).unwrap().clone();
+    let action = scene
+        .overlay
+        .zone_hit_regions
+        .iter()
+        .find(|region| matches!(&region.kind, ZoneInteractionKind::Action { index: 2 }))
+        .unwrap()
+        .clone();
     let wake = scene.activate_notification(&action, 240).unwrap();
+    let tze_hud_scene::graph::NotificationActivation::Callback(wake) = wake else {
+        panic!("callback outcome")
+    };
     wake.notify();
     compositor.update_publication_animations(&scene);
     assert!(scene.overlay.zone_hit_regions.is_empty());

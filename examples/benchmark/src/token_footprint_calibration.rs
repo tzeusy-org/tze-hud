@@ -504,13 +504,13 @@ mod calibration {
         let mut python =
             tokio::task::spawn_blocking(move || run_python_driver(addresses[0], choice_ready_rx));
         let driver_output = loop {
-            let activated = producer.step(async {
-                let shared = runtime.shared_state().lock().await;
-                let mut scene = shared.scene.lock().await;
-                // Do not shape earlier notifications while the independent
-                // portal flow needs this scene lock. Wait for the choice itself.
-                let choice_pending =
-                    scene
+            let activated = producer
+                .step(async {
+                    let shared = runtime.shared_state().lock().await;
+                    let mut scene = shared.scene.lock().await;
+                    // Do not shape earlier notifications while the independent
+                    // portal flow needs this scene lock. Wait for the choice itself.
+                    let choice_pending = scene
                         .zone_registry
                         .active_publishes
                         .values()
@@ -527,35 +527,39 @@ mod calibration {
                                 _ => false,
                             }
                         });
-                let wake = if choice_pending {
-                    // Exercise the production exact-live activation operation,
-                    // shared by pointer and keyboard. Never inject a PendingAction.
-                    runtime
-                        .compositor
-                        .populate_zone_hit_regions(&mut scene, 1920.0, 1080.0);
-                    let target = scene
-                        .overlay
-                        .zone_hit_regions
-                        .iter()
-                        .find(|region| {
-                            region.publisher_namespace == agent
-                                && matches!(&region.kind,
-                                    ZoneInteractionKind::Action { callback_id } if callback_id == "c")
-                        })
-                        .cloned();
-                    target.and_then(|region| scene.activate_notification(&region, 0))
-                } else {
-                    None
-                };
-                drop(scene);
-                drop(shared);
-                if let Some(wake) = wake {
-                    wake.notify();
-                    true
-                } else {
-                    false
-                }
-            }).await;
+                    let wake = if choice_pending {
+                        // Exercise the production exact-live activation operation,
+                        // shared by pointer and keyboard. Never inject a PendingAction.
+                        runtime
+                            .compositor
+                            .populate_zone_hit_regions(&mut scene, 1920.0, 1080.0);
+                        let target = scene
+                            .overlay
+                            .zone_hit_regions
+                            .iter()
+                            .find(|region| {
+                                region.publisher_namespace == agent
+                                    && matches!(
+                                        &region.kind,
+                                        ZoneInteractionKind::Action { index: 2 }
+                                    )
+                            })
+                            .cloned();
+                        target.and_then(|region| scene.activate_notification(&region, 0))
+                    } else {
+                        None
+                    };
+                    drop(scene);
+                    drop(shared);
+                    if let Some(tze_hud_scene::graph::NotificationActivation::Callback(wake)) = wake
+                    {
+                        wake.notify();
+                        true
+                    } else {
+                        false
+                    }
+                })
+                .await;
             if activated {
                 choice_ready_tx
                     .send(())

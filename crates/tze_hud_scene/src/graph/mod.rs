@@ -9,6 +9,12 @@ use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
+/// An accepted notification outcome, delivered only after unlocking the scene.
+pub enum NotificationActivation {
+    Callback(RenderWakeNotifier),
+    OpenUrl(String),
+}
+
 /// Returns a `SystemClock` wrapped in `Arc<dyn Clock>`.
 /// Used as the serde default for the `clock` field so that deserialized
 /// graphs behave like freshly constructed ones.

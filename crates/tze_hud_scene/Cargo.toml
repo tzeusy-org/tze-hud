@@ -15,6 +15,7 @@ blake3 = { workspace = true }
 subtle = { workspace = true }
 sha2 = { workspace = true }
 arc-swap = { workspace = true }
+url = "=2.5.8"
 
 [features]
 # Deterministic named scenes and Layer 0 invariant checks for pixel, budget and

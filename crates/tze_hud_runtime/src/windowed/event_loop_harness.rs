@@ -182,6 +182,7 @@ impl WindowedRuntimeState {
             overlay_refits: Default::default(),
             press_window: None,
             zone_press: None,
+            notification_link_opener: Default::default(),
             context_menu_press: None,
             context_menu_open: false,
             context_menu_dismiss_pending: false,
@@ -970,7 +971,9 @@ impl HeadlessEventLoopHarness {
             .zone_hit_regions
             .iter()
             .find(|region| {
-                matches!(&region.kind, ZoneInteractionKind::Action { callback_id: id } if id == callback_id)
+                scene
+                    .notification_action(region)
+                    .is_some_and(|a| a.callback_id.as_deref() == Some(callback_id))
             })
             .map(|region| {
                 (
@@ -1940,7 +1943,9 @@ mod tests {
             });
             let action = |id: &str, label: &str| NotificationAction {
                 label: label.to_string(),
-                callback_id: id.to_string(),
+                callback_id: Some(id.to_string()),
+
+                url: None,
             };
             scene
                 .publish_to_zone(
@@ -2035,7 +2040,9 @@ mod tests {
             .zone_hit_regions
             .iter()
             .find(|region| {
-                matches!(&region.kind, ZoneInteractionKind::Action { callback_id: id } if id == callback_id)
+                scene
+                    .notification_action(region)
+                    .is_some_and(|a| a.callback_id.as_deref() == Some(callback_id))
             })
             .map(|region| region.interaction_id.clone())
             .expect("the action has a hit region");
@@ -2062,7 +2069,15 @@ mod tests {
         let approve = harness.notification_action_center("approve").unwrap();
         let reject = harness.notification_action_center("reject").unwrap();
 
-        let focus_id = harness.scene().overlay.zone_hit_regions.iter().find(|r| matches!(&r.kind, ZoneInteractionKind::Action { callback_id } if callback_id == "approve")).unwrap().interaction_id.clone();
+        let focus_id = harness
+            .scene()
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|r| matches!(&r.kind, ZoneInteractionKind::Action { index: 0 }))
+            .unwrap()
+            .interaction_id
+            .clone();
         let before_focus = geometry_epoch(&harness);
         harness.scene().focus_notification(Some(focus_id.clone()));
         assert!(geometry_epoch(&harness) > before_focus);
@@ -2800,7 +2815,14 @@ mod tests {
                     ("theme".into(), "blueprint".into()),
                     ("motion.exit.ms".into(), "240".into()),
                 ]));
-            let region = harness.scene().overlay.zone_hit_regions.iter().find(|r| matches!(&r.kind, ZoneInteractionKind::Action { callback_id } if callback_id == "approve")).unwrap().clone();
+            let region = harness
+                .scene()
+                .overlay
+                .zone_hit_regions
+                .iter()
+                .find(|r| matches!(&r.kind, ZoneInteractionKind::Action { index: 0 }))
+                .unwrap()
+                .clone();
             harness.click(
                 region.bounds.x + region.bounds.width / 2.0,
                 region.bounds.y + region.bounds.height / 2.0,
@@ -2922,9 +2944,14 @@ mod tests {
             )
             .unwrap();
         assert!(harness.tick());
-        let second = harness.scene().overlay.zone_hit_regions.iter().find(|r| {
-            matches!(&r.kind, ZoneInteractionKind::Action { callback_id } if callback_id == "second")
-        }).unwrap().clone();
+        let second = harness
+            .scene()
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|r| matches!(&r.kind, ZoneInteractionKind::Action { index: 1 }))
+            .unwrap()
+            .clone();
         {
             let mut scene = harness.scene();
             let records = scene.zone_registry.active_for_zone("notification-area");
@@ -3281,7 +3308,9 @@ mod tests {
                         title: "Deploy".to_string(),
                         actions: vec![NotificationAction {
                             label: "Ship".to_string(),
-                            callback_id: "ship".to_string(),
+                            callback_id: Some("ship".to_string()),
+
+                            url: None,
                         }],
                     }),
                     "notif-agent",
@@ -3361,7 +3390,9 @@ mod tests {
                         title: "Control".into(),
                         actions: vec![NotificationAction {
                             label: "Keep".into(),
-                            callback_id: "keep".into(),
+                            callback_id: Some("keep".into()),
+
+                            url: None,
                         }],
                     }),
                     "control-agent",
@@ -3421,9 +3452,13 @@ mod tests {
         });
         assert_eq!(after_dismiss.0.len(), 1);
         assert_eq!(after_dismiss.0[0].publisher_namespace, "control-agent");
-        assert!(after_dismiss.1.iter().any(|hit| {
-            matches!(&hit.kind, ZoneInteractionKind::Action { callback_id } if callback_id == "keep")
-        }), "the unrelated action hit survives");
+        assert!(
+            after_dismiss
+                .1
+                .iter()
+                .any(|hit| { matches!(&hit.kind, ZoneInteractionKind::Action { index: 0 }) }),
+            "the unrelated action hit survives"
+        );
         assert_eq!(
             notifications(),
             after_dismiss,
@@ -4323,7 +4358,7 @@ mod tests {
                     .notification_focus
                     .as_deref()
                     .unwrap()
-                    .ends_with(":details")
+                    .ends_with(":3")
             );
             press(&mut harness, "Tab", "Tab", false);
             assert!(harness.scene().overlay.notification_focus.is_none());
@@ -4339,7 +4374,7 @@ mod tests {
                     .notification_focus
                     .as_deref()
                     .unwrap()
-                    .ends_with(":details")
+                    .ends_with(":3")
             );
             press(&mut harness, "Tab", "Tab", false);
             assert!(harness.scene().overlay.notification_focus.is_none());
@@ -4557,7 +4592,14 @@ mod tests {
                 assert!(harness.tick());
                 {
                     let mut scene = harness.scene();
-                    let control = scene.overlay.zone_hit_regions.iter().find(|r| matches!(&r.kind, ZoneInteractionKind::Action { callback_id } if callback_id == "approve")).unwrap().interaction_id.clone();
+                    let control = scene
+                        .overlay
+                        .zone_hit_regions
+                        .iter()
+                        .find(|r| matches!(&r.kind, ZoneInteractionKind::Action { index: 0 }))
+                        .unwrap()
+                        .interaction_id
+                        .clone();
                     scene.focus_notification(Some(control));
                 }
                 harness.app.state.global_tokens = tze_hud_config::themes::resolve_config_tokens(

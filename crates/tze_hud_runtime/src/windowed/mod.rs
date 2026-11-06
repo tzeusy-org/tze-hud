@@ -474,6 +474,7 @@ struct WindowedRuntimeState {
     /// began on. A release activates a dismiss/action button only when it
     /// lands on the same affordance the press started on (hud-z21e9).
     zone_press: Option<String>,
+    notification_link_opener: crate::shell::link::LinkOpener,
     context_menu_press: Option<widgets::ContextMenuPress>,
     context_menu_open: bool,
     context_menu_dismiss_pending: bool,
@@ -3231,6 +3232,7 @@ impl WindowedRuntime {
             overlay_refits: Default::default(),
             press_window: None,
             zone_press: None,
+            notification_link_opener: Default::default(),
             context_menu_press: None,
             context_menu_open: false,
             context_menu_dismiss_pending: false,

@@ -678,7 +678,9 @@ mod tests {
                     ttl_ms: None,
                     actions: vec![NotificationAction {
                         label: "Open".into(),
-                        callback_id: "open".into(),
+                        callback_id: Some("open".into()),
+
+                        url: None,
                     }],
                 }),
                 "zone-owner",
@@ -1088,7 +1090,9 @@ mod tests {
                                 ttl_ms: None,
                                 actions: vec![NotificationAction {
                                     label: "Open".into(),
-                                    callback_id: "open".into(),
+                                    callback_id: Some("open".into()),
+
+                                    url: None,
                                 }],
                             }),
                             "zone-owner",

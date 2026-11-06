@@ -379,16 +379,14 @@ fn hit_test_returns_zone_interaction_for_action_button() {
 
     let action_bounds = Rect::new(1440.0, 12.0, 100.0, 22.0);
     let publication_id = scene.zone_registry.active_for_zone("notif")[0].publication_id;
-    let action_id = format!("zone:notif:action:{publication_id}:{ns}:0:confirm");
+    let action_id = format!("zone:notif:action:{publication_id}:{ns}:0");
     scene.overlay.zone_hit_regions.push(ZoneHitRegion {
         publication_id,
         zone_name: "notif".to_string(),
         published_at_wall_us: published_at,
         publisher_namespace: ns.to_string(),
         bounds: action_bounds,
-        kind: ZoneInteractionKind::Action {
-            callback_id: "confirm".to_string(),
-        },
+        kind: ZoneInteractionKind::Action { index: 0 },
         interaction_id: action_id.clone(),
         tab_order: 1,
     });
@@ -397,11 +395,11 @@ fn hit_test_returns_zone_interaction_for_action_button() {
 
     match result {
         HitResult::ZoneInteraction {
-            kind: ZoneInteractionKind::Action { ref callback_id },
+            kind: ZoneInteractionKind::Action { index },
             ref interaction_id,
             ..
         } => {
-            assert_eq!(callback_id, "confirm");
+            assert_eq!(index, 0);
             assert_eq!(interaction_id, &action_id);
         }
         other => panic!("expected ZoneInteraction(Action), got: {other:?}"),
@@ -414,17 +412,10 @@ fn hit_test_returns_zone_interaction_for_action_button() {
 #[test]
 fn zone_interaction_kind_clones_correctly() {
     let dismiss = ZoneInteractionKind::Dismiss;
-    let action = ZoneInteractionKind::Action {
-        callback_id: "my-callback".to_string(),
-    };
+    let action = ZoneInteractionKind::Action { index: 2 };
 
     assert_eq!(dismiss.clone(), ZoneInteractionKind::Dismiss);
-    assert_eq!(
-        action.clone(),
-        ZoneInteractionKind::Action {
-            callback_id: "my-callback".to_string()
-        }
-    );
+    assert_eq!(action.clone(), ZoneInteractionKind::Action { index: 2 });
 }
 
 /// `ZoneHitRegion` fields MUST be accessible and match what was inserted.
@@ -459,11 +450,13 @@ fn zone_hit_region_fields_round_trip() {
 fn notification_action_fields_accessible() {
     let action = NotificationAction {
         label: "Confirm".to_string(),
-        callback_id: "confirm-action".to_string(),
+        callback_id: Some("confirm-action".to_string()),
+
+        url: None,
     };
 
     assert_eq!(action.label, "Confirm");
-    assert_eq!(action.callback_id, "confirm-action");
+    assert_eq!(action.callback_id.as_deref(), Some("confirm-action"));
 }
 
 /// `NotificationPayload` with actions MUST serialize via serde (spot-check).
@@ -478,11 +471,15 @@ fn notification_payload_with_actions_serializes() {
         actions: vec![
             NotificationAction {
                 label: "Yes".to_string(),
-                callback_id: "yes".to_string(),
+                callback_id: Some("yes".to_string()),
+
+                url: None,
             },
             NotificationAction {
                 label: "No".to_string(),
-                callback_id: "no".to_string(),
+                callback_id: Some("no".to_string()),
+
+                url: None,
             },
         ],
     };
@@ -493,7 +490,7 @@ fn notification_payload_with_actions_serializes() {
 
     assert_eq!(back.text, "Do you confirm?");
     assert_eq!(back.actions.len(), 2);
-    assert_eq!(back.actions[0].callback_id, "yes");
+    assert_eq!(back.actions[0].callback_id.as_deref(), Some("yes"));
     assert_eq!(back.actions[1].label, "No");
 }
 

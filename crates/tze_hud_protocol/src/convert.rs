@@ -516,7 +516,8 @@ pub fn proto_zone_content_to_scene(c: &proto::ZoneContent) -> Option<ZoneContent
                 .iter()
                 .map(|a| NotificationAction {
                     label: a.label.clone(),
-                    callback_id: a.callback_id.clone(),
+                    callback_id: (!a.callback_id.is_empty()).then(|| a.callback_id.clone()),
+                    url: (!a.url.is_empty()).then(|| a.url.clone()),
                 })
                 .collect(),
         })),

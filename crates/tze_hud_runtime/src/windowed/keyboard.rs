@@ -1453,7 +1453,7 @@ impl WinitApp {
                 .insert(keyboard_key_identity(&raw.key_code, &raw.key));
         }
         if let Some(wake) = wake {
-            wake.notify();
+            self.deliver_notification_activation(wake);
         }
         Ok(consumed)
     }

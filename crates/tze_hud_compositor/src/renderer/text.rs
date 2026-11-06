@@ -681,7 +681,12 @@ impl super::Compositor {
                                         ))
                                     {
                                         items.push(Self::make_zone_text_item(
-                                            Arc::from(action.label.as_str()),
+                                            Arc::from(
+                                                super::token_colors::notification_action_label(
+                                                    zone_tokens,
+                                                    action,
+                                                ),
+                                            ),
                                             b.x + action_layout.padding,
                                             b.y + action_layout.padding,
                                             (b.width - action_layout.padding * 2.0).max(1.0),

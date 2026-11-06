@@ -296,7 +296,9 @@ async fn notification_actions_layout_matches_hit_regions() {
                             .enumerate()
                             .map(|(i, label)| NotificationAction {
                                 label: (*label).into(),
-                                callback_id: i.to_string(),
+                                callback_id: Some(i.to_string()),
+
+                                url: None,
                             })
                             .collect(),
                         ..Default::default()
@@ -340,10 +342,10 @@ async fn notification_actions_layout_matches_hit_regions() {
         let items = compositor.collect_text_items(&scene, 1280.0, 1080.0);
         let tokens = resolve_notification_action_tokens(&compositor.token_map);
         for region in &action_regions {
-            let ZoneInteractionKind::Action { callback_id } = &region.kind else {
+            let ZoneInteractionKind::Action { index } = &region.kind else {
                 unreachable!()
             };
-            let index = callback_id.parse::<usize>().unwrap();
+            let index = *index;
             let bounds = region.bounds;
             let fill = match index {
                 0 => tokens.background_hover,
@@ -428,7 +430,9 @@ async fn check_notification_action_row(margin: Option<f32>) {
     let card_inset = margin.unwrap_or(NOTIFICATION_INSET_DEFAULT_PX);
     let action = |label: &str| tze_hud_scene::types::NotificationAction {
         label: label.to_owned(),
-        callback_id: label.to_lowercase(),
+        callback_id: Some(label.to_lowercase()),
+
+        url: None,
     };
     let payload = |title: &str, text: &str, labels: &[&str]| NotificationPayload {
         text: text.to_owned(),
@@ -499,7 +503,11 @@ async fn check_notification_action_row(margin: Option<f32>) {
             .overlay
             .zone_hit_regions
             .iter()
-            .find(|r| matches!(&r.kind, tze_hud_scene::types::ZoneInteractionKind::Action { callback_id } if callback_id == callback))
+            .find(|r| {
+                scene
+                    .notification_action(r)
+                    .is_some_and(|a| a.callback_id.as_deref() == Some(callback))
+            })
             .unwrap_or_else(|| panic!("no hit region for {callback}"))
             .bounds
             .y
@@ -678,7 +686,9 @@ async fn notification_action_button_is_visible_and_hover_brightens_it() {
                 title: "Deploy".to_owned(),
                 actions: vec![tze_hud_scene::types::NotificationAction {
                     label: "Approve".to_owned(),
-                    callback_id: "approve".to_owned(),
+                    callback_id: Some("approve".to_owned()),
+
+                    url: None,
                 }],
             }),
             "test",

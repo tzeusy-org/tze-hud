@@ -120,7 +120,7 @@ impl NotificationLayoutCache {
                 .actions
                 .iter()
                 .take(MAX_NOTIFICATION_ACTIONS)
-                .map(|a| a.label.clone())
+                .map(|a| super::token_colors::notification_action_label(tokens, a))
                 .collect(),
             width,
             inset: notification_inset(policy, scale),

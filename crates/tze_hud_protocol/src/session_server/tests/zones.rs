@@ -173,6 +173,8 @@ async fn test_zone_publish_result() {
                                 .map(|i| crate::proto::NotificationActionProto {
                                     label: format!("Option {i}"),
                                     callback_id: format!("answer-{i}"),
+
+                                    url: String::new(),
                                 })
                                 .collect(),
                             ..Default::default()

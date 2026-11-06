@@ -750,6 +750,8 @@ mod tests {
                                 actions: vec![NotificationActionProto {
                                     label: "Yes".into(),
                                     callback_id: "yes".into(),
+
+                                    url: String::new(),
                                 }],
                                 ..Default::default()
                             },

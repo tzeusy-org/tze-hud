@@ -1034,6 +1034,24 @@ impl SceneGraph {
         removed
     }
 
+    /// Resolve a region's index only within its exact publication and publisher.
+    pub fn notification_action(&self, region: &ZoneHitRegion) -> Option<&NotificationAction> {
+        let ZoneInteractionKind::Action { index } = region.kind else {
+            return None;
+        };
+        self.zone_registry
+            .active_for_zone(&region.zone_name)
+            .iter()
+            .find(|r| {
+                r.publication_id == region.publication_id
+                    && r.publisher_namespace == region.publisher_namespace
+            })
+            .and_then(|r| match &r.content {
+                ZoneContent::Notification(n) => n.actions.get(index),
+                _ => None,
+            })
+    }
+
     /// Activate one exact, visible and unexpired notification control. Pointer
     /// releases and keyboard activation both enter here. The FIFO remains the
     /// authoritative answer; its readiness callback must run after unlocking.
@@ -1041,7 +1059,7 @@ impl SceneGraph {
         &mut self,
         region: &ZoneHitRegion,
         exit_ms: u32,
-    ) -> Option<crate::render_wake::RenderWakeNotifier> {
+    ) -> Option<super::NotificationActivation> {
         self.prune_notification_feedback();
         if !self
             .overlay
@@ -1070,13 +1088,25 @@ impl SceneGraph {
         };
         let kind = match &region.kind {
             ZoneInteractionKind::Dismiss => super::PendingActionKind::Dismiss,
-            ZoneInteractionKind::Action { callback_id }
-                if payload
-                    .actions
-                    .iter()
-                    .any(|a| &a.callback_id == callback_id) =>
-            {
-                super::PendingActionKind::Callback(callback_id.clone())
+            ZoneInteractionKind::Action { index } => {
+                let action = payload.actions.get(*index)?;
+                action.validate().ok()?;
+                if action.url.is_some() {
+                    let url = action.encoded_url().ok()?;
+                    let mono = self.now_monotonic_us();
+                    let stamp = (key, *index);
+                    if self
+                        .overlay
+                        .notification_link_attempts
+                        .get(&stamp)
+                        .is_some_and(|last| mono.saturating_sub(*last) < 2_000_000)
+                    {
+                        return None;
+                    }
+                    self.overlay.notification_link_attempts.insert(stamp, mono);
+                    return Some(super::NotificationActivation::OpenUrl(url));
+                }
+                super::PendingActionKind::Callback(action.callback_id.clone()?)
             }
             _ => return None,
         };
@@ -1126,12 +1156,14 @@ impl SceneGraph {
             self.prune_notification_feedback();
             self.version += 1;
         }
-        Some(self.push_pending_action(super::PendingAction {
-            publisher_namespace: region.publisher_namespace.clone(),
-            zone_name: region.zone_name.clone(),
-            kind,
-            key: notification_key,
-        }))
+        Some(super::NotificationActivation::Callback(
+            self.push_pending_action(super::PendingAction {
+                publisher_namespace: region.publisher_namespace.clone(),
+                zone_name: region.zone_name.clone(),
+                kind,
+                key: notification_key,
+            }),
+        ))
     }
 
     /// Drop ephemeral feedback whenever its exact publication is gone, hidden or
@@ -1175,6 +1207,19 @@ impl SceneGraph {
             })
             .map(|r| r.interaction_id.clone())
             .collect();
+        self.overlay
+            .notification_link_attempts
+            .retain(|(id, _), _| {
+                self.zone_registry
+                    .active_publishes
+                    .values()
+                    .flatten()
+                    .any(|r| {
+                        r.publication_id == *id
+                            && r.expires_at_wall_us.is_none_or(|expiry| expiry > now)
+                    })
+                    && !keys.contains(id)
+            });
         self.overlay
             .notification_choices
             .retain(|key, _| keys.contains(key));

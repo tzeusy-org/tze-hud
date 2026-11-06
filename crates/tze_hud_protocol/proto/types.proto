@@ -280,10 +280,11 @@ message MutationProto {
 // ─── Zone Types ───────────────────────────────────────────────────────────────
 
 // A single action button on a notification slot.
-// Maps to the scene-type `NotificationAction` (label + callback_id).
+// Exactly one non-empty callback_id or url target.
 message NotificationActionProto {
   string label       = 1;  // Human-readable button label (≤32 chars recommended)
-  string callback_id = 2;  // Opaque identifier forwarded to the publisher on activation
+  string callback_id = 2;  // Publisher callback, absent for links
+  string url = 3;          // HTTPS URL, absent for callbacks
 }
 
 message NotificationPayload {
@@ -291,7 +292,7 @@ message NotificationPayload {
   string icon    = 2;   // Resource name or empty
   uint32 urgency = 3;   // 0=low, 1=normal, 2=urgent, 3=critical
   string title   = 4;   // Optional: bold title for two-line layout; empty = single-line
-  repeated NotificationActionProto actions = 5;  // Optional action buttons (≤3 rendered)
+  repeated NotificationActionProto actions = 5;  // Optional action buttons (≤4 rendered)
 }
 
 message StatusBarPayload {

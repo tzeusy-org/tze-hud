@@ -38,7 +38,7 @@ pub fn tools_list_result() -> Value {
         {
             "name": "hud_publish",
             "description": "Zone: publish text or a structured object; notification is \
-                {title?,body,urgency?:0-3,actions?:[{label,callback_id}]}. Widget: typed params from hud_surfaces. \
+                {title?,body,urgency?:0-3,actions?:[{label,callback_id|url}]}. Widget: typed params from hud_surfaces. \
                 Portal: choose portal:<id>; first publish attaches, even without content. \
                 Send only new output text: content appends; same key replaces the newest matching output. \
                 Returns reattached and pending_input; poll hud_input for replies.",
