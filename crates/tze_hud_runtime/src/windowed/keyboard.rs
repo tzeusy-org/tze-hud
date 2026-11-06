@@ -3258,12 +3258,13 @@ mod tests {
             Arc::new(clock.clone()),
         ));
         let handle = driver.portal_handle();
+        let history = format!("assistant ready\n{}", "prior output\n".repeat(80));
         driver
             .hub_mut()
             .publish(
                 &tze_hud_projection::hub::PortalKey::new("test-agent", "proj-npcdf"),
                 tze_hud_projection::hub::Publish {
-                    text: Some(format!("assistant ready\n{}", "prior output\n".repeat(30))),
+                    text: Some(history.clone()),
                     ..Default::default()
                 },
                 100,
@@ -3327,7 +3328,15 @@ mod tests {
 
         // Seed an overflowing history so there is a nonzero scrollable range
         // (mirrors the authority echo growing the transcript).
-        processor.notify_tile_content_appended(tile_id, 30.0 * 21.0, 200.0, 21.0, &mut scene);
+        let line_height =
+            tze_hud_projection::tokens::PortalVisualTokens::default().transcript_font_size_px * 1.4;
+        processor.notify_tile_content_appended(
+            tile_id,
+            history.lines().count() as f32 * line_height,
+            tile_bounds.height,
+            line_height,
+            &mut scene,
+        );
 
         let (mut app, _rx) = make_windowed_keyboard_test_app(scene, focus_manager, processor);
         app.state.portal_projection_driver = driver;
