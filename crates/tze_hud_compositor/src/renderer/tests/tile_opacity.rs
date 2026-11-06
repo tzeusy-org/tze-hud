@@ -389,7 +389,6 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
             bounds.x as u32 + (header_bounds.width - 8.0) as u32,
             bounds.y as u32 + (header_bounds.height * 0.5) as u32,
         );
-        eprintln!("[hud-1wizi-opacity] {phase}: output={output:?}, header={header:?}");
         let settled = *settled_output_alpha.get_or_insert(output[3]);
         assert!(settled > 250, "default settled output must be opaque");
         assert_eq!(
