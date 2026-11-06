@@ -100,8 +100,9 @@ status entry, notification stream or portal.
 - **Replies:** use a session-named portal when a short typed answer or compact
   ongoing exchange is useful and its presentation is accepted. The current
   default portal is owner-rejected (2026-11-04): drag makes it transparent
-  (`hud-1wizi`) and its base card needs 3× the width and height at the existing
-  font size. Keep ordinary exchanges in chat until those defects are resolved;
+  (`hud-1wizi`). The latest owner size direction (2026-11-06) is 2× the width
+  and 3× the height at the existing base font: 1440×1080 before display fitting.
+  Keep ordinary exchanges in chat until those defects are resolved;
   use the portal only for an explicit validation step meanwhile. Do not mirror
   every chat message or open a portal for each subagent. The owner's normal
   coding workload is 4–12 main sessions, excluding subagents; keep attention
