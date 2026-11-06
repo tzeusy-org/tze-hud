@@ -444,7 +444,8 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
             json!({
                 "surface":"zone:notification-area", "delay_ms":delay_ms, "ttl_ms":0,
                 "content":{"body":"Choose", "actions":(0..count)
-                    .map(|i| json!({"label":format!("Option {i}"), "callback_id":format!("answer-{i}")}))
+                    .map(|i| if i%2==0 {json!({"label":format!("Option {i}"),"callback_id":format!("answer-{i}")})}
+                        else {json!({"label":format!("Option {i}"),"url":format!("https://example.com/{i}")})})
                     .collect::<Vec<_>>()}
             })
         };

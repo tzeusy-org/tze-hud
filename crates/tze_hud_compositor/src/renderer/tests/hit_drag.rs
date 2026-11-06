@@ -1208,9 +1208,8 @@ async fn drag_visual_feedback_applied_during_active_drag() {
                         actions: (0..if count == 3 { 4 } else { 0 })
                             .map(|n| NotificationAction {
                                 label: format!("Action {n}"),
-                                callback_id: Some(format!("action-{n}")),
-
-                                url: None,
+                                callback_id: (n != 0).then(|| format!("action-{n}")),
+                                url: (n == 0).then(|| "https://example.com/scale".into()),
                             })
                             .collect(),
                     }),

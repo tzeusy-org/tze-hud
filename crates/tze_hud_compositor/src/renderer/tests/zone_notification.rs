@@ -297,9 +297,8 @@ async fn notification_actions_layout_matches_hit_regions() {
                             .enumerate()
                             .map(|(i, label)| NotificationAction {
                                 label: (*label).into(),
-                                callback_id: Some(i.to_string()),
-
-                                url: None,
+                                callback_id: (i % 2 == 0).then(|| i.to_string()),
+                                url: (i % 2 == 1).then(|| format!("https://example.com/{i}")),
                             })
                             .collect(),
                         ..Default::default()

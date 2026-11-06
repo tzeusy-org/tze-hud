@@ -1431,11 +1431,7 @@ mod tests {
                 .unwrap();
             assert_eq!(url, "https://example.com/frame");
             assert_ne!(worker, std::thread::current().id());
-            runtime
-                .events
-                .scene()
-                .create_tab("frame during blocked opener", 0)
-                .unwrap();
+            runtime.events.scene().bump_geometry_epoch();
             let before = runtime.events.app.state.wake.counters().snapshot();
             assert!(
                 runtime.turn(true),
