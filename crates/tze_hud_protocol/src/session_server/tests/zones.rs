@@ -121,6 +121,43 @@ async fn test_zone_publish_result() {
             scene.next_timed_content_wall_us(),
         )
     };
+    // Plain proto3 defaults carry neither target, so they must reject.
+    for (sequence, delay) in [(900, 0), (901, 1_000_000)] {
+        let result = request(
+            &tx,
+            &mut stream,
+            sequence,
+            ClientPayload::Publish(Publish {
+                surface: "zone:notification-area".into(),
+                content: Some(crate::proto::ZoneContent {
+                    payload: Some(crate::proto::zone_content::Payload::Notification(
+                        crate::proto::NotificationPayload {
+                            text: "No target".into(),
+                            actions: vec![crate::proto::NotificationActionProto {
+                                label: "Open".into(),
+                                ..Default::default()
+                            }],
+                            ..Default::default()
+                        },
+                    )),
+                }),
+                present_at_us: if delay == 0 { 0 } else { now_wall_us() + delay },
+                ..Default::default()
+            }),
+        )
+        .await;
+        assert!(!result.ok, "empty target must reject: {result:?}");
+        assert_eq!(result.code, "INVALID_ARGUMENT");
+        assert_eq!(
+            result.hint,
+            super::verbs::fail(
+                sequence,
+                "INVALID_ARGUMENT",
+                "action needs callback_id or url, not both"
+            )
+            .hint
+        );
+    }
     let mut seq = 4;
     for delay_us in [0, 1_000_000] {
         let publish = |count| {

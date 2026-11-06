@@ -388,6 +388,23 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
         assert!(err["hint"].as_str().unwrap().contains(hint), "{err}");
     }
 
+    // Target exclusivity is checked before either admission or scheduling.
+    for delay in [0, 1_000] {
+        let err = call_err(
+            &server,
+            "hud_publish",
+            json!({
+                "surface":"zone:notification-area", "delay_ms":delay,
+                "content":{"body":"Open", "actions":[
+                    {"label":"Open", "callback_id":"open", "url":"https://example.com/"}
+                ]}
+            }),
+        )
+        .await;
+        assert_eq!(err["code"], "INVALID_ARGUMENT");
+        assert_eq!(err["hint"], "action needs callback_id or url, not both");
+    }
+
     // The same cardinality rule applies before immediate admission and scheduling.
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tze_hud_scene::types::MAX_NOTIFICATION_ACTIONS;
