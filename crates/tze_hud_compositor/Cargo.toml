@@ -38,6 +38,7 @@ rayon = { workspace = true }
 windows = { workspace = true }
 
 [dev-dependencies]
+tze_hud_projection = { path = "../tze_hud_projection", version = "0.1.0" }
 tracing-subscriber = { workspace = true }
 serde_json = { workspace = true }
 tze_hud_mcp = { path = "../tze_hud_mcp", version = "0.1.0" }

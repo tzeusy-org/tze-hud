@@ -262,6 +262,145 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
             "position and feedback leave content unchanged"
         );
     }
+
+    // The production expanded portal has rounded panes behind a transparent
+    // transcript. Exercise the actual overlay REPLACE encoder across the
+    // degradation transitions seen during native dragging, not headless blending.
+    use tze_hud_projection::{
+        ComposerStatus, PortalView, ProjectedPortalPresentation,
+        render::{DEFAULT_PORTAL_SIZE, render},
+        tokens::PortalVisualTokens,
+    };
+    let view = PortalView {
+        portal_id: "opacity".into(),
+        presentation: ProjectedPortalPresentation::Expanded,
+        connection_degraded: false,
+        has_ever_connected: true,
+        interaction_enabled: true,
+        composer: ComposerStatus::Ready,
+        display_name: Some("Opacity".into()),
+        lifecycle_state: None,
+        status_text: None,
+        visible_transcript: vec![],
+        input_history: vec![],
+        unread_output_count: Some(0),
+        visible_unread_output_count: Some(0),
+        pending_input_count: Some(0),
+        latest_viewer_delivery_state: None,
+        last_input_feedback: None,
+    };
+    let rendered = render(
+        &view,
+        &PortalVisualTokens::default(),
+        DEFAULT_PORTAL_SIZE,
+        0,
+    );
+    let output_pane = rendered
+        .surface
+        .parts
+        .iter()
+        .find(|part| part.kind == PortalPartKind::Transcript)
+        .unwrap()
+        .bounds;
+    let header_bounds = rendered
+        .surface
+        .parts
+        .iter()
+        .find(|part| part.kind == PortalPartKind::Header)
+        .unwrap()
+        .bounds;
+    let transcript_bounds = rendered
+        .children
+        .iter()
+        .find_map(|node| match &node.data {
+            NodeData::TextMarkdown(text)
+                if text.bounds.x >= output_pane.x && text.bounds.height > 100.0 =>
+            {
+                Some(text.bounds)
+            }
+            _ => None,
+        })
+        .expect("expanded transcript");
+    let output_sample = (
+        (transcript_bounds.x + transcript_bounds.width - 8.0) as u32,
+        (transcript_bounds.y + transcript_bounds.height - 8.0) as u32,
+    );
+    let mut scene = SceneGraph::new(800.0, 480.0);
+    let tab = scene.create_tab("portal", 0).unwrap();
+    let lease = scene.grant_lease("portal", 60_000);
+    let tile_id = scene
+        .create_tile(tab, "portal", lease, Rect::new(10.0, 10.0, 720.0, 360.0), 1)
+        .unwrap();
+    scene
+        .set_tile_root_tree(tile_id, rendered.root, rendered.children)
+        .unwrap();
+    scene
+        .register_tile_scroll_config(tile_id, TileScrollConfig::vertical())
+        .unwrap();
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    compositor.build_windowed_frame(&mut scene, 800, 480);
+    compositor.portal_tile_anim_states.clear(); // settled attachment, as above
+    let version = scene.version;
+    let mut settled_output_alpha = None;
+    for (phase, level) in [
+        ("settled", DegradationLevel::Nominal),
+        ("activated", DegradationLevel::Nominal),
+        ("drag simplified", DegradationLevel::Simplified),
+        ("moved simplified", DegradationLevel::Simplified),
+        ("drag recovered", DegradationLevel::Nominal),
+        ("released", DegradationLevel::Nominal),
+        ("released simplified", DegradationLevel::Simplified),
+        ("released recovered", DegradationLevel::Nominal),
+    ] {
+        match phase {
+            "activated" => scene.set_drag_active(tile_id),
+            "moved simplified" => {
+                let tile = scene.tiles.get_mut(&tile_id).unwrap();
+                tile.bounds.x += 5.0;
+                tile.bounds.y += 5.0;
+                scene.bump_geometry_epoch();
+            }
+            "released" => scene.clear_drag_active(tile_id),
+            _ => {}
+        }
+        compositor.set_degradation_policy(CompositorDegradationPolicy {
+            level,
+            ..Default::default()
+        });
+        let build = compositor.build_windowed_frame(&mut scene, 800, 480);
+        let frame = compositor
+            .capture_windowed_frame(
+                &build,
+                &crate::FrameTarget::primary(800, 480),
+                wgpu::TextureFormat::Rgba8UnormSrgb,
+            )
+            .expect("real windowed overlay capture");
+        let bounds = scene.tiles[&tile_id].bounds;
+        let output = crate::test_pixels::pixel_at(
+            &frame.rgba,
+            frame.width,
+            bounds.x as u32 + output_sample.0,
+            bounds.y as u32 + output_sample.1,
+        );
+        let header = crate::test_pixels::pixel_at(
+            &frame.rgba,
+            frame.width,
+            bounds.x as u32 + (header_bounds.width - 8.0) as u32,
+            bounds.y as u32 + (header_bounds.height * 0.5) as u32,
+        );
+        let settled = *settled_output_alpha.get_or_insert(output[3]);
+        assert!(settled > 250, "default settled output must be opaque");
+        assert_eq!(
+            output[3], settled,
+            "{phase}: output backdrop must survive degradation and drag"
+        );
+        assert!(header[3] > 250, "{phase}: header control must stay opaque");
+        assert_eq!(
+            scene.version, version,
+            "drag and degradation leave content unchanged"
+        );
+    }
 }
 
 // ─── hud-b0x0m: every tile node fill type fades with the tile, not just the ──

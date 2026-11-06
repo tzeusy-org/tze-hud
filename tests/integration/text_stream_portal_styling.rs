@@ -93,7 +93,7 @@ fn portal_node_uses_injected_visual_tokens() {
     assert_eq!(body.color, Rgba::new(1.0, 0.0, 0.0, 1.0));
     assert_eq!(body.font_size_px, 23.0);
     // Pane backgrounds are separate native nodes; text is transparent above them.
-    assert_eq!(body.background, Some(Rgba::TRANSPARENT));
+    assert_eq!(body.background, None);
     let solids: Vec<_> = expanded
         .children
         .iter()
