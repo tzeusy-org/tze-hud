@@ -2213,6 +2213,13 @@ impl WinitApp {
     }
 
     pub(super) fn notification_pointer_permitted(&self) -> bool {
+        if self
+            .state
+            .safe_mode_atomic
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return false;
+        }
         #[cfg(test)]
         if chrome_capture_under_test() {
             return native_chrome_permits(self.state.press_window);
