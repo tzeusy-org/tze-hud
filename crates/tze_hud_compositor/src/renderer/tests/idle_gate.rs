@@ -472,6 +472,34 @@ async fn idle_with_notification_renders_only_at_fade() {
             .collect();
     }
     compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    let link = scene
+        .overlay
+        .zone_hit_regions
+        .iter()
+        .find(|r| matches!(r.kind, ZoneInteractionKind::Action { index: 0 }))
+        .unwrap()
+        .clone();
+    if let ZoneContent::Notification(n) = &mut scene
+        .zone_registry
+        .active_publishes
+        .get_mut("notification-area")
+        .unwrap()[0]
+        .content
+    {
+        n.actions[0].callback_id = None;
+        n.actions[0].url = Some("https://example.com/idle".into());
+    }
+    let timed = scene.next_timed_content_wall_us();
+    let version = scene.version;
+    assert!(matches!(
+        scene.activate_notification(&link, 240),
+        Some(tze_hud_scene::graph::NotificationActivation::OpenUrl(_))
+    ));
+    assert!(scene.pending_actions.is_empty());
+    assert!(scene.overlay.notification_choices.is_empty());
+    assert_eq!(scene.version, version);
+    assert_eq!(scene.next_timed_content_wall_us(), timed);
+    assert!(!compositor.has_inflight_animation(&scene));
     let action = scene
         .overlay
         .zone_hit_regions

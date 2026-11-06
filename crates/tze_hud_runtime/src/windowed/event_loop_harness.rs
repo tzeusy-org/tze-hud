@@ -1387,10 +1387,16 @@ mod tests {
             }));
             {
                 let mut scene = runtime.events.scene();
-                let zone = tze_hud_scene::ZoneRegistry::with_defaults()
+                let mut zone = tze_hud_scene::ZoneRegistry::with_defaults()
                     .zones
                     .remove("notification-area")
                     .unwrap();
+                zone.geometry_policy = tze_hud_scene::GeometryPolicy::Relative {
+                    x_pct: 0.0,
+                    y_pct: 0.0,
+                    width_pct: 1.0,
+                    height_pct: 1.0,
+                };
                 scene.register_zone(zone);
                 scene
                     .publish_to_zone(
@@ -2858,8 +2864,13 @@ mod tests {
             assert_eq!(url, "https://xn--xample-9ua.com/a%22b");
             assert_ne!(thread, std::thread::current().id());
             for elapsed in [0, 1999] {
+                let before = harness.app.state.notification_link_opener.workers.len();
                 clock.advance(elapsed);
                 click(&mut harness, points[0]);
+                assert_eq!(
+                    harness.app.state.notification_link_opener.workers.len(),
+                    before
+                );
                 assert!(rx.try_recv().is_err());
             }
             clock.advance(1);
@@ -2883,10 +2894,15 @@ mod tests {
             );
             // Failed spawn still stamps the accepted attempt, before dispatch.
             clock.advance(2000);
+            let before = harness.app.state.notification_link_opener.workers.len();
             harness.app.state.notification_link_opener.fail_spawn = true;
             click(&mut harness, points[0]);
             harness.app.state.notification_link_opener.fail_spawn = false;
             click(&mut harness, points[0]);
+            assert_eq!(
+                harness.app.state.notification_link_opener.workers.len(),
+                before
+            );
             assert!(rx.try_recv().is_err());
             clock.advance(2000);
             click(&mut harness, points[0]);
@@ -4727,7 +4743,12 @@ mod tests {
                 rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap(),
                 "https://example.com/key"
             );
+            let attempts = harness.app.state.notification_link_opener.workers.len();
             press(&mut harness, code, key, false);
+            assert_eq!(
+                harness.app.state.notification_link_opener.workers.len(),
+                attempts
+            );
             assert!(rx.try_recv().is_err());
             assert_eq!(harness.scene().overlay.notification_focus, focused);
             assert!(take_action_ids(&harness).is_empty());
@@ -4739,6 +4760,10 @@ mod tests {
                 .safe_mode_atomic
                 .store(true, std::sync::atomic::Ordering::Release);
             press(&mut harness, code, key, false);
+            assert_eq!(
+                harness.app.state.notification_link_opener.workers.len(),
+                attempts
+            );
             assert!(rx.try_recv().is_err());
             harness
                 .app
