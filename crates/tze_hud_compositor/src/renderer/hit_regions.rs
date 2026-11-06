@@ -462,24 +462,17 @@ fn populate_notification_hit_regions_in(
                         notification_inset(policy, scale),
                     );
 
-                for (index, (action, action_bounds)) in
+                for (index, (_action, action_bounds)) in
                     n_payload.actions.iter().zip(action_rects).enumerate()
                 {
-                    let action_id = notification_action_interaction_id(
-                        zone_name,
-                        record,
-                        &action.callback_id,
-                        index,
-                    );
+                    let action_id = notification_action_interaction_id(zone_name, record, index);
                     scene.overlay.zone_hit_regions.push(ZoneHitRegion {
                         zone_name: zone_name.clone(),
                         publication_id: record.publication_id,
                         published_at_wall_us: record.published_at_wall_us,
                         publisher_namespace: record.publisher_namespace.clone(),
                         bounds: action_bounds,
-                        kind: ZoneInteractionKind::Action {
-                            callback_id: action.callback_id.clone(),
-                        },
+                        kind: ZoneInteractionKind::Action { index },
                         interaction_id: action_id,
                         tab_order,
                     });
@@ -509,12 +502,11 @@ pub(super) fn notification_dismiss_interaction_id(
 pub(super) fn notification_action_interaction_id(
     zone_name: &str,
     record: &ZonePublishRecord,
-    callback_id: &str,
     index: usize,
 ) -> String {
     format!(
-        "zone:{}:action:{}:{}:{}:{}",
-        zone_name, record.publication_id, record.publisher_namespace, index, callback_id,
+        "zone:{}:action:{}:{}:{}",
+        zone_name, record.publication_id, record.publisher_namespace, index,
     )
 }
 

@@ -14,6 +14,7 @@ pub(super) struct NotificationActionLayout {
     pub(super) heights: Vec<f32>,
     pub(super) gap: f32,
     pub(super) padding: f32,
+    pub(super) link_marks: Vec<Option<(String, f32)>>,
 }
 impl NotificationActionLayout {
     pub(super) fn reserve(&self, inset: f32) -> f32 {
@@ -63,6 +64,7 @@ impl NotificationActionLayout {
 #[derive(PartialEq)]
 struct LayoutInputs {
     labels: Vec<String>,
+    link_marks: Vec<Option<String>>,
     width: f32,
     inset: f32,
     font: FontFamily,
@@ -120,7 +122,23 @@ impl NotificationLayoutCache {
                 .actions
                 .iter()
                 .take(MAX_NOTIFICATION_ACTIONS)
-                .map(|a| a.label.clone())
+                .map(|a| super::token_colors::notification_action_label(tokens, a))
+                .collect(),
+            link_marks: payload
+                .actions
+                .iter()
+                .take(MAX_NOTIFICATION_ACTIONS)
+                .map(|a| {
+                    a.url.as_ref().map(|_| {
+                        format!(
+                            " {}",
+                            tokens
+                                .get("notification.action.link_mark")
+                                .map(String::as_str)
+                                .unwrap_or("↗")
+                        )
+                    })
+                })
                 .collect(),
             width,
             inset: notification_inset(policy, scale),
@@ -165,8 +183,28 @@ impl NotificationLayoutCache {
         self.shapes += measured;
         let height = (inputs.size * 1.4 + inputs.padding * 2.0).max(inputs.minimum_height);
         let heights = vec![height; inputs.labels.len()];
+        let link_marks = inputs
+            .link_marks
+            .iter()
+            .map(|mark| {
+                mark.as_ref().map(|mark| {
+                    self.shapes += 1;
+                    (
+                        mark.clone(),
+                        crate::text::single_line_width(
+                            fonts,
+                            mark,
+                            inputs.size,
+                            inputs.font,
+                            inputs.weight,
+                        ),
+                    )
+                })
+            })
+            .collect();
         let layout = NotificationActionLayout {
             stacked,
+            link_marks,
             heights,
             gap: inputs.gap,
             padding: inputs.padding,

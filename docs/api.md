@@ -61,8 +61,18 @@ otherwise. Scheduled zone publications count as held before presentation;
 
 - Zone: `content` is a string, or a typed object for structured zones
   (`notification` with optional `title`, `body`, integer `urgency` 0–3
-  (default 1), and optional `actions: [{label, callback_id}]`; both action
-  fields are non-empty strings). Both MCP and gRPC accept at most 4 actions
+  (default 1), and optional `actions: [{label, callback_id|url}]`). Each
+  action has exactly one target. MCP requires a non-empty label; a callback string must be
+  non-empty when supplied. Supplying both target members (even empty) or neither rejects with
+  `INVALID_ARGUMENT` and hint `action needs callback_id or url, not both`.
+  An empty URL gets `action url must be https`; an empty callback retains
+  its existing non-empty argument error. gRPC plain-string defaults map empty
+  targets to absence: both empty or both non-empty reject; existing gRPC label
+  admission is unchanged. URLs must parse as HTTPS with a non-empty host and
+  contain at most 2048 supplied UTF-8 bytes; every URL failure uses
+  `action url must be https`. No network probe is performed. Both planes
+  validate the whole payload before immediate admission or deferred scheduling.
+  Both MCP and gRPC accept at most 4 mixed callback/link actions
   (`MAX_NOTIFICATION_ACTIONS`); excess actions reject the whole publish with
   `INVALID_ARGUMENT` and hint `notification allows at most 4 actions`, before
   admission or scheduling. Notification actions form a choice card: four equal
@@ -89,7 +99,7 @@ otherwise. Scheduled zone publications count as held before presentation;
   whose every value is a string; an empty string removes that entry.
   Notification TTL belongs at the publish's top-level `ttl_ms`; an inner
   `content.ttl_ms` is rejected with a hint to move it.
-  Activating an action queues its unchanged `hud_input` callback once and
+  Activating a callback action queues its unchanged `hud_input` callback once and
   immediately disables all controls on that exact publication. Runtime identity
   keeps same-tick publications and replacements independent without changing
   their wall-clock timestamps or TTLs. The chosen button keeps its pressed fill during the finite `motion.exit.ms` fade
@@ -105,6 +115,22 @@ otherwise. Scheduled zone publications count as held before presentation;
   Enter/Space uses the same exact-publication activation as pointer release. Publication
   never activates an OS window or steals editor focus; Escape, completion and
   removal release local card focus. Panel and shell routing retain precedence.
+  Link actions use that same pointer/keyboard operation and exact live
+  publication plus zero-based action index. A link leaves the card, lifetime,
+  hold, focus and controls in place: no callback, readiness event, human-X or
+  chosen exit is produced. Per publication/index, accepted launch attempts
+  are limited to one every 2 monotonic seconds, including failures; other
+  buttons/cards are independent, and retirement removes the transient state.
+  The runtime sends the parser-serialized encoded URL (including encoded IDN
+  host/path) to an unlocked dedicated Windows COM worker using
+  `ShellExecuteExW` verb `open`, without a shell command or event-loop wait.
+  Non-Windows logs a no-op. Failures log operation/error without the URL and
+  leave the card unchanged. Native permission, focus/cancellation, owner
+  hiding and safe mode still govern activation. A trailing
+  `notification.action.link_mark` (default ↗) shares the resolved action font,
+  color and scale; layout reserves its shaped width separately from the
+  clipped label. Browser foreground and card-stays behavior remain a
+  separate Windows owner acceptance check.
 - `zone:ambient-background` draws its fill or image at most
   `opacity.ambient.max` (0.9 by default) opaque, so the desktop under the
   overlay always shows through.
@@ -433,7 +459,10 @@ down to the lifecycle.
 `Publish.key` remains wire field 7. `Clear.key` is additive string field 2;
 its empty protobuf default preserves old clients. Keyed notification replacement,
 selective clear, byte validation and authenticated publisher isolation match MCP.
-There is no new gRPC notification callback/dismiss stream.
+`NotificationActionProto` adds only `string url = 3`; label (1) and
+callback_id (2) retain their wire identities. An absent/default URL with a valid
+callback preserves callback behavior. There is no new gRPC notification
+callback/dismiss stream.
 
 Public `ClaimTile`, `MutationBatch`, `SceneSnapshot`, `Reclaimed`, placement
 and tile surfaces are removed. Their wire tags and names stay reserved.
@@ -828,7 +857,7 @@ color overrides still take precedence.
 | Surfaces | `color.surface`, `color.surface.container`, `color.surface.container.{low,high,highest}`, `opacity.surface`, `opacity.scrim` |
 | Roles | `color.on_surface[.variant]`, `color.outline[.variant]`, `color.primary`, `color.on_primary`, `color.[on_]primary.container`, `color.success`, `color.caution`, `color.error`, `color.[on_]caution.container`, `color.[on_]error.container` |
 | State | `state.hover.opacity`, `state.pressed.opacity`, `focus.ring.width`, `focus.ring.offset` |
-| Choice actions | `notification.action.{height,gap,padding}_px`, `notification.action.background{,_hover,_pressed}`, `typography.notification.action.{font_size_px,font_weight}` |
+| Choice actions | `notification.action.link_mark`, `notification.action.{height,gap,padding}_px`, `notification.action.background{,_hover,_pressed}`, `typography.notification.action.{font_size_px,font_weight}` |
 | Motion | `motion.{enter,exit,state}.ms`, `motion.{enter,exit}.easing` (`linear`, `standard`, `decelerate`, `accelerate`) |
 | Shape | `shape.{xs,s,m,l,xl,full}` (corner radius) |
 | Spacing | `space.{xs,s,m,l,xl,xxl}` (4 px grid) |
@@ -903,7 +932,7 @@ baselined against regressions.
 
 | Measure | Before T5 (wire) | Wire | Model-visible | Budget (model-visible) |
 |---|---|---|---|---|
-| `tools/list` | 4,418 | 599 | 562 | ≤ 900 |
+| `tools/list` | 4,418 | 601 | 564 | ≤ 900 |
 | Discover (default scene) | ~430 (`list_zones`) | 181 | 113 | ≤ 150 |
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
 | Four-option notification ask + returned answer + ACK | — | 273 | 114 | ≤ 120 |
@@ -912,10 +941,11 @@ baselined against regressions.
 | Discover (`production.toml`: 6 zones, 3 built-in widgets) | n/a | n/a | ~232 | ≤ 250 |
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
 
-All seven measurements use canonical flow version 4. Runtime calibration of
-notification keys against actual merged main `8a94fcf7` changes `tools/list`
-from 2,248 to 2,451 model-visible UTF-8 bytes and 517 to 562 o200k tokens
-(+203 bytes, +45 tokens). The tokenizer is `tiktoken-rs` 0.12.0, `o200k_base`.
+All seven measurements use canonical flow version 4. F7 source calibration
+on `53ef94b3` against the
+retained `b52bc65c` baseline changes `tools/list` from 2,451 to 2,455
+model-visible UTF-8 bytes and 562 to 564 o200k tokens (+4 bytes, +2 tokens).
+The tokenizer is `tiktoken-rs` 0.12.0, `o200k_base`.
 The five other established flows and the complete choice flow retain identical
 request/response fingerprints and metrics; every ceiling is unchanged.
 The complete choice remains 114 tokens (69 ask + 28 retained answer + 17 ACK).

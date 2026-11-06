@@ -2199,7 +2199,27 @@ impl WinitApp {
         }
     }
 
+    /// The scene committed this outcome; no shared-state or scene guard survives.
+    pub(super) fn deliver_notification_activation(
+        &mut self,
+        outcome: tze_hud_scene::graph::NotificationActivation,
+    ) {
+        match outcome {
+            tze_hud_scene::graph::NotificationActivation::Callback(wake) => wake.notify(),
+            tze_hud_scene::graph::NotificationActivation::OpenUrl(url) => {
+                self.state.notification_link_opener.launch(url)
+            }
+        }
+    }
+
     pub(super) fn notification_pointer_permitted(&self) -> bool {
+        if self
+            .state
+            .safe_mode_atomic
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return false;
+        }
         #[cfg(test)]
         if chrome_capture_under_test() {
             return native_chrome_permits(self.state.press_window);
@@ -2554,7 +2574,7 @@ impl WinitApp {
         // `portal_resize_outcome` carries the geometry snapshot from a pointer-driven
         // portal resize step so that `dispatch_portal_geometry_event` can be called
         // without holding the scene lock.
-        let mut pending_action_wakes = Vec::new();
+        let mut pending_notification_outcomes = Vec::new();
         let drag_released: Option<DragRelease>;
         let portal_resize_outcome: Option<PortalResizePointerOutcome>;
         // Flag set when a composer focus-lost transition is detected inside the
@@ -2879,7 +2899,7 @@ impl WinitApp {
                                     if let Some(wake) =
                                         scene.activate_notification(&region, exit_ms)
                                     {
-                                        pending_action_wakes.push(wake);
+                                        pending_notification_outcomes.push(wake);
                                     }
                                 }
                             }
@@ -3055,8 +3075,8 @@ impl WinitApp {
         }
 
         // The accepted input is committed and both scene/state guards are gone.
-        for notifier in pending_action_wakes {
-            notifier.notify();
+        for outcome in pending_notification_outcomes {
+            self.deliver_notification_activation(outcome);
         }
 
         // A press the scene lock never saw cannot arm a zone affordance.

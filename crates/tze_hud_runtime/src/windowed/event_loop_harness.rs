@@ -59,6 +59,7 @@ use tze_hud_input::{
     RawCharacterEvent, RawKeyDownEvent, RawKeyUpEvent,
 };
 use tze_hud_scene::graph::SceneGraph;
+#[cfg(test)]
 use tze_hud_scene::types::ZoneInteractionKind;
 use tze_hud_scene::{Clock, MonoUs, NodeData, SceneId};
 #[cfg(test)]
@@ -182,6 +183,7 @@ impl WindowedRuntimeState {
             overlay_refits: Default::default(),
             press_window: None,
             zone_press: None,
+            notification_link_opener: Default::default(),
             context_menu_press: None,
             context_menu_open: false,
             context_menu_dismiss_pending: false,
@@ -963,15 +965,25 @@ impl HeadlessEventLoopHarness {
     /// whose callback is `callback_id`, as hit-tested after the last
     /// [`Self::tick`].
     pub fn notification_action_center(&self, callback_id: &str) -> Option<(f32, f32)> {
+        self.notification_target_center(|a| a.callback_id.as_deref() == Some(callback_id))
+    }
+
+    /// Display center of a live link, using the compositor's exact action index.
+    pub fn notification_link_center(&self, url: &str) -> Option<(f32, f32)> {
+        self.notification_target_center(|a| a.url.as_deref() == Some(url))
+    }
+
+    fn notification_target_center(
+        &self,
+        matches: impl Fn(&tze_hud_scene::NotificationAction) -> bool,
+    ) -> Option<(f32, f32)> {
         let state = self.app.state.shared_state.try_lock().ok()?;
         let scene = state.scene.try_lock().ok()?;
         scene
             .overlay
             .zone_hit_regions
             .iter()
-            .find(|region| {
-                matches!(&region.kind, ZoneInteractionKind::Action { callback_id: id } if id == callback_id)
-            })
+            .find(|region| scene.notification_action(region).is_some_and(&matches))
             .map(|region| {
                 (
                     region.bounds.x + region.bounds.width / 2.0,
@@ -1847,6 +1859,111 @@ mod tests {
             );
             assert_eq!(trace[rendered]["success"], true);
         }
+        {
+            let (entered_tx, entered_rx) = std::sync::mpsc::channel();
+            let (release_tx, release_rx) = std::sync::mpsc::channel();
+            let release = Arc::new(std::sync::Mutex::new(release_rx));
+            let shared = runtime.events.shared_state();
+            runtime.events.app.state.notification_link_opener.worker = Some(Arc::new(move |url| {
+                let state = shared
+                    .try_lock()
+                    .expect("worker owns no shared-state guard");
+                assert!(state.scene.try_lock().is_ok(), "worker owns no scene guard");
+                drop(state);
+                entered_tx.send((url, std::thread::current().id())).unwrap();
+                release.lock().unwrap().recv().unwrap();
+                Ok(())
+            }));
+            {
+                let mut scene = runtime.events.scene();
+                let mut zone = tze_hud_scene::ZoneRegistry::with_defaults()
+                    .zones
+                    .remove("notification-area")
+                    .unwrap();
+                zone.geometry_policy = tze_hud_scene::GeometryPolicy::Relative {
+                    x_pct: 0.0,
+                    y_pct: 0.0,
+                    width_pct: 1.0,
+                    height_pct: 1.0,
+                };
+                scene.register_zone(zone);
+                scene
+                    .publish_to_zone(
+                        "notification-area",
+                        tze_hud_scene::ZoneContent::Notification(
+                            tze_hud_scene::NotificationPayload {
+                                text: "Blocked browser".into(),
+                                actions: vec![tze_hud_scene::NotificationAction {
+                                    label: "Open".into(),
+                                    callback_id: None,
+                                    url: Some("https://example.com/frame".into()),
+                                }],
+                                ..Default::default()
+                            },
+                        ),
+                        "fixture",
+                        None,
+                        None,
+                        None,
+                    )
+                    .unwrap();
+            }
+            assert!(runtime.events.tick());
+            let point = runtime
+                .events
+                .notification_link_center("https://example.com/frame")
+                .unwrap();
+            runtime.events.click(point.0, point.1);
+            runtime.events.drain();
+            let (url, worker) = entered_rx
+                .recv_timeout(std::time::Duration::from_secs(2))
+                .unwrap();
+            assert_eq!(url, "https://example.com/frame");
+            assert_ne!(worker, std::thread::current().id());
+            // The worker is still waiting on release_rx. Drive the actual
+            // pending-keyboard drain and observe local consumption before
+            // releasing it, independently of the frame/scene progress below.
+            assert!(runtime.events.scene().overlay.notification_focus.is_none());
+            runtime.events.enqueue(key_down("Tab", "Tab", 2_000));
+            runtime.events.drain();
+            assert!(runtime.events.scene().overlay.notification_focus.is_some());
+            assert_eq!(runtime.events.app.state.notification_keydowns.len(), 1);
+            runtime.events.enqueue(key_up("Tab", "Tab", 2_100));
+            runtime.events.drain();
+            assert!(runtime.events.app.state.notification_keydowns.is_empty());
+            assert!(runtime.events.app.state.pending_keyboard_events.is_empty());
+            assert!(runtime.events.scene().pending_actions.is_empty());
+            runtime.events.scene().bump_geometry_epoch();
+            let before = runtime.events.app.state.wake.counters().snapshot();
+            assert!(
+                runtime.turn(true),
+                "real frame preparation advances while opener waits"
+            );
+            let after = runtime.events.app.state.wake.counters().snapshot();
+            assert_eq!(after.presents, before.presents + 1);
+            assert_eq!(
+                after.gpu_queue_submissions,
+                before.gpu_queue_submissions + 1
+            );
+            assert!(runtime.events.scene().pending_actions.is_empty());
+            release_tx.send(()).unwrap();
+            for worker in runtime
+                .events
+                .app
+                .state
+                .notification_link_opener
+                .workers
+                .drain(..)
+            {
+                worker.join().unwrap();
+            }
+            runtime
+                .events
+                .scene()
+                .clear_zone("notification-area")
+                .unwrap();
+            runtime.turn(true);
+        }
     }
 
     fn character(ch: &str, ts: u64) -> PendingKeyboardEvent {
@@ -1905,6 +2022,10 @@ mod tests {
     /// A harness showing one notification with Approve and Reject actions,
     /// ticked so its hit regions are live.
     fn approve_reject_notification_harness() -> HeadlessEventLoopHarness {
+        approve_reject_notification_harness_on(Arc::new(tze_hud_scene::TestClock::new(1_000)))
+    }
+
+    fn approve_reject_notification_harness_on(clock: Arc<dyn Clock>) -> HeadlessEventLoopHarness {
         use tze_hud_scene::{
             ContentionPolicy, GeometryPolicy, LayerAttachment, NotificationAction,
             NotificationPayload, RenderingPolicy, ZoneContent, ZoneDefinition, ZoneMediaType,
@@ -1914,11 +2035,7 @@ mod tests {
         {
             let shared = harness.app.state.shared_state.blocking_lock();
             let mut scene = shared.scene.blocking_lock();
-            *scene = SceneGraph::new_with_clock(
-                1920.0,
-                1080.0,
-                Arc::new(tze_hud_scene::TestClock::new(1_000)),
-            );
+            *scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock);
             scene.create_tab("Main", 0).unwrap();
             scene.register_zone(ZoneDefinition {
                 id: SceneId::new(),
@@ -1940,7 +2057,8 @@ mod tests {
             });
             let action = |id: &str, label: &str| NotificationAction {
                 label: label.to_string(),
-                callback_id: id.to_string(),
+                callback_id: Some(id.to_string()),
+                url: None,
             };
             scene
                 .publish_to_zone(
@@ -2035,7 +2153,9 @@ mod tests {
             .zone_hit_regions
             .iter()
             .find(|region| {
-                matches!(&region.kind, ZoneInteractionKind::Action { callback_id: id } if id == callback_id)
+                scene
+                    .notification_action(region)
+                    .is_some_and(|a| a.callback_id.as_deref() == Some(callback_id))
             })
             .map(|region| region.interaction_id.clone())
             .expect("the action has a hit region");
@@ -2062,7 +2182,15 @@ mod tests {
         let approve = harness.notification_action_center("approve").unwrap();
         let reject = harness.notification_action_center("reject").unwrap();
 
-        let focus_id = harness.scene().overlay.zone_hit_regions.iter().find(|r| matches!(&r.kind, ZoneInteractionKind::Action { callback_id } if callback_id == "approve")).unwrap().interaction_id.clone();
+        let focus_id = harness
+            .scene()
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|r| matches!(&r.kind, ZoneInteractionKind::Action { index: 0 }))
+            .unwrap()
+            .interaction_id
+            .clone();
         let before_focus = geometry_epoch(&harness);
         harness.scene().focus_notification(Some(focus_id.clone()));
         assert!(geometry_epoch(&harness) > before_focus);
@@ -2672,6 +2800,242 @@ mod tests {
     /// second click has nothing to land on (hud-paslt).
     #[test]
     fn action_click_queues_one_action_and_dismisses_the_notification() {
+        // The existing real pointer route also owns local links, exact debounce
+        // identity and failure handling. Native receipts authorize ordinary edges.
+        {
+            use super::super::lifecycle::ChromeCaptureTestScope;
+            use std::sync::atomic::{AtomicUsize, Ordering};
+            use std::sync::mpsc;
+            use std::time::Duration;
+            use tze_hud_scene::{NotificationAction, ZoneContent};
+            use winit::event::MouseButton;
+            let clock = Arc::new(tze_hud_scene::TestClock::new(1_000));
+            let mut harness = approve_reject_notification_harness_on(clock.clone());
+            let urls = ["https://éxample.com/a\"b", "https://example.com/second"];
+            {
+                let mut scene = harness.scene();
+                let record = &mut scene
+                    .zone_registry
+                    .active_publishes
+                    .get_mut("notification-area")
+                    .unwrap()[0];
+                let ZoneContent::Notification(payload) = &mut record.content else {
+                    unreachable!()
+                };
+                payload.actions[0] = NotificationAction {
+                    label: "Docs".into(),
+                    callback_id: None,
+                    url: Some(urls[0].into()),
+                };
+                payload.actions[1] = NotificationAction {
+                    label: "More".into(),
+                    callback_id: None,
+                    url: Some(urls[1].into()),
+                };
+                payload.actions[2].callback_id = Some("approve".into());
+                payload.actions[3].callback_id = Some("approve".into());
+            }
+            assert!(harness.tick());
+            let (tx, rx) = mpsc::channel();
+            harness.app.state.notification_link_opener.worker = Some(Arc::new(move |url| {
+                tx.send((url, std::thread::current().id())).unwrap();
+                Err("injected opener failure".into())
+            }));
+            let wakes = Arc::new(AtomicUsize::new(0));
+            let observed = wakes.clone();
+            harness.scene().register_action_notifier(
+                "notif-agent",
+                tze_hud_scene::render_wake::RenderWakeNotifier::new(move || {
+                    observed.fetch_add(1, Ordering::SeqCst);
+                }),
+            );
+            let window = winit::window::WindowId::dummy();
+            let mut native = ChromeCaptureTestScope::new(window);
+            let click = |h: &mut HeadlessEventLoopHarness, point: (f32, f32)| {
+                (h.app.state.cursor_x, h.app.state.cursor_y) = point;
+                for down in [true, false] {
+                    let receipt = native.begin(down);
+                    h.app
+                        .handle_mouse_button(MouseButton::Left, down, window, None);
+                    native.complete(receipt);
+                }
+                h.drain();
+            };
+            let points = urls.map(|url| harness.notification_link_center(url).unwrap());
+            let original = harness
+                .scene()
+                .zone_registry
+                .active_for_zone("notification-area")[0]
+                .clone();
+            click(&mut harness, points[0]);
+            let (url, thread) = rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            assert_eq!(url, "https://xn--xample-9ua.com/a%22b");
+            assert_ne!(thread, std::thread::current().id());
+            for elapsed in [0, 1999] {
+                let before = harness.app.state.notification_link_opener.workers.len();
+                clock.advance(elapsed);
+                click(&mut harness, points[0]);
+                assert_eq!(
+                    harness.app.state.notification_link_opener.workers.len(),
+                    before
+                );
+                assert!(rx.try_recv().is_err());
+            }
+            clock.advance(1);
+            click(&mut harness, points[0]);
+            assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap().0, url);
+            click(&mut harness, points[1]);
+            assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap().0, urls[1]);
+            assert_eq!(
+                harness
+                    .scene()
+                    .zone_registry
+                    .active_for_zone("notification-area")[0],
+                original
+            );
+            assert!(harness.scene().overlay.notification_choices.is_empty());
+            assert!(take_action_ids(&harness).is_empty());
+            assert_eq!(
+                wakes.load(Ordering::SeqCst),
+                0,
+                "links create no input readiness"
+            );
+            // Failed spawn still stamps the accepted attempt, before dispatch.
+            clock.advance(2000);
+            let before = harness.app.state.notification_link_opener.workers.len();
+            harness.app.state.notification_link_opener.fail_spawn = true;
+            click(&mut harness, points[0]);
+            harness.app.state.notification_link_opener.fail_spawn = false;
+            click(&mut harness, points[0]);
+            assert_eq!(
+                harness.app.state.notification_link_opener.workers.len(),
+                before
+            );
+            assert!(rx.try_recv().is_err());
+            clock.advance(2000);
+            click(&mut harness, points[0]);
+            rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            // Lost native Up, focus cancellation and safe mode never open links.
+            for denied in ["focus", "safe-mode", "native-up", "native-mismatched-up"] {
+                let workers_before = harness.app.state.notification_link_opener.workers.len();
+                clock.advance(2000);
+                (harness.app.state.cursor_x, harness.app.state.cursor_y) = points[0];
+                if denied == "safe-mode" {
+                    harness
+                        .app
+                        .state
+                        .safe_mode_atomic
+                        .store(true, Ordering::SeqCst);
+                }
+                let receipt = native.begin(true);
+                harness
+                    .app
+                    .handle_mouse_button(MouseButton::Left, true, window, None);
+                native.complete(receipt);
+                if denied == "focus" {
+                    harness.app.handle_window_focus(None, false);
+                }
+                let receipt = if denied == "native-up" {
+                    None
+                } else {
+                    native.begin(denied == "native-mismatched-up")
+                };
+                harness
+                    .app
+                    .handle_mouse_button(MouseButton::Left, false, window, None);
+                native.complete(receipt);
+                harness.drain();
+                assert_eq!(
+                    harness.app.state.notification_link_opener.workers.len(),
+                    workers_before,
+                    "{denied} must spawn no worker"
+                );
+                assert!(rx.try_recv().is_err(), "{denied}");
+                harness
+                    .app
+                    .state
+                    .safe_mode_atomic
+                    .store(false, Ordering::SeqCst);
+                if denied == "focus" {
+                    harness.app.handle_window_focus(None, true);
+                }
+                if denied.starts_with("native-") {
+                    assert!(
+                        !native.healthy(),
+                        "denied delivery faults its native ledger"
+                    );
+                    // Start an independent injected native lifetime for the next
+                    // case; production never rearms a faulted installation.
+                    drop(native);
+                    native = super::super::lifecycle::ChromeCaptureTestScope::new(window);
+                }
+            }
+            for worker in harness.app.state.notification_link_opener.workers.drain(..) {
+                worker.join().unwrap();
+            }
+            drop(native);
+            // Exact publication cleanup, not a reusable key or callback string.
+            let stale = harness
+                .scene()
+                .overlay
+                .zone_hit_regions
+                .iter()
+                .find(|r| matches!(r.kind, ZoneInteractionKind::Action { index: 0 }))
+                .unwrap()
+                .clone();
+            let content = original.content.clone();
+            harness.scene().clear_zone("notification-area").unwrap();
+            assert!(
+                harness
+                    .scene()
+                    .overlay
+                    .notification_link_attempts
+                    .is_empty()
+            );
+            harness
+                .scene()
+                .publish_to_zone(
+                    "notification-area",
+                    content,
+                    "notif-agent",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+            assert!(harness.tick());
+            assert!(harness.scene().activate_notification(&stale, 0).is_none());
+            let point = harness.notification_link_center(urls[0]).unwrap();
+            harness.click(point.0, point.1);
+            harness.drain();
+            rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            // Equal callback text does not alias distinct index-derived controls.
+            let ids: Vec<_> = harness
+                .scene()
+                .overlay
+                .zone_hit_regions
+                .iter()
+                .filter(|r| matches!(r.kind, ZoneInteractionKind::Action { .. }))
+                .map(|r| r.interaction_id.clone())
+                .collect();
+            assert_eq!(ids.len(), 4);
+            assert_ne!(ids[2], ids[3]);
+            let point = harness.notification_action_center("approve").unwrap();
+            harness.click(point.0, point.1);
+            harness.drain();
+            assert_eq!(take_action_ids(&harness), ["approve"]);
+            assert_eq!(wakes.load(Ordering::SeqCst), 1);
+            assert!(
+                harness
+                    .scene()
+                    .overlay
+                    .notification_link_attempts
+                    .is_empty()
+            );
+            for worker in harness.app.state.notification_link_opener.workers.drain(..) {
+                worker.join().unwrap();
+            }
+        }
         // Native callbacks surround delivery to winit. Panel-owned clicks must
         // consume those same receipts even though they never reach the scene.
         // Reuse the real panel task/factory and compositor-generated geometry.
@@ -2800,7 +3164,14 @@ mod tests {
                     ("theme".into(), "blueprint".into()),
                     ("motion.exit.ms".into(), "240".into()),
                 ]));
-            let region = harness.scene().overlay.zone_hit_regions.iter().find(|r| matches!(&r.kind, ZoneInteractionKind::Action { callback_id } if callback_id == "approve")).unwrap().clone();
+            let region = harness
+                .scene()
+                .overlay
+                .zone_hit_regions
+                .iter()
+                .find(|r| matches!(&r.kind, ZoneInteractionKind::Action { index: 0 }))
+                .unwrap()
+                .clone();
             harness.click(
                 region.bounds.x + region.bounds.width / 2.0,
                 region.bounds.y + region.bounds.height / 2.0,
@@ -2907,7 +3278,7 @@ mod tests {
             .clone();
         let mut second_content = first.content.clone();
         if let tze_hud_scene::ZoneContent::Notification(payload) = &mut second_content {
-            payload.actions[0].callback_id = "second".into();
+            payload.actions[0].callback_id = Some("second".into());
             payload.actions[0].label = "Second card".into();
         }
         harness
@@ -2922,9 +3293,14 @@ mod tests {
             )
             .unwrap();
         assert!(harness.tick());
-        let second = harness.scene().overlay.zone_hit_regions.iter().find(|r| {
-            matches!(&r.kind, ZoneInteractionKind::Action { callback_id } if callback_id == "second")
-        }).unwrap().clone();
+        let second = harness
+            .scene()
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|r| matches!(&r.kind, ZoneInteractionKind::Action { index: 0 }))
+            .unwrap()
+            .clone();
         {
             let mut scene = harness.scene();
             let records = scene.zone_registry.active_for_zone("notification-area");
@@ -3234,6 +3610,116 @@ mod tests {
                 );
             }
         }
+        for terminal in [
+            "move-off",
+            "focus",
+            "expiry",
+            "clear",
+            "replacement",
+            "hidden",
+            "dismiss",
+        ] {
+            let mut harness = approve_reject_notification_harness();
+            {
+                let mut scene = harness.scene();
+                let tze_hud_scene::ZoneContent::Notification(n) = &mut scene
+                    .zone_registry
+                    .active_publishes
+                    .get_mut("notification-area")
+                    .unwrap()[0]
+                    .content
+                else {
+                    unreachable!()
+                };
+                n.actions[0].callback_id = None;
+                n.actions[0].url = Some("https://example.com/stale".into());
+            }
+            assert!(harness.tick());
+            harness.app.state.notification_link_opener.worker =
+                Some(Arc::new(|_| panic!("retired link must not open")));
+            let point = harness
+                .notification_link_center("https://example.com/stale")
+                .unwrap();
+            let old = harness
+                .scene()
+                .zone_registry
+                .active_for_zone("notification-area")[0]
+                .clone();
+            let window = winit::window::WindowId::dummy();
+            let native = super::super::lifecycle::ChromeCaptureTestScope::new(window);
+            (harness.app.state.cursor_x, harness.app.state.cursor_y) = point;
+            let receipt = native.begin(true);
+            harness
+                .app
+                .handle_mouse_button(winit::event::MouseButton::Left, true, window, None);
+            native.complete(receipt);
+            match terminal {
+                "move-off" => {
+                    harness.app.state.cursor_x = 0.0;
+                    harness.app.state.cursor_y = 0.0;
+                }
+                "focus" => harness.app.handle_window_focus(None, false),
+                "expiry" => {
+                    harness
+                        .scene()
+                        .zone_registry
+                        .active_publishes
+                        .get_mut("notification-area")
+                        .unwrap()[0]
+                        .expires_at_wall_us = Some(0);
+                    harness.scene().drain_expired_zone_publications();
+                }
+                "clear" | "replacement" => {
+                    harness.scene().clear_zone("notification-area").unwrap();
+                    if terminal == "replacement" {
+                        harness
+                            .scene()
+                            .publish_to_zone(
+                                "notification-area",
+                                old.content,
+                                "notif-agent",
+                                None,
+                                None,
+                                None,
+                            )
+                            .unwrap();
+                        assert!(harness.tick());
+                    }
+                }
+                "hidden" => {
+                    harness.scene().set_owner_hidden(
+                        tze_hud_scene::graph::visibility::SurfaceClasses {
+                            zones: true,
+                            ..Default::default()
+                        },
+                    );
+                }
+                "dismiss" => {
+                    assert!(harness.scene().dismiss_notification(
+                        "notification-area",
+                        old.publication_id,
+                        "notif-agent"
+                    ));
+                }
+                _ => unreachable!(),
+            }
+            let receipt = native.begin(false);
+            harness
+                .app
+                .handle_mouse_button(winit::event::MouseButton::Left, false, window, None);
+            native.complete(receipt);
+            harness.drain();
+            assert!(
+                harness
+                    .app
+                    .state
+                    .notification_link_opener
+                    .workers
+                    .is_empty(),
+                "{terminal}"
+            );
+            assert!(take_action_ids(&harness).is_empty(), "{terminal}");
+        }
     }
 
     /// A pointer press on a notification action button, dispatched through the
@@ -3281,7 +3767,8 @@ mod tests {
                         title: "Deploy".to_string(),
                         actions: vec![NotificationAction {
                             label: "Ship".to_string(),
-                            callback_id: "ship".to_string(),
+                            callback_id: Some("ship".to_string()),
+                            url: None,
                         }],
                     }),
                     "notif-agent",
@@ -3361,7 +3848,8 @@ mod tests {
                         title: "Control".into(),
                         actions: vec![NotificationAction {
                             label: "Keep".into(),
-                            callback_id: "keep".into(),
+                            callback_id: Some("keep".into()),
+                            url: None,
                         }],
                     }),
                     "control-agent",
@@ -3421,9 +3909,13 @@ mod tests {
         });
         assert_eq!(after_dismiss.0.len(), 1);
         assert_eq!(after_dismiss.0[0].publisher_namespace, "control-agent");
-        assert!(after_dismiss.1.iter().any(|hit| {
-            matches!(&hit.kind, ZoneInteractionKind::Action { callback_id } if callback_id == "keep")
-        }), "the unrelated action hit survives");
+        assert!(
+            after_dismiss
+                .1
+                .iter()
+                .any(|hit| { matches!(&hit.kind, ZoneInteractionKind::Action { index: 0 }) }),
+            "the unrelated action hit survives"
+        );
         assert_eq!(
             notifications(),
             after_dismiss,
@@ -4230,6 +4722,69 @@ mod tests {
             harness.enqueue(key_up(code, key, 1_100));
             harness.drain();
         }
+        // Links inherit the same reverse-entry/focus and Enter/Space path.
+        for (code, key) in [("Enter", "Enter"), ("Space", " ")] {
+            let clock = Arc::new(tze_hud_scene::TestClock::new(1_000));
+            let mut harness = approve_reject_notification_harness_on(clock.clone());
+            {
+                let mut scene = harness.scene();
+                let tze_hud_scene::ZoneContent::Notification(n) = &mut scene
+                    .zone_registry
+                    .active_publishes
+                    .get_mut("notification-area")
+                    .unwrap()[0]
+                    .content
+                else {
+                    unreachable!()
+                };
+                n.actions[3].callback_id = None;
+                n.actions[3].url = Some("https://example.com/key".into());
+            }
+            assert!(harness.tick());
+            let (tx, rx) = std::sync::mpsc::channel();
+            harness.app.state.notification_link_opener.worker = Some(Arc::new(move |url| {
+                tx.send(url).unwrap();
+                Ok(())
+            }));
+            press(&mut harness, "Tab", "Tab", true);
+            let focused = harness.scene().overlay.notification_focus.clone();
+            assert!(focused.as_deref().unwrap().ends_with(":3"));
+            press(&mut harness, code, key, false);
+            assert_eq!(
+                rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap(),
+                "https://example.com/key"
+            );
+            let attempts = harness.app.state.notification_link_opener.workers.len();
+            press(&mut harness, code, key, false);
+            assert_eq!(
+                harness.app.state.notification_link_opener.workers.len(),
+                attempts
+            );
+            assert!(rx.try_recv().is_err());
+            assert_eq!(harness.scene().overlay.notification_focus, focused);
+            assert!(take_action_ids(&harness).is_empty());
+            assert!(harness.scene().overlay.notification_choices.is_empty());
+            clock.advance(2000);
+            harness
+                .app
+                .state
+                .safe_mode_atomic
+                .store(true, std::sync::atomic::Ordering::Release);
+            press(&mut harness, code, key, false);
+            assert_eq!(
+                harness.app.state.notification_link_opener.workers.len(),
+                attempts
+            );
+            assert!(rx.try_recv().is_err());
+            harness
+                .app
+                .state
+                .safe_mode_atomic
+                .store(false, std::sync::atomic::Ordering::Release);
+            for worker in harness.app.state.notification_link_opener.workers.drain(..) {
+                worker.join().unwrap();
+            }
+        }
         for (code, key) in [("Enter", "Enter"), ("Space", " ")] {
             let mut harness = approve_reject_notification_harness();
             let (zone, content) = {
@@ -4323,7 +4878,7 @@ mod tests {
                     .notification_focus
                     .as_deref()
                     .unwrap()
-                    .ends_with(":details")
+                    .ends_with(":3")
             );
             press(&mut harness, "Tab", "Tab", false);
             assert!(harness.scene().overlay.notification_focus.is_none());
@@ -4339,7 +4894,7 @@ mod tests {
                     .notification_focus
                     .as_deref()
                     .unwrap()
-                    .ends_with(":details")
+                    .ends_with(":3")
             );
             press(&mut harness, "Tab", "Tab", false);
             assert!(harness.scene().overlay.notification_focus.is_none());
@@ -4557,7 +5112,14 @@ mod tests {
                 assert!(harness.tick());
                 {
                     let mut scene = harness.scene();
-                    let control = scene.overlay.zone_hit_regions.iter().find(|r| matches!(&r.kind, ZoneInteractionKind::Action { callback_id } if callback_id == "approve")).unwrap().interaction_id.clone();
+                    let control = scene
+                        .overlay
+                        .zone_hit_regions
+                        .iter()
+                        .find(|r| matches!(&r.kind, ZoneInteractionKind::Action { index: 0 }))
+                        .unwrap()
+                        .interaction_id
+                        .clone();
                     scene.focus_notification(Some(control));
                 }
                 harness.app.state.global_tokens = tze_hud_config::themes::resolve_config_tokens(

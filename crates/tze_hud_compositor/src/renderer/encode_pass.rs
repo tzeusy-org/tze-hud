@@ -498,7 +498,7 @@ impl super::Compositor {
                         // are drawn by `collect_text_items`.
                         let action_layout =
                             self.notification_action_layout(zone_name, record, policy, w);
-                        for (index, (action, b)) in payload
+                        for (index, (_action, b)) in payload
                             .actions
                             .iter()
                             .zip(action_layout.bounds(
@@ -511,10 +511,7 @@ impl super::Compositor {
                             .enumerate()
                         {
                             let state = chrome_state(notification_action_interaction_id(
-                                zone_name,
-                                record,
-                                &action.callback_id,
-                                index,
+                                zone_name, record, index,
                             ));
                             out.push(self.notification_control_cmd(
                                 b,

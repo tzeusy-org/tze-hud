@@ -570,7 +570,8 @@ async fn test_two_line_notification_title_produces_two_text_items() {
                                 .iter()
                                 .map(|label| NotificationAction {
                                     label: (*label).into(),
-                                    callback_id: (*label).into(),
+                                    callback_id: Some((*label).into()),
+                                    url: None,
                                 })
                                 .collect(),
                             ..Default::default()
@@ -895,7 +896,8 @@ async fn test_two_line_notifications_stack_correctly() {
         .into_iter()
         .map(|label| NotificationAction {
             label: label.into(),
-            callback_id: label.into(),
+            callback_id: Some(label.into()),
+            url: None,
         })
         .collect();
     }
@@ -1422,7 +1424,8 @@ async fn test_stack_reflow_after_publication_pruned() {
     .into_iter()
     .map(|label| NotificationAction {
         label: label.into(),
-        callback_id: label.into(),
+        callback_id: Some(label.into()),
+        url: None,
     })
     .collect();
     scene
@@ -1494,7 +1497,8 @@ async fn test_stack_reflow_after_publication_pruned() {
                             } else {
                                 label.into()
                             },
-                            callback_id: label.into(),
+                            callback_id: Some(label.into()),
+                            url: None,
                         })
                         .collect(),
                     ..Default::default()

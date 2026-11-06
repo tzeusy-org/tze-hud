@@ -1053,6 +1053,25 @@ pub(super) fn notification_stack_gap(token_map: &HashMap<String, String>) -> f32
         * px_scale(token_map)
 }
 
+/// One display label shared by shaping and painting; uses action typography/color.
+pub(super) fn notification_action_label(
+    tokens: &HashMap<String, String>,
+    action: &tze_hud_scene::NotificationAction,
+) -> String {
+    if action.url.is_some() {
+        format!(
+            "{} {}",
+            action.label,
+            tokens
+                .get("notification.action.link_mark")
+                .map(String::as_str)
+                .unwrap_or("↗")
+        )
+    } else {
+        action.label.clone()
+    }
+}
+
 /// Resolved tokens for notification action buttons.
 #[derive(Clone, Debug)]
 pub(super) struct NotificationActionTokens {

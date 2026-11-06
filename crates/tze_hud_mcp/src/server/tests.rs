@@ -388,6 +388,23 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
         assert!(err["hint"].as_str().unwrap().contains(hint), "{err}");
     }
 
+    // Target exclusivity is checked before either admission or scheduling.
+    for delay in [0, 1_000] {
+        let err = call_err(
+            &server,
+            "hud_publish",
+            json!({
+                "surface":"zone:notification-area", "delay_ms":delay,
+                "content":{"body":"Open", "actions":[
+                    {"label":"Open", "callback_id":"open", "url":"https://example.com/"}
+                ]}
+            }),
+        )
+        .await;
+        assert_eq!(err["code"], "INVALID_ARGUMENT");
+        assert_eq!(err["hint"], "action needs callback_id or url, not both");
+    }
+
     // The same cardinality rule applies before immediate admission and scheduling.
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tze_hud_scene::types::MAX_NOTIFICATION_ACTIONS;
@@ -427,7 +444,8 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
             json!({
                 "surface":"zone:notification-area", "delay_ms":delay_ms, "ttl_ms":0,
                 "content":{"body":"Choose", "actions":(0..count)
-                    .map(|i| json!({"label":format!("Option {i}"), "callback_id":format!("answer-{i}")}))
+                    .map(|i| if i%2==0 {json!({"label":format!("Option {i}"),"callback_id":format!("answer-{i}")})}
+                        else {json!({"label":format!("Option {i}"),"url":format!("https://example.com/{i}")})})
                     .collect::<Vec<_>>()}
             })
         };
@@ -499,6 +517,129 @@ async fn bad_arguments_are_invalid_argument_tool_errors() {
                 json!([]),
                 "no action/FIFO items from rejection"
             );
+        }
+    }
+
+    // HTTPS target validation uses the same authority for direct and delayed publish.
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let observed = wakes.clone();
+    let server = server.with_render_wake_notifier(
+        tze_hud_scene::render_wake::RenderWakeNotifier::new(move || {
+            observed.fetch_add(1, Ordering::Relaxed);
+        }),
+    );
+    let target_hint = "action needs callback_id or url, not both";
+    let url_hint = "action url must be https";
+    let prefix = "https://example.com/";
+    let boundary = format!("{prefix}{}", "a".repeat(2048 - prefix.len()));
+    let unicode_boundary = format!("{prefix}{}", "é".repeat((2048 - prefix.len()) / 2));
+    let mut rejected = vec![
+        (json!({"label":"Open"}), target_hint),
+        (
+            json!({"label":"Open","callback_id":"","url":"https://example.com/"}),
+            target_hint,
+        ),
+        (
+            json!({"label":"Open","callback_id":"go","url":""}),
+            target_hint,
+        ),
+        (
+            json!({"label":"Open","callback_id":"","url":""}),
+            target_hint,
+        ),
+        (json!({"label":"Open","url":""}), url_hint),
+        (
+            json!({"label":"Open","callback_id":""}),
+            "notification.actions[1].callback_id must be a non-empty string",
+        ),
+        (
+            json!({"label":"Open","url":null}),
+            "notification.actions[1].url must be a string",
+        ),
+        (
+            json!({"label":"Open","callback_id":42}),
+            "notification.actions[1].callback_id must be a string",
+        ),
+    ];
+    for url in [
+        "http://example.com/".into(),
+        "file:///a".into(),
+        "javascript:alert(1)".into(),
+        "/relative".into(),
+        "https://".into(),
+        "https://[bad]/".into(),
+        format!("{boundary}a"),
+        format!("{unicode_boundary}é"),
+    ] {
+        rejected.push((json!({"label":"Open","url":url}), url_hint));
+    }
+    for delay_ms in [0, 1000] {
+        for (action, hint) in &rejected {
+            let before = snapshot(&*server.scene.lock().await);
+            let wake_count = wakes.load(Ordering::Relaxed);
+            let err = call_err(&server,"hud_publish",json!({"surface":"zone:notification-area","delay_ms":delay_ms,
+                "content":{"body":"Target validation","actions":[{"label":"Legacy","callback_id":"legacy"},action]}})).await;
+            assert_eq!(err["code"], "INVALID_ARGUMENT");
+            assert_eq!(err["hint"], *hint, "{action}");
+            assert_eq!(snapshot(&*server.scene.lock().await), before);
+            assert_eq!(wakes.load(Ordering::Relaxed), wake_count);
+        }
+        for (action, encoded) in [
+            (json!({"label":"Legacy","callback_id":"legacy"}), None),
+            (
+                json!({"label":"Open","url":boundary}),
+                Some(boundary.clone()),
+            ),
+            (
+                json!({"label":"Open","url":unicode_boundary}),
+                Some(format!(
+                    "{prefix}{}",
+                    "%C3%A9".repeat((2048 - prefix.len()) / 2)
+                )),
+            ),
+            (
+                json!({"label":"Open","url":"https://éxample.com/a\"b"}),
+                Some("https://xn--xample-9ua.com/a%22b".into()),
+            ),
+        ] {
+            call(
+                &server,
+                "hud_publish",
+                json!({"surface":"zone:notification-area","delay_ms":delay_ms,
+                "content":{"body":"Valid target","actions":[action]}}),
+            )
+            .await;
+            {
+                let scene = server.scene.lock().await;
+                let content = if delay_ms == 0 {
+                    &scene
+                        .zone_registry
+                        .active_for_zone("notification-area")
+                        .last()
+                        .unwrap()
+                        .content
+                } else {
+                    match &scene.scheduled_batches.last().unwrap().batch.mutations[0] {
+                        tze_hud_scene::mutation::SceneMutation::PublishToZone {
+                            content, ..
+                        } => content,
+                        _ => panic!("publish"),
+                    }
+                };
+                let ZoneContent::Notification(n) = content else {
+                    panic!("notification")
+                };
+                assert_eq!(n.actions[0].url.is_some(), encoded.is_some());
+                if let Some(encoded) = encoded {
+                    assert_eq!(n.actions[0].encoded_url().unwrap(), encoded);
+                }
+            }
+            call(
+                &server,
+                "hud_clear",
+                json!({"surface":"zone:notification-area"}),
+            )
+            .await;
         }
     }
 

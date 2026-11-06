@@ -507,6 +507,11 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
     },
     // Notification action buttons (docs/api.md notification `actions`).
     CanonicalToken {
+        key: "notification.action.link_mark",
+        description: "Trailing mark on a notification HTTPS link button",
+        default_value: "↗",
+    },
+    CanonicalToken {
         key: "notification.action.height_px",
         description: "Notification action height in dp",
         default_value: "22",

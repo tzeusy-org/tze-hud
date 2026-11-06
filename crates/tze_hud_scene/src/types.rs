@@ -1954,30 +1954,42 @@ pub struct ZonePublishToken {
 
 // ─── Zone content ────────────────────────────────────────────────────────────
 
-/// A single actionable button on a notification.
-///
-/// When the user clicks or activates an action button, the runtime routes the
-/// callback to the publishing agent by emitting an interaction event.  The
-/// emitted event's `interaction_id` follows the scheme
-/// `"zone:{zone_name}:action:{publication_id}:{publisher_namespace}:{index}:{callback_id}"`
-/// (see [`ZoneInteractionKind::Action`] and [`ZoneHitRegion::interaction_id`]).
-///
-/// Rendering: buttons appear in a horizontal row at the bottom of the
-/// notification slot. The runtime does not enforce a publish-time label
-/// length limit; callers should keep labels concise for the available space.
+/// One notification button: a publisher callback or an owner-opened HTTPS link.
+/// The runtime resolves its target by live publication and zero-based index.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NotificationAction {
-    /// Human-readable label shown on the button (e.g. "Open", "Snooze").
-    ///
-    /// The runtime does not enforce a publish-time label length limit.
     pub label: String,
-    /// Opaque callback identifier forwarded to the publishing agent when the
-    /// button is activated (click or keyboard Enter/Space).
-    ///
-    /// Must be non-empty.  The runtime treats an empty `callback_id` as
-    /// "unnamed" and will still route the event, but agents should use
-    /// meaningful identifiers for routing clarity.
-    pub callback_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub callback_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+}
+
+pub const ACTION_TARGET_HINT: &str = "action needs callback_id or url, not both";
+pub const ACTION_URL_HINT: &str = "action url must be https";
+
+impl NotificationAction {
+    /// Preserve transport presence for exclusivity; only the parser's serialized
+    /// URL may leave the scene for a local browser handoff.
+    pub fn validate(&self) -> Result<(), String> {
+        match (&self.callback_id, &self.url) {
+            (Some(callback), None) if !callback.is_empty() => Ok(()),
+            (None, Some(_)) => self.encoded_url().map(|_| ()),
+            _ => Err(ACTION_TARGET_HINT.into()),
+        }
+    }
+
+    pub fn encoded_url(&self) -> Result<String, String> {
+        let raw = self.url.as_deref().ok_or(ACTION_URL_HINT)?;
+        if raw.len() > 2048 {
+            return Err(ACTION_URL_HINT.into());
+        }
+        let parsed = url::Url::parse(raw).map_err(|_| ACTION_URL_HINT)?;
+        if parsed.scheme() != "https" || parsed.host_str().is_none_or(str::is_empty) {
+            return Err(ACTION_URL_HINT.into());
+        }
+        Ok(parsed.into())
+    }
 }
 
 /// Notification payload: text + optional icon + urgency + optional two-line layout + optional action buttons.
@@ -2041,6 +2053,9 @@ impl NotificationPayload {
                 "notification allows at most {MAX_NOTIFICATION_ACTIONS} actions"
             ));
         }
+        for action in &self.actions {
+            action.validate()?;
+        }
         Ok(())
     }
 }
@@ -2062,11 +2077,8 @@ pub enum ZoneInteractionKind {
     /// `interaction_id` for dismiss elements follows the pattern
     /// `"zone:{zone_name}:dismiss:{publication_id}:{publisher_namespace}"`.
     Dismiss,
-    /// An action button.  `callback_id` is the agent-defined identifier from
-    /// [`NotificationAction::callback_id`].  The `interaction_id` follows the
-    /// pattern
-    /// `"zone:{zone_name}:action:{publication_id}:{publisher_namespace}:{index}:{callback_id}"`.
-    Action { callback_id: String },
+    /// Zero-based action index, scoped by the region's exact publication.
+    Action { index: usize },
     /// Runtime chrome drag handle for a movable element.
     DragHandle {
         /// Element identity in scene-id wire format.
@@ -2151,7 +2163,7 @@ pub struct ZoneHitRegion {
     ///
     /// Scheme:
     /// - Dismiss: `"zone:{zone_name}:dismiss:{publication_id}:{publisher_namespace}"`
-    /// - Action:  `"zone:{zone_name}:action:{publication_id}:{publisher_namespace}:{index}:{callback_id}"`
+    /// - Action:  `"zone:{zone_name}:action:{publication_id}:{publisher_namespace}:{index}"`
     pub interaction_id: String,
     /// Tab-order index within the zone's interactive elements.
     ///

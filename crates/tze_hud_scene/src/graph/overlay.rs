@@ -54,6 +54,9 @@ pub struct RuntimeOverlayState {
     /// The chosen interaction keeps its pressed fill; it has no hit region.
     #[serde(skip, default)]
     pub notification_choices: HashMap<SceneId, String>,
+    /// Last accepted local link attempt per exact publication/button. No timer.
+    #[serde(skip, default)]
+    pub notification_link_attempts: HashMap<(SceneId, usize), u64>,
     /// Owner-directed notification focus, independent of agent/editor focus.
     #[serde(skip, default)]
     pub notification_focus: Option<String>,

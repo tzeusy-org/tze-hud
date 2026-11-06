@@ -1288,17 +1288,24 @@ fn parse_zone_content(content: &Value) -> Result<ZoneContent, McpError> {
                                         ))
                                     })?
                                     .to_string();
-                                let callback_id = o
-                                    .get("callback_id")
-                                    .and_then(|v| v.as_str())
-                                    .filter(|v| !v.is_empty())
-                                    .ok_or_else(|| {
-                                        invalid(format!(
-                                            "notification.actions[{index}].callback_id must be a non-empty string"
-                                        ))
-                                    })?
-                                    .to_string();
-                                Ok(NotificationAction { label, callback_id })
+                                let target = |name: &str| -> Result<Option<String>, McpError> {
+                                    o.get(name).map(|value| value.as_str().map(str::to_owned)
+                                        .ok_or_else(|| invalid(format!(
+                                            "notification.actions[{index}].{name} must be a string"))))
+                                        .transpose()
+                                };
+                                let action = NotificationAction {
+                                    label,
+                                    callback_id: target("callback_id")?,
+                                    url: target("url")?,
+                                };
+                                // Preserve the existing MCP non-empty callback rule,
+                                // after exclusivity so both supplied members never alias.
+                                if action.url.is_none() && action.callback_id.as_deref() == Some("") {
+                                    return Err(invalid(format!(
+                                        "notification.actions[{index}].callback_id must be a non-empty string")));
+                                }
+                                Ok(action)
                             })
                             .collect::<Result<Vec<_>, McpError>>()?,
                         Some(_) => {

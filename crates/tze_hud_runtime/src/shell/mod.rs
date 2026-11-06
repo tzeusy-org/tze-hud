@@ -14,6 +14,7 @@
 
 pub(crate) mod chrome;
 pub(crate) mod control_panel;
+pub(crate) mod link;
 // Freeze is unwired in production; hud-bstmy.5.6 decides delete-or-wire. Drop
 // this expectation (and the dead items) with that decision.
 #[expect(dead_code, reason = "freeze is never activated; see hud-bstmy.5.6")]
