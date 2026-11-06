@@ -2893,6 +2893,7 @@ mod tests {
             rx.recv_timeout(Duration::from_secs(2)).unwrap();
             // Lost native Up, focus cancellation and safe mode never open links.
             for denied in ["focus", "safe-mode", "native-up"] {
+                let workers_before = harness.app.state.notification_link_opener.workers.len();
                 clock.advance(2000);
                 (harness.app.state.cursor_x, harness.app.state.cursor_y) = points[0];
                 if denied == "safe-mode" {
@@ -2920,6 +2921,11 @@ mod tests {
                     .handle_mouse_button(MouseButton::Left, false, window, None);
                 native.complete(receipt);
                 harness.drain();
+                assert_eq!(
+                    harness.app.state.notification_link_opener.workers.len(),
+                    workers_before,
+                    "{denied} must spawn no worker"
+                );
                 assert!(rx.try_recv().is_err(), "{denied}");
                 harness
                     .app
