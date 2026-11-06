@@ -184,7 +184,7 @@ impl Renderer<'_> {
                 font_family: Default::default(),
                 alignment: Default::default(),
                 color,
-                background: Some(Rgba::TRANSPARENT),
+                background: None,
                 color_runs: Box::default(),
                 overflow: TextOverflow::Clip,
             }),
@@ -273,12 +273,8 @@ impl Renderer<'_> {
         let mut transcript = self.portal_text_node(state, SceneId::new(), now_wall_us);
         if let NodeData::TextMarkdown(text) = &mut transcript.data {
             text.bounds = geometry.output_content;
-            text.background = Some(Rgba {
-                r: 0.0,
-                g: 0.0,
-                b: 0.0,
-                a: 0.0,
-            });
+            // The pane owns its backdrop; a zero-alpha REPLACE quad erases it.
+            text.background = None;
         }
 
         let mut frame_color = self.tokens.frame_background;

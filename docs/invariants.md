@@ -165,6 +165,13 @@ wake paths rather than polling. The existing compositor drag feedback, chrome
 pixel and target-signature parents and runtime hit-region/real-drag parents
 cover these source seams (Tests: +0 ~5 -0 for the grip-chrome repair).
 
+Expanded portal text leaves its backdrop to the pane, rather than emitting
+zero-alpha flat fills that erase it in the overlay REPLACE pass. The existing
+compositor `hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade` parent
+captures the production rounded portal through Normal/Simplified/recovery and
+settled activation/move/release. This prevents transparent body holes when drag
+work triggers simplified rendering; intended token alpha and fades remain.
+
 These are source/headless proofs. Exact-deployed-SHA Windows motion/drop,
 reset/restart, native capture/focus and four-action pointer/keyboard owner
 acceptance remain pending; title passthrough is not a defect claim.
