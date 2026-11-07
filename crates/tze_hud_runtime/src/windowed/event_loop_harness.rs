@@ -2397,6 +2397,34 @@ mod tests {
             );
         }
 
+        // Composer hit regions use the same runtime pointer entry point, but
+        // their local feedback must repaint without waiting for a caret blink.
+        let mut composer = HeadlessEventLoopHarness::new();
+        composer.focus_composer();
+        composer.app.state.cursor_x = 10.0;
+        composer.app.state.cursor_y = 10.0;
+        composer.app.enqueue_pointer_event(PointerEventKind::Up);
+        let content_version = composer.scene().version;
+        for (kind, y, changed) in [
+            (PointerEventKind::Move, 120.0, true),
+            (PointerEventKind::Move, 121.0, false),
+            (PointerEventKind::Move, 10.0, true),
+            (PointerEventKind::Move, 11.0, false),
+            (PointerEventKind::Down, 11.0, true),
+            (PointerEventKind::Up, 11.0, true),
+            (PointerEventKind::Move, 120.0, true),
+        ] {
+            let epoch = geometry_epoch(&composer);
+            composer.app.state.cursor_y = y;
+            composer.app.enqueue_pointer_event(kind);
+            assert_eq!(
+                geometry_epoch(&composer) > epoch,
+                changed,
+                "composer {kind:?} at y={y} repaints only changed feedback"
+            );
+            assert_eq!(composer.scene().version, content_version);
+        }
+
         // Model only the emitted handle/window identity at the headless boundary.
         // Admission, activation, native ledger loss, focus cancellation, retained
         // Up and scene settling below are the production routes, not reset helpers.
