@@ -83,9 +83,6 @@ RESULTS_CSV_HEADER = [
     "label_template_hash",
     "zone_text_template_hash",
     "run_notes",
-    "trace_spec_ref",
-    "trace_rfc_ref",
-    "trace_doctrine_ref",
     "trace_budget_ref",
     "expected_e2e_ms_max",
     "expected_p95_ms_max",
@@ -190,7 +187,7 @@ def append_results_csv(path: str, record: dict[str, Any]) -> None:
                 row[key] = value
 
     with open(path, "a", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=RESULTS_CSV_HEADER)
+        writer = csv.DictWriter(f, fieldnames=RESULTS_CSV_HEADER, lineterminator="\n")
         if not exists:
             writer.writeheader()
         writer.writerow(row)
@@ -208,7 +205,7 @@ def _migrate_results_csv_header(path: str) -> None:
             rows.append(row)
 
     with open(path, "w", encoding="utf-8", newline="") as dst:
-        writer = csv.DictWriter(dst, fieldnames=RESULTS_CSV_HEADER)
+        writer = csv.DictWriter(dst, fieldnames=RESULTS_CSV_HEADER, lineterminator="\n")
         writer.writeheader()
         for row in rows:
             writer.writerow(row)

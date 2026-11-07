@@ -24,7 +24,7 @@ Reviewed: 2026-04-09
 
 **Type:** Zone | **Contention:** latest-wins | **Position:** bottom-center
 
-**Spec:** `openspec/changes/exemplar-subtitle/`
+**Contract:** [API](../../../../docs/api.md) and [invariants](../../../../docs/invariants.md).
 
 ### Design Review
 
@@ -54,7 +54,7 @@ Reviewed: 2026-04-09
 
 **Type:** Zone | **Contention:** stack | **Position:** top of screen
 
-**Spec:** `openspec/changes/exemplar-alert-banner/`
+**Contract:** [API](../../../../docs/api.md) and [invariants](../../../../docs/invariants.md).
 
 ### Design Review
 
@@ -81,7 +81,7 @@ Reviewed: 2026-04-09
 
 **Type:** Zone | **Contention:** stack | **Position:** configurable
 
-**Spec:** `openspec/changes/exemplar-notification/`
+**Contract:** [API](../../../../docs/api.md) and [invariants](../../../../docs/invariants.md).
 
 ### Design Review
 
@@ -112,7 +112,7 @@ Basic rendering confirmed working (colored backdrops, text, stacking, TTL expiry
 
 **Type:** Zone | **Contention:** merge-by-key | **Position:** bottom edge
 
-**Spec:** `openspec/changes/exemplar-status-bar/`
+**Contract:** [API](../../../../docs/api.md) and [invariants](../../../../docs/invariants.md).
 
 ### Design Review
 
@@ -147,7 +147,7 @@ Basic rendering confirmed working (colored backdrops, text, stacking, TTL expiry
 
 **Type:** Zone | **Contention:** latest-wins | **Position:** full-screen
 
-**Spec:** `openspec/changes/exemplar-ambient-background/`
+**Contract:** [API](../../../../docs/api.md) and [invariants](../../../../docs/invariants.md).
 
 ### Design Review
 
@@ -177,7 +177,7 @@ and native portal validation remain separate.
 
 **Type:** Widget | **Orientation:** vertical fill
 
-**Spec:** `openspec/changes/exemplar-gauge-widget/`
+**Contract:** [API](../../../../docs/api.md) and [invariants](../../../../docs/invariants.md).
 
 ### Design Review
 
@@ -206,7 +206,7 @@ and native portal validation remain separate.
 
 **Type:** Widget | **Size:** 300x20 px
 
-**Spec:** `openspec/changes/exemplar-progress-bar/`
+**Contract:** [API](../../../../docs/api.md) and [invariants](../../../../docs/invariants.md).
 
 > **Note:** Asset bundle exists and is deployed (`widget.toml`, `track.svg`, `fill.svg`); remaining work is visual/manual acceptance.
 
@@ -235,7 +235,7 @@ _(to be filled during review)_
 
 **Type:** Widget | **Size:** 48x48 px default
 
-**Spec:** `openspec/changes/exemplar-status-indicator/`
+**Contract:** [API](../../../../docs/api.md) and [invariants](../../../../docs/invariants.md).
 
 ### Design Review
 
