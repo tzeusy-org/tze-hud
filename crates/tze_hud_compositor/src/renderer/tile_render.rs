@@ -50,6 +50,30 @@ use super::token_colors::{
 };
 use super::{Compositor, CompositorDegradationPolicy};
 
+pub(super) fn hit_region_tint(
+    region: &HitRegionNode,
+    node_id: SceneId,
+    scene: &SceneGraph,
+) -> Option<[f32; 4]> {
+    match scene.hit_region_states.get(&node_id) {
+        Some(state) if state.pressed => Some(
+            region
+                .local_style
+                .pressed_tint
+                .map(|color| color.to_array())
+                .unwrap_or([0.0, 0.0, 0.0, 0.15]),
+        ),
+        Some(state) if state.hovered => Some(
+            region
+                .local_style
+                .hover_tint
+                .map(|color| color.to_array())
+                .unwrap_or([1.0, 1.0, 1.0, 0.1]),
+        ),
+        _ => None,
+    }
+}
+
 /// Apply the DisableTransparency degradation rule without changing visibility.
 ///
 /// Level 3 makes every *visible* tile opaque, but zero remains the semantic
@@ -1954,22 +1978,12 @@ impl Compositor {
                 //            a black overlay at 0.15 alpha against the sibling)
                 // Per-node overrides come from `local_style.hover_tint` /
                 // `pressed_tint` when set.
-                let state = scene.hit_region_states.get(&node_id);
-                let tint = match state {
-                    Some(s) if s.pressed => Some(
-                        hr.local_style
-                            .pressed_tint
-                            .map(|c| c.to_array())
-                            .unwrap_or([0.0, 0.0, 0.0, 0.15]),
-                    ),
-                    Some(s) if s.hovered => Some(
-                        hr.local_style
-                            .hover_tint
-                            .map(|c| c.to_array())
-                            .unwrap_or([1.0, 1.0, 1.0, 0.1]),
-                    ),
-                    _ => None,
-                };
+                // Composer feedback is blended with its pane by the content
+                // SDF pass, including Simplified mode. A REPLACE quad here
+                // would erase the pane and become opaque white on hover.
+                let tint = (!hr.accepts_composer_input)
+                    .then(|| hit_region_tint(hr, node_id, scene))
+                    .flatten();
                 if let Some(color) = tint {
                     Self::append_clipped_rect_vertices(
                         tile,
