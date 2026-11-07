@@ -80,6 +80,11 @@ pub(super) fn composer_backdrop_color(
     bounds: Rect,
     backdrop: Rgba,
 ) -> Option<Rgba> {
+    // A transparent pane has no coverage to tint. In Simplified mode its
+    // rounded fill is skipped; adding a zero-alpha REPLACE quad erases the root.
+    if backdrop.a == 0.0 {
+        return None;
+    }
     let node_id = *scene.overlay.tile_composer_nodes.get(&tile_id)?;
     let NodeData::HitRegion(region) = &scene.nodes.get(&node_id)?.data else {
         return None;
