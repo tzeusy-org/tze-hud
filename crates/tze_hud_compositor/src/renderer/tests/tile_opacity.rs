@@ -267,28 +267,11 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
     // transcript. Exercise the actual overlay REPLACE encoder across the
     // degradation transitions seen during native dragging, not headless blending.
     use tze_hud_portal::{
-        ComposerStatus, PortalView, ProjectedPortalPresentation,
+        PortalView, ProjectedPortalPresentation,
         render::{DEFAULT_PORTAL_SIZE, render},
         tokens::PortalVisualTokens,
     };
-    let view = PortalView {
-        portal_id: "opacity".into(),
-        presentation: ProjectedPortalPresentation::Expanded,
-        connection_degraded: false,
-        has_ever_connected: true,
-        interaction_enabled: true,
-        composer: ComposerStatus::Ready,
-        display_name: Some("Opacity".into()),
-        lifecycle_state: None,
-        status_text: None,
-        visible_transcript: vec![],
-        input_history: vec![],
-        unread_output_count: Some(0),
-        visible_unread_output_count: Some(0),
-        pending_input_count: Some(0),
-        latest_viewer_delivery_state: None,
-        last_input_feedback: None,
-    };
+    let view = empty_portal_view("opacity", "Opacity");
     let rendered = render(
         &view,
         &PortalVisualTokens::default(),

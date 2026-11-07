@@ -957,6 +957,64 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
         (document_before - item_y(&after, "output document") - scroll_y).abs() < 0.5,
         "document content must translate by the display scroll offset"
     );
+
+    // Use the real portal renderer: the old synthetic Clip node above could
+    // not expose the native tail-snapshot → head-snapshot switch on append.
+    use tze_hud_portal::{
+        OutputKind, TranscriptUnit,
+        render::{Size, render},
+        tokens::PortalVisualTokens,
+    };
+    let mut view = empty_portal_view("scroll-anchor", "Reading anchor");
+    view.visible_transcript.push(TranscriptUnit {
+        sequence: 1,
+        output_text: (1..=60)
+            .map(|i| format!("Line {i:02} — stable reading marker.\n\n"))
+            .collect(),
+        output_kind: OutputKind::Assistant,
+        expects_reply: false,
+        appended_at_wall_us: 0,
+    });
+    let viewport = Size {
+        width: tile_bounds.width,
+        height: tile_bounds.height,
+    };
+    let tokens = PortalVisualTokens::default();
+    for append in [false, true] {
+        if append {
+            view.visible_transcript.push(TranscriptUnit {
+                sequence: 2,
+                output_text: "NEW MARKER".into(),
+                output_kind: OutputKind::Assistant,
+                expects_reply: false,
+                appended_at_wall_us: 0,
+            });
+        }
+        let rendered = render(&view, &tokens, viewport, 3_000_000);
+        scene
+            .set_portal_surface(tile_id, rendered.surface, "expanded-portal")
+            .unwrap();
+        scene
+            .set_tile_root_tree(tile_id, rendered.root, rendered.children)
+            .unwrap();
+        scene.set_tile_follow_tail_at_tail(tile_id, !append);
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
+        let items = compositor.collect_text_items(&scene, 800.0, 520.0);
+        let item = items
+            .iter()
+            .find(|item| item.text.contains("Line 40"))
+            .unwrap();
+        let rasterizer = compositor.text_rasterizer.as_ref().unwrap();
+        let display = crate::text::effective_truncation_key(item)
+            .and_then(|key| rasterizer.truncation_cache.get_by_key(&key))
+            .map(|result| result.text.as_str())
+            .unwrap_or(&item.text);
+        assert!(
+            display.contains("Line 40"),
+            "a retained reading marker must survive append and the tail-to-scrollback transition; append={append}, display={display}"
+        );
+    }
 }
 
 /// `collect_text_items` does NOT shift text for tiles with zero scroll offset.

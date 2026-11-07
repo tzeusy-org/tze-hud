@@ -6,6 +6,28 @@ use image_cache::{
 };
 use tze_hud_scene::graph::SceneGraph;
 
+fn empty_portal_view(id: &str, name: &str) -> tze_hud_portal::PortalView {
+    use tze_hud_portal::{ComposerStatus, PortalView, ProjectedPortalPresentation};
+    PortalView {
+        portal_id: id.into(),
+        presentation: ProjectedPortalPresentation::Expanded,
+        connection_degraded: false,
+        has_ever_connected: true,
+        interaction_enabled: true,
+        composer: ComposerStatus::Ready,
+        display_name: Some(name.into()),
+        lifecycle_state: None,
+        status_text: None,
+        visible_transcript: vec![],
+        input_history: vec![],
+        unread_output_count: Some(0),
+        visible_unread_output_count: Some(0),
+        pending_input_count: Some(0),
+        latest_viewer_delivery_state: None,
+        last_input_feedback: None,
+    }
+}
+
 /// Mutex to serialize tests that mutate `HEADLESS_FORCE_SOFTWARE`, a
 /// global environment variable.  Rust tests run in parallel by default,
 /// so concurrent mutations would cause races.  This is an in-process lock;
