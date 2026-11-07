@@ -11,7 +11,7 @@ use tze_hud_resource::{
     UploadId, UploadStartRequest,
 };
 use tze_hud_scene::{
-    MAX_MARKDOWN_BYTES, MonoUs, ZONE_TILE_Z_MIN,
+    MAX_MARKDOWN_BYTES, ZONE_TILE_Z_MIN,
     graph::{MAX_NODES_PER_TILE, SceneGraph},
     lease::LeaseState,
     mutation::{MutationBatch, SceneMutation},
@@ -1115,55 +1115,54 @@ fn portal_scroll_updates_local_first_via_input_processor() {
     );
 }
 
-/// Multiple scroll events for the same tile coalesce to the latest offset under
-/// backpressure. The currently-visible scroll window is preserved (not clobbered
-/// to zero).
-///
-/// AC: Coherent Transcript Coalescing requirement — coalescing under backpressure
-/// preserves the currently-visible scroll window.
+/// A lagging agent retains the latest available absolute scroll sample. Losing
+/// older notifications must not reset the local viewport or replay old offsets.
 #[test]
-fn portal_scroll_coalescing_preserves_visible_window() {
-    // The coalescing pipeline uses `tze_hud_input::envelope::InputEnvelope`
-    // (the full multi-variant pipeline type), distinct from the agent-facing
-    // `tze_hud_input::events::InputEnvelope` which carries only pointer events.
-    use tze_hud_input::FrameCoalescer;
-    use tze_hud_input::envelope::{InputEnvelope as PipelineEnvelope, ScrollOffsetChangedData};
+fn portal_scroll_lag_preserves_visible_window() {
+    use tze_hud_input::{ScrollConfig, ScrollState};
+    use tze_hud_protocol::proto::{
+        EventBatch, InputEnvelope, ScrollOffsetChangedEvent, input_envelope::Event,
+    };
+    use tze_hud_protocol::session_server::{
+        InputEventSender, input_event_bus::InputEventTryRecvError,
+    };
 
     let tile_id = SceneId::new();
-    let mut coalescer = FrameCoalescer::default();
-
-    // Simulate several scroll events arriving quickly for the same tile.
-    // Only the LAST offset must survive coalescing.
-    let offsets: &[f32] = &[20.0, 50.0, 90.0, 130.0, 170.0];
-    for (i, &oy) in offsets.iter().enumerate() {
-        coalescer.push(PipelineEnvelope::ScrollOffsetChanged(
-            ScrollOffsetChangedData {
-                tile_id,
-                timestamp_mono_us: MonoUs(i as u64 * 1_000),
-                offset_x: 0.0,
-                offset_y: oy,
+    let mut scroll = ScrollState::new();
+    scroll.register_tile(tile_id, ScrollConfig::vertical());
+    let sender = InputEventSender::new(1);
+    let mut receiver = sender.subscribe("portal-scroll");
+    for delta_y in [20.0, 30.0, 40.0, 40.0, 40.0] {
+        scroll.apply_user_scroll(tile_id, 0.0, delta_y).unwrap();
+        let changed = scroll.changed_event(tile_id).unwrap();
+        sender.send((
+            "portal-scroll".into(),
+            EventBatch {
+                events: vec![InputEnvelope {
+                    event: Some(Event::ScrollOffsetChanged(ScrollOffsetChangedEvent {
+                        tile_id: changed.tile_id.as_uuid().as_bytes().to_vec(),
+                        offset_x: changed.offset_x,
+                        offset_y: changed.offset_y,
+                        ..Default::default()
+                    })),
+                }],
+                ..Default::default()
             },
         ));
     }
-
-    let events = coalescer.into_events();
-    let scroll_events: Vec<_> = events
-        .iter()
-        .filter(|e| matches!(e, PipelineEnvelope::ScrollOffsetChanged(d) if d.tile_id == tile_id))
-        .collect();
-
-    assert_eq!(
-        scroll_events.len(),
-        1,
-        "FrameCoalescer must coalesce multiple scroll events into one"
-    );
-    if let PipelineEnvelope::ScrollOffsetChanged(d) = scroll_events[0] {
-        assert!(
-            (d.offset_y - 170.0).abs() < f32::EPSILON,
-            "coalesced scroll must carry the latest (largest) offset; got {}",
-            d.offset_y
-        );
-    }
+    assert_eq!(scroll.offset(tile_id), (0.0, 170.0));
+    assert_eq!(receiver.try_recv(), Err(InputEventTryRecvError::Lagged(4)));
+    let (namespace, batch) = receiver.try_recv().unwrap();
+    assert_eq!(namespace, "portal-scroll");
+    let Some(Event::ScrollOffsetChanged(changed)) = &batch.events[0].event else {
+        panic!("expected current scroll offset");
+    };
+    assert_eq!(changed.tile_id, tile_id.as_uuid().as_bytes());
+    assert_eq!((changed.offset_x, changed.offset_y), (0.0, 170.0));
+    assert_eq!(receiver.try_recv(), Err(InputEventTryRecvError::Empty));
+    assert_eq!(scroll.commit_all_frames(), vec![tile_id]);
+    assert!(scroll.commit_all_frames().is_empty());
+    assert_eq!(scroll.offset(tile_id), (0.0, 170.0));
 }
 
 /// Scroll offset is clamped to the retained transcript window; the viewer

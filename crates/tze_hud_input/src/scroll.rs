@@ -3,7 +3,7 @@
 //! Scroll is a local-first operation: the compositor maintains a scroll offset
 //! per scrollable tile and updates it in the same frame the scroll event arrives,
 //! without waiting for any agent response. Agents are notified asynchronously via
-//! `ScrollOffsetChangedEvent` (non-transactional, coalesced).
+//! `ScrollOffsetChangedEvent` through a bounded, droppable notification lane.
 //!
 //! # Opt-in via ScrollConfig
 //!
@@ -111,8 +111,9 @@ pub struct SetScrollOffsetRequest {
 
 /// Async notification sent to agents after scroll offset changes.
 ///
-/// This event is non-transactional and coalesced: if many scroll events arrive
-/// between agent polling cycles, only the final offset is delivered.
+/// This event carries the current absolute offset. The resident input bus uses
+/// a bounded broadcast lane: slow consumers can lose older samples and receive
+/// a lag report. Notification loss never rolls back the local scroll offset.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ScrollOffsetChangedEvent {
     pub tile_id: SceneId,
@@ -1001,7 +1002,17 @@ mod tests {
         let tile_id = SceneId::new();
         let mut scroll = ScrollState::new();
         scroll.register_tile(tile_id, ScrollConfig::vertical());
-        scroll.apply_user_scroll(tile_id, 0.0, 42.0);
+        // Requests within a frame are latest-wins; the current offset is what
+        // the notification exposes, with no replay of superseded requests.
+        for offset_y in [20.0, 50.0, 42.0] {
+            scroll.queue_agent_request(SetScrollOffsetRequest {
+                tile_id,
+                offset_x: 0.0,
+                offset_y,
+            });
+        }
+        assert_eq!(scroll.commit_all_frames(), vec![tile_id]);
+        assert!(scroll.commit_all_frames().is_empty());
 
         let event = scroll.changed_event(tile_id);
         assert!(event.is_some());

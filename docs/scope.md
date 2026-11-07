@@ -51,6 +51,14 @@ source links when implementation changes the status.
 
 ## Current implementation evidence
 
+- **T8 — input pipeline diet [Source].** `hud-bstmy.4.5` removes the unused
+  native batching/coalescing/queue/envelope modules after the final T7 source
+  landing (`hud-lirh2.11`). Invariant 2 now names the real resident input bus:
+  transactional input retains order; ephemeral samples can be dropped on lag.
+  Local scroll and the existing portal scroll fixture use live scroll state.
+  Production dispatch and delivery semantics are unchanged. T7 Windows owner
+  acceptance (`.12`) and final cross-child reconciliation (`.13`) remain separate.
+
 - **Zone grips — session placement [Source].** `hud-3to0a` routes existing
   notification-zone grips through scene-owned transient placement and shared
   effective geometry. The existing human Reset restores defaults; clear,

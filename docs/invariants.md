@@ -53,8 +53,8 @@ bridges. Source tests are distinct from Windows owner interaction evidence.
 
 Transactional (create, lease, release: reliable, ordered, acknowledged),
 state-stream (content updates: reliable, coalesced, latest wins), and
-ephemeral (pointer moves, hover: droppable, latest wins). A transport or API
-change must not give one class another's delivery semantics.
+ephemeral (pointer moves, hover and scroll notifications: droppable on lag).
+A transport or API change must not give one class another's delivery semantics.
 
 Accepted human notification events use a per-publisher FIFO and retained-until-ACK
 ids without oldest-first eviction. Destructive scene transfer has no cancellation
@@ -105,7 +105,20 @@ separate acceptance.
 
 - `tze_hud_mcp` [`test_hud_publish_zone_contention_policy_latest_wins`](../crates/tze_hud_mcp/src/server/tests.rs)
 - `tze_hud_compositor` [`test_latest_wins_zone_renders_only_latest_publication`](../crates/tze_hud_compositor/src/renderer/tests/zone_stack.rs)
-- `tze_hud_input` [`test_pointer_move_coalesced_in_batch`](../crates/tze_hud_input/src/batching.rs), [`test_coalesce_scroll_latest_wins`](../crates/tze_hud_input/src/coalescing.rs)
+
+The resident input bus retains transactional down/up/command batches in ordered
+per-subscriber queues. Pointer move/enter/leave and absolute scroll notifications
+share a bounded broadcast lane: slow receivers report lag and resume from retained
+samples. This does not promise per-tile coalescing or delivery of every sample;
+local scroll feedback does not wait on that lane.
+
+- `tze_hud_protocol` [`ephemeral_pointer_moves_drop_on_lag_and_report_lagged`](../crates/tze_hud_protocol/src/session_server/input_event_bus.rs),
+  [`transactional_pointer_down_up_survive_slow_consumer`](../crates/tze_hud_protocol/src/session_server/input_event_bus.rs),
+  [`transactional_input_is_not_enqueued_for_an_unrelated_namespace`](../crates/tze_hud_protocol/src/session_server/tests/events.rs)
+- `tze_hud_input` [`test_scroll_changed_event_contains_current_offset`](../crates/tze_hud_input/src/scroll.rs)
+  (latest queued request per frame); `integration`
+  [`portal_scroll_lag_preserves_visible_window`](../tests/integration/text_stream_portal_surface.rs)
+  (local viewport survives notification lag)
 
 ## 3. The runtime owns the screen; the human override always wins
 
