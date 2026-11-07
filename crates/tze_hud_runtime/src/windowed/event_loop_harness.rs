@@ -2416,7 +2416,7 @@ mod tests {
         ] {
             let epoch = geometry_epoch(&composer);
             composer.app.state.cursor_y = y;
-            composer.app.enqueue_pointer_event(kind);
+            composer.app.enqueue_pointer_event(kind.clone());
             assert_eq!(
                 geometry_epoch(&composer) > epoch,
                 changed,
