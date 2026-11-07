@@ -722,6 +722,12 @@ pub(crate) fn measure_raw_content_height(
         .unwrap_or(line_height)
 }
 
+pub(crate) struct ShapedDocumentMetrics {
+    pub signature: [u8; 32],
+    pub height: f32,
+    pub rows: std::sync::Arc<[(usize, f32)]>,
+}
+
 impl TextRasterizer {
     /// Create a text rasterizer whose font roles follow `font_config`.
     ///
@@ -1513,10 +1519,7 @@ impl TextRasterizer {
 
     /// Reuse the paint buffer to measure the retained document, including wrap
     /// and rich-text line metrics. The fixed pane scissor is independent.
-    pub(crate) fn measure_scroll_document(
-        &mut self,
-        item: &TextItem,
-    ) -> ([u8; 32], f32, std::sync::Arc<[(usize, f32)]>) {
+    pub(crate) fn measure_scroll_document(&mut self, item: &TextItem) -> ShapedDocumentMetrics {
         let key = shape_key_for_item(item, &item.text);
         if !self.shape_cache.contains_key(&key) {
             let buffer = self.build_and_shape_buffer(item, None);
@@ -1543,7 +1546,11 @@ impl TextRasterizer {
                 (bases[run.line_i] + start, run.line_top)
             })
             .collect::<Vec<_>>();
-        (key, height, rows.into())
+        ShapedDocumentMetrics {
+            signature: key,
+            height,
+            rows: rows.into(),
+        }
     }
 
     /// Build and shape on a cache miss; scroll frames reuse this exact buffer.

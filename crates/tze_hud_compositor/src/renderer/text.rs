@@ -1146,23 +1146,23 @@ impl super::Compositor {
             let Some(rasterizer) = self.text_rasterizer.as_mut() else {
                 continue;
             };
-            let (signature, height, rows) = rasterizer.measure_scroll_document(item);
+            let metrics = rasterizer.measure_scroll_document(item);
             let key = (tile_id, pane);
             live.insert(key);
             scene.overlay.portal_document_layouts.insert(
                 key,
                 tze_hud_scene::PortalDocumentLayout {
                     node_id,
-                    signature,
+                    signature: metrics.signature,
                     source: match &scene.nodes[&node_id].data {
                         NodeData::TextMarkdown(text) => text.clone(),
                         _ => unreachable!("classified document"),
                     },
                     tile_size: (tile.bounds.width, tile.bounds.height),
                     font_scale: scene.tile_font_scale(tile_id),
-                    rows,
+                    rows: metrics.rows,
                     content: item.text.clone(),
-                    height,
+                    height: metrics.height,
                     viewport_height: item.clip_bounds_height,
                     line_height: item.font_size_px * item.line_height_multiplier,
                 },
