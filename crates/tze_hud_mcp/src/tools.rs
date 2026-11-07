@@ -18,7 +18,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use tokio::sync::Mutex;
-use tze_hud_projection::hub::{PortalError, PortalHub, PortalKey, PortalStatus, Publish};
+use tze_hud_portal::hub::{PortalError, PortalHub, PortalKey, PortalStatus, Publish};
 use tze_hud_scene::{
     SceneId, ValidationError,
     config::AgentIdentity,

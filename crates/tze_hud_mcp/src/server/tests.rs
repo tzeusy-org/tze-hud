@@ -1,7 +1,7 @@
 use super::*;
 use serde_json::{Value, json};
 use std::collections::HashMap;
-use tze_hud_projection::hub::{PortalHub, PortalKey, PortalStatus};
+use tze_hud_portal::hub::{PortalHub, PortalKey, PortalStatus};
 use tze_hud_scene::config::hash_psk;
 use tze_hud_scene::graph::PendingActionKind;
 use tze_hud_scene::{
@@ -2384,7 +2384,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         .unwrap()
         .publish(
             &other,
-            tze_hud_projection::hub::Publish {
+            tze_hud_portal::hub::Publish {
                 text: Some("untouched other-agent output".into()),
                 ..Default::default()
             },
@@ -2822,7 +2822,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
     {
         let (live, clock) = self::server();
         let portals = PortalHandle::new(
-            PortalHub::new(tze_hud_projection::hub::PortalLimits {
+            PortalHub::new(tze_hud_portal::hub::PortalLimits {
                 degrade_after_us: 10_000,
                 reclaim_after_us: 10_000,
                 input_ttl_us: 5_000,
@@ -2989,10 +2989,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
             hub.take_due(overlap_at);
             assert_eq!(hub.get(&own).unwrap().last_seen_us, overlap_at);
             let deadline = hub.next_deadline().unwrap();
-            assert_eq!(
-                deadline.kind,
-                tze_hud_projection::hub::DeadlineKind::Liveness
-            );
+            assert_eq!(deadline.kind, tze_hud_portal::hub::DeadlineKind::Liveness);
             assert!(deadline.at_us > overlap_at + 10_000);
             assert!(deadline.at_us <= overlap_at + 1_000_000);
         }
@@ -3014,10 +3011,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         // Contended final Drop still deactivates atomically before a Hub scan.
         drop(last);
         let deadline = hub.next_deadline().unwrap();
-        assert_eq!(
-            deadline.kind,
-            tze_hud_projection::hub::DeadlineKind::Liveness
-        );
+        assert_eq!(deadline.kind, tze_hud_portal::hub::DeadlineKind::Liveness);
         assert_eq!(
             deadline.at_us,
             overlap_at + 10_000,

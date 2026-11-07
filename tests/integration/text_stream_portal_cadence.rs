@@ -14,7 +14,7 @@ use crate::gpu_init::serialized_headless_init;
 
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tze_hud_projection::hub::{PortalHub, PortalKey, Publish};
+use tze_hud_portal::hub::{PortalHub, PortalKey, Publish};
 use tze_hud_runtime::headless::{HeadlessConfig, HeadlessRuntime};
 use tze_hud_runtime::portal::{PortalDriver, PortalHandle};
 use tze_hud_runtime::{

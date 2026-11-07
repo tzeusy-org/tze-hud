@@ -168,8 +168,9 @@ stops the adapter. Ordinary explicit CLI publication above is unchanged.
 ## Source of truth
 
 - MCP verbs: `crates/tze_hud_mcp/src/tools.rs`; contract: `docs/api.md`.
-- Portal authority: `crates/tze_hud_projection/`, bridged by
-  `crates/tze_hud_runtime/src/portal_projection_driver.rs`.
+- In-process portal state and renderer: `crates/tze_hud_portal/`;
+  `PortalDriver` in `crates/tze_hud_runtime/src/portal.rs` applies scene data.
+  MCP and the driver share `PortalHandle` in `crates/tze_hud_mcp/src/server.rs`.
 - `.claude/skills/hud-projection/references/mcp-facade.md`: wiring and boundary rules.
 
 ## Safety

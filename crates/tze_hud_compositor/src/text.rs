@@ -2269,7 +2269,7 @@ pub(crate) fn markdown_node_has_pixel_runs(node: &TextMarkdownNode) -> bool {
 /// node carries the streaming-cursor tail marker (hud-zlq2v).
 ///
 /// The projection adapter (`streaming_cursor_color_runs` in
-/// `tze_hud_projection::resident_grpc`) signals an active tail cursor with a
+/// `tze_hud_portal::resident_grpc`) signals an active tail cursor with a
 /// single **zero-length** color run pinned at the very end of `content`
 /// (`start_byte == end_byte == content.len()`), carrying the
 /// `portal.streaming_cursor.color` token. Because it is zero-length it is a pure

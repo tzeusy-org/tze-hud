@@ -23,7 +23,7 @@ source links when implementation changes the status.
 |---|---|
 | Overlay window, compositor, text/markdown, images | `tze_hud_runtime` (windowed), `tze_hud_compositor` |
 | Scene graph: tabs, tiles, nodes, zones | `tze_hud_scene` |
-| Session portal + projection | `tze_hud_projection`, `tze_hud_runtime` portal modules, `tze_hud_input` |
+| Session portal + projection | `tze_hud_portal`, `tze_hud_runtime` portal modules, `tze_hud_input` |
 | MCP tools (zones, widgets, portal) | `tze_hud_mcp` |
 | gRPC resident session (zones, widgets, uploads, events) | `tze_hud_protocol` |
 | SVG widgets + asset store | `tze_hud_widget`, `tze_hud_resource` |
@@ -42,7 +42,7 @@ source links when implementation changes the status.
 | T4 | Scaffolding: `tze_hud_validation`, replay/trace recording, v1-thesis/Layer-4 artifact harness and their CI jobs; component profiles (flat `[design_tokens]` stay; removed profile sections are rejected); sync groups and clock-skew estimation (`compositor_timestamp_wall_us` stays for `present_at`/`expires_at`; wire fields reserved); hardware calibration (tests use a fixed `test_budget` slack; the benchmark keeps its CI factors); test scenes for removed features; reserved mobile display profile; unwired tab-switch trigger; redundant tests | done |
 | T5 | API redesign ([api.md](api.md)): one verb set per lifecycle stage across MCP and gRPC (five MCP tools replace 22; gRPC `Publish`/`Clear`/`Hold`/`RequestResult`); per-agent PSK identity with an `allow` list replaces the capability vocabulary, resident principal, and portal owner token; one shared error-code set with hints; geometry remains runtime-owned; token budgets enforced in CI; dead wire removed and reserved; session-server constructors collapsed; invariant 1 and 4 breaks on the gRPC path fixed; owner-directed public tile removal on 2026-10-14 (deferred spec hud-x1wuq) | done |
 | T6 | Windows delivery without SSH, then prove the POC on it. (1) CI builds `x86_64-pc-windows-msvc` natively on a Windows runner, boots it under WARP with an MCP smoke, and publishes minisign-signed releases (rolling `dev` from main, `v*` tags). (2) The exe self-installs per user (`%LOCALAPPDATA%`, `HKCU` Run autostart, no admin). (3) It listens on loopback and the Tailscale address only (owner reaffirmed 2026-10-06: no loopback-only default, no relay). The HUD detects when Windows Firewall blocks tailnet inbound and says so on the pairing card and in `/admin/status`; an opt-in elevated helper adds one program-scoped rule (bead `hud-lgb6c`). (4) First-run pairing: the HUD shows a one-time code, an agent host trades it for a per-agent PSK (`POST /pair`; only a hash is stored); delete `--psk`, the default PSK, and `--bind-all-interfaces`. (5) `/admin/*` operator endpoints (status, logs, screenshot of the HUD's own frame, restart, signed pull-only self-update with health handoff), off the MCP surface. (6) Rewrite `user-test`/`hud-projection` around the paired PSK; delete SSH deploy tooling. Then run POC acceptance on the owner's host; close stale draft PRs | delivery paths implemented; GEN6: 36 implementation rows + 1 historical owner record; diagnostic, logging and mutex repairs merged; current acceptance holds retained |
-| T7 | Portal as a runtime feature: projection state lives in the runtime keyed by PSK identity. Delete the external-authority design: owner tokens, audit log, provider-neutral contract, `projection_authority` binary, `resident_grpc` adapter. Fold the `PROJECTION_*` error codes into the shared set. Internal interfaces may break; the MCP surface and token footprint must not regress. Target: portal code (projection, driver, windowed portal, composer) under ~12k lines from ~45k | in progress: shared `PortalHub` and direct scene renderer are live; portal-only wire fields 13–17 are reserved; rename, final size reconciliation and owner acceptance remain |
+| T7 | Portal as a runtime feature: projection state lives in the runtime keyed by PSK identity. Delete the external-authority design: owner tokens, audit log, provider-neutral contract, `projection_authority` binary, `resident_grpc` adapter. Fold the `PROJECTION_*` error codes into the shared set. Internal interfaces may break; the MCP surface and token footprint must not regress. Owner-amended target: at most 14,000 physical Rust lines, including tests/comments/blanks, in the same four groups/eight files (portal crate, driver, windowed portal, composer), from ~45k | source implemented: `tze_hud_portal`, shared `PortalHub` and direct scene renderer; portal-only wire fields 13–17 are reserved; final owner acceptance and cross-child reconciliation remain |
 | T8 | Code and test diet, crate by crate (compositor, runtime, scene, protocol, input first): delete code without a current user, replace oversized test files with behavior tests tied to `invariants.md`, add `tze_hud_resource` tests, a local llvmpipe recipe for compositor tests, and strip pre-reset references (openspec, RFCs, doctrine) from comments and protos | in progress: resource behavior tests and llvmpipe recipes exist; diet and reconciliation continue |
 | T9 | Owner-directed 2026-10-05, alongside T6 rather than after the POC. Per-monitor overlays: one window and surface per monitor sharing one scene, the default with no flag; delete `--monitor` and monitor cycling; logical (dp) token sizes scaled per monitor (bead `hud-1pt5h`). Owner-directed 2026-10-06: `[displays.<key>]` is keyed by EDID model and serial, plus the GPU connector path when two monitors are ambiguous; `/admin/status` and the log show each key (bead `hud-avr7s`). One global `ui.scale` token multiplies every logical size on top of each monitor's Windows scale factor; there are no per-monitor overrides (bead `hud-h51u7.3`) | partial: overlay windows exist; logical (dp) sizing and `ui.scale` landed (`hud-h51u7.3`); stable keys remain |
 | T10 | Owner-directed 2026-10-05. Swappable visual design: themes as a token layer between canonical defaults and `[design_tokens]` overrides, with Tonal Glass as the default; semantic token families (surfaces, roles, state, motion, shape, spacing, type); configurable fonts (bundled IBM Plex, fonts beside the config, Windows fonts by name); live theme and font switching from the config file and from an in-HUD picker (now the T11 control panel's Appearance section), which writes the choice back to the config (owner-directed 2026-10-06; agents never set themes); every element restyled to use tokens only (bead `hud-h51u7`). This reverses T4's removal of component profiles for themes only: themes hold token values, never layout | partial: startup themes/fonts and live switching (config file and control panel; `hud-h51u7.5`) exist; `ui.scale` landed (`hud-h51u7.3`); restyling remains |
@@ -63,11 +63,11 @@ source links when implementation changes the status.
   Windows acceptance now covers movement, drop/action, cancellation and
   session/restart lifetimes on the repaired build (14/15 original parent
   clauses); the remaining parent clause is not inferred from source tests.
-  The unchanged T7 four-group/eight-file denominator now measures 13,995
-  physical Rust lines including tests/comments/blanks (was 13,918; +77),
-  within the owner's separately recorded 14,000 cap. This repair precedes D5;
-  the final mechanical rename, .12 owner acceptance and .13 reconciliation
-  remain outstanding. The T7 target-row amendment remains assigned to .11.
+  At that repair the unchanged T7 four-group/eight-file denominator measured
+  13,995 physical Rust lines including tests/comments/blanks (was 13,918; +77).
+  The final D5 inventory below includes subsequent portal repairs and records
+  the owner-approved 14,000 cap. Owner .12 acceptance and .13 reconciliation
+  remain distinct from those source changes.
 
 - **F7 — HTTPS link actions [Source].** `hud-bz9bv.8` adds shared strict
   target validation, indexed local opening, token-derived marks and unlocked
@@ -292,12 +292,12 @@ source links when implementation changes the status.
 - **T7 — portal [Observed].** MCP tools now share
   [`PortalHandle`](../crates/tze_hud_mcp/src/server.rs) directly with the
   runtime's [portal driver](../crates/tze_hud_runtime/src/portal.rs).
-  [`PortalHub`](../crates/tze_hud_projection/src/hub.rs) owns transcripts,
+  [`PortalHub`](../crates/tze_hud_portal/src/hub.rs) owns transcripts,
   replies, liveness, pacing, cue deadlines and retained unread state under
-  `(agent, portal id)`. The [pure renderer](../crates/tze_hud_projection/src/render.rs)
+  `(agent, portal id)`. The [pure renderer](../crates/tze_hud_portal/src/render.rs)
   builds scene nodes from `PortalView` and resolved tokens; the driver applies
   them directly. The resident adapter and protobuf render round trip are gone.
-  The [projection crate](../crates/tze_hud_projection/src/lib.rs) no longer exports
+  The [projection crate](../crates/tze_hud_portal/src/lib.rs) no longer exports
   the external authority, contract or coalescer. Portal-only `MutationProto`
   fields 13–17 and their names are reserved; their wire messages, converters and
   scene mutation variants are removed. Native rendering retains the checked
@@ -346,9 +346,9 @@ source links when implementation changes the status.
   unique retained regression remain in scope. Driver's approximate 750 / 1100
   targets are also missed (949 / 1521). Moving tests is ownership cleanup,
   not combined deletion. This source inventory does not establish executed
-  verification or physical Windows acceptance. Crate
-  rename, final four-group size reconciliation and Windows owner acceptance
-  remain (`hud-lirh2`); source evidence cannot close those owner checks.
+  verification or physical Windows acceptance. The final D5 inventory below
+  records the later mechanical crate rename and size reconciliation; those
+  source changes cannot close the remaining Windows owner checks.
   The composer cleanup (`hud-lirh2.10`) removes the scheduler, raw draft wire
   messages, raw input-history queue/store and their obsolete assertions. Native
   local editing, accepted history and complete-handle routing remain. It keeps
@@ -380,6 +380,32 @@ source links when implementation changes the status.
   reductions miss their estimated 600–900 / 350–600 lines; unique coverage takes priority
   over estimates. Tests: +0 ~54 -59 (net -59); two moves have zero add/remove
   delta. Native projection/hub/goldens and driver source remain unchanged.
+
+
+  **D5 — final crate rename [Source].** `tze_hud_portal` now names the
+  in-process hub, tokens and pure renderer. Workspace/dependency paths,
+  imports and current contributor/skill references follow that name; the
+  resident feature and old protocol/crypto dependencies were already gone.
+  MCP identity, shared errors and reserved wire fields 13–17 are unchanged.
+  The owner explicitly amended the earlier ~12k target to **at most 14,000
+  physical Rust lines** in the same four groups/eight files, including all
+  tests, comments and blanks. The historical pre-repair baseline is 13,918;
+  this rename starts at 14,000. The final measured inventory is:
+
+  | Group | Before rename | After rename |
+  |---|---:|---:|
+  | Portal crate (all five Rust files) | 3,214 | 3,214 |
+  | runtime/src/portal.rs | 2,511 | 2,511 |
+  | runtime/src/windowed/portal.rs | 5,027 | 5,027 |
+  | input/src/composer_draft.rs | 3,248 | 3,248 |
+  | Total | 14,000 | 14,000 |
+
+  Reproduce with `wc -l crates/tze_hud_portal/src/*.rs
+  crates/tze_hud_runtime/src/portal.rs
+  crates/tze_hud_runtime/src/windowed/portal.rs
+  crates/tze_hud_input/src/composer_draft.rs` (one command). No source or
+  tests moved outside the denominator. This is source completion of D5;
+  `hud-lirh2.12` owner acceptance and `.13` final reconciliation remain open.
 
 - **T8 — diet [Observed].** The [local harness](../justfile) includes
   llvmpipe GPU recipes and Nextest; resource acceptance has a compact

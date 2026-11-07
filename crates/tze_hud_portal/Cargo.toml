@@ -1,6 +1,6 @@
 [package]
-name = "tze_hud_projection"
-description = "Shared in-process portal state and resident rendering"
+name = "tze_hud_portal"
+description = "In-process portal state and scene rendering"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

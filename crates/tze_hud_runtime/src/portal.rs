@@ -28,8 +28,8 @@ use std::sync::MutexGuard;
 use tze_hud_config::{resolve_portal_tokens, tokens::DesignTokenMap};
 use tze_hud_input::InputProcessor;
 pub use tze_hud_mcp::PortalHandle;
-pub use tze_hud_projection::hub::{PortalHub, PortalKey};
-use tze_hud_projection::{
+pub use tze_hud_portal::hub::{PortalHub, PortalKey};
+use tze_hud_portal::{
     ComposerStatus, InputDeliveryState, OutputKind, PortalInputFeedback, PortalInputFeedbackState,
     PortalView, ProjectedPortalPresentation, ProjectionLifecycleState, TranscriptUnit,
     hub::{DeadlineKind, Due, Portal, PortalStatus, Transition, Unit},
@@ -92,7 +92,7 @@ const PORTAL_LEASE_TTL_MS: u64 = 86_400_000;
 /// so `state`'s agent-activity / streaming-cursor cue quiesces (hud-kbm80), or
 /// `None` when the state carries no cue active as of `now_us`.
 fn activity_cue_clear_due_us(state: &PortalView, now_us: u64) -> Option<u64> {
-    tze_hud_projection::render::agent_activity_clear_deadline_us(state)
+    tze_hud_portal::render::agent_activity_clear_deadline_us(state)
         .filter(|deadline| *deadline >= now_us)
         .map(|deadline| deadline.saturating_add(1))
 }
@@ -959,7 +959,7 @@ impl PortalDriver {
 mod tests {
     use super::*;
     use std::sync::Arc;
-    use tze_hud_projection::hub::{PortalError, PortalLimits, Publish};
+    use tze_hud_portal::hub::{PortalError, PortalLimits, Publish};
     use tze_hud_scene::{Clock, NodeData, TestClock};
 
     /// The header marker line the scene renderer paints while the agent is
@@ -983,7 +983,7 @@ mod tests {
             .hub_mut()
             .publish(
                 key,
-                tze_hud_projection::hub::Publish {
+                tze_hud_portal::hub::Publish {
                     display_name: None,
                     text: Some(text.into()),
                     key: None,
@@ -1160,7 +1160,7 @@ mod tests {
         assert_eq!(rejected.feedback_state, PortalInputFeedbackState::Rejected);
         assert_eq!(
             rejected.error_code,
-            Some(tze_hud_projection::PortalError::TooLarge { limit: input_limit })
+            Some(tze_hud_portal::PortalError::TooLarge { limit: input_limit })
         );
         assert_eq!(rejected.pending_input_count, 0);
         assert!(std::future::Future::poll(rejected_notify.as_mut(), &mut context).is_pending());

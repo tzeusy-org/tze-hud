@@ -3254,7 +3254,7 @@ mod tests {
         // pins the tail; the raw-tile echo helper never runs.
         let clock = tze_hud_scene::TestClock::from_us(200);
         let mut driver = crate::portal::PortalDriver::new(tze_hud_mcp::PortalHandle::new(
-            tze_hud_projection::hub::PortalHub::default(),
+            tze_hud_portal::hub::PortalHub::default(),
             Arc::new(clock.clone()),
         ));
         let handle = driver.portal_handle();
@@ -3262,8 +3262,8 @@ mod tests {
         driver
             .hub_mut()
             .publish(
-                &tze_hud_projection::hub::PortalKey::new("test-agent", "proj-npcdf"),
-                tze_hud_projection::hub::Publish {
+                &tze_hud_portal::hub::PortalKey::new("test-agent", "proj-npcdf"),
+                tze_hud_portal::hub::Publish {
                     text: Some(history.clone()),
                     ..Default::default()
                 },
@@ -3281,7 +3281,7 @@ mod tests {
                 .hub
                 .lock()
                 .unwrap()
-                .get(&tze_hud_projection::hub::PortalKey::new(
+                .get(&tze_hud_portal::hub::PortalKey::new(
                     "test-agent",
                     "proj-npcdf"
                 ))
@@ -3329,7 +3329,7 @@ mod tests {
         // Seed an overflowing history so there is a nonzero scrollable range
         // (mirrors the authority echo growing the transcript).
         let line_height =
-            tze_hud_projection::tokens::PortalVisualTokens::default().transcript_font_size_px * 1.4;
+            tze_hud_portal::tokens::PortalVisualTokens::default().transcript_font_size_px * 1.4;
         processor.notify_tile_content_appended(
             tile_id,
             history.lines().count() as f32 * line_height,
@@ -3437,7 +3437,7 @@ mod tests {
         {
             let hub = handle.hub.lock().unwrap();
             let portal = hub
-                .get(&tze_hud_projection::hub::PortalKey::new(
+                .get(&tze_hud_portal::hub::PortalKey::new(
                     "test-agent",
                     "proj-npcdf",
                 ))
@@ -3476,7 +3476,7 @@ mod tests {
                 .hub
                 .lock()
                 .unwrap()
-                .get(&tze_hud_projection::hub::PortalKey::new(
+                .get(&tze_hud_portal::hub::PortalKey::new(
                     "test-agent",
                     "proj-npcdf"
                 ))
@@ -3573,7 +3573,7 @@ mod tests {
         {
             let hub = handle.hub.lock().unwrap();
             let portal = hub
-                .get(&tze_hud_projection::hub::PortalKey::new(
+                .get(&tze_hud_portal::hub::PortalKey::new(
                     "test-agent",
                     "proj-npcdf",
                 ))
@@ -3633,7 +3633,7 @@ mod tests {
                 .hub
                 .lock()
                 .unwrap()
-                .get(&tze_hud_projection::hub::PortalKey::new(
+                .get(&tze_hud_portal::hub::PortalKey::new(
                     "test-agent",
                     "proj-npcdf"
                 ))
@@ -3650,7 +3650,7 @@ mod tests {
         {
             let hub = handle.hub.lock().unwrap();
             let portal = hub
-                .get(&tze_hud_projection::hub::PortalKey::new(
+                .get(&tze_hud_portal::hub::PortalKey::new(
                     "test-agent",
                     "proj-npcdf",
                 ))
@@ -3672,7 +3672,7 @@ mod tests {
         {
             let hub = handle.hub.lock().err().unwrap().into_inner();
             let portal = hub
-                .get(&tze_hud_projection::hub::PortalKey::new(
+                .get(&tze_hud_portal::hub::PortalKey::new(
                     "test-agent",
                     "proj-npcdf",
                 ))

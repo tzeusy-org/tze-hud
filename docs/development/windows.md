@@ -275,7 +275,7 @@ All workspace targets, tests included, compiled for Windows as of 2026-10-04.
 This was checked with
 `cargo check --workspace --all-targets --target x86_64-pc-windows-gnu` from
 Linux. That compile-only observation does not establish full-suite execution on Windows; the current Windows workflow exercises the subset below. Tests marked
-`#[cfg(unix)]` (for example in `crates/tze_hud_projection/src/tests/mod.rs`)
+`#[cfg(unix)]` (for example in `crates/tze_hud_portal/src/tests/mod.rs`)
 don't run on Windows. Linux CI covers them.
 
 For the non-tag Windows CI build and smoke (`windows.yml`), run the commands

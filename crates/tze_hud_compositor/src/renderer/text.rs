@@ -1978,7 +1978,7 @@ fn apply_portal_reveal_fade(
 /// The transcript-tail streaming-cursor glyph (U+258D LEFT THREE EIGHTHS BLOCK).
 ///
 /// Mirrors the trailing glyph in `PORTAL_STREAMING_CURSOR_GLYPH` (`" ▍"`) that
-/// `tze_hud_projection::resident_grpc` appends to the streaming transcript body.
+/// `tze_hud_portal::resident_grpc` appends to the streaming transcript body.
 /// Kept in sync with that constant: if the adapter's cursor glyph changes, change
 /// this too (there is no shared crate for the literal).
 const STREAMING_CURSOR_GLYPH: char = '\u{258D}';

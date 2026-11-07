@@ -3818,7 +3818,7 @@ mod tests {
             .try_lock()
             .expect("shared scene must be free before inducing contention");
         let portals = app.state.portal_projection_driver.portal_handle();
-        let key = tze_hud_projection::hub::PortalKey::new("wake-test", "proj-availability-wake");
+        let key = tze_hud_portal::hub::PortalKey::new("wake-test", "proj-availability-wake");
         let before = format!("{:?}", portals.hub.lock().unwrap().get(&key).unwrap());
         let compositor_before = app.state.wake.compositor().checkpoint();
         let main_work_before = app.state.wake.main_work_generation();
@@ -3917,7 +3917,7 @@ mod tests {
     fn typed_portal_deadline_owns_the_single_post_mutation_wake() {
         use crate::idle_efficiency::RuntimeWakeupSource;
         use crate::portal::{PortalTimedAuthority, PortalWakeDeadline};
-        use tze_hud_projection::hub::DeadlineKind;
+        use tze_hud_portal::hub::DeadlineKind;
         for (authority, expected) in [
             (None, RuntimeWakeupSource::SceneChange),
             (
@@ -4609,14 +4609,14 @@ mod tests {
     fn make_windowed_app_with_pending_portal_publish(projection_id: &str) -> WinitApp {
         let mut scene = tze_hud_scene::SceneGraph::new(1920.0, 1080.0);
         let driver = crate::portal::PortalDriver::new(tze_hud_mcp::PortalHandle::new(
-            tze_hud_projection::hub::PortalHub::default(),
+            tze_hud_portal::hub::PortalHub::default(),
             scene.clock(),
         ));
         driver
             .hub_mut()
             .publish(
-                &tze_hud_projection::hub::PortalKey::new("wake-test", projection_id),
-                tze_hud_projection::hub::Publish {
+                &tze_hud_portal::hub::PortalKey::new("wake-test", projection_id),
+                tze_hud_portal::hub::Publish {
                     text: Some("actual portal mutation".to_string()),
                     ..Default::default()
                 },

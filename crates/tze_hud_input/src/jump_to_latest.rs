@@ -139,7 +139,7 @@ impl Default for JumpToLatestTokens {
 ///   rather than a "0 unread" marker.
 ///
 /// This matches the gating of the in-transcript ambient unread indicator
-/// (`tze_hud_projection::resident_grpc::unread_indicator_line`) so the pill
+/// (`tze_hud_portal::resident_grpc::unread_indicator_line`) so the pill
 /// badge and the ambient count agree. Large counts clamp to `"999+ unread"` so
 /// the label never overflows the compact pill; the compositor additionally
 /// clips to the pill interior.
