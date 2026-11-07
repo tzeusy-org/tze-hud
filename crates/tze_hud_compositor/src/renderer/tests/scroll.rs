@@ -993,7 +993,7 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
         height: tile_bounds.height,
     };
     let tokens = PortalVisualTokens::default();
-    for step in 0..3 {
+    for step in 0..4 {
         let append = step > 0;
         if step == 1 {
             view.visible_transcript.push(TranscriptUnit {
@@ -1008,6 +1008,11 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
             // Same-size rolling retention window: height delta cannot identify
             // the removed prefix. Keep the visible marker at the same screen y.
             view.visible_transcript[0].output_text = (21..=80)
+                .map(|i| format!("Line {i:02} — stable reading marker.\n\n"))
+                .collect();
+        }
+        if step == 3 {
+            view.visible_transcript[0].output_text = (31..=90)
                 .map(|i| format!("Line {i:02} — stable reading marker.\n\n"))
                 .collect();
         }
@@ -1080,6 +1085,11 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
                 "INPUT wheel cannot move OUTPUT"
             );
         }
+        if step == 3 {
+            // Main-thread input can arrive after reconciliation but before the
+            // compositor consumes the changed document coordinate origin.
+            processor.process_keyboard_scroll(tile_id, -40.0, &mut scene);
+        }
         // Exercise the native displayed coordinate, with a deterministic 1 ms
         // frame delta. Headless raw-target assertions cannot catch origin easing.
         compositor.scroll_smoothing_enabled = true;
@@ -1100,8 +1110,16 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
         let input_offset = scene.portal_input_scroll_offset(tile_id);
         if let Some((previous_y, previous_input)) = reading {
             assert!(
-                (marker_y - previous_y).abs() < 0.01,
-                "same retained visible line after append/head trim"
+                (marker_y
+                    - previous_y
+                    - if step == 3 {
+                        40.0 * super::easing::exp_smooth_factor(1.0, 90.0)
+                    } else {
+                        0.0
+                    })
+                .abs()
+                    < 0.01,
+                "retain the reading line and ease only any intervening user scroll"
             );
             assert_eq!(
                 input_offset, previous_input,
