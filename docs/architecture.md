@@ -127,7 +127,8 @@ Typing resets INPUT history alone; header, labels and editor remain fixed.
 A uniquely identifiable visible plain-text row anchors append, reflow and rolling
 head trim. Repeated identical lines without a unique visible anchor keep their
 pixel offset, clamped to the retained range; this does not guarantee original
-turn identity. Existing 16 KiB history/render limits are unchanged. Resize
+turn identity. Measured origin corrections rebase the native smoother once, so
+ordinary wheel easing never animates a reading coordinate through a new origin. Existing 16 KiB history/render limits are unchanged. Resize
 completion broadcasts member geometry and optionally persists it after unlock.
 Detach revokes while
 scene-owned; hub tombstones and scene terminal state retain missed-lock cleanup.

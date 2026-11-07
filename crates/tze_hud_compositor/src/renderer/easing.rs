@@ -141,6 +141,7 @@ pub(crate) struct ScrollSmoother {
     /// Snap distance (px): within this of the target, jump exactly onto it so
     /// motion terminates cleanly instead of asymptotically crawling.
     snap_epsilon: f32,
+    origin_epoch: u64,
 }
 
 /// Default smoothing time constant (ms). ~90 ms reads as a quick, deliberate
@@ -161,6 +162,17 @@ impl ScrollSmoother {
             displayed_y: y,
             tau_ms: SCROLL_SMOOTH_TAU_MS,
             snap_epsilon: SCROLL_SNAP_EPSILON_PX,
+            origin_epoch: 0,
+        }
+    }
+
+    /// Layout corrections change coordinate origin, not reading intent. Snap
+    /// once per epoch; repeated frames and ordinary wheel retain their easing.
+    pub(crate) fn rebase(&mut self, epoch: u64, x: f32, y: f32) {
+        if self.origin_epoch != epoch {
+            self.displayed_x = x;
+            self.displayed_y = y;
+            self.origin_epoch = epoch;
         }
     }
 

@@ -715,10 +715,18 @@ impl Compositor {
                 continue;
             }
             let (target_x, target_y) = scene.tile_scroll_offset_local(tile.id);
-            self.scroll_smoothers
+            let smoother = self
+                .scroll_smoothers
                 .entry(tile.id)
-                .or_insert_with(|| super::easing::ScrollSmoother::new(target_x, target_y))
-                .advance(target_x, target_y, dt_ms);
+                .or_insert_with(|| super::easing::ScrollSmoother::new(target_x, target_y));
+            let origin_epoch = scene
+                .overlay
+                .portal_scroll_origin_epochs
+                .get(&tile.id)
+                .copied()
+                .unwrap_or_default();
+            smoother.rebase(origin_epoch, target_x, target_y);
+            smoother.advance(target_x, target_y, dt_ms);
         }
 
         // Prune smoothers for tiles that are no longer scrollable / present.

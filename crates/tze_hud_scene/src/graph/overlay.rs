@@ -104,6 +104,10 @@ pub struct RuntimeOverlayState {
     /// INPUT history scrolls independently of the tile's OUTPUT document.
     #[serde(skip, default)]
     pub portal_input_scroll_offsets: HashMap<SceneId, (f32, f32)>,
+    /// Measured OUTPUT coordinate-origin changes snap rather than easing an
+    /// old coordinate through a new retained document. Ordinary wheel stays eased.
+    #[serde(skip, default)]
+    pub portal_scroll_origin_epochs: HashMap<SceneId, u64>,
     /// Only actual shaped documents publish extents; this does not dirty pixels.
     #[serde(skip, default)]
     pub portal_document_layouts: HashMap<(SceneId, PortalPartKind), PortalDocumentLayout>,

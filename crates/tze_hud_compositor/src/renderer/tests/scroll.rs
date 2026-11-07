@@ -1065,6 +1065,18 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
                 input_tail,
                 "OUTPUT wheel cannot move INPUT"
             );
+            let displayed_before_wheel = compositor.display_tile_scroll_offset(&scene, tile_id).1;
+            processor.process_keyboard_scroll(tile_id, -40.0, &mut scene);
+            compositor.update_scroll_smoothing_at(
+                &scene,
+                smooth_time + std::time::Duration::from_millis(3),
+            );
+            let displayed_after_wheel = compositor.display_tile_scroll_offset(&scene, tile_id).1;
+            assert!(displayed_after_wheel < displayed_before_wheel);
+            assert!(
+                displayed_after_wheel > scene.tile_scroll_offset_local(tile_id).1,
+                "ordinary wheel still eases; only measured origin changes snap"
+            );
             let output_reading = scene.tile_scroll_offset_local(tile_id);
             assert!(output_reading.1 < output_tail.1);
             assert!(
