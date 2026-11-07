@@ -473,12 +473,13 @@ impl InputProcessor {
                 let previous = scene.tile_scroll_offset_local(tile);
                 if previous != offset {
                     if reading_offset.is_some() || offset.1 < previous.1 {
-                        let epoch = scene
+                        let shift = scene
                             .overlay
-                            .portal_scroll_origin_epochs
+                            .portal_scroll_origin_shifts
                             .entry(tile)
                             .or_default();
-                        *epoch = epoch.wrapping_add(1);
+                        shift.0 += f64::from(offset.0) - f64::from(previous.0);
+                        shift.1 += f64::from(offset.1) - f64::from(previous.1);
                     }
                     let _ = scene.set_tile_scroll_offset_local(tile, offset.0, offset.1);
                     scene.bump_geometry_epoch();

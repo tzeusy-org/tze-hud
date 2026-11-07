@@ -141,7 +141,7 @@ pub(crate) struct ScrollSmoother {
     /// Snap distance (px): within this of the target, jump exactly onto it so
     /// motion terminates cleanly instead of asymptotically crawling.
     snap_epsilon: f32,
-    origin_epoch: u64,
+    origin_shift: (f64, f64),
 }
 
 /// Default smoothing time constant (ms). ~90 ms reads as a quick, deliberate
@@ -156,24 +156,23 @@ impl ScrollSmoother {
     ///
     /// A freshly-observed tile starts *on* its current offset (no initial
     /// jump); only subsequent target changes animate.
-    pub(crate) fn new(x: f32, y: f32) -> Self {
+    pub(crate) fn new(x: f32, y: f32, origin_shift: (f64, f64)) -> Self {
         Self {
             displayed_x: x,
             displayed_y: y,
             tau_ms: SCROLL_SMOOTH_TAU_MS,
             snap_epsilon: SCROLL_SNAP_EPSILON_PX,
-            origin_epoch: 0,
+            origin_shift,
         }
     }
 
-    /// Layout corrections change coordinate origin, not reading intent. Snap
-    /// once per epoch; repeated frames and ordinary wheel retain their easing.
-    pub(crate) fn rebase(&mut self, epoch: u64, x: f32, y: f32) {
-        if self.origin_epoch != epoch {
-            self.displayed_x = x;
-            self.displayed_y = y;
-            self.origin_epoch = epoch;
-        }
+    /// Translate displayed coordinates by unconsumed layout corrections. The
+    /// cumulative shift coalesces corrections without swallowing wheel input
+    /// received before this frame; ordinary advance still eases that target.
+    pub(crate) fn rebase(&mut self, origin_shift: (f64, f64)) {
+        self.displayed_x += (origin_shift.0 - self.origin_shift.0) as f32;
+        self.displayed_y += (origin_shift.1 - self.origin_shift.1) as f32;
+        self.origin_shift = origin_shift;
     }
 
     /// The currently displayed (smoothed) offset.
@@ -409,10 +408,16 @@ mod tests {
 
     #[test]
     fn scroll_smoother_starts_settled() {
-        let s = ScrollSmoother::new(12.0, 34.0);
+        let mut s = ScrollSmoother::new(12.0, 34.0, (5.0, -700.0));
         assert_eq!(s.displayed(), (12.0, 34.0));
-        // Freshly constructed on its offset → settled there (idle render gate).
+        // Fresh construction has already observed the cumulative origin.
+        s.rebase((5.0, -700.0));
         assert!(s.is_settled(12.0, 34.0));
+        // Two coalesced corrections are consumed once, without a target snap.
+        s.rebase((5.0 + 3.0 + 4.0, -700.0 - 10.0 - 20.0));
+        assert_eq!(s.displayed(), (19.0, 4.0));
+        s.rebase((12.0, -730.0));
+        assert_eq!(s.displayed(), (19.0, 4.0));
     }
 
     #[test]
@@ -421,7 +426,7 @@ mod tests {
         // far away; settles again once the displayed offset converges onto it.
         // This is the predicate the idle render gate (hud-ilivg) uses to tell a
         // still-catching-up smoother (keep rendering) from a finished one (idle).
-        let mut s = ScrollSmoother::new(0.0, 0.0);
+        let mut s = ScrollSmoother::new(0.0, 0.0, (0.0, 0.0));
         assert!(s.is_settled(0.0, 0.0));
 
         // Target jumps 500px away: catch-up in flight, not yet settled.
@@ -443,7 +448,7 @@ mod tests {
 
     #[test]
     fn scroll_smoother_converges_to_target() {
-        let mut s = ScrollSmoother::new(0.0, 0.0);
+        let mut s = ScrollSmoother::new(0.0, 0.0, (0.0, 0.0));
         // 16.6ms frames toward a target 500px away — must converge within ~2s.
         let mut frames = 0;
         loop {
@@ -459,7 +464,7 @@ mod tests {
 
     #[test]
     fn scroll_smoother_monotonic_approach() {
-        let mut s = ScrollSmoother::new(0.0, 0.0);
+        let mut s = ScrollSmoother::new(0.0, 0.0, (0.0, 0.0));
         let mut prev = 0.0;
         for _ in 0..30 {
             let (_, y) = s.advance(0.0, 100.0, 16.6);
@@ -472,10 +477,10 @@ mod tests {
     #[test]
     fn scroll_smoother_frame_rate_independent() {
         // One 100ms step vs many small steps summing to 100ms land close.
-        let mut coarse = ScrollSmoother::new(0.0, 0.0);
+        let mut coarse = ScrollSmoother::new(0.0, 0.0, (0.0, 0.0));
         coarse.advance(0.0, 100.0, 100.0);
 
-        let mut fine = ScrollSmoother::new(0.0, 0.0);
+        let mut fine = ScrollSmoother::new(0.0, 0.0, (0.0, 0.0));
         for _ in 0..100 {
             fine.advance(0.0, 100.0, 1.0);
         }
@@ -489,7 +494,7 @@ mod tests {
 
     #[test]
     fn scroll_smoother_snaps_within_epsilon() {
-        let mut s = ScrollSmoother::new(99.9, 0.0);
+        let mut s = ScrollSmoother::new(99.9, 0.0, (0.0, 0.0));
         let (x, _) = s.advance(100.0, 0.0, 16.6);
         assert_eq!(x, 100.0, "should snap exactly when within epsilon");
     }

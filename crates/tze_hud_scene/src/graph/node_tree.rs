@@ -162,7 +162,7 @@ impl SceneGraph {
         self.overlay.tile_scroll_configs.remove(&tile_id);
         self.overlay.tile_scroll_offsets.remove(&tile_id);
         self.overlay.portal_input_scroll_offsets.remove(&tile_id);
-        self.overlay.portal_scroll_origin_epochs.remove(&tile_id);
+        self.overlay.portal_scroll_origin_shifts.remove(&tile_id);
         self.overlay
             .portal_document_layouts
             .retain(|(tile, _), _| *tile != tile_id);

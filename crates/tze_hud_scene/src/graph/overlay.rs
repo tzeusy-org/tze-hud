@@ -104,10 +104,10 @@ pub struct RuntimeOverlayState {
     /// INPUT history scrolls independently of the tile's OUTPUT document.
     #[serde(skip, default)]
     pub portal_input_scroll_offsets: HashMap<SceneId, (f32, f32)>,
-    /// Measured OUTPUT coordinate-origin changes snap rather than easing an
-    /// old coordinate through a new retained document. Ordinary wheel stays eased.
+    /// Cumulative measured OUTPUT origin translation. The compositor consumes
+    /// each delta once, independently of intervening ordinary wheel targets.
     #[serde(skip, default)]
-    pub portal_scroll_origin_epochs: HashMap<SceneId, u64>,
+    pub portal_scroll_origin_shifts: HashMap<SceneId, (f64, f64)>,
     /// Only actual shaped documents publish extents; this does not dirty pixels.
     #[serde(skip, default)]
     pub portal_document_layouts: HashMap<(SceneId, PortalPartKind), PortalDocumentLayout>,
