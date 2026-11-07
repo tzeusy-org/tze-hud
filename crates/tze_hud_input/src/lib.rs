@@ -487,6 +487,12 @@ impl InputProcessor {
         tile: SceneId,
         scene: &mut SceneGraph,
     ) -> bool {
+        if scene
+            .portal_surface(tile)
+            .is_none_or(|surface| surface.parts.iter().any(|part| part.node.is_some()))
+        {
+            return self.reset_tile_scroll_to_tail(tile, scene);
+        }
         let changed = self.portal_input_scroll_state.reset_to_tail(tile);
         if changed {
             scene.set_portal_input_scroll_offset(tile, self.portal_input_scroll_state.offset(tile));

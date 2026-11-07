@@ -905,10 +905,10 @@ impl PortalDriver {
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use std::sync::Arc;
-    use tze_hud_portal::hub::{PortalError, PortalLimits, Publish};
+    use tze_hud_portal::hub::{PortalError, Publish};
     use tze_hud_scene::{Clock, NodeData, TestClock};
 
     /// The header marker line the scene renderer paints while the agent is
@@ -1316,7 +1316,7 @@ mod tests {
 
     /// FrameReady carries actual shaped metrics; tests below inject that seam.
     /// The compositor regression proves the metrics against its actual buffer.
-    fn measured_panes(scene: &mut SceneGraph, tile: SceneId, output: f32, input: f32) {
+    pub(crate) fn measured_panes(scene: &mut SceneGraph, tile: SceneId, output: f32, input: f32) {
         let size = (
             scene.tiles[&tile].bounds.width,
             scene.tiles[&tile].bounds.height,
