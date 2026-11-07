@@ -3030,16 +3030,16 @@ impl WinitApp {
                     portal_tokens,
                 );
 
-                // Local feedback patch (result.local_patch) would be sent to the
-                // compositor via a local-patch channel in the full pipeline. For the
-                // initial windowed runtime, the compositor reads the scene state
-                // directly on the next frame.
+                // Local state is already in the shared scene. Re-arm the idle
+                // gate for changed feedback without invalidating content caches.
+                if !result.local_patch.is_empty() {
+                    scene.bump_geometry_epoch();
+                }
                 record_pending_input_latency(
                     &self.state.pending_input_latency,
                     input_started_at,
                     result.local_ack_us,
                 );
-                let _ = result.local_patch;
 
                 // ── Pointer event dispatch to subscribed portal agents ────────
                 // Broadcast PointerDown / PointerMove / PointerUp to agents
