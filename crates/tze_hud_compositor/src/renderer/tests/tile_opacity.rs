@@ -479,6 +479,15 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
                 unreachable!()
             };
             backdrop.color = color;
+            let NodeData::HitRegion(region) = &mut scene.nodes.get_mut(&composer_id).unwrap().data
+            else {
+                unreachable!()
+            };
+            region.local_style.hover_tint = Some(Rgba::new(0.6, 0.5, 0.8, 0.3));
+            region.local_style.pressed_tint = Some(Rgba::new(0.0, 0.0, 0.0, 0.25));
+            scene.version += 1;
+            compositor.prime_markdown_cache(&scene);
+            compositor.prime_truncation_cache(&scene);
         }
         for opacity in [1.0, 0.4, 0.0] {
             scene.tiles.get_mut(&tile_id).unwrap().opacity = opacity;
@@ -570,6 +579,8 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
             },
         )
         .unwrap();
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
     for level in [DegradationLevel::Nominal, DegradationLevel::Simplified] {
         compositor.set_degradation_policy(CompositorDegradationPolicy {
             level,

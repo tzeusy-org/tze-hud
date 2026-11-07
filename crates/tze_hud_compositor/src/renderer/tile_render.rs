@@ -50,7 +50,7 @@ use super::token_colors::{
 };
 use super::{Compositor, CompositorDegradationPolicy};
 
-pub(super) fn hit_region_tint(
+fn hit_region_tint(
     region: &HitRegionNode,
     node_id: SceneId,
     scene: &SceneGraph,
@@ -88,6 +88,9 @@ pub(super) fn composer_backdrop_color(
         return None;
     }
     let tint = hit_region_tint(region, node_id, scene)?;
+    if tint[3] == 0.0 {
+        return None;
+    }
     // Tint the existing pane before its ordinary fade/alpha conversion. An
     // additional overlay changes coverage and can escape the pane's z-order.
     Some(Rgba {
