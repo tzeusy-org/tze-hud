@@ -11,7 +11,7 @@ use tze_hud_resource::{
     UploadId, UploadStartRequest,
 };
 use tze_hud_scene::{
-    MAX_MARKDOWN_BYTES, MonoUs, ZONE_TILE_Z_MIN,
+    MAX_MARKDOWN_BYTES, ZONE_TILE_Z_MIN,
     graph::{MAX_NODES_PER_TILE, SceneGraph},
     lease::LeaseState,
     mutation::{MutationBatch, SceneMutation},
