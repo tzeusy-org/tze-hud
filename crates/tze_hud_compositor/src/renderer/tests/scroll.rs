@@ -985,7 +985,7 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
         appended_at_wall_us: 0,
     });
     let mut processor = tze_hud_input::InputProcessor::new();
-    let mut reading = None;
+    let mut reading: Option<(f32, (f32, f32))> = None;
     let viewport = Size {
         width: tile_bounds.width,
         height: tile_bounds.height,
