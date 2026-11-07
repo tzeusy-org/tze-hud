@@ -889,18 +889,19 @@ impl Compositor {
                     return Some(c);
                 }
                 NodeData::TextMarkdown(tm) => {
-                    if let Some(bg) = &tm.background {
-                        // Apply combined opacity to the token-supplied background alpha.
-                        let mut c = bg.to_array();
-                        c[3] *= opacity;
-                        return Some(c);
-                    }
-                    let c = resolve_tile_bg_token(
-                        &self.token_map,
-                        "color.tile.background.text_markdown",
-                        TILE_BG_TEXT_MARKDOWN,
-                    );
-                    return Some([c.r, c.g, c.b, opacity]);
+                    let bg = tm.background.unwrap_or_else(|| {
+                        let color = resolve_tile_bg_token(
+                            &self.token_map,
+                            "color.tile.background.text_markdown",
+                            TILE_BG_TEXT_MARKDOWN,
+                        );
+                        Rgba { a: 1.0, ..color }
+                    });
+                    let mut c = composer_backdrop_color(scene, tile.id, tm.bounds, bg)
+                        .unwrap_or(bg)
+                        .to_array();
+                    c[3] *= opacity;
+                    return Some(c);
                 }
                 NodeData::HitRegion(_) => {
                     // HitRegion is an invisible interaction primitive. Its visible
@@ -1819,6 +1820,8 @@ impl Compositor {
             NodeData::TextMarkdown(tm) => {
                 if self.text_rasterizer.is_some() {
                     if let Some(bg) = tm.background {
+                        let bg =
+                            composer_backdrop_color(scene, tile.id, tm.bounds, bg).unwrap_or(bg);
                         Self::append_clipped_rect_vertices(
                             tile,
                             Rect::new(
@@ -1964,6 +1967,7 @@ impl Compositor {
                     // Fallback when glyphon is unavailable: preserve the old
                     // placeholder treatment so text tiles remain visible.
                     let bg = tm.background.unwrap_or(TILE_BG_TEXT_MARKDOWN);
+                    let bg = composer_backdrop_color(scene, tile.id, tm.bounds, bg).unwrap_or(bg);
                     Self::append_clipped_rect_vertices(
                         tile,
                         Rect::new(

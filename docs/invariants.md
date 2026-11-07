@@ -172,10 +172,12 @@ captures the production rounded portal through Normal/Simplified/recovery and
 settled activation/move/release. This prevents transparent body holes when drag
 work triggers simplified rendering; intended token alpha and fades remain.
 The generated composer is installed separately from its render tree. Its hover
-and press tint the existing input-pane background before fade/alpha conversion,
+and press tint the existing expanded input pane or collapsed text background before fade/alpha conversion,
 preserving the pane's coverage and paint order in normal and simplified frames.
 The same parent checks actual composer pixels, leave, partial/zero fades, a
-custom translucent pane and overlap with a higher tile.
+custom translucent/transparent panes, distinct and zero-alpha style overrides,
+collapsed feedback and overlap with a higher tile. A fully transparent pane
+does not gain a simplified fill that could erase the frame behind it.
 
 These are source/headless proofs. Exact-deployed-SHA Windows motion/drop,
 reset/restart, native capture/focus and four-action pointer/keyboard owner
