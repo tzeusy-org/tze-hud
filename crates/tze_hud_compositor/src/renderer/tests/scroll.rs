@@ -1003,7 +1003,7 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
         let items = compositor.collect_text_items(&scene, 800.0, 520.0);
         let item = items
             .iter()
-            .find(|item| item.text.contains("Line 40"))
+            .find(|item| item.text.contains("Line 55"))
             .unwrap();
         let rasterizer = compositor.text_rasterizer.as_ref().unwrap();
         let display = crate::text::effective_truncation_key(item)
@@ -1011,7 +1011,7 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
             .map(|result| result.text.as_str())
             .unwrap_or(&item.text);
         assert!(
-            display.contains("Line 40"),
+            display.contains("Line 55"),
             "a retained reading marker must survive append and the tail-to-scrollback transition; append={append}, display={display}"
         );
     }
