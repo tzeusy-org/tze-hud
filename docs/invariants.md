@@ -178,6 +178,11 @@ The same parent checks actual composer pixels, leave, partial/zero fades, a
 custom translucent/transparent panes, distinct and zero-alpha style overrides,
 collapsed feedback and overlap with a higher tile. A fully transparent pane
 does not gain a simplified fill that could erase the frame behind it.
+The windowed pointer path advances the geometry epoch for a nonempty local
+feedback patch, so composer hover/leave and press/release repaint without
+waiting for a caret blink or invalidating content caches. Unchanged moves stay
+idle. The existing runtime `action_button_hover_and_press_are_local_and_frame_only_on_change`
+parent covers these transitions through the production pointer entry point.
 
 These are source/headless proofs. Exact-deployed-SHA Windows motion/drop,
 reset/restart, native capture/focus and four-action pointer/keyboard owner
