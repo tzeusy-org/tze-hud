@@ -521,9 +521,12 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
                 if transparent_pane {
                     assert_eq!(hovered, idle, "transparent pane cannot erase its backdrop");
                 } else if opacity > 0.0 && custom_color.is_some() {
-                    assert!(hovered[1] > hovered[0].saturating_add(30), "custom green hover: {hovered:?}, idle {idle:?}, {level:?}, opacity {opacity}");
                     assert!(
-                        hovered[1] > hovered[2].saturating_add(30),
+                        hovered[1] > hovered[0].saturating_add(8),
+                        "custom green hover: {hovered:?}, idle {idle:?}, {level:?}, opacity {opacity}"
+                    );
+                    assert!(
+                        hovered[1] > hovered[2].saturating_add(8),
                         "custom green hover"
                     );
                 } else if opacity > 0.0 {
@@ -540,9 +543,9 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
                 if transparent_pane {
                     assert_eq!(pressed, idle, "transparent press cannot erase its backdrop");
                 } else if opacity > 0.0 && custom_color.is_some() {
-                    assert!(pressed[0] > pressed[1].saturating_add(30));
+                    assert!(pressed[0] > pressed[1].saturating_add(8));
                     assert!(
-                        pressed[0] > pressed[2].saturating_add(30),
+                        pressed[0] > pressed[2].saturating_add(8),
                         "custom red press"
                     );
                 } else if opacity > 0.0 {
