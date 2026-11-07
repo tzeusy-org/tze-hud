@@ -438,9 +438,15 @@ impl InputProcessor {
             }
             let old = self.portal_layouts.get(&(tile, pane));
             if old.is_some_and(|old| {
-                old.signature == layout.signature && old.viewport_height == layout.viewport_height
+                old.signature == layout.signature && old.viewport.height == layout.viewport.height
             }) {
                 continue;
+            }
+            if old.is_none_or(|old| old.height != layout.height || old.viewport != layout.viewport)
+            {
+                // Vertex collection precedes metric publication. One corrective
+                // frame updates indicator/pill geometry even when reading stays put.
+                scene.bump_geometry_epoch();
             }
             let input = pane == PortalPartKind::Composer;
             let state = if input {
@@ -458,7 +464,7 @@ impl InputProcessor {
             state.notify_content_appended(
                 tile,
                 layout.height,
-                layout.viewport_height,
+                layout.viewport.height,
                 layout.line_height,
             );
             if let Some(y) = reading_offset {

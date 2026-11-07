@@ -1163,7 +1163,12 @@ impl super::Compositor {
                     rows: metrics.rows,
                     content: item.text.clone(),
                     height: metrics.height,
-                    viewport_height: item.clip_bounds_height,
+                    viewport: Rect::new(
+                        item.clip_pixel_x - tile.bounds.x,
+                        item.clip_pixel_y - tile.bounds.y,
+                        item.clip_bounds_width,
+                        item.clip_bounds_height,
+                    ),
                     line_height: item.font_size_px * item.line_height_multiplier,
                 },
             );

@@ -91,6 +91,28 @@ impl SceneGraph {
             .map(|part| part.kind)
     }
 
+    /// Output document viewport and total height for the indicator, badge and
+    /// jump hit target. Ordinary/materialized tiles keep their existing geometry.
+    pub fn output_scroll_geometry(&self, tile_id: SceneId) -> Option<(Rect, f32)> {
+        let tile = self.tiles.get(&tile_id)?;
+        let native = self
+            .portal_surface(tile_id)
+            .is_some_and(|surface| surface.parts.iter().all(|part| part.node.is_none()));
+        if native {
+            let layout = self
+                .overlay
+                .portal_document_layouts
+                .get(&(tile_id, PortalPartKind::Transcript))?;
+            return (self.portal_document_kind(tile_id, layout.node_id)
+                == Some(PortalPartKind::Transcript))
+            .then_some((layout.viewport, layout.height));
+        }
+        Some((
+            Rect::new(0.0, 0.0, tile.bounds.width, tile.bounds.height),
+            self.tile_scroll_config(tile_id)?.content_height?,
+        ))
+    }
+
     pub fn portal_input_scroll_offset(&self, tile_id: SceneId) -> (f32, f32) {
         self.overlay
             .portal_input_scroll_offsets

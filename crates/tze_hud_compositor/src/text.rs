@@ -1517,6 +1517,13 @@ impl TextRasterizer {
         prepare_result.map(|()| inline_backdrop_quads)
     }
 
+    #[cfg(any(test, feature = "dev-mode"))]
+    pub(crate) fn has_shaped_document(&self, item: &TextItem) -> bool {
+        self.shape_cache
+            .get(&shape_key_for_item(item, &item.text))
+            .is_some_and(|buffers| !buffers.is_empty())
+    }
+
     /// Reuse the paint buffer to measure the retained document, including wrap
     /// and rich-text line metrics. The fixed pane scissor is independent.
     pub(crate) fn measure_scroll_document(&mut self, item: &TextItem) -> ShapedDocumentMetrics {

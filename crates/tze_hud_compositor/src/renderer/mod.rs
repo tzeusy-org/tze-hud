@@ -1972,14 +1972,25 @@ impl Compositor {
         self.markdown_primer.load()
     }
 
-    /// Bytes visited by the last completed truncation prime, only when it
-    /// belongs to this exact scene version. Test harnesses use this witness to
-    /// distinguish measured shaping work from a cadence-deferred frame.
+    /// Bytes in current full portal documents whose exact paint buffers have
+    /// actually been shaped. Read-only: never shapes or primes to satisfy a test.
     #[cfg(any(test, feature = "dev-mode"))]
-    pub fn primed_truncation_content_bytes(&self, scene: &SceneGraph) -> Option<usize> {
-        (self.truncation_cache_scene_instance == Some(scene.instance_id)
-            && self.truncation_cache_scene_version == scene.version)
-            .then_some(self.resize_reprime_content_bytes)
+    pub fn prepared_portal_content_bytes(&self, scene: &SceneGraph) -> Option<usize> {
+        let rasterizer = self.text_rasterizer.as_ref()?;
+        let items =
+            self.collect_text_items(scene, scene.display_area.width, scene.display_area.height);
+        let documents: Vec<_> = items
+            .iter()
+            .filter(|item| item.bounds_height == f32::MAX)
+            .collect();
+        if documents.is_empty()
+            || documents
+                .iter()
+                .any(|item| !rasterizer.has_shaped_document(item))
+        {
+            return None;
+        }
+        Some(documents.iter().map(|item| item.text.len()).sum())
     }
 
     /// Prime the ellipsis-truncation cache for all `TextOverflow::Ellipsis` items

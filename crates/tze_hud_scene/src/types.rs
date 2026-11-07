@@ -351,7 +351,7 @@ pub struct PortalDocumentLayout {
     pub font_scale: f32,
     pub content: std::sync::Arc<str>,
     pub height: f32,
-    pub viewport_height: f32,
+    pub viewport: Rect,
     pub line_height: f32,
     /// Plain-text byte start and top of each actually shaped visual row.
     pub rows: std::sync::Arc<[(usize, f32)]>,
@@ -367,7 +367,7 @@ impl PortalDocumentLayout {
             .partition_point(|(_, y)| *y <= offset)
             .saturating_sub(1);
         for &(byte, y) in &self.rows[first..] {
-            if y > offset + self.viewport_height {
+            if y > offset + self.viewport.height {
                 break;
             }
             let byte = byte.min(self.content.len());

@@ -1345,7 +1345,7 @@ pub(crate) mod tests {
                     tile_size: size,
                     font_scale: scene.tile_font_scale(tile),
                     height,
-                    viewport_height: 100.0,
+                    viewport: Rect::new(0.0, 0.0, 100.0, 100.0),
                     line_height: 20.0,
                     rows: Default::default(),
                 },

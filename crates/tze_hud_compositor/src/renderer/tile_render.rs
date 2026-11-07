@@ -1541,9 +1541,8 @@ impl Compositor {
         // gating via the pure functions this delegates to).
         self.text_rasterizer.as_ref()?;
 
-        let scroll_cfg = scene.tile_scroll_config(tile.id)?;
-        let content_height = scroll_cfg.content_height?;
-        let viewport_px = tile.bounds.height;
+        let (viewport, content_height) = scene.output_scroll_geometry(tile.id)?;
+        let viewport_px = viewport.height;
         let (_, scroll_offset_y) = self.display_tile_scroll_offset(scene, tile.id);
         // Only offer the badge where the pill itself renders: content overflows.
         tze_hud_input::compute_scroll_indicator(
@@ -1555,7 +1554,7 @@ impl Compositor {
 
         let scrolled_back = !scene.tile_follow_tail_at_tail(tile.id);
         let pill = tze_hud_input::compute_jump_to_latest_pill(
-            tile.bounds.width,
+            viewport.width,
             viewport_px,
             scrolled_back,
             jump_to_latest_tokens,
@@ -1582,8 +1581,8 @@ impl Compositor {
         let line_height = (font_size_px * line_height_multiplier).max(1.0);
 
         // Pill origin in absolute pixels; vertically center one text line inside it.
-        let pill_x = tile.bounds.x + pill.x_px;
-        let pill_y = tile.bounds.y + pill.y_px;
+        let pill_x = tile.bounds.x + viewport.x + pill.x_px;
+        let pill_y = tile.bounds.y + viewport.y + pill.y_px;
         let text_y = pill_y + ((pill.height_px - line_height) / 2.0).max(0.0);
         let bounds_width = pill.width_px.max(1.0);
         let bounds_height = pill.height_px.max(1.0);

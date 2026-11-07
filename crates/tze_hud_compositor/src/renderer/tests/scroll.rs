@@ -1025,11 +1025,11 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
         let input =
             scene.overlay.portal_document_layouts[&(tile_id, PortalPartKind::Composer)].clone();
         assert!(
-            layout.height > layout.viewport_height * 4.0,
+            layout.height > layout.viewport.height * 4.0,
             "full output is shaped behind the fixed scissor"
         );
         assert!(
-            input.height > input.viewport_height * 2.0,
+            input.height > input.viewport.height * 2.0,
             "INPUT has its own full wrapped layout"
         );
         processor.reconcile_portal_document_layouts(&mut scene);
@@ -1123,7 +1123,7 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
             display.contains("Line 55"),
             "a retained reading marker must survive append and the tail-to-scrollback transition; append={append}, display={display}"
         );
-        assert_eq!(item.clip_bounds_height, layout.viewport_height);
+        assert_eq!(item.clip_bounds_height, layout.viewport.height);
         assert!(
             item.bounds_height > layout.height,
             "paint buffer must not be viewport bounded"
