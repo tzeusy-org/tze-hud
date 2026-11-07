@@ -161,6 +161,10 @@ impl SceneGraph {
         }
         self.overlay.tile_scroll_configs.remove(&tile_id);
         self.overlay.tile_scroll_offsets.remove(&tile_id);
+        self.overlay.portal_input_scroll_offsets.remove(&tile_id);
+        self.overlay
+            .portal_document_layouts
+            .retain(|(tile, _), _| *tile != tile_id);
         self.overlay.tile_follow_tail_at_tail.remove(&tile_id);
         self.overlay.tile_unread_counts.remove(&tile_id);
         self.overlay.tile_lifecycle_accents.remove(&tile_id);

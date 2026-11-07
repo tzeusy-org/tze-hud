@@ -341,6 +341,64 @@ pub enum PortalDisplayState {
     Expanded,
 }
 
+/// A shaped native portal document, published by the compositor for local input.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PortalDocumentLayout {
+    pub node_id: SceneId,
+    pub signature: [u8; 32],
+    pub source: TextMarkdownNode,
+    pub tile_size: (f32, f32),
+    pub font_scale: f32,
+    pub content: std::sync::Arc<str>,
+    pub height: f32,
+    pub viewport_height: f32,
+    pub line_height: f32,
+    /// Plain-text byte start and top of each actually shaped visual row.
+    pub rows: std::sync::Arc<[(usize, f32)]>,
+}
+
+impl PortalDocumentLayout {
+    /// Preserve a uniquely identifiable visible row across append, head trim
+    /// and wrap changes. Repeated identical lines have no text-only identity;
+    /// retain their pixel position and clamp if no unambiguous anchor survives.
+    pub fn retained_reading_offset(&self, new: &Self, offset: f32) -> f32 {
+        let first = self
+            .rows
+            .partition_point(|(_, y)| *y <= offset)
+            .saturating_sub(1);
+        for &(byte, y) in &self.rows[first..] {
+            if y > offset + self.viewport_height {
+                break;
+            }
+            let byte = byte.min(self.content.len());
+            let start = self.content[..byte].rfind('\n').map_or(0, |i| i + 1);
+            let end = self.content[byte..]
+                .find('\n')
+                .map_or(self.content.len(), |i| byte + i);
+            let line = &self.content[start..end];
+            if line.trim().is_empty() {
+                continue;
+            }
+            let mapped = if self.content == new.content {
+                Some(byte)
+            } else if self.content.match_indices(line).count() == 1 {
+                let mut hits = new.content.match_indices(line);
+                hits.next()
+                    .filter(|_| hits.next().is_none())
+                    .map(|(i, _)| i + byte - start)
+            } else {
+                None
+            };
+            if let Some(mapped) = mapped {
+                if let Some((_, new_y)) = new.rows.iter().rev().find(|(b, _)| *b <= mapped) {
+                    return (*new_y + offset - y).max(0.0);
+                }
+            }
+        }
+        offset
+    }
+}
+
 /// One of the eight named parts of the first-class portal surface, per the
 /// `text-portal` component-shape-language part model (hud-2ey2w). Each variant
 /// cross-maps to the Phase-0 raw-tile assembly so promotion preserves — rather

@@ -42,23 +42,89 @@ impl SceneGraph {
             return true;
         }
 
-        let Some(node) = self.nodes.get(&node_id) else {
-            return false;
-        };
-        let NodeData::TextMarkdown(text) = &node.data else {
-            return false;
-        };
+        self.portal_document_kind(tile_id, node_id).is_some()
+    }
 
-        surface.parts.iter().any(|part| {
-            matches!(
-                part.kind,
-                PortalPartKind::Composer | PortalPartKind::Transcript
-            ) && text.bounds.is_within(&part.bounds)
-                // INPUT/OUTPUT labels start at the pane's top edge and are
-                // chrome; the resident adapter lays document markdown below
-                // that label band.
-                && text.bounds.y > part.bounds.y
-        })
+    /// Native single-tile document classification, shared by drawing and input.
+    pub fn portal_document_kind(
+        &self,
+        tile_id: SceneId,
+        node_id: SceneId,
+    ) -> Option<PortalPartKind> {
+        let surface = self.portal_surface(tile_id)?;
+        if surface.parts.iter().any(|part| part.node.is_some()) {
+            return None;
+        }
+        let NodeData::TextMarkdown(text) = &self.nodes.get(&node_id)?.data else {
+            return None;
+        };
+        surface
+            .parts
+            .iter()
+            .find(|part| {
+                matches!(
+                    part.kind,
+                    PortalPartKind::Composer | PortalPartKind::Transcript
+                ) && text.bounds.is_within(&part.bounds)
+                    && text.bounds.y > part.bounds.y
+            })
+            .map(|part| part.kind)
+    }
+
+    pub fn portal_document_at(&self, tile_id: SceneId, x: f32, y: f32) -> Option<PortalPartKind> {
+        let tile = self.tiles.get(&tile_id)?;
+        let surface = self.portal_surface(tile_id)?;
+        if surface.parts.iter().any(|part| part.node.is_some()) {
+            return None;
+        }
+        surface
+            .parts
+            .iter()
+            .find(|part| {
+                matches!(
+                    part.kind,
+                    PortalPartKind::Composer | PortalPartKind::Transcript
+                ) && part
+                    .bounds
+                    .contains_point(x - tile.bounds.x, y - tile.bounds.y)
+            })
+            .map(|part| part.kind)
+    }
+
+    pub fn portal_input_scroll_offset(&self, tile_id: SceneId) -> (f32, f32) {
+        self.overlay
+            .portal_input_scroll_offsets
+            .get(&tile_id)
+            .copied()
+            .unwrap_or_default()
+    }
+
+    pub fn set_portal_input_scroll_offset(&mut self, tile_id: SceneId, offset: (f32, f32)) {
+        if self.tiles.contains_key(&tile_id)
+            && offset.0.is_finite()
+            && offset.1.is_finite()
+            && self.portal_input_scroll_offset(tile_id) != offset
+        {
+            self.overlay
+                .portal_input_scroll_offsets
+                .insert(tile_id, offset);
+            self.bump_geometry_epoch();
+        }
+    }
+
+    pub fn node_document_scroll_offset(
+        &self,
+        tile_id: SceneId,
+        node_id: SceneId,
+        output: (f32, f32),
+    ) -> (f32, f32) {
+        if self.portal_document_kind(tile_id, node_id) == Some(PortalPartKind::Composer) {
+            self.portal_input_scroll_offset(tile_id)
+        } else if self.node_uses_display_tile_scroll(tile_id, node_id) {
+            output
+        } else {
+            (0.0, 0.0)
+        }
     }
 
     // ─── Portal frame / header-band resolution (hud-643dv) ───────────────
@@ -569,14 +635,15 @@ impl SceneGraph {
         // Check this node — only HitRegionNode with accepts_pointer qualifies.
         match &node.data {
             NodeData::HitRegion(hr) if hr.accepts_pointer => {
-                let (node_x, node_y) = if self.node_uses_display_tile_scroll(tile_id, node_id) {
-                    (
-                        coordinates.local_x + coordinates.scroll_x,
-                        coordinates.local_y + coordinates.scroll_y,
-                    )
-                } else {
-                    (coordinates.local_x, coordinates.local_y)
-                };
+                let (scroll_x, scroll_y) = self.node_document_scroll_offset(
+                    tile_id,
+                    node_id,
+                    (coordinates.scroll_x, coordinates.scroll_y),
+                );
+                let (node_x, node_y) = (
+                    coordinates.local_x + scroll_x,
+                    coordinates.local_y + scroll_y,
+                );
                 hr.bounds.contains_point(node_x, node_y).then_some(node_id)
             }
             _ => None,

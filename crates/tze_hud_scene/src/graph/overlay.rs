@@ -101,6 +101,12 @@ pub struct RuntimeOverlayState {
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
     pub tile_scroll_offsets: HashMap<SceneId, (f32, f32)>,
+    /// INPUT history scrolls independently of the tile's OUTPUT document.
+    #[serde(skip, default)]
+    pub portal_input_scroll_offsets: HashMap<SceneId, (f32, f32)>,
+    /// Only actual shaped documents publish extents; this does not dirty pixels.
+    #[serde(skip, default)]
+    pub portal_document_layouts: HashMap<(SceneId, PortalPartKind), PortalDocumentLayout>,
     /// Displayed (smoothed/lagged) scroll offsets per tile, published by the
     /// compositor each frame while windowed scroll smoothing is active.
     ///

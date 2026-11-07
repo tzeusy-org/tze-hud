@@ -398,7 +398,7 @@ impl WinitApp {
         {
             self.state
                 .input_processor
-                .reset_tile_scroll_to_tail(tile_id, &mut scene);
+                .reset_portal_input_scroll_to_tail(tile_id, &mut scene);
         }
     }
 

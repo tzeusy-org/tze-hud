@@ -975,13 +975,25 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
         expects_reply: false,
         appended_at_wall_us: 0,
     });
+    view.input_history.push(TranscriptUnit {
+        sequence: 100,
+        output_text: (1..=40)
+            .map(|i| format!("Input {i:02} — retained reply.\n\n"))
+            .collect(),
+        output_kind: OutputKind::Viewer,
+        expects_reply: false,
+        appended_at_wall_us: 0,
+    });
+    let mut processor = tze_hud_input::InputProcessor::new();
+    let mut reading = None;
     let viewport = Size {
         width: tile_bounds.width,
         height: tile_bounds.height,
     };
     let tokens = PortalVisualTokens::default();
-    for append in [false, true] {
-        if append {
+    for step in 0..3 {
+        let append = step > 0;
+        if step == 1 {
             view.visible_transcript.push(TranscriptUnit {
                 sequence: 2,
                 output_text: "NEW MARKER".into(),
@@ -990,6 +1002,13 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
                 appended_at_wall_us: 0,
             });
         }
+        if step == 2 {
+            // Same-size rolling retention window: height delta cannot identify
+            // the removed prefix. Keep the visible marker at the same screen y.
+            view.visible_transcript[0].output_text = (21..=80)
+                .map(|i| format!("Line {i:02} — stable reading marker.\n\n"))
+                .collect();
+        }
         let rendered = render(&view, &tokens, viewport, 3_000_000);
         scene
             .set_portal_surface(tile_id, rendered.surface, "expanded-portal")
@@ -997,10 +1016,92 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
         scene
             .set_tile_root_tree(tile_id, rendered.root, rendered.children)
             .unwrap();
-        scene.set_tile_follow_tail_at_tail(tile_id, !append);
         compositor.prime_markdown_cache(&scene);
         compositor.resize_reprime_last_at = None; // A settled native commit, outside resize cadence.
         compositor.prime_truncation_cache(&scene);
+        compositor.publish_portal_document_layouts(&mut scene);
+        let layout =
+            scene.overlay.portal_document_layouts[&(tile_id, PortalPartKind::Transcript)].clone();
+        let input =
+            scene.overlay.portal_document_layouts[&(tile_id, PortalPartKind::Composer)].clone();
+        assert!(
+            layout.height > layout.viewport_height * 4.0,
+            "full output is shaped behind the fixed scissor"
+        );
+        assert!(
+            input.height > input.viewport_height * 2.0,
+            "INPUT has its own full wrapped layout"
+        );
+        processor.reconcile_portal_document_layouts(&mut scene);
+        if step == 0 {
+            let output_tail = scene.tile_scroll_offset_local(tile_id);
+            let input_tail = scene.portal_input_scroll_offset(tile_id);
+            let surface = scene.portal_surface(tile_id).unwrap();
+            let point = |kind| {
+                let part = surface.parts.iter().find(|p| p.kind == kind).unwrap();
+                (
+                    tile_bounds.x + part.bounds.x + part.bounds.width / 2.0,
+                    tile_bounds.y + part.bounds.y + part.bounds.height / 2.0,
+                )
+            };
+            let output_point = point(PortalPartKind::Transcript);
+            let input_point = point(PortalPartKind::Composer);
+            let wheel = |(x, y), delta_y| tze_hud_input::ScrollEvent {
+                x,
+                y,
+                delta_x: 0.0,
+                delta_y,
+            };
+            assert!(
+                processor
+                    .process_scroll_event(&wheel(output_point, -130.0), &mut scene)
+                    .is_some()
+            );
+            assert_eq!(
+                scene.portal_input_scroll_offset(tile_id),
+                input_tail,
+                "OUTPUT wheel cannot move INPUT"
+            );
+            let output_reading = scene.tile_scroll_offset_local(tile_id);
+            assert!(output_reading.1 < output_tail.1);
+            assert!(
+                processor
+                    .process_scroll_event(&wheel(input_point, -70.0), &mut scene)
+                    .is_some()
+            );
+            assert_eq!(
+                scene.tile_scroll_offset_local(tile_id),
+                output_reading,
+                "INPUT wheel cannot move OUTPUT"
+            );
+        }
+        let marker_byte = layout.content.find("Line 55").unwrap();
+        let marker_y = layout
+            .rows
+            .iter()
+            .rev()
+            .find(|(byte, _)| *byte <= marker_byte)
+            .unwrap()
+            .1
+            - scene.tile_scroll_offset_local(tile_id).1;
+        let input_offset = scene.portal_input_scroll_offset(tile_id);
+        if let Some((previous_y, previous_input)) = reading {
+            assert!(
+                (marker_y - previous_y).abs() < 0.01,
+                "same retained visible line after append/head trim"
+            );
+            assert_eq!(
+                input_offset, previous_input,
+                "OUTPUT updates cannot move INPUT"
+            );
+        }
+        reading = Some((marker_y, input_offset));
+        let epoch = scene.geometry_epoch;
+        processor.reconcile_portal_document_layouts(&mut scene);
+        assert_eq!(
+            scene.geometry_epoch, epoch,
+            "unchanged measured layout is quiescent"
+        );
         let items = compositor.collect_text_items(&scene, 800.0, 520.0);
         let item = items
             .iter()
@@ -1020,7 +1121,24 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
             display.contains("Line 55"),
             "a retained reading marker must survive append and the tail-to-scrollback transition; append={append}, display={display}"
         );
+        assert_eq!(item.clip_bounds_height, layout.viewport_height);
+        assert!(
+            item.bounds_height > layout.height,
+            "paint buffer must not be viewport bounded"
+        );
     }
+    let output_reading = scene.tile_scroll_offset_local(tile_id);
+    assert!(processor.reset_portal_input_scroll_to_tail(tile_id, &mut scene));
+    assert_eq!(
+        scene.tile_scroll_offset_local(tile_id),
+        output_reading,
+        "typing resets only INPUT history"
+    );
+    assert!(processor.reset_tile_scroll_to_tail(tile_id, &mut scene));
+    assert!(
+        scene.tile_follow_tail_at_tail(tile_id),
+        "jump-to-latest returns OUTPUT to its measured tail"
+    );
 }
 
 /// `collect_text_items` does NOT shift text for tiles with zero scroll offset.

@@ -754,6 +754,15 @@ impl ScrollState {
             .unwrap_or(false)
     }
 
+    /// Restore a measured reading anchor after native document reflow. This is
+    /// local layout correction, not a user gesture or an adapter request.
+    pub(crate) fn restore_reading_offset(&mut self, tile_id: SceneId, y: f32) {
+        if let Some(state) = self.tiles.get_mut(&tile_id) {
+            state.offset_y = y;
+            state.clamp_offsets();
+        }
+    }
+
     /// Return the current follow-tail anchor state for a tile.
     ///
     /// Returns `AtTail` (the default) if the tile is not registered.

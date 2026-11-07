@@ -121,18 +121,6 @@ pub(super) fn degradation_tile_opacity(opacity: f32, level: DegradationLevel) ->
     }
 }
 
-/// Renderer adapter for the scene-owned scroll classification.
-///
-/// Pointer mapping uses the same `SceneGraph` decision, keeping fixed portal
-/// chrome and scrolling document coordinates aligned after resize (hud-jeqop).
-pub(super) fn node_uses_display_tile_scroll(
-    scene: &SceneGraph,
-    tile: &Tile,
-    node_id: SceneId,
-) -> bool {
-    scene.node_uses_display_tile_scroll(tile.id, node_id)
-}
-
 // The composer's content inset (historically the `COMPOSER_TEXT_MARGIN = 6.0`
 // literal) is now token-driven: it resolves from the shared
 // `portal.spacing.content_inset_px` token into
@@ -460,11 +448,11 @@ impl Compositor {
                 let NodeData::HitRegion(hr) = &node.data else {
                     return;
                 };
-                let (scroll_x, scroll_y) = if node_uses_display_tile_scroll(scene, tile, node_id) {
-                    self.display_tile_scroll_offset(scene, owner.tile_id)
-                } else {
-                    (0.0, 0.0)
-                };
+                let (scroll_x, scroll_y) = scene.node_document_scroll_offset(
+                    tile.id,
+                    node_id,
+                    self.display_tile_scroll_offset(scene, owner.tile_id),
+                );
                 Rect::new(
                     tile.bounds.x + hr.bounds.x - scroll_x,
                     tile.bounds.y + hr.bounds.y - scroll_y,
@@ -1779,11 +1767,11 @@ impl Compositor {
             .get(&node_id)
             .copied()
             .unwrap_or_else(|| node.data.bounds().y);
-        let (scroll_x, scroll_y) = if node_uses_display_tile_scroll(scene, tile, node_id) {
-            self.display_tile_scroll_offset(scene, tile.id)
-        } else {
-            (0.0, 0.0)
-        };
+        let (scroll_x, scroll_y) = scene.node_document_scroll_offset(
+            tile.id,
+            node_id,
+            self.display_tile_scroll_offset(scene, tile.id),
+        );
         // §6.3 fade: the whole tile (backdrop + content backgrounds + text) must
         // fade as one unit. `tile_background_color` and `collect_text_items`
         // already apply this; the content-node backgrounds below MUST match, or a

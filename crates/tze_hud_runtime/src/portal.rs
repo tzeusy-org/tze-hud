@@ -14,9 +14,8 @@
 //!    reconnected when the agent returns. A reclaimed portal's lease is
 //!    revoked, which removes its tile.
 //!
-//! Follow-tail and head-trim are wired at the render site:
-//! `InputProcessor::notify_tile_content_appended` /
-//! `notify_head_content_removed` (spec §3.2 / §3.3).
+//! FrameReady drains consume actual compositor document metrics for independent
+//! INPUT/OUTPUT scrolling; raw markdown line counts never set scroll bounds.
 //!
 //! `drain` takes `&mut SceneGraph` (the caller holds the scene lock via
 //! `try_lock`) and is wrapped in `catch_unwind`: a panic resets the drive
@@ -71,13 +70,6 @@ impl PortalWakeDeadline {
     }
 }
 
-/// Line-height multiplier used by the compositor's text shaper (text.rs).
-///
-/// `line_height_px = font_size_px * PORTAL_LINE_HEIGHT_MULTIPLIER`
-///
-/// Must stay in sync with `tze_hud_compositor::text` — search for `1.4` there.
-const PORTAL_LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
-
 /// Namespace of the scene leases and tiles the driver creates for portals.
 /// It is distinct from any agent-facing namespace.
 pub const PORTAL_DRIVER_NAMESPACE: &str = "tze_hud_portal_driver";
@@ -107,9 +99,6 @@ struct Binding {
     /// mirrors the portal's liveness.
     scene_lease_id: Option<SceneId>,
     tile_scene_id: Option<SceneId>,
-    /// Content height (px) from the last render. A decrease means content was
-    /// trimmed from the head (spec §3.3, hud-pkg2g / hud-hkaw2).
-    prev_content_height_px: f32,
     /// Outcome of the viewer's last composer submit.
     last_input_feedback: Option<PortalInputFeedback>,
 }
@@ -122,7 +111,6 @@ impl Binding {
             declared_surface: None,
             scene_lease_id: None,
             tile_scene_id: None,
-            prev_content_height_px: 0.0,
             last_input_feedback: None,
         }
     }
@@ -605,8 +593,10 @@ impl PortalDriver {
         self.reconnect_recovered_leases(scene);
 
         for due in due {
-            self.apply_due(due, scene, input_processor, tab_id, now_us);
+            self.apply_due(due, scene, tab_id, now_us);
         }
+
+        input_processor.reconcile_portal_document_layouts(scene);
 
         // Orphan after rendering, so the degraded repaint lands first.
         self.orphan_degraded_leases(scene);
@@ -619,7 +609,6 @@ impl PortalDriver {
         &mut self,
         (due, incarnation): (Due, u64),
         scene: &mut SceneGraph,
-        input_processor: &mut InputProcessor,
         tab_id: Option<SceneId>,
         now_us: u64,
     ) {
@@ -635,7 +624,7 @@ impl PortalDriver {
         }
         let entry = self.entry(&due.key);
         entry.incarnation = Some(incarnation);
-        self.render(&due.key, scene, input_processor, tab_id, now_us);
+        self.render(&due.key, scene, tab_id, now_us);
     }
 
     /// Render one portal: create its tile on first render, then paint and
@@ -644,7 +633,6 @@ impl PortalDriver {
         &mut self,
         key: &PortalKey,
         scene: &mut SceneGraph,
-        input_processor: &mut InputProcessor,
         tab_id: Option<SceneId>,
         now_us: u64,
     ) {
@@ -717,45 +705,6 @@ impl PortalDriver {
                 activity_cue_clear_due_us(&state, now_us),
             );
         }
-        if created {
-            return;
-        }
-
-        // Scroll accounting (spec §3.2 / §3.3). The content height counts
-        // every rendered line: the OUTPUT transcript plus, when expanded, the
-        // INPUT band (label + replies + trailing blank) painted into the same
-        // markdown.
-        let line_height_px = entry.tokens.transcript_font_size_px * PORTAL_LINE_HEIGHT_MULTIPLIER;
-        let lines = |units: &[TranscriptUnit]| -> usize {
-            units
-                .iter()
-                .map(|u| u.output_text.lines().count().max(1))
-                .sum()
-        };
-        let mut total_lines = lines(&state.visible_transcript);
-        if !state.input_history.is_empty() {
-            total_lines += 2 + lines(&state.input_history);
-        }
-        let new_content_height_px = total_lines.max(1) as f32 * line_height_px;
-        // Use the same live scene height for rendering and follow-tail.
-        let viewport_height_px = viewport.height;
-        // Any height decrease is a head trim (retention or the visible
-        // window), notified before the append so the scrolled-back offset
-        // stays put (hud-66i1s).
-        if new_content_height_px < entry.prev_content_height_px {
-            input_processor.notify_head_content_removed(
-                tile_id,
-                entry.prev_content_height_px - new_content_height_px,
-            );
-        }
-        entry.prev_content_height_px = new_content_height_px;
-        input_processor.notify_tile_content_appended(
-            tile_id,
-            new_content_height_px,
-            viewport_height_px,
-            line_height_px,
-            scene,
-        );
         // The jump-to-latest pill's badge (hud-g1ena.3).
         scene.set_tile_unread_count(tile_id, state.unread_output_count.unwrap_or(0));
     }
@@ -1035,20 +984,6 @@ mod tests {
         driver.entries[&key(id)]
             .scene_lease_id
             .expect("portal lease")
-    }
-
-    /// Shrink the live scene viewport to one line. Returns the line height.
-    fn one_line_viewport(driver: &mut PortalDriver, scene: &mut SceneGraph, id: &str) -> f32 {
-        let tile_id = tile(driver, id);
-        let line_h =
-            driver.entries[&key(id)].tokens.transcript_font_size_px * PORTAL_LINE_HEIGHT_MULTIPLIER;
-        let viewport_h = line_h.ceil();
-        let _ = scene.update_tile_bounds(
-            tile_id,
-            Rect::new(0.0, 0.0, 600.0, viewport_h),
-            PORTAL_DRIVER_NAMESPACE,
-        );
-        line_h
     }
 
     fn submit(
@@ -1379,7 +1314,47 @@ mod tests {
         }
     }
 
-    /// Live scene geometry drives native render, follow-tail and unread state.
+    /// FrameReady carries actual shaped metrics; tests below inject that seam.
+    /// The compositor regression proves the metrics against its actual buffer.
+    fn measured_panes(scene: &mut SceneGraph, tile: SceneId, output: f32, input: f32) {
+        let size = (
+            scene.tiles[&tile].bounds.width,
+            scene.tiles[&tile].bounds.height,
+        );
+        let docs: Vec<_> = scene
+            .nodes
+            .iter()
+            .filter_map(|(id, node)| {
+                let pane = scene.portal_document_kind(tile, *id)?;
+                let tze_hud_scene::NodeData::TextMarkdown(source) = &node.data else {
+                    return None;
+                };
+                Some((*id, pane, source.clone()))
+            })
+            .collect();
+        for (id, pane, source) in docs {
+            let input_pane = pane == tze_hud_scene::PortalPartKind::Composer;
+            let height = if input_pane { input } else { output };
+            scene.overlay.portal_document_layouts.insert(
+                (tile, pane),
+                tze_hud_scene::PortalDocumentLayout {
+                    node_id: id,
+                    signature: [if input_pane { 1 } else { 2 }; 32],
+                    content: source.content.clone().into(),
+                    source,
+                    tile_size: size,
+                    font_scale: scene.tile_font_scale(tile),
+                    height,
+                    viewport_height: 100.0,
+                    line_height: 20.0,
+                    rows: Default::default(),
+                },
+            );
+        }
+    }
+
+    /// Layout arrives on a later drain without another publish. Stale snapshots
+    /// and repeated identical measurements must never move the reading position.
     #[test]
     fn drain_render_portal_notify_tile_content_appended_wiring() {
         let mut driver = PortalDriver::new(PortalHandle::default());
@@ -1388,25 +1363,26 @@ mod tests {
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 200);
         let tile_id = tile(&driver, "p");
         assert!(scene.tile_scroll_config(tile_id).is_some());
-
-        // Only scene bounds change; ten lines overflow the live one-line viewport.
-        one_line_viewport(&mut driver, &mut scene, "p");
-        for i in 1..=9 {
-            publish(&mut driver, "p", &format!("line-{i}"), 1_000 + i);
-        }
-        driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + FRAME_US);
-
-        assert!(scene.tile_follow_tail_at_tail(tile_id));
-        let (_, scroll_y) = scene.tile_scroll_offset_local(tile_id);
-        assert!(scroll_y > 0.0, "follow-tail advanced to the tail");
+        assert_eq!(scene.tile_scroll_offset_local(tile_id).1, 0.0);
+        measured_panes(&mut scene, tile_id, 900.0, 500.0);
+        driver.drain_inner(&mut scene, &mut processor, Some(tab), 300);
+        assert_eq!(scene.tile_scroll_offset_local(tile_id).1, 800.0);
+        assert_eq!(scene.portal_input_scroll_offset(tile_id).1, 400.0);
+        let epoch = scene.geometry_epoch;
+        driver.drain_inner(&mut scene, &mut processor, Some(tab), 400);
         assert_eq!(
-            scene.tile_unread_count(tile_id),
-            9,
-            "the drained batch's unread count"
+            scene.geometry_epoch, epoch,
+            "settled metrics schedule no frame"
         );
-        // Repeated ordinary publishes must reflow from live fractional bounds,
-        // preserving subpixel width/height in the surface and scroll accounting.
-        for (i, (width, height)) in [(513.25, 37.75), (401.5, 22.125)].into_iter().enumerate() {
+        publish(&mut driver, "p", "new source", 500);
+        driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + FRAME_US);
+        assert_eq!(scene.tile_unread_count(tile_id), 1);
+        assert_eq!(
+            scene.tile_scroll_offset_local(tile_id).1,
+            800.0,
+            "old node metrics rejected"
+        );
+        for (i, (width, height)) in [(513.25, 337.75), (401.5, 322.125)].into_iter().enumerate() {
             scene
                 .update_tile_bounds(
                     tile_id,
@@ -1414,12 +1390,7 @@ mod tests {
                     PORTAL_DRIVER_NAMESPACE,
                 )
                 .unwrap();
-            publish(
-                &mut driver,
-                "p",
-                "another line",
-                300_000 + i as u64 * FRAME_US,
-            );
+            publish(&mut driver, "p", "reflow", 300_000 + i as u64 * FRAME_US);
             driver.drain_inner(
                 &mut scene,
                 &mut processor,
@@ -1429,43 +1400,27 @@ mod tests {
             let surface = scene.portal_surface(tile_id).unwrap();
             assert_eq!(surface.parts[0].bounds.width, width);
             assert_eq!(surface.parts[0].bounds.height, height);
-            let (_, scroll_y) = scene.tile_scroll_offset_local(tile_id);
-            let content_height = driver.entries[&key("p")].prev_content_height_px;
-            assert!(scroll_y <= content_height - height);
-            assert!(scene.tile_follow_tail_at_tail(tile_id));
-            // Ordinary append advances whole lines even after a shrink. An
-            // explicit tail reset exposes its retained exact viewport bound.
-            processor.reset_tile_scroll_to_tail(tile_id, &mut scene);
-            let (_, scroll_y) = scene.tile_scroll_offset_local(tile_id);
-            assert!(
-                (scroll_y - (content_height - height)).abs() < 0.001,
-                "follow-tail uses exact viewport height: {scroll_y}, {content_height}, {height}"
-            );
-            assert!(scene.tile_follow_tail_at_tail(tile_id));
         }
     }
 
-    /// The content height counts the INPUT band (viewer replies), not just
-    /// the OUTPUT transcript (codex P2, hud-y4pzu).
+    /// INPUT history has its own range; typing reset cannot move OUTPUT.
     #[test]
     fn drain_render_portal_height_accounting_includes_input_history() {
         let mut driver = PortalDriver::new(PortalHandle::default());
         let (mut scene, tab, mut processor) = scene();
-        publish(&mut driver, "p", "line-0", 100);
+        publish(&mut driver, "p", "output", 100);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 200);
         let tile_id = tile(&driver, "p");
-        let line_h = one_line_viewport(&mut driver, &mut scene, "p");
         for i in 0..10 {
-            let feedback = submit(&mut driver, tile_id, &format!("viewer reply {i}"), 300 + i);
-            assert_eq!(feedback.feedback_state, PortalInputFeedbackState::Accepted);
+            submit(&mut driver, tile_id, &format!("reply {i}"), 300 + i);
         }
-        publish(&mut driver, "p", "line-1", 1_000);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + FRAME_US);
-        let (_, offset_y) = scene.tile_scroll_offset_local(tile_id);
-        assert!(
-            offset_y > 5.0 * line_h,
-            "offset {offset_y} must cover the ten-reply INPUT band (line {line_h})"
-        );
+        measured_panes(&mut scene, tile_id, 100.0, 900.0);
+        driver.drain_inner(&mut scene, &mut processor, Some(tab), 201 + FRAME_US);
+        assert_eq!(scene.tile_scroll_offset_local(tile_id).1, 0.0);
+        assert_eq!(scene.portal_input_scroll_offset(tile_id).1, 800.0);
+        processor.reset_portal_input_scroll_to_tail(tile_id, &mut scene);
+        assert_eq!(scene.tile_scroll_offset_local(tile_id).1, 0.0);
     }
 
     /// spec §3.3 — `notify_tile_content_appended` on a scrolled-back tile must
@@ -1820,48 +1775,29 @@ mod tests {
         }
     }
 
-    /// A height-only head trim (same bytes, fewer lines) still reaches
-    /// `notify_head_content_removed`, so a scrolled-back offset clamps
-    /// (hud-66i1s).
+    /// A measured range shrink clamps reading position even when the source
+    /// has unchanged byte length; raw newline counts are not layout authority.
     #[test]
     fn head_trim_fires_on_height_shrink_without_byte_shrink_runtime_path() {
-        use tze_hud_input::ScrollEvent;
-
-        let mut driver = PortalDriver::new(PortalHandle::new(
-            PortalHub::new(PortalLimits {
-                visible_bytes: 30,
-                ..PortalLimits::default()
-            }),
-            Arc::new(tze_hud_scene::SystemClock::new()),
-        ));
+        let mut driver = PortalDriver::new(PortalHandle::default());
         let (mut scene, tab, mut processor) = scene();
-        publish(&mut driver, "p", "S", 100);
+        publish(&mut driver, "p", "retained", 100);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 200);
         let tile_id = tile(&driver, "p");
-        let line_h = one_line_viewport(&mut driver, &mut scene, "p");
-
-        publish(&mut driver, "p", &"\n".repeat(24), 300);
-        driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + FRAME_US);
-        assert!(scene.tile_follow_tail_at_tail(tile_id));
-        processor.process_scroll_event(
-            &ScrollEvent {
-                x: 300.0,
-                y: line_h / 2.0,
-                delta_x: 0.0,
-                delta_y: -1.0,
-            },
-            &mut scene,
-        );
+        measured_panes(&mut scene, tile_id, 900.0, 100.0);
+        driver.drain_inner(&mut scene, &mut processor, Some(tab), 300);
+        processor.process_keyboard_scroll(tile_id, -20.0, &mut scene);
+        assert!(scene.tile_scroll_offset_local(tile_id).1 > 0.0);
+        let layout = scene
+            .overlay
+            .portal_document_layouts
+            .get_mut(&(tile_id, tze_hud_scene::PortalPartKind::Transcript))
+            .unwrap();
+        layout.signature = [3; 32];
+        layout.height = 100.0;
+        driver.drain_inner(&mut scene, &mut processor, Some(tab), 400);
+        assert_eq!(scene.tile_scroll_offset_local(tile_id).1, 0.0);
         assert!(!scene.tile_follow_tail_at_tail(tile_id));
-        let (_, pre_y) = scene.tile_scroll_offset_local(tile_id);
-        assert!(pre_y > 0.0);
-
-        // 30 flat bytes push the 24 newlines out of the 30-byte window.
-        publish(&mut driver, "p", &"B".repeat(30), 400);
-        driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + 2 * FRAME_US);
-        processor.commit_scroll_updates(&mut scene);
-        let (_, post_y) = scene.tile_scroll_offset_local(tile_id);
-        assert!(post_y <= f32::EPSILON, "pre {pre_y}, post {post_y}");
     }
 
     /// `hud_clear` takes the surface down on the next drain; that drain is
@@ -1966,13 +1902,7 @@ mod tests {
             format!("{replacement:?}")
         };
         let version_before = first_scene.version;
-        first_paint_driver.apply_due(
-            pending,
-            &mut first_scene,
-            &mut first_processor,
-            Some(first_tab),
-            400,
-        );
+        first_paint_driver.apply_due(pending, &mut first_scene, Some(first_tab), 400);
         assert!(first_paint_driver.entries.is_empty());
         assert_eq!(first_scene.tile_count(), 0);
         assert!(first_scene.leases.is_empty());

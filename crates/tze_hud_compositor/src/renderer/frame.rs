@@ -649,6 +649,7 @@ impl Compositor {
         // inside the former post-acquire `encode_frame`) is what lets the encode
         // stage run lock-free.
         let encode_sources = self.collect_encode_sources(scene, surf_w, surf_h);
+        self.publish_portal_document_layouts(scene);
 
         // ── Widget draw geometry (precomputed from the registry) ─────────────
         let widget_quads = self.collect_widget_draw_geometry(scene, sw, sh);

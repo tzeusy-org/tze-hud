@@ -273,6 +273,7 @@ impl Renderer<'_> {
         let mut transcript = self.portal_text_node(state, SceneId::new(), now_wall_us);
         if let NodeData::TextMarkdown(text) = &mut transcript.data {
             text.bounds = geometry.output_content;
+            text.overflow = TextOverflow::Clip;
             // The pane owns its backdrop; a zero-alpha REPLACE quad erases it.
             text.background = None;
         }
