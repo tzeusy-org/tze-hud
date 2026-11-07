@@ -262,9 +262,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             "label_template_hash": sha256_hex(args.label_template),
             "expect_results": bool(args.expect_results),
             "result_timeout_ms": int(args.result_timeout_ms),
-            "trace_spec_ref": args.trace_spec_ref,
-            "trace_rfc_ref": args.trace_rfc_ref,
-            "trace_doctrine_ref": args.trace_doctrine_ref,
             "trace_budget_ref": args.trace_budget_ref,
             "expected_e2e_ms_max": args.expected_e2e_ms_max,
             "expected_p95_ms_max": args.expected_p95_ms_max,
@@ -317,9 +314,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
             },
             "payload_counts": client.payload_counts,
             "traceability": {
-                "spec_ref": args.trace_spec_ref,
-                "rfc_ref": args.trace_rfc_ref,
-                "doctrine_ref": args.trace_doctrine_ref,
                 "budget_ref": args.trace_budget_ref,
             },
             "expected_thresholds": {
@@ -372,9 +366,6 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
                 "sample_error": result_errors[0] if result_errors else "",
                 "label_template_hash": sha256_hex(args.label_template),
                 "run_notes": args.run_notes,
-                "trace_spec_ref": args.trace_spec_ref,
-                "trace_rfc_ref": args.trace_rfc_ref,
-                "trace_doctrine_ref": args.trace_doctrine_ref,
                 "trace_budget_ref": args.trace_budget_ref,
                 "expected_e2e_ms_max": args.expected_e2e_ms_max,
                 "expected_p95_ms_max": args.expected_p95_ms_max,
@@ -418,9 +409,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--benchmark-name", default=None, help="Stable benchmark label")
     parser.add_argument("--results-csv", default=DEFAULT_RESULTS_CSV, help="Append-only results CSV")
     parser.add_argument("--run-notes", default="", help="Optional notes for this run")
-    parser.add_argument("--trace-spec-ref", default="", help="Spec requirement reference id")
-    parser.add_argument("--trace-rfc-ref", default="", help="RFC/design contract reference")
-    parser.add_argument("--trace-doctrine-ref", default="", help="Doctrine principle reference")
     parser.add_argument("--trace-budget-ref", default="", help="Performance budget identifier")
     parser.add_argument("--expected-e2e-ms-max", type=float, default=None, help="Expected max e2e latency (ms)")
     parser.add_argument("--expected-p95-ms-max", type=float, default=None, help="Expected max p95 latency (ms)")

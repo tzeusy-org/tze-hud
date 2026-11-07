@@ -84,7 +84,7 @@ MacBook) under new `target_id` keys.
 - `scripts/grpc_widget_publish_perf.py` (Python — secondary alternative)
   - Benchmarks `WidgetPublish` on one gRPC bidi stream.
   - Supports pacing, target registry, byte accounting, traceability tags, thresholds, and CSV recording.
-  - Uses local `scripts/proto_gen/` stubs (self-contained inside this skill).
+  - Uses local `scripts/proto_gen/` stubs (self-contained inside this skill). Regenerate the sole Python stub source from the current three protocol files with `uv run --with grpcio-tools==1.80.0 -- bash scripts/regen_proto_stubs.sh` from the repo root. Pass an output directory to validate regeneration separately. The retired user-test gRPC client no longer needs a second copy.
 - `scripts/widget_soak_runner.py`
   - Runs the Rust gRPC widget harness concurrently for `agent-alpha`, `agent-beta`, and
     `agent-gamma` by default.
@@ -189,10 +189,10 @@ python3 .claude/skills/user-test-performance/scripts/compare_results.py \
 
 The Python MCP and gRPC scripts (`mcp_publish_perf.py`, `grpc_widget_publish_perf.py`) support:
 
-- Traceability: `--trace-spec-ref`, `--trace-rfc-ref`, `--trace-doctrine-ref`, `--trace-budget-ref`
+- Budget reference: `--trace-budget-ref`
 - Thresholds: `--expected-e2e-ms-max`, `--expected-p95-ms-max`, `--expected-p99-ms-max`, `--expected-throughput-rps-min`, `--expected-error-rate-max`
 
-These fields are persisted in `results.csv` for auditable historical comparisons.
+The budget reference and thresholds are persisted in `results.csv`. Retired document references no longer affect new run keys. Historical rows retain their original measurements, keys and key-input JSON; use an explicit baseline key when comparing across that change. Existing CSV files migrate to the current header when a new result is appended.
 
 The Rust harness (`examples/widget_publish_load_harness`) uses structured thresholds via
 `--target-p99-rtt-us` and `--target-throughput-rps`, with traceability embedded in the
