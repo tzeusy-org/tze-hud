@@ -2,7 +2,7 @@
 use tze_hud_input::{
     ComposerDraft, ComposerDraftManager, ComposerOutcome, EditOutcome, MAX_DRAFT_BYTES,
 };
-use tze_hud_projection::{PortalHub, PortalKey, Publish};
+use tze_hud_portal::{PortalHub, PortalKey, Publish};
 use tze_hud_scene::SceneId;
 
 fn focused() -> ComposerDraftManager {

@@ -266,7 +266,7 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
     // The production expanded portal has rounded panes behind a transparent
     // transcript. Exercise the actual overlay REPLACE encoder across the
     // degradation transitions seen during native dragging, not headless blending.
-    use tze_hud_projection::{
+    use tze_hud_portal::{
         ComposerStatus, PortalView, ProjectedPortalPresentation,
         render::{DEFAULT_PORTAL_SIZE, render},
         tokens::PortalVisualTokens,

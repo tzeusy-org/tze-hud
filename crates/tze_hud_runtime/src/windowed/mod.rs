@@ -2953,7 +2953,7 @@ impl WindowedRuntime {
         };
         let portal_projection_driver =
             crate::portal::PortalDriver::new(tze_hud_mcp::PortalHandle::new(
-                tze_hud_projection::hub::PortalHub::default(),
+                tze_hud_portal::hub::PortalHub::default(),
                 Arc::clone(&clock),
             ));
         let portals = portal_projection_driver.portal_handle();
@@ -3400,7 +3400,7 @@ mod wake_accounting_tests {
                 PortalWakeDeadline {
                     wall_us: 101,
                     authority: Some(crate::portal::PortalTimedAuthority::Hub(
-                        tze_hud_projection::hub::DeadlineKind::Render
+                        tze_hud_portal::hub::DeadlineKind::Render
                     )),
                 },
                 now,

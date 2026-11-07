@@ -1,6 +1,6 @@
 //! Token-resolved portal rendering through the native scene boundary.
 use tze_hud_config::{resolve_portal_tokens, tokens::DesignTokenMap};
-use tze_hud_projection::{
+use tze_hud_portal::{
     ComposerStatus, OutputKind, PortalHub, PortalKey, PortalStatus, PortalView,
     ProjectedPortalPresentation, ProjectionLifecycleState, Publish, TranscriptUnit,
     render::{DEFAULT_COMPACT_SIZE, DEFAULT_PORTAL_SIZE, PortalRender, Size, render},

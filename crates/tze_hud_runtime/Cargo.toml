@@ -26,7 +26,7 @@ tze_hud_config = { path = "../tze_hud_config", version = "0.1.0" }
 tze_hud_widget = { path = "../tze_hud_widget", version = "0.1.0" }
 tze_hud_mcp = { path = "../tze_hud_mcp", version = "0.1.0" }
 tze_hud_resource = { path = "../tze_hud_resource", version = "0.1.0" }
-tze_hud_projection = { path = "../tze_hud_projection", version = "0.1.0" }
+tze_hud_portal = { path = "../tze_hud_portal", version = "0.1.0" }
 tokio = { workspace = true }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
@@ -39,7 +39,7 @@ serde_json = { workspace = true }
 toml = { workspace = true }
 notify = { workspace = true }
 # Restart handoff nonce (OS CSPRNG) and its constant-time comparison; both are
-# already in the tree via tze_hud_projection / tze_hud_protocol.
+# already in the tree via tze_hud_portal / tze_hud_protocol.
 getrandom = { workspace = true }
 subtle = { workspace = true }
 arc-swap = { workspace = true }

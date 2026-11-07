@@ -25,7 +25,7 @@ use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex as HubMutex};
 use tokio::sync::{Mutex, Notify};
 use tracing::{debug, warn};
-use tze_hud_projection::hub::{PortalError, PortalHub, PortalKey};
+use tze_hud_portal::hub::{PortalError, PortalHub, PortalKey};
 use tze_hud_scene::config::{AgentDirectory, SharedAgents};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::render_wake::RenderWakeNotifier;

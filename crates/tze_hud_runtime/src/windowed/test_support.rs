@@ -231,10 +231,8 @@ pub(super) fn make_windowed_keyboard_test_app(
     tze_hud_protocol::session_server::InputEventReceiver,
 ) {
     let cfg = WindowedConfig::default();
-    let portals = tze_hud_mcp::PortalHandle::new(
-        tze_hud_projection::hub::PortalHub::default(),
-        scene.clock(),
-    );
+    let portals =
+        tze_hud_mcp::PortalHandle::new(tze_hud_portal::hub::PortalHub::default(), scene.clock());
     let shared_state = make_shared_state();
     let (input_capture_tx, input_capture_rx) = tokio::sync::mpsc::unbounded_channel();
     let (frame_ready_tx, frame_ready_rx) = frame_ready_channel();

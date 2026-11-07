@@ -12,14 +12,14 @@ There is no other dialect: bare tool-name methods return `-32601`.
 
 ## Wiring
 
-- `crates/tze_hud_mcp/src/tools.rs` turns each verb into one `PortalOp`
-  (`Publish`, `Hold`, `Input`, `Clear`, `List`) carrying the caller's agent
-  id. The first `hud_publish` attaches; `key` replaces the newest unit with
-  the same key.
-- `PortalOp` crosses an unbounded channel to the winit thread, where
-  `crates/tze_hud_runtime/src/portal_projection_driver.rs` applies it to the
-  `PortalHub` (`crates/tze_hud_projection/src/hub.rs`), the portal state
-  keyed by (agent id, portal id).
+- `crates/tze_hud_mcp/src/tools.rs` applies portal verbs to the shared
+  `PortalHub` (`crates/tze_hud_portal/src/hub.rs`), keyed by (agent id,
+  portal id). The first `hud_publish` attaches; `key` replaces the newest
+  unit with the same key.
+- MCP and `PortalDriver` (`crates/tze_hud_runtime/src/portal.rs`) share
+  `PortalHandle` (`crates/tze_hud_mcp/src/server.rs`): the hub, injected clock
+  and per-agent input readiness. The driver renders native scene nodes
+  directly; no operation channel or portal protobuf adapter remains.
 - The bearer PSK identifies the agent. Portal surfaces need `portal` (or `*`)
   in that agent's `[agents.<id>] allow` list; otherwise `NOT_ALLOWED`.
 

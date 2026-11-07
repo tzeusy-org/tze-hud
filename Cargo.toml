@@ -11,7 +11,7 @@ members = [
     "crates/tze_hud_config",
     "crates/tze_hud_resource",
     "crates/tze_hud_widget",
-    "crates/tze_hud_projection",
+    "crates/tze_hud_portal",
     "app/tze_hud_app",
     "examples/vertical_slice",
     "examples/poc_demo",

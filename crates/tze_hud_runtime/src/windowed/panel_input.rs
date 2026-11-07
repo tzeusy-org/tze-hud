@@ -516,7 +516,7 @@ pub(super) mod panel_task_tests {
     /// against the headless runtime's real scene and safe-mode flag.
     #[tokio::test(flavor = "multi_thread")]
     async fn portal_liveness_paused_during_safe_mode() {
-        use tze_hud_projection::hub::{PortalHub, PortalKey, PortalLimits, Publish};
+        use tze_hud_portal::hub::{PortalHub, PortalKey, PortalLimits, Publish};
         use tze_hud_scene::{Clock, TestClock};
 
         // Wall time can rewind independently; monotonic observations never do.

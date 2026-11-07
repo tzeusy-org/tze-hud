@@ -211,7 +211,7 @@ and [`hit_region_wire_cannot_enable_local_composer`](../crates/tze_hud_protocol/
 - `tze_hud_runtime` [`release_activates_only_the_button_the_press_began_on`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs),
   [`authority_attached_submit_snaps_scrolled_back_history_to_tail`](../crates/tze_hud_runtime/src/windowed/keyboard.rs),
   [`portal_composer_submission_enters_pending_input_queue_and_can_be_acknowledged`](../crates/tze_hud_runtime/src/portal.rs)
-- `tze_hud_projection` [`take_due_paces_renders_at_the_render_interval`](../crates/tze_hud_projection/src/hub.rs)
+- `tze_hud_portal` [`take_due_paces_renders_at_the_render_interval`](../crates/tze_hud_portal/src/hub.rs)
 
 - `tze_hud_runtime` [`shell::safe_mode`](../crates/tze_hud_runtime/src/shell/safe_mode.rs) [`test_enter_safe_mode_suspends_active_leases`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),
   [`test_mutations_rejected_via_shared_state_flag`](../crates/tze_hud_runtime/src/shell/safe_mode.rs)
@@ -262,7 +262,7 @@ ends its gRPC sessions by dropping their handlers wherever they wait, waits
 for those tasks to end, then clears.
 
 - `tze_hud_scene` [`reclaim_agent_clears_everything_it_holds_and_nothing_else`](../crates/tze_hud_scene/src/graph/agents.rs);
-  `tze_hud_projection` [`reclaim_agent_reclaims_only_that_agents_portals`](../crates/tze_hud_projection/src/hub.rs)
+  `tze_hud_portal` [`reclaim_agent_reclaims_only_that_agents_portals`](../crates/tze_hud_portal/src/hub.rs)
 - `integration` [`poc_override_clear_and_unpair_with_hung_grpc_agent`](../tests/integration/poc_acceptance.rs),
   [`poc_panel_clear_reattaches_and_grants_apply_to_the_next_request`](../tests/integration/poc_acceptance.rs),
   [`poc_panel_roster_updates_live_without_moving_focus`](../tests/integration/poc_acceptance.rs);
@@ -274,7 +274,7 @@ for those tasks to end, then clears.
 
 Portal rendering is native scene data. The renderer's fixed visual fixtures and
 integration token/composer checks preserve presentation independently of wire
-encoding: [`render_visual_goldens`](../crates/tze_hud_projection/src/render_goldens.rs),
+encoding: [`render_visual_goldens`](../crates/tze_hud_portal/src/render_goldens.rs),
 [`portal_node_uses_injected_visual_tokens`](../tests/integration/text_stream_portal_styling.rs),
 [`local_echo_does_not_depend_on_adapter_round_trip`](../tests/integration/text_stream_portal_composer.rs).
 The driver preserves the first-class surface and focusable composer in

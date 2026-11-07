@@ -13,7 +13,7 @@
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tze_hud_projection::hub::PortalError;
+use tze_hud_portal::hub::PortalError;
 
 /// JSON-RPC 2.0 protocol error codes.
 pub mod codes {

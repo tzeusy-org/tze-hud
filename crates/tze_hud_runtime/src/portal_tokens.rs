@@ -1,5 +1,5 @@
 //! Portal design-token conversion shared with the pure scene renderer.
-pub use tze_hud_projection::tokens::portal_visual_tokens_from_part_tokens;
+pub use tze_hud_portal::tokens::portal_visual_tokens_from_part_tokens;
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
 
@@ -7,7 +7,7 @@ pub use tze_hud_projection::tokens::portal_visual_tokens_from_part_tokens;
 mod tests {
     use super::*;
     use tze_hud_config::resolve_portal_tokens;
-    use tze_hud_projection::tokens::PortalVisualTokens;
+    use tze_hud_portal::tokens::PortalVisualTokens;
 
     /// Single-source-of-truth assertion (hud-dcynv): `PortalVisualTokens::default()` now
     /// derives from `tze_hud_config::PortalPartTokens::default()` via

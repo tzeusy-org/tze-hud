@@ -103,7 +103,7 @@ impl WindowedRuntimeState {
         let active_tab_mirror: Arc<StdMutex<Option<SceneId>>> = Arc::new(StdMutex::new(None));
 
         let portals = tze_hud_mcp::PortalHandle::new(
-            tze_hud_projection::hub::PortalHub::default(),
+            tze_hud_portal::hub::PortalHub::default(),
             Arc::clone(&clock),
         );
         let shared_state = Arc::new(TokioMutex::new(SharedStateBuilder::build(
@@ -328,7 +328,7 @@ impl HeadlessEventLoopHarness {
         };
 
         let portals = tze_hud_mcp::PortalHandle::new(
-            tze_hud_projection::hub::PortalHub::default(),
+            tze_hud_portal::hub::PortalHub::default(),
             Arc::clone(&clock),
         );
         let grpc_listener = tokio::net::TcpListener::bind(("127.0.0.1", 0)).await?;
