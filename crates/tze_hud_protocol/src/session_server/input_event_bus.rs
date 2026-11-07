@@ -174,3 +174,113 @@ fn batch_is_transactional(batch: &EventBatch) -> bool {
             )
         })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::proto::{
+        CommandInputEvent, InputEnvelope, PointerDownEvent, PointerMoveEvent, PointerUpEvent,
+    };
+    use input_envelope::Event;
+
+    fn batch(sequence: u64, event: Event) -> EventBatch {
+        EventBatch {
+            frame_number: sequence,
+            batch_ts_us: sequence,
+            events: vec![InputEnvelope { event: Some(event) }],
+        }
+    }
+
+    #[tokio::test]
+    async fn ephemeral_pointer_moves_drop_on_lag_and_report_lagged() {
+        // Exercise both receive APIs used by stream_session. Capacity two retains
+        // the last two samples; neither path promises one sample per tile/frame.
+        for asynchronous in [false, true] {
+            let sender = InputEventSender::new(2);
+            let mut receiver = sender.subscribe("agent-a");
+            for sequence in 0..6 {
+                sender.send((
+                    "agent-a".into(),
+                    batch(
+                        sequence,
+                        Event::PointerMove(PointerMoveEvent {
+                            timestamp_mono_us: sequence,
+                            display_x: sequence as f32,
+                            ..Default::default()
+                        }),
+                    ),
+                ));
+            }
+            if asynchronous {
+                assert_eq!(receiver.recv().await, Err(InputEventRecvError::Lagged(4)));
+            } else {
+                assert_eq!(receiver.try_recv(), Err(InputEventTryRecvError::Lagged(4)));
+            }
+            for sequence in 4..6 {
+                let (namespace, received) = if asynchronous {
+                    receiver.recv().await.unwrap()
+                } else {
+                    receiver.try_recv().unwrap()
+                };
+                assert_eq!(namespace, "agent-a");
+                assert_eq!(
+                    received,
+                    batch(
+                        sequence,
+                        Event::PointerMove(PointerMoveEvent {
+                            timestamp_mono_us: sequence,
+                            display_x: sequence as f32,
+                            ..Default::default()
+                        })
+                    )
+                );
+            }
+            assert_eq!(receiver.try_recv(), Err(InputEventTryRecvError::Empty));
+        }
+    }
+
+    #[tokio::test]
+    async fn transactional_pointer_down_up_survive_slow_consumer() {
+        let sender = InputEventSender::new(2);
+        let mut receiver = sender.subscribe("agent-a");
+        let mut expected = Vec::new();
+        // More individually classified down/up/command batches than the bounded
+        // lane can hold, with no reads until every batch has been sent.
+        for sequence in 0..6 {
+            let event = match sequence % 3 {
+                0 => Event::PointerDown(PointerDownEvent {
+                    timestamp_mono_us: sequence,
+                    ..Default::default()
+                }),
+                1 => Event::PointerUp(PointerUpEvent {
+                    timestamp_mono_us: sequence,
+                    ..Default::default()
+                }),
+                _ => Event::CommandInput(CommandInputEvent {
+                    interaction_id: sequence.to_string(),
+                    ..Default::default()
+                }),
+            };
+            let item = ("agent-a".into(), batch(sequence, event));
+            sender.send(item.clone());
+            expected.push(item);
+        }
+        // Independently overflowing ephemeral input must not evict or reorder
+        // transactions, and transactions must drain before the lag report.
+        for sequence in 0..6 {
+            sender.send((
+                "agent-a".into(),
+                batch(sequence, Event::PointerMove(Default::default())),
+            ));
+        }
+        for (index, item) in expected.into_iter().enumerate() {
+            let received = if index % 2 == 0 {
+                receiver.recv().await.unwrap()
+            } else {
+                receiver.try_recv().unwrap()
+            };
+            assert_eq!(received, item);
+        }
+        assert_eq!(receiver.try_recv(), Err(InputEventTryRecvError::Lagged(4)));
+    }
+}
