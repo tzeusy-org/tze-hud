@@ -987,6 +987,7 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
     });
     let mut processor = tze_hud_input::InputProcessor::new();
     let mut reading: Option<(f32, (f32, f32))> = None;
+    let smooth_time = std::time::Instant::now();
     let viewport = Size {
         width: tile_bounds.width,
         height: tile_bounds.height,
@@ -1079,6 +1080,14 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
                 "INPUT wheel cannot move OUTPUT"
             );
         }
+        // Exercise the native displayed coordinate, with a deterministic 1 ms
+        // frame delta. Headless raw-target assertions cannot catch origin easing.
+        compositor.scroll_smoothing_enabled = true;
+        compositor.update_scroll_smoothing_at(
+            &scene,
+            smooth_time + std::time::Duration::from_millis(step),
+        );
+        compositor.publish_displayed_scroll_offsets(&mut scene);
         let marker_byte = layout.content.find("Line 55").unwrap();
         let marker_y = layout
             .rows
@@ -1087,7 +1096,7 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
             .find(|(byte, _)| *byte <= marker_byte)
             .unwrap()
             .1
-            - scene.tile_scroll_offset_local(tile_id).1;
+            - compositor.display_tile_scroll_offset(&scene, tile_id).1;
         let input_offset = scene.portal_input_scroll_offset(tile_id);
         if let Some((previous_y, previous_input)) = reading {
             assert!(
