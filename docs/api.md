@@ -984,8 +984,10 @@ The five other established flows and the complete choice flow retain identical
 request/response fingerprints and metrics; every ceiling is unchanged.
 The complete choice remains 114 tokens (69 ask + 28 retained answer + 17 ACK).
 The canonical gate requires two byte-identical final-source measurements.
-The refreshed baseline remains `pending_owner_review`; approval of the choice
-ceiling does not approve these measured bytes.
+The owner accepted this measured baseline on 2026-11-08 (`hud-j7kxn`):
+`approval.status` is `owner_approved`. This separate approval covers the
+existing measured bytes, including tools/list 564, choice 114 and portal 137
+model-visible tokens, with no change to any ceiling or measurement.
 
 The `notification_choice` flow publishes Ship/Hold/Skip/Open, activates Skip through
 `SceneGraph::activate_notification` (the shared pointer/keyboard producer), polls
@@ -996,8 +998,9 @@ ceilings and public serialization/accounting remain unchanged.
 
 Historical runtime-backed version-4 calibration measured 114 model-visible tokens:
 ask 69, answer 28, ACK 17. It failed the former 104-token ceiling and remains a historical failure. Fresh
-runtime measurements meet the amended 120-token ceiling; the regenerated
-version-4 baseline still awaits review.
+runtime measurements meet the amended 120-token ceiling. The owner separately
+accepted the measured version-4 baseline on 2026-11-08; the earlier approval
+of the choice ceiling alone did not approve those bytes.
 
 The calibration fixture waits for shared activation through a local readiness
 pipe before issuing the choice's default `hud_input {}` poll. `wait_ms` already
