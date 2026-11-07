@@ -999,6 +999,7 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
             .unwrap();
         scene.set_tile_follow_tail_at_tail(tile_id, !append);
         compositor.prime_markdown_cache(&scene);
+        compositor.resize_reprime_last_at = None; // A settled native commit, outside resize cadence.
         compositor.prime_truncation_cache(&scene);
         let items = compositor.collect_text_items(&scene, 800.0, 520.0);
         let item = items
@@ -1007,7 +1008,12 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
             .unwrap();
         let rasterizer = compositor.text_rasterizer.as_ref().unwrap();
         let display = crate::text::effective_truncation_key(item)
-            .and_then(|key| rasterizer.truncation_cache.get_by_key(&key))
+            .map(|key| {
+                rasterizer
+                    .truncation_cache
+                    .get_by_key(&key)
+                    .expect("settled native document truncation must be primed")
+            })
             .map(|result| result.text.as_str())
             .unwrap_or(&item.text);
         assert!(
