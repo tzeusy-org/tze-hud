@@ -478,7 +478,7 @@ Handshake and resume send no scene content, foreign portal transcript or draft.
 `FramePresented` remains optional server metadata at `ServerMessage` field 52:
 `frame_number` (1), `present_wall_us` (2) and ordered raw 16-byte internal
 scene `batch_ids` (3). These ids come from `SceneGraph::apply_batch`, not
-ordinary `Publish.sequence` or `RequestResult.seq`; the public mutation route
+the `ClientMessage.sequence` envelope or `RequestResult.seq`; the public mutation route
 is removed. `RequestResult` reports acceptance separately from GPU work.
 Delivery requires both internal `read_telemetry` permission and explicit
 `TELEMETRY_FRAMES` subscription. Through `agents.toml`, only an owner-chosen
