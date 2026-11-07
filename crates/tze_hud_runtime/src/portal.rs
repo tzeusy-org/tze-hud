@@ -1374,6 +1374,31 @@ pub(crate) mod tests {
             scene.geometry_epoch, epoch,
             "settled metrics schedule no frame"
         );
+        // A current node ID alone is insufficient: same-node style changes
+        // invalidate an older measured frame before the next render arrives.
+        let output = (tile_id, tze_hud_scene::PortalPartKind::Transcript);
+        let saved = scene.overlay.portal_document_layouts[&output].clone();
+        let stale = scene
+            .overlay
+            .portal_document_layouts
+            .get_mut(&output)
+            .unwrap();
+        stale.signature = [9; 32];
+        stale.height = 200.0;
+        let NodeData::TextMarkdown(text) = &mut scene.nodes.get_mut(&saved.node_id).unwrap().data
+        else {
+            unreachable!()
+        };
+        text.font_size_px += 1.0;
+        driver.drain_inner(&mut scene, &mut processor, Some(tab), 450);
+        assert_eq!(
+            scene.tile_scroll_offset_local(tile_id).1,
+            800.0,
+            "stale same-node style rejected"
+        );
+        scene.nodes.get_mut(&saved.node_id).unwrap().data =
+            NodeData::TextMarkdown(saved.source.clone());
+        scene.overlay.portal_document_layouts.insert(output, saved);
         publish(&mut driver, "p", "new source", 500);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + FRAME_US);
         assert_eq!(scene.tile_unread_count(tile_id), 1);

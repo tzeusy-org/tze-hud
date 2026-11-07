@@ -386,10 +386,10 @@ impl PortalDocumentLayout {
             } else {
                 None
             };
-            if let Some(mapped) = mapped {
-                if let Some((_, new_y)) = new.rows.iter().rev().find(|(b, _)| *b <= mapped) {
-                    return (*new_y + offset - y).max(0.0);
-                }
+            if let Some(mapped) = mapped
+                && let Some((_, new_y)) = new.rows.iter().rev().find(|(b, _)| *b <= mapped)
+            {
+                return (*new_y + offset - y).max(0.0);
             }
         }
         offset
