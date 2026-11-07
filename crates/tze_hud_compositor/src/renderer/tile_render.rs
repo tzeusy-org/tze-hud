@@ -74,6 +74,30 @@ pub(super) fn hit_region_tint(
     }
 }
 
+pub(super) fn composer_backdrop_color(
+    scene: &SceneGraph,
+    tile_id: SceneId,
+    bounds: Rect,
+    backdrop: Rgba,
+) -> Option<Rgba> {
+    let node_id = *scene.overlay.tile_composer_nodes.get(&tile_id)?;
+    let NodeData::HitRegion(region) = &scene.nodes.get(&node_id)?.data else {
+        return None;
+    };
+    if region.bounds != bounds {
+        return None;
+    }
+    let tint = hit_region_tint(region, node_id, scene)?;
+    // Tint the existing pane before its ordinary fade/alpha conversion. An
+    // additional overlay changes coverage and can escape the pane's z-order.
+    Some(Rgba {
+        r: backdrop.r * (1.0 - tint[3]) + tint[0] * tint[3],
+        g: backdrop.g * (1.0 - tint[3]) + tint[1] * tint[3],
+        b: backdrop.b * (1.0 - tint[3]) + tint[2] * tint[3],
+        a: backdrop.a,
+    })
+}
+
 /// Apply the DisableTransparency degradation rule without changing visibility.
 ///
 /// Level 3 makes every *visible* tile opaque, but zero remains the semantic
@@ -1760,7 +1784,12 @@ impl Compositor {
 
         match &node.data {
             NodeData::SolidColor(sc) => {
-                if !sc.radius.is_some_and(|r| r > 0.0) {
+                let feedback = composer_backdrop_color(scene, tile.id, sc.bounds, sc.color);
+                if !sc.radius.is_some_and(|r| r > 0.0)
+                    || (feedback.is_some()
+                        && self.degradation_policy.level >= DegradationLevel::Simplified)
+                {
+                    let color = feedback.unwrap_or(sc.color);
                     Self::append_clipped_rect_vertices(
                         tile,
                         Rect::new(
@@ -1772,8 +1801,8 @@ impl Compositor {
                         sw,
                         sh,
                         self.gpu_color(Rgba {
-                            a: sc.color.a * tile_opacity,
-                            ..sc.color
+                            a: color.a * tile_opacity,
+                            ..color
                         }),
                         vertices,
                     );
@@ -1978,10 +2007,9 @@ impl Compositor {
                 //            a black overlay at 0.15 alpha against the sibling)
                 // Per-node overrides come from `local_style.hover_tint` /
                 // `pressed_tint` when set.
-                // Composer feedback is blended with its pane by the content
-                // SDF pass, including Simplified mode. A REPLACE quad here
-                // would erase the pane and become opaque white on hover.
-                let tint = (!hr.accepts_composer_input)
+                // The separately installed composer tints its existing pane;
+                // a second REPLACE quad would erase it and turn hover white.
+                let tint = (scene.overlay.tile_composer_nodes.get(&tile.id) != Some(&node_id))
                     .then(|| hit_region_tint(hr, node_id, scene))
                     .flatten();
                 if let Some(color) = tint {

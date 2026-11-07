@@ -72,19 +72,24 @@ impl super::Compositor {
     /// alpha is correct.
     #[inline]
     pub(super) fn gpu_color(&self, rgba: Rgba) -> [f32; 4] {
-        self.gpu_color_raw(rgba.to_array())
+        let rgba = simplify_flat_alpha(rgba.to_array(), self.degradation_policy.level);
+        if self.overlay_mode {
+            let a = rgba[3];
+            [
+                srgb_to_linear(linear_to_srgb(rgba[0]) * a),
+                srgb_to_linear(linear_to_srgb(rgba[1]) * a),
+                srgb_to_linear(linear_to_srgb(rgba[2]) * a),
+                a,
+            ]
+        } else {
+            rgba
+        }
     }
 
     /// Same as [`gpu_color`] but for raw `[f32; 4]` arrays (assumed linear).
     #[inline]
     pub(super) fn gpu_color_raw(&self, color: [f32; 4]) -> [f32; 4] {
         let color = simplify_flat_alpha(color, self.degradation_policy.level);
-        self.gpu_color_preserving_alpha(color)
-    }
-
-    // Interaction feedback is a blended tint, even when backdrop transparency
-    // is disabled by degradation. Promoting its alpha turns hover into a fill.
-    fn gpu_color_preserving_alpha(&self, color: [f32; 4]) -> [f32; 4] {
         if self.overlay_mode {
             let a = color[3];
             [
@@ -664,6 +669,9 @@ impl super::Compositor {
         &self,
         scene: &SceneGraph,
     ) -> Vec<crate::pipeline::RoundedRectDrawCmd> {
+        if self.degradation_policy.level >= tze_hud_scene::DegradationLevel::Simplified {
+            return Vec::new();
+        }
         let mut cmds = Vec::new();
         for tile in &Self::sort_tiles_with_drag_boost(self.policy_visible_tiles(scene), scene) {
             if let Some(root_id) = tile.root_node {
@@ -709,9 +717,7 @@ impl super::Compositor {
             None => return,
         };
 
-        if let NodeData::SolidColor(sc) = &node.data
-            && self.degradation_policy.level < tze_hud_scene::DegradationLevel::Simplified
-        {
+        if let NodeData::SolidColor(sc) = &node.data {
             if let Some(radius) = sc.radius.filter(|r| *r > 0.0) {
                 // hud-xe37d (review finding on hud-pd9bp, confirmed real): a
                 // rounded SolidColor is emitted here, not by render_node's flat-
@@ -741,6 +747,10 @@ impl super::Compositor {
                 );
                 if let Some(clipped) = Self::clip_rect_to_tile(tile, rect) {
                     let max_r = (rect.width * 0.5).min(rect.height * 0.5).max(0.0);
+                    let color = super::tile_render::composer_backdrop_color(
+                        scene, tile.id, sc.bounds, sc.color,
+                    )
+                    .unwrap_or(sc.color);
                     cmds.push(crate::pipeline::RoundedRectDrawCmd {
                         x: rect.x,
                         y: rect.y,
@@ -748,8 +758,8 @@ impl super::Compositor {
                         height: rect.height,
                         radius: radius.min(max_r),
                         color: self.gpu_color(Rgba {
-                            a: sc.color.a * tile_opacity,
-                            ..sc.color
+                            a: color.a * tile_opacity,
+                            ..color
                         }),
                         border: None,
                         clip: Some(RoundedRectClip {
@@ -760,49 +770,6 @@ impl super::Compositor {
                         }),
                     });
                 }
-            }
-        }
-
-        if let NodeData::HitRegion(region) = &node.data
-            && region.accepts_composer_input
-            && let Some(mut color) = super::tile_render::hit_region_tint(region, node_id, scene)
-        {
-            color[3] *= tile_opacity;
-            let effective_y = self
-                .tile_flow_offsets
-                .get(&node_id)
-                .copied()
-                .unwrap_or(region.bounds.y);
-            let (node_scroll_x, node_scroll_y) =
-                if node_uses_display_tile_scroll(scene, tile, node_id) {
-                    (scroll_x, scroll_y)
-                } else {
-                    (0.0, 0.0)
-                };
-            let rect = Rect::new(
-                tile.bounds.x + region.bounds.x - node_scroll_x,
-                tile.bounds.y + effective_y - node_scroll_y,
-                region.bounds.width,
-                region.bounds.height,
-            );
-            if color[3] > 0.0
-                && let Some(clipped) = Self::clip_rect_to_tile(tile, rect)
-            {
-                cmds.push(RoundedRectDrawCmd {
-                    x: rect.x,
-                    y: rect.y,
-                    width: rect.width,
-                    height: rect.height,
-                    radius: 0.0,
-                    color: self.gpu_color_preserving_alpha(color),
-                    border: None,
-                    clip: Some(RoundedRectClip {
-                        x: clipped.x,
-                        y: clipped.y,
-                        width: clipped.width,
-                        height: clipped.height,
-                    }),
-                });
             }
         }
 
