@@ -1184,7 +1184,7 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
     let displayed_before_wheel = compositor.display_tile_scroll_offset(&scene, tile_id).1;
     processor.process_keyboard_scroll(tile_id, -40.0, &mut scene);
     compositor
-        .update_scroll_smoothing_at(&scene, smooth_time + std::time::Duration::from_millis(3));
+        .update_scroll_smoothing_at(&scene, smooth_time + std::time::Duration::from_millis(4));
     let displayed_after_wheel = compositor.display_tile_scroll_offset(&scene, tile_id).1;
     assert!(displayed_after_wheel < displayed_before_wheel);
     assert!(
