@@ -1067,8 +1067,10 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
             assert!(
                 processor
                     .process_scroll_event(&wheel(input_point, -70.0), &mut scene)
-                    .is_some()
+                    .is_none(),
+                "INPUT feedback stays local rather than emitting an OUTPUT offset"
             );
+            assert!(scene.portal_input_scroll_offset(tile_id).1 < input_tail.1);
             assert_eq!(
                 scene.tile_scroll_offset_local(tile_id),
                 output_reading,

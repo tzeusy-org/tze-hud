@@ -117,7 +117,17 @@ complete handle before MCP, driver, agent control and pause control clone it.
 The driver owns one `(agent, portal id)` binding map for incarnation, tile/lease,
 native surface descriptor and local feedback. Scene tile bounds are the retained
 viewport geometry: the driver passes their positive fractional dimensions to
-the renderer and follow-tail, without a second adapter geometry cache. Resize
+the renderer, without a second adapter geometry cache. The compositor shapes each
+retained INPUT/OUTPUT document behind a fixed pane scissor and publishes its
+actual wrapped row positions through ephemeral scene state. The existing
+FrameReady drain reconciles independent scroll engines; metrics are rejected
+when their node/source, tile size or font scale is stale. INPUT wheel feedback
+stays local; the established tile-scroll event and PageUp/PageDown target OUTPUT.
+Typing resets INPUT history alone; header, labels and editor remain fixed.
+A uniquely identifiable visible plain-text row anchors append, reflow and rolling
+head trim. Repeated identical lines without a unique visible anchor keep their
+pixel offset, clamped to the retained range; this does not guarantee original
+turn identity. Existing 16 KiB history/render limits are unchanged. Resize
 completion broadcasts member geometry and optionally persists it after unlock.
 Detach revokes while
 scene-owned; hub tombstones and scene terminal state retain missed-lock cleanup.

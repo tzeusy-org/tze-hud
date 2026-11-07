@@ -402,7 +402,10 @@ impl InputProcessor {
                 tile_id,
                 self.portal_input_scroll_state.offset(tile_id),
             );
-            return self.portal_input_scroll_state.changed_event(tile_id);
+            // Native INPUT history is viewer-local. The public tile-scroll
+            // event identifies OUTPUT, so do not serialize an INPUT offset
+            // under that identity. Geometry invalidation above paints it.
+            return None;
         }
         self.process_scroll_for_tile(tile_id, event.delta_x, event.delta_y, scene)
     }

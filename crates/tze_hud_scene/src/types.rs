@@ -381,11 +381,8 @@ impl PortalDocumentLayout {
             }
             let mapped = if self.content == new.content {
                 Some(byte)
-            } else if self.content.match_indices(line).count() == 1 {
-                let mut hits = new.content.match_indices(line);
-                hits.next()
-                    .filter(|_| hits.next().is_none())
-                    .map(|(i, _)| i + byte - start)
+            } else if unique_document_line(&self.content, line).is_some() {
+                unique_document_line(&new.content, line).map(|i| i + byte - start)
             } else {
                 None
             };
@@ -397,6 +394,16 @@ impl PortalDocumentLayout {
         }
         offset
     }
+}
+
+fn unique_document_line(text: &str, line: &str) -> Option<usize> {
+    let mut hits = text.match_indices(line).filter(|(i, _)| {
+        (*i == 0 || text.as_bytes()[i - 1] == b'\n')
+            && (*i + line.len() == text.len() || text.as_bytes()[i + line.len()] == b'\n')
+    });
+    hits.next()
+        .filter(|_| hits.next().is_none())
+        .map(|(i, _)| i)
 }
 
 /// One of the eight named parts of the first-class portal surface, per the
