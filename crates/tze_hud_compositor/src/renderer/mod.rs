@@ -1976,6 +1976,11 @@ impl Compositor {
     /// actually been shaped. Read-only: never shapes or primes to satisfy a test.
     #[cfg(any(test, feature = "dev-mode"))]
     pub fn prepared_portal_content_bytes(&self, scene: &SceneGraph) -> Option<usize> {
+        if self.markdown_cache_scene_instance != Some(scene.instance_id)
+            || self.markdown_cache_scene_version != scene.version
+        {
+            return None;
+        }
         let rasterizer = self.text_rasterizer.as_ref()?;
         let items =
             self.collect_text_items(scene, scene.display_area.width, scene.display_area.height);

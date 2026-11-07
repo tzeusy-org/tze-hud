@@ -425,20 +425,12 @@ impl InputProcessor {
             .map(|(key, layout)| (*key, layout.clone()))
             .collect();
         for ((tile, pane), layout) in layouts {
-            if scene.portal_document_kind(tile, layout.node_id) != Some(pane)
-                || !matches!(&scene.nodes[&layout.node_id].data,
-                    tze_hud_scene::NodeData::TextMarkdown(text) if *text == layout.source)
-                || (
-                    scene.tiles[&tile].bounds.width,
-                    scene.tiles[&tile].bounds.height,
-                ) != layout.tile_size
-                || scene.tile_font_scale(tile) != layout.font_scale
-            {
+            if !scene.portal_document_layout_is_current(tile, pane, &layout) {
                 continue;
             }
             let old = self.portal_layouts.get(&(tile, pane));
             if old.is_some_and(|old| {
-                old.signature == layout.signature && old.viewport.height == layout.viewport.height
+                old.signature == layout.signature && old.viewport == layout.viewport
             }) {
                 continue;
             }

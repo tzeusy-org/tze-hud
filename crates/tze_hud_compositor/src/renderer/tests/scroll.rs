@@ -966,6 +966,7 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
         tokens::PortalVisualTokens,
     };
     let mut view = empty_portal_view("scroll-anchor", "Reading anchor");
+    view.unread_output_count = Some(3);
     view.visible_transcript.push(TranscriptUnit {
         sequence: 1,
         output_text: (1..=60)
@@ -1010,6 +1011,7 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
                 .collect();
         }
         let rendered = render(&view, &tokens, viewport, 3_000_000);
+        scene.set_tile_unread_count(tile_id, rendered.unread);
         scene
             .set_portal_surface(tile_id, rendered.surface, "expanded-portal")
             .unwrap();
@@ -1098,6 +1100,27 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
             );
         }
         reading = Some((marker_y, input_offset));
+        let jtl = super::token_colors::resolve_jump_to_latest_tokens(&compositor.token_map);
+        let si = super::token_colors::resolve_scroll_indicator_tokens(&compositor.token_map);
+        let badge = compositor
+            .collect_jump_to_latest_badge_item(&scene.tiles[&tile_id], &scene, &jtl, &si)
+            .expect("actual native OUTPUT overflow exposes jump/unread badge");
+        assert_eq!(&*badge.text, "3 unread");
+        assert!(badge.pixel_x >= tile_bounds.x + layout.viewport.x);
+        compositor.populate_zone_hit_regions(&mut scene, 800.0, 520.0);
+        let jump = scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|region| {
+                matches!(region.kind,
+            tze_hud_scene::ZoneInteractionKind::JumpToLatest { tile_id: id } if id == tile_id)
+            })
+            .unwrap();
+        assert!(
+            jump.bounds.x >= tile_bounds.x + layout.viewport.x,
+            "click target is in OUTPUT"
+        );
         let epoch = scene.geometry_epoch;
         processor.reconcile_portal_document_layouts(&mut scene);
         assert_eq!(
