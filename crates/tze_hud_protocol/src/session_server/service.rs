@@ -71,15 +71,13 @@ pub struct HudSessionImpl {
     pub element_repositioned_tx:
         tokio::sync::broadcast::Sender<crate::proto::ElementRepositionedEvent>,
 
-    /// Broadcast sender for `FramePresented` acknowledgments (hud-91uu6).
+    /// Broadcast sender for optional internal batch-to-GPU correlation.
     ///
-    /// Carries batch-correlated present timing: each event pairs the
-    /// MutationBatch.batch_ids composited into a presented frame with that
-    /// frame's number and present wall-clock. The render loop (headless or
-    /// windowed) drains the scene's present-ack queue at frame present and
-    /// sends through a clone of this sender. Each session handler
-    /// subscribes and delivers only when the agent is subscribed to
-    /// `TELEMETRY_FRAMES` (which requires the `read_telemetry` capability).
+    /// Pairs internal scene batch ids with a frame number and local GPU-work
+    /// timestamp, not display completion or Publish request ids. The windowed
+    /// producer clones this sender; headless requires explicit optional wiring.
+    /// Sessions forward global metadata only to permitted TELEMETRY_FRAMES
+    /// subscribers. Delivery is lossy, without per-batch guarantees or replay.
     ///
     /// Subscription category: TELEMETRY_FRAMES (requires `read_telemetry`).
     /// Message class: State-stream (coalesced/droppable under backpressure).

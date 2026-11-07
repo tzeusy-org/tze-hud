@@ -1,15 +1,12 @@
-//! End-to-end headless coverage for the batch-correlated present-acknowledgment
-//! path (hud-91uu6).
+//! Headless producer-half coverage for internal batch-to-GPU correlation.
 //!
-//! Proves the correlation primitive delivered by the producer half of the
-//! FramePresented protocol: a gRPC-style `MutationBatch` applied to the runtime
-//! scene is paired, at true on-screen present, with the frame's present
-//! wall-clock and emitted on the `frame_presented_tx` broadcast — the same
-//! sender a session handler subscribes to and gates on TELEMETRY_FRAMES.
+//! Internal scene batches are paired with a local GPU completion timestamp and
+//! emitted through an explicitly wired standalone FramePresented sender. The
+//! headless surface present is a no-op; this does not exercise a real gRPC
+//! listener, subscription permission gate or the windowed main-thread present.
 //!
-//! This is the non-proxy present-time signal that de-blocks hud-vjlqh: the
-//! present wall-clock is sampled at Stage 7 completion, distinct from the
-//! transport RTT of the mutation submit.
+//! These tests establish neither Windows on-screen completion nor synchronized
+//! cross-host latency. Session forwarding has its own fake-broadcast tests.
 
 use crate::gpu_init::serialized_headless_init;
 

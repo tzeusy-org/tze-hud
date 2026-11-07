@@ -127,8 +127,8 @@ message ServerMessage {
     // Message class: Transactional (never coalesced or dropped).
     tze_hud.protocol.v1.ElementRepositionedEvent element_repositioned = 51;
 
-    // Frame-present acknowledgment for runtime frame timing. The event remains
-    // available independently of the removed public mutation route.
+    // Optional internal batch-to-GPU correlation, independent of the removed
+    // public mutation route. No per-Publish or physical on-screen acknowledgment.
     // Subscription: TELEMETRY_FRAMES (requires the corresponding event permission).
     // Message class: State-stream (coalesced/droppable under backpressure).
     tze_hud.protocol.v1.FramePresented frame_presented = 52;

@@ -420,6 +420,21 @@ source links when implementation changes the status.
   quiescent-efficiency artifact remain. Pre-reset references remain in the projection and
   protocol crate docs. `hud-bstmy` and its reconciliation work remain open;
   a passing test inventory alone does not establish that the diet is complete.
+- **T8 — frame correlation KEEP [Observed].** `hud-uehz7` retains the existing
+  optional [`FramePresented`](api.md#grpc-resident-sessions) contract after the
+  relevant T7 source ownership release: D5 merged in PR #1577, and its source
+  and review readers released before reinventory at `84be1d31`. This is a
+  narrow source checkpoint; `hud-lirh2.12` Windows owner acceptance and `.13`
+  final reconciliation remain outstanding, as do other whole-T7 blockers.
+  The declared server field 52, fields 1/2/3, permitted opt-in session gate,
+  windowed producer, optional headless producer and existing correlation tests
+  support KEEP. The event correlates internal batches with local GPU work,
+  without observing main-thread surface present or physical display completion.
+  No external opt-in adoption was observed. The retired Python user-test
+  client/parser is already absent and is not recreated. This clarification
+  changes no runtime statements, wire declarations, grants, defaults, test
+  assertions or budgets; the broader gRPC product decision remains separate.
+
 - **T9 — monitors [Observed].**
   [`windowed/displays.rs`](../crates/tze_hud_runtime/src/windowed/displays.rs)
   creates per-monitor overlay windows sharing a scene in physical desktop

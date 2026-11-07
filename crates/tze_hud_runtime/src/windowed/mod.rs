@@ -1988,14 +1988,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             let built_scene_version = scene.version;
                             let built_geometry_epoch = scene.geometry_epoch;
                             // ── Batch-correlated present ack drain (hud-91uu6) ──
-                            // gRPC `apply_batch` enqueues accepted batch_ids in
-                            // BOTH runtimes, so the windowed present path must drain
-                            // this queue every presented frame or it grows unbounded
-                            // over a live session. Drain UNDER the lock (cheap: a
-                            // VecDeque swap, no I/O) and broadcast `FramePresented`
-                            // AFTER the lock is released and the frame is presented
-                            // (hud-4va6q) — keeping the send off the hottest
-                            // lock-collapse path (hud-uyhpn).
+                            // SceneGraph::apply_batch records internal batch ids.
+                            // Drain under the scene lock before GPU submission;
+                            // a failed primary attempt can consume ids without a
+                            // telemetry sample. Broadcast after local GPU work,
+                            // off the scene lock; main-thread present is separate.
                             let presented_batch_ids = scene.drain_present_ack_batch_ids();
                             // ── DROP the scene lock BEFORE the vsync-blocking
                             // acquire/encode/submit/poll (hud-uyhpn) ────────────
@@ -2054,14 +2051,14 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             }
 
                             // ── Broadcast FramePresented (hud-4va6q) ──────────
-                            // Stage 6–7 are complete, so the batches drained above
-                            // are now on screen. Mirror the headless producer
-                            // (headless.rs): pair those batch_ids with this frame's
-                            // number + present wall-clock and broadcast to gRPC
-                            // subscribers, gated on read_telemetry at the session
-                            // layer. The send is off the scene lock (already
-                            // dropped) and skipped when no subscriber is attached
-                            // (compositor-only mode) or no batch was applied.
+                            // Primary and secondary GPU work is complete. Pair
+                            // the drained ids with the primary frame number and
+                            // an emitter timestamp, without waiting for or
+                            // observing the independent main-thread surface present.
+                            // Permitted TELEMETRY_FRAMES subscribers receive this
+                            // optional, lossy metadata through the session gate.
+                            // No pending ids means no event; no receivers is an
+                            // ordinary broadcast miss, not a render failure.
                             if frame_submitted
                                 && let Some(tx) = &frame_presented_tx
                                 && !presented_batch_ids.is_empty()
