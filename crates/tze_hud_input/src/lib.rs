@@ -315,6 +315,9 @@ pub struct InputProcessor {
     pub capture: capture::PointerCaptureManager,
     /// Local-first tile scroll state.
     scroll_state: ScrollState,
+    portal_input_scroll_state: ScrollState,
+    portal_layouts:
+        HashMap<(SceneId, tze_hud_scene::PortalPartKind), tze_hud_scene::PortalDocumentLayout>,
     /// Runtime-owned composer draft manager.
     ///
     /// Owns the active `ComposerDraft` when a region with
@@ -340,6 +343,8 @@ impl InputProcessor {
             rollback_tracker: RollbackTracker::new(),
             capture: capture::PointerCaptureManager::new(),
             scroll_state: ScrollState::new(),
+            portal_input_scroll_state: ScrollState::new(),
+            portal_layouts: HashMap::new(),
             composer_draft_manager: ComposerDraftManager::new(),
         }
     }
@@ -382,7 +387,128 @@ impl InputProcessor {
             HitResult::NodeHit { tile_id, .. } | HitResult::TileHit { tile_id } => tile_id,
             _ => return None,
         };
+        if scene.portal_document_at(tile_id, event.x, event.y)
+            == Some(tze_hud_scene::PortalPartKind::Composer)
+        {
+            self.portal_input_scroll_state.apply_user_scroll(
+                tile_id,
+                event.delta_x,
+                event.delta_y,
+            )?;
+            if !self.portal_input_scroll_state.commit_tile_frame(tile_id) {
+                return None;
+            }
+            scene.set_portal_input_scroll_offset(
+                tile_id,
+                self.portal_input_scroll_state.offset(tile_id),
+            );
+            // Native INPUT history is viewer-local. The public tile-scroll
+            // event identifies OUTPUT, so do not serialize an INPUT offset
+            // under that identity. Geometry invalidation above paints it.
+            return None;
+        }
         self.process_scroll_for_tile(tile_id, event.delta_x, event.delta_y, scene)
+    }
+
+    /// Consume only current, actually shaped native documents. FrameReady already
+    /// wakes the main thread; unchanged layout never schedules another frame.
+    pub fn reconcile_portal_document_layouts(&mut self, scene: &mut SceneGraph) {
+        use tze_hud_scene::PortalPartKind;
+        self.portal_input_scroll_state
+            .retain_tiles(|id| scene.tiles.contains_key(&id));
+        self.portal_layouts
+            .retain(|(id, _), _| scene.tiles.contains_key(id));
+        let layouts: Vec<_> = scene
+            .overlay
+            .portal_document_layouts
+            .iter()
+            .map(|(key, layout)| (*key, layout.clone()))
+            .collect();
+        for ((tile, pane), layout) in layouts {
+            if !scene.portal_document_layout_is_current(tile, pane, &layout) {
+                continue;
+            }
+            let old = self.portal_layouts.get(&(tile, pane));
+            if old.is_some_and(|old| {
+                old.signature == layout.signature && old.viewport == layout.viewport
+            }) {
+                continue;
+            }
+            if old.is_none_or(|old| old.height != layout.height || old.viewport != layout.viewport)
+            {
+                // Vertex collection precedes metric publication. One corrective
+                // frame updates indicator/pill geometry even when reading stays put.
+                scene.bump_geometry_epoch();
+            }
+            let input = pane == PortalPartKind::Composer;
+            let state = if input {
+                &mut self.portal_input_scroll_state
+            } else {
+                &mut self.scroll_state
+            };
+            if !state.is_scrollable(tile) {
+                state.register_tile(tile, ScrollConfig::vertical());
+            }
+            let reading_offset = old.and_then(|old| {
+                (state.follow_tail_anchor(tile) == crate::scroll::FollowTailAnchor::ScrolledBack)
+                    .then(|| old.retained_reading_offset(&layout, state.offset(tile).1))
+            });
+            state.notify_content_appended(
+                tile,
+                layout.height,
+                layout.viewport.height,
+                layout.line_height,
+            );
+            if let Some(y) = reading_offset {
+                state.restore_reading_offset(tile, y);
+            } else if state.follow_tail_anchor(tile) == crate::scroll::FollowTailAnchor::AtTail {
+                // Full shaped rows may have different heights (headings, wrap).
+                // Initial paint and reflow must reach the exact measured tail.
+                state.reset_to_tail(tile);
+            }
+            let offset = state.offset(tile);
+            if input {
+                scene.set_portal_input_scroll_offset(tile, offset);
+            } else {
+                let previous = scene.tile_scroll_offset_local(tile);
+                if previous != offset {
+                    if reading_offset.is_some() || offset.1 < previous.1 {
+                        let shift = scene
+                            .overlay
+                            .portal_scroll_origin_shifts
+                            .entry(tile)
+                            .or_default();
+                        shift.0 += f64::from(offset.0) - f64::from(previous.0);
+                        shift.1 += f64::from(offset.1) - f64::from(previous.1);
+                    }
+                    let _ = scene.set_tile_scroll_offset_local(tile, offset.0, offset.1);
+                    scene.bump_geometry_epoch();
+                }
+                scene.set_tile_follow_tail_at_tail(
+                    tile,
+                    state.follow_tail_anchor(tile) == crate::scroll::FollowTailAnchor::AtTail,
+                );
+            }
+            self.portal_layouts.insert((tile, pane), layout);
+        }
+    }
+
+    pub fn reset_portal_input_scroll_to_tail(
+        &mut self,
+        tile: SceneId,
+        scene: &mut SceneGraph,
+    ) -> bool {
+        if scene
+            .portal_surface(tile)
+            .is_none_or(|surface| surface.parts.iter().any(|part| part.node.is_some()))
+        {
+            return self.reset_tile_scroll_to_tail(tile, scene);
+        }
+        let changed = self.portal_input_scroll_state.reset_to_tail(tile);
+        if changed {
+            scene.set_portal_input_scroll_offset(tile, self.portal_input_scroll_state.offset(tile));
+        }
+        changed
     }
 
     /// Register `tile_id` in `scroll_state` from its scene `TileScrollConfig`

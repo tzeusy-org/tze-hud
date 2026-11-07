@@ -369,24 +369,20 @@ async fn frame_budgets_hold_under_burst() {
     {
         let scene = shared_scene.lock().await;
         assert_eq!(
-            runtime.compositor.primed_truncation_content_bytes(&scene),
+            runtime.compositor.prepared_portal_content_bytes(&scene),
             None
         );
     }
-    // Empty warmups prime at the 16 ms real-clock cadence. TestClock only
-    // drives the portal Hub, so make this frame eligible outside the timer.
-    // Otherwise the stage budget can pass by deferring all burst shaping.
-    tokio::time::sleep(std::time::Duration::from_millis(32)).await;
     let burst_telemetry = runtime.render_frame().await;
     {
         let scene = shared_scene.lock().await;
-        let primed_bytes = runtime
+        let shaped_bytes = runtime
             .compositor
-            .primed_truncation_content_bytes(&scene)
-            .expect("burst frame must prime the current scene, not defer it");
+            .prepared_portal_content_bytes(&scene)
+            .expect("burst frame must shape the current full documents, not defer them");
         assert!(
-            primed_bytes >= CADENCE_BURST_BYTES,
-            "primed {primed_bytes} bytes, missing the {CADENCE_BURST_BYTES}-byte burst"
+            shaped_bytes >= CADENCE_BURST_BYTES,
+            "shaped {shaped_bytes} bytes, missing the {CADENCE_BURST_BYTES}-byte burst"
         );
     }
     eprintln!(

@@ -235,13 +235,10 @@ impl Compositor {
             .map(|tile| (tile.id, tile.bounds))
             .collect();
         for (tile_id, bounds) in tile_geoms {
-            let Some(scroll_cfg) = scene.tile_scroll_config(tile_id) else {
+            let Some((viewport, content_height)) = scene.output_scroll_geometry(tile_id) else {
                 continue;
             };
-            let Some(content_height) = scroll_cfg.content_height else {
-                continue;
-            };
-            let viewport_px = bounds.height;
+            let viewport_px = viewport.height;
             let (_, scroll_offset_y) = self.display_tile_scroll_offset(scene, tile_id);
             if tze_hud_input::compute_scroll_indicator(
                 viewport_px,
@@ -255,7 +252,7 @@ impl Compositor {
             }
             let scrolled_back = !scene.tile_follow_tail_at_tail(tile_id);
             let Some(pill) = tze_hud_input::compute_jump_to_latest_pill(
-                bounds.width,
+                viewport.width,
                 viewport_px,
                 scrolled_back,
                 &jump_to_latest_tokens,
@@ -263,8 +260,8 @@ impl Compositor {
                 continue;
             };
             let pill_bounds = Rect::new(
-                bounds.x + pill.x_px,
-                bounds.y + pill.y_px,
+                bounds.x + viewport.x + pill.x_px,
+                bounds.y + viewport.y + pill.y_px,
                 pill.width_px,
                 pill.height_px,
             );

@@ -722,6 +722,12 @@ pub(crate) fn measure_raw_content_height(
         .unwrap_or(line_height)
 }
 
+pub(crate) struct ShapedDocumentMetrics {
+    pub signature: [u8; 32],
+    pub height: f32,
+    pub rows: std::sync::Arc<[(usize, f32)]>,
+}
+
 impl TextRasterizer {
     /// Create a text rasterizer whose font roles follow `font_config`.
     ///
@@ -1511,17 +1517,50 @@ impl TextRasterizer {
         prepare_result.map(|()| inline_backdrop_quads)
     }
 
-    /// Build and shape a single `Buffer` for `item` — the cache-MISS path of
-    /// [`prepare_text_items`] (hud-991cj).
-    ///
-    /// This is the shaping half of the old inline buffer-building closure,
-    /// factored out so a cache HIT can skip it entirely. It performs the actual
-    /// `set_text`/`set_rich_text` + `shape_until_scroll` — the only work that a
-    /// pure scroll must avoid. It increments [`Self::shape_call_count`] exactly
-    /// once (the measurement lever). It does NOT compute the effective styled
-    /// runs (those are produced separately by [`effective_styled_runs_for_item`]
-    /// so the backdrop-quad path runs on both hit and miss); every styling input
-    /// used here is captured by the item's `ShapeKey`, so a reuse is byte-exact.
+    #[cfg(any(test, feature = "dev-mode"))]
+    pub(crate) fn has_shaped_document(&self, item: &TextItem) -> bool {
+        self.shape_cache
+            .get(&shape_key_for_item(item, &item.text))
+            .is_some_and(|buffers| !buffers.is_empty())
+    }
+
+    /// Reuse the paint buffer to measure the retained document, including wrap
+    /// and rich-text line metrics. The fixed pane scissor is independent.
+    pub(crate) fn measure_scroll_document(&mut self, item: &TextItem) -> ShapedDocumentMetrics {
+        let key = shape_key_for_item(item, &item.text);
+        if !self.shape_cache.contains_key(&key) {
+            let buffer = self.build_and_shape_buffer(item, None);
+            self.shape_cache.insert(key, vec![buffer]);
+        }
+        let buffer = &self.shape_cache[&key][0];
+        let mut bases = Vec::with_capacity(buffer.lines.len());
+        let mut base = 0;
+        for line in &buffer.lines {
+            bases.push(base);
+            base += line.text().len() + 1;
+        }
+        let mut height = 0.0_f32;
+        let rows = buffer
+            .layout_runs()
+            .map(|run| {
+                height = height.max(run.line_top + run.line_height);
+                let start = run
+                    .glyphs
+                    .iter()
+                    .map(|glyph| glyph.start)
+                    .min()
+                    .unwrap_or(0);
+                (bases[run.line_i] + start, run.line_top)
+            })
+            .collect::<Vec<_>>();
+        ShapedDocumentMetrics {
+            signature: key,
+            height,
+            rows: rows.into(),
+        }
+    }
+
+    /// Build and shape on a cache miss; scroll frames reuse this exact buffer.
     fn build_and_shape_buffer(&mut self, item: &TextItem, truncated: Option<&str>) -> Buffer {
         let line_height = item.font_size_px * item.line_height_multiplier;
         let mut buf = Buffer::new(

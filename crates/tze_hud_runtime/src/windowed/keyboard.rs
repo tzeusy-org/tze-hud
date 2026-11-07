@@ -398,7 +398,7 @@ impl WinitApp {
         {
             self.state
                 .input_processor
-                .reset_tile_scroll_to_tail(tile_id, &mut scene);
+                .reset_portal_input_scroll_to_tail(tile_id, &mut scene);
         }
     }
 
@@ -3245,8 +3245,7 @@ mod tests {
     #[test]
     fn authority_attached_submit_snaps_scrolled_back_history_to_tail() {
         use tze_hud_input::{FocusManager, InputProcessor, RawCharacterEvent};
-        use tze_hud_scene::types::HitRegionNode;
-        use tze_hud_scene::{Node, NodeData, Rect, SceneGraph, SceneId};
+        use tze_hud_scene::{NodeData, SceneGraph, SceneId};
 
         // Publish and drain to MATERIALISE a hub-backed portal tile (binding
         // it in the driver). A submission on this tile is routed to the hub,
@@ -3297,26 +3296,8 @@ mod tests {
             .expect("drain must materialise a portal tile");
         let tile_bounds = scene.tiles.get(&tile_id).unwrap().bounds;
 
-        // Give the materialised tile a focusable composer so Enter routes to the
-        // draft (the driver-created tile carries no composer node of its own).
-        let composer_id = SceneId::new();
-        scene.nodes.insert(
-            composer_id,
-            Node {
-                layout: Default::default(),
-                id: composer_id,
-                children: vec![],
-                data: NodeData::HitRegion(HitRegionNode {
-                    bounds: Rect::new(0.0, 0.0, 400.0, 60.0),
-                    interaction_id: "portal-composer".to_string(),
-                    accepts_focus: true,
-                    accepts_pointer: true,
-                    accepts_composer_input: true,
-                    ..Default::default()
-                }),
-            },
-        );
-        scene.tiles.get_mut(&tile_id).unwrap().root_node = Some(composer_id);
+        crate::portal::tests::measured_panes(&mut scene, tile_id, 900.0, 900.0);
+        processor.reconcile_portal_document_layouts(&mut scene);
 
         let mut focus_manager = FocusManager::new();
         focus_manager.add_tab(tab_id);
@@ -3324,18 +3305,6 @@ mod tests {
         assert!(
             processor.is_composer_active(),
             "test setup: focusing the composer must activate the draft"
-        );
-
-        // Seed an overflowing history so there is a nonzero scrollable range
-        // (mirrors the authority echo growing the transcript).
-        let line_height =
-            tze_hud_portal::tokens::PortalVisualTokens::default().transcript_font_size_px * 1.4;
-        processor.notify_tile_content_appended(
-            tile_id,
-            history.lines().count() as f32 * line_height,
-            tile_bounds.height,
-            line_height,
-            &mut scene,
         );
 
         let (mut app, _rx) = make_windowed_keyboard_test_app(scene, focus_manager, processor);
@@ -3356,10 +3325,19 @@ mod tests {
         {
             let shared = app.state.shared_state.try_lock().unwrap();
             let mut scene = shared.scene.try_lock().unwrap();
+            app.state.input_processor.process_scroll_event(
+                &tze_hud_input::ScrollEvent {
+                    x: tile_bounds.x + tile_bounds.width * 0.75,
+                    y: tile_bounds.y + 200.0,
+                    delta_x: 0.0,
+                    delta_y: -50.0,
+                },
+                &mut scene,
+            );
             let _ = app.state.input_processor.process_scroll_event(
                 &tze_hud_input::ScrollEvent {
-                    x: tile_bounds.x + 200.0,
-                    y: tile_bounds.y + tile_bounds.height - 20.0,
+                    x: tile_bounds.x + tile_bounds.width * 0.25,
+                    y: tile_bounds.y + 200.0,
                     delta_x: 0.0,
                     delta_y: -50.0,
                 },
@@ -3420,10 +3398,11 @@ mod tests {
         let shared = app.state.shared_state.try_lock().unwrap();
         let scene = shared.scene.try_lock().unwrap();
         assert!(
-            scene.tile_follow_tail_at_tail(tile_id),
-            "an authority-attached submission must snap the input-pane history back \
-             to the tail on submit (hud-npcdf)"
+            !scene.tile_follow_tail_at_tail(tile_id),
+            "submission must preserve OUTPUT reading position"
         );
+        assert_eq!(scene.portal_input_scroll_offset(tile_id).1, 800.0);
+        assert_eq!(scene.tile_scroll_offset_local(tile_id).1, 750.0);
         drop(scene);
         drop(shared);
         // Execute the actual production settle order: deferred
@@ -3468,7 +3447,7 @@ mod tests {
                 1,
                 "one hub echo in the scene, no raw duplicate: {painted}"
             );
-            assert!(scene.tile_follow_tail_at_tail(tile_id));
+            assert!(!scene.tile_follow_tail_at_tail(tile_id));
         }
         app.settle_scene_work();
         assert_eq!(
@@ -3491,7 +3470,7 @@ mod tests {
         let tail_after_first = {
             let shared = app.state.shared_state.try_lock().unwrap();
             let scene = shared.scene.try_lock().unwrap();
-            scene.tile_scroll_offset_local(tile_id).1
+            scene.portal_input_scroll_offset(tile_id).1
         };
         assert!(
             tail_after_first > 0.0,
@@ -3524,15 +3503,15 @@ mod tests {
             let mut scene = shared.scene.try_lock().unwrap();
             app.state.input_processor.process_scroll_event(
                 &tze_hud_input::ScrollEvent {
-                    x: tile_bounds.x + 200.0,
-                    y: tile_bounds.y + tile_bounds.height - 20.0,
+                    x: tile_bounds.x + tile_bounds.width * 0.25,
+                    y: tile_bounds.y + 200.0,
                     delta_x: 0.0,
                     delta_y: -50.0,
                 },
                 &mut scene,
             );
             assert!(!scene.tile_follow_tail_at_tail(tile_id));
-            assert!(scene.tile_scroll_offset_local(tile_id).1 < tail_after_first);
+            assert!(scene.portal_input_scroll_offset(tile_id).1 < tail_after_first);
         }
         clock.advance_us(1);
         app.dispatch_key_down_event_inner(
@@ -3606,9 +3585,9 @@ mod tests {
         {
             let shared = app.state.shared_state.try_lock().unwrap();
             let scene = shared.scene.try_lock().unwrap();
-            assert!(scene.tile_follow_tail_at_tail(tile_id));
+            assert!(!scene.tile_follow_tail_at_tail(tile_id));
             assert!(
-                scene.tile_scroll_offset_local(tile_id).1 >= tail_after_first,
+                scene.portal_input_scroll_offset(tile_id).1 >= tail_after_first,
                 "the second accepted reply must reach at least the prior tail"
             );
             let painted = scene

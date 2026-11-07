@@ -121,18 +121,6 @@ pub(super) fn degradation_tile_opacity(opacity: f32, level: DegradationLevel) ->
     }
 }
 
-/// Renderer adapter for the scene-owned scroll classification.
-///
-/// Pointer mapping uses the same `SceneGraph` decision, keeping fixed portal
-/// chrome and scrolling document coordinates aligned after resize (hud-jeqop).
-pub(super) fn node_uses_display_tile_scroll(
-    scene: &SceneGraph,
-    tile: &Tile,
-    node_id: SceneId,
-) -> bool {
-    scene.node_uses_display_tile_scroll(tile.id, node_id)
-}
-
 // The composer's content inset (historically the `COMPOSER_TEXT_MARGIN = 6.0`
 // literal) is now token-driven: it resolves from the shared
 // `portal.spacing.content_inset_px` token into
@@ -460,11 +448,11 @@ impl Compositor {
                 let NodeData::HitRegion(hr) = &node.data else {
                     return;
                 };
-                let (scroll_x, scroll_y) = if node_uses_display_tile_scroll(scene, tile, node_id) {
-                    self.display_tile_scroll_offset(scene, owner.tile_id)
-                } else {
-                    (0.0, 0.0)
-                };
+                let (scroll_x, scroll_y) = scene.node_document_scroll_offset(
+                    tile.id,
+                    node_id,
+                    self.display_tile_scroll_offset(scene, owner.tile_id),
+                );
                 Rect::new(
                     tile.bounds.x + hr.bounds.x - scroll_x,
                     tile.bounds.y + hr.bounds.y - scroll_y,
@@ -1553,9 +1541,8 @@ impl Compositor {
         // gating via the pure functions this delegates to).
         self.text_rasterizer.as_ref()?;
 
-        let scroll_cfg = scene.tile_scroll_config(tile.id)?;
-        let content_height = scroll_cfg.content_height?;
-        let viewport_px = tile.bounds.height;
+        let (viewport, content_height) = scene.output_scroll_geometry(tile.id)?;
+        let viewport_px = viewport.height;
         let (_, scroll_offset_y) = self.display_tile_scroll_offset(scene, tile.id);
         // Only offer the badge where the pill itself renders: content overflows.
         tze_hud_input::compute_scroll_indicator(
@@ -1567,7 +1554,7 @@ impl Compositor {
 
         let scrolled_back = !scene.tile_follow_tail_at_tail(tile.id);
         let pill = tze_hud_input::compute_jump_to_latest_pill(
-            tile.bounds.width,
+            viewport.width,
             viewport_px,
             scrolled_back,
             jump_to_latest_tokens,
@@ -1594,8 +1581,8 @@ impl Compositor {
         let line_height = (font_size_px * line_height_multiplier).max(1.0);
 
         // Pill origin in absolute pixels; vertically center one text line inside it.
-        let pill_x = tile.bounds.x + pill.x_px;
-        let pill_y = tile.bounds.y + pill.y_px;
+        let pill_x = tile.bounds.x + viewport.x + pill.x_px;
+        let pill_y = tile.bounds.y + viewport.y + pill.y_px;
         let text_y = pill_y + ((pill.height_px - line_height) / 2.0).max(0.0);
         let bounds_width = pill.width_px.max(1.0);
         let bounds_height = pill.height_px.max(1.0);
@@ -1779,11 +1766,11 @@ impl Compositor {
             .get(&node_id)
             .copied()
             .unwrap_or_else(|| node.data.bounds().y);
-        let (scroll_x, scroll_y) = if node_uses_display_tile_scroll(scene, tile, node_id) {
-            self.display_tile_scroll_offset(scene, tile.id)
-        } else {
-            (0.0, 0.0)
-        };
+        let (scroll_x, scroll_y) = scene.node_document_scroll_offset(
+            tile.id,
+            node_id,
+            self.display_tile_scroll_offset(scene, tile.id),
+        );
         // §6.3 fade: the whole tile (backdrop + content backgrounds + text) must
         // fade as one unit. `tile_background_color` and `collect_text_items`
         // already apply this; the content-node backgrounds below MUST match, or a

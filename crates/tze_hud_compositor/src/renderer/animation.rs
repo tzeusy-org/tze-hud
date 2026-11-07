@@ -691,11 +691,18 @@ impl Compositor {
     /// content appends — animate. User scroll stays authoritative (RFC 0013
     /// §3.2): only the visual catch-up is eased, never the target.
     pub(crate) fn update_scroll_smoothing(&mut self, scene: &SceneGraph) {
+        self.update_scroll_smoothing_at(scene, std::time::Instant::now());
+    }
+
+    pub(crate) fn update_scroll_smoothing_at(
+        &mut self,
+        scene: &SceneGraph,
+        now: std::time::Instant,
+    ) {
         if !self.scroll_smoothing_enabled {
             return;
         }
 
-        let now = std::time::Instant::now();
         let dt_ms = self
             .last_scroll_smooth_at
             .map(|t| now.duration_since(t).as_secs_f32() * 1_000.0)
@@ -708,10 +715,17 @@ impl Compositor {
                 continue;
             }
             let (target_x, target_y) = scene.tile_scroll_offset_local(tile.id);
-            self.scroll_smoothers
-                .entry(tile.id)
-                .or_insert_with(|| super::easing::ScrollSmoother::new(target_x, target_y))
-                .advance(target_x, target_y, dt_ms);
+            let origin_shift = scene
+                .overlay
+                .portal_scroll_origin_shifts
+                .get(&tile.id)
+                .copied()
+                .unwrap_or_default();
+            let smoother = self.scroll_smoothers.entry(tile.id).or_insert_with(|| {
+                super::easing::ScrollSmoother::new(target_x, target_y, origin_shift)
+            });
+            smoother.rebase(origin_shift);
+            smoother.advance(target_x, target_y, dt_ms);
         }
 
         // Prune smoothers for tiles that are no longer scrollable / present.

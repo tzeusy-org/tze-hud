@@ -16,7 +16,6 @@ use tze_hud_scene::types::*;
 use crate::text::TextItem;
 
 use super::icon::parse_notification_icon;
-use super::tile_render::node_uses_display_tile_scroll;
 use super::token_colors::{
     DISCONNECT_BADGE_LABEL, TILE_CLOSE_GLYPH, resolve_disconnect_badge_tokens,
     resolve_tile_close_tokens, tile_close_button_bounds,
@@ -1109,6 +1108,77 @@ impl super::Compositor {
         }
     }
 
+    /// Publish actual shaped native pane extents without a new wake channel.
+    /// Main consumes these on the existing FrameReady/about_to_wait path.
+    pub fn publish_portal_document_layouts(&mut self, scene: &mut SceneGraph) {
+        let mut jobs = Vec::new();
+        for tile in self.policy_visible_tiles(scene) {
+            let mut pending: Vec<_> = tile.root_node.into_iter().collect();
+            while let Some(node) = pending.pop() {
+                if let Some(value) = scene.nodes.get(&node) {
+                    pending.extend(value.children.iter().copied());
+                }
+                if let Some(pane) = scene.portal_document_kind(tile.id, node) {
+                    jobs.push((tile.id, node, pane));
+                }
+            }
+        }
+        let mut live = std::collections::HashSet::new();
+        for (tile_id, node_id, pane) in jobs {
+            let tile = &scene.tiles[&tile_id];
+            let (x, y) = self.display_tile_scroll_offset(scene, tile_id);
+            let mut items = Vec::new();
+            self.collect_text_items_from_node(
+                node_id,
+                tile,
+                scene,
+                x,
+                y,
+                super::tile_at_tail_for_ellipsis(tile_id, scene),
+                resolve_transcript_max_measure_px(&self.token_map),
+                portal_part_index(scene, tile_id),
+                None,
+                &mut items,
+            );
+            let Some(item) = items.first() else {
+                continue;
+            };
+            let Some(rasterizer) = self.text_rasterizer.as_mut() else {
+                continue;
+            };
+            let metrics = rasterizer.measure_scroll_document(item);
+            let key = (tile_id, pane);
+            live.insert(key);
+            scene.overlay.portal_document_layouts.insert(
+                key,
+                tze_hud_scene::PortalDocumentLayout {
+                    node_id,
+                    signature: metrics.signature,
+                    source: match &scene.nodes[&node_id].data {
+                        NodeData::TextMarkdown(text) => text.clone(),
+                        _ => unreachable!("classified document"),
+                    },
+                    tile_size: (tile.bounds.width, tile.bounds.height),
+                    font_scale: scene.tile_font_scale(tile_id),
+                    rows: metrics.rows,
+                    content: item.text.clone(),
+                    height: metrics.height,
+                    viewport: Rect::new(
+                        item.clip_pixel_x - tile.bounds.x,
+                        item.clip_pixel_y - tile.bounds.y,
+                        item.clip_bounds_width,
+                        item.clip_bounds_height,
+                    ),
+                    line_height: item.font_size_px * item.line_height_multiplier,
+                },
+            );
+        }
+        scene
+            .overlay
+            .portal_document_layouts
+            .retain(|key, _| live.contains(key));
+    }
+
     /// Collect `TextItem`s for all TextMarkdownNode tiles and zone StreamText
     /// and ShortTextWithIcon/Notification content in the scene.
     ///
@@ -1460,12 +1530,8 @@ impl super::Compositor {
         // P2). Threaded into children below so a container part scopes its whole
         // subtree.
         let effective_part = resolve_effective_part(part_index, node_id, active_part);
-        let (node_scroll_x, node_scroll_y) = if node_uses_display_tile_scroll(scene, tile, node_id)
-        {
-            (scroll_x, scroll_y)
-        } else {
-            (0.0, 0.0)
-        };
+        let (node_scroll_x, node_scroll_y) =
+            scene.node_document_scroll_offset(tile.id, node_id, (scroll_x, scroll_y));
 
         if let NodeData::TextMarkdown(tm) = &node.data {
             // hud-pd9bp: when this node is a `NodeLayout::VerticalFlow` child, its
@@ -1690,6 +1756,10 @@ impl super::Compositor {
             item.clip_pixel_y = clip_y;
             item.clip_bounds_width = clip_w;
             item.clip_bounds_height = clip_h;
+            if scene.portal_document_kind(tile.id, node_id).is_some() {
+                // Shape the retained document, independently of its fixed pane scissor.
+                item.bounds_height = f32::MAX;
+            }
 
             // Per-segment streaming-reveal fade (hud-bl7yi), routed by node
             // identity (hud-g8xpg). Reveal state is keyed per `(tile, node)`, so

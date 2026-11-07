@@ -957,6 +957,252 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
         (document_before - item_y(&after, "output document") - scroll_y).abs() < 0.5,
         "document content must translate by the display scroll offset"
     );
+
+    // Use the real portal renderer: the old synthetic Clip node above could
+    // not expose the native tail-snapshot → head-snapshot switch on append.
+    use tze_hud_portal::{
+        OutputKind, TranscriptUnit,
+        render::{Size, render},
+        tokens::PortalVisualTokens,
+    };
+    let mut view = empty_portal_view("scroll-anchor", "Reading anchor");
+    view.unread_output_count = Some(3);
+    view.visible_transcript.push(TranscriptUnit {
+        sequence: 1,
+        output_text: (1..=60)
+            .map(|i| format!("Line {i:02} — stable reading marker.\n\n"))
+            .collect(),
+        output_kind: OutputKind::Assistant,
+        expects_reply: false,
+        appended_at_wall_us: 0,
+    });
+    view.input_history.push(TranscriptUnit {
+        sequence: 100,
+        output_text: (1..=40)
+            .map(|i| format!("Input {i:02} — retained reply.\n\n"))
+            .collect(),
+        output_kind: OutputKind::Viewer,
+        expects_reply: false,
+        appended_at_wall_us: 0,
+    });
+    let mut processor = tze_hud_input::InputProcessor::new();
+    let mut reading: Option<(f32, (f32, f32))> = None;
+    let smooth_time = std::time::Instant::now();
+    let viewport = Size {
+        width: tile_bounds.width,
+        height: tile_bounds.height,
+    };
+    let tokens = PortalVisualTokens::default();
+    for step in 0..4 {
+        let append = step > 0;
+        if step == 1 {
+            view.visible_transcript.push(TranscriptUnit {
+                sequence: 2,
+                output_text: "NEW MARKER".into(),
+                output_kind: OutputKind::Assistant,
+                expects_reply: false,
+                appended_at_wall_us: 0,
+            });
+        }
+        if step == 2 {
+            // Same-size rolling retention window: height delta cannot identify
+            // the removed prefix. Keep the visible marker at the same screen y.
+            view.visible_transcript[0].output_text = (21..=80)
+                .map(|i| format!("Line {i:02} — stable reading marker.\n\n"))
+                .collect();
+        }
+        if step == 3 {
+            view.visible_transcript[0].output_text = (31..=90)
+                .map(|i| format!("Line {i:02} — stable reading marker.\n\n"))
+                .collect();
+        }
+        let rendered = render(&view, &tokens, viewport, 3_000_000);
+        scene.set_tile_unread_count(tile_id, rendered.unread);
+        scene
+            .set_portal_surface(tile_id, rendered.surface, "expanded-portal")
+            .unwrap();
+        scene
+            .set_tile_root_tree(tile_id, rendered.root, rendered.children)
+            .unwrap();
+        compositor.prime_markdown_cache(&scene);
+        compositor.resize_reprime_last_at = None; // A settled native commit, outside resize cadence.
+        compositor.prime_truncation_cache(&scene);
+        compositor.publish_portal_document_layouts(&mut scene);
+        let layout =
+            scene.overlay.portal_document_layouts[&(tile_id, PortalPartKind::Transcript)].clone();
+        let input =
+            scene.overlay.portal_document_layouts[&(tile_id, PortalPartKind::Composer)].clone();
+        assert!(
+            layout.height > layout.viewport.height * 4.0,
+            "full output is shaped behind the fixed scissor"
+        );
+        assert!(
+            input.height > input.viewport.height * 2.0,
+            "INPUT has its own full wrapped layout"
+        );
+        processor.reconcile_portal_document_layouts(&mut scene);
+        if step == 0 {
+            let output_tail = scene.tile_scroll_offset_local(tile_id);
+            let input_tail = scene.portal_input_scroll_offset(tile_id);
+            let surface = scene.portal_surface(tile_id).unwrap();
+            let point = |kind| {
+                let part = surface.parts.iter().find(|p| p.kind == kind).unwrap();
+                (
+                    tile_bounds.x + part.bounds.x + part.bounds.width / 2.0,
+                    tile_bounds.y + part.bounds.y + part.bounds.height / 2.0,
+                )
+            };
+            let output_point = point(PortalPartKind::Transcript);
+            let input_point = point(PortalPartKind::Composer);
+            let wheel = |(x, y), delta_y| tze_hud_input::ScrollEvent {
+                x,
+                y,
+                delta_x: 0.0,
+                delta_y,
+            };
+            assert!(
+                processor
+                    .process_scroll_event(&wheel(output_point, -130.0), &mut scene)
+                    .is_some()
+            );
+            assert_eq!(
+                scene.portal_input_scroll_offset(tile_id),
+                input_tail,
+                "OUTPUT wheel cannot move INPUT"
+            );
+            let output_reading = scene.tile_scroll_offset_local(tile_id);
+            assert!(output_reading.1 < output_tail.1);
+            assert!(
+                processor
+                    .process_scroll_event(&wheel(input_point, -70.0), &mut scene)
+                    .is_none(),
+                "INPUT feedback stays local rather than emitting an OUTPUT offset"
+            );
+            assert!(scene.portal_input_scroll_offset(tile_id).1 < input_tail.1);
+            assert_eq!(
+                scene.tile_scroll_offset_local(tile_id),
+                output_reading,
+                "INPUT wheel cannot move OUTPUT"
+            );
+        }
+        if step == 3 {
+            // Main-thread input can arrive after reconciliation but before the
+            // compositor consumes the changed document coordinate origin.
+            processor.process_keyboard_scroll(tile_id, -40.0, &mut scene);
+        }
+        // Exercise the native displayed coordinate, with a deterministic 1 ms
+        // frame delta. Headless raw-target assertions cannot catch origin easing.
+        compositor.scroll_smoothing_enabled = true;
+        compositor.update_scroll_smoothing_at(
+            &scene,
+            smooth_time + std::time::Duration::from_millis(step),
+        );
+        compositor.publish_displayed_scroll_offsets(&mut scene);
+        let marker_byte = layout.content.find("Line 55").unwrap();
+        let marker_y = layout
+            .rows
+            .iter()
+            .rev()
+            .find(|(byte, _)| *byte <= marker_byte)
+            .unwrap()
+            .1
+            - compositor.display_tile_scroll_offset(&scene, tile_id).1;
+        let input_offset = scene.portal_input_scroll_offset(tile_id);
+        if let Some((previous_y, previous_input)) = reading {
+            assert!(
+                (marker_y
+                    - previous_y
+                    - if step == 3 {
+                        40.0 * super::easing::exp_smooth_factor(1.0, 90.0)
+                    } else {
+                        0.0
+                    })
+                .abs()
+                    < 0.01,
+                "retain the reading line and ease only any intervening user scroll"
+            );
+            assert_eq!(
+                input_offset, previous_input,
+                "OUTPUT updates cannot move INPUT"
+            );
+        }
+        reading = Some((marker_y, input_offset));
+        let jtl = super::token_colors::resolve_jump_to_latest_tokens(&compositor.token_map);
+        let si = super::token_colors::resolve_scroll_indicator_tokens(&compositor.token_map);
+        let badge = compositor
+            .collect_jump_to_latest_badge_item(&scene.tiles[&tile_id], &scene, &jtl, &si)
+            .expect("actual native OUTPUT overflow exposes jump/unread badge");
+        assert_eq!(&*badge.text, "3 unread");
+        assert!(badge.pixel_x >= tile_bounds.x + layout.viewport.x);
+        compositor.populate_zone_hit_regions(&mut scene, 800.0, 520.0);
+        let jump = scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|region| {
+                matches!(region.kind,
+            tze_hud_scene::ZoneInteractionKind::JumpToLatest { tile_id: id } if id == tile_id)
+            })
+            .unwrap();
+        assert!(
+            jump.bounds.x >= tile_bounds.x + layout.viewport.x,
+            "click target is in OUTPUT"
+        );
+        let epoch = scene.geometry_epoch;
+        processor.reconcile_portal_document_layouts(&mut scene);
+        assert_eq!(
+            scene.geometry_epoch, epoch,
+            "unchanged measured layout is quiescent"
+        );
+        let items = compositor.collect_text_items(&scene, 800.0, 520.0);
+        let item = items
+            .iter()
+            .find(|item| item.text.contains("Line 55"))
+            .unwrap();
+        let rasterizer = compositor.text_rasterizer.as_ref().unwrap();
+        let display = crate::text::effective_truncation_key(item)
+            .map(|key| {
+                rasterizer
+                    .truncation_cache
+                    .get_by_key(&key)
+                    .expect("settled native document truncation must be primed")
+            })
+            .map(|result| result.text.as_str())
+            .unwrap_or(&item.text);
+        assert!(
+            display.contains("Line 55"),
+            "a retained reading marker must survive append and the tail-to-scrollback transition; append={append}, display={display}"
+        );
+        assert_eq!(item.clip_bounds_height, layout.viewport.height);
+        assert!(
+            item.bounds_height > layout.height,
+            "paint buffer must not be viewport bounded"
+        );
+    }
+    // The native smoother is initialized and rebased above. A later ordinary
+    // scroll must still animate rather than snapping with the layout correction.
+    let displayed_before_wheel = compositor.display_tile_scroll_offset(&scene, tile_id).1;
+    processor.process_keyboard_scroll(tile_id, -40.0, &mut scene);
+    compositor
+        .update_scroll_smoothing_at(&scene, smooth_time + std::time::Duration::from_millis(4));
+    let displayed_after_wheel = compositor.display_tile_scroll_offset(&scene, tile_id).1;
+    assert!(displayed_after_wheel < displayed_before_wheel);
+    assert!(
+        displayed_after_wheel > scene.tile_scroll_offset_local(tile_id).1,
+        "ordinary wheel still eases; only measured origin changes snap"
+    );
+    let output_reading = scene.tile_scroll_offset_local(tile_id);
+    assert!(processor.reset_portal_input_scroll_to_tail(tile_id, &mut scene));
+    assert_eq!(
+        scene.tile_scroll_offset_local(tile_id),
+        output_reading,
+        "typing resets only INPUT history"
+    );
+    assert!(processor.reset_tile_scroll_to_tail(tile_id, &mut scene));
+    assert!(
+        scene.tile_follow_tail_at_tail(tile_id),
+        "jump-to-latest returns OUTPUT to its measured tail"
+    );
 }
 
 /// `collect_text_items` does NOT shift text for tiles with zero scroll offset.

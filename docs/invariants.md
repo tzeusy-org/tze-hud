@@ -221,6 +221,18 @@ peer replaces it, and removed nodes cannot revive saved text. Regression owners:
 and [`hit_region_wire_cannot_enable_local_composer`](../crates/tze_hud_protocol/src/convert.rs).
 
 
+Native portal INPUT history and OUTPUT have independent local scroll tracking.
+Typing/submit resets only INPUT; appends retain the OUTPUT reading anchor and
+fixed pane scissor. Bounds come from the actual full wrapped paint buffer, not
+combined raw newline counts. Unchanged measured layouts schedule no frame.
+The existing compositor regression
+[`expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after_resize`](../crates/tze_hud_compositor/src/renderer/tests/scroll.rs)
+covers actual pane wheel routing, retained visible-row y through append/rolling
+head trim, full layout versus clipping, and input reset/output jump-to-latest.
+Unique visible lines can retain identity across trimming; repeated ambiguous
+lines keep a clamped pixel position. Evicted text is outside the retained window.
+
+
 - `tze_hud_runtime` [`release_activates_only_the_button_the_press_began_on`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs),
   [`authority_attached_submit_snaps_scrolled_back_history_to_tail`](../crates/tze_hud_runtime/src/windowed/keyboard.rs),
   [`portal_composer_submission_enters_pending_input_queue_and_can_be_acknowledged`](../crates/tze_hud_runtime/src/portal.rs)

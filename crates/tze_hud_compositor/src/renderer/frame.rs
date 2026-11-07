@@ -351,70 +351,68 @@ impl Compositor {
             // a known content_height (set by the portal adapter via
             // `register_tile_scroll_config`). Indicator is not shown when
             // content fits within the viewport (no overflow).
-            if let Some(scroll_cfg) = scene.tile_scroll_config(tile.id) {
-                if let Some(content_height) = scroll_cfg.content_height {
-                    let viewport_px = tile.bounds.height;
-                    let (_, scroll_offset_y) = self.display_tile_scroll_offset(scene, tile.id);
-                    if let Some(geom) = tze_hud_input::compute_scroll_indicator(
+            if let Some((viewport, content_height)) = scene.output_scroll_geometry(tile.id) {
+                let viewport_px = viewport.height;
+                let (_, scroll_offset_y) = self.display_tile_scroll_offset(scene, tile.id);
+                if let Some(geom) = tze_hud_input::compute_scroll_indicator(
+                    viewport_px,
+                    content_height,
+                    scroll_offset_y,
+                    &scroll_indicator_tokens,
+                ) {
+                    // Clamp indicator width to tile width so an out-of-range
+                    // token value can never push the thumb outside the tile.
+                    let indicator_w = geom.width_px.min(viewport.width);
+                    // Track rect: right edge of the tile, full height.
+                    // Thumb rect: inset within the track at thumb_y_px.
+                    let track_x = tile.bounds.x + viewport.x + viewport.width - indicator_w;
+                    let thumb_color = self.gpu_color_raw([
+                        scroll_indicator_tokens.color_r,
+                        scroll_indicator_tokens.color_g,
+                        scroll_indicator_tokens.color_b,
+                        scroll_indicator_tokens.color_a,
+                    ]);
+                    let thumb_verts = rect_vertices(
+                        track_x,
+                        tile.bounds.y + viewport.y + geom.thumb_y_px,
+                        indicator_w,
+                        geom.thumb_height_px,
+                        sw,
+                        sh,
+                        thumb_color,
+                    );
+                    vertices.extend_from_slice(&thumb_verts);
+
+                    // ── Jump-to-latest pill (hud-9ci61) ──────────────────
+                    // Rendered only while the tile is scrolled away from
+                    // the tail (auto follow-tail already exists but had no
+                    // click affordance to resume it). Geometry mirrors the
+                    // hit region populated in `populate_zone_hit_regions`,
+                    // computed from the same pure function so render and
+                    // hit-test never disagree.
+                    let scrolled_back = !scene.tile_follow_tail_at_tail(tile.id);
+                    if let Some(pill) = tze_hud_input::compute_jump_to_latest_pill(
+                        viewport.width,
                         viewport_px,
-                        content_height,
-                        scroll_offset_y,
-                        &scroll_indicator_tokens,
+                        scrolled_back,
+                        &jump_to_latest_tokens,
                     ) {
-                        // Clamp indicator width to tile width so an out-of-range
-                        // token value can never push the thumb outside the tile.
-                        let indicator_w = geom.width_px.min(tile.bounds.width);
-                        // Track rect: right edge of the tile, full height.
-                        // Thumb rect: inset within the track at thumb_y_px.
-                        let track_x = tile.bounds.x + tile.bounds.width - indicator_w;
-                        let thumb_color = self.gpu_color_raw([
-                            scroll_indicator_tokens.color_r,
-                            scroll_indicator_tokens.color_g,
-                            scroll_indicator_tokens.color_b,
-                            scroll_indicator_tokens.color_a,
+                        let pill_color = self.gpu_color_raw([
+                            jump_to_latest_tokens.color_r,
+                            jump_to_latest_tokens.color_g,
+                            jump_to_latest_tokens.color_b,
+                            jump_to_latest_tokens.color_a,
                         ]);
-                        let thumb_verts = rect_vertices(
-                            track_x,
-                            tile.bounds.y + geom.thumb_y_px,
-                            indicator_w,
-                            geom.thumb_height_px,
+                        let pill_verts = rect_vertices(
+                            tile.bounds.x + viewport.x + pill.x_px,
+                            tile.bounds.y + viewport.y + pill.y_px,
+                            pill.width_px,
+                            pill.height_px,
                             sw,
                             sh,
-                            thumb_color,
+                            pill_color,
                         );
-                        vertices.extend_from_slice(&thumb_verts);
-
-                        // ── Jump-to-latest pill (hud-9ci61) ──────────────────
-                        // Rendered only while the tile is scrolled away from
-                        // the tail (auto follow-tail already exists but had no
-                        // click affordance to resume it). Geometry mirrors the
-                        // hit region populated in `populate_zone_hit_regions`,
-                        // computed from the same pure function so render and
-                        // hit-test never disagree.
-                        let scrolled_back = !scene.tile_follow_tail_at_tail(tile.id);
-                        if let Some(pill) = tze_hud_input::compute_jump_to_latest_pill(
-                            tile.bounds.width,
-                            viewport_px,
-                            scrolled_back,
-                            &jump_to_latest_tokens,
-                        ) {
-                            let pill_color = self.gpu_color_raw([
-                                jump_to_latest_tokens.color_r,
-                                jump_to_latest_tokens.color_g,
-                                jump_to_latest_tokens.color_b,
-                                jump_to_latest_tokens.color_a,
-                            ]);
-                            let pill_verts = rect_vertices(
-                                tile.bounds.x + pill.x_px,
-                                tile.bounds.y + pill.y_px,
-                                pill.width_px,
-                                pill.height_px,
-                                sw,
-                                sh,
-                                pill_color,
-                            );
-                            vertices.extend_from_slice(&pill_verts);
-                        }
+                        vertices.extend_from_slice(&pill_verts);
                     }
                 }
             }
@@ -649,6 +647,7 @@ impl Compositor {
         // inside the former post-acquire `encode_frame`) is what lets the encode
         // stage run lock-free.
         let encode_sources = self.collect_encode_sources(scene, surf_w, surf_h);
+        self.publish_portal_document_layouts(scene);
 
         // ── Widget draw geometry (precomputed from the registry) ─────────────
         let widget_quads = self.collect_widget_draw_geometry(scene, sw, sh);
