@@ -322,38 +322,34 @@ message EventBatch {
   repeated InputEnvelope  events       = 3;  // Ordered by timestamp_mono_us ascending
 }
 
-// ─── Frame-present acknowledgment (batch-correlated present timing) ────────────
+// ─── Optional internal batch-to-GPU correlation ───────────────────────────────
 //
-// Correlates one or more MutationBatch.batch_ids to the wall-clock time their
-// composited frame was actually presented on screen. This closes the true
-// mutation-arrival → on-screen-present timing loop: MutationResult (session.proto)
-// acknowledges *acceptance* (scene commit), whereas FramePresented acknowledges
-// *presentation* (Stage 7 GPU submit complete) of the frame that carried those
-// batches. A client that timestamps its MutationBatch send can subtract to derive
-// true present latency (distinct from the transport-RTT proxy).
+// Pairs accepted internal SceneGraph batch ids with local GPU work. The public
+// MutationBatch request route is removed; these ids are not Publish sequence ids
+// or RequestResult correlation. RequestResult acknowledges request acceptance,
+// separately from this optional telemetry.
 //
-// Delivered on ServerMessage field 52 to agents subscribed to TELEMETRY_FRAMES
-// (requires the read_telemetry capability).
-// Message class: State-stream (coalesced/droppable under backpressure; RFC 0005 §3.2).
-// A consumer measuring present latency samples these — it MUST NOT assume every
-// accepted batch yields exactly one FramePresented under sustained backpressure.
+// The windowed producer samples after primary and secondary GPU submission/poll
+// work; it neither waits for nor observes the independent main-thread surface
+// present. Headless surface present is a no-op. This event proves no physical
+// on-screen or per-monitor completion, or synchronized cross-host latency.
 //
-// Direction: server → client only. Agents cannot reject — no response mechanism.
+// ServerMessage field 52 is global metadata for permitted TELEMETRY_FRAMES
+// subscribers (requires read_telemetry), not owner-filtered content. Delivery is
+// optional and lossy: lag and Simplified-mode cadence may drop samples, with no
+// replay or per-batch delivery guarantee. Missing samples are neither zero
+// latency nor transactional rejection. Direction: server → client only.
 //
-// Correlation: each entry in batch_ids is the raw 16-byte UUIDv7 SceneId echoed
-// from an accepted MutationBatch.batch_id (RFC 0005 §5.2). One presented frame may
-// carry several batches applied since the previous present, so batch_ids is
-// repeated and frame_number + present_wall_us are shared by all of them.
+// Several pending internal batches may share one sample; no pending ids means
+// no event. Windowed drains before submission, so a failed primary attempt can
+// consume ids without a sample; headless retains ids when submission is skipped.
 message FramePresented {
-  // Compositor frame number that presented these batches (monotonically
-  // increasing; matches EventBatch.frame_number / FrameTelemetry.frame_number).
+  // Primary compositor frame number associated with the local GPU work.
   uint64 frame_number    = 1;
 
-  // Wall-clock time (UTC µs since Unix epoch) at which the frame completed
-  // Stage 7 (GPU submit / present). RFC 0003 §1.1 wall-clock domain.
+  // UTC µs since Unix epoch sampled by the emitter after local GPU work.
   uint64 present_wall_us = 2;
 
-  // Raw 16-byte UUIDv7 batch_ids composited into this presented frame, in the
-  // order they were applied to the scene. Echoes MutationBatch.batch_id.
+  // Raw 16-byte internal batch SceneIds, in scene application order.
   repeated bytes batch_ids = 3;
 }

@@ -566,11 +566,10 @@ impl HeadlessRuntime {
         let degradation_work_time_us = degradation_work_start.elapsed().as_micros() as u64;
 
         // ── Batch-correlated present acknowledgment (hud-91uu6) ───────────────
-        // Stage 7 (GPU submit) is complete, so any batches applied to the scene
-        // since the last present are now on screen. Drain them and, if a sender
-        // is wired, emit a FramePresented pairing those batch_ids with this
-        // frame's number + present wall-clock. The drain runs unconditionally so
-        // the queue never grows unbounded even when no subscriber is attached.
+        // Successful local GPU work drains pending internal batch ids even when
+        // no sender/subscriber is attached. An explicitly wired optional sender
+        // pairs them with the frame number and emitter wall-clock; the headless
+        // surface present is a no-op, so this is not on-screen completion.
         // A skipped submission leaves both batch identity and timing context
         // pending for a frame that actually carries the response.
         let present_ack_batch_ids = if frame_submitted {

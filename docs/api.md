@@ -475,6 +475,35 @@ Only structured PSK credentials authenticate init and resume; legacy resume
 PSKs, local-socket credentials and protocol-version negotiation are removed.
 Handshake and resume send no scene content, foreign portal transcript or draft.
 
+`FramePresented` remains optional server metadata at `ServerMessage` field 52:
+`frame_number` (1), `present_wall_us` (2) and ordered raw 16-byte internal
+scene `batch_ids` (3). These ids come from `SceneGraph::apply_batch`, not
+ordinary `Publish.sequence` or `RequestResult.seq`; the public mutation route
+is removed. `RequestResult` reports acceptance separately from GPU work.
+Delivery requires both internal `read_telemetry` permission and explicit
+`TELEMETRY_FRAMES` subscription. Through `agents.toml`, only an owner-chosen
+`*` supplies that permission; narrow zone/widget/portal grants do not.
+The event is global metadata for those subscribers, not owner-filtered content.
+
+The [windowed producer](../crates/tze_hud_runtime/src/windowed/mod.rs) samples
+UTC microseconds after primary and secondary GPU submission/poll work, using
+the primary compositor's frame number and submission-success condition. It
+neither waits for nor observes the independent main-thread surface present.
+The [headless producer](../crates/tze_hud_runtime/src/headless.rs) has an
+optional sender, absent by default, and a no-op surface present. Neither path
+proves physical on-screen or per-monitor completion; subtracting a remote
+client timestamp does not establish synchronized one-way latency.
+
+Several accepted internal batches may share a sample; rejected batches add
+no correlation id, and no pending ids means no event. Windowed drains before
+submission, so a failed primary attempt may consume ids without a sample;
+headless retains them on a skipped submission and drains after successful
+GPU work even without a sender. No receivers is an ordinary broadcast miss.
+Lag and Simplified-mode cadence can drop delivery, with no replay or per-batch
+guarantee; a closed producer feed ends the session. A missing sample means
+neither zero latency nor rejection. Existing producer and session tests do
+not establish external opt-in adoption or Windows owner acceptance.
+
 Composer editing is local to native portals. Only accepted submissions enter the
 portal input queue returned by `hud_input`; resident sessions receive no draft
 snapshots, submit or cancel events. `HitRegionNodeProto` field 7 and name
