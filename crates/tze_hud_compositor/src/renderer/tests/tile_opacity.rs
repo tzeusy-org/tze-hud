@@ -325,6 +325,11 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
         (transcript_bounds.x + transcript_bounds.width - 8.0) as u32,
         (transcript_bounds.y + transcript_bounds.height - 8.0) as u32,
     );
+    let composer = rendered.composer.expect("generated interactive composer");
+    let input_sample = (
+        (composer.bounds.x + composer.bounds.width * 0.8) as u32,
+        (composer.bounds.y + composer.bounds.height * 0.4) as u32,
+    );
     let (frame_w, frame_h) = (
         DEFAULT_PORTAL_SIZE.width as u32 + 80,
         DEFAULT_PORTAL_SIZE.height as u32 + 120,
@@ -349,6 +354,11 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
     scene
         .set_tile_root_tree(tile_id, rendered.root, rendered.children)
         .unwrap();
+    // The driver installs this interaction separately from the render tree.
+    scene
+        .set_tile_composer_interaction_checked(tile_id, composer, "portal")
+        .unwrap();
+    let composer_hit = scene.hit_test(10.0 + input_sample.0 as f32, 10.0 + input_sample.1 as f32);
     scene
         .register_tile_scroll_config(tile_id, TileScrollConfig::vertical())
         .unwrap();
@@ -369,7 +379,12 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
         ("released recovered", DegradationLevel::Nominal),
     ] {
         match phase {
-            "activated" => scene.set_drag_active(tile_id),
+            "activated" => {
+                scene.set_drag_active(tile_id);
+                scene
+                    .update_hover_state(None, &composer_hit)
+                    .expect("actual generated composer hit");
+            }
             "moved simplified" => {
                 let tile = scene.tiles.get_mut(&tile_id).unwrap();
                 tile.bounds.x += 5.0;
@@ -403,6 +418,17 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
             frame.width,
             bounds.x as u32 + (header_bounds.width - 8.0) as u32,
             bounds.y as u32 + (header_bounds.height * 0.5) as u32,
+        );
+        let input = crate::test_pixels::pixel_at(
+            &frame.rgba,
+            frame.width,
+            bounds.x as u32 + input_sample.0,
+            bounds.y as u32 + input_sample.1,
+        );
+        assert!(input[3] > 250, "{phase}: composer backdrop alpha {input:?}");
+        assert!(
+            input[..3].iter().any(|&channel| channel < 240),
+            "{phase}: composer feedback must not replace the pane with white: {input:?}"
         );
         let settled = *settled_output_alpha.get_or_insert(output[3]);
         assert!(settled > 250, "default settled output must be opaque");
