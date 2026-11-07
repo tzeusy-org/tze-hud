@@ -747,6 +747,10 @@ impl super::Compositor {
                 );
                 if let Some(clipped) = Self::clip_rect_to_tile(tile, rect) {
                     let max_r = (rect.width * 0.5).min(rect.height * 0.5).max(0.0);
+                    let color = super::tile_render::composer_backdrop_color(
+                        scene, tile.id, sc.bounds, sc.color,
+                    )
+                    .unwrap_or(sc.color);
                     cmds.push(crate::pipeline::RoundedRectDrawCmd {
                         x: rect.x,
                         y: rect.y,
@@ -754,8 +758,8 @@ impl super::Compositor {
                         height: rect.height,
                         radius: radius.min(max_r),
                         color: self.gpu_color(Rgba {
-                            a: sc.color.a * tile_opacity,
-                            ..sc.color
+                            a: color.a * tile_opacity,
+                            ..color
                         }),
                         border: None,
                         clip: Some(RoundedRectClip {

@@ -325,6 +325,12 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
         (transcript_bounds.x + transcript_bounds.width - 8.0) as u32,
         (transcript_bounds.y + transcript_bounds.height - 8.0) as u32,
     );
+    let composer = rendered.composer.expect("generated interactive composer");
+    let composer_bounds = composer.bounds;
+    let input_sample = (
+        (composer.bounds.x + composer.bounds.width * 0.8) as u32,
+        (composer.bounds.y + composer.bounds.height * 0.4) as u32,
+    );
     let (frame_w, frame_h) = (
         DEFAULT_PORTAL_SIZE.width as u32 + 80,
         DEFAULT_PORTAL_SIZE.height as u32 + 120,
@@ -349,6 +355,12 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
     scene
         .set_tile_root_tree(tile_id, rendered.root, rendered.children)
         .unwrap();
+    // The driver installs this interaction separately from the render tree.
+    scene
+        .set_tile_composer_interaction_checked(tile_id, composer, "portal")
+        .unwrap();
+    let composer_hit = scene.hit_test(10.0 + input_sample.0 as f32, 10.0 + input_sample.1 as f32);
+    let composer_id = scene.overlay.tile_composer_nodes[&tile_id];
     scene
         .register_tile_scroll_config(tile_id, TileScrollConfig::vertical())
         .unwrap();
@@ -369,7 +381,12 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
         ("released recovered", DegradationLevel::Nominal),
     ] {
         match phase {
-            "activated" => scene.set_drag_active(tile_id),
+            "activated" => {
+                scene.set_drag_active(tile_id);
+                scene
+                    .update_hover_state(None, &composer_hit)
+                    .expect("actual generated composer hit");
+            }
             "moved simplified" => {
                 let tile = scene.tiles.get_mut(&tile_id).unwrap();
                 tile.bounds.x += 5.0;
@@ -404,6 +421,17 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
             bounds.x as u32 + (header_bounds.width - 8.0) as u32,
             bounds.y as u32 + (header_bounds.height * 0.5) as u32,
         );
+        let input = crate::test_pixels::pixel_at(
+            &frame.rgba,
+            frame.width,
+            bounds.x as u32 + input_sample.0,
+            bounds.y as u32 + input_sample.1,
+        );
+        assert!(input[3] > 250, "{phase}: composer backdrop alpha {input:?}");
+        assert!(
+            input[..3].iter().any(|&channel| channel < 240),
+            "{phase}: composer feedback must not replace the pane with white: {input:?}"
+        );
         let settled = *settled_output_alpha.get_or_insert(output[3]);
         assert!(settled > 250, "default settled output must be opaque");
         assert_eq!(
@@ -414,6 +442,304 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
         assert_eq!(
             scene.version, version,
             "drag and degradation leave content unchanged"
+        );
+    }
+    let capture_input =
+        |compositor: &mut Compositor, scene: &mut SceneGraph, sample: (u32, u32)| {
+            let build = compositor.build_windowed_frame(scene, frame_w, frame_h);
+            let frame = compositor
+                .capture_windowed_frame(
+                    &build,
+                    &crate::FrameTarget::primary(frame_w, frame_h),
+                    wgpu::TextureFormat::Rgba8UnormSrgb,
+                )
+                .expect("composer feedback overlay capture");
+            let bounds = scene.tiles[&tile_id].bounds;
+            crate::test_pixels::pixel_at(
+                &frame.rgba,
+                frame.width,
+                bounds.x as u32 + sample.0,
+                bounds.y as u32 + sample.1,
+            )
+        };
+    let brightness = |pixel: [u8; 4]| pixel[..3].iter().map(|&v| u16::from(v)).sum::<u16>();
+    let input_backdrop = scene
+        .nodes
+        .iter()
+        .find_map(|(id, node)| match &node.data {
+            NodeData::SolidColor(color) if color.bounds == composer_bounds => Some(*id),
+            _ => None,
+        })
+        .expect("generated composer pane background");
+    let NodeData::SolidColor(default_backdrop) = &scene.nodes[&input_backdrop].data else {
+        unreachable!()
+    };
+    let default_backdrop_color = default_backdrop.color;
+    for custom_color in [
+        None,
+        Some(Rgba::new(0.03, 0.07, 0.16, 0.0)),
+        Some(Rgba::new(0.03, 0.07, 0.16, 0.35)),
+    ] {
+        let transparent_pane = custom_color.is_some_and(|color| color.a == 0.0);
+        {
+            let NodeData::SolidColor(backdrop) =
+                &mut scene.nodes.get_mut(&input_backdrop).unwrap().data
+            else {
+                unreachable!()
+            };
+            backdrop.color = custom_color.unwrap_or(default_backdrop_color);
+            let NodeData::HitRegion(region) = &mut scene.nodes.get_mut(&composer_id).unwrap().data
+            else {
+                unreachable!()
+            };
+            region.local_style.hover_tint = custom_color.map(|_| Rgba::new(0.0, 1.0, 0.0, 0.8));
+            region.local_style.pressed_tint = custom_color.map(|_| Rgba::new(1.0, 0.0, 0.0, 0.8));
+            scene.version += 1;
+            compositor.prime_markdown_cache(&scene);
+            compositor.prime_truncation_cache(&scene);
+        }
+        for opacity in [1.0, 0.4, 0.0] {
+            scene.tiles.get_mut(&tile_id).unwrap().opacity = opacity;
+            for level in [DegradationLevel::Nominal, DegradationLevel::Simplified] {
+                compositor.set_degradation_policy(CompositorDegradationPolicy {
+                    level,
+                    ..Default::default()
+                });
+                scene
+                    .hit_region_states
+                    .get_mut(&composer_id)
+                    .unwrap()
+                    .hovered = false;
+                let idle = capture_input(&mut compositor, &mut scene, input_sample);
+                scene
+                    .hit_region_states
+                    .get_mut(&composer_id)
+                    .unwrap()
+                    .hovered = true;
+                let hovered = capture_input(&mut compositor, &mut scene, input_sample);
+                assert_eq!(hovered[3], idle[3], "hover preserves pane coverage");
+                if transparent_pane {
+                    assert_eq!(hovered, idle, "transparent pane cannot erase its backdrop");
+                } else if opacity > 0.0 && custom_color.is_some() {
+                    assert!(
+                        hovered[1] > hovered[0].saturating_add(8),
+                        "custom green hover: {hovered:?}, idle {idle:?}, {level:?}, opacity {opacity}"
+                    );
+                    assert!(
+                        hovered[1] > hovered[2].saturating_add(8),
+                        "custom green hover"
+                    );
+                } else if opacity > 0.0 {
+                    assert!(
+                        brightness(hovered) > brightness(idle),
+                        "hover visibly lightens"
+                    );
+                } else {
+                    assert_eq!(hovered, [0; 4], "hover cannot revive a faded-out pane");
+                }
+                scene.update_pressed_state(composer_id, true);
+                let pressed = capture_input(&mut compositor, &mut scene, input_sample);
+                assert_eq!(pressed[3], idle[3], "press preserves pane coverage");
+                if transparent_pane {
+                    assert_eq!(pressed, idle, "transparent press cannot erase its backdrop");
+                } else if opacity > 0.0 && custom_color.is_some() {
+                    assert!(pressed[0] > pressed[1].saturating_add(8));
+                    assert!(
+                        pressed[0] > pressed[2].saturating_add(8),
+                        "custom red press"
+                    );
+                } else if opacity > 0.0 {
+                    assert!(
+                        brightness(pressed) < brightness(hovered),
+                        "press visibly darkens"
+                    );
+                }
+                scene
+                    .hit_region_states
+                    .get_mut(&composer_id)
+                    .unwrap()
+                    .hovered = false;
+                assert_eq!(
+                    capture_input(&mut compositor, &mut scene, input_sample),
+                    pressed,
+                    "press takes precedence over hover"
+                );
+                scene.update_pressed_state(composer_id, false);
+                assert_eq!(
+                    capture_input(&mut compositor, &mut scene, input_sample),
+                    idle,
+                    "pointer leave restores the original pane"
+                );
+            }
+        }
+    }
+
+    // Explicitly transparent overrides disable feedback, even on a visible pane.
+    scene.tiles.get_mut(&tile_id).unwrap().opacity = 1.0;
+    let NodeData::HitRegion(region) = &mut scene.nodes.get_mut(&composer_id).unwrap().data else {
+        unreachable!()
+    };
+    region.local_style.hover_tint = Some(Rgba::new(1.0, 0.0, 0.0, 0.0));
+    region.local_style.pressed_tint = Some(Rgba::new(0.0, 1.0, 0.0, 0.0));
+    for level in [DegradationLevel::Nominal, DegradationLevel::Simplified] {
+        compositor.set_degradation_policy(CompositorDegradationPolicy {
+            level,
+            ..Default::default()
+        });
+        let idle = capture_input(&mut compositor, &mut scene, input_sample);
+        scene
+            .hit_region_states
+            .get_mut(&composer_id)
+            .unwrap()
+            .hovered = true;
+        assert_eq!(
+            capture_input(&mut compositor, &mut scene, input_sample),
+            idle,
+            "zero-alpha hover override"
+        );
+        scene.update_pressed_state(composer_id, true);
+        assert_eq!(
+            capture_input(&mut compositor, &mut scene, input_sample),
+            idle,
+            "zero-alpha press override"
+        );
+        scene.update_pressed_state(composer_id, false);
+        scene
+            .hit_region_states
+            .get_mut(&composer_id)
+            .unwrap()
+            .hovered = false;
+    }
+    let NodeData::HitRegion(region) = &mut scene.nodes.get_mut(&composer_id).unwrap().data else {
+        unreachable!()
+    };
+    region.local_style.hover_tint = None;
+    region.local_style.pressed_tint = None;
+
+    // A higher tile must still cover the lower composer's feedback in both
+    // rounded and simplified rendering; no new final-chrome tint is involved.
+    scene.tiles.get_mut(&tile_id).unwrap().opacity = 1.0;
+    let bounds = scene.tiles[&tile_id].bounds;
+    let upper = scene
+        .create_tile(
+            tab,
+            "portal",
+            lease,
+            Rect::new(
+                bounds.x + input_sample.0 as f32 - 4.0,
+                bounds.y + input_sample.1 as f32 - 4.0,
+                8.0,
+                8.0,
+            ),
+            2,
+        )
+        .unwrap();
+    scene
+        .set_tile_root(
+            upper,
+            Node {
+                layout: Default::default(),
+                id: SceneId::new(),
+                children: vec![],
+                data: NodeData::SolidColor(SolidColorNode {
+                    color: Rgba::new(0.0, 0.6, 0.1, 1.0),
+                    bounds: Rect::new(0.0, 0.0, 8.0, 8.0),
+                    radius: Some(1.0),
+                }),
+            },
+        )
+        .unwrap();
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    for level in [DegradationLevel::Nominal, DegradationLevel::Simplified] {
+        compositor.set_degradation_policy(CompositorDegradationPolicy {
+            level,
+            ..Default::default()
+        });
+        scene
+            .hit_region_states
+            .get_mut(&composer_id)
+            .unwrap()
+            .hovered = false;
+        let covered = capture_input(&mut compositor, &mut scene, input_sample);
+        scene
+            .hit_region_states
+            .get_mut(&composer_id)
+            .unwrap()
+            .hovered = true;
+        assert_eq!(
+            capture_input(&mut compositor, &mut scene, input_sample),
+            covered,
+            "feedback stays below a higher tile"
+        );
+    }
+
+    // Collapsed production portals use a TextMarkdown backdrop, not SolidColor.
+    scene.delete_tile(upper, "portal").unwrap();
+    let collapsed = render(
+        &PortalView {
+            presentation: ProjectedPortalPresentation::Collapsed,
+            ..view
+        },
+        &PortalVisualTokens::default(),
+        DEFAULT_PORTAL_SIZE,
+        0,
+    );
+    scene
+        .set_tile_root_tree(tile_id, collapsed.root, collapsed.children)
+        .unwrap();
+    scene
+        .set_tile_composer_interaction_checked(tile_id, collapsed.composer.unwrap(), "portal")
+        .unwrap();
+    let composer_id = scene.overlay.tile_composer_nodes[&tile_id];
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    let sample = (
+        (DEFAULT_PORTAL_SIZE.width * 0.8) as u32,
+        (DEFAULT_PORTAL_SIZE.height * 0.75) as u32,
+    );
+    for level in [
+        DegradationLevel::Nominal,
+        DegradationLevel::Simplified,
+        DegradationLevel::Nominal,
+    ] {
+        compositor.set_degradation_policy(CompositorDegradationPolicy {
+            level,
+            ..Default::default()
+        });
+        let idle = capture_input(&mut compositor, &mut scene, sample);
+        scene
+            .hit_region_states
+            .get_mut(&composer_id)
+            .unwrap()
+            .hovered = true;
+        let hovered = capture_input(&mut compositor, &mut scene, sample);
+        assert_eq!(hovered[3], idle[3]);
+        assert!(
+            brightness(hovered) > brightness(idle),
+            "collapsed hover feedback"
+        );
+        assert!(
+            hovered[..3].iter().any(|&channel| channel < 240),
+            "collapsed hover must not turn white"
+        );
+        scene.update_pressed_state(composer_id, true);
+        let pressed = capture_input(&mut compositor, &mut scene, sample);
+        assert_eq!(pressed[3], idle[3]);
+        assert!(
+            brightness(pressed) < brightness(idle),
+            "collapsed press feedback"
+        );
+        scene.update_pressed_state(composer_id, false);
+        scene
+            .hit_region_states
+            .get_mut(&composer_id)
+            .unwrap()
+            .hovered = false;
+        assert_eq!(
+            capture_input(&mut compositor, &mut scene, sample),
+            idle,
+            "collapsed leave restores backdrop"
         );
     }
 }

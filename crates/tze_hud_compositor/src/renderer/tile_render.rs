@@ -50,6 +50,62 @@ use super::token_colors::{
 };
 use super::{Compositor, CompositorDegradationPolicy};
 
+fn hit_region_tint(
+    region: &HitRegionNode,
+    node_id: SceneId,
+    scene: &SceneGraph,
+) -> Option<[f32; 4]> {
+    match scene.hit_region_states.get(&node_id) {
+        Some(state) if state.pressed => Some(
+            region
+                .local_style
+                .pressed_tint
+                .map(|color| color.to_array())
+                .unwrap_or([0.0, 0.0, 0.0, 0.15]),
+        ),
+        Some(state) if state.hovered => Some(
+            region
+                .local_style
+                .hover_tint
+                .map(|color| color.to_array())
+                .unwrap_or([1.0, 1.0, 1.0, 0.1]),
+        ),
+        _ => None,
+    }
+}
+
+pub(super) fn composer_backdrop_color(
+    scene: &SceneGraph,
+    tile_id: SceneId,
+    bounds: Rect,
+    backdrop: Rgba,
+) -> Option<Rgba> {
+    // A transparent pane has no coverage to tint. In Simplified mode its
+    // rounded fill is skipped; adding a zero-alpha REPLACE quad erases the root.
+    if backdrop.a == 0.0 {
+        return None;
+    }
+    let node_id = *scene.overlay.tile_composer_nodes.get(&tile_id)?;
+    let NodeData::HitRegion(region) = &scene.nodes.get(&node_id)?.data else {
+        return None;
+    };
+    if region.bounds != bounds {
+        return None;
+    }
+    let tint = hit_region_tint(region, node_id, scene)?;
+    if tint[3] == 0.0 {
+        return None;
+    }
+    // Tint the existing pane before its ordinary fade/alpha conversion. An
+    // additional overlay changes coverage and can escape the pane's z-order.
+    Some(Rgba {
+        r: backdrop.r * (1.0 - tint[3]) + tint[0] * tint[3],
+        g: backdrop.g * (1.0 - tint[3]) + tint[1] * tint[3],
+        b: backdrop.b * (1.0 - tint[3]) + tint[2] * tint[3],
+        a: backdrop.a,
+    })
+}
+
 /// Apply the DisableTransparency degradation rule without changing visibility.
 ///
 /// Level 3 makes every *visible* tile opaque, but zero remains the semantic
@@ -833,18 +889,19 @@ impl Compositor {
                     return Some(c);
                 }
                 NodeData::TextMarkdown(tm) => {
-                    if let Some(bg) = &tm.background {
-                        // Apply combined opacity to the token-supplied background alpha.
-                        let mut c = bg.to_array();
-                        c[3] *= opacity;
-                        return Some(c);
-                    }
-                    let c = resolve_tile_bg_token(
-                        &self.token_map,
-                        "color.tile.background.text_markdown",
-                        TILE_BG_TEXT_MARKDOWN,
-                    );
-                    return Some([c.r, c.g, c.b, opacity]);
+                    let bg = tm.background.unwrap_or_else(|| {
+                        let color = resolve_tile_bg_token(
+                            &self.token_map,
+                            "color.tile.background.text_markdown",
+                            TILE_BG_TEXT_MARKDOWN,
+                        );
+                        Rgba { a: 1.0, ..color }
+                    });
+                    let mut c = composer_backdrop_color(scene, tile.id, tm.bounds, bg)
+                        .unwrap_or(bg)
+                        .to_array();
+                    c[3] *= opacity;
+                    return Some(c);
                 }
                 NodeData::HitRegion(_) => {
                     // HitRegion is an invisible interaction primitive. Its visible
@@ -1736,7 +1793,12 @@ impl Compositor {
 
         match &node.data {
             NodeData::SolidColor(sc) => {
-                if !sc.radius.is_some_and(|r| r > 0.0) {
+                let feedback = composer_backdrop_color(scene, tile.id, sc.bounds, sc.color);
+                if !sc.radius.is_some_and(|r| r > 0.0)
+                    || (feedback.is_some()
+                        && self.degradation_policy.level >= DegradationLevel::Simplified)
+                {
+                    let color = feedback.unwrap_or(sc.color);
                     Self::append_clipped_rect_vertices(
                         tile,
                         Rect::new(
@@ -1748,8 +1810,8 @@ impl Compositor {
                         sw,
                         sh,
                         self.gpu_color(Rgba {
-                            a: sc.color.a * tile_opacity,
-                            ..sc.color
+                            a: color.a * tile_opacity,
+                            ..color
                         }),
                         vertices,
                     );
@@ -1758,6 +1820,8 @@ impl Compositor {
             NodeData::TextMarkdown(tm) => {
                 if self.text_rasterizer.is_some() {
                     if let Some(bg) = tm.background {
+                        let bg =
+                            composer_backdrop_color(scene, tile.id, tm.bounds, bg).unwrap_or(bg);
                         Self::append_clipped_rect_vertices(
                             tile,
                             Rect::new(
@@ -1903,6 +1967,7 @@ impl Compositor {
                     // Fallback when glyphon is unavailable: preserve the old
                     // placeholder treatment so text tiles remain visible.
                     let bg = tm.background.unwrap_or(TILE_BG_TEXT_MARKDOWN);
+                    let bg = composer_backdrop_color(scene, tile.id, tm.bounds, bg).unwrap_or(bg);
                     Self::append_clipped_rect_vertices(
                         tile,
                         Rect::new(
@@ -1954,22 +2019,11 @@ impl Compositor {
                 //            a black overlay at 0.15 alpha against the sibling)
                 // Per-node overrides come from `local_style.hover_tint` /
                 // `pressed_tint` when set.
-                let state = scene.hit_region_states.get(&node_id);
-                let tint = match state {
-                    Some(s) if s.pressed => Some(
-                        hr.local_style
-                            .pressed_tint
-                            .map(|c| c.to_array())
-                            .unwrap_or([0.0, 0.0, 0.0, 0.15]),
-                    ),
-                    Some(s) if s.hovered => Some(
-                        hr.local_style
-                            .hover_tint
-                            .map(|c| c.to_array())
-                            .unwrap_or([1.0, 1.0, 1.0, 0.1]),
-                    ),
-                    _ => None,
-                };
+                // The separately installed composer tints its existing pane;
+                // a second REPLACE quad would erase it and turn hover white.
+                let tint = (scene.overlay.tile_composer_nodes.get(&tile.id) != Some(&node_id))
+                    .then(|| hit_region_tint(hr, node_id, scene))
+                    .flatten();
                 if let Some(color) = tint {
                     Self::append_clipped_rect_vertices(
                         tile,
