@@ -531,6 +531,70 @@ async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
         "no badge when there is nothing unread"
     );
 
+    let (rects, labels) = compositor.collect_scroll_affordances(&scene);
+    assert!(
+        !rects.is_empty() && labels.is_empty(),
+        "plain tiles keep their jump control"
+    );
+    scene
+        .set_portal_surface(tile_id, Default::default(), "badge-test")
+        .unwrap();
+    let (rects, labels) = compositor.collect_scroll_affordances(&scene);
+    assert!(
+        rects.is_empty() && labels.is_empty(),
+        "a read portal has no empty badge"
+    );
+    assert!(
+        compositor
+            .jump_to_latest_visible_regions(
+                scene.tiles.get(&tile_id).unwrap(),
+                &scene,
+                &jtl_tokens,
+                &si_tokens
+            )
+            .is_empty(),
+        "a read portal has no invisible jump target"
+    );
+
+    for unread in [1, 2] {
+        scene.set_tile_unread_count(tile_id, unread);
+        let (_, labels) = compositor.collect_scroll_affordances(&scene);
+        assert_eq!(labels.len(), 1);
+        assert_eq!(&*labels[0].text, format!("{unread} unread"));
+        compositor.render_frame_headless(&mut scene, &surface);
+        let pixels = surface.read_pixels(&compositor.device);
+        let label = &labels[0];
+        let left = label.clip_pixel_x as u32 + 2;
+        let top = label.clip_pixel_y as u32 + 2;
+        let right = (label.clip_pixel_x + label.clip_bounds_width) as u32 - 2;
+        let bottom = (label.clip_pixel_y + label.clip_bounds_height) as u32 - 2;
+        let fill = crate::test_pixels::pixel_at(&pixels, 480, left, top);
+        let mut contrasting_pixels = 0;
+        for y in top..bottom {
+            for x in left..right {
+                let pixel = crate::test_pixels::pixel_at(&pixels, 480, x, y);
+                if (0..3).any(|channel| pixel[channel].saturating_sub(fill[channel]) > 32) {
+                    contrasting_pixels += 1;
+                }
+            }
+        }
+        assert!(
+            contrasting_pixels > 12,
+            "{unread} unread must paint readable glyphs"
+        );
+    }
+    scene.set_tile_follow_tail_at_tail(tile_id, true);
+    scene.set_tile_unread_count(tile_id, 0);
+    compositor.render_frame_headless(&mut scene, &surface);
+    let read_pixels = surface.read_pixels(&compositor.device);
+    scene.set_tile_follow_tail_at_tail(tile_id, false);
+    compositor.render_frame_headless(&mut scene, &surface);
+    assert_eq!(
+        read_pixels,
+        surface.read_pixels(&compositor.device),
+        "backscroll without new output must not repaint an empty badge"
+    );
+
     // Back at the tail → the pill (and therefore the badge) is hidden, even with
     // a stale nonzero count still recorded.
     scene.set_tile_unread_count(tile_id, 5);
