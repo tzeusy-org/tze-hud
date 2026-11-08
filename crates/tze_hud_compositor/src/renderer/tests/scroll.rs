@@ -1254,10 +1254,34 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
         output_reading,
         "typing resets only INPUT history"
     );
+    scene
+        .overlay
+        .portal_output_reads
+        .entry(tile_id)
+        .or_default()
+        .latest = 5;
     assert!(processor.reset_tile_scroll_to_tail(tile_id, &mut scene));
     assert!(
         scene.tile_follow_tail_at_tail(tile_id),
         "jump-to-latest returns OUTPUT to its measured tail"
+    );
+    assert_eq!(scene.overlay.portal_output_reads[&tile_id].read_through, 5);
+    // A capped repeated-text window can have a new output ordinal with the
+    // same shaped content. FrameReady must still reconcile its read state.
+    scene
+        .overlay
+        .portal_output_reads
+        .get_mut(&tile_id)
+        .unwrap()
+        .latest = 6;
+    scene.set_tile_unread_count(tile_id, 1);
+    processor.reconcile_portal_document_layouts(&mut scene);
+    assert_eq!(scene.overlay.portal_output_reads[&tile_id].read_through, 6);
+    processor.process_keyboard_scroll(tile_id, -40.0, &mut scene);
+    assert_eq!(
+        scene.tile_unread_count(tile_id),
+        0,
+        "read output stays read on backscroll"
     );
 }
 
