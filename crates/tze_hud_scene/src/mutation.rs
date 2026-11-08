@@ -1295,6 +1295,13 @@ mod tests {
             "a click inside the composer must resolve to the composer NodeHit"
         );
 
+        // The pointer rests on the composer (compositor-managed local state).
+        scene
+            .hit_region_states
+            .get_mut(&composer_id_1)
+            .unwrap()
+            .hovered = true;
+
         // Republish the transcript root twice (consecutive streaming renders). Each
         // republish replaces the whole node tree; the composer must be re-derived.
         for (i, text) in ["render 2", "render 3"].iter().enumerate() {
@@ -1313,6 +1320,17 @@ mod tests {
             // and still click-to-focus.
             let (composer_id, hr) = composer_child(&scene, tile_id)
                 .unwrap_or_else(|| panic!("composer hit region must survive republish {}", i + 2));
+            assert_eq!(
+                composer_id,
+                composer_id_1,
+                "the composer keeps its node id (focus and draft key) across republish {}",
+                i + 2
+            );
+            assert!(
+                scene.hit_region_states[&composer_id].hovered,
+                "the composer keeps its hover state across republish {}",
+                i + 2
+            );
             assert!(
                 hr.accepts_composer_input && hr.accepts_pointer && hr.accepts_focus,
                 "composer must still accept composer input after republish {}",
@@ -1329,6 +1347,22 @@ mod tests {
                 i + 2
             );
         }
+
+        // A changed spec (new bounds) updates the node in place, same id.
+        let mut moved = composer_region();
+        moved.bounds.y += 10.0;
+        scene
+            .set_tile_composer_interaction_checked(tile_id, moved.clone(), "agent")
+            .unwrap();
+        let (composer_id, hr) = composer_child(&scene, tile_id).expect("composer still attached");
+        assert_eq!(
+            composer_id, composer_id_1,
+            "a spec change keeps the composer node id"
+        );
+        assert_eq!(
+            hr.bounds, moved.bounds,
+            "a spec change applies the new bounds"
+        );
 
         // Disable interaction: the derived composer node is detached.
         assert!(

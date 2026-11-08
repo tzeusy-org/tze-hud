@@ -3239,6 +3239,133 @@ mod tests {
         );
     }
 
+    /// Streamed agent output re-renders the portal while the viewer drafts.
+    /// The composer keeps focus and the unsent draft across that re-render, and
+    /// typing continues into the same draft (hud-1dnk5.19).
+    #[test]
+    fn streamed_output_keeps_the_focused_draft() {
+        use tze_hud_input::{FocusManager, InputProcessor, RawCharacterEvent};
+        use tze_hud_scene::SceneGraph;
+
+        let clock = tze_hud_scene::TestClock::from_us(200);
+        let mut driver = crate::portal::PortalDriver::new(tze_hud_mcp::PortalHandle::new(
+            tze_hud_portal::hub::PortalHub::default(),
+            Arc::new(clock.clone()),
+        ));
+        let handle = driver.portal_handle();
+        let key = tze_hud_portal::hub::PortalKey::new("test-agent", "proj-stream");
+        let publish = |driver: &mut crate::portal::PortalDriver, text: &str, at: u64| {
+            driver
+                .hub_mut()
+                .publish(
+                    &key,
+                    tze_hud_portal::hub::Publish {
+                        text: Some(text.to_string()),
+                        ..Default::default()
+                    },
+                    at,
+                )
+                .expect("publish accepted");
+        };
+        publish(&mut driver, "assistant ready", 100);
+
+        let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, Arc::new(clock.clone()));
+        let tab_id = scene.create_tab("Main", 0).unwrap();
+        let mut processor = InputProcessor::new();
+        driver.drain(&mut scene, &mut processor, Some(tab_id));
+        let mut focus_manager = FocusManager::new();
+        focus_manager.add_tab(tab_id);
+        processor.navigate_focus(&mut focus_manager, &mut scene, tab_id, false);
+        assert!(
+            processor.is_composer_active(),
+            "test setup: composer focused"
+        );
+
+        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, focus_manager, processor);
+        app.state.portal_projection_driver = driver;
+        let type_text = |app: &mut WinitApp, text: &str, at: u64| {
+            app.dispatch_character_event_inner(
+                &RawCharacterEvent {
+                    character: text.to_string(),
+                    timestamp_mono_us: tze_hud_scene::MonoUs(at),
+                },
+                Some(tab_id),
+            );
+        };
+        type_text(&mut app, "abc", 1);
+        let composer_before = app.state.input_processor.composer_focused_node();
+        let root_before = {
+            let shared = app.state.shared_state.try_lock().unwrap();
+            let scene = shared.scene.try_lock().unwrap();
+            scene.tiles.values().next().unwrap().root_node
+        };
+
+        // The agent streams more output; settling re-renders the portal tile.
+        clock.advance_us(200_000);
+        publish(
+            &mut app.state.portal_projection_driver,
+            "assistant ready\nmore output",
+            200_200,
+        );
+        assert!(matches!(
+            app.settle_scene_work(),
+            PortalProjectionDrain::Completed {
+                scene_changed: true
+            }
+        ));
+        // The next frame's settle prunes focus and drafts on removed nodes.
+        let _ = app.settle_scene_work();
+        {
+            let shared = app.state.shared_state.try_lock().unwrap();
+            let scene = shared.scene.try_lock().unwrap();
+            assert_ne!(
+                scene.tiles.values().next().unwrap().root_node,
+                root_before,
+                "test setup: the streamed update replaces the tile root"
+            );
+        }
+        assert_eq!(
+            app.state.input_processor.composer_focused_node(),
+            composer_before,
+            "the composer keeps its node across the re-render"
+        );
+        assert!(
+            app.state.input_processor.is_composer_active(),
+            "streamed output must not blur the composer"
+        );
+        assert_eq!(
+            app.state
+                .input_processor
+                .composer_draft_snapshot()
+                .unwrap()
+                .0,
+            "abc",
+            "streamed output must not drop the unsent draft"
+        );
+
+        type_text(&mut app, "d", 2);
+        app.dispatch_key_down_event_inner(
+            &RawKeyDownEvent {
+                key_code: "Enter".into(),
+                key: "Enter".into(),
+                modifiers: tze_hud_input::KeyboardModifiers::NONE,
+                repeat: false,
+                timestamp_mono_us: tze_hud_scene::MonoUs(3),
+            },
+            Some(tab_id),
+        );
+        let hub = handle.hub.lock().unwrap();
+        let portal = hub.get(&key).unwrap();
+        assert_eq!(
+            portal
+                .replies
+                .iter()
+                .map(|r| r.text.as_str())
+                .collect::<Vec<_>>(),
+            ["abcd"]
+        );
+    }
+
     /// A hub-backed portal's submission routes to the portal hub, so the
     /// raw-tile echo path is skipped. The direct submission reset must
     /// reveal the reply at the tail before the hub echo paints during settle.
@@ -3465,8 +3592,9 @@ mod tests {
             "no perpetual local dirty frame"
         );
 
-        // The first reply is now native scene history. Focus its rendered
-        // composer through Winit, then submit another reply after scrolling back.
+        // The first reply is now native scene history. The composer keeps focus
+        // across that re-render (hud-1dnk5.19), so the viewer types the next
+        // reply without clicking again, then submits it after scrolling back.
         let tail_after_first = {
             let shared = app.state.shared_state.try_lock().unwrap();
             let scene = shared.scene.try_lock().unwrap();
@@ -3480,17 +3608,10 @@ mod tests {
                 .tile_total_content_height_px(tile_id),
             tile_bounds.height
         );
-        app.dispatch_key_down_event_inner(
-            &RawKeyDownEvent {
-                key_code: "Tab".into(),
-                key: "Tab".into(),
-                modifiers: tze_hud_input::KeyboardModifiers::NONE,
-                repeat: false,
-                timestamp_mono_us: tze_hud_scene::MonoUs(4),
-            },
-            Some(tab_id),
+        assert!(
+            app.state.input_processor.is_composer_active(),
+            "a send must not blur the composer"
         );
-        assert!(app.state.input_processor.is_composer_active());
         app.dispatch_character_event_inner(
             &RawCharacterEvent {
                 character: "viewer-reply-after-scroll-back".into(),
