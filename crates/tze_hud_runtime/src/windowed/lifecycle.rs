@@ -2098,6 +2098,22 @@ impl WinitApp {
             }),
             tze_hud_input::FocusOwner::None | tze_hud_input::FocusOwner::ChromeElement(_) => None,
         });
+        let draft_chars = if self.state.input_processor.is_composer_active() {
+            self.state
+                .input_processor
+                .composer_draft_chars()
+                .unwrap_or(0)
+        } else {
+            0
+        };
+        *self
+            .state
+            .portal_ui
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = crate::operator::portal_status::UiMirror {
+            focus: ring_owner.as_ref().map(|o| (o.tile_id, o.node_id)),
+            draft_chars,
+        };
         if let Ok(mut slot) = self.state.focus_ring_owner_state.lock() {
             *slot = ring_owner;
         }

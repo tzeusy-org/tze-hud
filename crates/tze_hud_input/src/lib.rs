@@ -1131,6 +1131,12 @@ impl InputProcessor {
         ))
     }
 
+    /// Characters in the focused composer's draft, without copying it.
+    pub fn composer_draft_chars(&self) -> Option<usize> {
+        self.composer_draft_manager.focused_node()?;
+        Some(self.composer_draft_manager.draft()?.text().chars().count())
+    }
+
     /// Process a pointer event against the scene graph.
     ///
     /// Updates hit-region local state for immediate visual feedback.

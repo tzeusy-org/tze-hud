@@ -370,6 +370,23 @@ agents until one is paired.
   firewall `fix` names `tze_hud.exe --allow-remote` with the same listen-port
   overrides as startup; see [the reversible Windows helper](operations/windows-install.md#remote-agents).
   This policy-derived result is cached for five seconds, not a network probe.
+  `/admin/status` `idle_since_ms` is the time since the last presented frame
+  (since start before the first); a growing value means the HUD has settled.
+  A focused composer's caret blink presents about every 530 ms, so while a
+  composer has focus treat `idle_since_ms >= 300` as settled.
+  `portals` (`null` before the windowed runtime starts or while the scene stays
+  locked for 100 ms) is read-only portal UI state for out-of-process validation,
+  one entry per portal: `s` (`portal:<id>`), `state`, `rect`, `display` (index
+  into `displays`), `panes` (`header`, `input`, `output`, `composer` hit region
+  and `unread_badge`, the largest exposed piece of the jump-to-latest pill as of
+  the last frame; each `{x, y, w, h}` in scene pixels or `null` when not drawn),
+  `focus` (`composer`, `tile` or `none`), `hover` (`composer` or `none`),
+  `output` `{first_visible_line, last_visible_line, at_tail, unread}` (`at_tail`
+  is the follow-tail state new output obeys) and `input` `{at_tail,
+  draft_chars}`; the visible lines and `input.at_tail` are `null` while their
+  document is being measured. Only the focused
+  composer's draft length is reported, never its text. It is computed per
+  request; an idle HUD does no extra work.
   `/admin/status` `displays` lists the overlaid monitors, primary first:
   `{name, x, y, width, height, primary, zones, window_state}` in scene pixels (the primary's
   top-left is 0,0; others may be negative) and the zones configured onto each.

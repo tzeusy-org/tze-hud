@@ -372,6 +372,7 @@ mod calibration {
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted(PSK).shared(),
             presents: None,
+            portals: None,
             capture: None,
             restart: None,
             update: None,

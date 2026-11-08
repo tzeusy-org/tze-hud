@@ -73,6 +73,8 @@ pub struct IdleEfficiencyCounters {
     gpu_queue_submissions: AtomicU64,
     surface_acquisitions: AtomicU64,
     presents: AtomicU64,
+    /// Microseconds after process start of the last present (0 = none yet).
+    last_present_us: AtomicU64,
     excluded_sampler_wakeups: AtomicU64,
     excluded_operating_system_wakeups: AtomicU64,
 }
@@ -96,6 +98,27 @@ impl IdleEfficiencyCounters {
 
     pub fn record_present(&self) {
         self.presents.fetch_add(1, Ordering::Relaxed);
+        let at = crate::operator::status::process_start()
+            .elapsed()
+            .as_micros();
+        self.last_present_us.store(
+            u64::try_from(at).unwrap_or(u64::MAX).max(1),
+            Ordering::Relaxed,
+        );
+    }
+
+    /// Milliseconds since the last present, or since process start before the
+    /// first one. A value that keeps growing means the HUD has settled.
+    pub fn idle_since_ms(&self) -> u64 {
+        let now = crate::operator::status::process_start()
+            .elapsed()
+            .as_micros();
+        self.idle_since_ms_at(u64::try_from(now).unwrap_or(u64::MAX))
+    }
+
+    /// `idle_since_ms` at `now_us` since process start.
+    fn idle_since_ms_at(&self, now_us: u64) -> u64 {
+        now_us.saturating_sub(self.last_present_us.load(Ordering::Relaxed)) / 1_000
     }
 
     pub fn record_excluded_sampler_wakeup(&self) {
@@ -232,5 +255,33 @@ impl IdleEfficiencySnapshot {
             )?,
             sources,
         })
+    }
+}
+
+#[cfg(test)]
+mod idle_since_tests {
+    use super::*;
+
+    #[test]
+    fn idle_since_restarts_at_each_present() {
+        let counters = IdleEfficiencyCounters::default();
+        // Before any present the clock runs from process start.
+        assert_eq!(counters.idle_since_ms_at(7_000), 7);
+        counters.record_present();
+        let first = counters.last_present_us.load(Ordering::Relaxed);
+        assert!(first >= 1, "a present is recorded");
+        assert_eq!(
+            counters.idle_since_ms_at(first + 2_500_000),
+            2_500,
+            "grows while idle"
+        );
+        counters.record_present();
+        let second = counters.last_present_us.load(Ordering::Relaxed);
+        assert!(second >= first);
+        assert_eq!(
+            counters.idle_since_ms_at(second),
+            0,
+            "a present restarts the clock"
+        );
     }
 }
