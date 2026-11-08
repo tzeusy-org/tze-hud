@@ -73,6 +73,11 @@ render-widget *args:
 untracked-evidence:
     bash scripts/ci/check_untracked_evidence.sh
 
+# No real host identifiers (tailnet IPs/names, private-key file names) in tracked files.
+# Also applies the local denylist in ~/.config/tze-hud/host-identifiers.deny when present.
+host-identifiers:
+    python3 scripts/ci/check_host_identifiers.py
+
 # cargo check: fast compilation gate (no codegen)
 check:
     {{cargo}} check --workspace
@@ -278,4 +283,4 @@ dev-run dev_dir host="":
 # Excluded by design: the Windows-only jobs (windows.yml) and weekly perf lanes.
 # Boot and pixel-readback tests run in the CI test job; focused recipes remain local.
 # Runs in CI job order: static, clippy (which subsumes `check`), then tests.
-ci: untracked-evidence fmt dev-mode-guard deps-unused cargo-deny test-python clippy clippy-windows-gnu test test-integration token-footprint production-boot canonical-app-boot
+ci: untracked-evidence host-identifiers fmt dev-mode-guard deps-unused cargo-deny test-python clippy clippy-windows-gnu test test-integration token-footprint production-boot canonical-app-boot

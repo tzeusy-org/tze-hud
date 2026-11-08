@@ -457,7 +457,7 @@ async fn connect_card_draws_the_prompt_well_and_its_rows() {
         item(
             "connect.reach",
             "Reachable at",
-            ro("100.87.181.125:9290", true),
+            ro("100.100.1.2:9290", true),
         ),
         item("connect.network", "Network", ro("", false)),
         item("connect.grants", "Grants", ro("", false)),
@@ -476,11 +476,11 @@ async fn connect_card_draws_the_prompt_well_and_its_rows() {
         title: "Connect an agent".into(),
         subtitle: "Paste this into any agent session. It pairs once, then uses the HUD.".into(),
         block: [
-            "Connect to my tze_hud HUD, a screen overlay on my Windows PC (tzehouse-windows).",
-            "It is reachable ONLY inside my Tailscale tailnet at 100.87.181.125:9290.",
+            "Connect to my tze_hud HUD, a screen overlay on my Windows PC (windows-pc).",
+            "It is reachable ONLY inside my Tailscale tailnet at 100.100.1.2:9290.",
             "",
             "1. Pair once. The code works one time and expires within 5 minutes:",
-            "   curl -s http://100.87.181.125:9290/pair \\",
+            "   curl -s http://100.100.1.2:9290/pair \\",
             r#"     -d '{"agent":"claude-laptop","code":"564016"}'"#,
         ]
         .into_iter()
