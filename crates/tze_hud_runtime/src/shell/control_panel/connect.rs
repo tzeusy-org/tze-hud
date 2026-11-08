@@ -467,9 +467,9 @@ mod tests {
     /// and how to use it, and names the five MCP verbs.
     #[test]
     fn prompt_pins_the_tailnet_route_and_carries_only_the_code() {
-        let r = reach("100.87.181.125:9290", true);
+        let r = reach("100.100.1.2:9290", true);
         let text = prompt(
-            Some("tzehouse-windows"),
+            Some("windows-pc"),
             &r,
             "claude-laptop",
             "564016",
@@ -477,17 +477,17 @@ mod tests {
         )
         .join("\n");
         for needle in [
-            "(tzehouse-windows)",
-            "reachable ONLY inside my Tailscale tailnet at 100.87.181.125:9290",
+            "(windows-pc)",
+            "reachable ONLY inside my Tailscale tailnet at 100.100.1.2:9290",
             "stop and tell me; do not look for another route",
             "expires within 5 minutes",
-            "curl -s http://100.87.181.125:9290/pair",
+            "curl -s http://100.100.1.2:9290/pair",
             r#"{"agent":"claude-laptop","code":"564016"}"#,
             "saves the key (psk) to a 0600 file",
-            r#"d+"/100.87.181.125.psk""#,
+            r#"d+"/100.100.1.2.psk""#,
             "Never print, log or commit the key",
             "Authorization: Bearer <psk>",
-            "http://100.87.181.125:9290/mcp",
+            "http://100.100.1.2:9290/mcp",
             "hud_surfaces",
             "hud_publish, hud_input, hud_hold and hud_clear",
             "follow the hint",
