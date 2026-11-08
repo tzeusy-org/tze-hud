@@ -3465,8 +3465,9 @@ mod tests {
             "no perpetual local dirty frame"
         );
 
-        // The first reply is now native scene history. Focus its rendered
-        // composer through Winit, then submit another reply after scrolling back.
+        // The first reply is now native scene history. The composer keeps focus
+        // across that re-render (hud-1dnk5.19), so the viewer types the next
+        // reply without clicking again, then submits it after scrolling back.
         let tail_after_first = {
             let shared = app.state.shared_state.try_lock().unwrap();
             let scene = shared.scene.try_lock().unwrap();
@@ -3480,17 +3481,10 @@ mod tests {
                 .tile_total_content_height_px(tile_id),
             tile_bounds.height
         );
-        app.dispatch_key_down_event_inner(
-            &RawKeyDownEvent {
-                key_code: "Tab".into(),
-                key: "Tab".into(),
-                modifiers: tze_hud_input::KeyboardModifiers::NONE,
-                repeat: false,
-                timestamp_mono_us: tze_hud_scene::MonoUs(4),
-            },
-            Some(tab_id),
+        assert!(
+            app.state.input_processor.is_composer_active(),
+            "a send must not blur the composer"
         );
-        assert!(app.state.input_processor.is_composer_active());
         app.dispatch_character_event_inner(
             &RawCharacterEvent {
                 character: "viewer-reply-after-scroll-back".into(),

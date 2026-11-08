@@ -493,7 +493,8 @@ impl SceneGraph {
         // by the current root) — leave it in place. This makes the second call in a
         // render pass (the checked direct composer setter, after the
         // `PublishToTile` reattach) a no-op when the spec did not change.
-        if let Some(&current) = self.overlay.tile_composer_nodes.get(&tile_id) {
+        let previous = self.overlay.tile_composer_nodes.get(&tile_id).copied();
+        if let Some(current) = previous {
             let valid = self.nodes.contains_key(&current)
                 && self
                     .nodes
@@ -505,9 +506,11 @@ impl SceneGraph {
             self.detach_tile_composer_node(tile_id);
         }
 
-        // Synthesize a fresh hit-region node from the spec and attach it under the
-        // current root.
-        let node_id = SceneId::new();
+        // Attach a hit-region node from the spec under the current root. A tile
+        // keeps one composer node id across root replacements: keyboard focus and
+        // the local draft are keyed by it, so a fresh id on every re-render would
+        // blur the composer after each send or streamed update.
+        let node_id = previous.unwrap_or_else(SceneId::new);
         self.nodes.insert(
             node_id,
             Node {

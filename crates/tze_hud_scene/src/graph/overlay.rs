@@ -541,14 +541,21 @@ impl SceneGraph {
         }
         let changed = self.overlay.tile_composer_interactions.get(&tile_id) != Some(&region);
         if changed {
+            // Apply the new spec's bounds/flags to the current derived node in
+            // place (it may have been attached from the prior spec earlier in this
+            // same batch: the `PublishToTile` reattach runs before this mutation).
+            // Keeping its id keeps keyboard focus and the draft on it.
+            if let Some(node) = self
+                .overlay
+                .tile_composer_nodes
+                .get(&tile_id)
+                .and_then(|id| self.nodes.get_mut(id))
+            {
+                node.data = NodeData::HitRegion(region.clone());
+            }
             self.overlay
                 .tile_composer_interactions
                 .insert(tile_id, region);
-            // Force a rebuild so the new spec's bounds/flags take effect: the
-            // current derived node (if any) may have been attached from the prior
-            // spec earlier in this same batch (the `PublishToTile` reattach runs
-            // before this mutation).
-            self.detach_tile_composer_node(tile_id);
         }
         self.ensure_tile_composer_node(tile_id);
         if changed {
