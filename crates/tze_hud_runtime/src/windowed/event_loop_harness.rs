@@ -204,6 +204,7 @@ impl WindowedRuntimeState {
             consumed_command_keydowns: HashSet::new(),
             local_composer_state: Arc::new(StdMutex::new(None)),
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
+            portal_ui: Default::default(),
             resize_grip_hover_state: Arc::new(StdMutex::new(None)),
             tile_close_hover_state: Arc::new(StdMutex::new(None)),
             cursor_left_window: false,
@@ -362,7 +363,11 @@ impl HeadlessEventLoopHarness {
             bind_addrs: vec![SocketAddr::from(([127, 0, 0, 1], 0))],
             late_tailnet_port: None,
             agents: Arc::clone(&cfg.agents),
-            presents: None,
+            presents: Some(Arc::clone(state.wake.counters())),
+            portals: Some(crate::operator::portal_status::probe(
+                Arc::clone(&scene_handle),
+                Arc::clone(&state.portal_ui),
+            )),
             capture: None,
             restart: None,
             update: None,
@@ -1231,6 +1236,7 @@ mod tests {
         compositor: tze_hud_compositor::Compositor,
         frames: super::super::frame_work::WindowedFrameWork,
         pending_texture: bool,
+        size: (u32, u32),
     }
 
     impl CaptureRenderHarness {
@@ -1249,7 +1255,7 @@ mod tests {
             let prepared = self.frames.prepare(
                 &mut self.compositor,
                 &mut scene,
-                (320, 200),
+                self.size,
                 &self.events.app.state.capture_inbox,
                 RenderTriggers::default(),
                 |needs_render| {
@@ -1261,6 +1267,13 @@ mod tests {
                 },
             );
             let versions = (scene.version, scene.geometry_epoch);
+            // The real post-render pass (`refresh_interaction_hit_regions_after_render`)
+            // in place of `tick`'s GPU-free notification-only approximation.
+            self.compositor.populate_zone_hit_regions(
+                &mut scene,
+                self.size.0 as f32,
+                self.size.1 as f32,
+            );
             drop(scene);
             if prepared.render.is_some() {
                 let mut telemetry = tze_hud_telemetry::FrameTelemetry::new(1);
@@ -1291,6 +1304,195 @@ mod tests {
             });
             prepared.plan.full
         }
+    }
+
+    /// `/admin/status` `portals` and `idle_since_ms` read the state real frame
+    /// builds and the production input path leave behind (T13, hud-1dnk5.12).
+    #[tokio::test]
+    async fn admin_status_reports_rendered_portal_state() {
+        use serde_json::Value;
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        use tze_hud_portal::hub::{PortalKey, Publish};
+        use tze_hud_scene::clock::TestClock;
+
+        let _gpu = crate::test_support::lock_headless_runtime().await;
+        let mut compositor = tze_hud_compositor::Compositor::new_headless(640, 480)
+            .await
+            .expect("software compositor for real frame builds");
+        compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+        let clock = Arc::new(TestClock::new(1_000));
+        let mut cfg = super::super::WindowedConfig::default();
+        cfg.window.width = 640;
+        cfg.window.height = 480;
+        cfg.agents = tze_hud_config::agents_file::AgentsFile::default()
+            .with_agent("ops", "status-fixture-key", &["*", "admin"])
+            .directory()
+            .unwrap()
+            .shared();
+        let events = HeadlessEventLoopHarness::with_network(cfg, clock.clone())
+            .await
+            .unwrap();
+        let frames = super::super::frame_work::WindowedFrameWork::new(
+            events.app.state.wake.clone(),
+            events.app.state.frame_ready_tx.as_ref().unwrap().clone(),
+        );
+        let mut runtime = CaptureRenderHarness {
+            events,
+            compositor,
+            frames,
+            pending_texture: false,
+            size: (640, 480),
+        };
+        let portals = runtime
+            .events
+            .app
+            .state
+            .portal_projection_driver
+            .portal_handle();
+        let key = PortalKey::new("ops", "probe");
+        let publish = |lines: usize| {
+            let text: Vec<String> = (0..lines).map(|i| format!("Line{i:02} output")).collect();
+            portals
+                .hub
+                .lock()
+                .unwrap()
+                .publish(
+                    &key,
+                    Publish {
+                        text: Some(text.join("\n")),
+                        ..Default::default()
+                    },
+                    portals.clock.now_us(),
+                )
+                .expect("publish accepted");
+        };
+        // Fades run on the wall clock; pace turns like frames until idle.
+        let settle = |runtime: &mut CaptureRenderHarness| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while runtime.turn(true) {
+                assert!(std::time::Instant::now() < deadline, "portal never settled");
+                clock.advance(16);
+                std::thread::sleep(std::time::Duration::from_millis(16));
+            }
+        };
+        let probe = crate::operator::portal_status::probe(
+            Arc::clone(
+                &runtime
+                    .events
+                    .app
+                    .state
+                    .shared_state
+                    .try_lock()
+                    .unwrap()
+                    .scene,
+            ),
+            Arc::clone(&runtime.events.app.state.portal_ui),
+        );
+        let portal = || probe.read().expect("scene available")[0].clone();
+
+        publish(40);
+        settle(&mut runtime);
+        let at_tail = portal();
+        assert_eq!(at_tail["s"], "portal:probe");
+        assert_eq!(at_tail["output"]["at_tail"], true);
+        // The live stream's cursor glyph follows the newest line.
+        let last = at_tail["output"]["last_visible_line"].as_str().unwrap();
+        assert!(last.starts_with("Line39 output"), "{last}");
+        assert_eq!(
+            at_tail["panes"]["unread_badge"],
+            Value::Null,
+            "no pill at the tail"
+        );
+        assert_eq!(at_tail["focus"], "none");
+        assert_eq!(at_tail["input"]["at_tail"], true, "measured, empty INPUT");
+
+        // Idle with content: no redraw, so the idle clock is never restarted.
+        let counters = runtime.events.app.state.wake.counters().clone();
+        let (idle, presents) = (counters.idle_since_ms(), counters.snapshot().presents);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        for _ in 0..3 {
+            clock.advance(50);
+            assert!(!runtime.turn(true), "an idle HUD renders nothing");
+        }
+        assert_eq!(counters.snapshot().presents, presents);
+        assert!(
+            counters.idle_since_ms() > idle,
+            "idle_since_ms keeps growing"
+        );
+
+        // Wheel up over OUTPUT through the production scroll path.
+        let output = &at_tail["panes"]["output"];
+        let center = |r: &Value, axis: &str, len: &str| {
+            (r[axis].as_f64().unwrap() + r[len].as_f64().unwrap() / 2.0) as f32
+        };
+        runtime.events.app.state.cursor_x = center(output, "x", "w");
+        runtime.events.app.state.cursor_y = center(output, "y", "h");
+        runtime.events.app.enqueue_scroll_event(0.0, -400.0);
+        settle(&mut runtime);
+        assert!(counters.idle_since_ms() < 1_000, "the scroll presented");
+        let scrolled = portal();
+        assert_eq!(scrolled["output"]["at_tail"], false);
+        let first = scrolled["output"]["first_visible_line"].clone();
+        assert_ne!(first, at_tail["output"]["first_visible_line"]);
+        assert_eq!(
+            scrolled["panes"]["unread_badge"],
+            Value::Null,
+            "nothing unread: no pill even when scrolled back"
+        );
+
+        // New output while scrolled back keeps the reading position.
+        publish(45);
+        settle(&mut runtime);
+        let appended = portal();
+        assert_eq!(appended["output"]["first_visible_line"], first);
+        assert_eq!(appended["output"]["at_tail"], false);
+        let unread = {
+            let scene = runtime.events.scene();
+            scene.tile_unread_count(*scene.tiles.keys().next().unwrap())
+        };
+        assert!(unread > 0, "output arrived while scrolled back");
+        assert_eq!(appended["output"]["unread"], unread);
+        let pill = &appended["panes"]["unread_badge"];
+        assert!(
+            pill["w"].as_f64().unwrap() > 0.0,
+            "the counted output has its badge drawn"
+        );
+        for (pos, len) in [("x", "w"), ("y", "h")] {
+            let (p, o) = (pill[pos].as_f64().unwrap(), output[pos].as_f64().unwrap());
+            assert!(p >= o && p + pill[len].as_f64().unwrap() <= o + output[len].as_f64().unwrap());
+        }
+
+        // Click the composer, type: focus moves there and only the length shows.
+        let (x, y) = runtime.events.composer_center().expect("composer");
+        runtime.events.click(x, y);
+        runtime.events.type_text("xyz");
+        settle(&mut runtime);
+
+        let addr = runtime.events.mcp_addr();
+        let status = tokio::spawn(async move {
+            let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
+            stream
+                .write_all(
+                    b"GET /admin/status HTTP/1.0\r\nAuthorization: Bearer status-fixture-key\r\n\r\n",
+                )
+                .await
+                .unwrap();
+            let mut raw = String::new();
+            stream.read_to_string(&mut raw).await.unwrap();
+            raw
+        })
+        .await
+        .unwrap();
+        assert!(
+            !status.contains("xyz"),
+            "the draft's text is never reported"
+        );
+        let body: Value = serde_json::from_str(status.split_once("\r\n\r\n").unwrap().1).unwrap();
+        let typed = &body["portals"][0];
+        assert_eq!(typed["focus"], "composer");
+        assert_eq!(typed["input"]["draft_chars"], 3);
+        assert_eq!(typed["output"]["first_visible_line"], first);
+        assert!(body["idle_since_ms"].as_u64().is_some());
     }
 
     /// Moves the former compositor build-only gate onto the runtime's actual
@@ -1359,6 +1561,7 @@ mod tests {
             compositor,
             frames,
             pending_texture: false,
+            size: (320, 200),
         };
         assert!(runtime.turn(true), "startup presents once");
         let versions = runtime.frames.last_rendered();

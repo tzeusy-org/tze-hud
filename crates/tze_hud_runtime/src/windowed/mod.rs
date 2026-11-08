@@ -578,6 +578,9 @@ struct WindowedRuntimeState {
     /// from the active tab's `FocusManager` owner; the compositor draws the ring
     /// for whatever owner it names (node or tile-level), above all content.
     focus_ring_owner_state: FocusRingOwnerHandle,
+    /// Focus and draft length for the `/admin/status` portals block, written
+    /// with the focus ring each settle.
+    portal_ui: crate::operator::portal_status::UiHandle,
     /// Shared handle carrying the portal tile whose resize-grip corner the pointer
     /// is over to the compositor's grip pass (hud-wgiys). Written each frame in
     /// `about_to_wait`: the focused portal's `SceneId` when the pointer sits over
@@ -2683,6 +2686,8 @@ impl WindowedRuntime {
         event_loop.set_control_flow(ControlFlow::Wait);
         monitor_identity::log_monitor_identities();
         let wake = WindowedWake::new(event_loop.create_proxy());
+        // Main-thread focus/draft mirror read by the `/admin/status` probe.
+        let portal_ui = crate::operator::portal_status::UiHandle::default();
         let render_wake = wake.render_notifier();
         let portal_ingress_wake = wake.main_work_notifier();
 
@@ -2992,6 +2997,10 @@ impl WindowedRuntime {
                     late_tailnet_port: Some(cfg.mcp_port),
                     agents: Arc::clone(&cfg.agents),
                     presents: Some(Arc::clone(wake.counters())),
+                    portals: Some(crate::operator::portal_status::probe(
+                        Arc::clone(&shared_scene),
+                        Arc::clone(&portal_ui),
+                    )),
                     capture: Some(capture_endpoint),
                     restart: restart.clone(),
                     update: update.clone(),
@@ -3255,6 +3264,7 @@ impl WindowedRuntime {
             // compositor.  Separate Arc so it works before compositor is created.
             local_composer_state: Arc::new(StdMutex::new(None)),
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
+            portal_ui,
             // Placeholder; replaced in resumed() with the compositor's Arc (hud-wgiys).
             resize_grip_hover_state: Arc::new(StdMutex::new(None)),
             tile_close_hover_state: Arc::new(StdMutex::new(None)),

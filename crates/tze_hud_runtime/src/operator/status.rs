@@ -217,6 +217,17 @@ pub fn set_displays(displays: Vec<DisplayStatus>, unplaced_zones: Vec<UnplacedZo
     *DISPLAYS.lock().unwrap_or_else(|e| e.into_inner()) = (displays, unplaced_zones);
 }
 
+/// Overlaid display rects in scene pixels, in `/admin/status` order.
+pub(crate) fn display_rects() -> Vec<tze_hud_scene::Rect> {
+    DISPLAYS
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .0
+        .iter()
+        .map(|d| tze_hud_scene::Rect::new(d.x as f32, d.y as f32, d.width as f32, d.height as f32))
+        .collect()
+}
+
 /// The name of display `index` in `/admin/status` order, if connected.
 pub fn display_name(index: usize) -> Option<String> {
     DISPLAYS
@@ -346,6 +357,8 @@ pub struct StatusSource {
     pub binds: Arc<Mutex<Vec<SocketAddr>>>,
     pub safe_mode: Arc<AtomicBool>,
     pub presents: Option<Arc<IdleEfficiencyCounters>>,
+    /// Portal UI state behind `portals` (null without a windowed runtime).
+    pub portals: Option<crate::operator::portal_status::PortalProbe>,
     /// Log file served by `/admin/logs`.
     pub log_path: std::path::PathBuf,
     /// Compositor capture channel behind `/admin/screenshot`.
@@ -409,6 +422,15 @@ impl StatusSource {
                 error: e.to_string(),
             });
         let (displays, unplaced_zones) = displays_json();
+        // Read off the async workers: the probe may wait briefly for the scene.
+        let portals = match self.portals.clone() {
+            Some(probe) => tokio::task::spawn_blocking(move || probe.read())
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(Value::Null),
+            None => Value::Null,
+        };
         json!({
             "version": env!("CARGO_PKG_VERSION"),
             "sha": build.map_or("unknown", |b| b.sha.as_str()),
@@ -426,6 +448,10 @@ impl StatusSource {
             "displays": displays,
             "unplaced_zones": unplaced_zones,
             "frames_presented": self.presents.as_ref().map(|c| c.snapshot().presents),
+            // Milliseconds since the last presented frame: a settle signal.
+            "idle_since_ms": self.presents.as_ref().map(|c| c.idle_since_ms()),
+            // Portal UI state for out-of-process validation (admin only).
+            "portals": portals,
             "cpu_pct_2s": cpu_pct_2s,
             "cpu_pct_avg": cpu_pct_avg,
             // Outcome of the last update attempt: null, or {ok, sha, error}.

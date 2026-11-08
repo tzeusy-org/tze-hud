@@ -5,6 +5,7 @@
 pub mod handoff;
 pub mod install;
 pub mod logs;
+pub mod portal_status;
 pub mod screenshot;
 pub mod status;
 pub mod update;
