@@ -167,6 +167,10 @@ otherwise. Scheduled zone publications count as held before presentation;
   base font; compact portals remain 420×96. Existing live geometry and saved
   overrides retain their current ownership. This size change is separate from
   the portal theme migration and later owner visual acceptance.
+  The native unread badge counts newly appended output units until the viewer
+  reaches the measured OUTPUT tail. Render batches, keyed replacements and
+  viewer replies do not inflate it; backscroll without new output keeps it clear.
+  The local header close reclaims that portal; a later publish reattaches it.
 - Omitted zone `ttl_ms` uses 60000, except a notification with actions uses
   the owner's live `[runtime] answer_window_ms` (default 60000). An explicit
   `ttl_ms` always wins, including 0 (held until cleared); the owner window is

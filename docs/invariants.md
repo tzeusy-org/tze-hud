@@ -232,6 +232,19 @@ head trim, full layout versus clipping, and input reset/output jump-to-latest.
 Unique visible lines can retain identity across trimming; repeated ambiguous
 lines keep a clamped pixel position. Evicted text is outside the retained window.
 
+Native unread counts accumulate new output units across render batches. Keyed
+replacements and viewer replies do not add unseen units. Reaching the measured
+OUTPUT tail acknowledges only the installed output ordinal for that attachment;
+a racing newer publish remains unread. Backscroll alone cannot restore a read
+count. Identical shaped content still reconciles a newer ordinal. Reading does
+not renew agent liveness, and repeated reconciliation schedules no idle repaint.
+The jump pill defaults to opaque fill/text and draws above OUTPUT glyphs on a
+separate bounded text layer; display translation and its shared hit geometry
+remain aligned. Header drag yields to that tile's runtime close control, while
+empty header space and legacy grips keep their drag behavior. The real pointer
+Down/Up harness checks dismissal, reclaim, unaffected input and later reattach;
+this source proof is separate from Windows owner acceptance.
+
 
 - `tze_hud_runtime` [`release_activates_only_the_button_the_press_began_on`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs),
   [`authority_attached_submit_snaps_scrolled_back_history_to_tail`](../crates/tze_hud_runtime/src/windowed/keyboard.rs),

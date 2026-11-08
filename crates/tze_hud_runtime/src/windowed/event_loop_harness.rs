@@ -4242,6 +4242,11 @@ mod tests {
                 .unwrap();
         }
         harness.app.drain_portal_projection();
+        portals
+            .submit_reply(&other, "keep this input".into(), portals.clock.now_us())
+            .unwrap()
+            .result
+            .unwrap();
         let (closing_tile, closing_lease, remaining_tile) = {
             let mut scene = harness.scene();
             let find = |id: &str| {
@@ -4304,6 +4309,12 @@ mod tests {
         harness.app.enqueue_pointer_event(PointerEventKind::Up);
         harness.drain();
         assert!(harness.scene().tiles.contains_key(&closing_tile));
+        harness.app.state.cursor_x = close.x + 10.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Down);
+        harness.app.state.cursor_x = close.x - 100.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        harness.drain();
+        assert!(harness.scene().tiles.contains_key(&closing_tile));
         harness.click(close.x + 10.0, close.y + 10.0);
         harness.drain();
         assert!(!harness.scene().tiles.contains_key(&closing_tile));
@@ -4316,7 +4327,17 @@ mod tests {
             portals.hub.lock().unwrap().get(&key).is_none(),
             "actual click reclaims Hub attachment"
         );
-        assert!(portals.hub.lock().unwrap().get(&other).is_some());
+        assert_eq!(
+            portals
+                .hub
+                .lock()
+                .unwrap()
+                .get(&other)
+                .unwrap()
+                .inputs
+                .len(),
+            1
+        );
         portals
             .hub
             .lock()
