@@ -36,7 +36,7 @@ use tze_hud_scene::types::*;
 
 use super::text::TILE_TEXT_OPACITY_EPSILON;
 use super::token_colors::{resolve_jump_to_latest_tokens, resolve_scroll_indicator_tokens};
-use crate::pipeline::{RectVertex, RoundedRectDrawCmd, rect_vertices};
+use crate::pipeline::{RectVertex, RoundedRectClip, RoundedRectDrawCmd, rect_vertices};
 use crate::text::TextItem;
 
 use super::draw_cmds::{TexturedDrawCmd, compute_fit_mode};
@@ -1529,8 +1529,9 @@ impl Compositor {
         let indicator = resolve_scroll_indicator_tokens(&self.token_map);
         let mut rects = Vec::new();
         let mut items = Vec::new();
-        for tile in self.policy_visible_tiles(scene) {
-            if self.rendered_tile_opacity(tile, scene) <= TILE_TEXT_OPACITY_EPSILON {
+        for tile in Self::sort_tiles_with_drag_boost(self.policy_visible_tiles(scene), scene) {
+            let regions = self.jump_to_latest_visible_regions(tile, scene, &tokens, &indicator);
+            if regions.is_empty() {
                 continue;
             }
             if let Some(bounds) = self.jump_to_latest_bounds(tile, scene, &tokens, &indicator) {
@@ -1548,25 +1549,93 @@ impl Compositor {
                         *channel *= opacity;
                     }
                 }
-                rects.push(RoundedRectDrawCmd {
-                    x: bounds.x,
-                    y: bounds.y,
-                    width: bounds.width,
-                    height: bounds.height,
-                    radius: 0.0,
-                    color,
-                    border: None,
-                    clip: None,
-                });
+                for region in &regions {
+                    rects.push(RoundedRectDrawCmd {
+                        x: bounds.x,
+                        y: bounds.y,
+                        width: bounds.width,
+                        height: bounds.height,
+                        radius: 0.0,
+                        color,
+                        border: None,
+                        clip: Some(RoundedRectClip {
+                            x: region.x,
+                            y: region.y,
+                            width: region.width,
+                            height: region.height,
+                        }),
+                    });
+                }
             }
             if let Some(mut item) =
                 self.collect_jump_to_latest_badge_item(tile, scene, &tokens, &indicator)
             {
                 item.opacity *= self.tile_effective_opacity(tile, scene);
-                items.push(item);
+                for region in &regions {
+                    let mut clipped = item.clone();
+                    clipped.clip_pixel_x = region.x;
+                    clipped.clip_pixel_y = region.y;
+                    clipped.clip_bounds_width = region.width;
+                    clipped.clip_bounds_height = region.height;
+                    items.push(clipped);
+                }
             }
         }
         (rects, items)
+    }
+
+    /// A pill is foreground within its own card, but higher cards occlude its
+    /// drawing and input together. Keep full text placement and clip only the
+    /// exposed pieces, using the renderer's effective order (including drag).
+    pub(super) fn jump_to_latest_visible_regions(
+        &self,
+        tile: &Tile,
+        scene: &SceneGraph,
+        tokens: &tze_hud_input::JumpToLatestTokens,
+        indicator: &tze_hud_input::ScrollIndicatorTokens,
+    ) -> Vec<Rect> {
+        if self.tile_effective_opacity(tile, scene) <= TILE_TEXT_OPACITY_EPSILON {
+            return Vec::new();
+        }
+        let Some(bounds) = self.jump_to_latest_bounds(tile, scene, tokens, indicator) else {
+            return Vec::new();
+        };
+        let ordered = Self::sort_tiles_with_drag_boost(self.policy_visible_tiles(scene), scene);
+        let Some(index) = ordered.iter().position(|t| t.id == tile.id) else {
+            return Vec::new();
+        };
+        let mut regions = vec![bounds];
+        for higher in &ordered[index + 1..] {
+            if self.tile_effective_opacity(higher, scene) <= TILE_TEXT_OPACITY_EPSILON {
+                continue;
+            }
+            let cover = higher.bounds;
+            regions = regions
+                .into_iter()
+                .flat_map(|r| {
+                    let left = r.x.max(cover.x);
+                    let top = r.y.max(cover.y);
+                    let right = (r.x + r.width).min(cover.x + cover.width);
+                    let bottom = (r.y + r.height).min(cover.y + cover.height);
+                    if right <= left || bottom <= top {
+                        return vec![r];
+                    }
+                    [
+                        Rect::new(r.x, r.y, r.width, top - r.y),
+                        Rect::new(r.x, bottom, r.width, r.y + r.height - bottom),
+                        Rect::new(r.x, top, left - r.x, bottom - top),
+                        Rect::new(right, top, r.x + r.width - right, bottom - top),
+                    ]
+                    .into_iter()
+                    .filter(|piece| piece.width > 0.0 && piece.height > 0.0)
+                    .collect()
+                })
+                .collect();
+            if regions.is_empty() {
+                break;
+            }
+        }
+        regions
     }
 
     fn jump_to_latest_bounds(
