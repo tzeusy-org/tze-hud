@@ -1402,6 +1402,29 @@ pub(super) mod panel_task_tests {
         })
         .await;
 
+        // Windows VK_PACKET text (touch keyboard, SendInput Unicode) has no
+        // layout key; it types into the search from the event text.
+        let packet = (
+            PhysicalKey::Unidentified(winit::keyboard::NativeKeyCode::Unidentified),
+            Key::Unidentified(winit::keyboard::NativeKey::Windows(0xE7)),
+        );
+        assert!(app.panel_key_input(packet.0, &packet.1, Some("é"), true));
+        assert!(app.panel_key_input(packet.0, &packet.1, Some("é"), false));
+        wait("2b", || {
+            panel.current_model().is_some_and(|m| m.query == "cé")
+        })
+        .await;
+        let backspace = (
+            PhysicalKey::Code(KeyCode::Backspace),
+            Key::Named(NamedKey::Backspace),
+        );
+        assert!(app.panel_key_input(backspace.0, &backspace.1, None, true));
+        assert!(app.panel_key_input(backspace.0, &backspace.1, None, false));
+        wait("2c", || {
+            panel.current_model().is_some_and(|m| m.query == "c")
+        })
+        .await;
+
         // Pointer: lay the model out the way the compositor would.
         let model = panel.current_model().unwrap();
         let geometry = tze_hud_compositor::estimate_control_panel_geometry(
