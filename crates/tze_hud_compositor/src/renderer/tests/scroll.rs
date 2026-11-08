@@ -537,7 +537,18 @@ async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
         "plain tiles keep their jump control"
     );
     scene
-        .set_portal_surface(tile_id, Default::default(), "badge-test")
+        .set_portal_surface(
+            tile_id,
+            tze_hud_scene::types::PortalSurface {
+                parts: vec![tze_hud_scene::types::PortalPart {
+                    kind: tze_hud_scene::types::PortalPartKind::Transcript,
+                    bounds: Rect::new(0.0, 0.0, 400.0, 200.0),
+                    node: scene.tiles[&tile_id].root_node,
+                }],
+                ..Default::default()
+            },
+            "badge-test",
+        )
         .unwrap();
     let (rects, labels) = compositor.collect_scroll_affordances(&scene);
     assert!(
