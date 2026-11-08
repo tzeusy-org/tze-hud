@@ -432,6 +432,9 @@ impl InputProcessor {
             if old.is_some_and(|old| {
                 old.signature == layout.signature && old.viewport == layout.viewport
             }) {
+                if pane == PortalPartKind::Transcript && scene.tile_follow_tail_at_tail(tile) {
+                    scene.set_tile_follow_tail_at_tail(tile, true);
+                }
                 continue;
             }
             if old.is_none_or(|old| old.height != layout.height || old.viewport != layout.viewport)
