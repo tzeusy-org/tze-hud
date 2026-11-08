@@ -243,7 +243,7 @@ separate bounded text layer; display translation and its shared hit geometry
 remain aligned. Header drag yields to that tile's runtime close control, while
 empty header space and legacy grips keep their drag behavior. The real pointer
 Down/Up harness checks dismissal, reclaim, unaffected input and later reattach;
-this source proof is separate from Windows owner acceptance.
+this source proof is separate from Windows owner acceptance. Secondary-window signatures include its fill and text. Higher effective-z cards clip both the pill and its hit targets; partial coverage preserves the label’s full placement.
 
 
 - `tze_hud_runtime` [`release_activates_only_the_button_the_press_began_on`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs),
