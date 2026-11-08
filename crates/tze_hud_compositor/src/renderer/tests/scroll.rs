@@ -600,9 +600,8 @@ async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
     let read_pixels = surface.read_pixels(&compositor.device);
     scene.set_tile_follow_tail_at_tail(tile_id, false);
     compositor.render_frame_headless(&mut scene, &surface);
-    assert_eq!(
-        read_pixels,
-        surface.read_pixels(&compositor.device),
+    assert!(
+        read_pixels == surface.read_pixels(&compositor.device),
         "backscroll without new output must not repaint an empty badge"
     );
 

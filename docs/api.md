@@ -170,6 +170,8 @@ otherwise. Scheduled zone publications count as held before presentation;
   The native unread badge counts newly appended output units until the viewer
   reaches the measured OUTPUT tail. Render batches, keyed replacements and
   viewer replies do not inflate it; backscroll without new output keeps it clear.
+  At zero unread, the portal badge background, label and click target disappear
+  together, including when the viewer scrolls back through already-read output.
   The local header close reclaims that portal; a later publish reattaches it.
 - Omitted zone `ttl_ms` uses 60000, except a notification with actions uses
   the owner's live `[runtime] answer_window_ms` (default 60000). An explicit
