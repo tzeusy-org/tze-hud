@@ -1062,6 +1062,10 @@ def scenario_resize_hotkey(run: Run) -> None:
     run.key("ctrl+equal")
     grown = run.expect("Ctrl+= grows the portal", on(s, lambda p: p["rect"]["w"] > shrunk["w"] and p["rect"]["h"] > shrunk["h"]))
     rect = portal_entry(grown, s)["rect"]
+    # Ctrl+Shift+Arrow selects text in a focused composer. Directional
+    # resize deliberately belongs to non-composer portal focus.
+    run.click(f"{s}/output")
+    run.expect("OUTPUT has non-composer portal focus", on(s, lambda p: p["focus"] == "tile"))
     run.key("ctrl+shift+Left")
     narrower = run.expect("Ctrl+Shift+Left changes width only",
                           on(s, lambda p: p["rect"]["w"] < rect["w"] and p["rect"]["h"] == rect["h"]))
