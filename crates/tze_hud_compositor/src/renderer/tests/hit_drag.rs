@@ -1385,6 +1385,22 @@ async fn tile_close_button_draw_and_hit_region_share_token_geometry() {
         )
         .unwrap();
 
+    let rendered = tze_hud_portal::render::render(
+        &empty_portal_view("text-stream://close", "Close check"),
+        &tze_hud_portal::tokens::PortalVisualTokens::default(),
+        tze_hud_portal::render::Size {
+            width: 400.0,
+            height: 300.0,
+        },
+        0,
+    );
+    scene
+        .set_portal_surface(tile, rendered.surface, "agent")
+        .unwrap();
+    scene
+        .set_tile_root_tree(tile, rendered.root, rendered.children)
+        .unwrap();
+
     // No hover: nothing drawn, nothing to hit.
     let mut resting: Vec<crate::pipeline::RectVertex> = Vec::new();
     compositor.append_tile_close_button_vertices(&scene, &mut resting, 1280.0, 720.0);
@@ -1441,6 +1457,8 @@ async fn tile_close_button_draw_and_hit_region_share_token_geometry() {
         "x mark is clipped to the button"
     );
 
+    let handles = compositor.collect_drag_handle_entries(&scene, 1280.0, 720.0);
+    compositor.populate_drag_handle_hit_regions_from(&mut scene, handles);
     let hit = scene.hit_test(b.x + b.width / 2.0, b.y + b.height / 2.0);
     assert!(
         matches!(
@@ -1452,6 +1470,34 @@ async fn tile_close_button_draw_and_hit_region_share_token_geometry() {
         ),
         "press on the button resolves to DismissTile, got {hit:?}"
     );
+    for (x, y) in [(100.0, 100.0), (870.0, 400.0)] {
+        scene
+            .update_tile_bounds(tile, Rect::new(x, y, 400.0, 300.0), "agent")
+            .unwrap();
+        let handles = compositor.collect_drag_handle_entries(&scene, 1280.0, 720.0);
+        compositor.populate_drag_handle_hit_regions_from(&mut scene, handles);
+        compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+        let close = scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|r| {
+                matches!(r.kind,
+            ZoneInteractionKind::DismissTile { tile_id } if tile_id == tile)
+            })
+            .unwrap();
+        assert!(
+            matches!(scene.hit_test(close.bounds.x + 15.0, close.bounds.y + 15.0),
+            HitResult::ZoneInteraction { kind: ZoneInteractionKind::DismissTile { tile_id }, .. } if tile_id == tile)
+        );
+        assert!(
+            matches!(scene.hit_test(x + 150.0, y + 10.0), HitResult::ZoneInteraction {
+            kind: ZoneInteractionKind::DragHandle { element_id, is_header_band: true, .. }, .. } if element_id == tile)
+        );
+    }
+    scene
+        .update_tile_bounds(tile, Rect::new(100.0, 100.0, 400.0, 300.0), "agent")
+        .unwrap();
     assert!(
         matches!(scene.hit_test(150.0, 350.0), HitResult::TileHit { .. }),
         "the rest of the tile is unchanged"

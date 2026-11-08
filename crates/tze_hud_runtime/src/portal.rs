@@ -189,9 +189,7 @@ fn apply_render(
     if redeclare {
         match scene.set_portal_surface(tile_id, surface.clone(), ns) {
             Ok(()) => binding.declared_surface = Some(surface),
-            // The old renderer also painted content when this optional descriptor
-            // exceeded its identity limit. Hub keys can legally exceed that limit
-            // once the driver adds its URI prefix. Keep those accepted portals visible.
+            // Descriptor rejection must not hide accepted Hub content.
             Err(error @ tze_hud_scene::ValidationError::InvalidPortalSurface { .. }) => {
                 tracing::warn!(
                     ?error,
@@ -396,8 +394,7 @@ impl PortalDriver {
         self.portals.clock.now_us()
     }
 
-    /// Submit text for the complete agent/portal identity bound to this tile.
-    /// Known portals remain handled on service refusal, preventing a raw echo.
+    /// Submit to the bound full identity; service refusal never falls back to raw echo.
     pub fn submit_reply_for_tile(
         &mut self,
         tile_id: SceneId,
@@ -451,8 +448,7 @@ impl PortalDriver {
         }
     }
 
-    /// Test support: queue portal input with a fixed id (the token-footprint
-    /// calibration's canonical input).
+    /// Queue the token-footprint calibration's fixed input.
     #[doc(hidden)]
     pub fn inject_input(&mut self, key: &PortalKey, id: &str, text: &str) -> bool {
         self.lock_hub()
