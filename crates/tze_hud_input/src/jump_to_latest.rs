@@ -109,13 +109,13 @@ impl Default for JumpToLatestTokens {
             color_r: srgb_to_linear(0x4A as f32 / 255.0),
             color_g: srgb_to_linear(0x55 as f32 / 255.0),
             color_b: srgb_to_linear(0x68 as f32 / 255.0),
-            color_a: 0.9,
+            color_a: 1.0,
             // #CBD5E0 — a light neutral that reads on the #4A5568 pill without
             // the loudness of pure white; ambient, subordinate to content.
             text_r: 0xCB as f32 / 255.0,
             text_g: 0xD5 as f32 / 255.0,
             text_b: 0xE0 as f32 / 255.0,
-            text_a: 0.95,
+            text_a: 1.0,
             text_size_px: 13.0,
             width_px: 96.0,
             height_px: 24.0,

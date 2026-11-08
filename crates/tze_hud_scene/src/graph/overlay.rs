@@ -3,6 +3,14 @@ use crate::validation::ValidationError;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+/// Output ordinals for the current native portal attachment. Local reads can
+/// acknowledge only output installed in the scene, not future Hub publishes.
+#[derive(Clone, Debug, Default)]
+pub struct PortalOutputReadState {
+    pub latest: u64,
+    pub read_through: u64,
+}
+
 /// Transient per-frame state owned by the runtime and compositor layers.
 ///
 /// These fields are all `#[serde(skip)]` — they are never serialized and carry
@@ -108,6 +116,8 @@ pub struct RuntimeOverlayState {
     /// each delta once, independently of intervening ordinary wheel targets.
     #[serde(skip, default)]
     pub portal_scroll_origin_shifts: HashMap<SceneId, (f64, f64)>,
+    #[serde(skip, default)]
+    pub portal_output_reads: HashMap<SceneId, PortalOutputReadState>,
     /// Only actual shaped documents publish extents; this does not dirty pixels.
     #[serde(skip, default)]
     pub portal_document_layouts: HashMap<(SceneId, PortalPartKind), PortalDocumentLayout>,
@@ -141,19 +151,9 @@ pub struct RuntimeOverlayState {
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
     pub tile_follow_tail_at_tail: HashMap<SceneId, bool>,
-    /// Runtime-owned ambient unread-output count per tile (hud-g1ena.3).
-    ///
-    /// The aggregate `PortalView::unread_output_count` a text-stream
-    /// portal already tracks, plumbed onto the transcript tile by the portal
-    /// projection driver each drain. Read by the compositor to render the
-    /// ambient unread badge the jump-to-latest pill MAY carry
-    /// (portal-chat-grade-affordances §Jump-to-Latest Affordance) — the pill is
-    /// only shown while `tile_follow_tail_at_tail == false`, so the badge clears
-    /// with it when the viewer returns to the tail.
-    ///
-    /// `0` (or an absent entry) means nothing unread; the driver stores `0` when
-    /// the count is redacted or empty so no badge renders. Ephemeral: skipped
-    /// during serialization.
+    /// Runtime-owned aggregate unread count; zero/absence suppresses the badge.
+    /// Native portal reads clear this locally at the measured OUTPUT tail and
+    /// acknowledge only the installed output ordinal on the next driver drain.
     #[serde(skip, default)]
     pub tile_unread_counts: HashMap<SceneId, usize>,
     /// Runtime-owned lifecycle-affordance accents per tile.
@@ -904,6 +904,13 @@ impl SceneGraph {
             self.overlay
                 .tile_follow_tail_at_tail
                 .insert(tile_id, at_tail);
+            if at_tail
+                && self.output_scroll_geometry(tile_id).is_some()
+                && let Some(read) = self.overlay.portal_output_reads.get_mut(&tile_id)
+            {
+                read.read_through = read.latest;
+                self.set_tile_unread_count(tile_id, 0);
+            }
         }
     }
 

@@ -1,15 +1,9 @@
 //! Portal state, keyed by (agent id, portal id).
 //!
-//! [`PortalHub`] is the whole runtime model of `portal:<id>` surfaces: the
-//! transcript, viewer replies, the input queue, liveness, and render pacing.
-//! It is pure: every time-dependent call takes `now_us`, and nothing here
-//! reads a clock, renders, or does I/O. The runtime's portal driver feeds it
-//! MCP operations and composer submissions, sweeps it on wake deadlines, and
-//! renders the portals [`PortalHub::take_due`] hands back.
-//!
-//! Identity is the authenticated agent id (PSK), so there are no owner
-//! tokens: a second agent publishing to the same portal id gets its own
-//! portal.
+//! Pure runtime state for authenticated (agent id, portal id) surfaces:
+//! transcript, replies, input delivery, liveness and render pacing. All timed
+//! operations take `now_us`; this module does no clock reads, rendering or I/O.
+//! MCP and the runtime driver share this Hub; distinct agents own distinct keys.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
@@ -259,8 +253,9 @@ pub struct Portal {
     pub inputs: VecDeque<Input>,
     /// Units appended since the last [`PortalHub::take_due`].
     pub unread: usize,
-    /// Latest nonempty rendered batch's badge, retained across local repaints.
-    pub rendered_unread: usize,
+    /// Output-only ordinal and local read watermark; replies never advance it.
+    pub published_outputs: u64,
+    read_outputs: u64,
     /// One-shot runtime-requested repaint when a rendered activity cue expires.
     pub activity_cue_due_us: Option<u64>,
     pub last_seen_us: u64,
@@ -292,7 +287,8 @@ impl Portal {
             replies: VecDeque::new(),
             inputs: VecDeque::new(),
             unread: 0,
-            rendered_unread: 0,
+            published_outputs: 0,
+            read_outputs: 0,
             activity_cue_due_us: None,
             last_seen_us: now_us,
             hold_until_us: None,
@@ -305,6 +301,12 @@ impl Portal {
             idle_deadline_us: None,
             paused_liveness: None,
         }
+    }
+
+    pub fn unread_output_count(&self) -> usize {
+        self.published_outputs
+            .saturating_sub(self.read_outputs)
+            .min(usize::MAX as u64) as usize
     }
 
     fn tombstone() -> Self {
@@ -672,6 +674,7 @@ impl PortalHub {
                     at_us: now_us,
                 });
                 portal.unread += 1;
+                portal.published_outputs = portal.published_outputs.saturating_add(1);
             }
             while portal.transcript_bytes > retained && portal.transcript.len() > 1 {
                 let dropped = portal.transcript.pop_front().expect("len > 1");
@@ -1006,9 +1009,6 @@ impl PortalHub {
             })
             .map(|(key, portal)| {
                 portal.activity_cue_due_us = None;
-                if portal.unread > 0 {
-                    portal.rendered_unread = portal.unread;
-                }
                 portal.dirty = false;
                 portal.local_feedback_pending = false;
                 portal.last_render_us = Some(now_us);
@@ -1018,6 +1018,22 @@ impl PortalHub {
                 }
             })
             .collect()
+    }
+
+    /// Read only output from the rendered attachment, never a racing new publish.
+    pub fn mark_read_through(&mut self, key: &PortalKey, incarnation: u64, through: u64) {
+        if let Some(p) = self
+            .portals
+            .get_mut(key)
+            .filter(|p| p.live() && p.incarnation == incarnation)
+        {
+            let read = through.min(p.published_outputs).max(p.read_outputs);
+            if read != p.read_outputs {
+                p.read_outputs = read;
+                p.dirty = true;
+                p.local_feedback_pending = true;
+            }
+        }
     }
 
     /// Schedule the single repaint needed to clear a cue that was actually drawn.
@@ -1550,8 +1566,48 @@ mod tests {
                 kind: DeadlineKind::Render
             })
         );
-        assert_eq!(hub.take_due(100_000), [Due { key: k, unread: 2 }]);
+        assert_eq!(
+            hub.take_due(100_000),
+            [Due {
+                key: k.clone(),
+                unread: 2
+            }]
+        );
+        assert_eq!(
+            hub.get(&k).unwrap().unread_output_count(),
+            3,
+            "unseen output accumulates across separate render batches"
+        );
         assert_eq!(hub.take_due(300_000), [], "nothing changed");
+        let incarnation = hub.incarnation(&k).unwrap();
+        hub.mark_read_through(&k, incarnation + 1, 3);
+        assert_eq!(
+            hub.get(&k).unwrap().unread_output_count(),
+            3,
+            "stale attachment cannot read"
+        );
+        hub.mark_read_through(&k, incarnation, 1);
+        assert_eq!(hub.get(&k).unwrap().unread_output_count(), 2);
+        assert_eq!(
+            hub.take_due(300_000),
+            [Due {
+                key: k.clone(),
+                unread: 0
+            }]
+        );
+        hub.publish(&k, text("4"), 300_001).unwrap();
+        hub.mark_read_through(&k, incarnation, 3);
+        assert_eq!(
+            hub.get(&k).unwrap().unread_output_count(),
+            1,
+            "a racing append remains unseen"
+        );
+        hub.take_due(300_001);
+        hub.mark_read_through(&k, incarnation, 3);
+        assert!(
+            hub.take_due(300_002).is_empty(),
+            "reading is idempotent and does not poll"
+        );
         let other = key("b", "p");
         hub.publish(&other, text("other agent"), 300_001).unwrap();
         assert_eq!(

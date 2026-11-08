@@ -688,6 +688,56 @@ async fn frame_signature_ignores_content_outside_the_target() {
         compositor.frame_signature(&closed, &overlapping),
         idle_overlap
     );
+    // An actual collected jump pill can change without any body geometry/text
+    // changing. Secondary display submission must see each foreground delta.
+    let mut scene = corner_tile_scene(Rgba::new(0.0, 0.0, 0.0, 1.0));
+    let tile = *scene.tiles.keys().next().unwrap();
+    scene
+        .register_tile_scroll_config(
+            tile,
+            TileScrollConfig {
+                content_height: Some(800.0),
+                ..TileScrollConfig::vertical()
+            },
+        )
+        .unwrap();
+    scene.set_tile_follow_tail_at_tail(tile, false);
+    scene.set_tile_unread_count(tile, 3);
+    let (rects, labels) = compositor.collect_scroll_affordances(&scene);
+    assert_eq!(labels.len(), 1);
+    assert_eq!(rects.len(), 1);
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    let _appearing = compositor.build_windowed_frame(&mut scene, 256, 256);
+    compositor.portal_tile_anim_states.clear();
+    let build = compositor.build_windowed_frame(&mut scene, 256, 256);
+    let outside = compositor.frame_signature(&build, &away);
+    let mut inside = compositor.frame_signature(&build, &overlapping);
+    for change in 0..3 {
+        match change {
+            0 => scene.set_tile_unread_count(tile, 4),
+            1 => {
+                compositor
+                    .token_map
+                    .insert("portal.jump_to_latest.color".into(), "#0000FF".into());
+            }
+            _ => scene.set_tile_follow_tail_at_tail(tile, true),
+        }
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
+        let build = compositor.build_windowed_frame(&mut scene, 256, 256);
+        assert_eq!(
+            compositor.frame_signature(&build, &away),
+            outside,
+            "off-target foreground changes stay idle"
+        );
+        let changed = compositor.frame_signature(&build, &overlapping);
+        assert_ne!(
+            changed, inside,
+            "visible foreground change {change} must present"
+        );
+        inside = changed;
+    }
 }
 
 /// A zone assigned to a secondary display renders in that display's window
@@ -765,6 +815,8 @@ async fn zone_assigned_to_secondary_display_renders_there() {
         }
         compositor.prime_markdown_cache(&scene);
         compositor.prime_truncation_cache(&scene);
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
         let build = compositor.build_windowed_frame(&mut scene, 256, 256);
         let format = wgpu::TextureFormat::Rgba8UnormSrgb;
         let primary = compositor
@@ -810,6 +862,8 @@ async fn safe_mode_flip_changes_secondary_signature() {
     let mut signatures = Vec::new();
     for safe_mode in [false, true, false] {
         compositor.set_safe_mode_overlay(safe_mode);
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
         let build = compositor.build_windowed_frame(&mut scene, 256, 256);
         signatures.push(compositor.frame_signature(&build, &side));
     }

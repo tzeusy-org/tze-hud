@@ -312,6 +312,12 @@ source links when implementation changes the status.
   fields 13–17 and their names are reserved; their wire messages, converters and
   scene mutation variants are removed. Native rendering retains the checked
   direct scene methods. This is source evidence, not Windows owner acceptance.
+  Follow-up source regressions cover cumulative unread/read-through state,
+  an opaque foreground jump badge and the header drag band yielding to its own
+  close button (`hud-lirh2.15` / `.16`). The unchanged eight-file physical
+  denominator is 14,000 lines (13,956 before this follow-up); no source/tests
+  moved out of it. Owner83eb retained-line/jump checks passed, but unread and
+  close failed on that build; acceptance of this follow-up remains outstanding.
   The runtime module/type is now `portal.rs` / `PortalDriver`, with one binding
   map and immediate scene-owned lease revocation. Scene, MCP and pause control
   share the injected clock; healthy portal idle/hold allowances survive pause

@@ -278,7 +278,7 @@ async fn test_collect_text_items_applies_tile_scroll_offset() {
 /// pill (local-first, no adapter round trip).
 #[tokio::test]
 async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(480, 320).await);
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(480, 320).await);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
 
     let mut scene = SceneGraph::new(480.0, 320.0);
@@ -339,6 +339,190 @@ async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
         "pill (and badge) sits in the lower half of the tile, got y={}",
         item.pixel_y
     );
+
+    // A foreground pill must hide both the pane fill and glyphs beneath it.
+    let mut painted = Vec::new();
+    for (content, background) in [
+        ("".to_string(), Rgba::new(1.0, 0.0, 0.0, 1.0)),
+        (
+            "WWWWWWWWWWWWWWWWWWWWWWWWWWWW\n".repeat(15),
+            Rgba::new(0.0, 0.0, 1.0, 1.0),
+        ),
+    ] {
+        scene
+            .set_tile_root(
+                tile_id,
+                Node {
+                    layout: Default::default(),
+                    id: SceneId::new(),
+                    children: vec![],
+                    data: NodeData::TextMarkdown(TextMarkdownNode {
+                        content,
+                        bounds: Rect::new(0.0, 0.0, 400.0, 200.0),
+                        font_size_px: 14.0,
+                        font_family: FontFamily::SystemMonospace,
+                        color: Rgba::new(1.0, 1.0, 1.0, 1.0),
+                        background: Some(background),
+                        alignment: TextAlign::Start,
+                        overflow: TextOverflow::Clip,
+                        color_runs: Box::default(),
+                    }),
+                },
+            )
+            .unwrap();
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
+        compositor.render_frame_headless(&mut scene, &surface);
+        compositor.portal_tile_anim_states.clear();
+        compositor.render_frame_headless(&mut scene, &surface);
+        painted.push(surface.read_pixels(&compositor.device));
+    }
+    assert_ne!(
+        crate::test_pixels::pixel_at(&painted[0], 480, 20, 20),
+        crate::test_pixels::pixel_at(&painted[1], 480, 20, 20),
+        "probe changes actual OUTPUT pixels"
+    );
+    for y in
+        (item.clip_pixel_y as u32 + 2)..((item.clip_pixel_y + item.clip_bounds_height) as u32 - 2)
+    {
+        for x in (item.clip_pixel_x as u32 + 2)
+            ..((item.clip_pixel_x + item.clip_bounds_width) as u32 - 2)
+        {
+            assert_eq!(
+                crate::test_pixels::pixel_at(&painted[0], 480, x, y),
+                crate::test_pixels::pixel_at(&painted[1], 480, x, y),
+                "opaque foreground pill masks OUTPUT fill and glyphs at {x},{y}"
+            );
+        }
+    }
+
+    // A higher card covers the lower portal's pill, including its hit target.
+    let cover_lease = scene.grant_lease("badge-cover", 120_000);
+    let cover = scene
+        .create_tile(
+            tab_id,
+            "badge-cover",
+            cover_lease,
+            Rect::new(
+                item.clip_pixel_x,
+                item.clip_pixel_y,
+                item.clip_bounds_width,
+                item.clip_bounds_height,
+            ),
+            2,
+        )
+        .unwrap();
+    scene
+        .set_tile_root(
+            cover,
+            Node {
+                layout: Default::default(),
+                id: SceneId::new(),
+                children: vec![],
+                data: NodeData::SolidColor(SolidColorNode {
+                    color: Rgba::new(0.0, 1.0, 0.0, 1.0),
+                    radius: None,
+                    bounds: Rect::new(0.0, 0.0, item.clip_bounds_width, item.clip_bounds_height),
+                }),
+            },
+        )
+        .unwrap();
+    let mut covered = Vec::new();
+    for at_tail in [false, true] {
+        scene.set_tile_follow_tail_at_tail(tile_id, at_tail);
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
+        compositor.render_frame_headless(&mut scene, &surface);
+        covered.push(surface.read_pixels(&compositor.device));
+    }
+    for y in
+        (item.clip_pixel_y as u32 + 2)..((item.clip_pixel_y + item.clip_bounds_height) as u32 - 2)
+    {
+        for x in (item.clip_pixel_x as u32 + 2)
+            ..((item.clip_pixel_x + item.clip_bounds_width) as u32 - 2)
+        {
+            assert_eq!(
+                crate::test_pixels::pixel_at(&covered[0], 480, x, y),
+                crate::test_pixels::pixel_at(&covered[1], 480, x, y),
+                "a covered lower pill must not paint over the higher tile at {x},{y}"
+            );
+        }
+    }
+    scene.set_tile_follow_tail_at_tail(tile_id, false);
+    scene.set_tile_unread_count(tile_id, 3);
+    let assert_regions = |c: &Compositor,
+                          s: &mut SceneGraph,
+                          expected: bool,
+                          covered_x: Option<f32>| {
+        let (rects, labels) = c.collect_scroll_affordances(s);
+        assert_eq!(!rects.is_empty(), expected);
+        assert_eq!(!labels.is_empty(), expected);
+        s.overlay.zone_hit_regions.clear();
+        c.populate_zone_hit_regions(s, 480.0, 320.0);
+        let hits: Vec<_> = s.overlay.zone_hit_regions.iter().filter(|h|
+            matches!(h.kind, tze_hud_scene::ZoneInteractionKind::JumpToLatest { tile_id: id } if id == tile_id)).collect();
+        assert_eq!(!hits.is_empty(), expected);
+        for label in labels {
+            assert_eq!(
+                label.pixel_x, item.pixel_x,
+                "partial clipping must not recenter the label"
+            );
+            if let Some(x) = covered_x {
+                assert!(label.clip_pixel_x + label.clip_bounds_width <= x);
+            }
+        }
+        for hit in hits {
+            if let Some(x) = covered_x {
+                assert!(hit.bounds.x + hit.bounds.width <= x);
+            }
+        }
+    };
+    assert_regions(&compositor, &mut scene, false, None);
+    scene.set_drag_active(tile_id);
+    assert_regions(&compositor, &mut scene, true, None);
+    scene.clear_drag_active(tile_id);
+    scene.set_drag_active(cover);
+    assert_regions(&compositor, &mut scene, false, None);
+    scene.clear_drag_active(cover);
+    scene.tiles.get_mut(&cover).unwrap().opacity = 0.0;
+    assert_regions(&compositor, &mut scene, true, None);
+    scene.tiles.get_mut(&cover).unwrap().opacity = 1.0;
+    scene.set_owner_hidden(tze_hud_scene::graph::visibility::SurfaceClasses {
+        tiles: true,
+        ..Default::default()
+    });
+    assert_regions(&compositor, &mut scene, true, None);
+    scene.set_owner_hidden(Default::default());
+    let split = item.clip_pixel_x + item.clip_bounds_width / 2.0;
+    scene.tiles.get_mut(&cover).unwrap().bounds.x = split;
+    assert_regions(&compositor, &mut scene, true, Some(split));
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    compositor.render_frame_headless(&mut scene, &surface);
+    let partial = surface.read_pixels(&compositor.device);
+    scene.set_tile_follow_tail_at_tail(tile_id, true);
+    compositor.render_frame_headless(&mut scene, &surface);
+    let partial_without_pill = surface.read_pixels(&compositor.device);
+    scene.set_tile_follow_tail_at_tail(tile_id, false);
+    for y in
+        (item.clip_pixel_y as u32 + 2)..((item.clip_pixel_y + item.clip_bounds_height) as u32 - 2)
+    {
+        for x in (item.clip_pixel_x as u32 + 2)
+            ..((item.clip_pixel_x + item.clip_bounds_width) as u32 - 2)
+        {
+            let expected = if (x as f32) < split {
+                &painted[1]
+            } else {
+                &partial_without_pill
+            };
+            assert_eq!(
+                crate::test_pixels::pixel_at(&partial, 480, x, y),
+                crate::test_pixels::pixel_at(expected, 480, x, y),
+                "partial cover preserves the exposed pill and covers the rest at {x},{y}"
+            );
+        }
+    }
+    scene.delete_tile(cover, "badge-cover").unwrap();
 
     // Nothing unread → plain pill, no badge (a presence engine renders nothing).
     scene.set_tile_unread_count(tile_id, 0);
@@ -1198,10 +1382,34 @@ async fn expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after
         output_reading,
         "typing resets only INPUT history"
     );
+    scene
+        .overlay
+        .portal_output_reads
+        .entry(tile_id)
+        .or_default()
+        .latest = 5;
     assert!(processor.reset_tile_scroll_to_tail(tile_id, &mut scene));
     assert!(
         scene.tile_follow_tail_at_tail(tile_id),
         "jump-to-latest returns OUTPUT to its measured tail"
+    );
+    assert_eq!(scene.overlay.portal_output_reads[&tile_id].read_through, 5);
+    // A capped repeated-text window can have a new output ordinal with the
+    // same shaped content. FrameReady must still reconcile its read state.
+    scene
+        .overlay
+        .portal_output_reads
+        .get_mut(&tile_id)
+        .unwrap()
+        .latest = 6;
+    scene.set_tile_unread_count(tile_id, 1);
+    processor.reconcile_portal_document_layouts(&mut scene);
+    assert_eq!(scene.overlay.portal_output_reads[&tile_id].read_through, 6);
+    processor.process_keyboard_scroll(tile_id, -40.0, &mut scene);
+    assert_eq!(
+        scene.tile_unread_count(tile_id),
+        0,
+        "read output stays read on backscroll"
     );
 }
 

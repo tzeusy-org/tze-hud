@@ -385,6 +385,7 @@ pub(crate) struct TextRasterizer {
     overlay_renderer: TextRenderer,
     /// Grip menu text, replayed after its plate and before final system chrome.
     menu_renderer: TextRenderer,
+    affordance_renderer: TextRenderer,
     /// Content-addressed IDs of agent-uploaded fonts already loaded into
     /// `font_system`.  Used to skip redundant `load_font_data` calls (which
     /// would add duplicate entries to fontdb).
@@ -440,6 +441,7 @@ pub(crate) struct TextRasterizer {
     /// prepares overlay text does not evict the content layer's buffers.
     overlay_shape_cache: HashMap<[u8; 32], Vec<Buffer>>,
     menu_shape_cache: HashMap<[u8; 32], Vec<Buffer>>,
+    affordance_shape_cache: HashMap<[u8; 32], Vec<Buffer>>,
 }
 
 /// Which glyphon renderer (and shaped-buffer cache) a prepare call targets.
@@ -450,6 +452,7 @@ enum TextLayer {
     /// Runtime chrome text, drawn in the final pass above everything else.
     Overlay,
     Menu,
+    Affordance,
 }
 
 /// Wrap policy for wrapped text (composer draft and every
@@ -764,6 +767,9 @@ impl TextRasterizer {
         let menu_renderer =
             TextRenderer::new(&mut atlas, device, MultisampleState::default(), None);
 
+        let affordance_renderer =
+            TextRenderer::new(&mut atlas, device, MultisampleState::default(), None);
+
         Self {
             font_system,
             swash_cache,
@@ -772,6 +778,7 @@ impl TextRasterizer {
             renderer,
             overlay_renderer,
             menu_renderer,
+            affordance_renderer,
             loaded_font_ids: HashSet::new(),
             uploaded_fonts: Vec::new(),
             #[cfg(test)]
@@ -781,6 +788,7 @@ impl TextRasterizer {
             shape_cache: HashMap::new(),
             overlay_shape_cache: HashMap::new(),
             menu_shape_cache: HashMap::new(),
+            affordance_shape_cache: HashMap::new(),
         }
     }
 
@@ -835,6 +843,7 @@ impl TextRasterizer {
         // rebuilt from the next frame's items on the miss path (hud-991cj).
         self.shape_cache.clear();
         self.overlay_shape_cache.clear();
+        self.affordance_shape_cache.clear();
 
         tracing::info!(
             resource_id = %format_resource_id(&resource_id),
@@ -1288,6 +1297,15 @@ impl TextRasterizer {
         self.prepare_layer(TextLayer::Overlay, device, queue, items)
     }
 
+    pub(crate) fn prepare_affordance_text_items(
+        &mut self,
+        device: &Device,
+        queue: &Queue,
+        items: &[TextItem],
+    ) -> Result<Vec<InlineBackdropQuad>, String> {
+        self.prepare_layer(TextLayer::Affordance, device, queue, items)
+    }
+
     pub(crate) fn prepare_menu_text_items(
         &mut self,
         device: &Device,
@@ -1387,6 +1405,7 @@ impl TextRasterizer {
             TextLayer::Content => &mut self.shape_cache,
             TextLayer::Overlay => &mut self.overlay_shape_cache,
             TextLayer::Menu => &mut self.menu_shape_cache,
+            TextLayer::Affordance => &mut self.affordance_shape_cache,
         });
         let mut shape_keys: Vec<[u8; 32]> = Vec::with_capacity(items.len());
         let mut buffers: Vec<Buffer> = Vec::with_capacity(items.len());
@@ -1487,6 +1506,7 @@ impl TextRasterizer {
             TextLayer::Content => &mut self.renderer,
             TextLayer::Overlay => &mut self.overlay_renderer,
             TextLayer::Menu => &mut self.menu_renderer,
+            TextLayer::Affordance => &mut self.affordance_renderer,
         };
         let prepare_result = renderer
             .prepare(
@@ -1512,6 +1532,7 @@ impl TextRasterizer {
             TextLayer::Content => self.shape_cache = rebuilt,
             TextLayer::Overlay => self.overlay_shape_cache = rebuilt,
             TextLayer::Menu => self.menu_shape_cache = rebuilt,
+            TextLayer::Affordance => self.affordance_shape_cache = rebuilt,
         }
 
         prepare_result.map(|()| inline_backdrop_quads)
@@ -1725,6 +1746,15 @@ impl TextRasterizer {
         self.overlay_renderer
             .render(&self.atlas, &self.viewport, render_pass)
             .map_err(|e| format!("glyphon overlay render: {e:?}"))
+    }
+
+    pub(crate) fn render_affordance_text_pass<'rp>(
+        &'rp self,
+        render_pass: &mut wgpu::RenderPass<'rp>,
+    ) -> Result<(), String> {
+        self.affordance_renderer
+            .render(&self.atlas, &self.viewport, render_pass)
+            .map_err(|e| format!("glyphon affordance render: {e:?}"))
     }
 
     pub(crate) fn render_menu_text_pass<'rp>(
