@@ -663,6 +663,37 @@ pub(super) fn logical_key_to_str(key: &winit::keyboard::Key) -> String {
     }
 }
 
+/// The text a key press types, or `None` for non-text keys and chords.
+///
+/// Shared by the composer/agent character path and the control-panel search.
+/// A key with a layout character types that character. Text with no layout
+/// key, such as a Windows `VK_PACKET` from the touch keyboard or `SendInput`
+/// Unicode events, reaches winit as `Key::Unidentified` with the character
+/// only in `KeyEvent::text`, so that text is used instead. Control characters
+/// (Enter, Tab, Backspace) are never text here, so a `"\r"` is not routed to
+/// an agent as a character; their named keys handle them.
+///
+/// Characters outside the BMP sent as two `VK_PACKET` surrogates are not
+/// covered: winit 0.30 finalizes each half as its own key event and drops the
+/// unpaired surrogate before it reaches this function.
+pub(super) fn key_press_text(
+    key: &winit::keyboard::Key,
+    text: Option<&str>,
+    mods: winit::keyboard::ModifiersState,
+) -> Option<String> {
+    use winit::keyboard::Key;
+    if mods.control_key() || mods.alt_key() || mods.super_key() {
+        return None;
+    }
+    match key {
+        Key::Character(ch) => Some(ch.to_string()),
+        Key::Unidentified(_) => text
+            .filter(|t| !t.is_empty() && !t.chars().any(char::is_control))
+            .map(str::to_string),
+        Key::Named(_) | Key::Dead(_) => None,
+    }
+}
+
 /// Convert winit's `ModifiersState` to `KeyboardModifiers` (RFC 0004 §7.4).
 ///
 /// CapsLock and NumLock toggle states are not exposed by winit's
@@ -694,6 +725,44 @@ mod tests {
         (tx, rx)
     }
     use crate::channels::{INPUT_EVENT_CAPACITY, InputEventKind};
+
+    #[test]
+    fn key_press_text_types_layout_and_packet_text_but_not_chords() {
+        use winit::keyboard::{Key, ModifiersState as M, NamedKey, NativeKey};
+        let none = M::empty();
+        let packet = Key::Unidentified(NativeKey::Windows(0xE7));
+        // Windows VK_PACKET: no layout character, the event text carries it.
+        assert_eq!(
+            key_press_text(&packet, Some("é"), none).as_deref(),
+            Some("é")
+        );
+        assert_eq!(
+            key_press_text(&packet, Some(" "), none).as_deref(),
+            Some(" ")
+        );
+        assert_eq!(key_press_text(&packet, Some("\r"), none), None);
+        assert_eq!(key_press_text(&packet, None, none), None);
+        assert_eq!(key_press_text(&packet, Some("é"), M::CONTROL), None);
+        // Layout characters type with Shift, not with Ctrl/Alt/Super chords.
+        let h = Key::Character("h".into());
+        assert_eq!(key_press_text(&h, Some("h"), none).as_deref(), Some("h"));
+        assert_eq!(
+            key_press_text(&h, Some("H"), M::SHIFT).as_deref(),
+            Some("h")
+        );
+        for chord in [M::CONTROL, M::ALT, M::SUPER] {
+            assert_eq!(key_press_text(&h, None, chord), None);
+        }
+        // Named keys never type text; their key-down handling owns them.
+        assert_eq!(
+            key_press_text(&Key::Named(NamedKey::Enter), Some("\r"), none),
+            None
+        );
+        assert_eq!(
+            key_press_text(&Key::Named(NamedKey::Space), Some(" "), none),
+            None
+        );
+    }
 
     #[test]
     fn enqueue_input_drops_oldest_when_full() {

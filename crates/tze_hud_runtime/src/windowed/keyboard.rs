@@ -1693,7 +1693,7 @@ impl WinitApp {
     /// log it, and broadcast it over the `INPUT_EVENTS` gRPC channel.
     ///
     /// Called both from `WindowEvent::Ime(Ime::Commit)` (IME path) and from
-    /// `Key::Character` in `WindowEvent::KeyboardInput` (direct input path), as
+    /// text-carrying key presses in `WindowEvent::KeyboardInput` (direct input path), as
     /// well as the paste-shortcut path (Ctrl+V clipboard text).
     ///
     /// Events are dropped silently when `current_owner` is `FocusOwner::None`.

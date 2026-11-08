@@ -9,7 +9,7 @@ use winit::event::{ElementState, KeyEvent};
 use winit::keyboard::{Key, KeyCode, ModifiersState, NamedKey, PhysicalKey};
 
 use super::WinitApp;
-use super::input_dispatch::{logical_key_to_str, physical_key_to_key_code_str};
+use super::input_dispatch::{key_press_text, logical_key_to_str, physical_key_to_key_code_str};
 use super::keyboard::keyboard_key_identity;
 use super::lifecycle::{focus_window_for_text_input, window_is_foreground};
 use crate::shell::control_panel::{ControlPanelHandle, PanelEvent, PanelKey};
@@ -31,7 +31,7 @@ pub(super) struct PanelInputState {
 }
 
 /// The panel key for a key press, if the panel handles it (typing is
-/// separate: see [`typed_text`]).
+/// separate: see [`key_press_text`]).
 pub(super) fn panel_key(
     physical: PhysicalKey,
     logical: &Key,
@@ -98,17 +98,6 @@ pub(super) fn panel_key(
     })
 }
 
-/// Printable text a key press types into the search (no Ctrl/Alt chords).
-pub(super) fn typed_text(logical: &Key, mods: ModifiersState) -> Option<String> {
-    if mods.control_key() || mods.alt_key() || mods.super_key() {
-        return None;
-    }
-    match logical.as_ref() {
-        Key::Character(text) => Some(text.to_string()),
-        _ => None,
-    }
-}
-
 impl WinitApp {
     /// The panel, when it is open.
     fn open_panel(&self) -> Option<&ControlPanelHandle> {
@@ -121,6 +110,7 @@ impl WinitApp {
         self.panel_key_input(
             event.physical_key,
             &event.logical_key,
+            event.text.as_deref(),
             event.state == ElementState::Pressed,
         )
     }
@@ -131,6 +121,7 @@ impl WinitApp {
         &mut self,
         physical: PhysicalKey,
         logical: &Key,
+        text: Option<&str>,
         pressed: bool,
     ) -> bool {
         let Some(panel) = self.open_panel().cloned() else {
@@ -152,7 +143,7 @@ impl WinitApp {
         let mods = self.state.modifiers;
         if let Some(key) = panel_key(physical, logical, mods) {
             panel.send(PanelEvent::Key(key));
-        } else if let Some(text) = typed_text(logical, mods) {
+        } else if let Some(text) = key_press_text(logical, text, mods) {
             panel.send(PanelEvent::Text(text));
         }
         true
@@ -379,22 +370,6 @@ mod tests {
                 named(NamedKey::Space),
                 ModifiersState::CONTROL
             ),
-            None
-        );
-    }
-
-    #[test]
-    fn typed_text_skips_modifier_chords() {
-        let h = Key::Character("h".into());
-        assert_eq!(
-            typed_text(&h, ModifiersState::empty()).as_deref(),
-            Some("h")
-        );
-        assert_eq!(typed_text(&h, ModifiersState::SHIFT).as_deref(), Some("h"));
-        assert_eq!(typed_text(&h, ModifiersState::CONTROL), None);
-        assert_eq!(typed_text(&h, ModifiersState::ALT), None);
-        assert_eq!(
-            typed_text(&Key::Named(NamedKey::Enter), ModifiersState::empty()),
             None
         );
     }
@@ -1412,7 +1387,7 @@ pub(super) mod panel_task_tests {
         };
         let (code, logical) = letter("c");
         assert!(
-            !app.panel_key_input(code, &logical, true),
+            !app.panel_key_input(code, &logical, None, true),
             "closed panel takes no keys"
         );
 
@@ -1420,9 +1395,32 @@ pub(super) mod panel_task_tests {
         wait("1", || panel.is_open()).await;
 
         // A typed key searches; its release is swallowed too.
-        assert!(app.panel_key_input(code, &logical, true));
-        assert!(app.panel_key_input(code, &logical, false));
+        assert!(app.panel_key_input(code, &logical, None, true));
+        assert!(app.panel_key_input(code, &logical, None, false));
         wait("2", || {
+            panel.current_model().is_some_and(|m| m.query == "c")
+        })
+        .await;
+
+        // Windows VK_PACKET text (touch keyboard, SendInput Unicode) has no
+        // layout key; it types into the search from the event text.
+        let packet = (
+            PhysicalKey::Unidentified(winit::keyboard::NativeKeyCode::Unidentified),
+            Key::Unidentified(winit::keyboard::NativeKey::Windows(0xE7)),
+        );
+        assert!(app.panel_key_input(packet.0, &packet.1, Some("é"), true));
+        assert!(app.panel_key_input(packet.0, &packet.1, Some("é"), false));
+        wait("2b", || {
+            panel.current_model().is_some_and(|m| m.query == "cé")
+        })
+        .await;
+        let backspace = (
+            PhysicalKey::Code(KeyCode::Backspace),
+            Key::Named(NamedKey::Backspace),
+        );
+        assert!(app.panel_key_input(backspace.0, &backspace.1, None, true));
+        assert!(app.panel_key_input(backspace.0, &backspace.1, None, false));
+        wait("2c", || {
             panel.current_model().is_some_and(|m| m.query == "c")
         })
         .await;
@@ -1500,19 +1498,19 @@ pub(super) mod panel_task_tests {
             Key::Named(NamedKey::Escape),
         );
         // Esc with a query clears it; a second Esc closes and resumes.
-        assert!(app.panel_key_input(esc.0, &esc.1, true));
+        assert!(app.panel_key_input(esc.0, &esc.1, None, true));
         wait("4", || {
             panel.current_model().is_some_and(|m| m.query.is_empty())
         })
         .await;
-        assert!(app.panel_key_input(esc.0, &esc.1, true));
+        assert!(app.panel_key_input(esc.0, &esc.1, None, true));
         wait("5", || !panel.is_open()).await;
         assert!(
             !app.state.safe_mode_atomic.load(Ordering::Acquire),
             "closing resumes"
         );
         assert!(
-            !app.panel_key_input(esc.0, &esc.1, false),
+            !app.panel_key_input(esc.0, &esc.1, None, false),
             "closed: release flows on"
         );
         assert!(!app.panel_captures_cursor());
