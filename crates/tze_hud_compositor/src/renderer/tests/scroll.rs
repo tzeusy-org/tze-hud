@@ -278,7 +278,7 @@ async fn test_collect_text_items_applies_tile_scroll_offset() {
 /// pill (local-first, no adapter round trip).
 #[tokio::test]
 async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
-    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(480, 320).await);
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(480, 320).await);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
 
     let mut scene = SceneGraph::new(480.0, 320.0);
@@ -339,6 +339,62 @@ async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
         "pill (and badge) sits in the lower half of the tile, got y={}",
         item.pixel_y
     );
+
+    // A foreground pill must hide both the pane fill and glyphs beneath it.
+    let mut painted = Vec::new();
+    for (content, background) in [
+        ("".to_string(), Rgba::new(1.0, 0.0, 0.0, 1.0)),
+        (
+            "WWWWWWWWWWWWWWWWWWWWWWWWWWWW\n".repeat(15),
+            Rgba::new(0.0, 0.0, 1.0, 1.0),
+        ),
+    ] {
+        scene
+            .set_tile_root(
+                tile_id,
+                Node {
+                    layout: Default::default(),
+                    id: SceneId::new(),
+                    children: vec![],
+                    data: NodeData::TextMarkdown(TextMarkdownNode {
+                        content,
+                        bounds: Rect::new(0.0, 0.0, 400.0, 200.0),
+                        font_size_px: 14.0,
+                        font_family: FontFamily::SystemMonospace,
+                        color: Rgba::new(1.0, 1.0, 1.0, 1.0),
+                        background: Some(background),
+                        alignment: TextAlign::Start,
+                        overflow: TextOverflow::Clip,
+                        color_runs: Box::default(),
+                    }),
+                },
+            )
+            .unwrap();
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
+        compositor.render_frame_headless(&mut scene, &surface);
+        compositor.portal_tile_anim_states.clear();
+        compositor.render_frame_headless(&mut scene, &surface);
+        painted.push(surface.read_pixels(&compositor.device));
+    }
+    assert_ne!(
+        crate::test_pixels::pixel_at(&painted[0], 480, 20, 20),
+        crate::test_pixels::pixel_at(&painted[1], 480, 20, 20),
+        "probe changes actual OUTPUT pixels"
+    );
+    for y in
+        (item.clip_pixel_y as u32 + 2)..((item.clip_pixel_y + item.clip_bounds_height) as u32 - 2)
+    {
+        for x in (item.clip_pixel_x as u32 + 2)
+            ..((item.clip_pixel_x + item.clip_bounds_width) as u32 - 2)
+        {
+            assert_eq!(
+                crate::test_pixels::pixel_at(&painted[0], 480, x, y),
+                crate::test_pixels::pixel_at(&painted[1], 480, x, y),
+                "opaque foreground pill masks OUTPUT fill and glyphs at {x},{y}"
+            );
+        }
+    }
 
     // Nothing unread → plain pill, no badge (a presence engine renders nothing).
     scene.set_tile_unread_count(tile_id, 0);
