@@ -325,12 +325,18 @@ impl SceneGraph {
                 // Header-band handles (hud-643dv) span the whole top strip of a
                 // portal frame and legitimately overlap interactive controls
                 // (minimize, reply). Windows-titlebar semantics: a control on the
-                // band wins; the band drags only empty header space. So a band
-                // yields to any `accepts_pointer` HitRegionNode under the point,
+                // band wins; the band drags only empty header space. A band
+                // yields to its runtime close or header-contained pointer node,
                 // letting the normal tile/node walk below return that control.
                 // Legacy grips keep their original chrome-priority (they never
                 // overlap controls), so this only affects band handles.
-                if region.is_header_band && self.header_band_yields_to_node(region, x, y) {
+                if region.is_header_band
+                    && (self.overlay.zone_hit_regions.iter().any(|control| {
+                        matches!(control.kind, ZoneInteractionKind::DismissTile { tile_id }
+                            if region.element_kind == DragHandleElementKind::Tile && tile_id == region.element_id)
+                            && control.bounds.contains_point(x, y)
+                    }) || self.header_band_yields_to_node(region, x, y))
+                {
                     break;
                 }
                 return HitResult::ZoneInteraction {

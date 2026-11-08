@@ -4211,6 +4211,132 @@ mod tests {
             scene.leases.get(&lease_id).unwrap().state,
             tze_hud_scene::types::LeaseState::Revoked
         );
+        drop(scene);
+        drop(shared);
+
+        // Exercise the same real pointer path on a driver-bound portal, with
+        // its overlapping header band and a separate live portal left alone.
+        use tze_hud_portal::hub::{PortalKey, Publish};
+        let portals = harness.app.state.portal_projection_driver.portal_handle();
+        let key = PortalKey {
+            agent: "close-agent".into(),
+            id: "closing".into(),
+        };
+        let other = PortalKey {
+            agent: "close-agent".into(),
+            id: "remaining".into(),
+        };
+        for key in [&key, &other] {
+            portals
+                .hub
+                .lock()
+                .unwrap()
+                .publish(
+                    key,
+                    Publish {
+                        text: Some("portal output".into()),
+                        ..Default::default()
+                    },
+                    portals.clock.now_us(),
+                )
+                .unwrap();
+        }
+        harness.app.drain_portal_projection();
+        let (closing_tile, closing_lease, remaining_tile) = {
+            let mut scene = harness.scene();
+            let find = |id: &str| {
+                scene
+                    .tiles
+                    .values()
+                    .find(|tile| {
+                        scene
+                            .portal_surface(tile.id)
+                            .is_some_and(|surface| surface.identity.session_id.ends_with(id))
+                    })
+                    .unwrap()
+                    .id
+            };
+            let tile = find("closing");
+            let remaining = find("remaining");
+            let lease = scene.tiles[&tile].lease_id;
+            let bounds = scene.tiles[&tile].bounds;
+            let band = scene
+                .portal_header_band_anchors(40.0)
+                .into_iter()
+                .find(|(id, _)| *id == tile)
+                .unwrap()
+                .1;
+            scene
+                .overlay
+                .drag_handle_hit_regions
+                .push(tze_hud_scene::DragHandleHitRegion {
+                    element_id: tile,
+                    element_kind: tze_hud_scene::DragHandleElementKind::Tile,
+                    bounds: band,
+                    interaction_id: "portal-header".into(),
+                    hit_region: HitRegionNode {
+                        accepts_pointer: true,
+                        bounds: band,
+                        ..Default::default()
+                    },
+                    tab_order: 0,
+                    is_header_band: true,
+                });
+            scene.overlay.zone_hit_regions.clear();
+            scene.overlay.zone_hit_regions.push(ZoneHitRegion {
+                publication_id: SceneId::null(),
+                zone_name: "__chrome_tile_close__".into(),
+                published_at_wall_us: 0,
+                publisher_namespace: "runtime".into(),
+                bounds: Rect::new(bounds.x + bounds.width - 28.0, bounds.y + 6.0, 22.0, 22.0),
+                kind: ZoneInteractionKind::DismissTile { tile_id: tile },
+                interaction_id: "portal-close".into(),
+                tab_order: 0,
+            });
+            (tile, lease, remaining)
+        };
+        let close = harness.scene().overlay.zone_hit_regions[0].bounds;
+        // Releasing on the close after a press elsewhere must not dismiss.
+        harness.app.state.cursor_x = close.x - 100.0;
+        harness.app.state.cursor_y = close.y;
+        harness.app.enqueue_pointer_event(PointerEventKind::Down);
+        harness.app.state.cursor_x = close.x + 10.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        harness.drain();
+        assert!(harness.scene().tiles.contains_key(&closing_tile));
+        harness.click(close.x + 10.0, close.y + 10.0);
+        harness.drain();
+        assert!(!harness.scene().tiles.contains_key(&closing_tile));
+        assert!(harness.scene().tiles.contains_key(&remaining_tile));
+        assert_eq!(
+            harness.scene().leases[&closing_lease].state,
+            tze_hud_scene::types::LeaseState::Revoked
+        );
+        assert!(
+            portals.hub.lock().unwrap().get(&key).is_none(),
+            "actual click reclaims Hub attachment"
+        );
+        assert!(portals.hub.lock().unwrap().get(&other).is_some());
+        portals
+            .hub
+            .lock()
+            .unwrap()
+            .publish(
+                &key,
+                Publish {
+                    text: Some("reattached output".into()),
+                    ..Default::default()
+                },
+                portals.clock.now_us(),
+            )
+            .unwrap();
+        harness.app.drain_portal_projection();
+        assert_eq!(
+            harness.tile_count(),
+            2,
+            "publish reattaches alongside unaffected portal"
+        );
+        assert!(!harness.scene().tiles.contains_key(&closing_tile));
     }
 
     /// Install one ordinary focused button (not a portal composer/control) and

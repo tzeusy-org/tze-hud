@@ -4105,6 +4105,35 @@ fn header_band_drags_empty_header_but_yields_to_minimize_control() {
         },
         "an interactive control on the band must win over the drag band (Windows-titlebar)"
     );
+    let mut close = ZoneHitRegion {
+        publication_id: SceneId::null(),
+        zone_name: "__chrome_tile_close__".into(),
+        published_at_wall_us: 0,
+        publisher_namespace: "runtime".into(),
+        bounds: Rect::new(650.0, 105.0, 30.0, 30.0),
+        kind: ZoneInteractionKind::DismissTile {
+            tile_id: SceneId::new(),
+        },
+        interaction_id: "close".into(),
+        tab_order: 0,
+    };
+    scene.overlay.zone_hit_regions.push(close.clone());
+    assert!(
+        matches!(
+            scene.hit_test(660.0, 115.0),
+            HitResult::ZoneInteraction {
+                kind: ZoneInteractionKind::DragHandle { .. },
+                ..
+            }
+        ),
+        "foreign close cannot steal a header"
+    );
+    close.kind = ZoneInteractionKind::DismissTile { tile_id: frame_id };
+    scene.overlay.zone_hit_regions[0] = close;
+    assert!(
+        matches!(scene.hit_test(660.0, 115.0), HitResult::ZoneInteraction {
+        kind: ZoneInteractionKind::DismissTile { tile_id }, .. } if tile_id == frame_id)
+    );
 }
 
 #[test]
