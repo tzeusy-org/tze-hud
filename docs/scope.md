@@ -572,7 +572,7 @@ the [`ci.yml`](../.github/workflows/ci.yml) header and this section together.
   informational. Owner-host checks, including POC acceptance above, are never
   a merge gate.
 - **Mirrored locally.** `just ci` runs the required gates in CI order;
-  `just pre-push` runs fmt and the exact CI clippy command.
+  `just pre-push` runs the host-identifier check, fmt and the exact CI clippy command.
 
 Open work toward these targets: `hud-1dnk5` (`just dev-run`, Windows-first
 quickstart, capture diff) and `hud-51ujj.7` (live smoke against the paired

@@ -15,6 +15,9 @@ Two layers:
   the identifiers it names are never committed; CI has none and skips it.
 
 Findings print path:line and the rule, never the matched value.
+
+Known limits: Tailscale IPv6 host addresses (fd7a:115c:a1e0::/48), user names
+and home paths have no generic rule; list real ones in the local denylist.
 """
 from __future__ import annotations
 
@@ -28,17 +31,17 @@ from pathlib import Path
 # Synthetic addresses used by tests and docs: range bounds and made-up hosts.
 # A new fixture should reuse one of these rather than extend the list.
 SYNTHETIC_CGNAT = frozenset({
-    "100.64.0.0",       # range base (100.64.0.0/10)
-    "100.64.0.1",
-    "100.72.0.9",
-    "100.100.1.1",
-    "100.100.1.2",
-    "100.100.1.3",
-    "100.101.102.103",
-    "100.127.255.255",  # range top
+    "100.64.0.0",       # range base in the Tailscale CIDR constants (firewall, net_addrs)
+    "100.64.0.1",       # first host: pairing card and connect-prompt fixtures
+    "100.72.0.9",       # non-Tailscale interface fixture in net_addrs tests
+    "100.100.1.1",      # made-up tailnet host
+    "100.100.1.2",      # made-up tailnet host (pairing, firewall, connect prompt)
+    "100.100.1.3",      # made-up tailnet host
+    "100.101.102.103",  # made-up tailnet host in net_addrs range tests
+    "100.127.255.255",  # range top in net_addrs range tests
 })
 CGNAT = ipaddress.ip_network("100.64.0.0/10")
-IPV4 = re.compile(r"(?<![\d.])(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?![\d.])")
+IPV4 = re.compile(r"(?<!\d\.)(?<!\d)(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})(?!\.?\d)")
 MAGICDNS = re.compile(r"\b[a-z0-9-]+\.[a-z0-9-]+\.ts\.net\b", re.IGNORECASE)
 KEY_FILE = re.compile(r"\bid_(?:rsa|dsa|ecdsa|ed25519)(?:_sk)?\b")
 SKIP_SUFFIXES = (".png", ".jpg", ".jpeg", ".gif", ".ico", ".ttf", ".otf", ".woff", ".woff2", ".lock", ".pdf")

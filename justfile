@@ -104,6 +104,7 @@ pre-push mode="head":
 # Selection belongs to pre-push; include calibration headless cfg, not only changed crates.
 [private]
 pre-push-check:
+    python3 scripts/ci/check_host_identifiers.py
     {{cargo}} fmt --all --check
     {{cargo}} clippy --workspace --all-targets --features benchmark/headless -- -D warnings
 
