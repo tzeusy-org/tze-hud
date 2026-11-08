@@ -1187,7 +1187,11 @@ def scenario_safe_mode(run: Run) -> None:
     run.key("ctrl+shift+F12")
     run.expect("pressed again it resumes", lambda st: st.get("safe_mode") is False)
     # No publish/input/hold refresh before observing survival after the real exit.
-    run.observe_for("resume does not reap the retained portal", lambda st: st.get("safe_mode") is False and intact(st), 5.0)
+    run.observe_for("resume does not reap the retained portal",
+                    lambda st: st.get("safe_mode") is False and on(s, lambda p: p["state"] == "Active")(st), 5.0)
+    # Resume invalidates measured layouts for a frame. Observe liveness above
+    # throughout that transition, then require the retained text to be measured.
+    run.expect("the original content is measured after resume", intact, timeout_s=1.0)
     run.snapshot("safe-mode.resumed")
     run.publish(s, content="\nafter resume")
     run.expect("publishing works again",
