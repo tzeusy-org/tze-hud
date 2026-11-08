@@ -1084,15 +1084,26 @@ def scenario_resize_hotkey(run: Run) -> None:
     run.expect("republish uses the resized OUTPUT",
                               on(s, lambda p: (p["output"]["last_visible_line"] or "").startswith("geometry marker")))
     after = portal_entry(run.settle(), s)
-    if after["rect"] != before["rect"] or any(after["panes"][pane] != before["panes"][pane]
-                                             for pane in ("header", "input", "output", "composer")):
-        raise ScenarioFailed("republish preserves resized frame, pane and composer hit geometry", {"before": before, "after": after})
-    outer = after["rect"]
-    for name in ("header", "input", "output", "composer"):
-        pane = after["panes"][name]
-        if not (outer["x"] <= pane["x"] < pane["x"] + pane["w"] <= outer["x"] + outer["w"]
-                and outer["y"] <= pane["y"] < pane["y"] + pane["h"] <= outer["y"] + outer["h"]):
-            raise ScenarioFailed("resized panes and hit rect stay inside the frame", {"pane": name, "rect": pane, "frame": outer})
+    if after["rect"] != before["rect"]:
+        raise ScenarioFailed("republish preserves the viewer's resized frame", {"before": before, "after": after})
+    # Republish resolves canonical token chrome inside the retained viewport;
+    # internal reflow is allowed, but both layouts must keep paint and hits coherent.
+    for layout in (before, after):
+        outer, panes = layout["rect"], layout["panes"]
+        header, left, right = (panes[name] for name in ("header", "input", "output"))
+        for name in ("header", "input", "output", "composer"):
+            pane = panes[name]
+            if not (outer["x"] <= pane["x"] < pane["x"] + pane["w"] <= outer["x"] + outer["w"]
+                    and outer["y"] <= pane["y"] < pane["y"] + pane["h"] <= outer["y"] + outer["h"]):
+                raise ScenarioFailed("resized panes and hit rect stay inside the frame", {"pane": name, "rect": pane, "frame": outer})
+        if not (header["x"] == outer["x"] and header["y"] == outer["y"] and header["w"] == outer["w"]
+                and left["y"] == right["y"] == header["y"] + header["h"]
+                and left["y"] + left["h"] == right["y"] + right["h"] == outer["y"] + outer["h"]
+                and left["x"] == outer["x"] and left["x"] + left["w"] <= right["x"]
+                and right["x"] + right["w"] == outer["x"] + outer["w"] and panes["composer"] == left):
+            raise ScenarioFailed("header, independent panes and composer hit stay aligned", {"layout": layout})
+    run.click(f"{s}/output")
+    run.expect("republished OUTPUT remains outside the composer hit", on(s, lambda p: p["focus"] == "tile"))
     run.click(f"{s}/composer")
     run.type("resized reply")
     run.expect("the resized composer hit takes real typing", on(s, lambda p: p["input"]["draft_chars"] == 13))
