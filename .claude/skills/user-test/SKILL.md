@@ -15,7 +15,9 @@ metadata:
 
 Run the mechanical checks yourself first: `just gesture` drives a fresh Linux
 build on a private Xvfb display with real XTEST input (AGENTS.md, T13 in
-`docs/scope.md`), then use the Windows dispatch below. Ask the owner only about
+`docs/scope.md`), then the Windows tier: `gh workflow run windows.yml --ref
+<branch>` replays them with real `SendInput` on a hosted VM. Use the steps below
+on the owner's HUD only for what those cannot cover. Ask the owner only about
 the T13 residual list (visual preference, owner hardware, network/install,
 time-based behaviour), with a link to the evidence.
 

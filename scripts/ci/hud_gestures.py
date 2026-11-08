@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
-"""Drive a real Linux tze_hud with real X input on a private Xvfb (T13 tier L).
+"""Drive a real tze_hud with real OS input (T13 tiers L and W).
 
-Each run starts its own Xvfb (`-displayfd`) and its own HUD from `--exe` with
-a freshly seeded config, an ephemeral loopback MCP port and gRPC disabled,
-then plays gesture scenarios through XTEST (`xdotool`) and asserts on state:
+Tier L (`--injector xtest`, Linux): each run starts its own Xvfb and plays
+scenarios through XTEST (`xdotool`). Tier W (`--injector sendinput`,
+Windows): only on a GitHub-hosted VM, through Win32 `SendInput`
+(`hud_sendinput.py`), as an informational step in `windows.yml`. Either way
+the run starts its own HUD from `--exe` with a freshly seeded config, an
+ephemeral loopback MCP port and gRPC disabled, and asserts on state:
 the `/admin/status` `portals` block and MCP results. Pixels are checked only
 inside rects that status reports. Readiness is observed (`idle_since_ms`),
 never slept for, and nothing is retried.
 
-Owned mode only. Input is injected only into the Xvfb this run started, and
-only while `/admin/status` reports the pid of the HUD this run launched.
+Owned mode only. Input is injected only while `/admin/status` reports the
+pid of the HUD this run launched, and only into the Xvfb this run started
+(L) or while an owned process has the foreground window on a CI VM (W).
 
     just gesture                      # build, then every scenario
     just gesture composer unread      # selected scenarios
@@ -19,7 +23,7 @@ Artifacts land in `test_results/gestures/<sha>/<run>/` (gitignored): status
 JSON and runtime screenshots before/after each scenario, an X screen grab and
 the log tail on failure, and `timeline.json`.
 
-Stdlib only (plus the `xdotool`, `Xvfb` and optional `ffmpeg` executables).
+Stdlib only (plus `xdotool`, `Xvfb` and optional `ffmpeg` for tier L).
 """
 
 from __future__ import annotations
@@ -45,11 +49,18 @@ from windows_smoke import (  # noqa: E402  (sibling import; windows_smoke never 
     RequestFailure,
     Smoke,
     capture_frame,
+    encode_png_rgba,
     kill_pid,
     seed_config,
     wait_for_mcp,
     wait_until,
 )
+
+WINDOWS = sys.platform == "win32"
+if WINDOWS:
+    import hud_sendinput as WIN  # noqa: E402,N812  (ctypes Win32; imported only where it loads)
+else:
+    WIN = None
 
 REPO = Path(__file__).resolve().parents[2]
 CONFIG = REPO / "app/tze_hud_app/config/production.toml"
@@ -90,6 +101,22 @@ def check_owned(*, started_display: str | None, target_display: str | None,
         raise Refused("no owned HUD process")
     if status_pid != owned_pid:
         raise Refused(f"/admin/status pid {status_pid!r} is not the owned HUD pid {owned_pid}")
+
+
+def check_owned_windows(*, github_actions: str | None, foreground_pid: int, owned_hud_pid: int | None,
+                        helper_pids: list[int], status_pid: object, url: str) -> None:
+    """Refuse SendInput unless this is a CI VM and an owned process has the foreground."""
+    host = urllib.parse.urlsplit(url).hostname
+    if host not in {"127.0.0.1", "localhost", "::1"}:
+        raise Refused(f"refusing a borrowed HUD URL (host {host!r}); this harness owns its HUD")
+    if github_actions != "true":
+        raise Refused("SendInput reaches the real desktop; it runs only on a CI VM (GITHUB_ACTIONS=true)")
+    if owned_hud_pid is None:
+        raise Refused("no owned HUD process")
+    if status_pid != owned_hud_pid:
+        raise Refused(f"/admin/status pid {status_pid!r} is not the owned HUD pid {owned_hud_pid}")
+    if foreground_pid not in {owned_hud_pid, *helper_pids}:
+        raise Refused(f"the foreground window belongs to pid {foreground_pid}, not an owned process")
 
 
 # ── Geometry ─────────────────────────────────────────────────────────────────
@@ -193,6 +220,8 @@ def free_port() -> int:
 
 
 def pid_alive(pid: int) -> bool:
+    if WINDOWS:  # os.kill(pid, 0) would terminate it there
+        return WIN.process_alive(pid)
     try:
         os.kill(pid, 0)
     except ProcessLookupError:
@@ -200,6 +229,12 @@ def pid_alive(pid: int) -> bool:
     except PermissionError:
         return True
     return True
+
+
+def windows_huds() -> list[int]:
+    out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq tze_hud.exe", "/FO", "CSV", "/NH"],
+                         capture_output=True, text=True).stdout
+    return [int(row.split('","')[1]) for row in out.splitlines() if row.startswith('"tze_hud.exe"')]
 
 
 @dataclass
@@ -216,7 +251,9 @@ class Run:
     config_dir: Path | None = None
     log: Path | None = None
     smoke: Smoke | None = None
-    xtest: XTest | None = None
+    injector: str = "xtest"
+    inj: object | None = None  # XTest or hud_sendinput.SendInput
+    helper_pids: list[int] = field(default_factory=list)  # owned non-HUD apps (scenario 10's Notepad)
     timeline: list[dict] = field(default_factory=list)
 
     @property
@@ -226,19 +263,29 @@ class Run:
     # Lifecycle ───────────────────────────────────────────────────────────
 
     def start(self) -> None:
-        self.xvfb, self.display = start_xvfb()
-        self.port = free_port()
+        if self.injector == "sendinput":
+            if os.environ.get("GITHUB_ACTIONS") != "true":
+                raise Refused("tier W drives the real desktop; it runs only on a CI VM (GITHUB_ACTIONS=true)")
+            running = windows_huds()
+            if running:  # it would hold the chords and the port handover; never touch it
+                raise Refused(f"tze_hud.exe is already running (pid {running}); this harness owns its HUD")
         self.home = Path(tempfile.mkdtemp(prefix="hud_gestures_home_"))
-        (self.home / ".config").mkdir()
+        if self.injector == "xtest":
+            self.xvfb, self.display = start_xvfb()
+            (self.home / ".config").mkdir()
+            env = dict(os.environ, DISPLAY=self.display, WAYLAND_DISPLAY="", HOME=str(self.home),
+                       XDG_CONFIG_HOME=str(self.home / ".config"))
+            if LAVAPIPE.exists():
+                env["VK_ICD_FILENAMES"] = str(LAVAPIPE)
+        else:
+            for name in ("LocalAppData", "AppData"):
+                (self.home / name).mkdir()
+            env = dict(os.environ, LOCALAPPDATA=str(self.home / "LocalAppData"), APPDATA=str(self.home / "AppData"))
+        env["TZE_HUD_LOG"] = "info"
+        self.port = free_port()
         config = seed_config(CONFIG, self.psk)
         self.config_dir = config.parent
         self.log = self.out / "hud.log"
-        env = dict(
-            os.environ, DISPLAY=self.display, WAYLAND_DISPLAY="", HOME=str(self.home),
-            XDG_CONFIG_HOME=str(self.home / ".config"), TZE_HUD_LOG="info",
-        )
-        if LAVAPIPE.exists():
-            env["VK_ICD_FILENAMES"] = str(LAVAPIPE)
         with open(self.log, "wb") as log:
             self.hud = subprocess.Popen(
                 [str(self.exe), "--config", str(config), "--window-mode", "fullscreen",
@@ -250,14 +297,40 @@ class Run:
         self.owned_pids.append(self.hud.pid)
         self.smoke = Smoke(f"http://127.0.0.1:{self.port}/mcp", self.psk)
         wait_for_mcp(self.smoke, self.hud, 60)
-        self.xtest = XTest(self.display, self.guard)
+        self.inj = XTest(self.display, self.guard) if self.injector == "xtest" else WIN.SendInput(self.guard)
+        if self.injector == "sendinput":
+            self._check_identity_mapping()
         self.guard()
 
+    def _check_identity_mapping(self) -> None:
+        """Status rects are scene pixels; SendInput takes physical ones. Run only where they agree."""
+        def reported():
+            displays = self.status().get("displays") or []
+            return bool(displays and displays[0].get("width")), displays
+        try:
+            displays, _ = wait_until(reported, what="displays reported", timeout_s=30, interval_s=0.2)
+        except AssertionError:
+            raise Refused("/admin/status never reported the primary display") from None
+        primary = displays[0]
+        physical = WIN.screen_size()
+        scene = (primary.get("width"), primary.get("height"))
+        if WIN.system_dpi() != 96 or scene != physical or (primary.get("x"), primary.get("y")) != (0, 0):
+            raise Refused(f"scene-to-screen mapping is not identity (scene {scene}, screen {physical}, "
+                          f"dpi {WIN.system_dpi()}); add a scaled mapping before running here")
+
     def guard(self) -> None:
+        if self.injector == "sendinput":
+            status = self.status()
+            check_owned_windows(github_actions=os.environ.get("GITHUB_ACTIONS"),
+                                foreground_pid=WIN.foreground_pid(),
+                                owned_hud_pid=self.pid if self.pid and pid_alive(self.pid) else None,
+                                helper_pids=[p for p in self.helper_pids if pid_alive(p)],
+                                status_pid=status.get("pid"), url=self.smoke.url)
+            return
         if not self.xvfb or self.xvfb.poll() is not None:
             raise Refused("the harness's Xvfb is gone; its display number may be reused")
         status = self.status()
-        check_owned(started_display=self.display, target_display=self.xtest.display if self.xtest else self.display,
+        check_owned(started_display=self.display, target_display=self.inj.display if self.inj else self.display,
                     owned_pid=self.pid if self.pid and pid_alive(self.pid) else None,
                     status_pid=status.get("pid"), url=self.smoke.url)
 
@@ -270,15 +343,16 @@ class Run:
                 self.hud.wait(15)
             except subprocess.TimeoutExpired:
                 self.hud.kill()
-        for pid in self.owned_pids:
+        for pid in self.owned_pids + self.helper_pids:
             if pid_alive(pid):
                 kill_pid(pid)
         deadline = time.monotonic() + 10
-        while time.monotonic() < deadline and any(pid_alive(p) for p in self.owned_pids):
+        while time.monotonic() < deadline and any(pid_alive(p) for p in self.owned_pids + self.helper_pids):
             time.sleep(0.1)
         if self.hud:
             self.hud.poll()  # reap our direct child
         survivors += [f"hud pid {p}" for p in self.owned_pids if pid_alive(p) and not self._zombie(p)]
+        survivors += [f"helper pid {p}" for p in self.helper_pids if pid_alive(p)]
         # A replacement HUD that never answered was never recorded; find it by
         # this run's private HOME, which nothing else uses.
         for pid in self._strays():
@@ -297,6 +371,10 @@ class Run:
         return survivors
 
     def _strays(self) -> list[int]:
+        if self.hud is None:  # never launched: nothing here is ours
+            return []
+        if WINDOWS:  # start() refused unless none ran before, so any left now is this run's
+            return [pid for pid in windows_huds() if pid not in self.owned_pids]
         if not self.home:
             return []
         marker = f"HOME={self.home}".encode() + b"\0"
@@ -380,7 +458,7 @@ class Run:
     def point(self, target: str) -> tuple[int, int]:
         self.mark()
         x, y = resolve_target(self.status(), target)
-        self.xtest.move_abs(x, y)
+        self.glide(x, y)
         self.step(f"point {target} {x},{y}")
         return x, y
 
@@ -389,47 +467,81 @@ class Run:
             self.point(target)
         else:
             self.mark()
-        self.xtest.click()
+        self.inj.click()
         self.step(f"click {target or ''}".rstrip())
 
     def wheel(self, target: str, notches: int) -> None:
-        """Positive notches scroll toward the start (wheel up)."""
+        """Positive notches scroll toward the start (wheel up); returns once the HUD handled them."""
         self.point(target)
-        self.xtest.click(4 if notches > 0 else 5, repeat=abs(notches))
+        surface, _, pane = target.partition("/")
+        here = "composer" if pane in {"composer", "input"} else "none"
+        self.expect(f"pointer on {target}", on(surface, lambda p: p["hover"] == here))
+        self.inj.click(4 if notches > 0 else 5, repeat=abs(notches))
         self.step(f"wheel {target} {notches}")
+        self.handled(target)
+
+    def glide(self, x: int, y: int) -> None:
+        """Arrive at x,y in three motion events, all inside the destination, as a real pointer does.
+
+        The runtime drops a pointer move that finds the scene lock busy
+        (hud-65gpz), and hover follows the last move it handled; a single
+        synthetic jump can therefore leave hover stale. It also guarantees
+        motion when the pointer already rests at x,y.
+        """
+        for dx in (-2, -1, 0):
+            self.inj.move_abs(x + dx, y)
+
+    def handled(self, target: str) -> None:
+        """Prove queued input was handled: hover a pane whose hover state differs, and observe it.
+
+        The HUD handles input in order, so seeing the hover change means every
+        notch queued before the move was handled too (wheel() confirmed the
+        opposite hover before injecting, so this is a change). Without this a long
+        burst still draining (Windows hands wheel messages over a few per
+        frame) swallows the next gesture.
+        """
+        surface, _, pane = target.partition("/")
+        other, hover = ("output", "none") if pane in {"composer", "input"} else ("composer", "composer")
+        x, y = resolve_target(self.status(), f"{surface}/{other}")
+        self.glide(x, y)
+        self.expect(f"input to {target} handled", on(surface, lambda p: p["hover"] == hover))
 
     def drag(self, start: tuple[int, int], end: tuple[int, int], *, release: bool = True, steps: int = 8) -> None:
         self.mark()
-        self.xtest.move_abs(*start)
-        self.xtest.button(True)
+        self.inj.move_abs(*start)
+        self.inj.button(True)
         for i in range(1, steps + 1):
-            self.xtest.move_abs(start[0] + (end[0] - start[0]) * i // steps,
+            self.inj.move_abs(start[0] + (end[0] - start[0]) * i // steps,
                                 start[1] + (end[1] - start[1]) * i // steps)
         if release:
-            self.xtest.button(False)
+            self.inj.button(False)
         self.step(f"drag {start} -> {end}{'' if release else ' (held)'}")
 
     def type(self, text: str) -> None:
         self.mark()
-        self.xtest.type(text)
+        self.inj.type(text)
         self.step(f"type {len(text)} chars")
 
     def key(self, chord: str) -> None:
         self.mark()
-        self.xtest.key(chord)
+        self.inj.key(chord)
         self.step(f"key {chord}")
 
     # MCP ─────────────────────────────────────────────────────────────────
 
     def publish(self, surface: str, **args) -> dict:
         self.mark()
-        reply = self.smoke.ok("hud_publish", {"surface": surface, **args})
+        is_error, reply = self.smoke.call("hud_publish", {"surface": surface, **args})
+        if is_error:  # the refusal's code and hint, never content
+            raise ScenarioFailed(f"hud_publish {surface} refused", {"code": reply.get("code"), "hint": reply.get("hint")})
         self.step(f"publish {surface}")
         return reply
 
     def inputs(self, wait_ms: int = 0) -> list[dict]:
         """Take and ack queued hud_input items."""
-        reply = self.smoke.ok("hud_input", {"wait_ms": wait_ms, "max_items": 20}, timeout_s=10 + wait_ms / 1000)
+        is_error, reply = self.smoke.call("hud_input", {"wait_ms": wait_ms, "max_items": 20}, timeout_s=10 + wait_ms / 1000)
+        if is_error:
+            raise ScenarioFailed("hud_input refused", {"code": reply.get("code"), "hint": reply.get("hint"), "wait_ms": wait_ms})
         items = reply.get("items") or []
         if items:
             self.smoke.ok("hud_input", {"ack": [i["id"] for i in items]})
@@ -468,7 +580,10 @@ class Run:
         return status
 
     def screen_grab(self, name: str) -> None:
-        if shutil.which("ffmpeg"):
+        """What a person would see: the whole desktop, not the HUD's own frame."""
+        if WINDOWS:
+            (self.out / f"{name}.desktop.png").write_bytes(encode_png_rgba(*WIN.desktop_rgba()))
+        elif shutil.which("ffmpeg"):
             subprocess.run(
                 ["ffmpeg", "-loglevel", "error", "-f", "x11grab", "-video_size", f"{SCREEN[0]}x{SCREEN[1]}",
                  "-i", self.display, "-frames:v", "1", "-y", str(self.out / f"{name}.x11.png")],
@@ -539,18 +654,22 @@ def scenario_output_anchor(run: Run) -> None:
     publish(5)
     run.settle()
     run.expect("head-trim keeps the visible line", on(s, lambda p: first_line(p) == anchor))
-    # Wheel to the very top, then prove it is the top: ten more notches up and
-    # one down, which must land one notch below `top` (X delivers in order, so
-    # seeing the down proves the ups were handled), then one up returns to it.
-    run.wheel(f"{s}/output", 900)
-    top = first_line(portal_entry(run.settle(), s))
-    run.wheel(f"{s}/output", 10)
-    run.wheel(f"{s}/output", -1)
-    run.expect("one notch below the top", on(s, lambda p: first_line(p) != top))
-    run.wheel(f"{s}/output", 1)
-    run.expect("back at the same top", on(s, lambda p: first_line(p) == top))
-    if not top or not top.startswith("a-") or top.startswith("a-000"):
-        raise ScenarioFailed("the head was trimmed past the retention bound", {"top": top})
+    # Wheel up in handled bursts until a burst no longer moves the view: the top.
+    top = None
+    for _ in range(12):
+        run.wheel(f"{s}/output", 100)
+        now = first_line(portal_entry(run.settle(), s))
+        if now == top:
+            break
+        top = now
+    else:
+        raise ScenarioFailed("the view reaches the top", {"first_visible_line": top})
+    # The top must be where the 16 KiB retention bound puts it, within one
+    # publish: not a-000 (nothing trimmed) and not mid-buffer (a dropped burst).
+    line_bytes = len(lines("a", 0, 1, pad=20)) + 1
+    retained = (6 * chunk - int(top.split()[0][2:])) * line_bytes if top and top.startswith("a-") else -1
+    if not 16 * 1024 - chunk * line_bytes < retained <= 16 * 1024:
+        raise ScenarioFailed("the head was trimmed to the retention bound", {"top": top, "retained_bytes": retained})
     run.step(f"ok head trimmed: top is {top.split()[0]}")
 
 
@@ -733,7 +852,7 @@ def scenario_drag_alignment(run: Run) -> None:
     run.point(f"{s}/composer")
     run.expect("the moved composer hovers", on(s, lambda p: p["hover"] == "composer"))
     old = before["panes"]["composer"]
-    run.xtest.move_abs(int(old["x"]) + 4, int(old["y"]) + 4)
+    run.glide(int(old["x"]) + 4, int(old["y"]) + 4)
     run.expect("old composer location no longer hovers it", on(s, lambda p: p["hover"] == "none"))
     run.point(f"{s}/composer")
     run.click()
@@ -751,11 +870,11 @@ def scenario_drag_release(run: Run) -> None:
     hx, hy = resolve_target(run.status(), f"{s}/header")
     run.drag((hx, hy), (hx + 100, hy + 40), release=False)
     run.expect("follows while held", on(s, lambda p: p["rect"]["x"] - rect["x"] >= 80))
-    run.xtest.button(False)
+    run.inj.button(False)
     run.step("mouse-up")
     run.settle()
     dropped = portal_entry(run.status(), s)["rect"]
-    run.xtest.move_abs(hx + 300, hy + 140)
+    run.inj.move_abs(hx + 300, hy + 140)
     run.step("move after release")
     # A drag still held would carry the portal along; hovering its composer
     # proves the move was handled.
@@ -827,6 +946,88 @@ def scenario_resize_hotkey(run: Run) -> None:
     run.expect("Ctrl+= grows the portal", on(s, lambda p: p["rect"]["w"] > shrunk["w"] or p["rect"]["h"] > shrunk["h"]))
 
 
+def scenario_unicode_typing(run: Run) -> None:
+    """Text sent as Unicode packets (on-screen keyboards, emoji panels) reaches the composer exactly."""
+    s = "portal:g-unicode"
+    open_portal(run, s, "n", count=5, expects_reply=True)
+    run.click(f"{s}/composer")
+    run.expect("composer focused", on(s, lambda p: p["focus"] == "composer"))
+    text = "héllo ✓ 你好"
+    run.mark()
+    getattr(run.inj, "type_unicode", run.inj.type)(text)
+    run.step(f"type {len(text)} chars as Unicode")
+    run.expect("Unicode draft", on(s, lambda p: p["input"]["draft_chars"] == len(text)))
+    run.key("Return")
+    items = run.take(1)
+    if [i.get("text") for i in items] != [text]:
+        raise ScenarioFailed("Enter submits the exact Unicode text", {"items": items})
+
+
+def scenario_no_focus_steal(run: Run) -> None:
+    """10. Publishing never takes the foreground from the app being typed in; its keys stay there."""
+    s = "portal:g-focus"
+    open_portal(run, s, "f", count=5, expects_reply=True)
+    run.click(f"{s}/composer")
+    run.type("abc")
+    run.expect("a composer draft to protect", on(s, lambda p: p["input"]["draft_chars"] == 3))
+    notepad = subprocess.Popen(["notepad.exe"])
+    run.helper_pids.append(notepad.pid)
+    try:
+        def foreground():
+            if WIN.foreground_pid() != notepad.pid:
+                WIN.bring_to_front(notepad.pid)  # a window request, not injected input
+            return WIN.foreground_pid() == notepad.pid, WIN.foreground_pid()
+        wait_until(foreground, what="Notepad in the foreground", timeout_s=15, interval_s=0.2)
+        run.step("ok Notepad foreground")
+        for n in range(3):
+            run.publish(s, content=f"\nbackground {n}")
+        run.publish("zone:subtitle", content="background notice", ttl_ms=5000)
+        run.expect("publishes shown", on(s, lambda p: (p["output"]["last_visible_line"] or "").startswith("background 2")))
+        if WIN.foreground_pid() != notepad.pid:
+            raise ScenarioFailed("the foreground stays with Notepad through publishes",
+                                 {"foreground_pid": WIN.foreground_pid(), "hud_pid": run.pid})
+        text = "typed into notepad"
+        run.type(text)
+        wait_until(lambda: (WIN.edit_text(notepad.pid) == text, WIN.edit_text(notepad.pid)),
+                   what="Notepad receives the keys", timeout_s=SETTLE_S)
+        run.expect("the HUD composer draft is untouched", on(s, lambda p: p["input"]["draft_chars"] == 3))
+        if run.inputs():
+            raise ScenarioFailed("no hud_input from keys typed into Notepad", {})
+    finally:
+        kill_pid(notepad.pid)
+        notepad.wait(10)
+        run.helper_pids.remove(notepad.pid)
+
+
+def scenario_safe_mode(run: Run) -> None:
+    """12. The pause chord pauses agents and keeps the portal; pressed again it resumes.
+
+    Lease time across a pause is not observable through MCP for portals; the
+    runtime's safe_mode unit tests own it. This proves the real chord path.
+    """
+    s = "portal:g-safe"
+    open_portal(run, s, "m", count=5)
+    run.publish(s, content="\nheld", ttl_ms=60_000)
+    run.key("ctrl+shift+F12")
+    run.expect("the pause chord sets safe mode", lambda st: st.get("safe_mode") is True)
+    paused = time.monotonic()
+    is_error, reply = run.smoke.call("hud_publish", {"surface": s, "content": "\nwhile paused"})
+    if not is_error or reply.get("code") != "SAFE_MODE_ACTIVE":
+        raise ScenarioFailed("publishing while paused returns SAFE_MODE_ACTIVE", {"reply": reply})
+    run.inputs()  # input polling stays available while paused
+    run.key("ctrl+shift+F12")
+    run.expect("pressed again it resumes", lambda st: st.get("safe_mode") is False)
+    paused_s = time.monotonic() - paused
+    run.expect("the portal survived the pause", on(s, lambda p: (p["output"]["last_visible_line"] or "") == "held"))
+    run.publish(s, content="\nafter resume")
+    run.expect("publishing works again",
+               on(s, lambda p: (p["output"]["last_visible_line"] or "").startswith("after resume")))
+    run.step(f"ok paused for {paused_s:.1f}s")
+
+
+# Windows only: they need Win32 foreground/edit-control access or global hotkeys.
+TIER_W_ONLY = {"no-focus-steal", "safe-mode"}
+
 SCENARIOS: dict[str, Callable[[Run], None]] = {
     "output-anchor": scenario_output_anchor,          # 1
     "independent-scroll": scenario_independent_scroll,  # 2
@@ -839,6 +1040,9 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "drag-release": scenario_drag_release,            # 9
     "lifecycle": scenario_lifecycle,                  # 13
     "resize-hotkey": scenario_resize_hotkey,          # 16
+    "unicode-typing": scenario_unicode_typing,
+    "no-focus-steal": scenario_no_focus_steal,        # 10 (tier W)
+    "safe-mode": scenario_safe_mode,                  # 12 (tier W)
     "restart": scenario_restart,                      # 14 (last: replaces the HUD)
 }
 
@@ -893,7 +1097,9 @@ def run_scenarios(run: Run, names: list[str]) -> list[dict]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    parser.add_argument("--exe", type=Path, required=True, help="the Linux tze_hud binary to own")
+    parser.add_argument("--exe", type=Path, required=True, help="the tze_hud binary to own")
+    parser.add_argument("--injector", choices=("xtest", "sendinput"), default="sendinput" if WINDOWS else "xtest",
+                        help="xtest: private Xvfb (Linux); sendinput: Win32 on a CI VM only")
     parser.add_argument("--out", type=Path, help="artifact dir (default test_results/gestures/<sha>/<run>)")
     parser.add_argument("--list", action="store_true", help="list scenarios and exit")
     parser.add_argument("scenarios", nargs="*", help="scenario names (default: all)")
@@ -905,21 +1111,26 @@ def main(argv: list[str] | None = None) -> int:
     unknown = [n for n in args.scenarios if n not in SCENARIOS]
     if unknown:
         parser.error(f"unknown scenario(s): {', '.join(unknown)}; see --list")
-    names = args.scenarios or list(SCENARIOS)
+    if (args.injector == "sendinput") != WINDOWS:
+        parser.error(f"--injector {args.injector} does not run on {sys.platform}")
+    tier_w = args.injector == "sendinput"
+    if not tier_w and TIER_W_ONLY.intersection(args.scenarios):
+        parser.error(f"{', '.join(sorted(TIER_W_ONLY))} run only with --injector sendinput")
+    names = args.scenarios or [n for n in SCENARIOS if tier_w or n not in TIER_W_ONLY]
     if "restart" in names:  # it replaces the HUD; keep it last
         names = [n for n in names if n != "restart"] + ["restart"]
     sha = git_sha()
     # The pid keeps parallel runs started in the same second apart.
     out = args.out or REPO / "test_results/gestures" / sha / f"{time.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}"
     out.mkdir(parents=True, exist_ok=True)
-    run = Run(exe=args.exe.resolve(), out=out)
+    run = Run(exe=args.exe.resolve(), out=out, injector=args.injector)
     started = time.monotonic()
     results: list[dict] = []
     failure = None
     try:
         run.start()
         status = run.status()
-        run.step(f"owned HUD pid {run.pid} on display {run.display}")
+        run.step(f"owned HUD pid {run.pid} on display {run.display or 'primary'} via {args.injector}")
         results = run_scenarios(run, names)
         unacked = run.smoke.ok("hud_input", {"max_items": 0}).get("remaining", 0)
         if unacked:
@@ -929,17 +1140,18 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as err:  # noqa: BLE001
         failure = f"harness: {type(err).__name__}: {err}"
     finally:
-        survivors = run.stop() if run.xvfb else []
+        survivors = run.stop() if run.home else []
         if survivors:
             failure = (failure + "; " if failure else "") + "left running: " + ", ".join(survivors)
         timeline = {
             "sha": sha, "profile": run.exe.parent.name,
-            "exe": str(run.exe), "injector": XTest.name, "screen": SCREEN,
+            "exe": str(run.exe), "injector": args.injector, "screen": SCREEN,
             "display": run.display, "mcp_port": run.port,
             "geometry": (status.get("displays") if "status" in locals() else None),
             "theme_scale": ({k: status.get(k) for k in ("theme", "ui_scale") if k in status} if "status" in locals() else None),
             "seconds": round(time.monotonic() - started, 2), "results": results, "failure": failure,
             "steps": run.timeline,
+            "sendinput_calls": getattr(run.inj, "calls", None) if args.injector == "sendinput" else None,
         }
         (out / "timeline.json").write_text(json.dumps(timeline, indent=1))
         if run.log and run.log.exists():
@@ -949,7 +1161,22 @@ def main(argv: list[str] | None = None) -> int:
     print(f"{passed}/{len(results)} scenarios passed in {time.monotonic() - started:.1f}s; artifacts: {out}")
     if failure:
         print(f"FAIL harness: {failure}")
+    write_step_summary(args.injector, results, failure, passed, time.monotonic() - started)
     return 0 if failure is None and passed == len(results) else 1
+
+
+def write_step_summary(injector: str, results: list[dict], failure: str | None, passed: int, seconds: float) -> None:
+    """A GitHub step summary table, so a dispatching agent reads outcomes without the artifact."""
+    path = os.environ.get("GITHUB_STEP_SUMMARY")
+    if not path:
+        return
+    rows = [f"## Gesture scenarios ({injector}): {passed}/{len(results)} passed in {seconds:.0f}s", "",
+            "| scenario | outcome | s | failing step |", "|---|---|---|---|"]
+    rows += [f"| {r['scenario']} | {r['outcome']} | {r['seconds']} | {r.get('step', '')} |" for r in results]
+    if failure:
+        rows += ["", f"**harness:** {failure}"]
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write("\n".join(rows) + "\n")
 
 
 if __name__ == "__main__":

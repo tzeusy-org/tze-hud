@@ -80,6 +80,55 @@ class GuardTests(unittest.TestCase):
         status.assert_not_called()
 
 
+WIN_OWNED = dict(github_actions="true", foreground_pid=4242, owned_hud_pid=4242, helper_pids=[77],
+                 status_pid=4242, url="http://127.0.0.1:5555/mcp")
+
+
+class WindowsGuardTests(unittest.TestCase):
+    def test_owned_hud_or_helper_foreground_passes(self) -> None:
+        g.check_owned_windows(**WIN_OWNED)
+        g.check_owned_windows(**{**WIN_OWNED, "foreground_pid": 77})
+
+    def test_refuses_off_a_ci_vm(self) -> None:
+        for value in (None, "", "false", "1"):
+            with self.subTest(value=value), self.assertRaisesRegex(g.Refused, "only on a CI VM"):
+                g.check_owned_windows(**{**WIN_OWNED, "github_actions": value})
+
+    def test_refuses_a_foreground_window_it_does_not_own(self) -> None:
+        with self.assertRaisesRegex(g.Refused, "foreground window belongs to pid 9"):
+            g.check_owned_windows(**{**WIN_OWNED, "foreground_pid": 9})
+
+    def test_refuses_borrowed_url_and_foreign_or_missing_hud(self) -> None:
+        with self.assertRaisesRegex(g.Refused, "borrowed"):
+            g.check_owned_windows(**{**WIN_OWNED, "url": "http://192.0.2.7:9090/mcp"})
+        with self.assertRaisesRegex(g.Refused, "not the owned HUD"):
+            g.check_owned_windows(**{**WIN_OWNED, "status_pid": 999})
+        with self.assertRaisesRegex(g.Refused, "no owned HUD"):
+            g.check_owned_windows(**{**WIN_OWNED, "owned_hud_pid": None})
+
+    def test_a_refused_start_never_kills_a_running_hud(self) -> None:
+        # Refusing because someone's HUD is running must not then "clean it up".
+        run = g.Run(exe=Path("tze_hud.exe"), out=Path("."), injector="sendinput")
+        with mock.patch.object(g, "WINDOWS", True), \
+                mock.patch.object(g, "windows_huds", return_value=[1234]), \
+                mock.patch.dict(g.os.environ, {"GITHUB_ACTIONS": "true"}), \
+                mock.patch.object(g, "kill_pid") as kill:
+            with self.assertRaisesRegex(g.Refused, "already running"):
+                run.start()
+            self.assertEqual(run.stop() if run.home else [], [])
+            self.assertEqual(run._strays(), [])
+        kill.assert_not_called()
+
+    def test_start_refuses_off_a_ci_vm_before_creating_anything(self) -> None:
+        run = g.Run(exe=Path("tze_hud.exe"), out=Path("."), injector="sendinput")
+        with mock.patch.dict(g.os.environ, {"GITHUB_ACTIONS": ""}), \
+                mock.patch.object(g, "windows_huds") as huds:
+            with self.assertRaisesRegex(g.Refused, "only on a CI VM"):
+                run.start()
+        huds.assert_not_called()
+        self.assertIsNone(run.home)
+
+
 class TargetTests(unittest.TestCase):
     def test_resolves_pane_centres_and_the_whole_portal(self) -> None:
         self.assertEqual(g.resolve_target(STATUS, "portal:demo/output"), (550, 270))
