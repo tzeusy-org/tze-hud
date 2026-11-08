@@ -1550,7 +1550,18 @@ mod tests {
                 kind: DeadlineKind::Render
             })
         );
-        assert_eq!(hub.take_due(100_000), [Due { key: k, unread: 2 }]);
+        assert_eq!(
+            hub.take_due(100_000),
+            [Due {
+                key: k.clone(),
+                unread: 2
+            }]
+        );
+        assert_eq!(
+            hub.get(&k).unwrap().rendered_unread,
+            3,
+            "unseen output accumulates across separate render batches"
+        );
         assert_eq!(hub.take_due(300_000), [], "nothing changed");
         let other = key("b", "p");
         hub.publish(&other, text("other agent"), 300_001).unwrap();
