@@ -496,6 +496,28 @@ async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
     let split = item.clip_pixel_x + item.clip_bounds_width / 2.0;
     scene.tiles.get_mut(&cover).unwrap().bounds.x = split;
     assert_regions(&compositor, &mut scene, true, Some(split));
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    compositor.render_frame_headless(&mut scene, &surface);
+    let partial = surface.read_pixels(&compositor.device);
+    for y in
+        (item.clip_pixel_y as u32 + 2)..((item.clip_pixel_y + item.clip_bounds_height) as u32 - 2)
+    {
+        for x in (item.clip_pixel_x as u32 + 2)
+            ..((item.clip_pixel_x + item.clip_bounds_width) as u32 - 2)
+        {
+            let expected = if (x as f32) < split {
+                &painted[1]
+            } else {
+                &covered[1]
+            };
+            assert_eq!(
+                crate::test_pixels::pixel_at(&partial, 480, x, y),
+                crate::test_pixels::pixel_at(expected, 480, x, y),
+                "partial cover preserves the exposed pill and covers the rest at {x},{y}"
+            );
+        }
+    }
     scene.delete_tile(cover, "badge-cover").unwrap();
 
     // Nothing unread → plain pill, no badge (a presence engine renders nothing).
