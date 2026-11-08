@@ -559,6 +559,12 @@ The merge queue is the development loop, so it is held to targets, not just
 kept green. Changing a required check updates the `main merge queue` ruleset,
 the [`ci.yml`](../.github/workflows/ci.yml) header and this section together.
 
+Linux compile jobs install their pinned mold linker through
+[`install_mold.py`](../scripts/ci/install_mold.py): one bounded official release
+asset API download, a repository-pinned SHA256 check before extraction, and an
+exact version check before adding its temporary bin directory to `GITHUB_PATH`.
+The existing read-only GitHub token supplies public-asset access.
+
 - **Fast.** A merge-group run's required checks finish within 6 minutes of the
   run starting. Suites that cannot fit run in the weekly lanes
   (`perf-budget.yml`, `perf-assert.yml`) or in `windows.yml`, never in the

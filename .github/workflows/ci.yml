@@ -140,11 +140,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install pinned mold (native Linux linker)
-        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        run: python3 scripts/ci/install_mold.py
         timeout-minutes: 5
-        with:
-          mold-version: "2.42.1"
-          make-default: false
+        env:
+          GH_TOKEN: ${{ github.token }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
@@ -188,11 +187,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Install pinned mold (native Linux linker)
-        uses: rui314/setup-mold@10ca16bf91dc22e05ebdc935cad9c75ea248f621
+        run: python3 scripts/ci/install_mold.py
         timeout-minutes: 5
-        with:
-          mold-version: "2.42.1"
-          make-default: false
+        env:
+          GH_TOKEN: ${{ github.token }}
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
