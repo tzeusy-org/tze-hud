@@ -222,8 +222,9 @@ pub use self::config::{Relaunch, WindowedConfig, WindowedQuiescentEfficiencyConf
 pub use self::event_loop_harness::HeadlessEventLoopHarness;
 use self::hittest::{refresh_interaction_hit_regions_after_render, sync_scene_display_area};
 use self::input_dispatch::{
-    enqueue_input, logical_key_to_str, nanoseconds_since_start, normalize_mouse_wheel_delta,
-    physical_key_to_key_code_str, physical_key_to_u32, winit_mods_to_keyboard_modifiers,
+    enqueue_input, key_press_text, logical_key_to_str, nanoseconds_since_start,
+    normalize_mouse_wheel_delta, physical_key_to_key_code_str, physical_key_to_u32,
+    winit_mods_to_keyboard_modifiers,
 };
 use self::keyboard::PendingKeyboardEvent;
 use self::lifecycle::{
@@ -2549,16 +2550,18 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     }
                 }
 
-                // ── Character input via Key::Character (non-IME path) ────────
-                // When the logical key carries a printable character, produce a
-                // RawCharacterEvent so the KeyboardProcessor character path is
-                // also exercised (handles basic ASCII without an IME active).
+                // ── Character input from key presses (non-IME path) ──────────
+                // A press that carries text produces a RawCharacterEvent: layout
+                // characters, and text with no layout key (Windows VK_PACKET).
                 // IME commit characters arrive via WindowEvent::Ime below.
-                if event.state == ElementState::Pressed && !mods.ctrl && !mods.meta && !mods.alt {
-                    use winit::keyboard::Key;
-                    if let Key::Character(ch) = event.logical_key.as_ref() {
+                if event.state == ElementState::Pressed {
+                    if let Some(character) = key_press_text(
+                        &event.logical_key,
+                        event.text.as_deref(),
+                        self.state.modifiers,
+                    ) {
                         let raw_char = RawCharacterEvent {
-                            character: ch.to_string(),
+                            character,
                             timestamp_mono_us,
                         };
                         self.dispatch_character_event(&raw_char);
