@@ -706,6 +706,8 @@ async fn frame_signature_ignores_content_outside_the_target() {
     let (rects, labels) = compositor.collect_scroll_affordances(&scene);
     assert_eq!(labels.len(), 1);
     assert_eq!(rects.len(), 1);
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
     let build = compositor.build_windowed_frame(&mut scene, 256, 256);
     let outside = compositor.frame_signature(&build, &away);
     let mut inside = compositor.frame_signature(&build, &overlapping);
@@ -719,6 +721,8 @@ async fn frame_signature_ignores_content_outside_the_target() {
             }
             _ => scene.set_tile_follow_tail_at_tail(tile, true),
         }
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
         let build = compositor.build_windowed_frame(&mut scene, 256, 256);
         assert_eq!(
             compositor.frame_signature(&build, &away),
@@ -809,6 +813,8 @@ async fn zone_assigned_to_secondary_display_renders_there() {
         }
         compositor.prime_markdown_cache(&scene);
         compositor.prime_truncation_cache(&scene);
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
         let build = compositor.build_windowed_frame(&mut scene, 256, 256);
         let format = wgpu::TextureFormat::Rgba8UnormSrgb;
         let primary = compositor
@@ -854,6 +860,8 @@ async fn safe_mode_flip_changes_secondary_signature() {
     let mut signatures = Vec::new();
     for safe_mode in [false, true, false] {
         compositor.set_safe_mode_overlay(safe_mode);
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
         let build = compositor.build_windowed_frame(&mut scene, 256, 256);
         signatures.push(compositor.frame_signature(&build, &side));
     }

@@ -430,6 +430,8 @@ async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
     let mut covered = Vec::new();
     for at_tail in [false, true] {
         scene.set_tile_follow_tail_at_tail(tile_id, at_tail);
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
         compositor.render_frame_headless(&mut scene, &surface);
         covered.push(surface.read_pixels(&compositor.device));
     }
