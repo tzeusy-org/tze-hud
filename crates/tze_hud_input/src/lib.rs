@@ -803,12 +803,15 @@ impl InputProcessor {
         tab_id: SceneId,
     ) -> (InputResult, Option<FocusTransition>) {
         let focus_transition = if event.kind == PointerEventKind::Down {
-            let hit = scene.hit_test(event.x, event.y);
-            if let HitResult::NodeHit {
-                tile_id, node_id, ..
-            } = hit
-            {
-                let transition = focus_manager.on_click(tab_id, tile_id, Some(node_id), scene);
+            let target = match scene.hit_test(event.x, event.y) {
+                HitResult::NodeHit {
+                    tile_id, node_id, ..
+                } => Some((tile_id, Some(node_id))),
+                HitResult::TileHit { tile_id } => Some((tile_id, None)),
+                _ => None,
+            };
+            if let Some((tile_id, node_id)) = target {
+                let transition = focus_manager.on_click(tab_id, tile_id, node_id, scene);
                 self.apply_focus_transition_side_effects(&transition, scene);
                 if transition.gained.is_some() || transition.lost.is_some() {
                     Some(transition)
@@ -4694,6 +4697,27 @@ mod tests {
 
         // The blur keeps one keyed local draft, including caret/anchor.
         scene.tiles.get_mut(&tile_id).unwrap().root_node = Some(composer_id);
+        processor.process_with_focus(&down_composer, &mut scene, &mut fm, tab_id);
+        let (text, cursor, anchor, _, _, _) = processor.composer_draft_snapshot().unwrap();
+        assert_eq!((text.as_str(), cursor, anchor), ("z", 1, 1));
+
+        // OUTPUT has ordinary text, not an interactive HitRegion. A tile
+        // background click must also blur editing and permit portal commands.
+        let output_click = PointerEvent {
+            x: 400.0,
+            y: 300.0,
+            ..down_plain
+        };
+        assert!(
+            matches!(scene.hit_test(400.0, 300.0), HitResult::TileHit { tile_id: t } if t == tile_id)
+        );
+        processor.process_with_focus(&output_click, &mut scene, &mut fm, tab_id);
+        assert!(
+            !processor.is_composer_active(),
+            "tile background click blurs the composer"
+        );
+        assert_eq!(fm.current_owner(tab_id), &FocusOwner::Tile(tile_id));
+        processor.route_character_to_composer("ignored");
         processor.process_with_focus(&down_composer, &mut scene, &mut fm, tab_id);
         let (text, cursor, anchor, _, _, _) = processor.composer_draft_snapshot().unwrap();
         assert_eq!((text.as_str(), cursor, anchor), ("z", 1, 1));

@@ -9,8 +9,10 @@
 use std::sync::{Arc, Mutex as StdMutex};
 
 use serde_json::{Value, json};
+use tze_hud_compositor::markdown_node_tail_cursor_color;
 use tze_hud_scene::{
-    NodeData, PortalDocumentLayout, PortalPartKind, Rect, SceneGraph, SceneId, ZoneInteractionKind,
+    NodeData, PortalDocumentLayout, PortalPartKind, Rect, SceneGraph, SceneId, TextMarkdownNode,
+    ZoneInteractionKind,
 };
 
 /// Builds the `portals` array, or `None` while the scene stays locked.
@@ -117,19 +119,39 @@ fn at_tail(layout: Option<&PortalDocumentLayout>, scroll_y: f32) -> Value {
     })
 }
 
-/// The largest exposed piece of the tile's jump-to-latest pill, from the hit
-/// regions the compositor published with its last frame: null exactly when
-/// the pill is not drawn (at the tail, faded out, off tab, or covered).
-fn unread_badge(scene: &SceneGraph, tile_id: SceneId) -> Option<Rect> {
+/// Largest exposed piece of a runtime control in the compositor's last-frame
+/// hit regions. A hidden, covered or absent control has no target to report.
+fn visible_control(scene: &SceneGraph, kind: ZoneInteractionKind) -> Option<Rect> {
     scene
         .overlay
         .zone_hit_regions
         .iter()
-        .filter(
-            |r| matches!(r.kind, ZoneInteractionKind::JumpToLatest { tile_id: t } if t == tile_id),
-        )
+        .filter(|r| r.kind == kind)
         .map(|r| r.bounds)
         .max_by(|a, b| (a.width * a.height).total_cmp(&(b.width * b.height)))
+}
+
+/// Read the materialized text node, not a reconstructed Hub status string.
+/// Native portals put the title and documents directly under their root.
+fn part_text(scene: &SceneGraph, tile: SceneId, kind: PortalPartKind) -> Option<&TextMarkdownNode> {
+    let part = scene
+        .portal_surface(tile)?
+        .parts
+        .iter()
+        .find(|p| p.kind == kind)?;
+    let root = scene.nodes.get(&scene.tiles.get(&tile)?.root_node?)?;
+    part.node
+        .into_iter()
+        .chain(root.children.iter().copied())
+        .find_map(|id| {
+            let NodeData::TextMarkdown(text) = &scene.nodes.get(&id)?.data else {
+                return None;
+            };
+            (text.bounds.is_within(&part.bounds)
+                && (kind == PortalPartKind::Header
+                    || scene.portal_document_kind(tile, id) == Some(kind)))
+            .then_some(text)
+        })
 }
 
 /// One entry per portal tile, ordered by surface identity.
@@ -186,6 +208,7 @@ pub fn portals_json(scene: &SceneGraph, ui: UiMirror, displays: &[Rect]) -> Valu
             json!({
                 "s": s,
                 "state": surface.lifecycle,
+                "header_text": part_text(scene, tile_id, PortalPartKind::Header).map(|t| &t.content),
                 "rect": rect_json(b),
                 "display": display,
                 // Scene-pixel rects; null when the part is not shown.
@@ -194,7 +217,8 @@ pub fn portals_json(scene: &SceneGraph, ui: UiMirror, displays: &[Rect]) -> Valu
                     "input": part(PortalPartKind::Composer),
                     "output": part(PortalPartKind::Transcript),
                     "composer": composer,
-                    "unread_badge": unread_badge(scene, tile_id).map_or(Value::Null, rect_json),
+                    "unread_badge": visible_control(scene, ZoneInteractionKind::JumpToLatest { tile_id }).map_or(Value::Null, rect_json),
+                    "close": visible_control(scene, ZoneInteractionKind::DismissTile { tile_id }).map_or(Value::Null, rect_json),
                 },
                 "focus": focus,
                 "hover": if hovered { "composer" } else { "none" },
@@ -204,6 +228,8 @@ pub fn portals_json(scene: &SceneGraph, ui: UiMirror, displays: &[Rect]) -> Valu
                     // The follow-tail flag the pill and new-output scrolling obey.
                     "at_tail": scene.tile_follow_tail_at_tail(tile_id),
                     "unread": scene.tile_unread_count(tile_id),
+                    "writing_caret": part_text(scene, tile_id, PortalPartKind::Transcript)
+                        .is_some_and(|t| markdown_node_tail_cursor_color(t).is_some()),
                 },
                 "input": {
                     "at_tail": at_tail(current_layout(scene, tile_id, PortalPartKind::Composer), input_y),
@@ -221,7 +247,12 @@ mod tests {
     use super::*;
     use tze_hud_portal::hub::{PortalHub, PortalKey, Publish};
 
-    fn portal_scene() -> (SceneGraph, SceneId) {
+    fn portal_scene() -> (
+        SceneGraph,
+        SceneId,
+        crate::portal::PortalDriver,
+        tze_hud_scene::TestClock,
+    ) {
         let clock = tze_hud_scene::TestClock::from_us(200);
         let mut driver = crate::portal::PortalDriver::new(tze_hud_mcp::PortalHandle::new(
             PortalHub::default(),
@@ -238,7 +269,7 @@ mod tests {
                 100,
             )
             .expect("publish accepted");
-        let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, Arc::new(clock));
+        let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, Arc::new(clock.clone()));
         let tab = scene.create_tab("Main", 0).unwrap();
         let mut processor = tze_hud_input::InputProcessor::new();
         driver.drain(&mut scene, &mut processor, Some(tab));
@@ -288,7 +319,7 @@ mod tests {
                 rows: rows.into(),
             },
         );
-        (scene, tile_id)
+        (scene, tile_id, driver, clock)
     }
 
     fn jump_region(tile_id: SceneId, bounds: Rect) -> tze_hud_scene::ZoneHitRegion {
@@ -306,7 +337,7 @@ mod tests {
 
     #[test]
     fn reports_portal_panes_focus_and_draft_length() {
-        let (mut scene, tile_id) = portal_scene();
+        let (mut scene, tile_id, mut driver, clock) = portal_scene();
         let composer = scene.overlay.tile_composer_nodes[&tile_id];
         scene.hit_region_states.get_mut(&composer).unwrap().hovered = true;
         let displays = [Rect::new(0.0, 0.0, 1920.0, 1080.0)];
@@ -317,6 +348,8 @@ mod tests {
         let v = portals_json(&scene, focused, &displays);
         let p = &v[0];
         assert_eq!(p["s"], "portal:probe");
+        assert!(p["header_text"].as_str().unwrap().contains("⋯ writing"));
+        assert_eq!(p["output"]["writing_caret"], true);
         assert_eq!(p["display"], 0);
         for pane in ["header", "input", "output", "composer"] {
             assert!(p["panes"][pane]["w"].as_f64().unwrap() > 0.0, "{pane} rect");
@@ -336,11 +369,20 @@ mod tests {
         assert_eq!(v[0]["input"]["draft_chars"], 0);
         let v = portals_json(&scene, UiMirror::default(), &displays);
         assert_eq!(v[0]["focus"], "none");
+
+        // Observe the actual driver clearing both rendered cues, without a
+        // replacement publish or reconstructed Hub deadline in the probe.
+        clock.advance(2001);
+        let tab = scene.active_tab;
+        driver.drain(&mut scene, &mut tze_hud_input::InputProcessor::new(), tab);
+        let v = portals_json(&scene, UiMirror::default(), &displays);
+        assert!(!v[0]["header_text"].as_str().unwrap().contains("⋯ writing"));
+        assert_eq!(v[0]["output"]["writing_caret"], false);
     }
 
     #[test]
     fn reports_visible_rows_and_tail_state_as_scrolled() {
-        let (mut scene, tile_id) = portal_scene();
+        let (mut scene, tile_id, _, _) = portal_scene();
         let out =
             |scene: &SceneGraph| portals_json(scene, UiMirror::default(), &[])[0]["output"].clone();
         let rows = |scene: &SceneGraph| {
@@ -375,12 +417,16 @@ mod tests {
 
     #[test]
     fn unread_badge_is_the_largest_exposed_pill_piece() {
-        let (mut scene, tile_id) = portal_scene();
+        let (mut scene, tile_id, _, _) = portal_scene();
         let badge = |scene: &SceneGraph| {
             portals_json(scene, UiMirror::default(), &[])[0]["panes"]["unread_badge"].clone()
         };
         // No pill region published (at tail, hidden or covered): null.
         assert_eq!(badge(&scene), Value::Null);
+        assert_eq!(
+            portals_json(&scene, UiMirror::default(), &[])[0]["panes"]["close"],
+            Value::Null
+        );
         let other = SceneId::new();
         scene.overlay.zone_hit_regions.extend([
             jump_region(tile_id, Rect::new(10.0, 20.0, 30.0, 24.0)),
@@ -390,6 +436,24 @@ mod tests {
         assert_eq!(
             badge(&scene),
             json!({"x": 40.0, "y": 20.0, "w": 66.0, "h": 24.0})
+        );
+        // A close target is reported only from the compositor's exposed hit
+        // regions, never guessed from a tile corner or another tile's button.
+        let mut close = jump_region(tile_id, Rect::new(80.0, 20.0, 24.0, 24.0));
+        close.kind = ZoneInteractionKind::DismissTile { tile_id };
+        let mut foreign = close.clone();
+        foreign.kind = ZoneInteractionKind::DismissTile { tile_id: other };
+        foreign.bounds.width = 500.0;
+        scene.overlay.zone_hit_regions.extend([close, foreign]);
+        let v = portals_json(&scene, UiMirror::default(), &[]);
+        assert_eq!(
+            v[0]["panes"]["close"],
+            json!({"x": 80.0, "y": 20.0, "w": 24.0, "h": 24.0})
+        );
+        scene.overlay.zone_hit_regions.clear();
+        assert_eq!(
+            portals_json(&scene, UiMirror::default(), &[])[0]["panes"]["close"],
+            Value::Null
         );
     }
 }

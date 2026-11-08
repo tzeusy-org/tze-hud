@@ -22,6 +22,7 @@ STATUS = {
                 "output": {"x": 400, "y": 90, "w": 300, "h": 360},
                 "composer": {"x": 100, "y": 90, "w": 295, "h": 360},
                 "unread_badge": None,
+                "close": {"x": 676, "y": 50, "w": 24, "h": 24},
             },
         }
     ],
@@ -133,6 +134,7 @@ class TargetTests(unittest.TestCase):
     def test_resolves_pane_centres_and_the_whole_portal(self) -> None:
         self.assertEqual(g.resolve_target(STATUS, "portal:demo/output"), (550, 270))
         self.assertEqual(g.resolve_target(STATUS, "portal:demo/header"), (400, 70))
+        self.assertEqual(g.resolve_target(STATUS, "portal:demo/close"), (688, 62))
         self.assertEqual(g.resolve_target(STATUS, "portal:demo"), (400, 250))
 
     def test_hidden_or_missing_targets_raise(self) -> None:
