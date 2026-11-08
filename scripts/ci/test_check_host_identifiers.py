@@ -66,11 +66,11 @@ class Main(unittest.TestCase):
     def test_fails_on_a_tracked_value_without_printing_it(self):
         secret_host = "fixture-host-" + "7f3a"
         with tempfile.TemporaryDirectory() as d:
-            repo = Path(d)
+            repo = Path(d) / "repo"
             subprocess.run(["git", "init", "-q", str(repo)], check=True)
             (repo / "a.rs").write_text(f'const H: &str = "{secret_host}";\n', encoding="utf-8")
             subprocess.run(["git", "-C", str(repo), "add", "a.rs"], check=True)
-            deny = repo.parent / (repo.name + ".deny")
+            deny = Path(d) / "host.deny"
             deny.write_text(secret_host + "\n", encoding="utf-8")
             err, out = io.StringIO(), io.StringIO()
             cwd = os.getcwd()
@@ -81,7 +81,6 @@ class Main(unittest.TestCase):
                     code = chk.main([])
             finally:
                 os.chdir(cwd)
-                deny.unlink()
             self.assertEqual(code, 1)
             self.assertIn("a.rs:1: local denylist entry", err.getvalue())
             self.assertNotIn(secret_host, err.getvalue() + out.getvalue())
