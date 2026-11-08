@@ -703,20 +703,23 @@ async fn frame_signature_ignores_content_outside_the_target() {
         .unwrap();
     scene.set_tile_follow_tail_at_tail(tile, false);
     scene.set_tile_unread_count(tile, 3);
-    let mut build = compositor.build_windowed_frame(&mut scene, 256, 256);
-    assert_eq!(build.encode_sources.affordance_items.len(), 1);
-    assert_eq!(build.encode_sources.affordance_rects.len(), 1);
+    let (rects, labels) = compositor.collect_scroll_affordances(&scene);
+    assert_eq!(labels.len(), 1);
+    assert_eq!(rects.len(), 1);
+    let build = compositor.build_windowed_frame(&mut scene, 256, 256);
     let outside = compositor.frame_signature(&build, &away);
     let mut inside = compositor.frame_signature(&build, &overlapping);
     for change in 0..3 {
         match change {
-            0 => build.encode_sources.affordance_items[0].text = Arc::from("4 unread"),
-            1 => build.encode_sources.affordance_rects[0].color = [0.0, 0.0, 1.0, 1.0],
-            _ => {
-                build.encode_sources.affordance_items.clear();
-                build.encode_sources.affordance_rects.clear();
+            0 => scene.set_tile_unread_count(tile, 4),
+            1 => {
+                compositor
+                    .token_map
+                    .insert("portal.jump_to_latest.color".into(), "#0000FF".into());
             }
+            _ => scene.set_tile_follow_tail_at_tail(tile, true),
         }
+        let build = compositor.build_windowed_frame(&mut scene, 256, 256);
         assert_eq!(
             compositor.frame_signature(&build, &away),
             outside,
