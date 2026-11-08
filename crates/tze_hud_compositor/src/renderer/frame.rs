@@ -1121,7 +1121,6 @@ impl Compositor {
             &tv.rr_background,
             &tv.rr_content,
             &tv.rr_post,
-            &tv.affordance_rects,
             &tv.drag_highlight_cmds,
         ] {
             0xD8u8.hash(&mut hasher);
@@ -1162,7 +1161,6 @@ impl Compositor {
             .text_items
             .iter()
             .chain(tv.context_menu_text.iter())
-            .chain(tv.affordance_items.iter())
             .filter(|i| {
                 visible(
                     i.clip_pixel_x,

@@ -708,6 +708,8 @@ async fn frame_signature_ignores_content_outside_the_target() {
     assert_eq!(rects.len(), 1);
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
+    let _appearing = compositor.build_windowed_frame(&mut scene, 256, 256);
+    compositor.portal_tile_anim_states.clear();
     let build = compositor.build_windowed_frame(&mut scene, 256, 256);
     let outside = compositor.frame_signature(&build, &away);
     let mut inside = compositor.frame_signature(&build, &overlapping);
