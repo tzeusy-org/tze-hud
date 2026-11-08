@@ -387,14 +387,17 @@ fn pct(cpu_delta: f64, wall_delta: f64) -> Value {
 }
 
 impl StatusSource {
-    /// Build the status object. Sleeps [`CPU_SAMPLE`] to measure `cpu_pct_2s`
-    /// (percent of one core over the window).
-    pub async fn render(&self) -> Value {
+    /// Build the status object. With `sample_cpu`, sleeps [`CPU_SAMPLE`] to
+    /// measure `cpu_pct_2s` (percent of one core over the window); without
+    /// it, answers at once with `cpu_pct_2s` null (polling harnesses).
+    pub async fn render(&self, sample_cpu: bool) -> Value {
         let (cpu0, t0) = (process_cpu_secs(), Instant::now());
-        tokio::time::sleep(CPU_SAMPLE).await;
+        if sample_cpu {
+            tokio::time::sleep(CPU_SAMPLE).await;
+        }
         let (cpu1, t1) = (process_cpu_secs(), Instant::now());
         let cpu_pct_2s = match (cpu0, cpu1) {
-            (Some(a), Some(b)) => pct(b - a, (t1 - t0).as_secs_f64()),
+            (Some(a), Some(b)) if sample_cpu => pct(b - a, (t1 - t0).as_secs_f64()),
             _ => Value::Null,
         };
         let uptime = process_start().elapsed();

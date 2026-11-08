@@ -374,6 +374,8 @@ agents until one is paired.
   (since start before the first); a growing value means the HUD has settled.
   A focused composer's caret blink presents about every 530 ms, so while a
   composer has focus treat `idle_since_ms >= 300` as settled.
+  `GET /admin/status?cpu=0` answers at once with `cpu_pct_2s` null instead of
+  sampling CPU for 2 s, for harnesses that poll status.
   `portals` (`null` before the windowed runtime starts or while the scene stays
   locked for 100 ms) is read-only portal UI state for out-of-process validation,
   one entry per portal: `s` (`portal:<id>`), `state`, `rect`, `display` (index

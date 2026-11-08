@@ -22,6 +22,7 @@
 #   just cargo-deny         # advisories/licenses/bans/sources (skips if cargo-deny missing)
 #   just bootstrap # install/report dev-host deps (scripts/dev-bootstrap.sh; --check to report only)
 #   just build-windows # cross-build tze_hud.exe for x86_64-pc-windows-gnu
+#   just gesture [scenario...] # tier-L gesture checks: fresh Linux build, private Xvfb, XTEST input (local only)
 #   just ci        # full local gate sweep (see the `ci` recipe; no Windows-only jobs)
 #
 # GPU tests (compositor render tests + runtime pixel_readback) already run inside
@@ -162,6 +163,16 @@ test-python:
         scripts/tests/ \
         -q
     {{py}} -m unittest discover -s scripts/ci
+
+# Tier-L gesture checks (local only, not in `ci`): builds the Linux HUD and drives it
+# on a private Xvfb display with XTEST input; `python3 scripts/ci/hud_gestures.py --list`
+# names the scenarios. Needs Xvfb, xdotool, libxkbcommon-x11-0, libxcb-xkb1 and
+# mesa-vulkan-drivers. Artifacts land in test_results/gestures/<sha>/.
+gesture *scenarios:
+    {{cargo}} build -q --profile release-dev -p tze_hud_app
+    python3 scripts/ci/hud_gestures.py \
+        --exe "$({{cargo}} metadata --no-deps --format-version 1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["target_directory"])')/release-dev/tze_hud" \
+        {{scenarios}}
 
 # Deterministic LLM-facing token-footprint gate (mirror CI test job, last step)
 token-footprint:
