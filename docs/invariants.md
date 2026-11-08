@@ -236,6 +236,11 @@ head trim, full layout versus clipping, and input reset/output jump-to-latest.
 Unique visible lines can retain identity across trimming; repeated ambiguous
 lines keep a clamped pixel position. Evicted text is outside the retained window.
 
+A pointer-down on a tile's text/background transfers focus to that tile and
+blurs its composer, preserving the keyed unsent draft for refocus. This makes
+Ctrl+Shift+Arrow directional portal resize reachable from OUTPUT; the same
+chord retains text-selection behavior while the composer is active.
+
 Native unread counts accumulate new output units across render batches. Keyed
 replacements and viewer replies do not add unseen units. Reaching the measured
 OUTPUT tail acknowledges only the installed output ordinal for that attachment;
