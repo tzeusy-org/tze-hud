@@ -151,19 +151,9 @@ pub struct RuntimeOverlayState {
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
     pub tile_follow_tail_at_tail: HashMap<SceneId, bool>,
-    /// Runtime-owned ambient unread-output count per tile (hud-g1ena.3).
-    ///
-    /// The aggregate `PortalView::unread_output_count` a text-stream
-    /// portal already tracks, plumbed onto the transcript tile by the portal
-    /// projection driver each drain. Read by the compositor to render the
-    /// ambient unread badge the jump-to-latest pill MAY carry
-    /// (portal-chat-grade-affordances §Jump-to-Latest Affordance) — the pill is
-    /// only shown while `tile_follow_tail_at_tail == false`, so the badge clears
-    /// with it when the viewer returns to the tail.
-    ///
-    /// `0` (or an absent entry) means nothing unread; the driver stores `0` when
-    /// the count is redacted or empty so no badge renders. Ephemeral: skipped
-    /// during serialization.
+    /// Runtime-owned aggregate unread count; zero/absence suppresses the badge.
+    /// Native portal reads clear this locally at the measured OUTPUT tail and
+    /// acknowledge only the installed output ordinal on the next driver drain.
     #[serde(skip, default)]
     pub tile_unread_counts: HashMap<SceneId, usize>,
     /// Runtime-owned lifecycle-affordance accents per tile.

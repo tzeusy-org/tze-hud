@@ -1376,7 +1376,7 @@ pub(crate) mod tests {
             NodeData::TextMarkdown(saved.source.clone());
         scene.overlay.portal_document_layouts.insert(output, saved);
         publish(&mut driver, "p", "new source", 500);
-        driver.drain_inner(&mut scene, &mut processor, Some(tab), 200 + FRAME_US);
+        driver.drain_inner(&mut scene, &mut processor, Some(tab), 350 + FRAME_US);
         assert_eq!(scene.tile_unread_count(tile_id), 1);
         assert_eq!(
             scene.tile_scroll_offset_local(tile_id).1,
@@ -1702,21 +1702,13 @@ pub(crate) mod tests {
             content.contains("3 unread"),
             "degraded repaint keeps it: {content}"
         );
-        scene
-            .overlay
-            .portal_output_reads
-            .get_mut(&tile_id)
-            .unwrap()
-            .read_through = 3;
+        measured_panes(&mut scene, tile_id, 100.0, 100.0);
+        processor.reconcile_portal_document_layouts(&mut scene);
         publish(&mut driver, "p", "racing unseen output", 400);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 400 + FRAME_US);
         assert_eq!(scene.tile_unread_count(tile_id), 1);
-        scene
-            .overlay
-            .portal_output_reads
-            .get_mut(&tile_id)
-            .unwrap()
-            .read_through = 4;
+        measured_panes(&mut scene, tile_id, 100.0, 100.0);
+        processor.reconcile_portal_document_layouts(&mut scene);
         driver.drain_inner(&mut scene, &mut processor, Some(tab), 401 + FRAME_US);
         assert_eq!(scene.tile_unread_count(tile_id), 0);
         scene.set_tile_follow_tail_at_tail(tile_id, false);

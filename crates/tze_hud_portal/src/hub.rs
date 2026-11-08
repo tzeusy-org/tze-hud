@@ -1,15 +1,9 @@
 //! Portal state, keyed by (agent id, portal id).
 //!
-//! [`PortalHub`] is the whole runtime model of `portal:<id>` surfaces: the
-//! transcript, viewer replies, the input queue, liveness, and render pacing.
-//! It is pure: every time-dependent call takes `now_us`, and nothing here
-//! reads a clock, renders, or does I/O. The runtime's portal driver feeds it
-//! MCP operations and composer submissions, sweeps it on wake deadlines, and
-//! renders the portals [`PortalHub::take_due`] hands back.
-//!
-//! Identity is the authenticated agent id (PSK), so there are no owner
-//! tokens: a second agent publishing to the same portal id gets its own
-//! portal.
+//! Pure runtime state for authenticated (agent id, portal id) surfaces:
+//! transcript, replies, input delivery, liveness and render pacing. All timed
+//! operations take `now_us`; this module does no clock reads, rendering or I/O.
+//! MCP and the runtime driver share this Hub; distinct agents own distinct keys.
 
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
