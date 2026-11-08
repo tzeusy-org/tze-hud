@@ -4697,6 +4697,27 @@ mod tests {
         processor.process_with_focus(&down_composer, &mut scene, &mut fm, tab_id);
         let (text, cursor, anchor, _, _, _) = processor.composer_draft_snapshot().unwrap();
         assert_eq!((text.as_str(), cursor, anchor), ("z", 1, 1));
+
+        // OUTPUT has ordinary text, not an interactive HitRegion. A tile
+        // background click must also blur editing and permit portal commands.
+        let output_click = PointerEvent {
+            x: 400.0,
+            y: 300.0,
+            ..down_plain
+        };
+        assert!(
+            matches!(scene.hit_test(400.0, 300.0), HitResult::TileHit { tile_id: t } if t == tile_id)
+        );
+        processor.process_with_focus(&output_click, &mut scene, &mut fm, tab_id);
+        assert!(
+            !processor.is_composer_active(),
+            "tile background click blurs the composer"
+        );
+        assert_eq!(fm.current_owner(tab_id), &FocusOwner::Tile(tile_id));
+        processor.route_character_to_composer("ignored");
+        processor.process_with_focus(&down_composer, &mut scene, &mut fm, tab_id);
+        let (text, cursor, anchor, _, _, _) = processor.composer_draft_snapshot().unwrap();
+        assert_eq!((text.as_str(), cursor, anchor), ("z", 1, 1));
     }
 
     /// Verify that `route_key_down_to_composer` does not consume unknown keys
