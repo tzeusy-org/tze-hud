@@ -983,7 +983,7 @@ def scenario_lifecycle(run: Run) -> None:
         raise ScenarioFailed("idle recovery uses the same live attachment", {"reply": reply})
     recovered = run.expect("same-id publish clears stale and restores Active",
                            on(s, lambda p: p["state"] == "Active" and "stream stale" not in p["header_text"]
-                              and p["output"]["last_visible_line"].startswith("recovered")))
+                              and (p["output"]["last_visible_line"] or "").startswith("recovered")))
     run.settle()
     recovered_color = output_background(run.frame(), portal_entry(recovered, s))
     if recovered_color != bright:
@@ -1015,8 +1015,8 @@ def scenario_dismiss(run: Run) -> None:
     if reply.get("reattached") is not True:
         raise ScenarioFailed("same-id publish explicitly reattaches", {"reply": reply})
     run.expect("reattachment has only fresh output and empty draft",
-               on(s, lambda p: p["output"]["first_visible_line"].startswith("fresh attachment")
-                  and p["output"]["last_visible_line"].startswith("fresh attachment") and p["input"]["draft_chars"] == 0))
+               on(s, lambda p: (p["output"]["first_visible_line"] or "").startswith("fresh attachment")
+                  and (p["output"]["last_visible_line"] or "").startswith("fresh attachment") and p["input"]["draft_chars"] == 0))
     run.click(f"{s}/composer")
     run.type("fresh reply")
     run.key("Return")
@@ -1082,7 +1082,7 @@ def scenario_resize_hotkey(run: Run) -> None:
     before = portal_entry(run.settle(), s)
     run.publish(s, content="\ngeometry marker", expects_reply=True)
     run.expect("republish uses the resized OUTPUT",
-                              on(s, lambda p: p["output"]["last_visible_line"].startswith("geometry marker")))
+                              on(s, lambda p: (p["output"]["last_visible_line"] or "").startswith("geometry marker")))
     after = portal_entry(run.settle(), s)
     if after["rect"] != before["rect"] or any(after["panes"][pane] != before["panes"][pane]
                                              for pane in ("header", "input", "output", "composer")):
