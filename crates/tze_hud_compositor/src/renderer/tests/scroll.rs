@@ -500,6 +500,10 @@ async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
     compositor.prime_truncation_cache(&scene);
     compositor.render_frame_headless(&mut scene, &surface);
     let partial = surface.read_pixels(&compositor.device);
+    scene.set_tile_follow_tail_at_tail(tile_id, true);
+    compositor.render_frame_headless(&mut scene, &surface);
+    let partial_without_pill = surface.read_pixels(&compositor.device);
+    scene.set_tile_follow_tail_at_tail(tile_id, false);
     for y in
         (item.clip_pixel_y as u32 + 2)..((item.clip_pixel_y + item.clip_bounds_height) as u32 - 2)
     {
@@ -509,7 +513,7 @@ async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
             let expected = if (x as f32) < split {
                 &painted[1]
             } else {
-                &covered[1]
+                &partial_without_pill
             };
             assert_eq!(
                 crate::test_pixels::pixel_at(&partial, 480, x, y),
