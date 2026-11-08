@@ -572,6 +572,8 @@ async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
         let (_, labels) = compositor.collect_scroll_affordances(&scene);
         assert_eq!(labels.len(), 1);
         assert_eq!(&*labels[0].text, format!("{unread} unread"));
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
         compositor.render_frame_headless(&mut scene, &surface);
         let pixels = surface.read_pixels(&compositor.device);
         let label = &labels[0];
@@ -596,9 +598,13 @@ async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
     }
     scene.set_tile_follow_tail_at_tail(tile_id, true);
     scene.set_tile_unread_count(tile_id, 0);
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
     compositor.render_frame_headless(&mut scene, &surface);
     let read_pixels = surface.read_pixels(&compositor.device);
     scene.set_tile_follow_tail_at_tail(tile_id, false);
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
     compositor.render_frame_headless(&mut scene, &surface);
     assert!(
         read_pixels == surface.read_pixels(&compositor.device),
