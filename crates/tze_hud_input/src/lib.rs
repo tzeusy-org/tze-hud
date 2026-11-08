@@ -803,12 +803,15 @@ impl InputProcessor {
         tab_id: SceneId,
     ) -> (InputResult, Option<FocusTransition>) {
         let focus_transition = if event.kind == PointerEventKind::Down {
-            let hit = scene.hit_test(event.x, event.y);
-            if let HitResult::NodeHit {
-                tile_id, node_id, ..
-            } = hit
-            {
-                let transition = focus_manager.on_click(tab_id, tile_id, Some(node_id), scene);
+            let target = match scene.hit_test(event.x, event.y) {
+                HitResult::NodeHit {
+                    tile_id, node_id, ..
+                } => Some((tile_id, Some(node_id))),
+                HitResult::TileHit { tile_id } => Some((tile_id, None)),
+                _ => None,
+            };
+            if let Some((tile_id, node_id)) = target {
+                let transition = focus_manager.on_click(tab_id, tile_id, node_id, scene);
                 self.apply_focus_transition_side_effects(&transition, scene);
                 if transition.gained.is_some() || transition.lost.is_some() {
                     Some(transition)
