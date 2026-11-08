@@ -683,7 +683,12 @@ async fn handle_admin(
         return denied;
     }
     match which {
-        AdminRoute::Status => Response::json(admin.render().await.to_string()),
+        AdminRoute::Status => Response::json(
+            admin
+                .render(query_param(&req.query, "cpu") != Some("0"))
+                .await
+                .to_string(),
+        ),
         AdminRoute::Screenshot => match &admin.capture {
             None => crate::operator::screenshot::ScreenshotError::Unavailable(
                 "this runtime has no display to capture",
@@ -1123,6 +1128,32 @@ mod tests {
         let outside = handle_admin(Update, &post(Some("root-psk"), ok), &src).await;
         assert_eq!(outside.status, 409);
         assert!(body_of(&outside).contains("NOT_INSTALLED"));
+    }
+
+    /// `?cpu=0` answers without the CPU sample window, for polling harnesses.
+    #[tokio::test(start_paused = true)]
+    async fn admin_status_cpu_0_skips_the_sample() {
+        let src = admin_source(std::env::temp_dir().join("tze_hud_no_such.log"));
+        for (query, sampled) in [("/admin/status", true), ("/admin/status?cpu=0", false)] {
+            let started = tokio::time::Instant::now();
+            let r = handle_admin(
+                crate::http::AdminRoute::Status,
+                &admin_get(query, Some("root-psk")),
+                &src,
+            )
+            .await;
+            let waited = started.elapsed();
+            let v: serde_json::Value = serde_json::from_slice(&r.body).unwrap();
+            assert_eq!(
+                waited >= crate::operator::status::CPU_SAMPLE,
+                sampled,
+                "{query}"
+            );
+            if !sampled {
+                assert!(v["cpu_pct_2s"].is_null(), "{query}");
+                assert!(v.get("idle_since_ms").is_some() && v.get("portals").is_some());
+            }
+        }
     }
 
     #[tokio::test(start_paused = true)]

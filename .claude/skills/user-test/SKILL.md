@@ -13,6 +13,12 @@ metadata:
 
 # User Test
 
+Run the mechanical checks yourself first: `just gesture` drives a fresh Linux
+build on a private Xvfb display with real XTEST input (AGENTS.md, T13 in
+`docs/scope.md`), then use the Windows dispatch below. Ask the owner only about
+the T13 residual list (visual preference, owner hardware, network/install,
+time-based behaviour), with a link to the evidence.
+
 Everything goes over the HUD's MCP port (default 9090) with your paired PSK.
 Contract: `docs/api.md` (pairing, `hud_*` verbs) and
 `docs/operations/windows-install.md` (`/admin/*`).
