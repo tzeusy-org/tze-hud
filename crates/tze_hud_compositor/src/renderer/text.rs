@@ -1319,32 +1319,6 @@ impl super::Compositor {
             }
         }
 
-        // ── Jump-to-latest unread-count badge (hud-g1ena.3) ──────────────────
-        // The ambient unread count the jump-to-latest pill MAY carry
-        // (portal-chat-grade-affordances §Jump-to-Latest Affordance). The pill
-        // rect itself is drawn in `render_frame`'s tile loop; this injects the
-        // count TEXT centered on top of it. `collect_jump_to_latest_badge_item`
-        // reproduces the pill's exact visibility gates (overflow + scrolled-away)
-        // and only yields a `TextItem` when the tile carries a nonzero,
-        // non-redacted unread count — so it renders on any scrolled-back
-        // scrollable tile with unread content and clears with the pill at the tail.
-        let jump_to_latest_tokens = resolve_jump_to_latest_tokens(&self.token_map);
-        let scroll_indicator_tokens = resolve_scroll_indicator_tokens(&self.token_map);
-        for tile in self.policy_visible_tiles(scene) {
-            if let Some(mut badge) = self.collect_jump_to_latest_badge_item(
-                tile,
-                scene,
-                &jump_to_latest_tokens,
-                &scroll_indicator_tokens,
-            ) {
-                // Fade the badge with the tile (matches the pill / composer echo).
-                if self.rendered_tile_opacity(tile, scene) > TILE_TEXT_OPACITY_EPSILON {
-                    badge.opacity *= self.tile_effective_opacity(tile, scene);
-                    items.push(badge);
-                }
-            }
-        }
-
         // ── "Disconnected" label on orphaned tiles (invariant 4) ─────────────
         // Text for the strip `append_disconnect_badge_vertices` draws along the
         // tile's bottom edge.

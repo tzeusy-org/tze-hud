@@ -1517,6 +1517,79 @@ impl Compositor {
     /// pill MAY carry (hud-g1ena.3, portal-chat-grade-affordances §Jump-to-Latest
     /// Affordance).
     ///
+    /// Scroll affordances draw after OUTPUT glyphs on their own text layer.
+    fn collect_scroll_affordances(
+        &self,
+        scene: &SceneGraph,
+    ) -> (Vec<RoundedRectDrawCmd>, Vec<TextItem>) {
+        let tokens = resolve_jump_to_latest_tokens(&self.token_map);
+        let indicator = resolve_scroll_indicator_tokens(&self.token_map);
+        let mut rects = Vec::new();
+        let mut items = Vec::new();
+        for tile in self.policy_visible_tiles(scene) {
+            if self.rendered_tile_opacity(tile, scene) <= TILE_TEXT_OPACITY_EPSILON {
+                continue;
+            }
+            if let Some(bounds) = self.jump_to_latest_bounds(tile, scene, &tokens, &indicator) {
+                let mut color = self.gpu_color_raw([
+                    tokens.color_r,
+                    tokens.color_g,
+                    tokens.color_b,
+                    tokens.color_a,
+                ]);
+                // Follow the tile's finite appearance/exit animation.
+                let opacity = self.tile_effective_opacity(tile, scene);
+                color[3] *= opacity;
+                if self.overlay_mode {
+                    for channel in &mut color[..3] {
+                        *channel *= opacity;
+                    }
+                }
+                rects.push(RoundedRectDrawCmd {
+                    x: bounds.x,
+                    y: bounds.y,
+                    width: bounds.width,
+                    height: bounds.height,
+                    radius: 0.0,
+                    color,
+                    border: None,
+                    clip: None,
+                });
+            }
+            if let Some(mut item) =
+                self.collect_jump_to_latest_badge_item(tile, scene, &tokens, &indicator)
+            {
+                item.opacity *= self.tile_effective_opacity(tile, scene);
+                items.push(item);
+            }
+        }
+        (rects, items)
+    }
+
+    fn jump_to_latest_bounds(
+        &self,
+        tile: &Tile,
+        scene: &SceneGraph,
+        tokens: &tze_hud_input::JumpToLatestTokens,
+        indicator: &tze_hud_input::ScrollIndicatorTokens,
+    ) -> Option<Rect> {
+        let (viewport, height) = scene.output_scroll_geometry(tile.id)?;
+        let offset = self.display_tile_scroll_offset(scene, tile.id).1;
+        tze_hud_input::compute_scroll_indicator(viewport.height, height, offset, indicator)?;
+        let pill = tze_hud_input::compute_jump_to_latest_pill(
+            viewport.width,
+            viewport.height,
+            !scene.tile_follow_tail_at_tail(tile.id),
+            tokens,
+        )?;
+        Some(Rect::new(
+            tile.bounds.x + viewport.x + pill.x_px,
+            tile.bounds.y + viewport.y + pill.y_px,
+            pill.width_px,
+            pill.height_px,
+        ))
+    }
+
     /// Returns `None` unless every gate the pill render in `render_frame` uses
     /// also holds — the tile has a registered scroll config with a known content
     /// height, the content overflows (a scroll indicator would render), the
@@ -1541,23 +1614,11 @@ impl Compositor {
         // gating via the pure functions this delegates to).
         self.text_rasterizer.as_ref()?;
 
-        let (viewport, content_height) = scene.output_scroll_geometry(tile.id)?;
-        let viewport_px = viewport.height;
-        let (_, scroll_offset_y) = self.display_tile_scroll_offset(scene, tile.id);
-        // Only offer the badge where the pill itself renders: content overflows.
-        tze_hud_input::compute_scroll_indicator(
-            viewport_px,
-            content_height,
-            scroll_offset_y,
-            scroll_indicator_tokens,
-        )?;
-
-        let scrolled_back = !scene.tile_follow_tail_at_tail(tile.id);
-        let pill = tze_hud_input::compute_jump_to_latest_pill(
-            viewport.width,
-            viewport_px,
-            scrolled_back,
+        let bounds = self.jump_to_latest_bounds(
+            tile,
+            scene,
             jump_to_latest_tokens,
+            scroll_indicator_tokens,
         )?;
 
         // The count the pill MAY carry — `None`/`0` leaves the plain pill (no badge).
@@ -1581,11 +1642,11 @@ impl Compositor {
         let line_height = (font_size_px * line_height_multiplier).max(1.0);
 
         // Pill origin in absolute pixels; vertically center one text line inside it.
-        let pill_x = tile.bounds.x + viewport.x + pill.x_px;
-        let pill_y = tile.bounds.y + viewport.y + pill.y_px;
-        let text_y = pill_y + ((pill.height_px - line_height) / 2.0).max(0.0);
-        let bounds_width = pill.width_px.max(1.0);
-        let bounds_height = pill.height_px.max(1.0);
+        let pill_x = bounds.x;
+        let pill_y = bounds.y;
+        let text_y = pill_y + ((bounds.height - line_height) / 2.0).max(0.0);
+        let bounds_width = bounds.width.max(1.0);
+        let bounds_height = bounds.height.max(1.0);
 
         Some(crate::text::TextItem {
             text: Arc::from(label.as_str()),

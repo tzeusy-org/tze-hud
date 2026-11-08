@@ -15,6 +15,8 @@ struct TargetView<'a> {
     rr_content: Cow<'a, [RoundedRectDrawCmd]>,
     rr_post: Cow<'a, [RoundedRectDrawCmd]>,
     text_items: Cow<'a, [TextItem]>,
+    affordance_items: Cow<'a, [TextItem]>,
+    affordance_rects: Cow<'a, [RoundedRectDrawCmd]>,
     card_items: &'a [TextItem],
     drag_handle_vertices: Cow<'a, [RectVertex]>,
     drag_highlight_cmds: Cow<'a, [RoundedRectDrawCmd]>,
@@ -382,38 +384,6 @@ impl Compositor {
                         thumb_color,
                     );
                     vertices.extend_from_slice(&thumb_verts);
-
-                    // ── Jump-to-latest pill (hud-9ci61) ──────────────────
-                    // Rendered only while the tile is scrolled away from
-                    // the tail (auto follow-tail already exists but had no
-                    // click affordance to resume it). Geometry mirrors the
-                    // hit region populated in `populate_zone_hit_regions`,
-                    // computed from the same pure function so render and
-                    // hit-test never disagree.
-                    let scrolled_back = !scene.tile_follow_tail_at_tail(tile.id);
-                    if let Some(pill) = tze_hud_input::compute_jump_to_latest_pill(
-                        viewport.width,
-                        viewport_px,
-                        scrolled_back,
-                        &jump_to_latest_tokens,
-                    ) {
-                        let pill_color = self.gpu_color_raw([
-                            jump_to_latest_tokens.color_r,
-                            jump_to_latest_tokens.color_g,
-                            jump_to_latest_tokens.color_b,
-                            jump_to_latest_tokens.color_a,
-                        ]);
-                        let pill_verts = rect_vertices(
-                            tile.bounds.x + viewport.x + pill.x_px,
-                            tile.bounds.y + viewport.y + pill.y_px,
-                            pill.width_px,
-                            pill.height_px,
-                            sw,
-                            sh,
-                            pill_color,
-                        );
-                        vertices.extend_from_slice(&pill_verts);
-                    }
                 }
             }
 
@@ -849,11 +819,16 @@ impl Compositor {
         // before the encode that replays it.
         let render_menu_text = self.prepare_menu_text(&tv.context_menu_text, tv.width, tv.height);
         let inputs = self.prepare_encode_inputs(
-            tv.rr_background.into_owned(),
-            tv.rr_content.into_owned(),
-            tv.rr_post.into_owned(),
-            &tv.text_items,
-            tv.card_items,
+            EncodeSources {
+                rr_background: tv.rr_background.into_owned(),
+                rr_content: tv.rr_content.into_owned(),
+                rr_post: tv.rr_post.into_owned(),
+                text_items: tv.text_items.into_owned(),
+                card_items: tv.card_items.to_vec(),
+                notice_items: 0,
+                affordance_items: tv.affordance_items.into_owned(),
+                affordance_rects: tv.affordance_rects.into_owned(),
+            },
             (tv.width, tv.height),
         );
 
@@ -932,6 +907,8 @@ impl Compositor {
                 rr_content: Cow::Borrowed(&build.encode_sources.rr_content),
                 rr_post: Cow::Borrowed(&build.encode_sources.rr_post),
                 text_items: Cow::Borrowed(&build.encode_sources.text_items),
+                affordance_items: Cow::Borrowed(&build.encode_sources.affordance_items),
+                affordance_rects: Cow::Borrowed(&build.encode_sources.affordance_rects),
                 card_items: &build.encode_sources.card_items,
                 drag_handle_vertices: Cow::Borrowed(&build.drag_handle_vertices),
                 drag_highlight_cmds: Cow::Borrowed(&build.drag_highlight_cmds),
@@ -979,19 +956,20 @@ impl Compositor {
                 })
                 .collect()
         };
-        let text_items = build
-            .encode_sources
-            .text_items
-            .iter()
-            .map(|item| {
-                let mut item = item.clone();
-                item.pixel_x += dx;
-                item.pixel_y += dy;
-                item.clip_pixel_x += dx;
-                item.clip_pixel_y += dy;
-                item
-            })
-            .collect();
+        let shift_text = |items: &[TextItem]| -> Vec<TextItem> {
+            items
+                .iter()
+                .map(|item| {
+                    let mut item = item.clone();
+                    item.pixel_x += dx;
+                    item.pixel_y += dy;
+                    item.clip_pixel_x += dx;
+                    item.clip_pixel_y += dy;
+                    item
+                })
+                .collect()
+        };
+        let text_items = shift_text(&build.encode_sources.text_items);
         let textured_cmds = build
             .textured_cmds
             .iter()
@@ -1012,6 +990,8 @@ impl Compositor {
             rr_content: Cow::Owned(shift_rr(&build.encode_sources.rr_content)),
             rr_post: Cow::Owned(shift_rr(&build.encode_sources.rr_post)),
             text_items: Cow::Owned(text_items),
+            affordance_items: Cow::Owned(shift_text(&build.encode_sources.affordance_items)),
+            affordance_rects: Cow::Owned(shift_rr(&build.encode_sources.affordance_rects)),
             card_items: if target.primary {
                 &build.encode_sources.card_items
             } else {

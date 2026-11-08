@@ -666,6 +666,8 @@ pub(crate) struct EncodeInputs {
     /// Whether the system card's text was prepared on the overlay text layer and
     /// must be replayed by [`Compositor::encode_system_card_pass`] (hud-w5zon).
     render_card_text: bool,
+    affordance_rects: Vec<RoundedRectDrawCmd>,
+    render_affordance_text: bool,
 }
 
 /// Scene-read inputs for the encode stage, before any glyphon prepare, in
@@ -676,6 +678,8 @@ pub(crate) struct EncodeSources {
     pub(crate) rr_content: Vec<RoundedRectDrawCmd>,
     pub(crate) rr_post: Vec<RoundedRectDrawCmd>,
     pub(crate) text_items: Vec<TextItem>,
+    pub(crate) affordance_items: Vec<TextItem>,
+    pub(crate) affordance_rects: Vec<RoundedRectDrawCmd>,
     /// System card text (primary display only), led by the closed panel
     /// notice's text.
     pub(crate) card_items: Vec<TextItem>,
@@ -2453,14 +2457,7 @@ impl Compositor {
         surf_h: u32,
     ) -> EncodeInputs {
         let sources = self.collect_encode_sources(scene, surf_w, surf_h);
-        self.prepare_encode_inputs(
-            sources.rr_background,
-            sources.rr_content,
-            sources.rr_post,
-            &sources.text_items,
-            &sources.card_items,
-            (surf_w, surf_h),
-        )
+        self.prepare_encode_inputs(sources, (surf_w, surf_h))
     }
 
     /// The scene-read half of [`Self::collect_encode_inputs`]: rounded-rect
@@ -2499,7 +2496,10 @@ impl Compositor {
         } else {
             (vec![], 0)
         };
+        let (affordance_rects, affordance_items) = self.collect_scroll_affordances(scene);
         EncodeSources {
+            affordance_rects,
+            affordance_items,
             rr_background,
             rr_content,
             rr_post,
@@ -2513,13 +2513,19 @@ impl Compositor {
     /// `surf_w`×`surf_h` target whose items are already in its pixel space.
     fn prepare_encode_inputs(
         &mut self,
-        rr_background: Vec<crate::pipeline::RoundedRectDrawCmd>,
-        rr_content: Vec<crate::pipeline::RoundedRectDrawCmd>,
-        rr_post: Vec<crate::pipeline::RoundedRectDrawCmd>,
-        text_items: &[TextItem],
-        card_items: &[TextItem],
+        sources: EncodeSources,
         (surf_w, surf_h): (u32, u32),
     ) -> EncodeInputs {
+        let EncodeSources {
+            rr_background,
+            rr_content,
+            rr_post,
+            text_items,
+            card_items,
+            affordance_rects,
+            affordance_items,
+            ..
+        } = sources;
         let sw = surf_w as f32;
         let sh = surf_h as f32;
         // Phase A: prepare glyphon buffers (requires mutable tr borrow). Drop the
@@ -2535,7 +2541,7 @@ impl Compositor {
                 if text_items.is_empty() {
                     None
                 } else {
-                    Some(tr.prepare_text_items(&self.device, &self.queue, text_items))
+                    Some(tr.prepare_text_items(&self.device, &self.queue, &text_items))
                 }
             } else {
                 None
@@ -2576,7 +2582,7 @@ impl Compositor {
         // (no card) means no prepare and no extra pass.
         let render_card_text = match self.text_rasterizer {
             Some(ref mut tr) if !card_items.is_empty() => {
-                match tr.prepare_overlay_text_items(&self.device, &self.queue, card_items) {
+                match tr.prepare_overlay_text_items(&self.device, &self.queue, &card_items) {
                     Ok(_) => true,
                     Err(e) => {
                         tracing::warn!(error = %e, "system card text prepare failed");
@@ -2587,7 +2593,16 @@ impl Compositor {
             _ => false,
         };
 
+        let render_affordance_text = self.text_rasterizer.as_mut().is_some_and(|tr| {
+            !affordance_items.is_empty()
+                && tr
+                    .prepare_affordance_text_items(&self.device, &self.queue, &affordance_items)
+                    .map_err(|e| tracing::warn!(error = %e, "affordance text prepare failed"))
+                    .is_ok()
+        });
         EncodeInputs {
+            affordance_rects,
+            render_affordance_text,
             rr_background,
             rr_content,
             rr_post,
@@ -2768,6 +2783,28 @@ impl Compositor {
             tr.trim_atlas();
         }
 
+        self.encode_rounded_rect_pass(&mut encoder, frame_view, &inputs.affordance_rects, sw, sh);
+        if inputs.render_affordance_text
+            && let Some(ref tr) = self.text_rasterizer
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("scroll_affordance_text"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: frame_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Load,
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+            });
+            if let Err(e) = tr.render_affordance_text_pass(&mut pass) {
+                tracing::warn!(error = %e, "affordance text render failed");
+            }
+        }
         let encode_us = encode_start.elapsed().as_micros() as u64;
         (encoder, encode_us)
     }
