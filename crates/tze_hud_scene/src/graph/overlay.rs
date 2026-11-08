@@ -3,6 +3,14 @@ use crate::validation::ValidationError;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+/// Output ordinals for the current native portal attachment. Local reads can
+/// acknowledge only output installed in the scene, not future Hub publishes.
+#[derive(Clone, Debug, Default)]
+pub struct PortalOutputReadState {
+    pub latest: u64,
+    pub read_through: u64,
+}
+
 /// Transient per-frame state owned by the runtime and compositor layers.
 ///
 /// These fields are all `#[serde(skip)]` — they are never serialized and carry
@@ -108,6 +116,8 @@ pub struct RuntimeOverlayState {
     /// each delta once, independently of intervening ordinary wheel targets.
     #[serde(skip, default)]
     pub portal_scroll_origin_shifts: HashMap<SceneId, (f64, f64)>,
+    #[serde(skip, default)]
+    pub portal_output_reads: HashMap<SceneId, PortalOutputReadState>,
     /// Only actual shaped documents publish extents; this does not dirty pixels.
     #[serde(skip, default)]
     pub portal_document_layouts: HashMap<(SceneId, PortalPartKind), PortalDocumentLayout>,
@@ -904,6 +914,13 @@ impl SceneGraph {
             self.overlay
                 .tile_follow_tail_at_tail
                 .insert(tile_id, at_tail);
+            if at_tail
+                && self.output_scroll_geometry(tile_id).is_some()
+                && let Some(read) = self.overlay.portal_output_reads.get_mut(&tile_id)
+            {
+                read.read_through = read.latest;
+                self.set_tile_unread_count(tile_id, 0);
+            }
         }
     }
 

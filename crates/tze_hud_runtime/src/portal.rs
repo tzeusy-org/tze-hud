@@ -1,25 +1,9 @@
 //! In-process portal driver: owns the [`PortalHub`] and renders its portals.
 //!
-//! The hub is the portal state model (keyed by agent and portal id); this
-//! driver is the runtime side. On the winit event-loop thread it:
-//!
-//! 1. Reads the single Hub shared directly with the MCP server.
-//! 2. On every `about_to_wait` drain: sweeps the hub (input expiry, idle
-//!    degrade, reclaim), then renders each portal [`PortalHub::take_due`]
-//!    returns into a scene tile, creating the tile (under its own scene
-//!    lease) on first render. The pure scene renderer receives a PortalView;
-//!    this driver applies its nodes and affordances with checked scene calls.
-//! 3. Mirrors liveness onto the scene lease: a degraded portal's lease is
-//!    orphaned (disconnection badge, content kept, invariant 4) and
-//!    reconnected when the agent returns. A reclaimed portal's lease is
-//!    revoked, which removes its tile.
-//!
-//! FrameReady drains consume actual compositor document metrics for independent
-//! INPUT/OUTPUT scrolling; raw markdown line counts never set scroll bounds.
-//!
-//! `drain` takes `&mut SceneGraph` (the caller holds the scene lock via
-//! `try_lock`) and is wrapped in `catch_unwind`: a panic resets the drive
-//! state instead of propagating into the event loop.
+//! The event-loop driver shares the MCP Hub, sweeps liveness/input expiry,
+//! applies due views under checked scene leases, and mirrors degrade/reconnect.
+//! FrameReady consumes shaped INPUT/OUTPUT metrics and output read watermarks.
+//! `drain` runs under the caller's scene lock; panic recovery resets bindings.
 
 use std::collections::HashMap;
 use std::sync::MutexGuard;
@@ -135,8 +119,7 @@ fn portal_scene_identity(key: &PortalKey, tile_id: SceneId) -> String {
     }
 }
 
-/// The renderer's view of a hub portal (one step until the renderer reads
-/// the hub directly).
+/// Snapshot presentation data under the Hub lock.
 fn portal_state(
     key: &PortalKey,
     tile_id: SceneId,
@@ -172,8 +155,10 @@ fn portal_state(
             PortalStatus::Detached => ProjectionLifecycleState::Detached,
         }),
         status_text: None,
-        unread_output_count: Some(portal.rendered_unread),
-        visible_unread_output_count: Some(portal.rendered_unread.min(visible_transcript.len())),
+        unread_output_count: Some(portal.unread_output_count()),
+        visible_unread_output_count: Some(
+            portal.unread_output_count().min(visible_transcript.len()),
+        ),
         visible_transcript,
         input_history: portal
             .replies
@@ -493,12 +478,8 @@ impl PortalDriver {
         self.portals.hub.lock().expect("test hub")
     }
 
-    /// Sweep the hub and render due portals onto the scene.
-    ///
-    /// Called from `about_to_wait` after the composer-draft flush, with the
-    /// scene lock already taken (`try_lock`). `tab_id` is the active tab; a
-    /// new portal tile goes there, or into the first tab (activating it), or
-    /// into a fresh "Main" tab.
+    /// Sweep and render under the caller's scene lock. New portals use the
+    /// active tab, otherwise the first existing tab or a newly created Main tab.
     pub fn drain(
         &mut self,
         scene: &mut SceneGraph,
@@ -561,6 +542,15 @@ impl PortalDriver {
                 .filter(|(key, entry)| hub.incarnation(key) != entry.incarnation)
                 .map(|(key, _)| key.clone())
                 .collect();
+            for (key, entry) in &self.entries {
+                if let Some(read) = entry
+                    .tile_scene_id
+                    .and_then(|id| scene.overlay.portal_output_reads.get(&id))
+                    && let Some(incarnation) = entry.incarnation
+                {
+                    hub.mark_read_through(key, incarnation, read.read_through);
+                }
+            }
             let transitions = hub.sweep(now_us);
             let due: Vec<_> = hub
                 .take_due(now_us)
@@ -661,7 +651,7 @@ impl PortalDriver {
         let Some(tile_id) = self.entries[key].tile_scene_id else {
             return;
         };
-        let state = {
+        let (state, published_outputs) = {
             let Some(hub) = self.lock_hub() else {
                 return;
             };
@@ -671,12 +661,15 @@ impl PortalDriver {
                 return;
             }
             let portal = hub.get(key).expect("incarnation checked above");
-            portal_state(
-                key,
-                tile_id,
-                portal,
-                &self.entries[key],
-                hub.limits().visible_bytes,
+            (
+                portal_state(
+                    key,
+                    tile_id,
+                    portal,
+                    &self.entries[key],
+                    hub.limits().visible_bytes,
+                ),
+                portal.published_outputs,
             )
         };
         let entry = self.entries.get_mut(key).expect("entry ensured above");
@@ -697,6 +690,12 @@ impl PortalDriver {
             tracing::warn!(portal = %key.id, ?error, "portal scene render failed");
             return;
         }
+        scene
+            .overlay
+            .portal_output_reads
+            .entry(tile_id)
+            .or_default()
+            .latest = published_outputs;
         // The hub owns the wake and consumes it through the same due path as dirty content.
         if let Ok(mut hub) = self.portals.hub.lock() {
             hub.set_activity_cue_deadline(
@@ -705,8 +704,6 @@ impl PortalDriver {
                 activity_cue_clear_due_us(&state, now_us),
             );
         }
-        // The jump-to-latest pill's badge (hud-g1ena.3).
-        scene.set_tile_unread_count(tile_id, state.unread_output_count.unwrap_or(0));
     }
 
     /// Create a portal's tile under its own scene lease. A portal needs a
@@ -1705,9 +1702,7 @@ pub(crate) mod tests {
         }
     }
 
-    /// The ambient "N unread" count and the in-transcript divider come from
-    /// the drained batch (hud-meqet, hud-n95zc) and survive a degraded repaint
-    /// that adds no output (hud-lylbz).
+    /// Unread survives local/degraded repaints until the viewer reads output.
     #[test]
     fn drain_then_render_surfaces_live_unread_count() {
         let mut driver = PortalDriver::new(PortalHandle::default());
@@ -1727,6 +1722,30 @@ pub(crate) mod tests {
         assert!(
             content.contains("3 unread"),
             "degraded repaint keeps it: {content}"
+        );
+        scene
+            .overlay
+            .portal_output_reads
+            .get_mut(&tile_id)
+            .unwrap()
+            .read_through = 3;
+        publish(&mut driver, "p", "racing unseen output", 400);
+        driver.drain_inner(&mut scene, &mut processor, Some(tab), 400 + FRAME_US);
+        assert_eq!(scene.tile_unread_count(tile_id), 1);
+        scene
+            .overlay
+            .portal_output_reads
+            .get_mut(&tile_id)
+            .unwrap()
+            .read_through = 4;
+        driver.drain_inner(&mut scene, &mut processor, Some(tab), 401 + FRAME_US);
+        assert_eq!(scene.tile_unread_count(tile_id), 0);
+        scene.set_tile_follow_tail_at_tail(tile_id, false);
+        driver.drain_inner(&mut scene, &mut processor, Some(tab), 402 + FRAME_US);
+        assert_eq!(
+            scene.tile_unread_count(tile_id),
+            0,
+            "backscroll cannot resurrect read output"
         );
     }
 
