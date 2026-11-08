@@ -9,7 +9,8 @@
 #   (scripts/ci/windows_install_smoke.py).
 #   Runs on non-docs PRs and main pushes, v* tags, and manual dispatch.
 #   PRs skip the informational idle measurement and run theme captures (and
-#   the changed-scene comment) only when they touch rendered paths, keeping
+#   the changed-scene comment) only when they touch rendered paths, and the
+#   T13 gesture scenarios only for rendered, input or portal paths, keeping
 #   the PR run near 10 min and off the shared runner pool; main pushes run
 #   everything, so the capture baseline and idle trend stay complete.
 #   Informational: omit merge_group while this check is not required. Restore
@@ -71,13 +72,21 @@ jobs:
         run: |
           set -euo pipefail
           if [[ "$GITHUB_EVENT_NAME" != pull_request ]]; then
-            echo rendered=true >> "$GITHUB_OUTPUT"; exit 0
+            { echo rendered=true; echo gestures=true; } >> "$GITHUB_OUTPUT"; exit 0
           fi
           git diff --name-only HEAD^1 HEAD | tee "$RUNNER_TEMP/changed-files.txt"
-          if grep -Eq '^(crates/tze_hud_(compositor|widget|scene|config|runtime)/|app/tze_hud_app/|assets/|\.claude/skills/user-test/scripts/[^/]+\.json$|scripts/ci/windows_smoke\.py$|Cargo\.lock$|\.github/workflows/windows\.yml$)' "$RUNNER_TEMP/changed-files.txt"; then
+          rendered='^(crates/tze_hud_(compositor|widget|scene|config|runtime)/|app/tze_hud_app/|assets/|\.claude/skills/user-test/scripts/[^/]+\.json$|scripts/ci/windows_smoke\.py$|Cargo\.lock$|\.github/workflows/windows\.yml$)'
+          # Gestures also follow input, portal and the harness itself.
+          gestures="$rendered|^(crates/tze_hud_(input|portal)/|scripts/ci/hud_(gestures|sendinput)\.py$)"
+          if grep -Eq "$rendered" "$RUNNER_TEMP/changed-files.txt"; then
             echo rendered=true >> "$GITHUB_OUTPUT"
           else
             echo rendered=false >> "$GITHUB_OUTPUT"
+          fi
+          if grep -Eq "$gestures" "$RUNNER_TEMP/changed-files.txt"; then
+            echo gestures=true >> "$GITHUB_OUTPUT"
+          else
+            echo gestures=false >> "$GITHUB_OUTPUT"
           fi
 
       - uses: dtolnay/rust-toolchain@stable
@@ -148,6 +157,26 @@ jobs:
       - name: Install, single-instance, uninstall smoke
         timeout-minutes: 5
         run: python scripts/ci/windows_install_smoke.py --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe"
+
+      # T13 tier W, informational: real SendInput into a HUD this step starts
+      # (fullscreen, WARP), asserting on /admin/status; it refuses if any
+      # tze_hud.exe is already running. Scenarios and guards:
+      # scripts/ci/hud_gestures.py. Results land in the step summary.
+      - name: Gesture scenarios (informational, SendInput)
+        id: gestures
+        if: steps.changes.outputs.gestures == 'true'
+        continue-on-error: true
+        timeout-minutes: 6
+        run: python scripts/ci/hud_gestures.py --injector sendinput --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --out "$env:RUNNER_TEMP/gestures"
+
+      - name: Upload gesture evidence
+        if: always() && steps.gestures.outcome != 'skipped'
+        continue-on-error: true
+        uses: actions/upload-artifact@v6
+        with:
+          name: gestures
+          path: ${{ runner.temp }}/gestures/
+          if-no-files-found: warn
 
       # Own-frame WARP comparisons are informational, not owner signoff or a
       # required check. First main run bootstraps an explicitly absent baseline.
