@@ -12,7 +12,7 @@ use tze_hud_scene::types::{
     TextColorRun, TextMarkdownNode, TextOverflow,
 };
 
-pub const REFERENCE_TAG: &str = "TzeHouse";
+pub const REFERENCE_TAG: &str = "reference-windows";
 pub const REFERENCE_WIDTH: u32 = 4096;
 pub const REFERENCE_HEIGHT: u32 = 2160;
 pub const PROOF_SCHEMA_VERSION: u32 = 1;
