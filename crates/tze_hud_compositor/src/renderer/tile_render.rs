@@ -1645,6 +1645,9 @@ impl Compositor {
         tokens: &tze_hud_input::JumpToLatestTokens,
         indicator: &tze_hud_input::ScrollIndicatorTokens,
     ) -> Option<Rect> {
+        if scene.portal_surface(tile.id).is_some() && scene.tile_unread_count(tile.id) == 0 {
+            return None;
+        }
         let (viewport, height) = scene.output_scroll_geometry(tile.id)?;
         let offset = self.display_tile_scroll_offset(scene, tile.id).1;
         tze_hud_input::compute_scroll_indicator(viewport.height, height, offset, indicator)?;
@@ -1693,7 +1696,7 @@ impl Compositor {
             scroll_indicator_tokens,
         )?;
 
-        // The count the pill MAY carry — `None`/`0` leaves the plain pill (no badge).
+        // Generic jump controls may omit a count label; portals are gated above.
         let count = scene.tile_unread_count(tile.id);
         let label = tze_hud_input::jump_to_latest_badge_label(Some(count))?;
 

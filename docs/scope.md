@@ -318,6 +318,11 @@ source links when implementation changes the status.
   denominator is 14,000 lines (13,956 before this follow-up); no source/tests
   moved out of it. Owner83eb retained-line/jump checks passed, but unread and
   close failed on that build; acceptance of this follow-up remains outstanding.
+  Owner d6ad later accepted retained Line 50, cumulative two-unread and jumping
+  to both new markers, but found an empty badge background after read-through
+  and backscroll. The follow-up gates portal fill, label and hit target together
+  at zero unread; its source regression checks zero/one/two and retained generic
+  jump controls. Corrected Windows acceptance remains outstanding.
   The runtime module/type is now `portal.rs` / `PortalDriver`, with one binding
   map and immediate scene-owned lease revocation. Scene, MCP and pause control
   share the injected clock; healthy portal idle/hold allowances survive pause
