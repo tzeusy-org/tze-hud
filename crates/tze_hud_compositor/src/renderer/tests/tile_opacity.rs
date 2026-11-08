@@ -656,6 +656,13 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
             "feedback stays below a higher tile"
         );
     }
+    // The pointer leaves. Hover is pointer state: it survives a re-render of the
+    // same composer node (hud-1dnk5.19), so clear it before the collapsed render.
+    scene
+        .hit_region_states
+        .get_mut(&composer_id)
+        .unwrap()
+        .hovered = false;
 
     // Collapsed production portals use a TextMarkdown backdrop, not SolidColor.
     scene.delete_tile(upper, "portal").unwrap();
