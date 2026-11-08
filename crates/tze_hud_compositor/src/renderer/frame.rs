@@ -285,7 +285,6 @@ impl Compositor {
         // the token map does not change during the tile loop.
         let scroll_indicator_tokens = resolve_scroll_indicator_tokens(&self.token_map);
         // Resolve "jump to latest" pill tokens once per frame (hud-9ci61).
-        let jump_to_latest_tokens = resolve_jump_to_latest_tokens(&self.token_map);
         // Resolve composer overlay tokens once per frame (hud-r3ax6).
         let composer_overlay_tokens = resolve_composer_overlay_tokens(&self.token_map);
 

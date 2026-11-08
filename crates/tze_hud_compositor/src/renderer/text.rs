@@ -26,8 +26,7 @@ use super::token_colors::{
     NOTIFICATION_DISMISS_GAP_PX, NOTIFICATION_ICON_GAP_PX, NOTIFICATION_ICON_SIZE_PX,
     NOTIFICATION_INTER_LINE_GAP, NOTIFICATION_TITLE_WEIGHT, is_alert_banner_zone,
     notification_dismiss_bounds, notification_inset, resolve_composer_overlay_tokens,
-    resolve_jump_to_latest_tokens, resolve_notification_action_tokens,
-    resolve_scroll_indicator_tokens, resolve_transcript_max_measure_px,
+    resolve_notification_action_tokens, resolve_transcript_max_measure_px,
     urgency_to_on_severity_color,
 };
 
@@ -45,7 +44,7 @@ const DEFAULT_LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
 /// driven to 0 by `update_tile_opacity(0.0)` — leaves NO floating glyphs on
 /// screen (hud-dat3x).  Chosen well below one 8-bit alpha step (1/255 ≈ 0.0039)
 /// so any perceptible fraction still blends.
-const TILE_TEXT_OPACITY_EPSILON: f32 = 1e-4;
+pub(super) const TILE_TEXT_OPACITY_EPSILON: f32 = 1e-4;
 
 /// Font size of the close button's x mark relative to the button: a `×` fills
 /// about half its em, so the mark spans roughly 40% of the button.

@@ -34,7 +34,10 @@ use tze_hud_scene::DegradationLevel;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::*;
 
-use crate::pipeline::{RectVertex, rect_vertices};
+use super::text::TILE_TEXT_OPACITY_EPSILON;
+use super::token_colors::{resolve_jump_to_latest_tokens, resolve_scroll_indicator_tokens};
+use crate::pipeline::{RectVertex, RoundedRectDrawCmd, rect_vertices};
+use crate::text::TextItem;
 
 use super::draw_cmds::{TexturedDrawCmd, compute_fit_mode};
 use super::image_cache::{
@@ -1518,7 +1521,7 @@ impl Compositor {
     /// Affordance).
     ///
     /// Scroll affordances draw after OUTPUT glyphs on their own text layer.
-    fn collect_scroll_affordances(
+    pub(super) fn collect_scroll_affordances(
         &self,
         scene: &SceneGraph,
     ) -> (Vec<RoundedRectDrawCmd>, Vec<TextItem>) {
