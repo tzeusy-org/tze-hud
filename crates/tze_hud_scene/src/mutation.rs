@@ -1295,6 +1295,13 @@ mod tests {
             "a click inside the composer must resolve to the composer NodeHit"
         );
 
+        // The pointer rests on the composer (compositor-managed local state).
+        scene
+            .hit_region_states
+            .get_mut(&composer_id_1)
+            .unwrap()
+            .hovered = true;
+
         // Republish the transcript root twice (consecutive streaming renders). Each
         // republish replaces the whole node tree; the composer must be re-derived.
         for (i, text) in ["render 2", "render 3"].iter().enumerate() {
@@ -1317,6 +1324,11 @@ mod tests {
                 composer_id,
                 composer_id_1,
                 "the composer keeps its node id (focus and draft key) across republish {}",
+                i + 2
+            );
+            assert!(
+                scene.hit_region_states[&composer_id].hovered,
+                "the composer keeps its hover state across republish {}",
                 i + 2
             );
             assert!(

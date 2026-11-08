@@ -408,6 +408,15 @@ impl SceneGraph {
             tile.root_node
         };
 
+        // The derived composer node is re-attached under the new root with the
+        // same id (see `ensure_tile_composer_node`); keep its hover/press/focus
+        // state too, which the subtree removal below would otherwise reset.
+        let composer_state = self
+            .overlay
+            .tile_composer_nodes
+            .get(&tile_id)
+            .and_then(|id| self.hit_region_states.get(id).cloned());
+
         // Remove old root and its subtree if present
         if let Some(old_root_id) = old_root {
             self.remove_node_tree(old_root_id);
@@ -453,6 +462,11 @@ impl SceneGraph {
         // coalescible StateStream on the hottest path (streaming transcript with an
         // interactive composer, hud-mzk74 / hud-iofav).
         self.ensure_tile_composer_node(tile_id);
+        if let Some(state) = composer_state
+            && self.overlay.tile_composer_nodes.get(&tile_id) == Some(&state.node_id)
+        {
+            self.hit_region_states.insert(state.node_id, state);
+        }
 
         self.version += 1;
         Ok(())

@@ -544,7 +544,8 @@ impl SceneGraph {
             // Apply the new spec's bounds/flags to the current derived node in
             // place (it may have been attached from the prior spec earlier in this
             // same batch: the `PublishToTile` reattach runs before this mutation).
-            // Keeping its id keeps keyboard focus and the draft on it.
+            // Keeping its id keeps keyboard focus and the draft on it. If no node
+            // is attached, `ensure_tile_composer_node` below derives one.
             if let Some(node) = self
                 .overlay
                 .tile_composer_nodes

@@ -214,10 +214,14 @@ Portal composer edits stay local; accepted submissions alone atomically enter
 input and native reply history. Repeated empty Enter, whitespace, cancel,
 unknown tiles and rejected submits add neither accepted input nor readiness.
 Blur retains at most one keyed draft: an empty peer preserves it, a nonempty
-peer replaces it, and removed nodes cannot revive saved text. Regression owners:
+peer replaces it, and removed nodes cannot revive saved text. Focus and the
+unsent draft survive portal re-renders (sends and streamed output): a tile keeps
+one composer node across root replacements. Regression owners:
 [`manager_draft_persists_across_focus_loss_and_restores`](../crates/tze_hud_input/src/composer_draft.rs),
 [`composer_focus_lost_on_blur_preserves_keyed_draft`](../crates/tze_hud_input/src/lib.rs),
 [`removing_focused_composer_tile_clears_local_echo`](../crates/tze_hud_runtime/src/windowed/lifecycle.rs),
+[`streamed_output_keeps_the_focused_draft`](../crates/tze_hud_runtime/src/windowed/keyboard.rs),
+[`composer_interaction_hit_region_survives_consecutive_transcript_republishes`](../crates/tze_hud_scene/src/mutation.rs),
 and [`hit_region_wire_cannot_enable_local_composer`](../crates/tze_hud_protocol/src/convert.rs).
 
 
