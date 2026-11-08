@@ -688,6 +688,47 @@ async fn frame_signature_ignores_content_outside_the_target() {
         compositor.frame_signature(&closed, &overlapping),
         idle_overlap
     );
+    // An actual collected jump pill can change without any body geometry/text
+    // changing. Secondary display submission must see each foreground delta.
+    let mut scene = corner_tile_scene(Rgba::new(0.0, 0.0, 0.0, 1.0));
+    let tile = *scene.tiles.keys().next().unwrap();
+    scene
+        .register_tile_scroll_config(
+            tile,
+            TileScrollConfig {
+                content_height: Some(800.0),
+                ..TileScrollConfig::vertical()
+            },
+        )
+        .unwrap();
+    scene.set_tile_follow_tail_at_tail(tile, false);
+    scene.set_tile_unread_count(tile, 3);
+    let mut build = compositor.build_windowed_frame(&mut scene, 256, 256);
+    assert_eq!(build.encode_sources.affordance_items.len(), 1);
+    assert_eq!(build.encode_sources.affordance_rects.len(), 1);
+    let outside = compositor.frame_signature(&build, &away);
+    let mut inside = compositor.frame_signature(&build, &overlapping);
+    for change in 0..3 {
+        match change {
+            0 => build.encode_sources.affordance_items[0].text = Arc::from("4 unread"),
+            1 => build.encode_sources.affordance_rects[0].color = [0.0, 0.0, 1.0, 1.0],
+            _ => {
+                build.encode_sources.affordance_items.clear();
+                build.encode_sources.affordance_rects.clear();
+            }
+        }
+        assert_eq!(
+            compositor.frame_signature(&build, &away),
+            outside,
+            "off-target foreground changes stay idle"
+        );
+        let changed = compositor.frame_signature(&build, &overlapping);
+        assert_ne!(
+            changed, inside,
+            "visible foreground change {change} must present"
+        );
+        inside = changed;
+    }
 }
 
 /// A zone assigned to a secondary display renders in that display's window

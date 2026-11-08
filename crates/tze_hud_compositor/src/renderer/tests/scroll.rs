@@ -396,6 +396,106 @@ async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
         }
     }
 
+    // A higher card covers the lower portal's pill, including its hit target.
+    let cover_lease = scene.grant_lease("badge-cover", 120_000);
+    let cover = scene
+        .create_tile(
+            tab_id,
+            "badge-cover",
+            cover_lease,
+            Rect::new(
+                item.clip_pixel_x,
+                item.clip_pixel_y,
+                item.clip_bounds_width,
+                item.clip_bounds_height,
+            ),
+            2,
+        )
+        .unwrap();
+    scene
+        .set_tile_root(
+            cover,
+            Node {
+                layout: Default::default(),
+                id: SceneId::new(),
+                children: vec![],
+                data: NodeData::SolidColor(SolidColorNode {
+                    color: Rgba::new(0.0, 1.0, 0.0, 1.0),
+                    radius: None,
+                    bounds: Rect::new(0.0, 0.0, item.clip_bounds_width, item.clip_bounds_height),
+                }),
+            },
+        )
+        .unwrap();
+    let mut covered = Vec::new();
+    for at_tail in [false, true] {
+        scene.set_tile_follow_tail_at_tail(tile_id, at_tail);
+        compositor.render_frame_headless(&mut scene, &surface);
+        covered.push(surface.read_pixels(&compositor.device));
+    }
+    for y in
+        (item.clip_pixel_y as u32 + 2)..((item.clip_pixel_y + item.clip_bounds_height) as u32 - 2)
+    {
+        for x in (item.clip_pixel_x as u32 + 2)
+            ..((item.clip_pixel_x + item.clip_bounds_width) as u32 - 2)
+        {
+            assert_eq!(
+                crate::test_pixels::pixel_at(&covered[0], 480, x, y),
+                crate::test_pixels::pixel_at(&covered[1], 480, x, y),
+                "a covered lower pill must not paint over the higher tile at {x},{y}"
+            );
+        }
+    }
+    scene.set_tile_follow_tail_at_tail(tile_id, false);
+    scene.set_tile_unread_count(tile_id, 3);
+    let assert_regions = |c: &Compositor,
+                          s: &mut SceneGraph,
+                          expected: bool,
+                          covered_x: Option<f32>| {
+        let (rects, labels) = c.collect_scroll_affordances(s);
+        assert_eq!(!rects.is_empty(), expected);
+        assert_eq!(!labels.is_empty(), expected);
+        s.overlay.zone_hit_regions.clear();
+        c.populate_zone_hit_regions(s, 480.0, 320.0);
+        let hits: Vec<_> = s.overlay.zone_hit_regions.iter().filter(|h|
+            matches!(h.kind, tze_hud_scene::ZoneInteractionKind::JumpToLatest { tile_id: id } if id == tile_id)).collect();
+        assert_eq!(!hits.is_empty(), expected);
+        for label in labels {
+            assert_eq!(
+                label.pixel_x, item.pixel_x,
+                "partial clipping must not recenter the label"
+            );
+            if let Some(x) = covered_x {
+                assert!(label.clip_pixel_x + label.clip_bounds_width <= x);
+            }
+        }
+        for hit in hits {
+            if let Some(x) = covered_x {
+                assert!(hit.bounds.x + hit.bounds.width <= x);
+            }
+        }
+    };
+    assert_regions(&compositor, &mut scene, false, None);
+    scene.set_drag_active(tile_id);
+    assert_regions(&compositor, &mut scene, true, None);
+    scene.clear_drag_active(tile_id);
+    scene.set_drag_active(cover);
+    assert_regions(&compositor, &mut scene, false, None);
+    scene.clear_drag_active(cover);
+    scene.tiles.get_mut(&cover).unwrap().opacity = 0.0;
+    assert_regions(&compositor, &mut scene, true, None);
+    scene.tiles.get_mut(&cover).unwrap().opacity = 1.0;
+    scene.set_owner_hidden(tze_hud_scene::graph::visibility::SurfaceClasses {
+        tiles: true,
+        ..Default::default()
+    });
+    assert_regions(&compositor, &mut scene, true, None);
+    scene.set_owner_hidden(Default::default());
+    let split = item.clip_pixel_x + item.clip_bounds_width / 2.0;
+    scene.tiles.get_mut(&cover).unwrap().bounds.x = split;
+    assert_regions(&compositor, &mut scene, true, Some(split));
+    scene.delete_tile(cover, "badge-cover").unwrap();
+
     // Nothing unread → plain pill, no badge (a presence engine renders nothing).
     scene.set_tile_unread_count(tile_id, 0);
     assert!(
