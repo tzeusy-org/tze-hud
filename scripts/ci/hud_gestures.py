@@ -432,7 +432,8 @@ class Run:
         self._since = None
         return status
 
-    def expect(self, what: str, check: Callable[[dict], bool], timeout_s: float = SETTLE_S) -> dict:
+    def expect(self, what: str, check: Callable[[dict], bool], timeout_s: float = SETTLE_S,
+               interval_s: float = 0.05) -> dict:
         """Wait for a status in which `check` holds; fail with the last one seen."""
         last: dict = {}
 
@@ -444,11 +445,35 @@ class Run:
             except (KeyError, TypeError, LookupError):
                 return False, last
         try:
-            wait_until(probe, what=what, timeout_s=timeout_s, interval_s=0.05)
+            wait_until(probe, what=what, timeout_s=timeout_s, interval_s=interval_s)
         except AssertionError:
             raise ScenarioFailed(what, {"portals": last.get("portals"), "idle_since_ms": last.get("idle_since_ms")}) from None
         self.step(f"ok {what}")
         return last
+
+    def observe_for(self, what: str, check: Callable[[dict], bool], seconds: float) -> dict:
+        """Require a state throughout a measured interval; status reads do not refresh portals.
+
+        This observes a duration contract, rather than sleeping and assuming
+        readiness. No publish, input poll, hold or injected event occurs here.
+        """
+        started = time.monotonic()
+        deadline = started + seconds
+        self.step(f"observe {what} for at least {seconds:.1f}s")
+        while True:
+            status = self.status()
+            try:
+                valid = bool(check(status))
+            except (KeyError, TypeError, LookupError):
+                valid = False
+            if not valid:
+                raise ScenarioFailed(what, {"elapsed_s": round(time.monotonic() - started, 3),
+                                            "safe_mode": status.get("safe_mode"), "portals": status.get("portals")})
+            left = deadline - time.monotonic()
+            if left <= 0:
+                self.step(f"ok {what} throughout {time.monotonic() - started:.3f}s")
+                return status
+            time.sleep(min(left, 0.2))
 
     def step(self, what: str) -> None:
         self.timeline.append({"t": round(time.monotonic(), 3), "step": what})
@@ -624,8 +649,9 @@ def on(surface: str, check: Callable[[dict], bool]) -> Callable[[dict], bool]:
     return lambda status: check(portal_entry(status, surface))
 
 
-def open_portal(run: Run, surface: str, prefix: str, count: int = LINES, **args) -> None:
-    run.publish(surface, content=lines(prefix, 0, count), ttl_ms=0, **args)
+def open_portal(run: Run, surface: str, prefix: str, count: int = LINES, *, ttl_ms: int | None = 0, **args) -> None:
+    # None leaves the normal idle deadline intact; 0 deliberately holds forever.
+    run.publish(surface, content=lines(prefix, 0, count), **({"ttl_ms": ttl_ms} if ttl_ms is not None else {}), **args)
     run.expect(f"{surface} shows its tail", on(surface, lambda p: p["output"]["at_tail"] and tail_line(prefix, count - 1)(p)))
     run.settle()
 
@@ -882,8 +908,42 @@ def scenario_drag_release(run: Run) -> None:
     run.expect("stays dropped after release", on(s, lambda p: p["rect"] == dropped and p["hover"] == "composer"))
 
 
+def output_background(frame: tuple[int, int, bytes], portal: dict) -> bytes:
+    """The actual OUTPUT background, left of the text inset and away from rounded corners."""
+    width, height, rgba = frame
+    rect = portal["panes"]["output"]
+    x, y = int(rect["x"]) + 2, int(rect["y"] + rect["h"] / 2)
+    if not (0 <= x < width and 0 <= y < height):
+        raise ScenarioFailed("OUTPUT background pixel is on screen", {"rect": rect, "frame": [width, height]})
+    at = (y * width + x) * 4
+    return rgba[at:at + 4]
+
+
+def scenario_writing(run: Run) -> None:
+    """Writing header and trailing caret appear with fragments, then both clear about two seconds later."""
+    s = "portal:g-writing"
+    open_portal(run, s, "w", count=5)
+    for fragment in ("first fragment", "final fragment"):
+        published = time.monotonic()
+        run.publish(s, content="\n" + fragment)
+        run.expect("the rendered header and caret both show writing",
+                   on(s, lambda p: "⋯ writing" in p["header_text"] and p["output"]["writing_caret"] is True),
+                   timeout_s=1.0)
+        run.snapshot(f"writing.{fragment.split()[0]}")
+    # Two seconds is the production quiescence window. Allow one bounded
+    # 750ms presentation/observation margin, measured from the final publish.
+    remaining = 2.75 - (time.monotonic() - published)
+    if remaining <= 0:
+        raise ScenarioFailed("writing observation fits the 2.75s deadline", {"elapsed_s": time.monotonic() - published})
+    run.expect("both writing cues clear after the final fragment",
+               on(s, lambda p: "⋯ writing" not in p["header_text"] and p["output"]["writing_caret"] is False),
+               timeout_s=remaining)
+    run.step(f"ok writing cleared {time.monotonic() - published:.3f}s after the final publish")
+    run.snapshot("writing.cleared")
+
+
 def scenario_lifecycle(run: Run) -> None:
-    """13. Zone TTL expiry, hud_hold, and a portal's degraded -> active status."""
+    """13. Zone TTL/hold, then real portal idle dim/stale, same-id recovery and eventual reap."""
     held = lambda name: next((e.get("held", False) for e in run.smoke.ok("hud_surfaces")["surfaces"] if e["s"] == name), False)  # noqa: E731
     zone = "zone:subtitle"
     run.publish(zone, content="ttl probe", ttl_ms=1500)
@@ -896,15 +956,72 @@ def scenario_lifecycle(run: Run) -> None:
     run.smoke.ok("hud_hold", {"surface": zone, "ttl_ms": 4000})
     wait_until(lambda: (not held(zone), None), what="held zone expiry", timeout_s=4 + SETTLE_S)
     lasted = time.monotonic() - started
-    if lasted < 3.0:  # the original 1.5 s TTL would have ended well before
+    if lasted < 3.0:
         raise ScenarioFailed("hud_hold outlives the original TTL", {"lasted_s": round(lasted, 2)})
     run.step(f"ok hold outlived the TTL ({lasted:.1f}s)")
     s = "portal:g-life"
-    open_portal(run, s, "l", count=5)
-    run.publish(s, status="degraded")
-    run.expect("degraded status shown", on(s, lambda p: p["state"] == "Degraded"))
-    run.publish(s, status="active")
-    run.expect("recovers to active", on(s, lambda p: p["state"] == "Active"))
+    started = time.monotonic()
+    open_portal(run, s, "l", count=5, ttl_ms=None)
+    active = run.expect("portal initially active", on(s, lambda p: p["state"] == "Active"))
+    bright = output_background(run.frame(), portal_entry(active, s))
+    degraded = run.expect("idle alone degrades the portal and shows the stale marker",
+                          on(s, lambda p: p["state"] == "Degraded" and "⊘ disconnected — stream stale" in p["header_text"]),
+                          timeout_s=35, interval_s=0.2)
+    elapsed = time.monotonic() - started
+    if elapsed < 29:
+        raise ScenarioFailed("degradation follows the normal 30s idle deadline", {"elapsed_s": elapsed})
+    run.settle()
+    dim = output_background(run.frame(), portal_entry(degraded, s))
+    if sum(dim[:3]) >= sum(bright[:3]) or dim[3] != bright[3]:
+        raise ScenarioFailed("idle dims the actual OUTPUT background at unchanged opacity",
+                             {"active_rgba": list(bright), "degraded_rgba": list(dim)})
+    run.step(f"ok idle dim/stale after {elapsed:.3f}s; background {list(bright)} -> {list(dim)}")
+    run.snapshot("lifecycle.degraded")
+    resumed = time.monotonic()
+    reply = run.publish(s, content="\nrecovered")
+    if reply.get("reattached"):
+        raise ScenarioFailed("idle recovery uses the same live attachment", {"reply": reply})
+    recovered = run.expect("same-id publish clears stale and restores Active",
+                           on(s, lambda p: p["state"] == "Active" and "stream stale" not in p["header_text"]
+                              and p["output"]["last_visible_line"].startswith("recovered")))
+    run.settle()
+    recovered_color = output_background(run.frame(), portal_entry(recovered, s))
+    if recovered_color != bright:
+        raise ScenarioFailed("recovery restores the OUTPUT background", {"active_rgba": list(bright), "recovered_rgba": list(recovered_color)})
+    run.snapshot("lifecycle.recovered")
+    run.expect("a second unrefreshed idle interval degrades again", on(s, lambda p: p["state"] == "Degraded"),
+               timeout_s=35, interval_s=0.2)
+    run.expect("continued idle reclaims the portal",
+               lambda st: isinstance(st.get("portals"), list) and portal_entry(st, s) is None,
+               timeout_s=35, interval_s=0.2)
+    elapsed = time.monotonic() - resumed
+    if elapsed < 59:
+        raise ScenarioFailed("reap follows a full idle plus degraded interval", {"elapsed_s": elapsed})
+    run.step(f"ok no input/publish/hold refresh: reclaimed {elapsed:.3f}s after recovery")
+    run.snapshot("lifecycle.reaped")
+
+
+def scenario_dismiss(run: Run) -> None:
+    """A real close-button click dismisses the portal; same-id publication creates a fresh attachment."""
+    s = "portal:g-dismiss"
+    open_portal(run, s, "old", count=5, expects_reply=True)
+    run.point(f"{s}/header")
+    run.expect("the actual close hit region is exposed", on(s, lambda p: p["panes"]["close"] is not None))
+    run.click(f"{s}/close")
+    run.expect("the pointer close removes the portal",
+               lambda st: isinstance(st.get("portals"), list) and portal_entry(st, s) is None)
+    run.snapshot("dismiss.closed")
+    reply = run.publish(s, content="fresh attachment", expects_reply=True, ttl_ms=0)
+    if reply.get("reattached") is not True:
+        raise ScenarioFailed("same-id publish explicitly reattaches", {"reply": reply})
+    run.expect("reattachment has only fresh output and empty draft",
+               on(s, lambda p: p["output"]["first_visible_line"].startswith("fresh attachment")
+                  and p["output"]["last_visible_line"].startswith("fresh attachment") and p["input"]["draft_chars"] == 0))
+    run.click(f"{s}/composer")
+    run.type("fresh reply")
+    run.key("Return")
+    if [i.get("text") for i in run.take(1)] != ["fresh reply"]:
+        raise ScenarioFailed("the fresh composer's real pointer hit and submit work", {})
 
 
 def scenario_restart(run: Run) -> None:
@@ -938,12 +1055,47 @@ def scenario_restart(run: Run) -> None:
 
 
 def scenario_resize_hotkey(run: Run) -> None:
-    """16. Ctrl+- / Ctrl+= on a focused portal change its rect."""
+    """16. Pointer, Ctrl+-/= and directional Ctrl+Shift+Arrow resize; republish preserves geometry and hits."""
     s = "portal:g-resize"
     open_portal(run, s, "z", count=5, expects_reply=True)
-    shrunk = portal_entry(shrink(run, s, times=2), s)["rect"]
+    shrunk = portal_entry(shrink(run, s, times=4), s)["rect"]
     run.key("ctrl+equal")
-    run.expect("Ctrl+= grows the portal", on(s, lambda p: p["rect"]["w"] > shrunk["w"] or p["rect"]["h"] > shrunk["h"]))
+    grown = run.expect("Ctrl+= grows the portal", on(s, lambda p: p["rect"]["w"] > shrunk["w"] and p["rect"]["h"] > shrunk["h"]))
+    rect = portal_entry(grown, s)["rect"]
+    run.key("ctrl+shift+Left")
+    narrower = run.expect("Ctrl+Shift+Left changes width only",
+                          on(s, lambda p: p["rect"]["w"] < rect["w"] and p["rect"]["h"] == rect["h"]))
+    rect = portal_entry(narrower, s)["rect"]
+    run.key("ctrl+shift+Up")
+    shorter = run.expect("Ctrl+Shift+Up changes height only",
+                         on(s, lambda p: p["rect"]["w"] == rect["w"] and p["rect"]["h"] < rect["h"]))
+    rect = portal_entry(shorter, s)["rect"]
+    start = (int(rect["x"] + rect["w"]) - 2, int(rect["y"] + rect["h"]) - 2)
+    run.drag(start, (start[0] + 60, start[1] + 40))
+    run.expect("bottom-right pointer drag resizes both axes without moving the origin",
+                         on(s, lambda p: p["rect"]["w"] >= rect["w"] + 40 and p["rect"]["h"] >= rect["h"] + 20
+                            and p["rect"]["x"] == rect["x"] and p["rect"]["y"] == rect["y"]))
+    before = portal_entry(run.settle(), s)
+    run.publish(s, content="\ngeometry marker", expects_reply=True)
+    run.expect("republish uses the resized OUTPUT",
+                              on(s, lambda p: p["output"]["last_visible_line"].startswith("geometry marker")))
+    after = portal_entry(run.settle(), s)
+    if after["rect"] != before["rect"] or any(after["panes"][pane] != before["panes"][pane]
+                                             for pane in ("header", "input", "output", "composer")):
+        raise ScenarioFailed("republish preserves resized frame, pane and composer hit geometry", {"before": before, "after": after})
+    outer = after["rect"]
+    for name in ("header", "input", "output", "composer"):
+        pane = after["panes"][name]
+        if not (outer["x"] <= pane["x"] < pane["x"] + pane["w"] <= outer["x"] + outer["w"]
+                and outer["y"] <= pane["y"] < pane["y"] + pane["h"] <= outer["y"] + outer["h"]):
+            raise ScenarioFailed("resized panes and hit rect stay inside the frame", {"pane": name, "rect": pane, "frame": outer})
+    run.click(f"{s}/composer")
+    run.type("resized reply")
+    run.expect("the resized composer hit takes real typing", on(s, lambda p: p["input"]["draft_chars"] == 13))
+    run.key("Return")
+    if [i.get("text") for i in run.take(1)] != ["resized reply"]:
+        raise ScenarioFailed("the resized composer submits the exact reply", {})
+    run.step("ok resized panes, republish and real pointer hit remain coherent")
 
 
 def scenario_unicode_typing(run: Run) -> None:
@@ -1000,29 +1152,32 @@ def scenario_no_focus_steal(run: Run) -> None:
 
 
 def scenario_safe_mode(run: Run) -> None:
-    """12. The pause chord pauses agents and keeps the portal; pressed again it resumes.
-
-    Lease time across a pause is not observable through MCP for portals; the
-    runtime's safe_mode unit tests own it. This proves the real chord path.
-    """
+    """12. The real pause chord preserves an unheld portal beyond idle/reap expiry, then resumes without reap."""
     s = "portal:g-safe"
-    open_portal(run, s, "m", count=5)
-    run.publish(s, content="\nheld", ttl_ms=60_000)
+    open_portal(run, s, "m", count=5, ttl_ms=None)
     run.key("ctrl+shift+F12")
     run.expect("the pause chord sets safe mode", lambda st: st.get("safe_mode") is True)
-    paused = time.monotonic()
     is_error, reply = run.smoke.call("hud_publish", {"surface": s, "content": "\nwhile paused"})
     if not is_error or reply.get("code") != "SAFE_MODE_ACTIVE":
         raise ScenarioFailed("publishing while paused returns SAFE_MODE_ACTIVE", {"reply": reply})
-    run.inputs()  # input polling stays available while paused
+    run.inputs()  # exercise availability BEFORE the measured no-refresh interval
+    run.snapshot("safe-mode.paused")
+    paused = time.monotonic()
+    intact = on(s, lambda p: p["state"] == "Active" and tail_line("m", 4)(p))
+    run.observe_for("safe mode preserves the unheld portal past the normal 30s+30s reap deadline",
+                    lambda st: st.get("safe_mode") is True and intact(st), 65.0)
+    paused_s = time.monotonic() - paused
+    if paused_s < 65:
+        raise ScenarioFailed("pause observation spans the normal reap deadline", {"paused_s": paused_s})
     run.key("ctrl+shift+F12")
     run.expect("pressed again it resumes", lambda st: st.get("safe_mode") is False)
-    paused_s = time.monotonic() - paused
-    run.expect("the portal survived the pause", on(s, lambda p: (p["output"]["last_visible_line"] or "") == "held"))
+    # No publish/input/hold refresh before observing survival after the real exit.
+    run.observe_for("resume does not reap the retained portal", lambda st: st.get("safe_mode") is False and intact(st), 5.0)
+    run.snapshot("safe-mode.resumed")
     run.publish(s, content="\nafter resume")
     run.expect("publishing works again",
                on(s, lambda p: (p["output"]["last_visible_line"] or "").startswith("after resume")))
-    run.step(f"ok paused for {paused_s:.1f}s")
+    run.step(f"ok unheld portal paused for {paused_s:.3f}s; survived 5s after resume before refresh")
 
 
 # Windows only: they need Win32 foreground/edit-control access or global hotkeys.
@@ -1038,6 +1193,8 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "keyboard": scenario_keyboard,                    # 7
     "drag-alignment": scenario_drag_alignment,        # 8
     "drag-release": scenario_drag_release,            # 9
+    "writing": scenario_writing,
+    "dismiss": scenario_dismiss,
     "lifecycle": scenario_lifecycle,                  # 13
     "resize-hotkey": scenario_resize_hotkey,          # 16
     "unicode-typing": scenario_unicode_typing,

@@ -379,11 +379,14 @@ agents until one is paired.
   `portals` (`null` before the windowed runtime starts or while the scene stays
   locked for 100 ms) is read-only portal UI state for out-of-process validation,
   one entry per portal: `s` (`portal:<id>`), `state`, `rect`, `display` (index
-  into `displays`), `panes` (`header`, `input`, `output`, `composer` hit region
-  and `unread_badge`, the largest exposed piece of the jump-to-latest pill as of
+  into `displays`), `header_text` (the materialized header node), `panes`
+  (`header`, `input`, `output`, `composer` hit region, `close` and
+  `unread_badge`, the largest exposed piece of each runtime control as of
   the last frame; each `{x, y, w, h}` in scene pixels or `null` when not drawn),
   `focus` (`composer`, `tile` or `none`), `hover` (`composer` or `none`),
-  `output` `{first_visible_line, last_visible_line, at_tail, unread}` (`at_tail`
+  `output` `{first_visible_line, last_visible_line, at_tail, unread,
+  writing_caret}` (`writing_caret` observes the compositor's actual trailing
+  cursor marker; `at_tail`
   is the follow-tail state new output obeys) and `input` `{at_tail,
   draft_chars}`; the visible lines and `input.at_tail` are `null` while their
   document is being measured. Only the focused

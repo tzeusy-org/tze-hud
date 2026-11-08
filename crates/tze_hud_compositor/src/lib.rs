@@ -29,7 +29,7 @@ pub use renderer::{
     SystemCardModel, TileCloseHoverHandle, estimate_control_panel_geometry,
 };
 pub use surface::{CompositorSurface, HeadlessSurface, SurfaceFactory, WindowSurface};
-pub use text::TextItem;
+pub use text::{TextItem, markdown_node_tail_cursor_color};
 
 #[cfg(test)]
 #[path = "../tests/common/pixels.rs"]
