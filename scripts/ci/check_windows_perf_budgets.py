@@ -21,13 +21,13 @@ from typing import Any
 
 
 REFERENCE_HARDWARE_TAG = (
-    "TzeHouse / Intel Core i5-13600KF / NVIDIA RTX 3080 driver 32.0.15.9636 / "
+    "reference-windows / Intel Core i5-13600KF / NVIDIA RTX 3080 driver 32.0.15.9636 / "
     "16 GiB RAM / Windows 11 Pro 10.0.26200 build 26200 / 4096x2160@60Hz"
 )
 
 # From docs/reports/windows_perf_baseline_2026-05.md, layer3_benchmark_600.json.
 # The benchmark artifact factors are relative to the harness' internal reference
-# constants, so Windows-locked TzeHouse budgets scale by current/reference factor.
+# constants, so Windows-locked reference budgets scale by current/reference factor.
 REFERENCE_FACTORS = {
     "cpu": 0.854,
     "gpu": 0.338,
@@ -244,9 +244,9 @@ def validate_benchmark(artifact: dict[str, Any]) -> tuple[list[dict[str, Any]], 
                 failures.append(
                     f"{session_name}.{budget.metric}: observed {observed}us exceeds "
                     f"effective budget {effective_budget}us "
-                    f"(TzeHouse budget {budget.reference_budget_us}us, "
+                    f"(reference budget {budget.reference_budget_us}us, "
                     f"{budget.factor} factor {factor:.4f}, "
-                    f"TzeHouse factor {reference_factor:.4f})"
+                    f"reference factor {reference_factor:.4f})"
                 )
 
     for session_name in REQUIRED_COUNTER_SESSIONS:

@@ -53,7 +53,7 @@ mod text_stream_portal_composer;
 // (≥200 scalars/s sustained, 4KiB/250ms bursts), frame/stage budget verification,
 // dual-portal fairness under equal sustained rates, retained-window coherence under
 // burst. Live soak (5.5), live cadence (5.6), and RTT evidence (5.7) are deferred
-// to the TzeHouse reference host.
+// to the Windows reference host.
 #[path = "text_stream_portal_cadence.rs"]
 mod text_stream_portal_cadence;
 
@@ -61,7 +61,7 @@ mod text_stream_portal_cadence;
 // Covers: portal part inventory token mapping, exemplar adapter consuming resolved tokens
 // (no literal visual values), collapsed/expanded transitions redaction-safe, profile-swap
 // reskin test, token-propagation on republish. Live profile-swap phase (§6.5) is deferred
-// to the TzeHouse reference host (discovered follow-up).
+// to the Windows reference host (discovered follow-up).
 #[path = "text_stream_portal_styling.rs"]
 mod text_stream_portal_styling;
 

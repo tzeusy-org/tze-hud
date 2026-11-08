@@ -330,7 +330,7 @@ mod tests {
                 "--output",
                 "proof",
                 "--reference-hardware-tag",
-                "TzeHouse",
+                "reference-windows",
                 "--reference-hostname",
                 "reference-windows",
                 "--reference-gpu",
@@ -349,7 +349,7 @@ mod tests {
         )
         .expect("complete args must parse");
         assert_eq!(args.output_dir, PathBuf::from("proof"));
-        assert_eq!(args.reference_hardware_tag, "TzeHouse");
+        assert_eq!(args.reference_hardware_tag, "reference-windows");
         assert_eq!(args.display_width, 4096);
         assert_eq!(args.display_height, 2160);
     }

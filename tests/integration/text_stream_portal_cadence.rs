@@ -7,7 +7,7 @@
 //!   - 5.4: independent dual-portal service and retained-window burst coherence
 //!
 //! Live soak (5.5), live cadence phase (5.6), and transport-RTT evidence (5.7)
-//! require the TzeHouse Windows reference host and are recorded as discovered
+//! require the Windows reference host and are recorded as discovered
 //! follow-up work in the worker report (see Discovered-Follow-Ups-JSON).
 
 use crate::gpu_init::serialized_headless_init;
