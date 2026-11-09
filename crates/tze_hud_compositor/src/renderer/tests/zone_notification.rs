@@ -316,6 +316,7 @@ async fn notification_actions_layout_matches_hit_regions() {
         let policy = &scene.zone_registry.zones["notification-area"].rendering_policy;
         let descriptor =
             compositor.notification_action_layout("notification-area", record, policy, 448.0);
+        let publication_id = record.publication_id;
         assert_eq!(descriptor.stacked, stacked);
         let shapes = compositor.notification_layouts.borrow().shapes;
         let regions = scene.overlay.zone_hit_regions.clone();
@@ -359,12 +360,15 @@ async fn notification_actions_layout_matches_hit_regions() {
                 .iter()
                 .find(|item| &*item.text == labels[index])
                 .unwrap();
-            assert_eq!(item.pixel_x, bounds.x + descriptor.padding);
+            assert_eq!(
+                item.pixel_x,
+                bounds.x + descriptor.padding + descriptor.hint_width
+            );
             let mark = descriptor.link_marks[index].as_ref();
             let mark_width = mark.map_or(0.0, |(_, width)| *width);
             assert_eq!(
                 item.bounds_width,
-                bounds.width - descriptor.padding * 2.0 - mark_width
+                bounds.width - descriptor.padding * 2.0 - descriptor.hint_width - mark_width
             );
             assert!(region.interaction_id.ends_with(&format!(":{index}")));
             if let Some((mark, width)) = mark {
@@ -415,6 +419,50 @@ async fn notification_actions_layout_matches_hit_regions() {
         compositor.populate_zone_hit_regions(&mut scene, 1280.0, 1080.0);
         assert_eq!(compositor.notification_layouts.borrow().shapes, shapes);
         assert_eq!(scene.overlay.zone_hit_regions, regions);
+        assert!(
+            !items
+                .iter()
+                .any(|item| ["1", "2", "3", "4"].contains(&item.text.as_ref()))
+        );
+        scene.overlay.notification_answer = Some(publication_id);
+        let with_hints = compositor.collect_text_items(&scene, 1280.0, 1080.0);
+        for index in 0..4 {
+            let label = |items: &[crate::text::TextItem]| {
+                items
+                    .iter()
+                    .find(|item| &*item.text == labels[index])
+                    .map(|item| {
+                        (
+                            item.pixel_x,
+                            item.pixel_y,
+                            item.bounds_width,
+                            item.bounds_height,
+                        )
+                    })
+            };
+            assert_eq!(
+                label(&items),
+                label(&with_hints),
+                "hint visibility cannot move or rewrap labels"
+            );
+            assert_eq!(
+                with_hints
+                    .iter()
+                    .filter(|item| &*item.text == (index + 1).to_string())
+                    .count(),
+                1
+            );
+        }
+        compositor.populate_zone_hit_regions(&mut scene, 1280.0, 1080.0);
+        assert_eq!(scene.overlay.zone_hit_regions, regions);
+        assert_eq!(compositor.notification_layouts.borrow().shapes, shapes);
+        scene.focus_notification(None);
+        let after = compositor.collect_text_items(&scene, 1280.0, 1080.0);
+        assert!(
+            !after
+                .iter()
+                .any(|item| ["1", "2", "3", "4"].contains(&item.text.as_ref()))
+        );
     }
 }
 

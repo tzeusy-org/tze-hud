@@ -683,17 +683,39 @@ impl super::Compositor {
                                     {
                                         let available =
                                             (b.width - action_layout.padding * 2.0).max(1.0);
+                                        let hint_width = action_layout.hint_width.min(available);
                                         let mark = action_layout
                                             .link_marks
                                             .get(index)
                                             .and_then(Option::as_ref);
-                                        let mark_width =
-                                            mark.map_or(0.0, |(_, width)| (*width).min(available));
+                                        let mark_width = mark.map_or(0.0, |(_, width)| {
+                                            (*width).min((available - hint_width).max(0.0))
+                                        });
+                                        if scene.overlay.notification_answer
+                                            == Some(record.publication_id)
+                                        {
+                                            items.push(Self::make_zone_text_item(
+                                                Arc::from((index + 1).to_string()),
+                                                b.x + action_layout.padding,
+                                                b.y + action_layout.padding,
+                                                hint_width,
+                                                (b.height - action_layout.padding * 2.0).max(1.0),
+                                                notif_action_font_size_px,
+                                                font_family,
+                                                notif_action_font_weight,
+                                                color,
+                                                tze_hud_scene::types::TextAlign::Start,
+                                                tze_hud_scene::types::TextOverflow::Clip,
+                                                None,
+                                                None,
+                                                effective_opacity,
+                                            ));
+                                        }
                                         items.push(Self::make_zone_text_item(
                                             Arc::from(action.label.as_str()),
-                                            b.x + action_layout.padding,
+                                            b.x + action_layout.padding + hint_width,
                                             b.y + action_layout.padding,
-                                            (available - mark_width).max(1.0),
+                                            (available - hint_width - mark_width).max(1.0),
                                             (b.height - action_layout.padding * 2.0).max(1.0),
                                             notif_action_font_size_px,
                                             font_family,

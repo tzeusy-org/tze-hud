@@ -103,6 +103,10 @@ pub struct RuntimeOverlayState {
     pub notification_focus: Option<String>,
     #[serde(skip, default)]
     pub notification_focus_entered_reverse: bool,
+    /// The exact question selected by the owner's answer chord. Ordinary Tab
+    /// focus never enables digit shortcuts or their visual hints.
+    #[serde(skip, default)]
+    pub notification_answer: Option<SceneId>,
     /// Set of element_ids that are currently being actively dragged.
     ///
     /// Written by the input processor on DragActivated and cleared on

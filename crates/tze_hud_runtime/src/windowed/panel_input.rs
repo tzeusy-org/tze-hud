@@ -279,6 +279,8 @@ impl WinitApp {
         self.state.panel_input.pressed = None;
         self.state.panel_input.hovered = None;
         if open {
+            self.state.answer_keyboard.focus = None;
+            self.state.input_processor.chrome_feedback_cancel_pending = true;
             let focused = self.state.window.as_ref().is_none_or(|window| {
                 focus_window_for_text_input(window);
                 window_is_foreground(window)

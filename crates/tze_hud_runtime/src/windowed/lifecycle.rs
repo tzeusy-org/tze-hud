@@ -1211,6 +1211,22 @@ fn owns_foreground(owner: &ChromeNativeOwner, foreground: Option<isize>) -> bool
         })
 }
 
+pub(super) fn hud_owns_foreground() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        let foreground = foreground_window();
+        CHROME_NATIVE_OWNER.with(|owner| {
+            owner
+                .try_borrow()
+                .is_ok_and(|owner| owns_foreground(&owner, foreground))
+        })
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
+}
+
 /// Return focus only on an explicit outer HUD exit, and only if one of our
 /// live primary/secondary HWNDs still holds it. A third-app switch wins.
 pub(super) fn restore_foreground() {
@@ -2463,6 +2479,8 @@ impl WinitApp {
             self.panel_window_focus(focused);
         }
         if !focused {
+            self.state.answer_keyboard.focus = None;
+            self.state.answer_keyboard.return_key = None;
             let window = match secondary {
                 Some(index) => self.state.secondaries.get(index).map(|d| d.window.id()),
                 None => self.state.window.as_ref().map(|w| w.id()),
@@ -2636,6 +2654,9 @@ impl WinitApp {
     /// - Inside a hit-region → `set_cursor_hittest(true)` (window captures events).
     /// - Outside all hit-regions → `set_cursor_hittest(false)` (events pass through).
     pub(super) fn enqueue_pointer_event(&mut self, kind: PointerEventKind) {
+        if kind == PointerEventKind::Down && self.state.answer_keyboard.focus.take().is_some() {
+            self.state.input_processor.chrome_feedback_cancel_pending = true;
+        }
         if self.state.context_menu_press.is_some() {
             return;
         }

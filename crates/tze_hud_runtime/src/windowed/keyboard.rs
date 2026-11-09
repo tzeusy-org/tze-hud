@@ -325,13 +325,13 @@ struct PortalControlSnapshot {
 }
 
 /// Returns `true` for the Escape key (recovery-to-composer trigger, hud-2v8br).
-fn is_escape_key(key: &str, key_code: &str) -> bool {
+pub(super) fn is_escape_key(key: &str, key_code: &str) -> bool {
     key_code == "Escape" || key == "Escape"
 }
 
 /// Returns `true` for Enter / Space — the activation keys for a Tab-focused
 /// portal control (hud-2v8br), mirroring a pointer click.
-fn is_activation_key(key: &str, key_code: &str) -> bool {
+pub(super) fn is_activation_key(key: &str, key_code: &str) -> bool {
     matches!(key_code, "Enter" | "NumpadEnter" | "Space")
         || matches!(key, "Enter" | "\r" | "\n" | " ")
 }
@@ -622,13 +622,33 @@ impl WinitApp {
             return;
         }
 
+        // Finish the physical exit sequence before letting any later key reach
+        // the saved editor. Its character event is consumed by the same debt.
+        if self.state.answer_keyboard.return_key.is_some() {
+            self.state
+                .notification_keydowns
+                .insert(keyboard_key_identity(&raw.key_code, &raw.key));
+            return;
+        }
+
         // No active tab → nothing else to route to. Drop after global shell
         // handling, which must not depend on a focused content tab.
         let Some(tab_id) = active_tab else {
-            if self.route_notification_key(raw, None).is_err() {
-                self.state
-                    .pending_keyboard_events
-                    .push_back(PendingKeyboardEvent::KeyDown(raw.clone()));
+            match self.route_notification_key(raw, None) {
+                Err(()) => {
+                    self.state
+                        .pending_keyboard_events
+                        .push_back(PendingKeyboardEvent::KeyDown(raw.clone()));
+                }
+                Ok(false)
+                    if is_escape_key(&raw.key, &raw.key_code)
+                        && !raw.modifiers.ctrl
+                        && !raw.modifiers.alt
+                        && !raw.modifiers.meta =>
+                {
+                    self.return_focus_after_key(raw);
+                }
+                _ => {}
             }
             return;
         };
@@ -778,6 +798,10 @@ impl WinitApp {
                             self.state
                                 .pending_keyboard_events
                                 .push_back(PendingKeyboardEvent::KeyDown(raw.clone()));
+                        } else {
+                            self.state
+                                .notification_keydowns
+                                .insert(keyboard_key_identity(&raw.key_code, &raw.key));
                         }
                         return;
                     }
@@ -802,6 +826,7 @@ impl WinitApp {
                                 self.state
                                     .consumed_command_keydowns
                                     .insert(keyboard_key_identity(&raw.key_code, &raw.key));
+                                self.return_focus_after_key(raw);
                                 return;
                             }
                             EscapeClearOutcome::Busy => {
@@ -810,7 +835,10 @@ impl WinitApp {
                                     .push_back(PendingKeyboardEvent::KeyDown(raw.clone()));
                                 return;
                             }
-                            EscapeClearOutcome::NoOwner => {}
+                            EscapeClearOutcome::NoOwner => {
+                                self.return_focus_after_key(raw);
+                                return;
+                            }
                         }
                     }
                 }
@@ -820,6 +848,42 @@ impl WinitApp {
 
         // ── Composer draft intercept (§4.4) ──────────────────────────────
         if self.state.input_processor.is_composer_active() {
+            if is_escape_key(&raw.key, &raw.key_code)
+                && !raw.modifiers.ctrl
+                && !raw.modifiers.alt
+                && !raw.modifiers.meta
+                && let Some((text, cursor, anchor, ..)) =
+                    self.state.input_processor.composer_draft_snapshot()
+            {
+                if cursor != anchor {
+                    self.state
+                        .input_processor
+                        .route_pointer_selection_to_composer(cursor, cursor);
+                    self.push_local_composer_echo(Instant::now());
+                    self.state
+                        .notification_keydowns
+                        .insert(keyboard_key_identity(&raw.key_code, &raw.key));
+                    return;
+                }
+                if text.is_empty() {
+                    let command =
+                        keyboard_command(raw, self.state.focus_manager.current_owner(tab_id))
+                            .expect("bare Escape is a cancel binding");
+                    match self.try_escape_clear_focus(tab_id, &command) {
+                        EscapeClearOutcome::Busy => self
+                            .state
+                            .pending_keyboard_events
+                            .push_back(PendingKeyboardEvent::KeyDown(raw.clone())),
+                        _ => {
+                            self.clear_local_composer_echo();
+                            self.return_focus_after_key(raw);
+                        }
+                    }
+                    return;
+                }
+                // A nonempty draft is an inner cancellation. The next Esc,
+                // on the empty editor, performs the outer native focus return.
+            }
             let history_tile_id = match self.composer_target_for_tab(tab_id) {
                 ComposerTargetLookup::Ready(tile_id) => Some(tile_id),
                 ComposerTargetLookup::Busy => {
@@ -885,6 +949,11 @@ impl WinitApp {
                 self.clear_local_composer_echo();
             }
             if consumed {
+                if is_escape_key(&raw.key, &raw.key_code) {
+                    self.state
+                        .notification_keydowns
+                        .insert(keyboard_key_identity(&raw.key_code, &raw.key));
+                }
                 tracing::debug!(
                     key_code = %str_preview(&raw.key_code),
                     "composer: KeyDown consumed by draft manager"
@@ -1300,15 +1369,21 @@ impl WinitApp {
                 .tile_id()
                 .and_then(|tile_id| scene.tiles.get(&tile_id))
                 .map(|tile| tile.namespace.clone());
-            let command_dispatch = namespace.and_then(|namespace| {
-                CommandProcessor::new().process(command, &owner, &mut scene, move |_| {
-                    Some(namespace.clone())
-                })
-            });
-            let transition = self.state.focus_manager.clear_focus(tab_id, &scene);
+            let command_dispatch = namespace
+                .filter(|_| !self.state.input_processor.is_composer_active())
+                .and_then(|namespace| {
+                    CommandProcessor::new().process(command, &owner, &mut scene, move |_| {
+                        Some(namespace.clone())
+                    })
+                });
+            let transition = self.state.input_processor.clear_keyboard_focus(
+                &mut self.state.focus_manager,
+                &mut scene,
+                tab_id,
+            );
             (transition, command_dispatch)
         };
-        tracing::debug!("portal recovery: Escape cleared composer-less focus stop");
+        tracing::debug!("portal recovery: Escape cleared the outer focus stop");
         if let Some(dispatch) = command_dispatch {
             dispatch_command_event(&self.state.input_event_tx, dispatch);
         }
@@ -1361,6 +1436,8 @@ impl WinitApp {
         let traversal = is_bare_tab_chord(&raw.key, &raw.modifiers);
         let activation = !modified && is_activation_key(&raw.key, &raw.key_code);
         let mut wake = None;
+        let mut answer_exit = false;
+        let mut return_focus = false;
         let consumed = {
             let state = spin_acquire(&self.state.shared_state, INTERACTION_LOCK_BUDGET).ok_or(())?;
             let mut scene = spin_acquire(&state.scene, INTERACTION_LOCK_BUDGET).ok_or(())?;
@@ -1370,91 +1447,124 @@ impl WinitApp {
                 self.state.input_processor.clear_chrome_feedback(&mut scene);
             }
             scene.prune_notification_feedback();
-            let mut controls: Vec<_> = scene
-                .overlay
-                .zone_hit_regions
-                .iter()
-                .filter(|region| {
-                    matches!(
-                        region.kind,
-                        tze_hud_scene::types::ZoneInteractionKind::Dismiss
-                            | tze_hud_scene::types::ZoneInteractionKind::Action { .. }
-                    )
-                })
-                .cloned()
-                .collect();
-            controls.sort_by_key(|region| region.tab_order);
-            if controls.is_empty() || (modified && scene.overlay.notification_focus.is_none()) {
-                false
-            } else if traversal {
-                let current = controls.iter().position(|r| {
-                    Some(&r.interaction_id) == scene.overlay.notification_focus.as_ref()
-                });
-                if let Some(index) = current {
-                    if (raw.modifiers.shift && index == 0)
-                        || (!raw.modifiers.shift && index + 1 == controls.len())
-                    {
-                        let entered_reverse = scene.overlay.notification_focus_entered_reverse;
-                        scene.focus_notification(None);
-                        // Reversing at the entry edge returns to the saved stop;
-                        // continuing across the far edge advances the content cycle.
-                        raw.modifiers.shift != entered_reverse
-                    } else {
+            if let Some(focus) = self.state.answer_keyboard.focus {
+                if !self
+                    .state
+                    .safe_mode_atomic
+                    .load(std::sync::atomic::Ordering::Acquire)
+                {
+                    let outcome = super::answer_focus::route_answer_key(
+                        &mut scene,
+                        focus,
+                        raw,
+                        &self.state.global_tokens,
+                    );
+                    wake = outcome.activation;
+                    answer_exit = outcome.exit;
+                    return_focus = outcome.return_focus;
+                }
+                true
+            } else {
+                let mut controls: Vec<_> = scene
+                    .overlay
+                    .zone_hit_regions
+                    .iter()
+                    .filter(|region| {
+                        matches!(
+                            region.kind,
+                            tze_hud_scene::types::ZoneInteractionKind::Dismiss
+                                | tze_hud_scene::types::ZoneInteractionKind::Action { .. }
+                        )
+                    })
+                    .cloned()
+                    .collect();
+                controls.sort_by_key(|region| region.tab_order);
+                if controls.is_empty() || (modified && scene.overlay.notification_focus.is_none()) {
+                    false
+                } else if traversal {
+                    let current = controls.iter().position(|r| {
+                        Some(&r.interaction_id) == scene.overlay.notification_focus.as_ref()
+                    });
+                    if let Some(index) = current {
+                        if (raw.modifiers.shift && index == 0)
+                            || (!raw.modifiers.shift && index + 1 == controls.len())
+                        {
+                            let entered_reverse = scene.overlay.notification_focus_entered_reverse;
+                            scene.focus_notification(None);
+                            // Reversing at the entry edge returns to the saved stop;
+                            // continuing across the far edge advances the content cycle.
+                            raw.modifiers.shift != entered_reverse
+                        } else {
+                            if !raw.repeat {
+                                let next = if raw.modifiers.shift {
+                                    index - 1
+                                } else {
+                                    index + 1
+                                };
+                                scene.focus_notification(Some(
+                                    controls[next].interaction_id.clone(),
+                                ));
+                            }
+                            true
+                        }
+                    } else if tab.is_none_or(|tab| {
+                        self.state.focus_manager.traversal_would_wrap(
+                            tab,
+                            &scene,
+                            raw.modifiers.shift,
+                        )
+                    }) {
                         if !raw.repeat {
                             let next = if raw.modifiers.shift {
-                                index - 1
+                                controls.len() - 1
                             } else {
-                                index + 1
+                                0
                             };
+                            scene.overlay.notification_focus_entered_reverse = raw.modifiers.shift;
                             scene.focus_notification(Some(controls[next].interaction_id.clone()));
                         }
                         true
+                    } else {
+                        false
                     }
-                } else if tab.is_none_or(|tab| {
-                    self.state
-                        .focus_manager
-                        .traversal_would_wrap(tab, &scene, raw.modifiers.shift)
-                }) {
-                    if !raw.repeat {
-                        let next = if raw.modifiers.shift {
-                            controls.len() - 1
-                        } else {
-                            0
-                        };
-                        scene.overlay.notification_focus_entered_reverse = raw.modifiers.shift;
-                        scene.focus_notification(Some(controls[next].interaction_id.clone()));
+                } else if let Some(control) = controls
+                    .iter()
+                    .find(|r| Some(&r.interaction_id) == scene.overlay.notification_focus.as_ref())
+                {
+                    if is_escape_key(&raw.key, &raw.key_code) {
+                        scene.focus_notification(None);
+                    } else if activation
+                        && !raw.repeat
+                        && !self
+                            .state
+                            .safe_mode_atomic
+                            .load(std::sync::atomic::Ordering::Acquire)
+                    {
+                        // The pending-keyboard drain bypasses the outer FIFO guard;
+                        // a key queued before pause must not activate a card afterward.
+                        let duration = super::lifecycle::notification_exit_ms(
+                            &scene,
+                            &control.zone_name,
+                            &self.state.global_tokens,
+                        );
+                        wake = scene.activate_notification(control, duration);
+                        return_focus = matches!(
+                            wake,
+                            Some(tze_hud_scene::graph::NotificationActivation::Callback(_))
+                        );
                     }
                     true
                 } else {
                     false
                 }
-            } else if let Some(control) = controls
-                .iter()
-                .find(|r| Some(&r.interaction_id) == scene.overlay.notification_focus.as_ref())
-            {
-                if is_escape_key(&raw.key, &raw.key_code) {
-                    scene.focus_notification(None);
-                } else if activation
-                    && !raw.repeat
-                    && !self
-                        .state
-                        .safe_mode_atomic
-                        .load(std::sync::atomic::Ordering::Acquire)
-                {
-                    // The pending-keyboard drain bypasses the outer FIFO guard;
-                    // a key queued before pause must not activate a card afterward.
-                    let duration = super::lifecycle::notification_exit_ms(
-                        &scene,
-                        &control.zone_name,
-                        &self.state.global_tokens,
-                    );
-                    wake = scene.activate_notification(control, duration);
-                }
-                true
-            } else {
-                false
             }
         };
+        if answer_exit {
+            self.state.answer_keyboard.focus = None;
+        }
+        if return_focus {
+            self.return_focus_after_key(raw);
+        }
         if consumed {
             self.state
                 .notification_keydowns
@@ -1525,7 +1635,17 @@ impl WinitApp {
         active_tab: Option<tze_hud_scene::SceneId>,
     ) {
         let key_identity = keyboard_key_identity(&raw.key_code, &raw.key);
-        if self.state.notification_keydowns.remove(&key_identity) {
+        if self.state.answer_keyboard.return_key.as_ref() == Some(&key_identity) {
+            self.state.answer_keyboard.return_key = None;
+            self.state.notification_keydowns.remove(&key_identity);
+            self.state.consumed_command_keydowns.remove(&key_identity);
+            super::lifecycle::restore_foreground();
+            return;
+        }
+        if self.state.notification_keydowns.remove(&key_identity)
+            || self.state.answer_keyboard.focus.is_some()
+            || self.state.answer_keyboard.return_key.is_some()
+        {
             return;
         }
         if self
@@ -1752,7 +1872,10 @@ impl WinitApp {
         raw: &RawCharacterEvent,
         active_tab: Option<tze_hud_scene::SceneId>,
     ) {
-        if !self.state.notification_keydowns.is_empty() {
+        if !self.state.notification_keydowns.is_empty()
+            || self.state.answer_keyboard.focus.is_some()
+            || self.state.answer_keyboard.return_key.is_some()
+        {
             return;
         }
         {
