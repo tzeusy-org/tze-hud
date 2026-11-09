@@ -53,11 +53,15 @@ pub(crate) fn on_chord(
 ) -> ChordOutcome {
     let resume_if_paused = paused.then_some(false);
     match (opened_by, chord) {
-        // Answer is dispatched to the main-thread card route, never a panel
-        // transition. Keep this core total without opening or resuming anything.
-        (_, ChordRole::Answer) => ChordOutcome {
+        // The main-thread card route sends this only after finding a question.
+        // Never open settings or change pause state from the answer chord.
+        (opened, ChordRole::Answer) => ChordOutcome {
             pause: None,
-            panel: PanelChange::Keep,
+            panel: if opened.is_some() && !paused {
+                PanelChange::Close
+            } else {
+                PanelChange::Keep
+            },
             connect: false,
         },
         (None, ChordRole::Pause) => ChordOutcome {
@@ -1270,7 +1274,11 @@ mod tests {
             for paused in [false, true] {
                 assert_eq!(
                     on_chord(by, paused, ChordRole::Answer),
-                    outcome(None, Keep, false)
+                    outcome(
+                        None,
+                        if by.is_some() && !paused { Close } else { Keep },
+                        false
+                    )
                 );
             }
         }

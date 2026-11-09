@@ -121,6 +121,11 @@ impl WinitApp {
         text: Option<&str>,
         pressed: bool,
     ) -> bool {
+        if self.state.answer_keyboard.focus.is_some()
+            || self.state.answer_keyboard.return_key.is_some()
+        {
+            return false;
+        }
         let Some(panel) = self.open_panel().cloned() else {
             return false;
         };
@@ -148,6 +153,11 @@ impl WinitApp {
 
     /// IME-composed text goes to the panel's search while it is open.
     pub(super) fn panel_text(&mut self, text: &str) -> bool {
+        if self.state.answer_keyboard.focus.is_some()
+            || self.state.answer_keyboard.return_key.is_some()
+        {
+            return false;
+        }
         let Some(panel) = self.open_panel() else {
             return false;
         };
@@ -291,7 +301,9 @@ impl WinitApp {
                 );
             }
             self.panel_window_focus(focused);
-        } else {
+        } else if self.state.answer_keyboard.focus.is_none()
+            && self.state.answer_keyboard.return_key.is_none()
+        {
             super::lifecycle::restore_foreground();
         }
         self.update_overlay_cursor_hittest();

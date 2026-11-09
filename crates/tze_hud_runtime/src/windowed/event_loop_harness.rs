@@ -5257,6 +5257,92 @@ mod tests {
             assert!(harness.scene().overlay.notification_answer.is_none());
         }
 
+        // A primary/secondary HWND blur is not a whole-HUD focus loss. The
+        // production handler receives the current native foreground ownership.
+        for secondary in [None, Some(0)] {
+            for owned in [true, false] {
+                let mut harness = card_with_editor();
+                request_answer(&mut harness);
+                let focused = harness.scene().overlay.notification_focus.clone();
+                harness
+                    .app
+                    .handle_window_focus_with_foreground(secondary, false, owned);
+                if owned {
+                    assert!(harness.app.state.answer_keyboard.focus.is_some());
+                    assert_eq!(harness.scene().overlay.notification_focus, focused);
+                    assert!(
+                        !harness
+                            .app
+                            .state
+                            .input_processor
+                            .chrome_feedback_cancel_pending
+                    );
+                    press(&mut harness, "Digit2", "2", false);
+                    assert_eq!(take_action_ids(&harness), ["reject"]);
+                } else {
+                    assert!(harness.app.state.answer_keyboard.focus.is_none());
+                    assert!(harness.app.state.answer_keyboard.return_key.is_none());
+                    assert!(harness.tick());
+                    assert!(harness.scene().overlay.notification_focus.is_none());
+                    assert!(harness.scene().overlay.notification_answer.is_none());
+                    assert!(take_action_ids(&harness).is_empty());
+                }
+            }
+        }
+
+        // The global answer chord transfers input from an open running panel.
+        // A request with no card keeps its search and panel completely intact.
+        {
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            let fixture =
+                runtime.block_on(async { super::super::panel_input::panel_task_tests::fixture() });
+            let panel = fixture.panel.clone();
+            let wait_open = |open| {
+                runtime.block_on(async {
+                    for _ in 0..200 {
+                        if panel.is_open() == open {
+                            return;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                    }
+                    panic!("panel did not reach open={open}");
+                })
+            };
+            use crate::shell::control_panel::PanelEvent;
+            use tze_hud_scene::config::ChordRole;
+            panel.send(PanelEvent::Chord(ChordRole::Panel));
+            wait_open(true);
+            let mut harness = card_with_editor();
+            harness.app.state.control_panel = Some(panel.clone());
+            harness.app.sync_panel_focus();
+            request_answer(&mut harness);
+            assert!(harness.app.state.answer_keyboard.focus.is_some());
+            assert!(!harness.app.state.answer_keyboard.focus.unwrap().nested);
+            let physical = winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Digit2);
+            let logical = winit::keyboard::Key::Character("2".into());
+            assert!(
+                !harness
+                    .app
+                    .panel_key_input(physical, &logical, Some("2"), true)
+            );
+            assert!(!harness.app.panel_text("2"));
+            wait_open(false);
+            harness.app.sync_panel_focus();
+            assert!(harness.app.state.answer_keyboard.focus.is_some());
+            assert!(harness.scene().overlay.notification_answer.is_some());
+            press(&mut harness, "Digit2", "2", false);
+            assert_eq!(take_action_ids(&harness), ["reject"]);
+            assert!(harness.tick());
+            panel.send(PanelEvent::Chord(ChordRole::Panel));
+            wait_open(true);
+            harness.app.sync_panel_focus();
+            request_answer(&mut harness);
+            assert!(harness.app.state.answer_keyboard.focus.is_none());
+            assert!(panel.is_open(), "no question must not close settings");
+            panel.send(PanelEvent::Chord(ChordRole::Panel));
+            wait_open(false);
+        }
+
         // An unavailable ordinal is inert; Enter/Space still use the moved
         // focus ring, and a safe-mode request cannot take card focus.
         for (activation, key) in [("Enter", "Enter"), ("Space", " ")] {

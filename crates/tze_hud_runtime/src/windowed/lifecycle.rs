@@ -2472,15 +2472,24 @@ impl WinitApp {
         self.update_overlay_cursor_hittest();
     }
 
-    /// Winit keyboard-focus transition. Notification focus is global HUD
-    /// chrome and must end even when the pointer belongs to another overlay.
+    /// Winit keyboard-focus transition. Global keyboard chrome survives an
+    /// owned monitor handoff; only leaving the whole HUD ends that interaction.
     pub(super) fn handle_window_focus(&mut self, secondary: Option<usize>, focused: bool) {
+        self.handle_window_focus_with_foreground(secondary, focused, hud_owns_foreground());
+    }
+
+    /// The OS foreground observation is passed explicitly so the event-loop
+    /// regression parent can exercise owned handoff and external loss alike.
+    pub(super) fn handle_window_focus_with_foreground(
+        &mut self,
+        secondary: Option<usize>,
+        focused: bool,
+        hud_foreground: bool,
+    ) {
         if secondary.is_none() {
             self.panel_window_focus(focused);
         }
         if !focused {
-            self.state.answer_keyboard.focus = None;
-            self.state.answer_keyboard.return_key = None;
             let window = match secondary {
                 Some(index) => self.state.secondaries.get(index).map(|d| d.window.id()),
                 None => self.state.window.as_ref().map(|w| w.id()),
@@ -2488,7 +2497,14 @@ impl WinitApp {
             if secondary.is_none() || window.is_some() {
                 self.cancel_captured_zone_drag(window);
             }
-            self.cancel_chrome_feedback();
+            if hud_foreground {
+                self.cancel_context_menu();
+                self.state.zone_press = None;
+            } else {
+                self.state.answer_keyboard.focus = None;
+                self.state.answer_keyboard.return_key = None;
+                self.cancel_chrome_feedback();
+            }
         }
     }
 

@@ -138,24 +138,33 @@ impl WinitApp {
         {
             return;
         }
-        if self.state.safe_mode_atomic.load(Ordering::Acquire)
-            || self
-                .state
-                .control_panel
-                .as_ref()
-                .is_some_and(|panel| panel.is_open())
-        {
+        if self.state.safe_mode_atomic.load(Ordering::Acquire) {
             return;
         }
-        if self
-            .focus_newest_question(super::lifecycle::hud_owns_foreground())
-            .is_err()
-        {
-            self.state
-                .answer_keyboard
-                .requested
-                .store(true, Ordering::Release);
-            self.schedule_shared_scene_availability_wake();
+        let panel_open = self
+            .state
+            .control_panel
+            .as_ref()
+            .is_some_and(|panel| panel.is_open());
+        match self.focus_newest_question(super::lifecycle::hud_owns_foreground() && !panel_open) {
+            Ok(true) if panel_open => {
+                // This explicit owner handoff closes settings only after a
+                // question was found. Its close edge must not restore focus
+                // underneath the new card visit.
+                if let Some(panel) = &self.state.control_panel {
+                    panel.send(crate::shell::control_panel::PanelEvent::Chord(
+                        tze_hud_scene::config::ChordRole::Answer,
+                    ));
+                }
+            }
+            Err(()) => {
+                self.state
+                    .answer_keyboard
+                    .requested
+                    .store(true, Ordering::Release);
+                self.schedule_shared_scene_availability_wake();
+            }
+            _ => {}
         }
     }
 
