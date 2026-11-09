@@ -1,4 +1,5 @@
 //! Keep the two agent-facing manuals on the same argument parser as MCP.
+use pulldown_cmark::{CodeBlockKind, Event, Parser, Tag, TagEnd};
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use tze_hud_mcp::tools::{ClearParams, HoldParams, InputParams, PublishParams, parse_args};
@@ -16,48 +17,75 @@ fn arguments(tool: &str, value: Value) -> Result<(), String> {
     .map_err(|error| error.to_string())
 }
 
+struct Example {
+    line: usize,
+    annotation: String,
+    body: String,
+}
+
+fn check_example(example: &Example) -> Result<(), String> {
+    if let Some(tool) = example
+        .annotation
+        .strip_prefix("<!-- tool: ")
+        .and_then(|s| s.strip_suffix(" -->"))
+    {
+        serde_json::from_str(&example.body)
+            .map_err(|error| error.to_string())
+            .and_then(|value| arguments(tool, value))
+    } else if matches!(
+        example.annotation.as_str(),
+        "<!-- example: response -->" | "<!-- example: error -->" | "<!-- example: partial -->"
+    ) {
+        Ok(())
+    } else {
+        Err("JSON fence needs a tool or response/error/partial annotation immediately above".into())
+    }
+}
+
 fn check_document(path: &Path, text: &str) -> Vec<String> {
-    let lines: Vec<_> = text.lines().collect();
     let mut errors = Vec::new();
-    let mut index = 0;
-    while index < lines.len() {
-        if lines[index].trim() != "```json" {
-            index += 1;
-            continue;
+    let mut annotation = None;
+    let mut example: Option<Example> = None;
+    // CommonMark owns fence lengths, tilde fences, container prefixes, and
+    // literal nested fences. Only the extracted arguments use our MCP parser.
+    for (event, range) in Parser::new(text).into_offset_iter() {
+        match event {
+            Event::Html(html) => {
+                let line = text[..range.start].bytes().filter(|&b| b == b'\n').count() + 1;
+                annotation = Some((line, html.trim().to_owned()));
+            }
+            Event::Start(Tag::CodeBlock(CodeBlockKind::Fenced(info)))
+                if info
+                    .split_whitespace()
+                    .next()
+                    .is_some_and(|language| language.eq_ignore_ascii_case("json")) =>
+            {
+                let line = text[..range.start].bytes().filter(|&b| b == b'\n').count() + 1;
+                let annotation = annotation
+                    .as_ref()
+                    .filter(|(annotation_line, _)| *annotation_line + 1 == line)
+                    .map(|(_, annotation)| annotation.clone())
+                    .unwrap_or_default();
+                example = Some(Example {
+                    line,
+                    annotation,
+                    body: String::new(),
+                });
+            }
+            Event::Text(body) => {
+                if let Some(example) = &mut example {
+                    example.body.push_str(&body);
+                }
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                if let Some(example) = example.take()
+                    && let Err(error) = check_example(&example)
+                {
+                    errors.push(format!("{}:{}: {error}", path.display(), example.line));
+                }
+            }
+            _ => {}
         }
-        let start = index;
-        index += 1;
-        while index < lines.len() && lines[index].trim() != "```" {
-            index += 1;
-        }
-        let location = format!("{}:{}", path.display(), start + 1);
-        if index == lines.len() {
-            errors.push(format!("{location}: unclosed JSON fence"));
-            break;
-        }
-        let annotation = start.checked_sub(1).map(|i| lines[i].trim()).unwrap_or("");
-        let result = if let Some(tool) = annotation
-            .strip_prefix("<!-- tool: ")
-            .and_then(|s| s.strip_suffix(" -->"))
-        {
-            serde_json::from_str(&lines[start + 1..index].join("\n"))
-                .map_err(|error| error.to_string())
-                .and_then(|value| arguments(tool, value))
-        } else if matches!(
-            annotation,
-            "<!-- example: response -->" | "<!-- example: error -->" | "<!-- example: partial -->"
-        ) {
-            Ok(())
-        } else {
-            Err(
-                "JSON fence needs a tool or response/error/partial annotation immediately above"
-                    .into(),
-            )
-        };
-        if let Err(error) = result {
-            errors.push(format!("{location}: {error}"));
-        }
-        index += 1;
     }
     errors
 }
@@ -157,10 +185,27 @@ fn skill_json_examples_use_production_arguments() {
         }
     }
     assert!(fence_failures.is_empty(), "{fence_failures:#?}");
-    assert_eq!(
-        check_document(Path::new("fixture.md"), "```json\n{}")[0],
-        "fixture.md:1: unclosed JSON fence"
-    );
+    for document in [
+        "<!-- tool: hud_input -->\n```json\n{}\n````\n",
+        "<!-- tool: hud_input -->\n~~~JSON extra-info\n{}\n~~~~\n",
+        "> <!-- tool: hud_input -->\n> ```json\n> {}\n> ```\n",
+        "- <!-- tool: hud_input -->\n  ```json\n  {}\n  ```\n",
+        // CommonMark closes a fenced block at EOF, too.
+        "<!-- tool: hud_input -->\n```json\n{}",
+    ] {
+        let errors = check_document(Path::new("fixture.md"), document);
+        assert!(errors.is_empty(), "{document}: {errors:?}");
+    }
+    for document in [
+        "```json\n{}",
+        // The wrong delimiter and a shorter fence are literal code, not closers.
+        "<!-- tool: hud_input -->\n````json\n{}\n```\n````\n",
+        "<!-- tool: hud_input -->\n~~~json\n{}\n```\n~~~\n",
+    ] {
+        let errors = check_document(Path::new("fixture.md"), document);
+        assert!(!errors.is_empty(), "{document}");
+        assert!(errors.iter().all(|error| error.starts_with("fixture.md:")));
+    }
 
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let mut paths = Vec::new();

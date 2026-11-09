@@ -20,3 +20,7 @@ The token-footprint artifact also reports the full two `SKILL.md` files' UTF-8
 bytes and pinned o200k tokens, including frontmatter, plus model tool calls per
 canonical flow. These measurements are report-only until the later skill diet.
 Protocol `tools/list` counts zero model tool calls; each `tools/call` counts one.
+
+The gate follows CommonMark fenced blocks, including longer backtick fences,
+tilde fences, and fences inside lists or block quotes. A literal JSON fence
+inside another code block is documentation, not a separate example.
