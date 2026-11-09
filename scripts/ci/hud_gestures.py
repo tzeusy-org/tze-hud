@@ -252,6 +252,7 @@ class Run:
     log: Path | None = None
     smoke: Smoke | None = None
     injector: str = "xtest"
+    window_mode: str = "fullscreen"
     inj: object | None = None  # XTest or hud_sendinput.SendInput
     helper_pids: list[int] = field(default_factory=list)  # owned non-HUD apps (scenario 10's Notepad)
     timeline: list[dict] = field(default_factory=list)
@@ -281,16 +282,20 @@ class Run:
             for name in ("LocalAppData", "AppData"):
                 (self.home / name).mkdir()
             env = dict(os.environ, LOCALAPPDATA=str(self.home / "LocalAppData"), APPDATA=str(self.home / "AppData"))
+        for key in ("GH_TOKEN", "GITHUB_TOKEN"):
+            env.pop(key, None)
         env["TZE_HUD_LOG"] = "info"
+        env["TZE_HUD_LOG_JSON"] = "1"
         self.port = free_port()
         config = seed_config(CONFIG, self.psk)
         self.config_dir = config.parent
         self.log = self.out / "hud.log"
+        dimensions = (["--width", str(SCREEN[0]), "--height", str(SCREEN[1])]
+                      if self.window_mode == "fullscreen" else [])
         with open(self.log, "wb") as log:
             self.hud = subprocess.Popen(
-                [str(self.exe), "--config", str(config), "--window-mode", "fullscreen",
-                 "--width", str(SCREEN[0]), "--height", str(SCREEN[1]),
-                 "--grpc-port", "0", "--mcp-port", str(self.port)],
+                [str(self.exe), "--config", str(config), "--window-mode", self.window_mode,
+                 *dimensions, "--grpc-port", "0", "--mcp-port", str(self.port)],
                 # The runtime writes a relative diagnostic file on Linux; keep it out of the repo.
                 env=env, cwd=self.home, stdout=log, stderr=subprocess.STDOUT,
             )
@@ -300,7 +305,13 @@ class Run:
         self.inj = XTest(self.display, self.guard) if self.injector == "xtest" else WIN.SendInput(self.guard)
         if self.injector == "sendinput":
             self._check_identity_mapping()
-        self.guard()
+        if self.window_mode == "fullscreen":
+            self.guard()
+        else:
+            # An overlay may start without activation. No input is sent until
+            # scenario 11 foregrounds its owned helper and the normal guard passes.
+            if self.status().get("pid") != self.pid:
+                raise Refused("overlay status is not the owned HUD")
 
     def _check_identity_mapping(self) -> None:
         """Status rects are scene pixels; SendInput takes physical ones. Run only where they agree."""
@@ -1166,6 +1177,102 @@ def scenario_no_focus_steal(run: Run) -> None:
         run.helper_pids.remove(notepad.pid)
 
 
+def scenario_overlay_pointer(run: Run) -> None:
+    """11. Relative pointer entry captures the composer; outside clicks reach owned Notepad."""
+    fields = [json.loads(line).get("fields", {}) for line in run.log.read_text(errors="replace").splitlines()
+              if line.startswith("{")]
+    renderer = [f for f in fields if f.get("message") == "windowed: GPU adapter selected"]
+    modes = [f for f in fields if str(f.get("message", "")).startswith("window mode: overlay/HUD")]
+    if (len(renderer) != 1 or renderer[0].get("backend") != "Vulkan"
+            or "llvmpipe" not in renderer[0].get("device_name", "").lower() or len(modes) != 1):
+        raise ScenarioFailed("actual overlay uses Vulkan lavapipe", {"renderer": renderer, "modes": modes})
+    run.step(f"actual overlay renderer {renderer[0]}")
+    s = "portal:g-overlay"
+    notepad = subprocess.Popen(["notepad.exe"])
+    run.helper_pids.append(notepad.pid)
+    try:
+        def foreground():
+            WIN.bring_to_front(notepad.pid)
+            return WIN.foreground_pid() == notepad.pid, WIN.foreground_pid()
+        wait_until(foreground, what="owned Notepad foreground", timeout_s=15, interval_s=0.2)
+        WIN.maximize(notepad.pid)
+        wait_until(lambda: (WIN.edit_rect(notepad.pid) is not None, None),
+                   what="owned Notepad editor", timeout_s=SETTLE_S)
+        open_portal(run, s, "overlay", count=5, expects_reply=True)
+        rect = run.portal(s)["rect"]
+        # Start outside the portal. Only relative events wake raw-input entry
+        # detection while the overlay is passing pointer events through.
+        width, height = WIN.screen_size()
+        outside = next(((x, y) for x, y in ((width - 2, height // 2), (2, height // 2),
+                                           (width // 2, height - 2), (width // 2, 2))
+                        if not (rect["x"] <= x <= rect["x"] + rect["w"]
+                                and rect["y"] <= y <= rect["y"] + rect["h"])), None)
+        if outside is None:
+            raise ScenarioFailed("a point outside the portal exists", rect)
+        run.inj.move_abs(*outside)
+        wait_until(lambda: (WIN.pointer_capturing(run.pid) is False, WIN.pointer_capturing(run.pid)),
+                   what="overlay passes pointer through outside portal", timeout_s=SETTLE_S)
+        run.step("ok native overlay is click-through before relative entry")
+        target = resolve_target(run.status(), f"{s}/composer")
+        deadline = time.monotonic() + SETTLE_S
+        while True:
+            x, y = WIN.cursor_position()
+            dx, dy = target[0] - x, target[1] - y
+            if abs(dx) <= 1 and abs(dy) <= 1:
+                break
+            if time.monotonic() >= deadline:
+                raise ScenarioFailed("relative motion reaches the composer", {"cursor": [x, y], "target": target})
+            run.inj.move_relative(max(-8, min(8, dx)), max(-8, min(8, dy)))
+            # Observe OS cursor progress during one continuous gesture.
+            time.sleep(0.005)
+        run.expect("relative entry shows composer hover", on(s, lambda p: p["hover"] == "composer"))
+        wait_until(lambda: (WIN.pointer_capturing(run.pid) is True, WIN.pointer_capturing(run.pid)),
+                   what="relative entry enables native capture", timeout_s=SETTLE_S)
+        run.step("ok relative entry enables native capture")
+        run.screen_grab("overlay-pointer.entry")
+        run.click()
+        run.expect("entry click focuses composer", on(s, lambda p: p["focus"] == "composer"))
+        run.type("overlay entry")
+        run.expect("overlay receives typed text", on(s, lambda p: p["input"]["draft_chars"] == 13))
+        run.key("Return")
+        items = run.take(1)
+        if [item.get("text") for item in items] != ["overlay entry"]:
+            raise ScenarioFailed("overlay receives exactly one reply", items)
+        # Leave ample owned editor space outside the portal, without moving
+        # the overlay window or altering any desktop outside this CI VM.
+        for _ in range(4):
+            run.key("ctrl+minus")
+        run.expect("portal shrinks", on(s, lambda p: p["rect"]["w"] < rect["w"]))
+        rect = run.portal(s)["rect"]
+        editor = WIN.edit_rect(notepad.pid)
+        if editor is None:
+            raise ScenarioFailed("owned editor remains available", {})
+        left, top, right, bottom = editor
+        point = (right - 20, (top + bottom) // 2)
+        if not (0 <= point[0] < width and 0 <= point[1] < height) or (
+                rect["x"] <= point[0] <= rect["x"] + rect["w"]
+                and rect["y"] <= point[1] <= rect["y"] + rect["h"]):
+            raise ScenarioFailed("click-through point is in editor outside portal", {"editor": editor, "portal": rect})
+        if WIN.foreground_pid() != run.pid:
+            raise ScenarioFailed("HUD is foreground before click-through", {"foreground": WIN.foreground_pid()})
+        run.inj.move_abs(*point)
+        wait_until(lambda: (WIN.pointer_capturing(run.pid) is False, WIN.pointer_capturing(run.pid)),
+                   what="leaving portal restores native click-through", timeout_s=SETTLE_S)
+        run.click()
+        wait_until(lambda: (WIN.foreground_pid() == notepad.pid, WIN.foreground_pid()),
+                   what="outside click foregrounds owned Notepad", timeout_s=SETTLE_S)
+        run.type("click through")
+        wait_until(lambda: (WIN.edit_text(notepad.pid) == "click through", WIN.edit_text(notepad.pid)),
+                   what="underlying editor receives exact text", timeout_s=SETTLE_S)
+        run.expect("underlying typing leaves composer empty", on(s, lambda p: p["input"]["draft_chars"] == 0))
+        run.screen_grab("overlay-pointer.click-through")
+        run.step("ok outside click reaches owned Notepad and typing stays there")
+    finally:
+        kill_pid(notepad.pid)
+        notepad.wait(10)
+        run.helper_pids.remove(notepad.pid)
+
+
 def scenario_safe_mode(run: Run) -> None:
     """12. The real pause chord preserves an unheld portal beyond idle/reap expiry, then resumes without reap."""
     s = "portal:g-safe"
@@ -1200,7 +1307,7 @@ def scenario_safe_mode(run: Run) -> None:
 
 
 # Windows only: they need Win32 foreground/edit-control access or global hotkeys.
-TIER_W_ONLY = {"no-focus-steal", "safe-mode"}
+TIER_W_ONLY = {"no-focus-steal", "safe-mode", "overlay-pointer"}
 
 SCENARIOS: dict[str, Callable[[Run], None]] = {
     "output-anchor": scenario_output_anchor,          # 1
@@ -1218,6 +1325,7 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "resize-hotkey": scenario_resize_hotkey,          # 16
     "unicode-typing": scenario_unicode_typing,
     "no-focus-steal": scenario_no_focus_steal,        # 10 (tier W)
+    "overlay-pointer": scenario_overlay_pointer,      # 11 (tier W, overlay only)
     "safe-mode": scenario_safe_mode,                  # 12 (tier W)
     "restart": scenario_restart,                      # 14 (last: replaces the HUD)
 }
@@ -1276,6 +1384,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--exe", type=Path, required=True, help="the tze_hud binary to own")
     parser.add_argument("--injector", choices=("xtest", "sendinput"), default="sendinput" if WINDOWS else "xtest",
                         help="xtest: private Xvfb (Linux); sendinput: Win32 on a CI VM only")
+    parser.add_argument("--window-mode", choices=("fullscreen", "overlay"), default="fullscreen")
     parser.add_argument("--out", type=Path, help="artifact dir (default test_results/gestures/<sha>/<run>)")
     parser.add_argument("--list", action="store_true", help="list scenarios and exit")
     parser.add_argument("scenarios", nargs="*", help="scenario names (default: all)")
@@ -1292,14 +1401,21 @@ def main(argv: list[str] | None = None) -> int:
     tier_w = args.injector == "sendinput"
     if not tier_w and TIER_W_ONLY.intersection(args.scenarios):
         parser.error(f"{', '.join(sorted(TIER_W_ONLY))} run only with --injector sendinput")
-    names = args.scenarios or [n for n in SCENARIOS if tier_w or n not in TIER_W_ONLY]
+    if args.window_mode == "overlay" and not tier_w:
+        parser.error("overlay gestures require --injector sendinput")
+    overlay_names = {"overlay-pointer"}
+    if args.scenarios and any((n in overlay_names) != (args.window_mode == "overlay") for n in args.scenarios):
+        parser.error("overlay-pointer requires --window-mode overlay; other scenarios require fullscreen")
+    names = args.scenarios or [n for n in SCENARIOS
+                               if (tier_w or n not in TIER_W_ONLY)
+                               and ((n in overlay_names) == (args.window_mode == "overlay"))]
     if "restart" in names:  # it replaces the HUD; keep it last
         names = [n for n in names if n != "restart"] + ["restart"]
     sha = git_sha()
     # The pid keeps parallel runs started in the same second apart.
     out = args.out or REPO / "test_results/gestures" / sha / f"{time.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}"
     out.mkdir(parents=True, exist_ok=True)
-    run = Run(exe=args.exe.resolve(), out=out, injector=args.injector)
+    run = Run(exe=args.exe.resolve(), out=out, injector=args.injector, window_mode=args.window_mode)
     started = time.monotonic()
     results: list[dict] = []
     failure = None
@@ -1321,7 +1437,7 @@ def main(argv: list[str] | None = None) -> int:
             failure = (failure + "; " if failure else "") + "left running: " + ", ".join(survivors)
         timeline = {
             "sha": sha, "profile": run.exe.parent.name,
-            "exe": str(run.exe), "injector": args.injector, "screen": SCREEN,
+            "exe": str(run.exe), "injector": args.injector, "window_mode": args.window_mode, "screen": SCREEN,
             "display": run.display, "mcp_port": run.port,
             "geometry": (status.get("displays") if "status" in locals() else None),
             "theme_scale": ({k: status.get(k) for k in ("theme", "ui_scale") if k in status} if "status" in locals() else None),

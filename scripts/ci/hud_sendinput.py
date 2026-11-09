@@ -28,6 +28,10 @@ for fn, res, args in (
     ("GetWindowThreadProcessId", wintypes.DWORD, [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]),
     ("IsWindowVisible", wintypes.BOOL, [wintypes.HWND]),
     ("SetForegroundWindow", wintypes.BOOL, [wintypes.HWND]),
+    ("ShowWindow", wintypes.BOOL, [wintypes.HWND, ctypes.c_int]),
+    ("GetWindowRect", wintypes.BOOL, [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]),
+    ("GetCursorPos", wintypes.BOOL, [ctypes.POINTER(wintypes.POINT)]),
+    ("GetWindowLongPtrW", ctypes.c_ssize_t, [wintypes.HWND, ctypes.c_int]),
     ("SendMessageW", ctypes.c_ssize_t, [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]),
     ("GetDC", wintypes.HDC, [wintypes.HWND]),
     ("ReleaseDC", ctypes.c_int, [wintypes.HWND, wintypes.HDC]),
@@ -176,6 +180,37 @@ def bring_to_front(pid: int) -> bool:
     return bool(windows) and bool(user32.SetForegroundWindow(windows[0]))
 
 
+def pointer_capturing(pid: int) -> bool | None:
+    windows = _windows_of(pid)
+    if len(windows) != 1:
+        return None
+    # winit's set_cursor_hittest(false) sets WS_EX_TRANSPARENT. Observe the
+    # actual native switch, rather than assuming a hover implies capture.
+    return not bool(user32.GetWindowLongPtrW(windows[0], -20) & 0x20)
+
+
+def maximize(pid: int) -> None:
+    for hwnd in _windows_of(pid):
+        user32.ShowWindow(hwnd, 3)  # SW_MAXIMIZE, only an owned helper
+
+
+def cursor_position() -> tuple[int, int]:
+    point = wintypes.POINT()
+    if not user32.GetCursorPos(ctypes.byref(point)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return point.x, point.y
+
+
+def edit_rect(pid: int) -> tuple[int, int, int, int] | None:
+    for hwnd in _windows_of(pid):
+        for cls in ("Edit", "RichEditD2DPT"):
+            child = user32.FindWindowExW(hwnd, None, cls, None)
+            rect = wintypes.RECT()
+            if child and user32.GetWindowRect(child, ctypes.byref(rect)):
+                return rect.left, rect.top, rect.right, rect.bottom
+    return None
+
+
 def edit_text(pid: int) -> str | None:
     """Text of the edit control in `pid`'s top-level window (Notepad), or None."""
     for hwnd in _windows_of(pid):
@@ -237,6 +272,9 @@ class SendInput:
         width, height = screen_size()
         self._send(f"move {x},{y}", [_mouse(MOUSE_MOVE | ABSOLUTE, round(x * 65535 / (width - 1)),
                                             round(y * 65535 / (height - 1)))])
+
+    def move_relative(self, dx: int, dy: int) -> None:
+        self._send(f"relative {dx},{dy}", [_mouse(MOUSE_MOVE, dx, dy)])
 
     def button(self, down: bool, button: int = 1) -> None:
         if button != 1:

@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import sys
+import contextlib
+import ctypes
+import hashlib
+import importlib.util
+import io
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hud_gestures as g  # noqa: E402
+import windows_overlay_gestures as overlay  # noqa: E402
 
 STATUS = {
     "pid": 4242,
@@ -128,6 +135,113 @@ class WindowsGuardTests(unittest.TestCase):
                 run.start()
         huds.assert_not_called()
         self.assertIsNone(run.home)
+
+
+    def test_sendinput_guard_runs_before_every_injection_including_relative_motion(self) -> None:
+        # Load the real boundary with fake DLL handles; no OS input is possible.
+        spec = importlib.util.spec_from_file_location("guarded_sendinput", Path(__file__).with_name("hud_sendinput.py"))
+        native = importlib.util.module_from_spec(spec)
+        with mock.patch.object(ctypes, "WinDLL", create=True):
+            spec.loader.exec_module(native)
+        injector = native.SendInput(lambda: g.check_owned_windows(**{**WIN_OWNED, "foreground_pid": 9}))
+        actions = (lambda: injector.move_abs(1, 2), lambda: injector.move_relative(3, 4),
+                   lambda: injector.click(), lambda: injector.button(True), lambda: injector.key("Tab"),
+                   lambda: injector.type_unicode("x"))
+        for action in actions:
+            with self.assertRaises(g.Refused):
+                action()
+        native.user32.SendInput.assert_not_called()
+
+    def test_modes_select_only_their_scenarios_and_refuse_mismatches(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fake = mock.Mock(home=None, log=None, display="", port=0)
+            fake.exe = Path("target/release-dev/tze_hud.exe")
+            fake.timeline = []
+            fake.status.return_value = {}
+            fake.inj = None
+            fake.smoke.ok.return_value = {}
+            for mode in ("fullscreen", "overlay"):
+                with self.subTest(mode=mode), mock.patch.object(g, "WINDOWS", True), \
+                        mock.patch.object(g, "Run", return_value=fake), \
+                        mock.patch.object(g, "run_scenarios", return_value=[]) as scenarios, \
+                        mock.patch.object(g, "write_step_summary"), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(g.main(["--exe", "unused.exe", "--injector", "sendinput",
+                                             "--window-mode", mode, "--out", directory]), 0)
+                    selected = scenarios.call_args.args[1]
+                    self.assertEqual("overlay-pointer" in selected, mode == "overlay")
+                    self.assertEqual(len(selected), 1 if mode == "overlay" else 17)
+            for mode, scenario in (("fullscreen", "overlay-pointer"), ("overlay", "composer")):
+                with mock.patch.object(g, "WINDOWS", True), contextlib.redirect_stderr(io.StringIO()), \
+                        self.assertRaises(SystemExit) as failure:
+                    g.main(["--exe", "unused.exe", "--injector", "sendinput", "--window-mode", mode, scenario])
+                self.assertEqual(failure.exception.code, 2)
+
+
+class OverlayInstallerTests(unittest.TestCase):
+    def test_archive_is_verified_before_extraction(self) -> None:
+        for case in ("download-fails", "wrong-hash", "verified"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                archive = b"fixture download"
+
+                def external(args, **kwargs):
+                    if args[0] == "gh":
+                        kwargs["stdout"].write(archive)
+                        if case == "download-fails":
+                            raise overlay.subprocess.CalledProcessError(7, args)
+                    else:
+                        (root / "x64").mkdir()
+                        (root / "x64/lvp_icd.x86_64.json").write_text("{}")
+                        (root / "x64/vulkan_lvp.dll").write_bytes(b"fixture driver")
+
+                digest = "0" * 64 if case == "wrong-hash" else hashlib.sha256(archive).hexdigest()
+                with mock.patch.object(overlay.subprocess, "run", side_effect=external) as external_run:
+                    if case == "verified":
+                        self.assertEqual(overlay.extract_driver(root, expected_sha256=digest),
+                                         root / "x64/lvp_icd.x86_64.json")
+                        self.assertEqual(external_run.call_count, 2)
+                    else:
+                        with self.assertRaises((RuntimeError, overlay.subprocess.CalledProcessError)):
+                            overlay.extract_driver(root, expected_sha256=digest)
+                        self.assertEqual(external_run.call_count, 1)
+                        self.assertFalse((root / "x64").exists())
+
+    def test_registration_cleanup_preserves_foreign_values_and_runs_on_failure(self) -> None:
+        for case in ("success", "scenario-fails", "already-registered"):
+            with self.subTest(case=case):
+                registry = mock.Mock(KEY_READ=1, KEY_WRITE=2, KEY_WOW64_64KEY=4)
+                # Fake only the Win32 registry boundary.
+                registry.CreateKeyEx.return_value = mock.MagicMock()
+                name = str(Path("unique-lavapipe.json").resolve())
+                values = {"foreign-driver.json": 0}
+                if case == "already-registered":
+                    values[name] = 1
+
+                def query(_key, value):
+                    if value not in values:
+                        raise FileNotFoundError(value)
+                    return values[value], 4
+
+                registry.QueryValueEx.side_effect = query
+                registry.SetValueEx.side_effect = lambda _key, value, _reserved, _kind, data: values.__setitem__(value, data)
+                registry.DeleteValue.side_effect = lambda _key, value: values.pop(value)
+                if case == "already-registered":
+                    with self.assertRaises(RuntimeError):
+                        with overlay.registered_driver(Path(name), registry):
+                            self.fail("must not enter with an existing value")
+                    self.assertEqual(values[name], 1)
+                    registry.DeleteValue.assert_not_called()
+                elif case == "scenario-fails":
+                    with self.assertRaisesRegex(RuntimeError, "scenario failed"):
+                        with overlay.registered_driver(Path(name), registry):
+                            self.assertEqual(values[name], 0)
+                            raise RuntimeError("scenario failed")
+                    self.assertNotIn(name, values)
+                else:
+                    with overlay.registered_driver(Path(name), registry):
+                        self.assertEqual(values[name], 0)
+                    self.assertNotIn(name, values)
+                self.assertEqual(values["foreign-driver.json"], 0)
 
 
 class TargetTests(unittest.TestCase):
