@@ -1371,7 +1371,10 @@ def run_scenarios(run: Run, names: list[str]) -> list[dict]:
             result.update(outcome="FAIL", step=f"{type(err).__name__}: {err}", last=None)
         result["seconds"] = round(time.monotonic() - started, 2)
         if result["outcome"] == "FAIL":
-            run.screen_grab(f"{name}.after")
+            try:
+                run.screen_grab(f"{name}.after")
+            except Exception as err:  # noqa: BLE001 - retain the original scenario failure
+                result["diagnostic_error"] = f"{type(err).__name__}: {err}"
         try:
             run.snapshot(f"{name}.after")
             stray = run.clear_portals()

@@ -44,6 +44,10 @@ for fn, res, args in (
     ("CreateCompatibleDC", wintypes.HDC, [wintypes.HDC]),
     ("CreateCompatibleBitmap", wintypes.HBITMAP, [wintypes.HDC, ctypes.c_int, ctypes.c_int]),
     ("SelectObject", wintypes.HGDIOBJ, [wintypes.HDC, wintypes.HGDIOBJ]),
+    ("BitBlt", wintypes.BOOL, [wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                              wintypes.HDC, ctypes.c_int, ctypes.c_int, wintypes.DWORD]),
+    ("GetDIBits", ctypes.c_int, [wintypes.HDC, wintypes.HBITMAP, wintypes.UINT, wintypes.UINT,
+                                ctypes.c_void_p, ctypes.c_void_p, wintypes.UINT]),
     ("DeleteObject", wintypes.BOOL, [wintypes.HGDIOBJ]),
     ("DeleteDC", wintypes.BOOL, [wintypes.HDC]),
 ):
@@ -256,16 +260,40 @@ def desktop_rgba() -> tuple[int, int, bytes]:
     """The whole primary desktop as RGBA (what a person would see, not the HUD's own frame)."""
     width, height = screen_size()
     screen_dc = user32.GetDC(0)
-    mem_dc = gdi32.CreateCompatibleDC(screen_dc)
-    bitmap = gdi32.CreateCompatibleBitmap(screen_dc, width, height)
-    gdi32.SelectObject(mem_dc, bitmap)
-    gdi32.BitBlt(mem_dc, 0, 0, width, height, screen_dc, 0, 0, 0x00CC0020 | 0x40000000)  # SRCCOPY|CAPTUREBLT
-    header = BITMAPINFOHEADER(ctypes.sizeof(BITMAPINFOHEADER), width, -height, 1, 32, 0, 0, 0, 0, 0, 0)
-    buf = ctypes.create_string_buffer(width * height * 4)
-    gdi32.GetDIBits(mem_dc, bitmap, 0, height, buf, ctypes.byref(header), 0)
-    gdi32.DeleteObject(bitmap)
-    gdi32.DeleteDC(mem_dc)
-    user32.ReleaseDC(0, screen_dc)
+    if not screen_dc:
+        raise OSError("GetDC failed during desktop capture")
+    mem_dc = bitmap = previous = None
+    try:
+        mem_dc = gdi32.CreateCompatibleDC(screen_dc)
+        if not mem_dc:
+            raise OSError("CreateCompatibleDC failed during desktop capture")
+        bitmap = gdi32.CreateCompatibleBitmap(screen_dc, width, height)
+        if not bitmap:
+            raise OSError("CreateCompatibleBitmap failed during desktop capture")
+        selected = gdi32.SelectObject(mem_dc, bitmap)
+        if not selected or selected == ctypes.c_void_p(-1).value:
+            raise OSError("SelectObject failed during desktop capture")
+        previous = selected
+        if not gdi32.BitBlt(mem_dc, 0, 0, width, height, screen_dc, 0, 0, 0x00CC0020 | 0x40000000):
+            raise OSError("BitBlt failed during desktop capture")
+        # GetDIBits requires the bitmap to be deselected from its DC.
+        restored = gdi32.SelectObject(mem_dc, previous)
+        previous = None
+        if not restored or restored == ctypes.c_void_p(-1).value:
+            raise OSError("SelectObject restore failed during desktop capture")
+        header = BITMAPINFOHEADER(ctypes.sizeof(BITMAPINFOHEADER), width, -height, 1, 32, 0, 0, 0, 0, 0, 0)
+        buf = ctypes.create_string_buffer(width * height * 4)
+        if gdi32.GetDIBits(mem_dc, bitmap, 0, height, buf, ctypes.byref(header), 0) != height:
+            raise OSError("GetDIBits did not capture every desktop row")
+    finally:
+        if previous:
+            gdi32.SelectObject(mem_dc, previous)
+        # Delete the DC first, releasing any selected object even after a failure.
+        if mem_dc:
+            gdi32.DeleteDC(mem_dc)
+        if bitmap:
+            gdi32.DeleteObject(bitmap)
+        user32.ReleaseDC(0, screen_dc)
     raw = bytearray(buf.raw)
     raw[0::4], raw[2::4] = raw[2::4], raw[0::4]  # BGRA -> RGBA
     raw[3::4] = b"\xff" * (width * height)

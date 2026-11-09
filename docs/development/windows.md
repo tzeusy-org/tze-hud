@@ -631,3 +631,6 @@ added occupancy (target: combined gesture step at most four minutes). Native
 failures remain failures in these artifacts even though the step is
 informational. This checks hosted software-rendered mechanics; owner GPU,
 DWM transparency, multiple monitors and DPI acceptance remain separate.
+An original scenario failure is preserved if its failure screenshot also
+fails (`diagnostic_error`). Desktop captures check GDI results and release
+their owned DCs and bitmap on error.
