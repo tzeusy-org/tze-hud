@@ -2497,11 +2497,15 @@ async fn publish_wait_endings_deadline_delay_and_validation() {
         if delayed {
             args["delay_ms"] = json!(20000);
         }
+        if ending == "expired" {
+            args["ttl_ms"] = json!(1000); // expires inside the 30s wait
+        }
         let mut ask = Box::pin(call(&server, "hud_publish", args));
         assert!(ask.as_mut().poll(&mut context).is_pending());
         match ending {
             "expired" => {
-                clock.advance(60000);
+                clock.advance(1000);
+                tokio::time::advance(std::time::Duration::from_millis(1000)).await;
                 let wakes = {
                     let mut scene = server.scene.lock().await;
                     scene.drain_expired_zone_publications();
