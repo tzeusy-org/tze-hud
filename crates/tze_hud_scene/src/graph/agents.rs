@@ -237,6 +237,7 @@ mod tests {
                 None,
                 Some(origin),
                 true,
+                None,
             )
             .unwrap();
         assert!(scene.orphan_publications(origin, 1, 60_000));
