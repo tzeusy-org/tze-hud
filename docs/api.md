@@ -1035,10 +1035,10 @@ model-owned values/limits remain. The seven canonical flow ceilings are unchange
 is tighter than its former 250-token envelope. Numeric discovery
 says `number`; admission and error hints still enforce finite f32.
 
-The baseline is **pending owner review** for these concrete new bytes. Earlier
-`hud-j7kxn` approval covered the old baseline only. The canonical gate requires
-two byte-identical final-source measurements; it never treats pending as owner
-approval. Reply defaults `reattached`, `pending_input` and `remaining` stay
+The owner **accepted these concrete new baseline bytes** for PR1598 on
+2026-11-10 (Asia/Singapore). Earlier `hud-j7kxn` approval covered the old baseline
+only. The canonical gate still requires two byte-identical final-source
+measurements. Reply defaults `reattached`, `pending_input` and `remaining` stay
 byte-identical, including the unchanged full portal flow.
 
 The `notification_choice` flow publishes Ship/Hold/Skip/Open, activates Skip through
