@@ -1470,13 +1470,23 @@ impl SceneGraph {
         self.widget_registry
             .active_publishes
             .retain(|_, v| !v.is_empty());
-        if !touched_widgets.is_empty() {
-            for widget_name in touched_widgets {
-                self.refresh_widget_current_params(&widget_name);
-            }
-            self.prune_publication_orphans();
-            self.version += 1;
+        for widget_name in touched_widgets {
+            self.refresh_widget_current_params(&widget_name);
         }
+        let pending: Vec<_> = self
+            .scheduled_batches
+            .iter()
+            .filter(|batch| batch.batch.lease_id == Some(lease_id))
+            .filter_map(|batch| batch.notification_publication)
+            .collect();
+        for id in pending {
+            self.finish_notification_wait(
+                id,
+                super::NotificationOutcome::Gone(super::NotificationGone::Cleared),
+            );
+        }
+        self.prune_publication_orphans();
+        self.version += 1;
     }
 
     /// Per spec: "ClearWidget clears all publications by the agent in the specified widget."

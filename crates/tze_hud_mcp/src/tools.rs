@@ -712,7 +712,7 @@ async fn publish_zone<'a>(
     if delay_ms > 0 {
         let batch = MutationBatch {
             batch_id: SceneId::new(),
-            agent_namespace: ns,
+            agent_namespace: ns.clone(),
             mutations: vec![SceneMutation::PublishToZone {
                 zone_name: zone.to_string(),
                 content,
@@ -796,9 +796,10 @@ async fn publish_zone<'a>(
                 return Ok(PublishReply::answered(reply, scene, claim, activity));
             }
             Some(NotificationOutcome::Gone(reason)) => {
-                return Ok(PublishReply::plain(
-                    json!({"ok":true,"gone":reason.as_str()}),
-                ));
+                let reply = PublishReply::plain(json!({"ok":true,"gone":reason.as_str()}));
+                scene.release_notification_wait(claim.id);
+                drop(scene);
+                return Ok(reply);
             }
             None => {}
         }

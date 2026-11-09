@@ -2300,6 +2300,280 @@ async fn action_presses_are_delivered_until_acked() {
     }
 }
 
+/// The shared pointer/keyboard producer, with the compositor's exact live card
+/// identity. Tests inject hit geometry rather than inventing input queue items.
+async fn activate_card(server: &McpServer, id: SceneId, dismiss: bool) {
+    use tze_hud_scene::types::{Rect, ZoneHitRegion, ZoneInteractionKind};
+    let (activation, wakes) = {
+        let mut scene = server.scene.lock().await;
+        let record = scene
+            .zone_registry
+            .active_for_zone("notification-area")
+            .iter()
+            .find(|record| record.publication_id == id)
+            .unwrap()
+            .clone();
+        let region = ZoneHitRegion {
+            publication_id: id,
+            zone_name: record.zone_name,
+            published_at_wall_us: record.published_at_wall_us,
+            publisher_namespace: record.publisher_namespace,
+            bounds: Rect::new(0.0, 0.0, 100.0, 30.0),
+            kind: if dismiss {
+                ZoneInteractionKind::Dismiss
+            } else {
+                ZoneInteractionKind::Action { index: 0 }
+            },
+            interaction_id: format!("test:{id}:{dismiss}"),
+            tab_order: 0,
+        };
+        scene.overlay.zone_hit_regions.push(region.clone());
+        let activation = scene
+            .activate_notification(&region, 0)
+            .expect("accepted local control");
+        (activation, scene.take_notification_wait_notifiers())
+    };
+    for wake in wakes {
+        wake.notify();
+    }
+    match activation {
+        tze_hud_scene::graph::NotificationActivation::Callback(wake) => wake.notify(),
+        _ => panic!("callback fixture"),
+    }
+}
+
+fn question(wait_ms: u64) -> Value {
+    json!({"surface":"zone:notification-area","key":"question","ttl_ms":60000,"wait_ms":wait_ms,
+        "content":{"title":"Ship?","actions":[{"label":"Ship","callback_id":"ship"}]}})
+}
+
+async fn latest_card(server: &McpServer) -> SceneId {
+    server
+        .scene
+        .lock()
+        .await
+        .zone_registry
+        .active_for_zone("notification-area")
+        .last()
+        .unwrap()
+        .publication_id
+}
+
+#[tokio::test(start_paused = true)]
+async fn publish_wait_reserves_only_its_exact_answer() {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+    let mut context = Context::from_waker(Waker::noop());
+    for dismiss in [false, true] {
+        for cancel in [false, true] {
+            let (server, _) = self::server();
+            let (server, _) = hub_portal(server);
+            let scene = server.scene_handle();
+            let wakes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let observed_wakes = Arc::clone(&wakes);
+            let server = server.with_render_wake_notifier(RenderWakeNotifier::new(move || {
+                assert!(scene.try_lock().is_ok(), "admission wake is post-unlock");
+                observed_wakes.fetch_add(1, Ordering::SeqCst);
+            }));
+            call(&server, "hud_publish", json!({"surface":"portal:other"})).await;
+            let mut ask = Box::pin(call(&server, "hud_publish", question(30000)));
+            assert!(ask.as_mut().poll(&mut context).is_pending());
+            assert_eq!(
+                wakes.load(Ordering::SeqCst),
+                1,
+                "question wakes before waiting"
+            );
+            let id = latest_card(&server).await;
+            let mut input = Box::pin(call(&server, "hud_input", json!({"wait_ms":30000})));
+            assert!(input.as_mut().poll(&mut context).is_pending());
+            activate_card(&server, id, dismiss).await;
+            assert!(
+                input.as_mut().poll(&mut context).is_pending(),
+                "armed answer stays private"
+            );
+
+            // A portal reply and a different card both remain ordinary input.
+            server
+                .portals
+                .as_ref()
+                .unwrap()
+                .submit_reply(&PortalKey::new(psk_agent(), "other"), "elsewhere".into(), 0)
+                .unwrap();
+            let Poll::Ready(portal) = input.as_mut().poll(&mut context) else {
+                panic!("unrelated reply wakes input");
+            };
+            assert_eq!(portal["items"][0]["text"], "elsewhere");
+            assert_eq!(portal["items"].as_array().unwrap().len(), 1);
+            call(
+                &server,
+                "hud_input",
+                json!({"ack":[portal["items"][0]["id"]]}),
+            )
+            .await;
+            call(&server, "hud_publish", json!({"surface":"zone:notification-area","content":{"title":"Other","actions":[{"label":"Other","callback_id":"other"}]},"ttl_ms":0})).await;
+            let other = latest_card(&server).await;
+            assert_ne!(other, id);
+            activate_card(&server, other, false).await;
+            let unrelated = call(&server, "hud_input", json!({})).await;
+            assert_eq!(unrelated["items"].as_array().unwrap().len(), 1);
+            assert_eq!(unrelated["items"][0]["action"], "other");
+            call(
+                &server,
+                "hud_input",
+                json!({"ack":[unrelated["items"][0]["id"]]}),
+            )
+            .await;
+
+            if cancel {
+                drop(ask);
+                let accepted = call(&server, "hud_input", json!({})).await;
+                assert_eq!(
+                    accepted["items"][0]["action"],
+                    if dismiss { "dismiss" } else { "ship" }
+                );
+                assert_eq!(accepted["items"][0].get("kind").is_some(), dismiss);
+                assert_eq!(
+                    call(&server, "hud_input", json!({})).await,
+                    accepted,
+                    "cancellation preserves stable FIFO id"
+                );
+            } else {
+                let Poll::Ready(answer) = ask.as_mut().poll(&mut context) else {
+                    panic!("answer completes publish");
+                };
+                assert_eq!(answer["action"], if dismiss { "dismiss" } else { "ship" });
+                assert_eq!(answer.get("kind").is_some(), dismiss);
+                assert_eq!(
+                    call(&server, "hud_input", json!({})).await,
+                    json!({"items":[],"remaining":0}),
+                    "encoded answer consumed without ACK"
+                );
+            }
+        }
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn publish_wait_endings_deadline_delay_and_validation() {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+    let mut context = Context::from_waker(Waker::noop());
+    for (ending, delayed) in [
+        ("expired", false),
+        ("replaced", false),
+        ("displaced", false),
+        ("cleared", false),
+        ("cleared", true),
+    ] {
+        let (server, clock) = self::server();
+        let mut args = question(30000);
+        if delayed {
+            args["delay_ms"] = json!(20000);
+        }
+        let mut ask = Box::pin(call(&server, "hud_publish", args));
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        match ending {
+            "expired" => {
+                clock.advance(60000);
+                let wakes = {
+                    let mut scene = server.scene.lock().await;
+                    scene.drain_expired_zone_publications();
+                    scene.take_notification_wait_notifiers()
+                };
+                for wake in wakes {
+                    wake.notify();
+                }
+            }
+            "replaced" => {
+                call(&server, "hud_publish", json!({"surface":"zone:notification-area","key":"question","content":{"title":"Replacement"}})).await;
+            }
+            "displaced" => {
+                // Exercise the configured real stack's oldest-entry trim.
+                let depth = match server.scene.lock().await.zone_registry.zones["notification-area"]
+                    .contention_policy
+                {
+                    ContentionPolicy::Stack { max_depth } => max_depth,
+                    _ => panic!("production notification stack"),
+                };
+                for index in 0..depth {
+                    call(&server, "hud_publish", json!({"surface":"zone:notification-area","key":format!("peer{index}"),"content":{"title":"Peer"}})).await;
+                }
+            }
+            _ => {
+                call(
+                    &server,
+                    "hud_clear",
+                    json!({"surface":"zone:notification-area","key":"question"}),
+                )
+                .await;
+            }
+        }
+        let Poll::Ready(answer) = ask.as_mut().poll(&mut context) else {
+            panic!("immediate {ending}, delayed={delayed}");
+        };
+        assert_eq!(answer, json!({"ok":true,"gone":ending}));
+        assert_eq!(
+            call(&server, "hud_input", json!({})).await,
+            json!({"items":[],"remaining":0})
+        );
+    }
+
+    // Delay counts from call; values above 30s clamp without a wall-clock wait.
+    for delayed in [false, true] {
+        let (server, clock) = self::server();
+        let mut args = question(90000);
+        if delayed {
+            args["delay_ms"] = json!(40000);
+        }
+        let mut ask = Box::pin(call(&server, "hud_publish", args));
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        tokio::time::advance(std::time::Duration::from_millis(29999)).await;
+        clock.advance(29999);
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        tokio::time::advance(std::time::Duration::from_millis(1)).await;
+        clock.advance(1);
+        let Poll::Ready(reply) = ask.as_mut().poll(&mut context) else {
+            panic!("clamped absolute deadline");
+        };
+        assert_eq!(
+            reply,
+            json!({"ok":true,"expires_in_ms":if delayed {70000} else {30000}})
+        );
+        if delayed {
+            clock.advance(10000);
+            assert!(server.scene.lock().await.apply_due_batches()[0].applied);
+        }
+        activate_card(&server, latest_card(&server).await, false).await;
+        let late = call(&server, "hud_input", json!({})).await;
+        assert_eq!(late["items"][0]["action"], "ship");
+        assert_eq!(call(&server, "hud_input", json!({})).await, late);
+    }
+
+    let (server, _) = self::server();
+    for args in [
+        json!({"surface":"widget:gauge","params":{"level":0.5},"wait_ms":1}),
+        json!({"surface":"portal:new","wait_ms":1}),
+        json!({"surface":"zone:notification-area","content":{"title":"No actions"},"wait_ms":0}),
+        json!({"surface":"zone:subtitle","content":"Text","wait_ms":1}),
+    ] {
+        assert_eq!(
+            call_err(&server, "hud_publish", args).await["code"],
+            "INVALID_ARGUMENT"
+        );
+    }
+    let scene = server.scene.lock().await;
+    assert!(scene.zone_registry.active_publishes.is_empty());
+    assert!(scene.widget_registry.active_publishes.is_empty());
+    assert!(
+        scene.leases.is_empty(),
+        "invalid wait does not renew or create a lease"
+    );
+}
+
 // ── Portal ───────────────────────────────────────────────────────────────────
 
 /// Share the real portal hub directly, with the deterministic test wall clock.
