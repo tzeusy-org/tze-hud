@@ -101,7 +101,7 @@ async fn test_durable_widget_publish_receives_result() {
                 .clone(),
         )
     };
-    let mut bad = vec![
+    let mut bad: Vec<_> = vec![
         ("level", Param::F32Value(-0.1), "0..1"),
         ("level", Param::F32Value(1.1), "0..1"),
         ("level", Param::F32Value(f32::NAN), "finite"),
@@ -109,28 +109,39 @@ async fn test_durable_widget_publish_receives_result() {
         ("fill_color", Param::F32Value(0.5), "severity"),
         ("theme", Param::F32Value(0.5), "owner-set"),
         ("tooltip_visible", Param::F32Value(0.5), "runtime-set"),
-    ];
+    ]
+    .into_iter()
+    .map(|(name, value, hint)| (name, Some(value), hint))
+    .collect();
     for channel in 0..4 {
         for value in [-0.1, 1.1, f32::NAN, f32::INFINITY] {
             let mut c = [0.5; 4];
             c[channel] = value;
             bad.push((
                 "color",
-                Param::ColorValue(crate::proto::Rgba {
+                Some(Param::ColorValue(crate::proto::Rgba {
                     r: c[0],
                     g: c[1],
                     b: c[2],
                     a: c[3],
-                }),
+                })),
                 "0..1",
             ));
         }
+    }
+    for (name, hint) in [
+        ("fill_color", "owner-set"),
+        ("theme", "owner-set"),
+        ("tooltip_visible", "runtime-set"),
+        ("level", "f32"),
+    ] {
+        bad.push((name, None, hint));
     }
     for (index, (param, value, hint)) in bad.into_iter().enumerate() {
         let sequence = 3 + index as u64;
         let mut params = vec![crate::proto::WidgetParameterValueProto {
             param_name: param.into(),
-            value: Some(value),
+            value,
         }];
         params.push(if param == "level" {
             crate::proto::WidgetParameterValueProto {
