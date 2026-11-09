@@ -67,11 +67,7 @@ use state::{Effect, Nav, Open, PanelChange, SectionRows, ViewContext};
 /// Input to the panel task.
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum PanelEvent {
-    /// A global chord was pressed (hotkey thread).
-    #[cfg_attr(
-        not(any(target_os = "windows", test, feature = "test-harness")),
-        expect(dead_code, reason = "chords come from the Windows hotkey thread")
-    )]
+    /// A native global chord or main-thread answer handoff was requested.
     Chord(ChordRole),
     Key(PanelKey),
     /// Typed text (search).
