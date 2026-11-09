@@ -623,6 +623,13 @@ fn safe_mode_hotkey_defaults_overrides_and_rejects_garbage() {
 
     let default = parse_ok(&cfg("")).freeze().expect("freeze");
     assert_eq!(default.chords, tze_hud_scene::config::HudChords::default());
+    assert!(
+        default
+            .chords
+            .role_of(&tze_hud_scene::config::Hotkey::parse("Ctrl+Shift+F9").unwrap())
+            .is_some(),
+        "the owner answer chord is enabled by default"
+    );
 
     let custom = parse_ok(&cfg("safe_mode_hotkey = \"Ctrl+Alt+F11\""))
         .freeze()
