@@ -52,6 +52,7 @@ unreachable or rejects the call, continue in chat and report the limitation once
 
 `hud_publish` takes `surface` plus zone `content` or widget `params`:
 
+<!-- tool: hud_publish -->
 ```json
 {"surface":"zone:notification-area","content":{"title":"Tests","body":"All checks passed","urgency":0},"key":"session-a:tests","ttl_ms":10000}
 ```
@@ -104,6 +105,7 @@ accept at most **four** `{label, callback_id}` actions; both strings must be
 nonempty. Use explicit labels such as Yes / No / Later. Callback ids must identify
 the session, question and fresh generation; a reusable visual key is not a nonce.
 
+<!-- tool: hud_publish -->
 ```json
 {"surface":"zone:notification-area","content":{"title":"Release tests","body":"Run the soak now?","actions":[{"label":"Run","callback_id":"session-a:soak:q1:run"},{"label":"Later","callback_id":"session-a:soak:q1:later"}]},"key":"session-a:soak"}
 ```

@@ -54,6 +54,16 @@ source links when implementation changes the status.
 
 ## Current implementation evidence
 
+- **Client teaching checks (`hud-ljhku.6`, PR1) [Source].** The two HUD
+  skills' Markdown JSON examples require adjacent tool or exemption annotations;
+  a Cargo test applies the production MCP argument parser and reports file:line
+  on failures. The token artifact and checker report complete skill-file o200k
+  costs and model tool calls per canonical flow without changing existing
+  payloads or budgets. Skill ceilings remain unarmed until PR2; the skill diet,
+  scoped background ask (after `.3` and `.4` land), separate managed-dotfiles PR
+  and live cross-repo discovery evidence remain. This is partial member scope,
+  not whole-client acceptance or proof that earlier PRs ran the new check.
+
 - **T8 — input pipeline diet [Source].** `hud-bstmy.4.5` removes the unused
   native batching/coalescing/queue/envelope modules after the final T7 source
   landing (`hud-lirh2.11`). Invariant 2 now names the real resident input bus:
