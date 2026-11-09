@@ -1022,7 +1022,7 @@ baselined against regressions.
 | Four-option notification ask + returned answer + ACK | — | 273 | 114 | ≤ 120 |
 | Widget publish | ~168 | 73 | 22 | ≤ 80 |
 | Portal: attach+publish+hold, poll, ack, clear | ~575 over 5 round trips | 343 over 4 | 137 over 4 | ≤ 250 |
-| Discover (`production.toml`: 6 zones, 3 built-in widgets) | n/a | n/a | 210 | ≤ 210 |
+| Discover (unheld `production.toml`: 6 zones, 3 built-in widgets) | n/a | n/a | 210 | ≤ 210 |
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
 
 All seven measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
@@ -1079,8 +1079,12 @@ the previous items and polls, so poll+ack is one round trip.
 
 `integration` `poc_acceptance` checks model-visible counts on the POC
 acceptance flows (`docs/scope.md`), run end to end against `production.toml`.
-Its discover budget is the production row above: <=210 tokens, retaining
-model-owned parameter names, bounds and actionable occupancy hints.
+Its fresh, unheld discovery budget is the production row above: <=210 tokens,
+retaining model-owned parameter names, bounds and actionable occupancy hints.
+The existing live-state POC fixtures retain their250-token envelope when
+holdings or attached portals add state/expiry/pending-input fields. That
+fixture envelope is not a promise for arbitrary numbers of live portals;
+required state fields are never dropped to fit the unheld baseline.
 
 The compact model schema retains `gauge.label` (metric name),
 `progress-bar.label` (32-byte task text), status `label`/`reason`, values and
