@@ -556,7 +556,7 @@ mod tests {
         scene.widget_registry.register_instance(WidgetInstance {
             id: SceneId::new(),
             widget_type_name: "test".into(),
-            tab_id: tab,
+            tab_id: scene.active_tab.unwrap(),
             geometry_override: None,
             contention_override: None,
             instance_name: "test".into(),
