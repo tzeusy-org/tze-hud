@@ -53,8 +53,8 @@ fn configured_instance(
         tze_hud_config::widgets::LoadedWidgetType {
             name: definition.id.clone(),
             parameter_schema: definition.parameter_schema.clone(),
-            default_geometry_policy: definition.default_geometry_policy.clone(),
-            default_contention_policy: definition.default_contention_policy.clone(),
+            default_geometry_policy: definition.default_geometry_policy,
+            default_contention_policy: definition.default_contention_policy,
         },
     )]);
     let raw = serde_json::from_value(serde_json::json!({

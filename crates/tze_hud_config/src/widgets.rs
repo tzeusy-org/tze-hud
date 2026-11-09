@@ -237,10 +237,11 @@ pub fn validate_widget_instances(
     }
 }
 
-/// Build a `WidgetInstance` from a validated `RawTabWidget` entry.
+/// Build a `WidgetInstance` after bundles are loaded.
 ///
-/// Called at runtime startup after bundles are loaded and config validation
-/// passes. `tab_id` is the scene ID assigned to the owning tab.
+/// Config-only validation has no bundle schemas, so recheck initial parameters
+/// here before applying any override. Invalid instances return None; the runtime
+/// retains its existing skip-and-warn behavior. `tab_id` is the owning tab.
 pub fn build_widget_instance(
     raw_widget: &RawTabWidget,
     tab_id: tze_hud_scene::types::SceneId,
@@ -248,6 +249,21 @@ pub fn build_widget_instance(
 ) -> Option<WidgetInstance> {
     let widget_type = raw_widget.widget_type.as_deref()?.to_string();
     let loaded = type_map.get(&widget_type)?;
+    let mut errors = Vec::new();
+    validate_initial_params(
+        &raw_widget.initial_params,
+        &loaded.parameter_schema,
+        "widget",
+        &widget_type,
+        "runtime startup",
+        &mut errors,
+    );
+    if !errors.is_empty() {
+        for error in errors {
+            tracing::warn!(field = %error.field_path, hint = %error.hint, "invalid widget initial_params");
+        }
+        return None;
+    }
 
     let instance_name = raw_widget
         .instance_id
@@ -767,6 +783,22 @@ mod tests {
                 audience != Runtime,
                 "{audience:?}: {errors:?}"
             );
+            let built = build_widget_instance(
+                &raw.tabs[0].widgets[0],
+                tze_hud_scene::SceneId::new(),
+                &type_map,
+            );
+            assert_eq!(
+                built.is_some(),
+                audience != Runtime,
+                "runtime startup must enforce the loaded schema"
+            );
+            if let Some(instance) = built {
+                assert_eq!(
+                    instance.current_params["label"],
+                    WidgetParameterValue::String("CPU".into())
+                );
+            }
         }
     }
 
