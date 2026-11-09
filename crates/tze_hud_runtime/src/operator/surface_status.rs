@@ -417,7 +417,7 @@ mod tests {
             NotificationPayload, RenderingPolicy, WidgetInstance, WidgetParameterValue,
             ZoneContent, ZoneDefinition, ZoneMediaType, graph::overlay::WidgetGeometry,
         };
-        let (mut scene, tab, _, _) = portal_scene();
+        let (mut scene, _, _, _) = portal_scene();
         let displays = [Rect::new(0.0, 0.0, 1920.0, 1080.0)];
         assert_eq!(notifications_json(&scene, &displays), json!([]));
         assert_eq!(

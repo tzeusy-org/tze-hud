@@ -908,8 +908,12 @@ def open_card(run: Run, key: str, *, actions: list[dict] | None = None) -> dict:
                 content={"body": "Owned gesture check", "actions": actions or [
                     {"label": "First", "callback_id": f"{key}-first"},
                     {"label": "Second", "callback_id": f"{key}-second"}]})
-    status = run.expect(f"card {key} shown", lambda s: bool(
-        (card := notification_entry(s, key)) and card["state"] == "shown"))
+    run.expect(f"card {key} geometry", lambda s: bool(
+        (card := notification_entry(s, key)) and card["state"] != "exiting"))
+    # A completed fade need not produce one more frame. Last-frame diagnostics
+    # may correctly retain "entering" after the runtime has become quiescent;
+    # wait on actual presentation/idleness rather than inventing a new frame.
+    status = run.settle()
     return notification_entry(status, key)
 
 

@@ -423,6 +423,7 @@ class CardHelperTests(unittest.TestCase):
                     if verb == "hud_publish":
                         card = copy.deepcopy(STATUS["notifications"][0])
                         card["key"] = args["key"]
+                        card["state"] = "entering"  # valid last-frame phase even after quiescence
                         status["notifications"] = [card]
                         return False, {}
                     self.assertEqual(verb, "hud_input")
