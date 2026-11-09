@@ -9,16 +9,20 @@
 
      The bar sits on the track drawn by track.svg (x=16, y=34, 328x6). -->
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 52" width="360" height="52">
+  <g id="info-fill" opacity="1">
   <rect
     id="fill-bar"
     x="16" y="34"
     width="0" height="6"
     rx="3" ry="3"
     fill="{{token.color.primary}}"/>
+  </g>
 
-  <!-- Severity covers the owner's info fill only for warning/error. -->
+  <!-- Severity selects one fill, including its antialiased edges. -->
+  <g id="severity-fill-group" opacity="0">
   <rect id="severity-fill" x="16" y="34" width="0" height="6" rx="3" ry="3"
-    fill="{{token.color.primary}}" opacity="0"/>
+    fill="{{token.color.primary}}"/>
+  </g>
 
   <text
     id="label-text"
