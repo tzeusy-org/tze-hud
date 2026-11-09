@@ -71,6 +71,26 @@ and `hud_clear` have `idempotentHint:true`; publish/input make neither claim.
 
 **`hud_publish`** `{surface*, content | params, ttl_ms?, delay_ms?, key?, status?, expects_reply?, display_name?}`
 
+For a one-shot notification with actions, add `wait_ms` (default0, clamped to
+30000). The card is admitted and rendering wakes before the call waits; the
+absolute wait includes admission and `delay_ms`. An answer returns in this call
+as `action:"<callback_id>"`; a human × adds `action:"dismiss",kind:"dismiss"`.
+It is consumed only after the reply is encoded and needs no ACK. A cancelled
+call releases its reservation and leaves accepted input in the ordinary FIFO,
+with the same retained id on repeated `hud_input` polls. Other card answers and
+portal replies stay queued; a concurrent `hud_input` cannot steal the reserved
+answer. HTTPS link presses do not fabricate a callback answer.
+
+An unanswered card removed during the wait returns `gone:"expired"`,
+`"replaced"` (same key), `"displaced"` (contention), or `"cleared"`. These endings
+never queue an additional displacement event. If the wait ends while the card
+is still admitted, the reply has the ordinary shape with `expires_in_ms`
+recomputed at return; a later answer uses `hud_input` and ACK normally. Passing
+`wait_ms`, including0, for a widget, portal, or action-less notification returns
+`INVALID_ARGUMENT` without publishing. Waiting counts as finite agent activity,
+with the same cancellation and idle semantics as a `hud_input` wait.
+
+
 - Zone: `content` is a string, or a typed object for structured zones
   (`notification` with optional `title`, `body`, integer `urgency` 0–3
   (default 1), and optional `actions: [{label, callback_id|url}]`). Each

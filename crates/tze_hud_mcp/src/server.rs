@@ -423,6 +423,29 @@ impl McpServer {
         }
     }
 
+    fn tool_context<'a>(
+        &'a self,
+        identity: &'a tze_hud_scene::config::AgentIdentity,
+        #[cfg(any(test, feature = "test-harness"))] input_wait_probe: Option<
+            &'a tokio::sync::watch::Sender<bool>,
+        >,
+    ) -> ToolCtx<'a> {
+        ToolCtx {
+            scene: &self.scene,
+            portals: self.portals.as_ref(),
+            input_notifiers: &self.input_notifiers,
+            #[cfg(any(test, feature = "test-harness"))]
+            input_wait_probe,
+            portal_wake: &self.portal_ingress_wake,
+            render_wake: &self.render_wake,
+            state: &self.state,
+            safe_mode: &self.safe_mode,
+            agent: &identity,
+            widget_transition_ms: self.config.widget_transition_ms,
+            publication_defaults: &self.config.publication_defaults,
+        }
+    }
+
     /// Dispatch one JSON-RPC 2.0 request body. Returns the response body, or
     /// an empty string for a notification.
     pub async fn dispatch(&self, body: &str, ctx: &CallerContext) -> String {
@@ -503,20 +526,11 @@ impl McpServer {
                 } else {
                     None
                 };
-                let tool_ctx = ToolCtx {
-                    scene: &self.scene,
-                    portals: self.portals.as_ref(),
-                    input_notifiers: &self.input_notifiers,
+                let tool_ctx = self.tool_context(
+                    &identity,
                     #[cfg(any(test, feature = "test-harness"))]
-                    input_wait_probe: input_wait_probe.as_ref(),
-                    portal_wake: &self.portal_ingress_wake,
-                    render_wake: &self.render_wake,
-                    state: &self.state,
-                    safe_mode: &self.safe_mode,
-                    agent: &identity,
-                    widget_transition_ms: self.config.widget_transition_ms,
-                    publication_defaults: &self.config.publication_defaults,
-                };
+                    input_wait_probe.as_ref(),
+                );
                 let args_zone_target = args
                     .get("surface")
                     .and_then(serde_json::Value::as_str)

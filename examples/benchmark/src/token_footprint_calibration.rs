@@ -327,6 +327,13 @@ mod calibration {
                     "ask, returned answer and ACK are all counted"
                 );
             }
+            if flow_name == "notification_choice_wait" {
+                assert_eq!(operations.len(), 1, "ask and answer share one call");
+                assert!(
+                    flow_model.tokens <= 90,
+                    "one-call choice exceeds its signed ceiling"
+                );
+            }
             flows.insert(
                 flow_name,
                 FlowMeasurement {
@@ -506,6 +513,7 @@ mod calibration {
         let (choice_ready_tx, choice_ready_rx) = mpsc::channel();
         let mut python =
             tokio::task::spawn_blocking(move || run_python_driver(addresses[0], choice_ready_rx));
+        let mut choice_barrier_sent = false;
         let driver_output = loop {
             let activated = producer
                 .step(async {
@@ -563,7 +571,8 @@ mod calibration {
                     }
                 })
                 .await;
-            if activated {
+            if activated && !choice_barrier_sent {
+                choice_barrier_sent = true;
                 choice_ready_tx
                     .send(())
                     .expect("notify driver after shared choice activation");

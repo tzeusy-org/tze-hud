@@ -61,6 +61,18 @@ ids without oldest-first eviction. Destructive scene transfer has no cancellatio
 point before retained commit. Callback and runtime-authored human-X kinds remain
 distinct; coalesced readiness wakes carry no record ownership. These in-memory
 guarantees do not claim process-crash durability or add a gRPC action transport.
+An armed `hud_publish wait_ms` reserves only its exact admitted publication over
+that same FIFO. Accepted callback/human-X wins before local removal; replacement,
+expiry, stack trim and clear latch only the first unanswered terminal reason.
+Scene rollback also rolls back terminal notification debt. Readiness callbacks
+run after scene unlock. The reserved input is consumed after successful reply
+encoding, with no intervening await; cancellation before encoding releases it
+for ordinary stable-id `hud_input`/ACK. Other publications and portal input keep
+their own ownership. Deadline release returns to the ordinary retained-until-ACK
+path. The delayed scheduler carries a private admission identity, without wire
+or session-origin changes. Waiting publication wakes rendering before awaiting
+input; it never adds a periodic poll to an idle runtime.
+
 A notification key names one exact-byte slot within a zone and authenticated
 publisher. Replacing it retains its position and zone enter progress while
 issuing fresh publication identity. Selective clear removes only matching active

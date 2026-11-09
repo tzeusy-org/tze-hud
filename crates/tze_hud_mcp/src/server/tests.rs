@@ -2454,6 +2454,28 @@ async fn publish_wait_reserves_only_its_exact_answer() {
             }
         }
     }
+    // Cancellation after preparing the JSON value, before dispatch encodes it.
+    // Reuse the production context factory and hold the real prepared reply.
+    {
+        let (server, _) = self::server();
+        let identity = server.config.agents.load().resolve(&psk(), "").unwrap();
+        let tool_ctx = server.tool_context(&identity, None);
+        let mut ask = Box::pin(tools::hud_publish(&tool_ctx, question(30000)));
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        activate_card(&server, latest_card(&server).await, false).await;
+        let Poll::Ready(Ok(prepared)) = ask.as_mut().poll(&mut context) else {
+            panic!("prepared answer");
+        };
+        assert_eq!(prepared.value["action"], "ship");
+        assert!(
+            server.scene.try_lock().is_err(),
+            "exact answer locked until encoding"
+        );
+        drop(prepared); // no encoded() commit
+        let input = call(&server, "hud_input", json!({})).await;
+        assert_eq!(input["items"][0]["action"], "ship");
+        assert_eq!(call(&server, "hud_input", json!({})).await, input);
+    }
 }
 
 #[tokio::test(start_paused = true)]
@@ -2517,6 +2539,79 @@ async fn publish_wait_endings_deadline_delay_and_validation() {
             panic!("immediate {ending}, delayed={delayed}");
         };
         assert_eq!(answer, json!({"ok":true,"gone":ending}));
+        assert_eq!(
+            call(&server, "hud_input", json!({})).await,
+            json!({"items":[],"remaining":0})
+        );
+    }
+
+    // A later invalid mutation rolls back the clear AND its terminal/wake debt.
+    {
+        use tze_hud_scene::{
+            mutation::{MutationBatch, SceneMutation},
+            types::ZonePublishToken,
+        };
+        let (server, _) = self::server();
+        let mut ask = Box::pin(call(&server, "hud_publish", question(30000)));
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        let id = latest_card(&server).await;
+        {
+            let mut scene = server.scene.lock().await;
+            let lease = scene.zone_registry.active_for_zone("notification-area")[0].lease_id;
+            let batch = MutationBatch {
+                batch_id: SceneId::new(),
+                agent_namespace: psk_agent(),
+                lease_id: lease,
+                timing_hints: None,
+                mutations: vec![
+                    SceneMutation::ClearZone {
+                        zone_name: "notification-area".into(),
+                        publish_token: ZonePublishToken { token: vec![] },
+                    },
+                    SceneMutation::SwitchActiveTab {
+                        tab_id: SceneId::new(),
+                    },
+                ],
+            };
+            assert!(!scene.apply_batch(&batch).applied);
+            assert!(
+                scene.take_notification_wait_notifiers().is_empty(),
+                "rejected batch emits no terminal readiness"
+            );
+        }
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        activate_card(&server, id, false).await;
+        let Poll::Ready(answer) = ask.as_mut().poll(&mut context) else {
+            panic!("original question survives rollback");
+        };
+        assert_eq!(answer["action"], "ship");
+    }
+
+    // Internal scheduled identity survives real materialization before the wait.
+    {
+        let (server, clock) = self::server();
+        let mut args = question(30000);
+        args["delay_ms"] = json!(5000);
+        let mut ask = Box::pin(call(&server, "hud_publish", args));
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        assert!(
+            server
+                .scene
+                .lock()
+                .await
+                .zone_registry
+                .active_for_zone("notification-area")
+                .is_empty()
+        );
+        clock.advance(5000);
+        tokio::time::advance(std::time::Duration::from_millis(5000)).await;
+        assert!(server.scene.lock().await.apply_due_batches()[0].applied);
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        activate_card(&server, latest_card(&server).await, false).await;
+        let Poll::Ready(answer) = ask.as_mut().poll(&mut context) else {
+            panic!("delayed question answers in-band");
+        };
+        assert_eq!(answer["action"], "ship");
         assert_eq!(
             call(&server, "hud_input", json!({})).await,
             json!({"items":[],"remaining":0})
@@ -3234,7 +3329,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
 
     // Deterministic model time exercises a real pending call's finite lease.
     // Small fixture limits expose boundaries; production defaults are untouched.
-    {
+    for publish_wait in [false, true] {
         let (live, clock) = self::server();
         let portals = PortalHandle::new(
             PortalHub::new(tze_hud_portal::hub::PortalLimits {
@@ -3251,7 +3346,19 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         let own = PortalKey::new(psk_agent(), "late");
         let outsider = PortalKey::new("other", "late");
         let start = 1_000_000;
-        let mut waiting = Box::pin(call(&live, "hud_input", json!({"wait_ms":1000})));
+        let mut waiting = Box::pin(call(
+            &live,
+            if publish_wait {
+                "hud_publish"
+            } else {
+                "hud_input"
+            },
+            if publish_wait {
+                question(1000)
+            } else {
+                json!({"wait_ms":1000})
+            },
+        ));
         assert!(waiting.as_mut().poll(&mut cx).is_pending());
         assert!(
             live_hub.lock().unwrap().next_deadline().is_none(),
