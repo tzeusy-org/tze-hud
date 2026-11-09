@@ -124,6 +124,39 @@ fn skill_json_examples_use_production_arguments() {
         assert_eq!(errors.is_empty(), valid, "{annotation}: {errors:?}");
         assert!(errors.iter().all(|error| error.starts_with("fixture.md:")));
     }
+    let mut fence_failures = Vec::new();
+    for fence in ["````", "~~~~"] {
+        for (annotation, body, valid) in [
+            ("", r#"{"surface":"zone:x","typo":1}"#, false),
+            (
+                "<!-- tool: hud_publish -->",
+                r#"{"surface":"zone:x","typo":1}"#,
+                false,
+            ),
+            (
+                "<!-- tool: hud_publish -->",
+                r#"{"surface":"zone:x","content":"hello"}"#,
+                true,
+            ),
+        ] {
+            let document = format!("{annotation}\n{fence}json\n{body}\n{fence}\n");
+            let errors = check_document(Path::new("fixture.md"), &document);
+            if errors.is_empty() != valid {
+                fence_failures.push(format!("{fence} / {annotation}: {errors:?}"));
+            }
+        }
+    }
+    // A literal JSON demonstration inside an outer code block is not an example.
+    for document in [
+        "````markdown\n```json\n{literal\n```\n````\n",
+        "~~~~text\n```json\n{literal\n```\n~~~~\n",
+    ] {
+        let errors = check_document(Path::new("fixture.md"), document);
+        if !errors.is_empty() {
+            fence_failures.push(format!("outer fence: {errors:?}"));
+        }
+    }
+    assert!(fence_failures.is_empty(), "{fence_failures:#?}");
     assert_eq!(
         check_document(Path::new("fixture.md"), "```json\n{}")[0],
         "fixture.md:1: unclosed JSON fence"
