@@ -901,6 +901,13 @@ mod tests {
                 if status == 403 {
                     assert!(String::from_utf8_lossy(&r.body).contains("NOT_ADMIN"));
                 }
+                if status == 200 && matches!(which, Status) {
+                    let body: serde_json::Value = serde_json::from_slice(&r.body).unwrap();
+                    assert!(body["portals"].is_null());
+                    assert!(body["notifications"].is_null());
+                    assert!(body["widgets"].is_null());
+                    assert_eq!(body["link_launches"], 0);
+                }
             }
         }
 

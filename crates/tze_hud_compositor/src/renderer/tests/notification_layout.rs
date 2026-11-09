@@ -115,6 +115,45 @@ async fn test_notification_stack_adds_dismiss_label_and_reserves_text_width() {
         "dismiss label must sit near the right edge, got {}",
         dismiss_item.pixel_x
     );
+    // Admin diagnostics retain the compositor's exact last-frame phase, not
+    // publication age, chosen input state, or the time of the status request.
+    let frame = std::time::Instant::now();
+    compositor.zone_animation_states.insert(
+        "notification-area".into(),
+        ZoneAnimationState::fade_in_at(100, frame),
+    );
+    compositor.last_animation_frame_at = Some(frame);
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    assert_eq!(scene.overlay.notification_geometry[0].state, "entering");
+    let drawn_bounds = scene.overlay.notification_geometry[0].bounds;
+    compositor.last_animation_frame_at = Some(frame + std::time::Duration::from_millis(100));
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    assert_eq!(scene.overlay.notification_geometry[0].state, "shown");
+    let record = &scene.zone_registry.active_for_zone("notification-area")[0];
+    let id = record.publication_id;
+    scene
+        .overlay
+        .notification_choices
+        .insert(id, "chosen".into());
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    assert_eq!(
+        scene.overlay.notification_geometry[0].state, "shown",
+        "choice alone does not invent an exit"
+    );
+    let mut exit = PublicationAnimationState::new(None, None, 150, super::easing::Easing::Linear);
+    exit.fade_start = Some(frame);
+    compositor
+        .pub_animation_states
+        .entry("notification-area".into())
+        .or_default()
+        .insert(id, exit);
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    assert_eq!(scene.overlay.notification_geometry[0].state, "exiting");
+    assert_eq!(scene.overlay.notification_geometry[0].bounds, drawn_bounds);
+    assert!(
+        scene.overlay.zone_hit_regions.is_empty(),
+        "chosen exit remains observable without input"
+    );
 }
 
 // ── Dismiss button typography token tests [hud-y08tp] ────────────────────

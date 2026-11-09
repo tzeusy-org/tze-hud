@@ -429,8 +429,6 @@ impl StatusSource {
         let surfaces = match self.surfaces.clone() {
             Some(probe) => tokio::task::spawn_blocking(move || probe.read())
                 .await
-                .ok()
-                .flatten()
                 .unwrap_or_default(),
             None => Default::default(),
         };

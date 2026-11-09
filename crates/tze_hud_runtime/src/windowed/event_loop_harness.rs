@@ -1390,7 +1390,7 @@ mod tests {
             Arc::clone(&runtime.events.app.state.surface_ui),
             Arc::clone(&runtime.events.app.state.notification_link_opener.launches),
         );
-        let portal = || probe.read().expect("scene available").portals[0].clone();
+        let portal = || probe.read().portals[0].clone();
 
         publish(40);
         settle(&mut runtime);
@@ -1415,6 +1415,10 @@ mod tests {
         for _ in 0..3 {
             clock.advance(50);
             assert!(!runtime.turn(true), "an idle HUD renders nothing");
+            let snapshot = probe.read();
+            assert_eq!(snapshot.notifications, serde_json::json!([]));
+            assert_eq!(snapshot.widgets, serde_json::json!([]));
+            assert_eq!(snapshot.link_launches, 0);
         }
         assert_eq!(counters.snapshot().presents, presents);
         assert!(
@@ -1490,6 +1494,9 @@ mod tests {
             "the draft's text is never reported"
         );
         let body: Value = serde_json::from_str(status.split_once("\r\n\r\n").unwrap().1).unwrap();
+        assert_eq!(body["notifications"], serde_json::json!([]));
+        assert_eq!(body["widgets"], serde_json::json!([]));
+        assert_eq!(body["link_launches"], 0);
         let typed = &body["portals"][0];
         assert_eq!(typed["focus"], "composer");
         assert_eq!(typed["input"]["draft_chars"], 3);
@@ -3104,6 +3111,8 @@ mod tests {
             let (url, thread) = rx.recv_timeout(Duration::from_secs(2)).unwrap();
             assert_eq!(url, "https://xn--xample-9ua.com/a%22b");
             assert_ne!(thread, std::thread::current().id());
+            let launches = harness.app.state.notification_link_opener.launches.clone();
+            assert_eq!(launches.load(Ordering::Relaxed), 1);
             for elapsed in [0, 1999] {
                 let before = harness.app.state.notification_link_opener.workers.len();
                 clock.advance(elapsed);
@@ -3113,12 +3122,14 @@ mod tests {
                     before
                 );
                 assert!(rx.try_recv().is_err());
+                assert_eq!(launches.load(Ordering::Relaxed), 1);
             }
             clock.advance(1);
             click(&mut harness, points[0]);
             assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap().0, url);
             click(&mut harness, points[1]);
             assert_eq!(rx.recv_timeout(Duration::from_secs(2)).unwrap().0, urls[1]);
+            assert_eq!(launches.load(Ordering::Relaxed), 3);
             assert_eq!(
                 harness
                     .scene()
@@ -3145,9 +3156,24 @@ mod tests {
                 before
             );
             assert!(rx.try_recv().is_err());
+            assert_eq!(
+                launches.load(Ordering::Relaxed),
+                3,
+                "failed spawn and refused retry"
+            );
             clock.advance(2000);
             click(&mut harness, points[0]);
             rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            assert_eq!(launches.load(Ordering::Relaxed), 4);
+            #[cfg(not(windows))]
+            {
+                let mut real_noop = crate::shell::link::LinkOpener::default();
+                real_noop.launch("https://example.invalid/".into());
+                for worker in real_noop.workers.drain(..) {
+                    worker.join().unwrap();
+                }
+                assert_eq!(real_noop.launches.load(Ordering::Relaxed), 1);
+            }
             // Lost native Up, focus cancellation and safe mode never open links.
             for denied in ["focus", "safe-mode", "native-up", "native-mismatched-up"] {
                 let workers_before = harness.app.state.notification_link_opener.workers.len();

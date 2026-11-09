@@ -13,9 +13,9 @@ use tze_hud_scene::{
     ZoneInteractionKind,
 };
 
-/// Reads all admin-only UI blocks together, or `None` while the scene stays locked.
+/// Reads all admin-only UI blocks together; a busy scene yields null geometry blocks.
 #[derive(Clone)]
-pub struct SurfaceProbe(Arc<dyn Fn() -> Option<SurfaceSnapshot> + Send + Sync>);
+pub struct SurfaceProbe(Arc<dyn Fn() -> SurfaceSnapshot + Send + Sync>);
 
 #[derive(Default)]
 pub struct SurfaceSnapshot {
@@ -26,7 +26,7 @@ pub struct SurfaceSnapshot {
 }
 
 impl SurfaceProbe {
-    pub fn read(&self) -> Option<SurfaceSnapshot> {
+    pub fn read(&self) -> SurfaceSnapshot {
         (self.0)()
     }
 }
@@ -64,15 +64,18 @@ pub fn probe(
             if let Ok(scene) = scene.try_lock() {
                 let ui = ui.lock().unwrap_or_else(|e| e.into_inner()).clone();
                 let displays = crate::operator::status::display_rects();
-                return Some(SurfaceSnapshot {
+                return SurfaceSnapshot {
                     portals: portals_json(&scene, &ui, &displays),
                     notifications: notifications_json(&scene, &displays),
                     widgets: widgets_json(&scene, &ui, &displays),
                     link_launches: link_launches.load(Ordering::Relaxed),
-                });
+                };
             }
             if std::time::Instant::now() >= deadline {
-                return None;
+                return SurfaceSnapshot {
+                    link_launches: link_launches.load(Ordering::Relaxed),
+                    ..Default::default()
+                };
             }
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
@@ -404,6 +407,217 @@ mod tests {
             interaction_id: format!("jump-to-latest:{tile_id}"),
             tab_order: 0,
         }
+    }
+
+    #[test]
+    fn reports_last_frame_cards_and_widgets_without_mutating_the_scene() {
+        use tze_hud_compositor::renderer::hit_regions::populate_notification_hit_regions;
+        use tze_hud_scene::{
+            ContentionPolicy, GeometryPolicy, LayerAttachment, NotificationAction,
+            NotificationPayload, RenderingPolicy, WidgetInstance, WidgetParameterValue,
+            ZoneContent, ZoneDefinition, ZoneMediaType, graph::overlay::WidgetGeometry,
+        };
+        let (mut scene, tab, _, _) = portal_scene();
+        let displays = [Rect::new(0.0, 0.0, 1920.0, 1080.0)];
+        assert_eq!(notifications_json(&scene, &displays), json!([]));
+        assert_eq!(
+            widgets_json(&scene, &UiMirror::default(), &displays),
+            json!([])
+        );
+        scene.register_zone(ZoneDefinition {
+            id: SceneId::new(),
+            name: "notification-area".into(),
+            description: String::new(),
+            geometry_policy: GeometryPolicy::Relative {
+                x_pct: 0.6,
+                y_pct: 0.0,
+                width_pct: 0.35,
+                height_pct: 0.3,
+            },
+            accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
+            rendering_policy: RenderingPolicy::default(),
+            contention_policy: ContentionPolicy::Stack { max_depth: 5 },
+            max_publishers: 4,
+            auto_clear_ms: None,
+            layer_attachment: LayerAttachment::Chrome,
+            ephemeral: false,
+        });
+        scene
+            .publish_to_zone(
+                "notification-area",
+                ZoneContent::Notification(NotificationPayload {
+                    text: "private body".into(),
+                    title: String::new(),
+                    icon: String::new(),
+                    urgency: 2,
+                    ttl_ms: None,
+                    actions: vec![
+                        NotificationAction {
+                            label: "Reply".into(),
+                            callback_id: Some("answer".into()),
+                            url: None,
+                        },
+                        NotificationAction {
+                            label: "Read".into(),
+                            callback_id: None,
+                            url: Some("https://example.invalid/?secret=value".into()),
+                        },
+                    ],
+                }),
+                "agent",
+                Some("card-key".into()),
+                None,
+                None,
+            )
+            .unwrap();
+        let refresh = |scene: &mut SceneGraph| {
+            populate_notification_hit_regions(scene, 1920.0, 1080.0, &HashMap::new());
+        };
+        refresh(&mut scene);
+        let card = notifications_json(&scene, &displays)[0].clone();
+        assert_eq!(card["s"], "zone:notification-area");
+        assert_eq!(card["key"], "card-key");
+        assert_eq!(card["display"], 0);
+        assert_eq!(card["actions"][0]["label"], "Reply");
+        assert_eq!(card["actions"][0]["kind"], "callback");
+        assert_eq!(card["actions"][1]["label"], "Read");
+        assert_eq!(card["actions"][1]["kind"], "url");
+        assert_eq!(card["actions"].as_array().unwrap().len(), 2);
+        assert!(card["focus"].is_null());
+        assert!(card["chosen"].is_null());
+        assert!(!card.to_string().contains("private body"));
+        assert!(!card.to_string().contains("secret=value"));
+        for rect in [
+            &card["rect"],
+            &card["close"],
+            &card["actions"][0]["rect"],
+            &card["actions"][1]["rect"],
+        ] {
+            let r = Rect::new(
+                rect["x"].as_f64().unwrap() as f32,
+                rect["y"].as_f64().unwrap() as f32,
+                rect["w"].as_f64().unwrap() as f32,
+                rect["h"].as_f64().unwrap() as f32,
+            );
+            assert!(
+                r.width > 0.0 && r.height > 0.0 && r.is_within(&displays[0]),
+                "{rect}"
+            );
+        }
+        let action = scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|r| matches!(r.kind, ZoneInteractionKind::Action { index: 1 }))
+            .unwrap()
+            .clone();
+        scene.overlay.notification_focus = Some(action.interaction_id.clone());
+        refresh(&mut scene);
+        assert_eq!(notifications_json(&scene, &displays)[0]["focus"], 1);
+        let close = scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|r| matches!(r.kind, ZoneInteractionKind::Dismiss))
+            .unwrap()
+            .clone();
+        scene.overlay.notification_focus = Some(close.interaction_id);
+        refresh(&mut scene);
+        assert_eq!(notifications_json(&scene, &displays)[0]["focus"], "close");
+        scene.overlay.notification_focus = None;
+        scene
+            .overlay
+            .notification_choices
+            .insert(action.publication_id, action.interaction_id);
+        refresh(&mut scene);
+        assert!(
+            scene.overlay.zone_hit_regions.is_empty(),
+            "chosen card takes no input"
+        );
+        for state in ["entering", "shown", "exiting"] {
+            scene.overlay.notification_geometry[0].state = state;
+            let v = notifications_json(&scene, &displays);
+            assert_eq!(
+                v[0]["rect"], card["rect"],
+                "retain exit geometry without hit regions"
+            );
+            assert_eq!(v[0]["state"], state);
+            assert_eq!(v[0]["chosen"], 1);
+            assert!(v[0]["focus"].is_null());
+        }
+        // A replacement record must never inherit old bounds under new labels.
+        scene
+            .zone_registry
+            .active_publishes
+            .get_mut("notification-area")
+            .unwrap()[0]
+            .publication_id = SceneId::new();
+        assert_eq!(notifications_json(&scene, &displays), json!([]));
+        scene.widget_registry.register_instance(WidgetInstance {
+            id: SceneId::new(),
+            widget_type_name: "test".into(),
+            tab_id: tab,
+            geometry_override: None,
+            contention_override: None,
+            instance_name: "test".into(),
+            current_params: HashMap::new(),
+            auto_clear_ms: None,
+        });
+        assert_eq!(
+            widgets_json(&scene, &UiMirror::default(), &displays),
+            json!([]),
+            "registry instance without a drawn quad"
+        );
+        scene.overlay.widget_geometry.push(WidgetGeometry {
+            instance_name: "test".into(),
+            bounds: Rect::new(40.0, 20.0, 320.0, 100.0),
+        });
+        let mut ui = UiMirror::default();
+        for (value, visible) in [(0.0, false), (0.499, false), (0.5, true), (1.0, true)] {
+            scene
+                .widget_registry
+                .instances
+                .get_mut("test")
+                .unwrap()
+                .current_params
+                .insert("tooltip_visible".into(), WidgetParameterValue::F32(value));
+            let v = widgets_json(&scene, &ui, &displays);
+            assert_eq!(v[0]["s"], "widget:test");
+            assert_eq!(v[0]["display"], 0);
+            assert_eq!(v[0]["rect"], json!({"x":40.0,"y":20.0,"w":320.0,"h":100.0}));
+            assert!(v[0]["hover_target"].is_null());
+            assert_eq!(v[0]["tooltip_visible"], visible);
+        }
+        let target = Rect::new(320.0, 20.0, 40.0, 32.0);
+        ui.hover_targets.insert("test".into(), target);
+        assert_eq!(
+            widgets_json(&scene, &ui, &displays)[0]["hover_target"],
+            rect_json(target)
+        );
+        let version = scene.version;
+        let scene = Arc::new(tokio::sync::Mutex::new(scene));
+        let launches = Arc::new(AtomicU64::new(7));
+        let observation = probe(scene.clone(), Arc::new(StdMutex::new(ui)), launches);
+        for _ in 0..3 {
+            assert_eq!(observation.read().widgets.as_array().unwrap().len(), 1);
+            assert_eq!(scene.try_lock().unwrap().version, version);
+        }
+        let _held = scene.try_lock().unwrap();
+        let started = std::time::Instant::now();
+        let unavailable = observation.read();
+        assert!(
+            unavailable.portals.is_null()
+                && unavailable.notifications.is_null()
+                && unavailable.widgets.is_null()
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(500),
+            "one 100ms acquisition for all blocks"
+        );
+        assert_eq!(
+            unavailable.link_launches, 7,
+            "scene contention must not reset the monotonic counter"
+        );
     }
 
     #[test]
