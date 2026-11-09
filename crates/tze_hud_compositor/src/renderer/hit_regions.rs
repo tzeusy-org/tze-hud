@@ -20,6 +20,7 @@
 
 use std::collections::HashMap;
 
+use tze_hud_scene::DegradationLevel;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::graph::overlay::{NotificationControl, NotificationGeometry};
 use tze_hud_scene::types::*;
@@ -208,7 +209,11 @@ impl Compositor {
                 .pub_animation_states
                 .get(&card.zone_name)
                 .and_then(|states| states.get(&card.publication_id));
-            card.state = if publication.is_some_and(|s| s.fade_start.is_some())
+            // The renderer bypasses both zone and publication fades at this
+            // degradation level; retained animation state did not affect pixels.
+            card.state = if self.degradation_policy.level >= DegradationLevel::Simplified {
+                "shown"
+            } else if publication.is_some_and(|s| s.fade_start.is_some())
                 || zone.is_some_and(|s| s.target_opacity == 0.0)
             {
                 "exiting"
