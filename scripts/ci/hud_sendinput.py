@@ -32,6 +32,8 @@ for fn, res, args in (
     ("GetWindowRect", wintypes.BOOL, [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]),
     ("GetCursorPos", wintypes.BOOL, [ctypes.POINTER(wintypes.POINT)]),
     ("GetWindowLongPtrW", ctypes.c_ssize_t, [wintypes.HWND, ctypes.c_int]),
+    ("GetWindowTextW", ctypes.c_int, [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]),
+    ("GetClassNameW", ctypes.c_int, [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]),
     ("SendMessageW", ctypes.c_ssize_t, [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]),
     ("GetDC", wintypes.HDC, [wintypes.HWND]),
     ("ReleaseDC", ctypes.c_int, [wintypes.HWND, wintypes.HDC]),
@@ -82,6 +84,7 @@ class INPUT(ctypes.Structure):
 
 
 MOUSE_MOVE, LEFT_DOWN, LEFT_UP, WHEEL, ABSOLUTE = 0x1, 0x2, 0x4, 0x800, 0x8000
+GWL_EXSTYLE, WS_EX_TOPMOST, WS_EX_TRANSPARENT = -20, 0x8, 0x20
 KEY_UP, KEY_UNICODE = 0x2, 0x4
 WHEEL_DELTA = 120
 
@@ -180,13 +183,31 @@ def bring_to_front(pid: int) -> bool:
     return bool(windows) and bool(user32.SetForegroundWindow(windows[0]))
 
 
-def pointer_capturing(pid: int) -> bool | None:
-    windows = _windows_of(pid)
-    if len(windows) != 1:
-        return None
+def pointer_capture_state(pid: int) -> dict:
+    """Observe the primary overlay, excluding auxiliary windows of the same PID.
+
+    The harness first proves primary scene/physical identity at origin zero.
+    A unique visible, topmost window covering that screen identifies the HUD;
+    ambiguity remains unknown and includes candidate evidence for diagnosis.
+    """
+    width, height = screen_size()
+    windows = []
+    for hwnd in _windows_of(pid):
+        rect = wintypes.RECT()
+        valid_bounds = user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        bounds = [rect.left, rect.top, rect.right, rect.bottom] if valid_bounds else None
+        style = user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
+        title, class_name = ctypes.create_unicode_buffer(256), ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, title, len(title))
+        user32.GetClassNameW(hwnd, class_name, len(class_name))
+        windows.append({"hwnd": hwnd, "rect": bounds, "style_ex": style,
+                        "title": title.value, "class": class_name.value})
+    overlays = [window for window in windows
+                if window["rect"] == [0, 0, width, height] and window["style_ex"] & WS_EX_TOPMOST]
     # winit's set_cursor_hittest(false) sets WS_EX_TRANSPARENT. Observe the
     # actual native switch, rather than assuming a hover implies capture.
-    return not bool(user32.GetWindowLongPtrW(windows[0], -20) & 0x20)
+    capturing = not bool(overlays[0]["style_ex"] & WS_EX_TRANSPARENT) if len(overlays) == 1 else None
+    return {"capturing": capturing, "matching_overlays": len(overlays), "windows": windows}
 
 
 def maximize(pid: int) -> None:

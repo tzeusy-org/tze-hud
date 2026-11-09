@@ -1177,6 +1177,14 @@ def scenario_no_focus_steal(run: Run) -> None:
         run.helper_pids.remove(notepad.pid)
 
 
+def expect_overlay_capture(run: Run, wanted: bool, what: str) -> None:
+    def sample():
+        state = WIN.pointer_capture_state(run.pid)
+        return state["capturing"] is wanted, state
+    state, _ = wait_until(sample, what=what, timeout_s=SETTLE_S)
+    run.step(f"ok {what}: {state}")
+
+
 def scenario_overlay_pointer(run: Run) -> None:
     """11. Relative pointer entry captures the composer; outside clicks reach owned Notepad."""
     fields = [json.loads(line).get("fields", {}) for line in run.log.read_text(errors="replace").splitlines()
@@ -1220,8 +1228,7 @@ def scenario_overlay_pointer(run: Run) -> None:
         if outside is None:
             raise ScenarioFailed("a point outside the portal exists", rect)
         run.inj.move_abs(*outside)
-        wait_until(lambda: (WIN.pointer_capturing(run.pid) is False, WIN.pointer_capturing(run.pid)),
-                   what="overlay passes pointer through outside portal", timeout_s=SETTLE_S)
+        expect_overlay_capture(run, False, "overlay passes pointer through outside portal")
         run.step("ok native overlay is click-through before relative entry")
         target = resolve_target(run.status(), f"{s}/composer")
         deadline = time.monotonic() + SETTLE_S
@@ -1236,8 +1243,7 @@ def scenario_overlay_pointer(run: Run) -> None:
             # Observe OS cursor progress during one continuous gesture.
             time.sleep(0.005)
         run.expect("relative entry shows composer hover", on(s, lambda p: p["hover"] == "composer"))
-        wait_until(lambda: (WIN.pointer_capturing(run.pid) is True, WIN.pointer_capturing(run.pid)),
-                   what="relative entry enables native capture", timeout_s=SETTLE_S)
+        expect_overlay_capture(run, True, "relative entry enables native capture")
         run.step("ok relative entry enables native capture")
         run.screen_grab("overlay-pointer.entry")
         run.click()
@@ -1262,8 +1268,7 @@ def scenario_overlay_pointer(run: Run) -> None:
         if WIN.foreground_pid() != run.pid:
             raise ScenarioFailed("HUD is foreground before click-through", {"foreground": WIN.foreground_pid()})
         run.inj.move_abs(*point)
-        wait_until(lambda: (WIN.pointer_capturing(run.pid) is False, WIN.pointer_capturing(run.pid)),
-                   what="leaving portal restores native click-through", timeout_s=SETTLE_S)
+        expect_overlay_capture(run, False, "leaving portal restores native click-through")
         run.click()
         wait_until(lambda: (WIN.foreground_pid() == notepad.pid, WIN.foreground_pid()),
                    what="outside click foregrounds owned Notepad", timeout_s=SETTLE_S)

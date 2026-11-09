@@ -92,6 +92,15 @@ WIN_OWNED = dict(github_actions="true", foreground_pid=4242, owned_hud_pid=4242,
                  status_pid=4242, url="http://127.0.0.1:5555/mcp")
 
 
+def native_input_boundary():
+    """Load the real Win32 boundary with inert DLL handles on either host OS."""
+    spec = importlib.util.spec_from_file_location("test_sendinput_boundary", Path(__file__).with_name("hud_sendinput.py"))
+    native = importlib.util.module_from_spec(spec)
+    with mock.patch.object(ctypes, "WinDLL", create=True):
+        spec.loader.exec_module(native)
+    return native
+
+
 class WindowsGuardTests(unittest.TestCase):
     def test_owned_hud_or_helper_foreground_passes(self) -> None:
         g.check_owned_windows(**WIN_OWNED)
@@ -139,10 +148,7 @@ class WindowsGuardTests(unittest.TestCase):
 
     def test_sendinput_guard_runs_before_every_injection_including_relative_motion(self) -> None:
         # Load the real boundary with fake DLL handles; no OS input is possible.
-        spec = importlib.util.spec_from_file_location("guarded_sendinput", Path(__file__).with_name("hud_sendinput.py"))
-        native = importlib.util.module_from_spec(spec)
-        with mock.patch.object(ctypes, "WinDLL", create=True):
-            spec.loader.exec_module(native)
+        native = native_input_boundary()
         injector = native.SendInput(lambda: g.check_owned_windows(**{**WIN_OWNED, "foreground_pid": 9}))
         actions = (lambda: injector.move_abs(1, 2), lambda: injector.move_relative(3, 4),
                    lambda: injector.click(), lambda: injector.button(True), lambda: injector.key("Tab"),
@@ -151,6 +157,31 @@ class WindowsGuardTests(unittest.TestCase):
             with self.assertRaises(g.Refused):
                 action()
         native.user32.SendInput.assert_not_called()
+
+    def test_native_capture_observes_only_a_unique_primary_overlay(self) -> None:
+        native = native_input_boundary()
+        for case in ("capture", "passthrough", "no-overlay", "ambiguous"):
+            with self.subTest(case=case):
+                rows = {11: ([5, 5, 100, 100], 0), 12: ([0, 0, 1024, 768], 0)}
+                if case != "no-overlay":
+                    rows[13] = ([0, 0, 1024, 768], 0x8 | (0x20 if case == "passthrough" else 0))
+                if case == "ambiguous":
+                    rows[14] = ([0, 0, 1024, 768], 0x8)
+
+                def bounds(hwnd, output):
+                    rect = output._obj
+                    rect.left, rect.top, rect.right, rect.bottom = rows[hwnd][0]
+                    return True
+
+                native.user32.GetWindowRect.side_effect = bounds
+                native.user32.GetWindowLongPtrW.side_effect = lambda hwnd, _: rows[hwnd][1]
+                with mock.patch.object(native, "_windows_of", return_value=list(rows)), \
+                        mock.patch.object(native, "screen_size", return_value=(1024, 768)):
+                    result = native.pointer_capture_state(4242)
+                expected = {"capture": True, "passthrough": False, "no-overlay": None, "ambiguous": None}[case]
+                self.assertIs(result["capturing"], expected)
+                self.assertEqual(len(result["windows"]), len(rows))
+                self.assertEqual(result["matching_overlays"], 0 if case == "no-overlay" else 2 if case == "ambiguous" else 1)
 
     def test_modes_select_only_their_scenarios_and_refuse_mismatches(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
