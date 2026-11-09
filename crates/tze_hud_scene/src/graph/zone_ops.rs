@@ -264,6 +264,7 @@ impl SceneGraph {
             lease_id,
             None,
             true,
+            None,
         )
     }
 
@@ -282,6 +283,7 @@ impl SceneGraph {
         lease_id: Option<SceneId>,
         publication_origin: Option<SceneId>,
         urgency_default: bool,
+        publication_id: Option<SceneId>,
     ) -> Result<(), ValidationError> {
         // Check zone exists and content type is accepted
         let (contention_policy, max_publishers, accepted) = {
@@ -337,8 +339,20 @@ impl SceneGraph {
             }
         });
 
+        let publication_id = publication_id.unwrap_or_default();
+        let waiting_before: Vec<_> = self
+            .notification_waits
+            .keys()
+            .filter_map(|id| {
+                self.zone_registry
+                    .active_for_zone(zone_name)
+                    .iter()
+                    .any(|r| r.publication_id == *id)
+                    .then_some(*id)
+            })
+            .collect();
         let record = ZonePublishRecord {
-            publication_id: SceneId::new(),
+            publication_id,
             zone_name: zone_name.to_string(),
             publisher_namespace: publisher_namespace.to_string(),
             content,
@@ -366,6 +380,7 @@ impl SceneGraph {
                 })
             })
         });
+        let replaced_id = replacement.map(|index| publishes[index].publication_id);
         if let Some(index) = replacement {
             // Keep the visual slot, but never transfer the old activation or
             // chosen-feedback identity. This also works at publisher capacity.
@@ -393,6 +408,27 @@ impl SceneGraph {
             )?;
         }
 
+        if let Some(wait) = self.notification_waits.get_mut(&publication_id) {
+            wait.materialized = true;
+        }
+        for id in waiting_before
+            .into_iter()
+            .chain(std::iter::once(publication_id))
+        {
+            if !self
+                .zone_registry
+                .active_for_zone(zone_name)
+                .iter()
+                .any(|r| r.publication_id == id)
+            {
+                let reason = if replaced_id == Some(id) {
+                    super::NotificationGone::Replaced
+                } else {
+                    super::NotificationGone::Displaced
+                };
+                self.finish_notification_wait(id, super::NotificationOutcome::Gone(reason));
+            }
+        }
         self.prune_publication_orphans();
         self.version += 1;
         Ok(())
@@ -496,6 +532,35 @@ impl SceneGraph {
             Some(lease_id),
             None,
             false,
+            None,
+        )
+    }
+
+    /// Admit an MCP question under a pre-reserved, runtime-only identity.
+    #[allow(clippy::too_many_arguments)]
+    pub fn publish_notification_until_with_id(
+        &mut self,
+        zone: &str,
+        content: ZoneContent,
+        namespace: &str,
+        lease: SceneId,
+        key: Option<String>,
+        expiry: Option<u64>,
+        id: SceneId,
+    ) -> Result<(), ValidationError> {
+        self.check_zone_publish_lease(namespace, lease)?;
+        self.publish_to_zone_inner(
+            zone,
+            content,
+            namespace,
+            key,
+            expiry,
+            None,
+            Vec::new(),
+            Some(lease),
+            None,
+            false,
+            Some(id),
         )
     }
 
@@ -1135,6 +1200,7 @@ impl SceneGraph {
             _ => return None,
         };
         let notification_key = record.merge_key.clone().filter(|key| !key.is_empty());
+        self.finish_notification_wait(key, super::NotificationOutcome::Answered);
         if matches!(region.kind, ZoneInteractionKind::Dismiss) || exit_ms == 0 {
             if !self.dismiss_notification(
                 &region.zone_name,
@@ -1182,6 +1248,7 @@ impl SceneGraph {
         }
         Some(super::NotificationActivation::Callback(
             self.push_pending_action(super::PendingAction {
+                publication_id: Some(region.publication_id),
                 publisher_namespace: region.publisher_namespace.clone(),
                 zone_name: region.zone_name.clone(),
                 kind,
@@ -1290,6 +1357,7 @@ impl SceneGraph {
 
     /// Keep orphan state bounded by the current publications, never request history.
     pub(crate) fn prune_publication_orphans(&mut self) {
+        self.prune_notification_waits();
         self.overlay
             .zone_placements
             .retain(|id, _| self.zone_registry.zones.values().any(|z| z.id == *id));
@@ -1354,8 +1422,25 @@ impl SceneGraph {
         for name in touched {
             self.refresh_widget_current_params(&name);
         }
+        let pending_waits: Vec<_> = self
+            .scheduled_batches
+            .iter()
+            .filter_map(|s| s.notification_publication)
+            .collect();
         self.scheduled_batches
             .retain(|s| s.publication_origin != Some(origin) || s.batch.lease_id.is_some());
+        for id in pending_waits {
+            if !self
+                .scheduled_batches
+                .iter()
+                .any(|s| s.notification_publication == Some(id))
+            {
+                self.finish_notification_wait(
+                    id,
+                    super::NotificationOutcome::Gone(super::NotificationGone::Cleared),
+                );
+            }
+        }
         self.publication_orphans.remove(&origin);
         self.version += 1;
     }
@@ -1463,6 +1548,20 @@ impl SceneGraph {
     pub fn drain_expired_zone_publications(&mut self) -> usize {
         let now_us = self.clock.now_us();
         let mut total_removed = 0usize;
+        let expired: Vec<_> = self
+            .zone_registry
+            .active_publishes
+            .values()
+            .flatten()
+            .filter(|r| r.expires_at_wall_us.is_some_and(|expiry| expiry <= now_us))
+            .map(|r| r.publication_id)
+            .collect();
+        for id in expired {
+            self.finish_notification_wait(
+                id,
+                super::NotificationOutcome::Gone(super::NotificationGone::Expired),
+            );
+        }
 
         for publishes in self.zone_registry.active_publishes.values_mut() {
             let before = publishes.len();

@@ -128,6 +128,8 @@ pub struct SceneGraph {
     /// Input readiness callbacks, invoked by the producer only after scene unlock.
     #[serde(skip, default)]
     pending_action_notifiers: HashMap<String, RenderWakeNotifier>,
+    #[serde(skip, default)]
+    notification_waits: HashMap<SceneId, notification_wait::NotificationWait>,
     /// Map of ResourceIds to their scene-node reference counts.
     ///
     /// A resource is available for use in [`NodeData::StaticImage`] nodes when it
@@ -197,8 +199,10 @@ pub mod tabs;
 pub mod tiles;
 pub mod timed;
 pub use tiles::validate_text_markdown_node_data;
+pub mod notification_wait;
 pub mod visibility;
 pub mod zone_ops;
+pub use notification_wait::{NotificationGone, NotificationOutcome};
 pub use visibility::SurfaceClasses;
 
 /// A publisher callback and a runtime-authored human close are distinct.
@@ -211,6 +215,8 @@ pub enum PendingActionKind {
 /// A transactional notification event addressed to its publishing agent.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PendingAction {
+    /// Exact publication identity; synthetic/non-card input may omit it.
+    pub publication_id: Option<SceneId>,
     pub publisher_namespace: String,
     pub zone_name: String,
     pub kind: PendingActionKind,
@@ -258,6 +264,7 @@ impl SceneGraph {
             publication_orphans: HashMap::new(),
             pending_actions: HashMap::new(),
             pending_action_notifiers: HashMap::new(),
+            notification_waits: HashMap::new(),
             registered_resources: HashMap::new(),
             overlay: RuntimeOverlayState::default(),
         }
@@ -286,7 +293,14 @@ impl SceneGraph {
 
     /// Remove and return the queued action presses for `namespace`, oldest first.
     pub fn take_pending_actions(&mut self, namespace: &str) -> Vec<PendingAction> {
-        self.pending_actions.remove(namespace).unwrap_or_default()
+        let actions = self.pending_actions.remove(namespace).unwrap_or_default();
+        let (claimed, available): (Vec<_>, Vec<_>) = actions
+            .into_iter()
+            .partition(|action| self.notification_answer_is_claimed(action));
+        if !claimed.is_empty() {
+            self.pending_actions.insert(namespace.to_owned(), claimed);
+        }
+        available
     }
 
     // ─── Sequence number (RFC 0001 §3.5) ────────────────────────────────

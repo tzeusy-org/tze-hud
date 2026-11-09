@@ -153,8 +153,25 @@ impl SceneGraph {
             self.refresh_widget_current_params(&name);
         }
 
+        let pending_waits: Vec<_> = self
+            .scheduled_batches
+            .iter()
+            .filter_map(|s| s.notification_publication)
+            .collect();
         self.scheduled_batches
             .retain(|s| s.batch.agent_namespace != namespace);
+        for id in pending_waits {
+            if !self
+                .scheduled_batches
+                .iter()
+                .any(|s| s.notification_publication == Some(id))
+            {
+                self.finish_notification_wait(
+                    id,
+                    super::NotificationOutcome::Gone(super::NotificationGone::Cleared),
+                );
+            }
+        }
         self.prune_publication_orphans();
         self.version += 1;
         AgentReclaim { cleared, expiries }

@@ -19,6 +19,7 @@ pub struct ScheduledBatch {
     pub present_at_wall_us: u64,
     pub batch: MutationBatch,
     pub(crate) publication_origin: Option<SceneId>,
+    pub notification_publication: Option<SceneId>,
 }
 
 impl SceneGraph {
@@ -40,6 +41,25 @@ impl SceneGraph {
             present_at_wall_us,
             batch,
             publication_origin,
+            notification_publication: None,
+        });
+    }
+
+    /// Reserve identity only for the one-notification MCP batch. It never
+    /// enters serialized mutations or the resident protocol's origin identity.
+    pub fn schedule_notification_batch(&mut self, at: u64, batch: MutationBatch, id: SceneId) {
+        assert!(matches!(
+            batch.mutations.as_slice(),
+            [SceneMutation::PublishToZone {
+                content: crate::types::ZoneContent::Notification(_),
+                ..
+            }]
+        ));
+        self.scheduled_batches.push(ScheduledBatch {
+            present_at_wall_us: at,
+            batch,
+            publication_origin: None,
+            notification_publication: Some(id),
         });
     }
 
@@ -57,6 +77,7 @@ impl SceneGraph {
                 cancelled += before - s.batch.mutations.len();
             }
         }
+        self.finish_cancelled_notification_batches();
         self.scheduled_batches
             .retain(|s| !s.batch.mutations.is_empty());
         self.prune_publication_orphans();
@@ -79,9 +100,25 @@ impl SceneGraph {
                 });
             }
         }
+        self.finish_cancelled_notification_batches();
         self.scheduled_batches
             .retain(|scheduled| !scheduled.batch.mutations.is_empty());
         self.prune_publication_orphans();
+    }
+
+    fn finish_cancelled_notification_batches(&mut self) {
+        let cancelled: Vec<_> = self
+            .scheduled_batches
+            .iter()
+            .filter(|s| s.batch.mutations.is_empty())
+            .filter_map(|s| s.notification_publication)
+            .collect();
+        for id in cancelled {
+            self.finish_notification_wait(
+                id,
+                super::NotificationOutcome::Gone(super::NotificationGone::Cleared),
+            );
+        }
     }
 
     /// Retime `namespace`'s pending publishes to `zone` as a hold would an
@@ -161,7 +198,22 @@ impl SceneGraph {
         let orphan_deadlines = std::mem::take(&mut self.publication_orphans);
         let results = due
             .into_iter()
-            .map(|s| self.apply_batch_for_origin(&s.batch, s.publication_origin))
+            .map(|s| {
+                let result = self.apply_batch_with_notification_id(
+                    &s.batch,
+                    s.publication_origin,
+                    s.notification_publication,
+                );
+                if !result.applied
+                    && let Some(id) = s.notification_publication
+                {
+                    self.finish_notification_wait(
+                        id,
+                        super::NotificationOutcome::Gone(super::NotificationGone::Cleared),
+                    );
+                }
+                result
+            })
             .collect();
         self.publication_orphans = orphan_deadlines;
         self.prune_publication_orphans();

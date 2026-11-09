@@ -51,6 +51,7 @@ pub fn tools_list_result() -> Value {
                     "params": {"type": "object"},
                     "ttl_ms": {"type": "integer", "minimum": 0, "description": "zone default 60000; widget durable; portal hold; 0 = until cleared"},
                     "delay_ms": {"type": "integer", "minimum": 0, "maximum": 300000, "description": "show later"},
+                    "wait_ms": {"type": "integer", "minimum": 0, "maximum": 30000, "description": "notification actions: wait for a consumed answer; otherwise hud_input"},
                     "key": {"type": "string", "description": "notification: own exact key replaces; at most 256 UTF-8 bytes; empty appends. Other surfaces: merge key"},
                     "status": {"type": "string", "enum": ["active", "degraded"], "description": "portal agent status; content optional"},
                     "expects_reply": {"type": "boolean", "description": "portal: arm reply composer"},

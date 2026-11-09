@@ -1917,7 +1917,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                 )
                                 .chain(card_frame.wake_at_wall_us)
                                 .min();
+                            let question_wakes = scene.take_notification_wait_notifiers();
                             drop(scene);
+                            for wake in question_wakes {
+                                wake.notify();
+                            }
                             if let Some(build) = render
                                 && displays::present_to_secondaries(
                                     &mut compositor,
@@ -2017,7 +2021,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             // ~16.6ms refresh interval, so the main-thread
                             // interaction path's `spin_acquire` (12ms budget) no
                             // longer times out and drops drag-move samples.
+                            let question_wakes = scene.take_notification_wait_notifiers();
                             drop(scene);
+                            for wake in question_wakes {
+                                wake.notify();
+                            }
 
                             // ── Stage 6–7: Present lock-free ──────────────────
                             let present_outcome = compositor.present_windowed_frame_to(

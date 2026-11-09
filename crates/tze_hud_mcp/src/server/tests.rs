@@ -2043,6 +2043,7 @@ async fn action_presses_are_delivered_until_acked() {
         .lock()
         .await
         .push_pending_action(PendingAction {
+            publication_id: None,
             key: None,
             publisher_namespace: AgentDirectory::unrestricted(psk())
                 .resolve(&psk(), "")
@@ -2071,6 +2072,7 @@ async fn action_presses_are_delivered_until_acked() {
         for index in 0..actions_per_agent {
             for namespace in ["a", "b"] {
                 scene.push_pending_action(PendingAction {
+                    publication_id: None,
                     key: None,
                     publisher_namespace: namespace.into(),
                     zone_name: "subtitle".into(),
@@ -2172,12 +2174,14 @@ async fn action_presses_are_delivered_until_acked() {
     {
         let mut scene = server.scene.lock().await;
         scene.push_pending_action(PendingAction {
+            publication_id: None,
             key: None,
             publisher_namespace: "a".into(),
             zone_name: "subtitle".into(),
             kind: PendingActionKind::Callback("dismiss".into()),
         });
         scene.push_pending_action(PendingAction {
+            publication_id: None,
             key: None,
             publisher_namespace: "a".into(),
             zone_name: "subtitle".into(),
@@ -2241,6 +2245,7 @@ async fn action_presses_are_delivered_until_acked() {
                 .lock()
                 .await
                 .push_pending_action(PendingAction {
+                    publication_id: None,
                     publisher_namespace: "a".into(),
                     zone_name: "notification-area".into(),
                     kind: kind.clone(),
@@ -2637,6 +2642,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
             .lock()
             .await
             .push_pending_action(PendingAction {
+                publication_id: None,
                 key: None,
                 publisher_namespace: "probe-a".into(),
                 zone_name: "subtitle".into(),
@@ -2777,6 +2783,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         .lock()
         .await
         .push_pending_action(PendingAction {
+            publication_id: None,
             key: None,
             publisher_namespace: psk_agent(),
             zone_name: "notification-area".into(),
@@ -2841,6 +2848,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         let mut waiting = Box::pin(call_as(&isolated, &a, "hud_input", json!({"wait_ms":1000})));
         assert!(waiting.as_mut().poll(&mut cx).is_pending());
         scene.push_pending_action(PendingAction {
+            publication_id: None,
             key: None,
             publisher_namespace: "a".into(),
             zone_name: "subtitle".into(),
@@ -2867,6 +2875,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
             .lock()
             .await
             .push_pending_action(PendingAction {
+                publication_id: None,
                 key: None,
                 publisher_namespace: "a".into(),
                 zone_name: "subtitle".into(),
@@ -2904,6 +2913,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         let mut waiting = Box::pin(call_as(&isolated, &a, "hud_input", json!({"wait_ms":1000})));
         assert!(waiting.as_mut().poll(&mut cx).is_pending());
         scene.push_pending_action(PendingAction {
+            publication_id: None,
             key: None,
             publisher_namespace: "a".into(),
             zone_name: "subtitle".into(),
@@ -2923,6 +2933,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
             .lock()
             .await
             .push_pending_action(PendingAction {
+                publication_id: None,
                 key: None,
                 publisher_namespace: psk_agent(),
                 zone_name: "subtitle".into(),
@@ -3253,6 +3264,7 @@ async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
         .lock()
         .await
         .push_pending_action(PendingAction {
+            publication_id: None,
             key: None,
             publisher_namespace: AgentDirectory::unrestricted(psk())
                 .resolve(&psk(), "")

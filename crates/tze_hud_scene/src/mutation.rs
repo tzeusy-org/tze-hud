@@ -301,6 +301,15 @@ impl SceneGraph {
         batch: &MutationBatch,
         publication_origin: Option<SceneId>,
     ) -> MutationResult {
+        self.apply_batch_with_notification_id(batch, publication_origin, None)
+    }
+
+    pub(crate) fn apply_batch_with_notification_id(
+        &mut self,
+        batch: &MutationBatch,
+        publication_origin: Option<SceneId>,
+        notification_id: Option<SceneId>,
+    ) -> MutationResult {
         // ── Batch size limit ───────────────────────────────────────────────
         if batch.mutations.len() > MAX_BATCH_SIZE {
             let err = ValidationError::BatchSizeExceeded {
@@ -452,6 +461,7 @@ impl SceneGraph {
                 &batch.agent_namespace,
                 batch.lease_id,
                 publication_origin,
+                notification_id.filter(|_| idx == 0),
             ) {
                 Ok(ids) => created_ids.extend(ids),
                 Err(e) => {
@@ -646,6 +656,7 @@ impl SceneGraph {
         namespace: &str,
         batch_lease_id: Option<SceneId>,
         publication_origin: Option<SceneId>,
+        notification_id: Option<SceneId>,
     ) -> Result<Vec<SceneId>, ValidationError> {
         match mutation {
             // ── Tab mutations ─────────────────────────────────────────────────
@@ -755,6 +766,7 @@ impl SceneGraph {
                     batch_lease_id,
                     publication_origin,
                     !*held,
+                    notification_id,
                 )?;
                 Ok(vec![])
             }

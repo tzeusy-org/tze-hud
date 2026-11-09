@@ -7,6 +7,7 @@
 //! namespace or token. Times are milliseconds. Failures are
 //! [`McpError::Tool`] with a stable code and a hint naming the next call.
 
+use crate::publish_wait::{PublishReply, WaitClaim};
 use crate::{
     error::McpError,
     server::{InputNotifiers, PortalHandle},
@@ -22,7 +23,7 @@ use tze_hud_portal::hub::{PortalError, PortalHub, PortalKey, PortalStatus, Publi
 use tze_hud_scene::{
     SceneId, ValidationError,
     config::AgentIdentity,
-    graph::{PendingActionKind, SceneGraph},
+    graph::{NotificationOutcome, PendingActionKind, SceneGraph},
     mutation::{MutationBatch, SceneMutation},
     render_wake::RenderWakeNotifier,
     types::{
@@ -110,6 +111,7 @@ pub struct ToolCtx<'a> {
     #[cfg(any(test, feature = "test-harness"))]
     pub input_wait_probe: Option<&'a tokio::sync::watch::Sender<bool>>,
     pub portal_wake: &'a RenderWakeNotifier,
+    pub render_wake: &'a RenderWakeNotifier,
     pub state: &'a McpState,
     /// The runtime's safe-mode flag, shared with gRPC. While set, every
     /// mutating verb is refused.
@@ -444,6 +446,8 @@ pub struct PublishParams {
     #[serde(default)]
     pub delay_ms: Option<u64>,
     #[serde(default)]
+    pub wait_ms: Option<u64>,
+    #[serde(default)]
     pub key: Option<String>,
     #[serde(default)]
     pub status: Option<String>,
@@ -458,16 +462,19 @@ pub fn parse_args<T: for<'de> Deserialize<'de>>(args: Value) -> McpResult<T> {
 }
 
 /// Publish to a surface: zone content, widget params, or portal output.
-pub async fn hud_publish(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
+pub(crate) async fn hud_publish<'a>(ctx: &ToolCtx<'a>, args: Value) -> McpResult<PublishReply<'a>> {
+    let started = tokio::time::Instant::now();
     let p: PublishParams = parse_args(args)?;
     let surface = Surface::parse(&p.surface)?;
     check_allowed(ctx, &surface)?;
     check_not_safe_mode(ctx)?;
     check_fields(&surface, &p)?;
     match surface {
-        Surface::Zone(zone) => publish_zone(ctx, &zone, p).await,
-        Surface::Widget(widget) => publish_widget(ctx, &widget, p).await,
-        Surface::Portal(pid) => publish_portal(ctx, &pid, p).await,
+        Surface::Zone(zone) => publish_zone(ctx, &zone, p, started).await,
+        Surface::Widget(widget) => publish_widget(ctx, &widget, p)
+            .await
+            .map(PublishReply::plain),
+        Surface::Portal(pid) => publish_portal(ctx, &pid, p).await.map(PublishReply::plain),
     }
 }
 
@@ -484,6 +491,7 @@ fn check_fields(surface: &Surface, p: &PublishParams) -> McpResult<()> {
         .into_iter()
         .find(|(_, set)| *set),
         Surface::Widget(_) => [
+            ("wait_ms", p.wait_ms.is_some()),
             ("content", p.content.is_some()),
             ("delay_ms", p.delay_ms.is_some()),
             ("status", p.status.is_some()),
@@ -493,6 +501,7 @@ fn check_fields(surface: &Surface, p: &PublishParams) -> McpResult<()> {
         .into_iter()
         .find(|(_, set)| *set),
         Surface::Portal(_) => [
+            ("wait_ms", p.wait_ms.is_some()),
             ("params", p.params.is_some()),
             ("delay_ms", p.delay_ms.is_some()),
         ]
@@ -613,7 +622,12 @@ fn with_inferred_type(content: Value, accepted: &[ZoneMediaType]) -> Value {
     }
 }
 
-async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpResult<Value> {
+async fn publish_zone<'a>(
+    ctx: &ToolCtx<'a>,
+    zone: &str,
+    p: PublishParams,
+    started: tokio::time::Instant,
+) -> McpResult<PublishReply<'a>> {
     let ns = ctx.agent.agent_id.clone();
     let raw = p
         .content
@@ -653,6 +667,13 @@ async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpRes
         ));
     };
     let content = parse_zone_content(&with_inferred_type(raw, &def.accepted_media_types))?;
+    if p.wait_ms.is_some()
+        && !matches!(&content, ZoneContent::Notification(n) if !n.actions.is_empty())
+    {
+        return Err(invalid(
+            "wait_ms needs a notification with actions; omit it for other content",
+        ));
+    }
     if matches!(&content, ZoneContent::Notification(_)) {
         SceneGraph::validate_notification_key(p.key.as_deref()).map_err(|e| scene_error(&e))?;
     }
@@ -666,6 +687,25 @@ async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpRes
         }
     });
     let lease_id = ensure_lease(ctx, &mut scene)?;
+    let deadline =
+        started + std::time::Duration::from_millis(p.wait_ms.unwrap_or(0).min(MAX_WAIT_MS));
+    let claim = if p.wait_ms.is_some_and(|ms| ms > 0) {
+        let ready = ctx.input_notifiers.try_for_agent(&ns)?;
+        let active = Arc::new(AtomicBool::new(true));
+        let id = SceneId::new();
+        let signal = RenderWakeNotifier::new(move || ready.notify_waiters());
+        scene.register_action_notifier(&ns, signal.clone());
+        scene.arm_notification_wait(id, &ns, Arc::clone(&active), signal.clone());
+        Some(WaitClaim {
+            scene: Arc::clone(ctx.scene),
+            id,
+            namespace: ns.clone(),
+            active,
+            ready: signal,
+        })
+    } else {
+        None
+    };
     let now = now_us(&scene);
     let present_at = now.saturating_add(delay_ms.saturating_mul(1_000));
     let expires_at = (ttl_ms > 0).then(|| present_at.saturating_add(ttl_ms.saturating_mul(1_000)));
@@ -687,7 +727,11 @@ async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpRes
             lease_id: Some(lease_id),
         };
         let batch_id = batch.batch_id;
-        scene.schedule_batch(present_at, batch);
+        if let Some(claim) = &claim {
+            scene.schedule_notification_batch(present_at, batch, claim.id);
+        } else {
+            scene.schedule_batch(present_at, batch);
+        }
         if zone == "subtitle"
             && tracing::enabled!(target: "tze_hud_delay_diagnostic", tracing::Level::DEBUG)
         {
@@ -704,14 +748,95 @@ async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpRes
                     expires_at_wall_us = expires_at, is_subtitle = true);
             }
         }
+    } else if let Some(claim) = &claim {
+        scene
+            .publish_notification_until_with_id(
+                zone, content, &ns, lease_id, p.key, expires_at, claim.id,
+            )
+            .map_err(|error| scene_error(&error))?;
     } else {
         scene
             .publish_to_zone_until_with_lease(zone, content, &ns, lease_id, p.key, expires_at)
             .map_err(|error| scene_error(&error))?;
     }
-    Ok(ok_with_expiry(
-        expires_at.map(|at| at.saturating_sub(now) / 1_000),
-    ))
+    let wakes = scene.take_notification_wait_notifiers();
+    drop(scene);
+    for wake in wakes {
+        wake.notify();
+    }
+    // A quiescent renderer must present/schedule this question before its call waits.
+    ctx.render_wake.notify();
+    let Some(claim) = claim else {
+        return Ok(PublishReply::plain(ok_with_expiry(
+            expires_at.map(|at| at.saturating_sub(now) / 1_000),
+        )));
+    };
+    let activity = InputPollLease::start(ctx, &ns, deadline)?;
+    let ready = ctx.input_notifiers.try_for_agent(&ns)?;
+    loop {
+        let mut notified = std::pin::pin!(ready.notified());
+        notified.as_mut().enable();
+        let mut scene = ctx.scene.lock().await;
+        match scene.notification_wait_outcome(claim.id) {
+            Some(NotificationOutcome::Answered) => {
+                let action = scene
+                    .notification_wait_answer(claim.id, &ns)
+                    .expect("accepted claimed answer stays in FIFO");
+                let mut reply =
+                    ok_with_expiry(expires_at.map(|at| at.saturating_sub(now_us(&scene)) / 1_000));
+                match &action.kind {
+                    PendingActionKind::Callback(callback) => {
+                        reply["action"] = json!(callback);
+                    }
+                    PendingActionKind::Dismiss => {
+                        reply["action"] = json!("dismiss");
+                        reply["kind"] = json!("dismiss");
+                    }
+                }
+                return Ok(PublishReply::answered(reply, scene, claim, activity));
+            }
+            Some(NotificationOutcome::Gone(reason)) => {
+                return Ok(PublishReply::plain(
+                    json!({"ok":true,"gone":reason.as_str()}),
+                ));
+            }
+            None => {}
+        }
+        if tokio::time::Instant::now() >= deadline {
+            // Read a live retimed holding, including a still-scheduled admission.
+            let expiry = scene
+                .zone_registry
+                .active_for_zone(zone)
+                .iter()
+                .find(|r| r.publication_id == claim.id)
+                .map(|r| r.expires_at_wall_us)
+                .or_else(|| {
+                    scene
+                        .scheduled_batches
+                        .iter()
+                        .find(|b| b.notification_publication == Some(claim.id))
+                        .and_then(|b| b.batch.mutations.first())
+                        .and_then(|m| match m {
+                            SceneMutation::PublishToZone {
+                                expires_at_wall_us, ..
+                            } => Some(*expires_at_wall_us),
+                            _ => None,
+                        })
+                })
+                .unwrap_or(expires_at);
+            scene.release_notification_wait(claim.id);
+            return Ok(PublishReply::plain(ok_with_expiry(
+                expiry.map(|at| at.saturating_sub(now_us(&scene)) / 1_000),
+            )));
+        }
+        drop(scene);
+        #[cfg(any(test, feature = "test-harness"))]
+        let _waiting = ctx.input_wait_probe.map(crate::server::InputWaitGuard::arm);
+        tokio::select! {
+            _ = notified.as_mut() => {},
+            _ = tokio::time::sleep_until(deadline) => {},
+        }
+    }
 }
 
 async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> McpResult<Value> {
@@ -1008,7 +1133,7 @@ static NEXT_ACTION_ID: AtomicU64 = AtomicU64::new(1);
 
 /// Own one finite active poll. Drop releases ownership without inventing
 /// activity, including cancellation before the first portal attachment.
-struct InputPollLease {
+pub(crate) struct InputPollLease {
     portals: PortalHandle,
     namespace: String,
     request: u64,
