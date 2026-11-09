@@ -114,7 +114,8 @@ also carry `key`. A human × has `action:"dismiss", kind:"dismiss"`; a callback
 named `dismiss` has no `kind`. Timeout, silence, expiry and dismiss are not consent.
 
 On a running build that discovers `hud_publish.wait_ms`, prefer a one-call
-question: publish callback actions with `wait_ms:30000`. A returned `action`
+question: publish callback actions with `wait_ms:30000` (CLI: add
+`--wait-ms 30000` to the question publish). A returned `action`
 is already consumed and needs no ACK; human × includes `kind:"dismiss"`.
 `gone:expired|replaced|displaced|cleared` ends an unanswered card and is not
 consent. An ordinary reply without action/gone means the wait ended: continue
