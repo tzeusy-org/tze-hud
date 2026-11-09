@@ -98,7 +98,11 @@ pub(crate) enum PanelEvent {
 struct Shared {
     /// What the compositor draws (`None`: closed), with a version that changes
     /// on every publish.
-    model: RwLock<(u64, Option<ControlPanelModel>)>,
+    model: RwLock<(
+        u64,
+        Option<ControlPanelModel>,
+        std::collections::HashSet<String>,
+    )>,
     /// The notice the compositor draws while the panel is closed, versioned
     /// like `model`.
     closed_notice: RwLock<(u64, Option<PanelNotice>)>,
@@ -125,6 +129,21 @@ pub(crate) struct ControlPanelHandle {
 }
 
 impl ControlPanelHandle {
+    /// Only actual fields/search take native focus on a pointer press.
+    /// Disclosure rows also draw as Value, so use the core's control metadata.
+    pub(crate) fn accepts_text(&self, target: &PanelHitTarget) -> bool {
+        use tze_hud_compositor::PanelPart;
+        let guard = self.shared.model.read().unwrap_or_else(|e| e.into_inner());
+        if guard.1.is_none() {
+            return false;
+        }
+        match target {
+            PanelHitTarget::Search => true,
+            PanelHitTarget::Row(id, PanelPart::Body) => guard.2.contains(id),
+            _ => false,
+        }
+    }
+
     /// Queue an event for the panel task; false once the task has stopped.
     pub(crate) fn send(&self, event: PanelEvent) -> bool {
         self.shared.events.send(event).is_ok()
@@ -253,12 +272,23 @@ impl ControlPanelHandle {
             .clone()
     }
 
-    fn publish(&self, model: Option<ControlPanelModel>) {
+    fn publish(&self, model: Option<ControlPanelModel>, nav: &Nav) {
         let open = model.is_some();
+        let fields = nav
+            .rows
+            .iter()
+            .filter_map(|(id, control)| {
+                matches!(control, row::Control::Field { .. }).then(|| id.clone())
+            })
+            .collect();
         {
             let mut guard = self.shared.model.write().unwrap_or_else(|e| e.into_inner());
+            if guard.1 == model && guard.2 == fields {
+                return;
+            }
             guard.0 += 1;
             guard.1 = model;
+            guard.2 = fields;
         }
         if !open {
             *self
@@ -366,7 +396,7 @@ pub(crate) fn spawn_control_panel(
     let (tx, mut rx) = mpsc::unbounded_channel();
     let handle = ControlPanelHandle {
         shared: Arc::new(Shared {
-            model: RwLock::new((0, None)),
+            model: RwLock::new((0, None, Default::default())),
             closed_notice: RwLock::new((0, None)),
             open: AtomicBool::new(false),
             geometry: RwLock::new(None),
@@ -420,7 +450,7 @@ pub(crate) fn spawn_control_panel(
                                 %error,
                                 "control panel: event handler failed; closing the panel and resuming agents"
                             );
-                            recover.publish(None);
+                            recover.publish(None, &Nav::default());
                             deps.pause.set(false).await;
                             None
                         }
@@ -806,8 +836,8 @@ impl PanelTask {
         }
         if model != self.published {
             self.published = model.clone();
-            self.handle.publish(model);
         }
+        self.handle.publish(model, &self.nav);
         if closed {
             let notice = self.closed_notice().await;
             self.handle.publish_closed_notice(notice);

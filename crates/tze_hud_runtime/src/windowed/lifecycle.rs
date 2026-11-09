@@ -371,6 +371,8 @@ struct ChromeNativeOwner {
     app_edge: Option<bool>,
     fault_delivered: bool,
     #[cfg(target_os = "windows")]
+    focus_origin: FocusOrigin,
+    #[cfg(target_os = "windows")]
     registrations: Vec<std::rc::Weak<ChromeNativeRegistration>>,
 }
 
@@ -383,6 +385,7 @@ struct ChromeNativeRegistration {
     installed: std::cell::Cell<bool>,
     remove_attempted: std::cell::Cell<bool>,
     expected_normal_release: std::cell::Cell<bool>,
+    overlay: bool,
     wake: tze_hud_scene::render_wake::RenderWakeNotifier,
 }
 
@@ -474,6 +477,26 @@ unsafe extern "system" fn chrome_capture_subclass(
         std::rc::Rc::increment_strong_count(ptr);
         std::rc::Rc::from_raw(ptr)
     };
+    if registration.overlay {
+        use windows::Win32::Foundation::LRESULT;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            GWL_EXSTYLE, MA_NOACTIVATE, STYLESTRUCT, WM_MOUSEACTIVATE, WM_STYLECHANGING,
+            WS_EX_NOACTIVATE,
+        };
+        if message == WM_MOUSEACTIVATE {
+            // Deliver the click without automatic activation. The ordinary
+            // pointer path explicitly focuses only a successfully hit text
+            // field, after releasing scene locks and recording the origin.
+            return LRESULT(MA_NOACTIVATE as isize);
+        }
+        if message == WM_STYLECHANGING && wparam.0 as i32 == GWL_EXSTYLE.0 && lparam.0 != 0 {
+            // winit regenerates the entire exstyle on cursor-hittest changes.
+            // Preserve this policy before application, leaving all proposed
+            // TRANSPARENT/LAYERED and other bits intact. No runtime lock here.
+            // SAFETY: WM_STYLECHANGING supplies a live writable STYLESTRUCT.
+            unsafe { (*(lparam.0 as *mut STYLESTRUCT)).styleNew |= WS_EX_NOACTIVATE.0 };
+        }
+    }
     let edge = match message {
         WM_LBUTTONDOWN => Some(true),
         WM_LBUTTONUP => Some(false),
@@ -796,6 +819,7 @@ impl ChromeWindowObserver {
     pub(super) fn install(
         window: &Window,
         wake: tze_hud_scene::render_wake::RenderWakeNotifier,
+        overlay: bool,
     ) -> Self {
         #[cfg(target_os = "windows")]
         {
@@ -836,6 +860,7 @@ impl ChromeWindowObserver {
                 installed: std::cell::Cell::new(false),
                 remove_attempted: std::cell::Cell::new(false),
                 expected_normal_release: std::cell::Cell::new(false),
+                overlay,
                 wake,
             });
             let raw = std::rc::Rc::into_raw(registration.clone());
@@ -880,6 +905,17 @@ impl ChromeWindowObserver {
                     published: false,
                 };
             }
+            if overlay {
+                use windows::Win32::UI::WindowsAndMessaging::{
+                    GWL_EXSTYLE, GetWindowLongW, SetWindowLongW, WS_EX_NOACTIVATE,
+                };
+                // SAFETY: this live HWND belongs to the current UI thread;
+                // the installed subclass preserves the bit on later rewrites.
+                unsafe {
+                    let style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
+                    SetWindowLongW(hwnd, GWL_EXSTYLE, (style | WS_EX_NOACTIVATE.0) as i32);
+                }
+            }
             Self {
                 registration: Some(registration),
                 published: false,
@@ -887,8 +923,30 @@ impl ChromeWindowObserver {
         }
         #[cfg(not(target_os = "windows"))]
         {
-            let _ = (window, wake);
+            let _ = (window, wake, overlay);
             Self { published: false }
+        }
+    }
+
+    /// A Windows overlay stays hidden if its native activation policy could
+    /// not be installed. Fullscreen and other platforms retain their policy.
+    pub(super) fn activation_ready(&self) -> bool {
+        #[cfg(target_os = "windows")]
+        {
+            use windows::Win32::UI::WindowsAndMessaging::{
+                GWL_EXSTYLE, GetWindowLongW, WS_EX_NOACTIVATE,
+            };
+            self.registration.as_ref().is_some_and(|registration| {
+                !registration.overlay
+                    || unsafe {
+                        GetWindowLongW(registration.hwnd, GWL_EXSTYLE) as u32 & WS_EX_NOACTIVATE.0
+                            != 0
+                    }
+            })
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            true
         }
     }
 
@@ -1120,30 +1178,79 @@ pub(super) fn foreground_window() -> Option<isize> {
     (!foreground.0.is_null()).then_some(foreground.0 as isize)
 }
 
-/// Hand keyboard focus back to `previous` (a window from
-/// [`foreground_window`]) unless it is `ours`. Allowed because this process
-/// holds the foreground; a window that has since closed is ignored by the OS.
-#[cfg(target_os = "windows")]
-pub(super) fn restore_foreground(previous: isize, ours: Option<&Window>) {
-    use std::ffi::c_void;
-    use windows::Win32::Foundation::HWND;
-    use windows::Win32::UI::WindowsAndMessaging::{GetForegroundWindow, SetForegroundWindow};
-    let previous = HWND(previous as *mut c_void);
-    let Some(ours) = ours.and_then(hwnd_for_window) else {
-        return;
-    };
-    // Only hand back focus the panel still holds: if the user has since
-    // clicked into another app, leave them there.
-    // SAFETY: GetForegroundWindow has no preconditions.
-    if ours == previous || unsafe { GetForegroundWindow() } != ours {
-        return;
+/// One outer focus take, shared by composer, panel and card keyboard focus.
+/// Nested HUD takes keep the original app; a later explicit take from another
+/// app starts a new session. Nontext pointer input never enters this state.
+#[cfg(any(target_os = "windows", test))]
+#[derive(Default)]
+struct FocusOrigin {
+    previous: Option<isize>,
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl FocusOrigin {
+    fn acquire(&mut self, foreground: Option<isize>, owned: bool) {
+        if !owned {
+            self.previous = foreground;
+        }
     }
-    // SAFETY: SetForegroundWindow accepts any HWND; a stale handle fails
-    // harmlessly.
-    let _ = unsafe { SetForegroundWindow(previous) };
+
+    fn leave(&mut self, still_owned: bool) -> Option<isize> {
+        self.previous.take().filter(|_| still_owned)
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn owns_foreground(owner: &ChromeNativeOwner, foreground: Option<isize>) -> bool {
+    owner
+        .registrations
+        .iter()
+        .filter_map(std::rc::Weak::upgrade)
+        .any(|registration| {
+            registration.installed.get() && Some(registration.hwnd.0 as isize) == foreground
+        })
+}
+
+/// Return focus only on an explicit outer HUD exit, and only if one of our
+/// live primary/secondary HWNDs still holds it. A third-app switch wins.
+pub(super) fn restore_foreground() {
+    #[cfg(target_os = "windows")]
+    {
+        use windows::Win32::Foundation::HWND;
+        use windows::Win32::UI::WindowsAndMessaging::{IsWindow, SetForegroundWindow};
+        let foreground = foreground_window();
+        let previous = CHROME_NATIVE_OWNER.with(|owner| {
+            let mut owner = owner.try_borrow_mut().ok()?;
+            let owned = owns_foreground(&owner, foreground);
+            owner.focus_origin.leave(owned)
+        });
+        if let Some(previous) = previous {
+            let previous = HWND(previous as *mut std::ffi::c_void);
+            // SAFETY: this saved HWND is queried before use; closure leaves
+            // focus with Windows. No native call runs inside the owner borrow.
+            if unsafe { IsWindow(previous) }.as_bool() {
+                let _ = unsafe { SetForegroundWindow(previous) };
+            }
+        }
+    }
 }
 
 pub(super) fn focus_window_for_text_input(window: &Window) {
+    #[cfg(target_os = "windows")]
+    {
+        let foreground = foreground_window();
+        let recorded = CHROME_NATIVE_OWNER.with(|owner| {
+            let Ok(mut owner) = owner.try_borrow_mut() else {
+                return false;
+            };
+            let owned = owns_foreground(&owner, foreground);
+            owner.focus_origin.acquire(foreground, owned);
+            true
+        });
+        if !recorded {
+            return;
+        }
+    }
     window.focus_window();
     window.set_ime_allowed(true);
 
@@ -2312,7 +2419,6 @@ impl WinitApp {
                     .and_then(|i| self.state.secondaries.get(i).map(|s| &s.window))
                     .or(self.state.window.as_ref());
                 if let Some(window) = window {
-                    focus_window_for_text_input(window);
                     begin_os_mouse_capture(window);
                 }
             } else {
@@ -2331,7 +2437,6 @@ impl WinitApp {
                 None => self.state.window.as_ref(),
             };
             if let Some(window) = window {
-                focus_window_for_text_input(window);
                 begin_os_mouse_capture(window);
             }
             self.update_overlay_cursor_hittest();
@@ -2615,6 +2720,7 @@ impl WinitApp {
         // compositor (which renders caret/selection from the local echo slot,
         // not the input processor) without a borrow conflict (hud-etrs0).
         let mut composer_selection_changed = false;
+        let mut take_text_focus = false;
         let mut pointer_processed = false;
         // Interactive gestures require guaranteed same-frame local feedback
         // (local-feedback-first).  For those events, acquire the locks with a
@@ -2751,6 +2857,15 @@ impl WinitApp {
                         .process(&pointer_event, &mut scene);
                     (r, None)
                 };
+                // An old composer focus is insufficient: this exact accepted
+                // Down must hit its text node. OUTPUT, buttons and lock misses
+                // cannot activate the native window.
+                take_text_focus = pointer_event.kind == PointerEventKind::Down
+                    && matches!(result.hit, HitResult::NodeHit { node_id, .. }
+                        if self.state.input_processor.composer_focused_node() == Some(node_id)
+                            && scene.nodes.get(&node_id).is_some_and(|node|
+                                matches!(&node.data, tze_hud_scene::NodeData::HitRegion(hit)
+                                    if hit.accepts_composer_input)));
 
                 // Log focus transitions and broadcast FocusGainedEvent /
                 // FocusLostEvent over the FOCUS_EVENTS gRPC channel.
@@ -3103,6 +3218,17 @@ impl WinitApp {
         }
 
         // The accepted input is committed and both scene/state guards are gone.
+        if take_text_focus {
+            let window = self
+                .state
+                .window
+                .iter()
+                .chain(self.state.secondaries.iter().map(|display| &display.window))
+                .find(|window| Some(window.id()) == self.state.press_window);
+            if let Some(window) = window {
+                focus_window_for_text_input(window);
+            }
+        }
         for outcome in pending_notification_outcomes {
             self.deliver_notification_activation(outcome);
         }
@@ -3309,6 +3435,34 @@ mod tests {
     use tokio::sync::Mutex;
 
     use super::*;
+
+    #[test]
+    fn outer_focus_return_preserves_origin_and_user_switches() {
+        let mut origin = FocusOrigin::default();
+        assert_eq!(origin.leave(true), None, "nontext clicks never acquire");
+        origin.acquire(Some(10), false); // External editor -> composer.
+        origin.acquire(Some(20), true); // Primary -> secondary HUD.
+        origin.acquire(Some(21), true); // Composer -> panel -> card.
+        assert_eq!(origin.leave(true), Some(10));
+        assert_eq!(origin.leave(true), None, "return is consumed once");
+
+        origin.acquire(Some(10), false);
+        assert_eq!(
+            origin.leave(false),
+            None,
+            "third-app switch wins over late exit"
+        );
+        assert_eq!(
+            origin.leave(true),
+            None,
+            "late exit cannot resurrect old origin"
+        );
+        origin.acquire(Some(10), false);
+        origin.acquire(Some(30), false); // A new explicit take from a third app.
+        assert_eq!(origin.leave(true), Some(30));
+        origin.acquire(None, false);
+        assert_eq!(origin.leave(true), None);
+    }
 
     #[test]
     fn foreground_lock_timeout_is_restored_after_focus() {

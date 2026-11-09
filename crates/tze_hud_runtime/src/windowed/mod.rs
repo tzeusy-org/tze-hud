@@ -1264,8 +1264,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             }
         };
 
-        let chrome_observer =
-            lifecycle::ChromeWindowObserver::install(&window, self.state.wake.main_work_notifier());
+        let chrome_observer = lifecycle::ChromeWindowObserver::install(
+            &window,
+            self.state.wake.main_work_notifier(),
+            self.state.effective_mode == WindowMode::Overlay,
+        );
 
         // In overlay mode, initialise cursor hittest to false so all pointer
         // events pass through to the desktop until the cursor enters a
@@ -1279,9 +1282,14 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                      may not work on this platform/compositor"
                 );
             }
-            // WS_EX_NOREDIRECTIONBITMAP is set at creation time via
-            // with_no_redirection_bitmap(true) above. No post-creation
-            // flag manipulation needed.
+            if !chrome_observer.activation_ready() {
+                tracing::error!("overlay: native no-activate policy unavailable");
+                leave_event_loop(event_loop);
+                return;
+            }
+            // Hidden/inactive creation lets the subclass/style take effect
+            // before winit's first SW_SHOWNOACTIVATE.
+            window.set_visible(true);
         }
 
         self.state.window = Some(window.clone());
