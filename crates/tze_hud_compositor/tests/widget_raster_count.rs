@@ -679,6 +679,7 @@ async fn widget_param_update_rasterizes_only_that_instance() {
                 .unwrap()
                 .register_svg(&name, &file, bytes);
         }
+        let mut severity_frames: HashMap<&str, Vec<u8>> = HashMap::new();
         for owner in [false, true] {
             let mut scene = SceneGraph::new(512.0, 256.0);
             let tab = scene.create_tab("Severity", 0).unwrap();
@@ -717,6 +718,22 @@ async fn widget_param_update_rasterizes_only_that_instance() {
                     .unwrap();
                 render(&mut compositor, &mut scene, &mut surface);
                 let pixels = surface.read_pixels(&compositor.device);
+                if severity != "info" {
+                    if owner {
+                        let baseline = &severity_frames[severity];
+                        let changed = pixels
+                            .chunks_exact(4)
+                            .zip(baseline.chunks_exact(4))
+                            .filter(|(actual, expected)| actual != expected)
+                            .count();
+                        assert_eq!(
+                            changed, 0,
+                            "{name}/{severity}: owner info fill altered non-info pixels, including rounded edges"
+                        );
+                    } else {
+                        severity_frames.insert(severity, pixels.clone());
+                    }
+                }
                 let actual = widget_region(&pixels, 512, (0, 0), (sample.0, sample.1, 1, 1))[0];
                 let expected = match severity {
                     "warning" => token_rgb("color.caution"),
