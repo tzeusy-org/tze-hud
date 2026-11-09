@@ -61,7 +61,10 @@ Surfaces on that lifecycle, in priority order:
   decisions: seeing state at a glance, and acting with a press or a short
   reply. Reading, reviewing and editing belong in tools built for them (a
   claude.ai artifact, a Codex page, GitHub), reached by a link from the HUD.
-  Don't rebuild document or app UI in the overlay.
+  Don't rebuild document or app UI in the overlay. A link may also target the
+  owner's own window for the originating session: on an explicit owner press,
+  the runtime may activate one matching top-level window. It never moves,
+  sizes, or tracks windows, and publication alone never activates anything.
 - **No hardcoded styling.** Visuals come from flat design tokens, resolved in
   layers: canonical defaults, then the selected theme, then `[design_tokens]`
   overrides. Themes (token values only, Tonal Glass by default) and fonts are
