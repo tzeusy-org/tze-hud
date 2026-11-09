@@ -2545,6 +2545,98 @@ async fn publish_wait_endings_deadline_delay_and_validation() {
         );
     }
 
+    // The event's acceptance time owns the outcome, even when the request is
+    // not polled until later. Exercise early, exact-boundary and late events.
+    let mut deadline_failures = Vec::new();
+    for event in ["answer", "clear"] {
+        for event_at in [500, 1000, 1500] {
+            let (server, clock) = self::server();
+            let mut ask = Box::pin(call(&server, "hud_publish", question(1000)));
+            assert!(ask.as_mut().poll(&mut context).is_pending());
+            let id = latest_card(&server).await;
+            clock.advance(event_at);
+            tokio::time::advance(std::time::Duration::from_millis(event_at)).await;
+            if event == "answer" {
+                activate_card(&server, id, false).await;
+            } else {
+                call(
+                    &server,
+                    "hud_clear",
+                    json!({"surface":"zone:notification-area","key":"question"}),
+                )
+                .await;
+            }
+            clock.advance(1500 - event_at);
+            tokio::time::advance(std::time::Duration::from_millis(1500 - event_at)).await;
+            let early = event_at < 1000;
+            let input = call(&server, "hud_input", json!({})).await;
+            let count = usize::from(event == "answer" && !early);
+            if input["items"].as_array().unwrap().len() != count {
+                deadline_failures.push(format!(
+                    "R1 {event}@{event_at}: incorrect input ownership {input}"
+                ));
+            }
+            let Poll::Ready(answer) = ask.as_mut().poll(&mut context) else {
+                panic!("deadline or accepted event must finish");
+            };
+            let expected = if early && event == "clear" {
+                json!({"ok":true,"gone":"cleared"})
+            } else if early {
+                json!({"ok":true,"expires_in_ms":58500,"action":"ship"})
+            } else {
+                json!({"ok":true,"expires_in_ms":58500})
+            };
+            if answer != expected {
+                deadline_failures.push(format!(
+                    "R1 {event}@{event_at}: got {answer}, expected {expected}"
+                ));
+            }
+            if count == 1 && !input["items"].as_array().unwrap().is_empty() {
+                assert_eq!(
+                    call(&server, "hud_input", json!({})).await,
+                    input,
+                    "late accepted input keeps its stable id after publish ends"
+                );
+            }
+        }
+    }
+    // Scene contention cannot extend the original cap. Both an unanswered
+    // card and an already accepted answer retain ordinary input on failure.
+    for accepted_early in [false, true] {
+        let (server, clock) = self::server();
+        let mut ask = Box::pin(call_err(&server, "hud_publish", question(1000)));
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        let id = latest_card(&server).await;
+        let event_at = if accepted_early { 500 } else { 0 };
+        if accepted_early {
+            clock.advance(event_at);
+            tokio::time::advance(std::time::Duration::from_millis(event_at)).await;
+            activate_card(&server, id, false).await;
+        }
+        let held = server.scene.lock().await;
+        clock.advance(1500 - event_at);
+        tokio::time::advance(std::time::Duration::from_millis(1500 - event_at)).await;
+        match ask.as_mut().poll(&mut context) {
+            Poll::Ready(error) => assert_eq!(error["code"], "INTERNAL"),
+            Poll::Pending => deadline_failures.push(format!(
+                "R2 accepted_early={accepted_early}: held scene extends the cap"
+            )),
+        }
+        drop(ask);
+        drop(held);
+        if !accepted_early {
+            activate_card(&server, id, false).await;
+        }
+        let input = call(&server, "hud_input", json!({})).await;
+        assert_eq!(input["items"][0]["action"], "ship");
+        assert_eq!(call(&server, "hud_input", json!({})).await, input);
+    }
+    assert!(
+        deadline_failures.is_empty(),
+        "{}",
+        deadline_failures.join("\n")
+    );
+
     // A later invalid mutation rolls back the clear AND its terminal/wake debt.
     {
         use tze_hud_scene::{
