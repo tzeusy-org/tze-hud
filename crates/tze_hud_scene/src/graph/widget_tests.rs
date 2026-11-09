@@ -11,7 +11,7 @@ fn widget_audiences_reject_agent_writes_and_survive_publication_lifecycle() {
         ContentionPolicy::Stack { max_depth: 3 },
         ContentionPolicy::MergeByKey { max_keys: 3 },
     ] {
-        let (mut scene, tab) = scene_with_gauge(policy);
+        let (mut scene, tab, clock) = scene_with_gauge_and_clock(policy);
         let schema = &mut scene
             .widget_registry
             .definitions
@@ -92,6 +92,28 @@ fn widget_audiences_reject_agent_writes_and_survive_publication_lifecycle() {
                 WidgetParameterValue::Enum("warning".into())
             );
         }
+        scene
+            .publish_to_widget(
+                "gauge",
+                HashMap::from([("level".into(), WidgetParameterValue::F32(0.4))]),
+                "agent.test",
+                None,
+                0,
+                Some(scene.now_wall_us() + 1_000),
+            )
+            .unwrap();
+        clock.advance(1);
+        assert_eq!(scene.drain_expired_widget_publications(), 1);
+        let effective = scene
+            .widget_registry
+            .get_occupancy("gauge", tab)
+            .unwrap()
+            .effective_params;
+        assert_eq!(effective["label"], owner);
+        assert_eq!(
+            effective["severity"],
+            WidgetParameterValue::Enum("warning".into())
+        );
     }
 }
 

@@ -283,8 +283,8 @@ fn widget_params(scene: &SceneGraph, instance: &str) -> Value {
         let c = d.constraints.as_ref();
         let ty = match d.param_type {
             WidgetParamType::F32 => match (c.and_then(|c| c.f32_min), c.and_then(|c| c.f32_max)) {
-                (Some(lo), Some(hi)) => format!("f32 {lo}..{hi}"),
-                _ => "f32".into(),
+                (Some(lo), Some(hi)) => format!("number {lo}..{hi}"),
+                _ => "number".into(),
             },
             WidgetParamType::String => {
                 match c.and_then(|c| c.string_max_bytes).filter(|n| *n > 0) {

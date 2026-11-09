@@ -1606,7 +1606,7 @@ async fn surfaces_report_holdings_compactly() {
     let gauge = entries.iter().find(|e| e["s"] == "widget:gauge").unwrap();
     assert_eq!(
         gauge["params"],
-        json!({"level": "f32 0..1", "label": "string", "color": "color"})
+        json!({"level": "number 0..1", "label": "string", "color": "color"})
     );
     let text = v.to_string();
     assert!(

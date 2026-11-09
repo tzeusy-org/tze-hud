@@ -532,8 +532,8 @@ explicit `--capture-at-ms 0` captures the initial frame. Delayed publications
 still become active when due and may be entering at the chosen checkpoint;
 this is not a promise that arbitrary delays or streaming content have settled.
 CPU widget mode defaults to 0ms. The status fixture
-`status-indicator-status-matrix-test.json` updates `main-status` twelve
-times: one final image shows **offline in the owner-configured style**, not all twelve updates.
+`status-indicator-status-matrix-test.json` updates `main-status` four
+times: one final image shows **offline in the owner-configured style**, not all four updates.
 Use separate checkpoint fixtures/images to make intermediate-state claims.
 
 The PNG is straight-alpha sRGB RGBA: GPU sRGB framebuffer bytes are decoded,

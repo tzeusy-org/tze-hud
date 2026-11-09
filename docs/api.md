@@ -47,7 +47,7 @@ milliseconds, named `*_ms`, everywhere.
 {"surfaces":[
   {"s":"zone:subtitle","accepts":"text","one":true},
   {"s":"zone:notification-area","accepts":"notification","max":5,"held":true,"expires_in_ms":4200},
-  {"s":"widget:gauge","params":{"level":"f32 0..1","label":"string<=12"}},
+  {"s":"widget:gauge","params":{"level":"number 0..1","label":"string<=12"}},
   {"s":"portal:claude-main","state":"attached","pending_input":1}
 ]}
 ```
@@ -59,7 +59,8 @@ otherwise. Scheduled zone publications count as held before presentation;
 Single-occupant zones carry `one:true`; stacks carry `max:N`. `busy:true`
 appears only when another agent currently occupies a single-occupant zone.
 MCP accepts lists omit `static_image`: resource upload is on gRPC. Strings with
-an explicit positive byte limit appear as `string<=N`; others as `string`.
+an explicit positive byte limit appear as `string<=N`; others as `string`. Numeric discovery hints use JSON `number` with the
+declared bounds (for example `number 0..1`); admission still enforces finite f32.
 Widget discovery includes only parameters with `audience = "model"` (the
 manifest default). `owner` and `runtime` parameters remain declared for local
 configuration/rendering but are rejected atomically on both agent transports.
