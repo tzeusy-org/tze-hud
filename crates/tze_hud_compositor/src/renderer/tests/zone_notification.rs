@@ -239,7 +239,7 @@ async fn notification_actions_layout_matches_hit_regions() {
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
     let adversarial = "A full-width label still clips within one button. ".repeat(128);
     for (labels, stacked) in [
-        (["Ship", "Hold", "Skip", "Open"], false),
+        (["Go", "No", "OK", "Do"], false),
         ([adversarial.as_str(), "Hold", "Skip", "Open"], true),
         (
             [
