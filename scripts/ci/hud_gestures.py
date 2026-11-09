@@ -1430,9 +1430,14 @@ def overlay_focus_etiquette(run: Run, notepad_pid: int, surface: str) -> None:
         for _ in range(2):
             before = WIN.foreground_pid()
             run.key("alt+Tab")
-            wait_until(lambda: (WIN.foreground_pid() != before, WIN.foreground_pid()),
-                       what="real Alt-Tab changes the foreground", timeout_s=SETTLE_S)
-            switches.append(WIN.foreground_pid())
+            # A changed PID alone does not establish the intended destination.
+            # Observe an owned editor before any subsequent guarded input.
+            def switched_owned_editor():
+                pid = WIN.foreground_pid()
+                return pid in {notepad_pid, third.pid} and pid != before, pid
+            switched, _ = wait_until(switched_owned_editor,
+                                    what="real Alt-Tab reaches an owned editor", timeout_s=SETTLE_S)
+            switches.append(switched)
             if switches[-1] == third.pid:
                 break
         if WIN.foreground_pid() != third.pid:
