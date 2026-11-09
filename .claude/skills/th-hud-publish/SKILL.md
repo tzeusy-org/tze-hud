@@ -32,7 +32,8 @@ updates or end-to-end Windows validation.
 2. Use a brief notification for a milestone or actionable question. Keep one
    work item under a unique session/work `key`; replace it on meaningful changes.
    A card carries one question and at most a couple of short lines. Put depth in
-   chat or a PR and name that destination; no notification link-action field exists.
+   chat or a PR and name that destination. A notification action may use an HTTPS
+   `url` instead of `callback_id` to link to a PR or artifact; never supply both.
 3. Follow [repository instructions](../../../AGENTS.md) and owner presentation
    constraints. Current owner dogfooding rejects the status bar's large slab
    and default portal presentation; prefer
