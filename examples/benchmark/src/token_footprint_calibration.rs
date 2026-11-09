@@ -418,7 +418,7 @@ mod calibration {
 
         fn ingress_wake(&self) -> tze_hud_scene::render_wake::RenderWakeNotifier {
             let (portals, key, phase, input_ready, changed) = (
-                self.surfaces.clone(),
+                self.portals.clone(),
                 self.key.clone(),
                 self.phase.clone(),
                 self.input_ready.clone(),
