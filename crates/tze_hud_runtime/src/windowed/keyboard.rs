@@ -3627,6 +3627,15 @@ mod tests {
                 },
                 Some(tab_id),
             );
+            app.dispatch_key_up_event_inner(
+                &RawKeyUpEvent {
+                    key_code: key.into(),
+                    key: key.into(),
+                    modifiers: tze_hud_input::KeyboardModifiers::NONE,
+                    timestamp_mono_us: tze_hud_scene::MonoUs(3),
+                },
+                Some(tab_id),
+            );
         }
         assert_eq!(
             app.state
@@ -3781,6 +3790,15 @@ mod tests {
                     key: key.into(),
                     modifiers: tze_hud_input::KeyboardModifiers::NONE,
                     repeat: false,
+                    timestamp_mono_us: tze_hud_scene::MonoUs(7),
+                },
+                Some(tab_id),
+            );
+            app.dispatch_key_up_event_inner(
+                &RawKeyUpEvent {
+                    key_code: key.into(),
+                    key: key.into(),
+                    modifiers: tze_hud_input::KeyboardModifiers::NONE,
                     timestamp_mono_us: tze_hud_scene::MonoUs(7),
                 },
                 Some(tab_id),

@@ -5290,6 +5290,32 @@ mod tests {
             }
         }
 
+        // Losing the whole HUD before an exit key is released cancels the
+        // pending return. Its late release stays consumed without answering again.
+        for (code, key, callbacks) in [
+            ("Digit2", "2", vec!["reject"]),
+            ("Escape", "Escape", vec![]),
+        ] {
+            let mut harness = card_with_editor();
+            request_answer(&mut harness);
+            harness.enqueue(key_down(code, key, 300));
+            harness.drain();
+            assert_eq!(take_action_ids(&harness), callbacks);
+            assert_eq!(
+                harness.app.state.answer_keyboard.return_key.as_deref(),
+                Some(code)
+            );
+            harness
+                .app
+                .handle_window_focus_with_foreground(None, false, false);
+            assert!(harness.app.state.answer_keyboard.return_key.is_none());
+            harness.enqueue(key_up(code, key, 301));
+            harness.drain();
+            assert!(harness.app.state.answer_keyboard.return_key.is_none());
+            assert!(take_action_ids(&harness).is_empty());
+            assert_eq!(harness.composer_draft().as_deref(), Some("kept"));
+        }
+
         // The global answer chord transfers input from an open running panel.
         // A request with no card keeps its search and panel completely intact.
         {

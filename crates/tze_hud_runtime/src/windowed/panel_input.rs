@@ -1118,7 +1118,11 @@ pub(super) mod panel_task_tests {
         let ids: Vec<_> = items.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(
             ids,
-            ["input.pause_chord", "input.panel_chord"],
+            [
+                "input.pause_chord",
+                "input.panel_chord",
+                "input.answer_chord"
+            ],
             "pairing is off in this fixture, so its chord is not listed"
         );
 
