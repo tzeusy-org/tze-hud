@@ -426,11 +426,11 @@ async fn notification_actions_layout_matches_hit_regions() {
         );
         scene.overlay.notification_answer = Some(publication_id);
         let with_hints = compositor.collect_text_items(&scene, 1280.0, 1080.0);
-        for index in 0..4 {
+        for (index, action_label) in labels.iter().enumerate() {
             let label = |items: &[crate::text::TextItem]| {
                 items
                     .iter()
-                    .find(|item| &*item.text == labels[index])
+                    .find(|item| &*item.text == *action_label)
                     .map(|item| {
                         (
                             item.pixel_x,
@@ -448,7 +448,7 @@ async fn notification_actions_layout_matches_hit_regions() {
             assert_eq!(
                 with_hints
                     .iter()
-                    .filter(|item| &*item.text == (index + 1).to_string())
+                    .filter(|item| *item.text == (index + 1).to_string())
                     .count(),
                 1
             );
