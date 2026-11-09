@@ -1026,12 +1026,13 @@ baselined against regressions.
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
 
 All seven measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
-`o200k_base`. The discovery-audience change (`hud-ljhku.7`, source177e1096)
-changes model-visible `tools/list` from564 to590 tokens and default discovery
-from113 to126. The five other flows retain identical request/response
-fingerprints and metrics: zone39, widget22, error45, complete choice114 and
-portal137. Production discovery is210, down from~232; occupancy hints and all
-model-owned values/limits remain. Every ceiling is unchanged. Numeric discovery
+`o200k_base`. The discovery-audience change (`hud-ljhku.7`, source `177e1096`)
+changes model-visible `tools/list` from 564 to 590 tokens and default discovery
+from 113 to 126. The five other flows retain identical request/response
+fingerprints and metrics: zone 39, widget 22, error 45, complete choice 114 and
+portal 137. Production discovery is 210, down from ~232; occupancy hints and all
+model-owned values/limits remain. The seven canonical flow ceilings are unchanged; the signed production target
+is tighter than its former 250-token envelope. Numeric discovery
 says `number`; admission and error hints still enforce finite f32.
 
 The baseline is **pending owner review** for these concrete new bytes. Earlier
@@ -1081,7 +1082,7 @@ the previous items and polls, so poll+ack is one round trip.
 acceptance flows (`docs/scope.md`), run end to end against `production.toml`.
 Its fresh, unheld discovery budget is the production row above: <=210 tokens,
 retaining model-owned parameter names, bounds and actionable occupancy hints.
-The existing live-state POC fixtures retain their250-token envelope when
+The existing live-state POC fixtures retain their 250-token envelope when
 holdings or attached portals add state/expiry/pending-input fields. That
 fixture envelope is not a promise for arbitrary numbers of live portals;
 required state fields are never dropped to fit the unheld baseline.

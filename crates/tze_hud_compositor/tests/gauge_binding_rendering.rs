@@ -20,7 +20,7 @@
 //!
 //! 8.1  LatestWins — Agent B's publish overrides Agent A's.
 //! 8.2  Parameter retention — unpublished params retain previous agent's values.
-//! 8.x  All-four-params simultaneous publish.
+//! 8.x  Model parameters publish together; owner/color bindings render locally.
 //!
 //! ## Sources
 //!
@@ -750,7 +750,7 @@ mod contention {
 
     /// All model-owned gauge parameters published simultaneously in a single call.
     ///
-    /// Verifies that a single publish with all four params correctly updates all
+    /// Verifies that a single publish with all model params correctly updates all
     /// effective parameter values in one render pass.
     #[test]
     fn gauge_model_params_simultaneous_publish() {
@@ -770,7 +770,7 @@ mod contention {
 
         scene
             .publish_to_widget("gauge", params, "agent.all", None, 0, None)
-            .expect("all-four-params publish must succeed");
+            .expect("model-params publish must succeed");
 
         let occupancy = scene
             .widget_registry
