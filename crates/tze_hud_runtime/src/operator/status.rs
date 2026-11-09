@@ -50,6 +50,11 @@ impl HotkeyStatus {
             ChordRole::Pause => ("safe", "pauses agents", "no human safe-mode override"),
             ChordRole::Panel => ("panel", "opens the control panel", "use the pause chord"),
             ChordRole::Pairing => ("pair", "opens Connect an agent", "use the control panel"),
+            ChordRole::Answer => (
+                "answer",
+                "focuses the newest question",
+                "use the card buttons",
+            ),
         };
         match self {
             Self::NotApplicable => None,
@@ -80,7 +85,8 @@ impl HotkeyStatus {
     }
 }
 
-static HOTKEYS: Mutex<[HotkeyStatus; 3]> = Mutex::new([
+static HOTKEYS: Mutex<[HotkeyStatus; ChordRole::ALL.len()]> = Mutex::new([
+    HotkeyStatus::NotApplicable,
     HotkeyStatus::NotApplicable,
     HotkeyStatus::NotApplicable,
     HotkeyStatus::NotApplicable,
@@ -91,6 +97,7 @@ fn slot(role: ChordRole) -> usize {
         ChordRole::Pause => 0,
         ChordRole::Panel => 1,
         ChordRole::Pairing => 2,
+        ChordRole::Answer => 3,
     }
 }
 
@@ -446,6 +453,7 @@ impl StatusSource {
             "safe_mode_hotkey": hotkey(ChordRole::Pause).to_json(),
             "panel_hotkey": hotkey(ChordRole::Panel).to_json(),
             "pairing_hotkey": hotkey(ChordRole::Pairing).to_json(),
+            "answer_hotkey": hotkey(ChordRole::Answer).to_json(),
             "displays": displays,
             "unplaced_zones": unplaced_zones,
             "frames_presented": self.presents.as_ref().map(|c| c.snapshot().presents),
@@ -528,6 +536,15 @@ mod tests {
                 .unwrap()
                 .contains("Ctrl+Shift+F12 pauses agents")
         );
+        let answer = HotkeyStatus::Registered {
+            chord: "Ctrl+Shift+F9".into(),
+        };
+        assert!(
+            answer
+                .banner_line(ChordRole::Answer)
+                .unwrap()
+                .contains("Ctrl+Shift+F9 focuses")
+        );
         let line = failed().banner_line(ChordRole::Pause).unwrap();
         assert!(line.contains("NOT registered") && line.contains("already in use"));
     }
@@ -544,6 +561,13 @@ mod tests {
         set_hotkey(pause, ok.clone());
         assert_eq!(hotkey(pause), ok);
         // Roles are independent slots.
+        let answer = HotkeyStatus::Registered {
+            chord: "Ctrl+Shift+F9".into(),
+        };
+        set_hotkey(ChordRole::Answer, answer.clone());
+        assert_eq!(hotkey(ChordRole::Answer), answer);
+        assert_eq!(hotkey(pause), ok);
+        set_hotkey(ChordRole::Answer, HotkeyStatus::NotApplicable);
         assert_eq!(hotkey(ChordRole::Panel), HotkeyStatus::NotApplicable);
         // Late report: the starter's receiver is gone, so the thread records it.
         set_hotkey(pause, pending.clone());

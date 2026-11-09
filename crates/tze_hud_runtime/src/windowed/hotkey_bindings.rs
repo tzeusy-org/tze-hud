@@ -14,6 +14,7 @@ fn base_id(role: ChordRole) -> i32 {
         ChordRole::Pause => 1,
         ChordRole::Panel => 2,
         ChordRole::Pairing => 3,
+        ChordRole::Answer => 4,
     }
 }
 
@@ -26,7 +27,7 @@ fn slot(role: ChordRole) -> usize {
 
 /// The chords and the id each is registered under now.
 pub(super) struct Bindings {
-    ids: [i32; 3],
+    ids: [i32; ChordRole::ALL.len()],
     chords: HudChords,
 }
 
@@ -89,33 +90,33 @@ mod tests {
     fn rebinding_registers_first_and_keeps_the_old_chord_on_refusal() {
         let mut bindings = Bindings::new(HudChords::default());
         let log = RefCell::new(Vec::new());
-        let f9 = Hotkey::parse("Ctrl+Shift+F9").unwrap();
         let f8 = Hotkey::parse("Ctrl+Shift+F8").unwrap();
+        let f7 = Hotkey::parse("Ctrl+Shift+F7").unwrap();
         let ok = |id, hk: Hotkey| -> Result<(), ()> {
             log.borrow_mut().push(format!("register {id} {hk}"));
             Ok(())
         };
         let release = |id| log.borrow_mut().push(format!("unregister {id}"));
 
-        bindings.rebind(ChordRole::Panel, f9, ok, release).unwrap();
-        assert_eq!(bindings.id(ChordRole::Panel), 12);
-        assert_eq!(bindings.chord(ChordRole::Panel), f9);
-        bindings.rebind(ChordRole::Panel, f8, ok, release).unwrap();
-        assert_eq!(bindings.id(ChordRole::Panel), 2);
+        bindings.rebind(ChordRole::Answer, f8, ok, release).unwrap();
+        assert_eq!(bindings.id(ChordRole::Answer), 14);
+        assert_eq!(bindings.chord(ChordRole::Answer), f8);
+        bindings.rebind(ChordRole::Answer, f7, ok, release).unwrap();
+        assert_eq!(bindings.id(ChordRole::Answer), 4);
         assert_eq!(
             *log.borrow(),
             [
-                "register 12 Ctrl+Shift+F9",
-                "unregister 2",
-                "register 2 Ctrl+Shift+F8",
-                "unregister 12"
+                "register 14 Ctrl+Shift+F8",
+                "unregister 4",
+                "register 4 Ctrl+Shift+F7",
+                "unregister 14"
             ]
         );
 
         log.borrow_mut().clear();
         let refused = bindings.rebind(
-            ChordRole::Panel,
-            f9,
+            ChordRole::Answer,
+            f8,
             |_, _| Err("in use"),
             |id| log.borrow_mut().push(format!("unregister {id}")),
         );
@@ -123,10 +124,10 @@ mod tests {
         assert!(log.borrow().is_empty(), "the old chord is never released");
         assert_eq!(
             (
-                bindings.id(ChordRole::Panel),
-                bindings.chord(ChordRole::Panel)
+                bindings.id(ChordRole::Answer),
+                bindings.chord(ChordRole::Answer)
             ),
-            (2, f8)
+            (4, f7)
         );
         assert_eq!(bindings.id(ChordRole::Pause), 1, "other roles untouched");
 
@@ -134,6 +135,7 @@ mod tests {
             (1, ChordRole::Pause),
             (12, ChordRole::Panel),
             (13, ChordRole::Pairing),
+            (14, ChordRole::Answer),
         ] {
             assert_eq!(Bindings::role_for_id(id), Some(role));
         }

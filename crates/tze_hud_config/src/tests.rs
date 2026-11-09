@@ -623,11 +623,11 @@ fn safe_mode_hotkey_defaults_overrides_and_rejects_garbage() {
 
     let default = parse_ok(&cfg("")).freeze().expect("freeze");
     assert_eq!(default.chords, tze_hud_scene::config::HudChords::default());
-    assert!(
+    assert_eq!(
         default
             .chords
-            .role_of(&tze_hud_scene::config::Hotkey::parse("Ctrl+Shift+F9").unwrap())
-            .is_some(),
+            .role_of(&tze_hud_scene::config::Hotkey::parse("Ctrl+Shift+F9").unwrap()),
+        Some(tze_hud_scene::config::ChordRole::Answer),
         "the owner answer chord is enabled by default"
     );
 
@@ -646,12 +646,21 @@ fn safe_mode_hotkey_defaults_overrides_and_rejects_garbage() {
     );
 
     let custom = parse_ok(&cfg(
-        "panel_hotkey = \"Ctrl+Alt+F10\"\npairing_hotkey = \"Ctrl+Alt+9\"",
+        "panel_hotkey = \"Ctrl+Alt+F10\"\npairing_hotkey = \"Ctrl+Alt+9\"\nanswer_hotkey = \"Alt+F8\"",
     ))
     .freeze()
     .expect("freeze");
     assert_eq!(custom.chords.panel.to_string(), "Ctrl+Alt+F10");
     assert_eq!(custom.chords.pairing.to_string(), "Ctrl+Alt+9");
+    assert_eq!(custom.chords.answer.to_string(), "Alt+F8");
+    let errors = parse_ok(&cfg("answer_hotkey = \"F9\""))
+        .freeze()
+        .expect_err("answer chord needs a modifier too");
+    assert!(
+        errors
+            .iter()
+            .any(|e| e.field_path == "runtime.answer_hotkey")
+    );
 }
 
 /// WHEN two HUD chords are the same (explicitly or against a default) THEN
@@ -675,4 +684,16 @@ fn hud_chords_must_be_distinct() {
         "{}",
         dup.hint
     );
+    for runtime in [
+        "answer_hotkey = \"Ctrl+Shift+F11\"",
+        "panel_hotkey = \"Ctrl+Shift+F9\"",
+        "panel_hotkey = \"Alt+8\"\nanswer_hotkey = \"Alt+8\"",
+    ] {
+        let errors = parse_ok(&cfg(runtime)).freeze().expect_err("answer clash");
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.field_path == "runtime.answer_hotkey")
+        );
+    }
 }

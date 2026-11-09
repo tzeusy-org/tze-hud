@@ -55,6 +55,16 @@ impl Hotkey {
         key: HotkeyKey::Function(10),
     };
 
+    /// Default chord that focuses the newest question without interrupting
+    /// the owner until they explicitly choose to answer.
+    pub const DEFAULT_ANSWER: Hotkey = Hotkey {
+        ctrl: true,
+        shift: true,
+        alt: false,
+        win: false,
+        key: HotkeyKey::Function(9),
+    };
+
     /// Parse a chord such as `"Ctrl+Shift+F12"` (case-insensitive, `+`-separated,
     /// modifiers `Ctrl|Shift|Alt|Win`, any order).
     pub fn parse(s: &str) -> Result<Hotkey, HotkeyParseError> {
@@ -161,10 +171,17 @@ pub enum ChordRole {
     Panel,
     /// Open pairing (`[runtime].pairing_hotkey`).
     Pairing,
+    /// Focus the newest unanswered callback card (`[runtime].answer_hotkey`).
+    Answer,
 }
 
 impl ChordRole {
-    pub const ALL: [ChordRole; 3] = [ChordRole::Pause, ChordRole::Panel, ChordRole::Pairing];
+    pub const ALL: [ChordRole; 4] = [
+        ChordRole::Pause,
+        ChordRole::Panel,
+        ChordRole::Pairing,
+        ChordRole::Answer,
+    ];
 
     /// The `[runtime]` key that configures this chord.
     pub fn config_key(self) -> &'static str {
@@ -172,6 +189,7 @@ impl ChordRole {
             ChordRole::Pause => "safe_mode_hotkey",
             ChordRole::Panel => "panel_hotkey",
             ChordRole::Pairing => "pairing_hotkey",
+            ChordRole::Answer => "answer_hotkey",
         }
     }
 
@@ -180,6 +198,7 @@ impl ChordRole {
             ChordRole::Pause => Hotkey::DEFAULT_SAFE_MODE,
             ChordRole::Panel => Hotkey::DEFAULT_PANEL,
             ChordRole::Pairing => Hotkey::DEFAULT_PAIRING,
+            ChordRole::Answer => Hotkey::DEFAULT_ANSWER,
         }
     }
 }
@@ -190,6 +209,7 @@ pub struct HudChords {
     pub pause: Hotkey,
     pub panel: Hotkey,
     pub pairing: Hotkey,
+    pub answer: Hotkey,
 }
 
 impl Default for HudChords {
@@ -198,6 +218,7 @@ impl Default for HudChords {
             pause: Hotkey::DEFAULT_SAFE_MODE,
             panel: Hotkey::DEFAULT_PANEL,
             pairing: Hotkey::DEFAULT_PAIRING,
+            answer: Hotkey::DEFAULT_ANSWER,
         }
     }
 }
@@ -208,6 +229,7 @@ impl HudChords {
             ChordRole::Pause => self.pause,
             ChordRole::Panel => self.panel,
             ChordRole::Pairing => self.pairing,
+            ChordRole::Answer => self.answer,
         }
     }
 
@@ -216,6 +238,7 @@ impl HudChords {
             ChordRole::Pause => self.pause = hotkey,
             ChordRole::Panel => self.panel = hotkey,
             ChordRole::Pairing => self.pairing = hotkey,
+            ChordRole::Answer => self.answer = hotkey,
         }
     }
 
@@ -256,6 +279,7 @@ mod tests {
         let chords = HudChords::default();
         assert_eq!(chords.panel.to_string(), "Ctrl+Shift+F11");
         assert_eq!(chords.pairing.to_string(), "Ctrl+Shift+F10");
+        assert_eq!(chords.answer.to_string(), "Ctrl+Shift+F9");
         for role in ChordRole::ALL {
             assert_eq!(chords.role_of(&chords.get(role)), Some(role));
         }

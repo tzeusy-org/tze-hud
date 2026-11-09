@@ -53,6 +53,13 @@ pub(crate) fn on_chord(
 ) -> ChordOutcome {
     let resume_if_paused = paused.then_some(false);
     match (opened_by, chord) {
+        // Answer is dispatched to the main-thread card route, never a panel
+        // transition. Keep this core total without opening or resuming anything.
+        (_, ChordRole::Answer) => ChordOutcome {
+            pause: None,
+            panel: PanelChange::Keep,
+            connect: false,
+        },
         (None, ChordRole::Pause) => ChordOutcome {
             pause: (!paused).then_some(true),
             panel: PanelChange::Open(ChordRole::Pause),
@@ -1259,6 +1266,14 @@ mod tests {
     #[test]
     fn chord_state_machine_matches_the_spec() {
         use PanelChange::*;
+        for by in [None, Some(PAUSE), Some(PANEL), Some(PAIR)] {
+            for paused in [false, true] {
+                assert_eq!(
+                    on_chord(by, paused, ChordRole::Answer),
+                    outcome(None, Keep, false)
+                );
+            }
+        }
         // Closed.
         assert_eq!(
             on_chord(None, false, PAUSE),

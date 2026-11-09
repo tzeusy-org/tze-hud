@@ -252,6 +252,7 @@ impl ConfigLoader for TzeHudConfig {
             pause: chord(ChordRole::Pause),
             panel: chord(ChordRole::Panel),
             pairing: chord(ChordRole::Pairing),
+            answer: chord(ChordRole::Answer),
         };
 
         let source_path = None; // Set by caller after file load.
@@ -504,6 +505,7 @@ fn raw_chord(runtime: &crate::raw::RawRuntime, role: ChordRole) -> Option<&str> 
         ChordRole::Pause => runtime.safe_mode_hotkey.as_deref(),
         ChordRole::Panel => runtime.panel_hotkey.as_deref(),
         ChordRole::Pairing => runtime.pairing_hotkey.as_deref(),
+        ChordRole::Answer => runtime.answer_hotkey.as_deref(),
     }
 }
 

@@ -386,7 +386,7 @@ agents until one is paired.
   negotiation and no resident principal.
 - `admin` is an operator entry, outside the model surface: it opens
   `GET /admin/status`, `GET /admin/logs`, and `GET /admin/screenshot` on the
-  MCP port, and `*` does not grant it. `/admin/status` includes `tailnet_inbound` (`state`: `allowed`, `blocked`, `unknown`, `not_applicable`; `reason`, `rule` and `fix` when `blocked`; `error` when `unknown`): whether Windows Firewall lets remote agents reach the tailnet bind, and `safe_mode_hotkey`, `panel_hotkey` and `pairing_hotkey`
+  MCP port, and `*` does not grant it. `/admin/status` includes `tailnet_inbound` (`state`: `allowed`, `blocked`, `unknown`, `not_applicable`; `reason`, `rule` and `fix` when `blocked`; `error` when `unknown`): whether Windows Firewall lets remote agents reach the tailnet bind, and `safe_mode_hotkey`, `panel_hotkey`, `pairing_hotkey` and `answer_hotkey`
   (each `chord`, `registered`, `error`; `null` when no hotkey is active; `registered: null` while pending): `registered: false`
   means another program owns that chord; for `safe_mode_hotkey` the human pause override is then lost. The blocked
   firewall `fix` names `tze_hud.exe --allow-remote` with the same listen-port
@@ -645,15 +645,16 @@ default. Ports are read at start; the rest change live from the panel.
 
 ## Human chords and the control panel
 
-Three global chords work while the overlay is unfocused and click-through
+Four global chords work while the overlay is unfocused and click-through
 (Windows; each is set in `[runtime]` as modifiers Ctrl/Shift/Alt/Win plus
-F1-F24, a letter or a digit, and the three must differ):
+F1-F24, a letter or a digit, and all four must differ):
 
 | Chord (default) | Key | Effect |
 |---|---|---|
 | Ctrl+Shift+F12 | `safe_mode_hotkey` | Pause agents and open the control panel; pressed again, resume and close |
 | Ctrl+Shift+F11 | `panel_hotkey` | Open or close the control panel with agents running |
 | Ctrl+Shift+F10 | `pairing_hotkey` | Open the control panel at Connect an agent, agents running |
+| Ctrl+Shift+F9 | `answer_hotkey` | Focus the newest unanswered question with callback actions |
 
 A global chord takes its keys from every other app while the HUD runs, so the
 defaults are F-key chords; rebind one that clashes (Ctrl+Shift+F10 is also
