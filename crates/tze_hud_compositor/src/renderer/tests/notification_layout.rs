@@ -154,6 +154,12 @@ async fn test_notification_stack_adds_dismiss_label_and_reserves_text_width() {
         scene.overlay.zone_hit_regions.is_empty(),
         "chosen exit remains observable without input"
     );
+    compositor.degradation_policy.level = DegradationLevel::Simplified;
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    assert_eq!(
+        scene.overlay.notification_geometry[0].state, "shown",
+        "disabled fades report the actual fully shown frame"
+    );
 }
 
 // ── Dismiss button typography token tests [hud-y08tp] ────────────────────
