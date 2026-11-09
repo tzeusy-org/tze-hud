@@ -21,6 +21,7 @@ async fn test_durable_widget_publish_receives_result() {
         });
         def.parameter_schema
             .push(tze_hud_scene::WidgetParameterDeclaration {
+                audience: Default::default(),
                 name: "color".into(),
                 param_type: tze_hud_scene::WidgetParamType::Color,
                 default_value: tze_hud_scene::WidgetParameterValue::Color(
@@ -28,6 +29,23 @@ async fn test_durable_widget_publish_receives_result() {
                 ),
                 constraints: None,
             });
+        for (name, audience) in [
+            ("fill_color", tze_hud_scene::WidgetParamAudience::Owner),
+            ("theme", tze_hud_scene::WidgetParamAudience::Owner),
+            (
+                "tooltip_visible",
+                tze_hud_scene::WidgetParamAudience::Runtime,
+            ),
+        ] {
+            def.parameter_schema
+                .push(tze_hud_scene::WidgetParameterDeclaration {
+                    name: name.into(),
+                    audience,
+                    param_type: tze_hud_scene::WidgetParamType::F32,
+                    default_value: tze_hud_scene::WidgetParameterValue::F32(0.0),
+                    constraints: None,
+                });
+        }
     }
     let (mut client, _handle) = setup_widget_test_with_service(service).await;
 
@@ -88,6 +106,9 @@ async fn test_durable_widget_publish_receives_result() {
         ("level", Param::F32Value(1.1), "0..1"),
         ("level", Param::F32Value(f32::NAN), "finite"),
         ("level", Param::F32Value(f32::INFINITY), "finite"),
+        ("fill_color", Param::F32Value(0.5), "severity"),
+        ("theme", Param::F32Value(0.5), "owner-set"),
+        ("tooltip_visible", Param::F32Value(0.5), "runtime-set"),
     ];
     for channel in 0..4 {
         for value in [-0.1, 1.1, f32::NAN, f32::INFINITY] {
@@ -165,7 +186,7 @@ async fn test_durable_widget_publish_receives_result() {
             tze_hud_scene::WidgetParameterValue::F32(0.75)
         );
     }
-    for (sequence, level) in [(30, 0.0), (31, 1.0)] {
+    for (sequence, level) in [(40, 0.0), (41, 1.0)] {
         tx.send(ClientMessage {
             sequence,
             timestamp_wall_us: now_wall_us(),
@@ -571,6 +592,7 @@ async fn test_ephemeral_widget_no_publish_result() {
             name: "LiveBar".to_string(),
             description: "Ephemeral bar widget".to_string(),
             parameter_schema: vec![WidgetParameterDeclaration {
+                audience: Default::default(),
                 name: "value".to_string(),
                 param_type: WidgetParamType::F32,
                 default_value: WidgetParameterValue::F32(0.0),

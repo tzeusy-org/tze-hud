@@ -1713,6 +1713,7 @@ fn test_contention_widget_max_publishers_rejected() {
         name: "counter".to_string(),
         description: "test counter widget".to_string(),
         parameter_schema: vec![WidgetParameterDeclaration {
+            audience: Default::default(),
             name: "value".to_string(),
             param_type: WidgetParamType::F32,
             default_value: WidgetParameterValue::F32(0.0),

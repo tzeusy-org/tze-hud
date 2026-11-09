@@ -19,7 +19,7 @@
 # Parameters:
 #   level      - Fill level (f32, 0.0-1.0); drives bar height via linear mapping
 #   label      - Label below the bar (string)
-#   fill_color - Bar color; defaults to the theme's primary
+#   fill_color - Owner info fill; warning/error use severity tokens
 #   severity   - info / warning / error; colors the card edge (enum)
 #   tooltip_visible - Runtime hover visibility toggle for the tooltip (f32 0..1)
 #   readout    - Tooltip readout text (e.g. "42/100 (42%)")
@@ -44,6 +44,7 @@ default = ""
 
 [[parameter_schema]]
 name    = "fill_color"
+audience = "owner"
 type    = "color"
 default = "{{token.color.primary}}"
 
@@ -57,6 +58,7 @@ enum_allowed_values = ["info", "warning", "error"]
 
 [[parameter_schema]]
 name    = "tooltip_visible"
+audience = "runtime"
 type    = "f32"
 default = 0.0
 
@@ -145,3 +147,41 @@ param            = "readout"
 target_element   = "tooltip-readout"
 target_attribute = "text-content"
 mapping          = "direct"
+
+[[layers.bindings]]
+param = "level"
+target_element = "severity-fill"
+target_attribute = "height"
+mapping = "linear"
+attr_min = 0.0
+attr_max = 168.0
+
+[[layers.bindings]]
+param = "level"
+target_element = "severity-fill"
+target_attribute = "y"
+mapping = "linear"
+attr_min = 184.0
+attr_max = 16.0
+
+[[layers.bindings]]
+param = "severity"
+target_element = "severity-fill"
+target_attribute = "fill"
+mapping = "discrete"
+
+[layers.bindings.value_map]
+info = "{{token.color.primary}}"
+warning = "{{token.color.caution}}"
+error = "{{token.color.error}}"
+
+[[layers.bindings]]
+param = "severity"
+target_element = "severity-fill"
+target_attribute = "opacity"
+mapping = "discrete"
+
+[layers.bindings.value_map]
+info = "0"
+warning = "1"
+error = "1"

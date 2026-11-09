@@ -26,6 +26,10 @@
     rx="{{token.shape.s}}" ry="{{token.shape.s}}"
     fill="{{token.color.primary}}"/>
 
+  <!-- Severity covers the owner's info fill only for warning/error. -->
+  <rect id="severity-fill" x="28" y="184" width="16" height="0" rx="{{token.shape.s}}" ry="{{token.shape.s}}"
+    fill="{{token.color.primary}}" opacity="0"/>
+
   <text
     id="label-text"
     data-role="text"

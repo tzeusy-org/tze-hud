@@ -157,8 +157,12 @@ pub enum ValidationError {
     WidgetUnknownParameter { widget: String, param: String },
 
     /// Widget publish rejected: published value type does not match schema type.
-    #[error("widget parameter type mismatch for '{param}' in widget '{widget}'")]
-    WidgetParameterTypeMismatch { widget: String, param: String },
+    #[error("{widget}.{param} must be {expected}")]
+    WidgetParameterTypeMismatch {
+        widget: String,
+        param: String,
+        expected: String,
+    },
 
     /// Widget publish rejected: value is invalid (NaN, infinity, out-of-range string, bad enum).
     #[error("widget parameter invalid value for '{param}' in widget '{widget}': {reason}")]
@@ -506,8 +510,12 @@ fn build_context_and_hint(
             json!({ "field": "param_name", "value": param, "widget": widget, "constraint": "parameter must be declared in widget schema" }),
             None,
         ),
-        ValidationError::WidgetParameterTypeMismatch { widget, param } => (
-            json!({ "field": "param_value", "param": param, "widget": widget, "constraint": "value type must match parameter schema type" }),
+        ValidationError::WidgetParameterTypeMismatch {
+            widget,
+            param,
+            expected,
+        } => (
+            json!({ "field": "param_value", "param": param, "widget": widget, "constraint": format!("must be {expected}") }),
             None,
         ),
         ValidationError::WidgetParameterInvalidValue {

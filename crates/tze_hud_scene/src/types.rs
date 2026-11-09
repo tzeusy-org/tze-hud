@@ -2475,14 +2475,59 @@ pub struct WidgetParamConstraints {
     pub enum_allowed_values: Vec<std::string::String>,
 }
 
+/// Who may write a widget parameter. Hidden values remain instance-local.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum WidgetParamAudience {
+    #[default]
+    Model,
+    Owner,
+    Runtime,
+}
+
 /// A single parameter declaration in a widget's parameter schema.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WidgetParameterDeclaration {
     pub name: std::string::String,
+    #[serde(default)]
+    pub audience: WidgetParamAudience,
     pub param_type: WidgetParamType,
     pub default_value: WidgetParameterValue,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub constraints: Option<WidgetParamConstraints>,
+}
+
+impl WidgetParameterDeclaration {
+    /// Expected value for actionable transport errors; discovery uses its compact notation.
+    pub fn value_hint(&self) -> std::string::String {
+        let constraints = self.constraints.as_ref();
+        match self.param_type {
+            WidgetParamType::F32 => {
+                let min = constraints.and_then(|c| c.f32_min);
+                let max = constraints.and_then(|c| c.f32_max);
+                match (min, max) {
+                    (Some(lo), Some(hi)) => format!("a finite f32 in {lo}..{hi} inclusive"),
+                    (Some(lo), None) => format!("a finite f32 >= {lo}"),
+                    (None, Some(hi)) => format!("a finite f32 <= {hi}"),
+                    (None, None) => "a finite f32".into(),
+                }
+            }
+            WidgetParamType::String => {
+                let limit = constraints
+                    .and_then(|c| c.string_max_bytes)
+                    .filter(|n| *n > 0)
+                    .unwrap_or(1024);
+                format!("a string of at most {limit} UTF-8 bytes")
+            }
+            WidgetParamType::Color => "an RGBA color with finite channels in 0..1".into(),
+            WidgetParamType::Enum => match constraints {
+                Some(c) if !c.enum_allowed_values.is_empty() => {
+                    format!("one of {}", c.enum_allowed_values.join("|"))
+                }
+                _ => "an enum string".into(),
+            },
+        }
+    }
 }
 
 /// How a parameter value is mapped to an SVG attribute.
@@ -2828,7 +2873,7 @@ impl WidgetRegistry {
                 .collect()
         };
 
-        let effective_params = if pubs.is_empty() {
+        let mut effective_params = if pubs.is_empty() {
             // No active publications — always use schema defaults.
             make_defaults()
         } else {
@@ -2868,6 +2913,17 @@ impl WidgetRegistry {
                 }
             }
         };
+
+        // Agent publication policies never replace owner configuration or local UI state.
+        for declaration in &def.parameter_schema {
+            if declaration.audience != WidgetParamAudience::Model {
+                let value = instance
+                    .current_params
+                    .get(&declaration.name)
+                    .unwrap_or(&declaration.default_value);
+                effective_params.insert(declaration.name.clone(), value.clone());
+            }
+        }
 
         Some(WidgetOccupancy {
             widget_name: instance_name.to_string(),

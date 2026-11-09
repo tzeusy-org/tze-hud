@@ -365,6 +365,17 @@ fn validate_initial_params(
             }
         };
 
+        if decl.audience == tze_hud_scene::WidgetParamAudience::Runtime {
+            errors.push(ConfigError {
+                code: ConfigErrorCode::WidgetInvalidInitialParams,
+                field_path,
+                expected: "a model or owner parameter".into(),
+                got: format!("runtime-set parameter {param_name:?}"),
+                hint: "remove this override; the runtime manages this parameter".into(),
+            });
+            continue;
+        }
+
         // Type check.
         if coerce_toml_to_widget_value(raw_val, decl.param_type).is_none() {
             let type_name = match decl.param_type {
@@ -525,6 +536,7 @@ mod tests {
             WidgetParamType::Enum => WidgetParameterValue::Enum("info".to_string()),
         };
         WidgetParameterDeclaration {
+            audience: Default::default(),
             name: name.to_string(),
             param_type: ptype,
             default_value,
@@ -743,13 +755,19 @@ mod tests {
             ..Default::default()
         }]);
         let known: HashSet<String> = ["gauge".to_string()].into();
-        let type_map = type_map_from(&[make_gauge_type()]);
-        let mut errors = Vec::new();
-        validate_widget_instances(&raw, &known, &type_map, &mut errors);
-        assert!(
-            errors.is_empty(),
-            "valid initial_params should produce no errors, got: {errors:?}"
-        );
+        use tze_hud_scene::WidgetParamAudience::{Model, Owner, Runtime};
+        for audience in [Model, Owner, Runtime] {
+            let mut definition = make_gauge_type();
+            definition.parameter_schema[1].audience = audience;
+            let type_map = type_map_from(&[definition]);
+            let mut errors = Vec::new();
+            validate_widget_instances(&raw, &known, &type_map, &mut errors);
+            assert_eq!(
+                errors.is_empty(),
+                audience != Runtime,
+                "{audience:?}: {errors:?}"
+            );
+        }
     }
 
     /// WHEN two widget entries have same type and no instance_id THEN error.
@@ -805,6 +823,7 @@ mod tests {
     #[test]
     fn initial_params_enum_out_of_allowed_values_produces_error() {
         let severity_decl = WidgetParameterDeclaration {
+            audience: Default::default(),
             name: "severity".to_string(),
             param_type: WidgetParamType::Enum,
             default_value: WidgetParameterValue::Enum("info".to_string()),

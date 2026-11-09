@@ -558,6 +558,7 @@ async fn drag_handle_regions_cover_visible_tile_and_zone_but_not_widget() {
         name: "Test Widget".to_string(),
         description: "test".to_string(),
         parameter_schema: vec![WidgetParameterDeclaration {
+            audience: Default::default(),
             name: "level".to_string(),
             param_type: WidgetParamType::F32,
             default_value: WidgetParameterValue::F32(0.0),

@@ -1,6 +1,26 @@
 use super::*;
 
 impl SceneGraph {
+    /// Agent writes cannot change owner configuration or runtime-local widget state.
+    pub fn validate_widget_param_audience(
+        widget: &str,
+        declaration: &crate::types::WidgetParameterDeclaration,
+    ) -> Result<(), ValidationError> {
+        use crate::types::WidgetParamAudience;
+        let reason = match declaration.audience {
+            WidgetParamAudience::Model => return Ok(()),
+            WidgetParamAudience::Owner if declaration.name == "fill_color" => {
+                "owner-set via initial_params; publish severity instead"
+            }
+            WidgetParamAudience::Owner => "owner-set via initial_params; omit it",
+            WidgetParamAudience::Runtime => "runtime-set; omit it",
+        };
+        Err(ValidationError::WidgetParameterInvalidValue {
+            widget: widget.to_string(),
+            param: declaration.name.clone(),
+            reason: reason.into(),
+        })
+    }
     /// Notification routing keys are exact UTF-8 bytes, with empty meaning absent.
     pub const MAX_NOTIFICATION_KEY_BYTES: usize = 256;
 
@@ -63,6 +83,7 @@ impl SceneGraph {
             (WidgetParamType::F32, _) => Err(ValidationError::WidgetParameterTypeMismatch {
                 widget: widget_name.to_string(),
                 param: param_name.to_string(),
+                expected: decl.value_hint(),
             }),
             (WidgetParamType::String, WidgetParameterValue::String(s)) => {
                 let mut max_bytes = constraints.string_max_bytes.unwrap_or(1024) as usize;
@@ -85,6 +106,7 @@ impl SceneGraph {
             (WidgetParamType::String, _) => Err(ValidationError::WidgetParameterTypeMismatch {
                 widget: widget_name.to_string(),
                 param: param_name.to_string(),
+                expected: decl.value_hint(),
             }),
             (WidgetParamType::Color, WidgetParameterValue::Color(c)) => {
                 for (channel, value) in [("r", c.r), ("g", c.g), ("b", c.b), ("a", c.a)] {
@@ -101,6 +123,7 @@ impl SceneGraph {
             (WidgetParamType::Color, _) => Err(ValidationError::WidgetParameterTypeMismatch {
                 widget: widget_name.to_string(),
                 param: param_name.to_string(),
+                expected: decl.value_hint(),
             }),
             (WidgetParamType::Enum, WidgetParameterValue::Enum(v)) => {
                 if !constraints.enum_allowed_values.is_empty()
@@ -110,8 +133,8 @@ impl SceneGraph {
                         widget: widget_name.to_string(),
                         param: param_name.to_string(),
                         reason: format!(
-                            "enum value '{}' not in allowed set {:?}",
-                            v, constraints.enum_allowed_values
+                            "must be one of {}",
+                            constraints.enum_allowed_values.join("|")
                         ),
                     });
                 }
@@ -120,6 +143,7 @@ impl SceneGraph {
             (WidgetParamType::Enum, _) => Err(ValidationError::WidgetParameterTypeMismatch {
                 widget: widget_name.to_string(),
                 param: param_name.to_string(),
+                expected: decl.value_hint(),
             }),
         }
     }
@@ -807,10 +831,10 @@ impl SceneGraph {
                         widget: widget_name.to_string(),
                         param: name.clone(),
                     })?;
-                Ok((
-                    name.clone(),
-                    Self::validate_widget_param_value(widget_name, name, decl, value)?,
-                ))
+                Ok((name.clone(), {
+                    Self::validate_widget_param_audience(widget_name, decl)?;
+                    Self::validate_widget_param_value(widget_name, name, decl, value)?
+                }))
             })
             .collect()
     }

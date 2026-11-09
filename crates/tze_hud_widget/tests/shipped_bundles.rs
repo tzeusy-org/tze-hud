@@ -140,6 +140,36 @@ fn manifest(name: &str, extra: &str) -> String {
 
 const LEVEL_PARAM: &str = "[[parameter_schema]]\nname = \"level\"\ntype = \"f32\"\ndefault = 0.0\n";
 
+#[test]
+fn parameter_audience_defaults_and_invalid_values_are_explicit() {
+    use tze_hud_scene::WidgetParamAudience;
+    for (name, expected) in [
+        (None, Some(WidgetParamAudience::Model)),
+        (Some("model"), Some(WidgetParamAudience::Model)),
+        (Some("owner"), Some(WidgetParamAudience::Owner)),
+        (Some("runtime"), Some(WidgetParamAudience::Runtime)),
+        (Some("everyone"), None),
+    ] {
+        let audience = name
+            .map(|name| format!("audience = \"{name}\"\n"))
+            .unwrap_or_default();
+        let text = manifest("audience-test", &format!("{LEVEL_PARAM}{audience}"));
+        let result = load_files(&[("widget.toml", &text)], &HashMap::new());
+        match (result, expected) {
+            (BundleScanResult::Ok(bundle), Some(expected)) => {
+                assert_eq!(bundle.definition.parameter_schema[0].audience, expected)
+            }
+            (BundleScanResult::Err(error), None) => {
+                let text = error.to_string();
+                for required in ["audience-test", "level", "model", "owner", "runtime"] {
+                    assert!(text.contains(required), "{text}");
+                }
+            }
+            other => panic!("unexpected audience result: {other:?}"),
+        }
+    }
+}
+
 // ─── Shipped bundles load and bind ────────────────────────────────────────────
 
 type BindingRow = (&'static str, &'static str, &'static str);
@@ -177,7 +207,13 @@ fn shipped_bundles_load_and_bind() {
         ),
         (
             "progress-bar",
-            &["progress", "label", "fill_color", "tooltip_visible"],
+            &[
+                "progress",
+                "label",
+                "fill_color",
+                "tooltip_visible",
+                "severity",
+            ],
             &["track.svg", "fill.svg"],
             &[
                 ("progress", "fill-bar", "width"),
@@ -433,7 +469,6 @@ fn shipped_widgets_reject_out_of_range_f32() {
             )),
             "token color default must be normalized"
         );
-        publish(&mut scene, widget, &[("fill_color", color.clone())]).unwrap();
         assert_eq!(
             scene.widget_registry.instances[widget].current_params["fill_color"],
             color

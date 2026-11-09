@@ -29,6 +29,7 @@ pub(super) fn make_gauge_definition() -> WidgetDefinition {
         description: "test gauge".to_string(),
         parameter_schema: vec![
             WidgetParameterDeclaration {
+                audience: Default::default(),
                 name: "level".to_string(),
                 param_type: WidgetParamType::F32,
                 default_value: WidgetParameterValue::F32(0.0),
@@ -39,12 +40,14 @@ pub(super) fn make_gauge_definition() -> WidgetDefinition {
                 }),
             },
             WidgetParameterDeclaration {
+                audience: Default::default(),
                 name: "label".to_string(),
                 param_type: WidgetParamType::String,
                 default_value: WidgetParameterValue::String(String::new()),
                 constraints: None,
             },
             WidgetParameterDeclaration {
+                audience: Default::default(),
                 name: "severity".to_string(),
                 param_type: WidgetParamType::Enum,
                 default_value: WidgetParameterValue::Enum("info".to_string()),
