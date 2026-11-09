@@ -5297,6 +5297,8 @@ mod tests {
             ("Escape", "Escape", vec![]),
         ] {
             let mut harness = card_with_editor();
+            harness.enqueue(character("kept", 299));
+            harness.drain();
             request_answer(&mut harness);
             harness.enqueue(key_down(code, key, 300));
             harness.drain();
