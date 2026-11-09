@@ -159,15 +159,25 @@ jobs:
         run: python scripts/ci/windows_install_smoke.py --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe"
 
       # T13 tier W, informational: real SendInput into a HUD this step starts
-      # (fullscreen, WARP), asserting on /admin/status; it refuses if any
-      # tze_hud.exe is already running. Scenarios and guards:
+      # (fullscreen WARP, then overlay lavapipe), asserting on /admin/status.
+      # It refuses if any tze_hud.exe is already running. Scenarios and guards:
       # scripts/ci/hud_gestures.py. Results land in the step summary.
       - name: Gesture scenarios (informational, SendInput)
         id: gestures
         if: steps.changes.outputs.gestures == 'true'
         continue-on-error: true
         timeout-minutes: 6
-        run: python scripts/ci/hud_gestures.py --injector sendinput --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --out "$env:RUNNER_TEMP/gestures"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          python scripts/ci/hud_gestures.py --injector sendinput --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --out "$env:RUNNER_TEMP/gestures"
+          $fullscreenExit = $LASTEXITCODE
+          # Install the software Vulkan ICD only after WARP has finished. The
+          # wrapper verifies the pinned archive before extraction and removes
+          # its exact registry value in finally, including on scenario failure.
+          python scripts/ci/windows_overlay_gestures.py --exe "target/$env:HUD_BUILD_PROFILE/tze_hud.exe" --out "$env:RUNNER_TEMP/gestures/overlay"
+          if ($fullscreenExit -ne 0 -or $LASTEXITCODE -ne 0) { exit 1 }
 
       - name: Upload gesture evidence
         if: always() && steps.gestures.outcome != 'skipped'

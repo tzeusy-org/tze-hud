@@ -28,6 +28,12 @@ for fn, res, args in (
     ("GetWindowThreadProcessId", wintypes.DWORD, [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]),
     ("IsWindowVisible", wintypes.BOOL, [wintypes.HWND]),
     ("SetForegroundWindow", wintypes.BOOL, [wintypes.HWND]),
+    ("ShowWindow", wintypes.BOOL, [wintypes.HWND, ctypes.c_int]),
+    ("GetWindowRect", wintypes.BOOL, [wintypes.HWND, ctypes.POINTER(wintypes.RECT)]),
+    ("GetCursorPos", wintypes.BOOL, [ctypes.POINTER(wintypes.POINT)]),
+    ("GetWindowLongPtrW", ctypes.c_ssize_t, [wintypes.HWND, ctypes.c_int]),
+    ("GetWindowTextW", ctypes.c_int, [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]),
+    ("GetClassNameW", ctypes.c_int, [wintypes.HWND, wintypes.LPWSTR, ctypes.c_int]),
     ("SendMessageW", ctypes.c_ssize_t, [wintypes.HWND, wintypes.UINT, wintypes.WPARAM, wintypes.LPARAM]),
     ("GetDC", wintypes.HDC, [wintypes.HWND]),
     ("ReleaseDC", ctypes.c_int, [wintypes.HWND, wintypes.HDC]),
@@ -38,6 +44,10 @@ for fn, res, args in (
     ("CreateCompatibleDC", wintypes.HDC, [wintypes.HDC]),
     ("CreateCompatibleBitmap", wintypes.HBITMAP, [wintypes.HDC, ctypes.c_int, ctypes.c_int]),
     ("SelectObject", wintypes.HGDIOBJ, [wintypes.HDC, wintypes.HGDIOBJ]),
+    ("BitBlt", wintypes.BOOL, [wintypes.HDC, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                              wintypes.HDC, ctypes.c_int, ctypes.c_int, wintypes.DWORD]),
+    ("GetDIBits", ctypes.c_int, [wintypes.HDC, wintypes.HBITMAP, wintypes.UINT, wintypes.UINT,
+                                ctypes.c_void_p, ctypes.c_void_p, wintypes.UINT]),
     ("DeleteObject", wintypes.BOOL, [wintypes.HGDIOBJ]),
     ("DeleteDC", wintypes.BOOL, [wintypes.HDC]),
 ):
@@ -78,6 +88,7 @@ class INPUT(ctypes.Structure):
 
 
 MOUSE_MOVE, LEFT_DOWN, LEFT_UP, WHEEL, ABSOLUTE = 0x1, 0x2, 0x4, 0x800, 0x8000
+GWL_EXSTYLE, WS_EX_TOPMOST, WS_EX_TRANSPARENT = -20, 0x8, 0x20
 KEY_UP, KEY_UNICODE = 0x2, 0x4
 WHEEL_DELTA = 120
 
@@ -176,6 +187,55 @@ def bring_to_front(pid: int) -> bool:
     return bool(windows) and bool(user32.SetForegroundWindow(windows[0]))
 
 
+def pointer_capture_state(pid: int) -> dict:
+    """Observe the primary overlay, excluding auxiliary windows of the same PID.
+
+    The harness first proves primary scene/physical identity at origin zero.
+    A unique visible, topmost window covering that screen identifies the HUD;
+    ambiguity remains unknown and includes candidate evidence for diagnosis.
+    """
+    width, height = screen_size()
+    windows = []
+    for hwnd in _windows_of(pid):
+        rect = wintypes.RECT()
+        valid_bounds = user32.GetWindowRect(hwnd, ctypes.byref(rect))
+        bounds = [rect.left, rect.top, rect.right, rect.bottom] if valid_bounds else None
+        style = user32.GetWindowLongPtrW(hwnd, GWL_EXSTYLE)
+        title, class_name = ctypes.create_unicode_buffer(256), ctypes.create_unicode_buffer(256)
+        user32.GetWindowTextW(hwnd, title, len(title))
+        user32.GetClassNameW(hwnd, class_name, len(class_name))
+        windows.append({"hwnd": hwnd, "rect": bounds, "style_ex": style,
+                        "title": title.value, "class": class_name.value})
+    overlays = [window for window in windows
+                if window["rect"] == [0, 0, width, height] and window["style_ex"] & WS_EX_TOPMOST]
+    # winit's set_cursor_hittest(false) sets WS_EX_TRANSPARENT. Observe the
+    # actual native switch, rather than assuming a hover implies capture.
+    capturing = not bool(overlays[0]["style_ex"] & WS_EX_TRANSPARENT) if len(overlays) == 1 else None
+    return {"capturing": capturing, "matching_overlays": len(overlays), "windows": windows}
+
+
+def maximize(pid: int) -> None:
+    for hwnd in _windows_of(pid):
+        user32.ShowWindow(hwnd, 3)  # SW_MAXIMIZE, only an owned helper
+
+
+def cursor_position() -> tuple[int, int]:
+    point = wintypes.POINT()
+    if not user32.GetCursorPos(ctypes.byref(point)):
+        raise ctypes.WinError(ctypes.get_last_error())
+    return point.x, point.y
+
+
+def edit_rect(pid: int) -> tuple[int, int, int, int] | None:
+    for hwnd in _windows_of(pid):
+        for cls in ("Edit", "RichEditD2DPT"):
+            child = user32.FindWindowExW(hwnd, None, cls, None)
+            rect = wintypes.RECT()
+            if child and user32.GetWindowRect(child, ctypes.byref(rect)):
+                return rect.left, rect.top, rect.right, rect.bottom
+    return None
+
+
 def edit_text(pid: int) -> str | None:
     """Text of the edit control in `pid`'s top-level window (Notepad), or None."""
     for hwnd in _windows_of(pid):
@@ -200,16 +260,40 @@ def desktop_rgba() -> tuple[int, int, bytes]:
     """The whole primary desktop as RGBA (what a person would see, not the HUD's own frame)."""
     width, height = screen_size()
     screen_dc = user32.GetDC(0)
-    mem_dc = gdi32.CreateCompatibleDC(screen_dc)
-    bitmap = gdi32.CreateCompatibleBitmap(screen_dc, width, height)
-    gdi32.SelectObject(mem_dc, bitmap)
-    gdi32.BitBlt(mem_dc, 0, 0, width, height, screen_dc, 0, 0, 0x00CC0020 | 0x40000000)  # SRCCOPY|CAPTUREBLT
-    header = BITMAPINFOHEADER(ctypes.sizeof(BITMAPINFOHEADER), width, -height, 1, 32, 0, 0, 0, 0, 0, 0)
-    buf = ctypes.create_string_buffer(width * height * 4)
-    gdi32.GetDIBits(mem_dc, bitmap, 0, height, buf, ctypes.byref(header), 0)
-    gdi32.DeleteObject(bitmap)
-    gdi32.DeleteDC(mem_dc)
-    user32.ReleaseDC(0, screen_dc)
+    if not screen_dc:
+        raise OSError("GetDC failed during desktop capture")
+    mem_dc = bitmap = previous = None
+    try:
+        mem_dc = gdi32.CreateCompatibleDC(screen_dc)
+        if not mem_dc:
+            raise OSError("CreateCompatibleDC failed during desktop capture")
+        bitmap = gdi32.CreateCompatibleBitmap(screen_dc, width, height)
+        if not bitmap:
+            raise OSError("CreateCompatibleBitmap failed during desktop capture")
+        selected = gdi32.SelectObject(mem_dc, bitmap)
+        if not selected or selected == ctypes.c_void_p(-1).value:
+            raise OSError("SelectObject failed during desktop capture")
+        previous = selected
+        if not gdi32.BitBlt(mem_dc, 0, 0, width, height, screen_dc, 0, 0, 0x00CC0020 | 0x40000000):
+            raise OSError("BitBlt failed during desktop capture")
+        # GetDIBits requires the bitmap to be deselected from its DC.
+        restored = gdi32.SelectObject(mem_dc, previous)
+        previous = None
+        if not restored or restored == ctypes.c_void_p(-1).value:
+            raise OSError("SelectObject restore failed during desktop capture")
+        header = BITMAPINFOHEADER(ctypes.sizeof(BITMAPINFOHEADER), width, -height, 1, 32, 0, 0, 0, 0, 0, 0)
+        buf = ctypes.create_string_buffer(width * height * 4)
+        if gdi32.GetDIBits(mem_dc, bitmap, 0, height, buf, ctypes.byref(header), 0) != height:
+            raise OSError("GetDIBits did not capture every desktop row")
+    finally:
+        if previous:
+            gdi32.SelectObject(mem_dc, previous)
+        # Delete the DC first, releasing any selected object even after a failure.
+        if mem_dc:
+            gdi32.DeleteDC(mem_dc)
+        if bitmap:
+            gdi32.DeleteObject(bitmap)
+        user32.ReleaseDC(0, screen_dc)
     raw = bytearray(buf.raw)
     raw[0::4], raw[2::4] = raw[2::4], raw[0::4]  # BGRA -> RGBA
     raw[3::4] = b"\xff" * (width * height)
@@ -237,6 +321,9 @@ class SendInput:
         width, height = screen_size()
         self._send(f"move {x},{y}", [_mouse(MOUSE_MOVE | ABSOLUTE, round(x * 65535 / (width - 1)),
                                             round(y * 65535 / (height - 1)))])
+
+    def move_relative(self, dx: int, dy: int) -> None:
+        self._send(f"relative {dx},{dy}", [_mouse(MOUSE_MOVE, dx, dy)])
 
     def button(self, down: bool, button: int = 1) -> None:
         if button != 1:

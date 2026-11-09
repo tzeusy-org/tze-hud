@@ -603,3 +603,34 @@ validation remains pending.
 - Use non-interactive `cp`/`mv`/`rm` flags as in `AGENTS.md`. For HUD
   deployment and evidence, use the paired clients and `/admin` routes in
   [Windows installation](../operations/windows-install.md).
+
+### Hosted overlay gesture check
+
+The existing informational Windows gesture step runs fullscreen WARP first,
+then `windows_overlay_gestures.py` runs only scenario 11 in real overlay mode.
+It downloads Mesa lavapipe 26.2.6 from the upstream release asset and verifies
+its pinned SHA256 before extracting the x64 driver. The runner's preinstalled
+Vulkan loader is required; an absent loader fails explicitly. One unique
+software-driver registry value exists only around the overlay run and is
+removed in `finally`. This handles elevated Windows runners, where the Vulkan
+loader ignores `VK_DRIVER_FILES`; it does not run Mesa's deployment scripts.
+
+Scenario 11 observes the actual Vulkan/lavapipe renderer, enters the portal
+with relative mouse motion, submits a reply, then clicks outside the portal
+into an owned Notepad window and verifies that typing reaches that editor.
+Every injection retains the owned-PID and CI guard. Default harness runs stay
+fullscreen; explicit overlay usage is:
+
+```powershell
+python scripts/ci/windows_overlay_gestures.py --exe target/release-dev/tze_hud.exe --out overlay-evidence
+```
+
+The existing `gestures` artifact includes `overlay/timeline.json`, native logs,
+status and desktop captures, plus `overlay/setup.json` with setup and total
+added occupancy (target: combined gesture step at most four minutes). Native
+failures remain failures in these artifacts even though the step is
+informational. This checks hosted software-rendered mechanics; owner GPU,
+DWM transparency, multiple monitors and DPI acceptance remain separate.
+An original scenario failure is preserved if its failure screenshot also
+fails (`diagnostic_error`). Desktop captures check GDI results and release
+their owned DCs and bitmap on error.

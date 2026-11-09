@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 import sys
+import contextlib
+import ctypes
+import hashlib
+import importlib.util
+import io
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import hud_gestures as g  # noqa: E402
+import windows_overlay_gestures as overlay  # noqa: E402
 
 STATUS = {
     "pid": 4242,
@@ -85,7 +92,96 @@ WIN_OWNED = dict(github_actions="true", foreground_pid=4242, owned_hud_pid=4242,
                  status_pid=4242, url="http://127.0.0.1:5555/mcp")
 
 
+def native_input_boundary():
+    """Load the real Win32 boundary with inert DLL handles on either host OS."""
+    spec = importlib.util.spec_from_file_location("test_sendinput_boundary", Path(__file__).with_name("hud_sendinput.py"))
+    native = importlib.util.module_from_spec(spec)
+    with mock.patch.object(ctypes, "WinDLL", create=True):
+        spec.loader.exec_module(native)
+    return native
+
+
 class WindowsGuardTests(unittest.TestCase):
+    def test_desktop_capture_keeps_pointer_sized_handles_and_releases_resources(self) -> None:
+        native = native_input_boundary()
+        screen, memory, bitmap, previous = (0x123456780 + n for n in range(4))
+        native.screen_size = lambda: (2, 1)
+        native.user32.GetDC.return_value = screen
+        native.gdi32.CreateCompatibleDC.return_value = memory
+        native.gdi32.CreateCompatibleBitmap.return_value = bitmap
+        calls = []
+
+        def blit(dst, _x, _y, _w, _h, src, _sx, _sy, _rop):
+            calls.append(("blit", dst, src))
+            return 1
+
+        def read(dc, image, _start, rows, data, _header, _usage):
+            calls.append(("read", dc, image))
+            ctypes.memmove(data, b"\x03\x02\x01\x00" * 2, 8)
+            return rows
+
+        # Call genuine ctypes C boundaries through the declarations installed by
+        # the module. An undeclared API truncates these handles to a C int.
+        signatures = {
+            "BitBlt": [ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int,
+                       ctypes.c_void_p, ctypes.c_int, ctypes.c_int, ctypes.c_uint32],
+            "GetDIBits": [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32,
+                          ctypes.c_void_p, ctypes.c_void_p, ctypes.c_uint32],
+        }
+        callbacks = []
+        for name, callback in (("BitBlt", blit), ("GetDIBits", read)):
+            actual = ctypes.CFUNCTYPE(ctypes.c_int, *signatures[name])(callback)
+            callbacks.append(actual)  # Keep the C callback alive through capture.
+            boundary = ctypes.CFUNCTYPE(ctypes.c_int)(ctypes.cast(actual, ctypes.c_void_p).value)
+            declaration = getattr(native.gdi32, name).__dict__.get("argtypes")
+            if declaration is not None:
+                boundary.argtypes = declaration
+            setattr(native.gdi32, name, boundary)
+
+        for failure in (None, "blit", "read"):
+            with self.subTest(failure=failure):
+                calls.clear()
+                for api in (native.gdi32.DeleteDC, native.gdi32.DeleteObject, native.user32.ReleaseDC):
+                    api.reset_mock()
+                native.gdi32.SelectObject.reset_mock()
+
+                def select(dc, image):
+                    calls.append(("select", dc, image))
+                    return previous if image == bitmap else bitmap
+
+                native.gdi32.SelectObject.side_effect = select
+                if failure:
+                    api = "BitBlt" if failure == "blit" else "GetDIBits"
+                    with mock.patch.object(native.gdi32, api, return_value=0), self.assertRaises(OSError):
+                        native.desktop_rgba()
+                else:
+                    self.assertEqual(native.desktop_rgba(), (2, 1, b"\x01\x02\x03\xff" * 2))
+                    self.assertEqual(calls, [("select", memory, bitmap), ("blit", memory, screen),
+                                             ("select", memory, previous), ("read", memory, bitmap)])
+                self.assertEqual(native.gdi32.SelectObject.call_args_list,
+                                 [mock.call(memory, bitmap), mock.call(memory, previous)])
+                native.gdi32.DeleteDC.assert_called_with(memory)
+                native.gdi32.DeleteObject.assert_called_with(bitmap)
+                native.user32.ReleaseDC.assert_called_with(0, screen)
+
+    def test_failed_diagnostic_keeps_original_result_and_next_scenario(self) -> None:
+        run = mock.Mock(out=Path("unused"))
+        run.clear_portals.return_value = []
+        run.screen_grab.side_effect = OSError("capture unavailable")
+
+        def first(_run):
+            raise g.ScenarioFailed("original failure", {"marker": 1})
+
+        second = mock.Mock(__doc__="second scenario")
+        with mock.patch.dict(g.SCENARIOS, {"first": first, "second": second}, clear=True), \
+                contextlib.redirect_stdout(io.StringIO()):
+            results = g.run_scenarios(run, ["first", "second"])
+        self.assertEqual([result["outcome"] for result in results], ["FAIL", "PASS"])
+        self.assertEqual(results[0]["step"], "original failure")
+        self.assertEqual(results[0]["last"], {"marker": 1})
+        self.assertIn("capture unavailable", results[0]["diagnostic_error"])
+        second.assert_called_once_with(run)
+
     def test_owned_hud_or_helper_foreground_passes(self) -> None:
         g.check_owned_windows(**WIN_OWNED)
         g.check_owned_windows(**{**WIN_OWNED, "foreground_pid": 77})
@@ -128,6 +224,135 @@ class WindowsGuardTests(unittest.TestCase):
                 run.start()
         huds.assert_not_called()
         self.assertIsNone(run.home)
+
+
+    def test_sendinput_guard_runs_before_every_injection_including_relative_motion(self) -> None:
+        # Load the real boundary with fake DLL handles; no OS input is possible.
+        native = native_input_boundary()
+        injector = native.SendInput(lambda: g.check_owned_windows(**{**WIN_OWNED, "foreground_pid": 9}))
+        actions = (lambda: injector.move_abs(1, 2), lambda: injector.move_relative(3, 4),
+                   lambda: injector.click(), lambda: injector.button(True), lambda: injector.key("Tab"),
+                   lambda: injector.type_unicode("x"))
+        for action in actions:
+            with self.assertRaises(g.Refused):
+                action()
+        native.user32.SendInput.assert_not_called()
+
+    def test_native_capture_observes_only_a_unique_primary_overlay(self) -> None:
+        native = native_input_boundary()
+        for case in ("capture", "passthrough", "no-overlay", "ambiguous"):
+            with self.subTest(case=case):
+                rows = {11: ([5, 5, 100, 100], 0), 12: ([0, 0, 1024, 768], 0)}
+                if case != "no-overlay":
+                    rows[13] = ([0, 0, 1024, 768], 0x8 | (0x20 if case == "passthrough" else 0))
+                if case == "ambiguous":
+                    rows[14] = ([0, 0, 1024, 768], 0x8)
+
+                def bounds(hwnd, output):
+                    rect = output._obj
+                    rect.left, rect.top, rect.right, rect.bottom = rows[hwnd][0]
+                    return True
+
+                native.user32.GetWindowRect.side_effect = bounds
+                native.user32.GetWindowLongPtrW.side_effect = lambda hwnd, _: rows[hwnd][1]
+                with mock.patch.object(native, "_windows_of", return_value=list(rows)), \
+                        mock.patch.object(native, "screen_size", return_value=(1024, 768)):
+                    result = native.pointer_capture_state(4242)
+                expected = {"capture": True, "passthrough": False, "no-overlay": None, "ambiguous": None}[case]
+                self.assertIs(result["capturing"], expected)
+                self.assertEqual(len(result["windows"]), len(rows))
+                self.assertEqual(result["matching_overlays"], 0 if case == "no-overlay" else 2 if case == "ambiguous" else 1)
+
+    def test_modes_select_only_their_scenarios_and_refuse_mismatches(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            fake = mock.Mock(home=None, log=None, display="", port=0)
+            fake.exe = Path("target/release-dev/tze_hud.exe")
+            fake.timeline = []
+            fake.status.return_value = {}
+            fake.inj = None
+            fake.smoke.ok.return_value = {}
+            for mode in ("fullscreen", "overlay"):
+                with self.subTest(mode=mode), mock.patch.object(g, "WINDOWS", True), \
+                        mock.patch.object(g, "Run", return_value=fake), \
+                        mock.patch.object(g, "run_scenarios", return_value=[]) as scenarios, \
+                        mock.patch.object(g, "write_step_summary"), contextlib.redirect_stdout(io.StringIO()):
+                    self.assertEqual(g.main(["--exe", "unused.exe", "--injector", "sendinput",
+                                             "--window-mode", mode, "--out", directory]), 0)
+                    selected = scenarios.call_args.args[1]
+                    self.assertEqual("overlay-pointer" in selected, mode == "overlay")
+                    self.assertEqual(len(selected), 1 if mode == "overlay" else 17)
+            for mode, scenario in (("fullscreen", "overlay-pointer"), ("overlay", "composer")):
+                with mock.patch.object(g, "WINDOWS", True), contextlib.redirect_stderr(io.StringIO()), \
+                        self.assertRaises(SystemExit) as failure:
+                    g.main(["--exe", "unused.exe", "--injector", "sendinput", "--window-mode", mode, scenario])
+                self.assertEqual(failure.exception.code, 2)
+
+
+class OverlayInstallerTests(unittest.TestCase):
+    def test_archive_is_verified_before_extraction(self) -> None:
+        for case in ("download-fails", "wrong-hash", "verified"):
+            with self.subTest(case=case), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                archive = b"fixture download"
+
+                def external(args, **kwargs):
+                    if args[0] == "gh":
+                        kwargs["stdout"].write(archive)
+                        if case == "download-fails":
+                            raise overlay.subprocess.CalledProcessError(7, args)
+                    else:
+                        (root / "x64").mkdir()
+                        (root / "x64/lvp_icd.x86_64.json").write_text("{}")
+                        (root / "x64/vulkan_lvp.dll").write_bytes(b"fixture driver")
+
+                digest = "0" * 64 if case == "wrong-hash" else hashlib.sha256(archive).hexdigest()
+                with mock.patch.object(overlay.subprocess, "run", side_effect=external) as external_run:
+                    if case == "verified":
+                        self.assertEqual(overlay.extract_driver(root, expected_sha256=digest),
+                                         root / "x64/lvp_icd.x86_64.json")
+                        self.assertEqual(external_run.call_count, 2)
+                    else:
+                        with self.assertRaises((RuntimeError, overlay.subprocess.CalledProcessError)):
+                            overlay.extract_driver(root, expected_sha256=digest)
+                        self.assertEqual(external_run.call_count, 1)
+                        self.assertFalse((root / "x64").exists())
+
+    def test_registration_cleanup_preserves_foreign_values_and_runs_on_failure(self) -> None:
+        for case in ("success", "scenario-fails", "already-registered"):
+            with self.subTest(case=case):
+                registry = mock.Mock(KEY_READ=1, KEY_WRITE=2, KEY_WOW64_64KEY=4)
+                # Fake only the Win32 registry boundary.
+                registry.CreateKeyEx.return_value = mock.MagicMock()
+                name = str(Path("unique-lavapipe.json").resolve())
+                values = {"foreign-driver.json": 0}
+                if case == "already-registered":
+                    values[name] = 1
+
+                def query(_key, value):
+                    if value not in values:
+                        raise FileNotFoundError(value)
+                    return values[value], 4
+
+                registry.QueryValueEx.side_effect = query
+                registry.SetValueEx.side_effect = lambda _key, value, _reserved, _kind, data: values.__setitem__(value, data)
+                registry.DeleteValue.side_effect = lambda _key, value: values.pop(value)
+                if case == "already-registered":
+                    with self.assertRaises(RuntimeError):
+                        with overlay.registered_driver(Path(name), registry):
+                            self.fail("must not enter with an existing value")
+                    self.assertEqual(values[name], 1)
+                    registry.DeleteValue.assert_not_called()
+                elif case == "scenario-fails":
+                    with self.assertRaisesRegex(RuntimeError, "scenario failed"):
+                        with overlay.registered_driver(Path(name), registry):
+                            self.assertEqual(values[name], 0)
+                            raise RuntimeError("scenario failed")
+                    self.assertNotIn(name, values)
+                else:
+                    with overlay.registered_driver(Path(name), registry):
+                        self.assertEqual(values[name], 0)
+                    self.assertNotIn(name, values)
+                self.assertEqual(values["foreign-driver.json"], 0)
 
 
 class TargetTests(unittest.TestCase):
