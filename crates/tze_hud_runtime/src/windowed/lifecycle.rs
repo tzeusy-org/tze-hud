@@ -2108,11 +2108,23 @@ impl WinitApp {
         };
         *self
             .state
-            .portal_ui
+            .surface_ui
             .lock()
-            .unwrap_or_else(|e| e.into_inner()) = crate::operator::portal_status::UiMirror {
+            .unwrap_or_else(|e| e.into_inner()) = crate::operator::surface_status::UiMirror {
             focus: ring_owner.as_ref().map(|o| (o.tile_id, o.node_id)),
             draft_chars,
+            hover_targets: self
+                .state
+                .widget_hover_trackers
+                .iter()
+                .map(|(name, tracker)| {
+                    let r = &tracker.region;
+                    (
+                        name.clone(),
+                        tze_hud_scene::Rect::new(r.x, r.y, r.width, r.height),
+                    )
+                })
+                .collect(),
         };
         if let Ok(mut slot) = self.state.focus_ring_owner_state.lock() {
             *slot = ring_owner;

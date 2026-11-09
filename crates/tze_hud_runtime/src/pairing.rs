@@ -1691,7 +1691,7 @@ pub(crate) mod tests {
             late_tailnet_port: None,
             agents: rig.agents.clone(),
             presents: None,
-            portals: None,
+            surfaces: None,
             capture: None,
             restart: None,
             bind_gate: None,

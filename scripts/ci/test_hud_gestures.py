@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import copy
 import contextlib
 import ctypes
 import hashlib
@@ -34,6 +35,15 @@ STATUS = {
         }
     ],
 }
+STATUS["notifications"] = [{
+    "s": "zone:notification-area", "key": "card", "state": "shown", "focus": None,
+    "rect": {"x": 400, "y": 10, "w": 300, "h": 120},
+    "close": {"x": 676, "y": 10, "w": 24, "h": 24},
+    "actions": [{"label": "First", "kind": "callback", "rect": {"x": 410, "y": 90, "w": 130, "h": 30}},
+                {"label": "Second", "kind": "callback", "rect": {"x": 550, "y": 90, "w": 130, "h": 30}}],
+}]
+STATUS["widgets"] = [{"s": "widget:main-status", "rect": {"x": 10, "y": 500, "w": 320, "h": 100},
+                      "hover_target": {"x": 290, "y": 500, "w": 40, "h": 32}, "tooltip_visible": False}]
 OWNED = dict(started_display=":91", target_display=":91", owned_pid=4242, status_pid=4242,
              url="http://127.0.0.1:5555/mcp")
 
@@ -166,7 +176,7 @@ class WindowsGuardTests(unittest.TestCase):
 
     def test_failed_diagnostic_keeps_original_result_and_next_scenario(self) -> None:
         run = mock.Mock(out=Path("unused"))
-        run.clear_portals.return_value = []
+        run.clear_publications.return_value = []
         run.screen_grab.side_effect = OSError("capture unavailable")
 
         def first(_run):
@@ -280,7 +290,7 @@ class WindowsGuardTests(unittest.TestCase):
                                              "--window-mode", mode, "--out", directory]), 0)
                     selected = scenarios.call_args.args[1]
                     self.assertEqual("overlay-pointer" in selected, mode == "overlay")
-                    self.assertEqual(len(selected), 1 if mode == "overlay" else 17)
+                    self.assertEqual(len(selected), 1 if mode == "overlay" else 22)
             for mode, scenario in (("fullscreen", "overlay-pointer"), ("overlay", "composer")):
                 with mock.patch.object(g, "WINDOWS", True), contextlib.redirect_stderr(io.StringIO()), \
                         self.assertRaises(SystemExit) as failure:
@@ -361,12 +371,27 @@ class TargetTests(unittest.TestCase):
         self.assertEqual(g.resolve_target(STATUS, "portal:demo/header"), (400, 70))
         self.assertEqual(g.resolve_target(STATUS, "portal:demo/close"), (688, 62))
         self.assertEqual(g.resolve_target(STATUS, "portal:demo"), (400, 250))
+        self.assertEqual(g.resolve_target(STATUS, "zone:notification-area/card"), (550, 70))
+        self.assertEqual(g.resolve_target(STATUS, "zone:notification-area/card/0"), (475, 105))
+        self.assertEqual(g.resolve_target(STATUS, "zone:notification-area/card/1"), (615, 105))
+        self.assertEqual(g.resolve_target(STATUS, "zone:notification-area/card/close"), (688, 22))
+        self.assertEqual(g.resolve_target(STATUS, "widget:main-status"), (170, 550))
+        self.assertEqual(g.resolve_target(STATUS, "widget:main-status/hover"), (310, 516))
 
     def test_hidden_or_missing_targets_raise(self) -> None:
         with self.assertRaisesRegex(LookupError, "not shown"):
             g.resolve_target(STATUS, "portal:demo/unread_badge")
         with self.assertRaisesRegex(LookupError, "not on screen"):
             g.resolve_target(STATUS, "portal:other/output")
+
+        for target in ["zone:notification-area/missing/0", "zone:notification-area/card/2",
+                       "zone:notification-area/card/-1", "zone:notification-area/card/nope", "widget:missing/hover"]:
+            with self.subTest(target=target), self.assertRaises(LookupError):
+                g.resolve_target(STATUS, target)
+        hidden = {**STATUS, "notifications": None, "widgets": [{**STATUS["widgets"][0], "hover_target": None}]}
+        for target in ["zone:notification-area/card/0", "widget:main-status/hover"]:
+            with self.subTest(target=target), self.assertRaises(LookupError):
+                g.resolve_target(hidden, target)
 
     def test_offset_primary_display_raises(self) -> None:
         moved = {**STATUS, "displays": [{"x": -1920, "y": 0}]}
@@ -378,6 +403,71 @@ class TargetTests(unittest.TestCase):
         rgba = bytes(range(width * height * 4))
         rows = g.region((width, height, rgba), {"x": 1, "y": 1, "w": 2, "h": 2}, inset=0)
         self.assertEqual(rows, [rgba[(1 * 4 + 1) * 4:(1 * 4 + 3) * 4], rgba[(2 * 4 + 1) * 4:(2 * 4 + 3) * 4]])
+
+
+class CardHelperTests(unittest.TestCase):
+    def test_publish_target_keyboard_and_acknowledged_answer_use_observed_state(self) -> None:
+        for mode, scenario in [("click", g.scenario_card_click), ("keys", g.scenario_card_keyboard),
+                               ("dismiss", g.scenario_card_dismiss)]:
+            with self.subTest(mode=mode):
+                run = g.Run(Path("unused"), Path("unused"))
+                run.smoke, run.inj = mock.Mock(), mock.Mock()
+                status = copy.deepcopy(STATUS)
+                status["portals"][0]["s"] = "portal:gesture-card-keys"
+                status["portals"][0]["focus"] = "composer"
+                status["notifications"] = []
+                run.status = lambda: status
+                run.settle = lambda: status
+                pending = []
+                def call(verb, args, **kwargs):
+                    if verb == "hud_publish":
+                        card = copy.deepcopy(STATUS["notifications"][0])
+                        card["key"] = args["key"]
+                        card["state"] = "entering"  # valid last-frame phase even after quiescence
+                        status["notifications"] = [card]
+                        return False, {}
+                    self.assertEqual(verb, "hud_input")
+                    items, pending[:] = pending[:], []
+                    return False, {"items": items}
+                run.smoke.call.side_effect = call
+                def answer(action):
+                    if status["notifications"]:
+                        card = status["notifications"].pop()
+                        pending.append({"id": "owned-event", "s": card["s"], "key": card["key"],
+                                        "action": action(card["key"]), "kind": "dismiss" if mode == "dismiss" else "callback"})
+                def click(*_):
+                    if mode != "keys":
+                        answer(lambda key: "dismiss" if mode == "dismiss" else key + "-first")
+                def key(chord):
+                    if chord == "Tab":
+                        card = status["notifications"][0]
+                        card["focus"] = 0 if card["focus"] is None else 1
+                    elif chord == "Return":
+                        self.assertEqual(status["notifications"][0]["focus"], 1)
+                        answer(lambda key: key + "-second")
+                run.inj.click.side_effect, run.inj.key.side_effect = click, key
+                with mock.patch.object(g, "open_portal"):
+                    scenario(run)
+                publish = run.smoke.call.call_args_list[0]
+                self.assertEqual(publish.args[0], "hud_publish")
+                self.assertEqual(publish.args[1]["surface"], "zone:notification-area")
+                self.assertEqual(publish.args[1]["content"]["actions"][1]["label"], "Second")
+                self.assertTrue(run.publications)
+                run.smoke.ok.assert_called_once_with("hud_input", {"ack": ["owned-event"]})
+                self.assertFalse(status["notifications"])
+                self.assertFalse(pending)
+                run.inj.move_abs.assert_called()
+                if mode == "keys":
+                    self.assertEqual(run.inj.key.call_args_list, [mock.call("Tab"), mock.call("Tab"), mock.call("Return")])
+                else:
+                    self.assertEqual(run.inj.move_abs.call_args.args, (688, 22) if mode == "dismiss" else (475, 105))
+        # A failed wait keeps the actual observation for scenario diagnostics.
+        run = g.Run(Path("unused"), Path("unused"))
+        run.status = lambda: STATUS
+        with self.assertRaises(g.ScenarioFailed) as failure:
+            run.expect("missing card", lambda s: g.notification_entry(s, "absent") is not None, timeout_s=0)
+        self.assertEqual(failure.exception.last["notifications"], STATUS["notifications"])
+        self.assertEqual(failure.exception.step, "missing card")
 
 
 if __name__ == "__main__":

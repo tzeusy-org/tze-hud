@@ -77,7 +77,7 @@ jobs:
           git diff --name-only HEAD^1 HEAD | tee "$RUNNER_TEMP/changed-files.txt"
           rendered='^(crates/tze_hud_(compositor|widget|scene|config|runtime)/|app/tze_hud_app/|assets/|\.claude/skills/user-test/scripts/[^/]+\.json$|scripts/ci/windows_smoke\.py$|Cargo\.lock$|\.github/workflows/windows\.yml$)'
           # Gestures also follow input, portal and the harness itself.
-          gestures="$rendered|^(crates/tze_hud_(input|portal)/|scripts/ci/hud_(gestures|sendinput)\.py$)"
+          gestures="$rendered|^(crates/tze_hud_(input|portal|mcp)/|scripts/ci/hud_(gestures|sendinput)\.py$)"
           if grep -Eq "$rendered" "$RUNNER_TEMP/changed-files.txt"; then
             echo rendered=true >> "$GITHUB_OUTPUT"
           else

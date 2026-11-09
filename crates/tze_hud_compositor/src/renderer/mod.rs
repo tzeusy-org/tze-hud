@@ -205,6 +205,8 @@ pub struct Compositor {
     pub width: u32,
     pub height: u32,
     frame_number: u64,
+    /// Clock used for the last frame's animation opacity and admin phase.
+    last_animation_frame_at: Option<std::time::Instant>,
     /// Opt-in work counts for the most recent completed headless frame.
     #[cfg(any(test, feature = "dev-mode"))]
     work_observation: work_observation::WorkObservation,
@@ -923,6 +925,7 @@ impl Compositor {
             width,
             height,
             frame_number: 0,
+            last_animation_frame_at: None,
             #[cfg(any(test, feature = "dev-mode"))]
             work_observation: work_observation::WorkObservation::default(),
             latest_surface_recovery: None,
@@ -1266,6 +1269,7 @@ impl Compositor {
             width: clamped_width,
             height: clamped_height,
             frame_number: 0,
+            last_animation_frame_at: None,
             #[cfg(any(test, feature = "dev-mode"))]
             work_observation: work_observation::WorkObservation::default(),
             latest_surface_recovery: None,

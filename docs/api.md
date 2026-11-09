@@ -414,6 +414,25 @@ agents until one is paired.
   document is being measured. Only the focused
   composer's draft length is reported, never its text. It is computed per
   request; an idle HUD does no extra work.
+  `notifications` and `widgets` share that single bounded scene acquisition:
+  both are `null` before the windowed runtime starts or after 100 ms of scene
+  contention, otherwise arrays (empty when nothing was drawn). Geometry comes
+  from the compositor's last frame, with no diagnostic timer or redraw.
+  A notification entry has `s` (`zone:<name>`), `key` (or `null`), `rect`,
+  `display`, `actions` (`{label, kind, rect}`, with `kind` `callback` or `url`),
+  `close` rect, `focus` (action index, `"close"`, or `null`), `chosen` (action
+  index or `null`) and `state` (`entering`, `shown`, `exiting`). Entries follow
+  drawn stack order; chosen cards retain their bounds during their exit even
+  after their input targets disappear. Card bodies and link URLs are omitted.
+  A widget entry has `s` (`widget:<instance>`), its snapped drawn `rect`,
+  `display`, `hover_target` (the runtime's declared trigger rect, or `null`)
+  and `tooltip_visible` (the current runtime parameter is at least 0.5).
+  Rects use `{x, y, w, h}` in scene pixels, and `display` indexes `displays`.
+  `link_launches` monotonically counts accepted runtime browser handoffs after
+  the per-publication/action 2 s limit. A failed worker spawn does not count;
+  a browser navigation failure does. The non-Windows no-op counts too. Scene
+  contention leaves this counter readable. These diagnostics are admin-only;
+  MCP/gRPC responses and their token budgets are unchanged.
   `/admin/status` `displays` lists the overlaid monitors, primary first:
   `{name, x, y, width, height, primary, zones, window_state}` in scene pixels (the primary's
   top-left is 0,0; others may be negative) and the zones configured onto each.

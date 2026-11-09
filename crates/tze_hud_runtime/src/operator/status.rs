@@ -357,8 +357,8 @@ pub struct StatusSource {
     pub binds: Arc<Mutex<Vec<SocketAddr>>>,
     pub safe_mode: Arc<AtomicBool>,
     pub presents: Option<Arc<IdleEfficiencyCounters>>,
-    /// Portal UI state behind `portals` (null without a windowed runtime).
-    pub portals: Option<crate::operator::portal_status::PortalProbe>,
+    /// One admin-only UI snapshot (null blocks without a windowed runtime).
+    pub surfaces: Option<crate::operator::surface_status::SurfaceProbe>,
     /// Log file served by `/admin/logs`.
     pub log_path: std::path::PathBuf,
     /// Compositor capture channel behind `/admin/screenshot`.
@@ -426,13 +426,11 @@ impl StatusSource {
             });
         let (displays, unplaced_zones) = displays_json();
         // Read off the async workers: the probe may wait briefly for the scene.
-        let portals = match self.portals.clone() {
+        let surfaces = match self.surfaces.clone() {
             Some(probe) => tokio::task::spawn_blocking(move || probe.read())
                 .await
-                .ok()
-                .flatten()
-                .unwrap_or(Value::Null),
-            None => Value::Null,
+                .unwrap_or_default(),
+            None => Default::default(),
         };
         json!({
             "version": env!("CARGO_PKG_VERSION"),
@@ -454,7 +452,10 @@ impl StatusSource {
             // Milliseconds since the last presented frame: a settle signal.
             "idle_since_ms": self.presents.as_ref().map(|c| c.idle_since_ms()),
             // Portal UI state for out-of-process validation (admin only).
-            "portals": portals,
+            "portals": surfaces.portals,
+            "notifications": surfaces.notifications,
+            "widgets": surfaces.widgets,
+            "link_launches": surfaces.link_launches,
             "cpu_pct_2s": cpu_pct_2s,
             "cpu_pct_avg": cpu_pct_avg,
             // Outcome of the last update attempt: null, or {ok, sha, error}.

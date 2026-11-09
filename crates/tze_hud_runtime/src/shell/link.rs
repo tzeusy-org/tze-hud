@@ -1,9 +1,15 @@
 //! Owner-pressed notification links. Call only after all scene/state guards drop.
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
+
 #[cfg(test)]
 type TestLinkWorker = std::sync::Arc<dyn Fn(String) -> Result<(), String> + Send + Sync>;
 
 #[derive(Default)]
 pub(crate) struct LinkOpener {
+    /// Accepted runtime handoffs, not successful browser navigations. No URL
+    /// is retained in diagnostics; admission already applied the rate limit.
+    pub(crate) launches: Arc<AtomicU64>,
     #[cfg(test)]
     pub(crate) worker: Option<TestLinkWorker>,
     #[cfg(test)]
@@ -33,6 +39,9 @@ impl LinkOpener {
                     tracing::warn!(%error, "notification browser handoff failed");
                 }
             });
+        if spawned.is_ok() {
+            self.launches.fetch_add(1, Ordering::Relaxed);
+        }
         match spawned {
             #[cfg(test)]
             Ok(worker) => self.workers.push(worker),

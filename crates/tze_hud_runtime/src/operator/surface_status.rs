@@ -1,11 +1,9 @@
-//! The `portals` block of `/admin/status`: read-only portal UI state, so
-//! out-of-process validation (T13) asserts on state instead of inferring it
-//! from pixels. Admin-scoped only; never exposed through MCP.
-//!
-//! Computed when status is requested, from the live scene plus a small
-//! main-thread mirror (keyboard focus and draft length), so an idle HUD does
-//! no extra work. The draft's text is never reported, only its length.
+//! Admin-only surface observations for real-input validation. JSON is built
+//! on request from last-frame geometry and a small main-thread mirror, under
+//! one bounded scene acquisition. It never wakes or advances the renderer.
 
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use serde_json::{Value, json};
@@ -15,29 +13,39 @@ use tze_hud_scene::{
     ZoneInteractionKind,
 };
 
-/// Builds the `portals` array, or `None` while the scene stays locked.
+/// Reads all admin-only UI blocks together; a busy scene yields null geometry blocks.
 #[derive(Clone)]
-pub struct PortalProbe(Arc<dyn Fn() -> Option<Value> + Send + Sync>);
+pub struct SurfaceProbe(Arc<dyn Fn() -> SurfaceSnapshot + Send + Sync>);
 
-impl PortalProbe {
-    pub fn read(&self) -> Option<Value> {
+#[derive(Default)]
+pub struct SurfaceSnapshot {
+    pub portals: Value,
+    pub notifications: Value,
+    pub widgets: Value,
+    pub link_launches: u64,
+}
+
+impl SurfaceProbe {
+    pub fn read(&self) -> SurfaceSnapshot {
         (self.0)()
     }
 }
 
-impl std::fmt::Debug for PortalProbe {
+impl std::fmt::Debug for SurfaceProbe {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("PortalProbe")
+        f.write_str("SurfaceProbe")
     }
 }
 
 /// Keyboard focus and draft length as the main thread last saw them.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct UiMirror {
     /// Focused `(tile, node)`; `node` is `None` for a tile-level stop.
     pub focus: Option<(SceneId, Option<SceneId>)>,
     /// Characters in the focused composer's draft (0 when none is focused).
     pub draft_chars: usize,
+    /// Actual runtime hover targets, including their configured trigger inset.
+    pub hover_targets: HashMap<String, Rect>,
 }
 
 /// The main thread's [`UiMirror`], written each settle.
@@ -45,20 +53,29 @@ pub type UiHandle = Arc<StdMutex<UiMirror>>;
 
 /// The status probe for one runtime: reads `scene` (only the scene lock, as
 /// the compositor does, waiting up to 100 ms) and the main thread's `ui`.
-pub fn probe(scene: Arc<tokio::sync::Mutex<SceneGraph>>, ui: UiHandle) -> PortalProbe {
-    PortalProbe(Arc::new(move || {
+pub fn probe(
+    scene: Arc<tokio::sync::Mutex<SceneGraph>>,
+    ui: UiHandle,
+    link_launches: Arc<AtomicU64>,
+) -> SurfaceProbe {
+    SurfaceProbe(Arc::new(move || {
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(100);
         loop {
             if let Ok(scene) = scene.try_lock() {
-                let ui = *ui.lock().unwrap_or_else(|e| e.into_inner());
-                return Some(portals_json(
-                    &scene,
-                    ui,
-                    &crate::operator::status::display_rects(),
-                ));
+                let ui = ui.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                let displays = crate::operator::status::display_rects();
+                return SurfaceSnapshot {
+                    portals: portals_json(&scene, &ui, &displays),
+                    notifications: notifications_json(&scene, &displays),
+                    widgets: widgets_json(&scene, &ui, &displays),
+                    link_launches: link_launches.load(Ordering::Relaxed),
+                };
             }
             if std::time::Instant::now() >= deadline {
-                return None;
+                return SurfaceSnapshot {
+                    link_launches: link_launches.load(Ordering::Relaxed),
+                    ..Default::default()
+                };
             }
             std::thread::sleep(std::time::Duration::from_millis(2));
         }
@@ -67,6 +84,63 @@ pub fn probe(scene: Arc<tokio::sync::Mutex<SceneGraph>>, ui: UiHandle) -> Portal
 
 fn rect_json(r: Rect) -> Value {
     json!({"x": r.x.round(), "y": r.y.round(), "w": r.width.round(), "h": r.height.round()})
+}
+
+fn display_index(bounds: Rect, displays: &[Rect]) -> Option<usize> {
+    let (x, y) = (
+        bounds.x + bounds.width / 2.0,
+        bounds.y + bounds.height / 2.0,
+    );
+    displays
+        .iter()
+        .position(|d| x >= d.x && x < d.x + d.width && y >= d.y && y < d.y + d.height)
+}
+
+fn notifications_json(scene: &SceneGraph, displays: &[Rect]) -> Value {
+    use tze_hud_scene::graph::overlay::NotificationControl;
+    let entries: Vec<Value> = scene.overlay.notification_geometry.iter().filter_map(|card| {
+        let record = scene.zone_registry.active_publishes.get(&card.zone_name)?
+            .iter().find(|r| r.publication_id == card.publication_id)?;
+        let tze_hud_scene::ZoneContent::Notification(payload) = &record.content else {
+            return None;
+        };
+        let actions: Vec<Value> = payload.actions.iter().zip(&card.actions).map(|(action, rect)| {
+            json!({"label": action.label, "kind": if action.url.is_some() { "url" } else { "callback" }, "rect": rect_json(*rect)})
+        }).collect();
+        let focus = match card.focus {
+            Some(NotificationControl::Action(index)) => json!(index),
+            Some(NotificationControl::Close) => json!("close"),
+            None => Value::Null,
+        };
+        Some(json!({
+            "s": format!("zone:{}", card.zone_name),
+            "key": record.merge_key,
+            "rect": rect_json(card.bounds),
+            "display": display_index(card.bounds, displays),
+            "actions": actions,
+            "close": rect_json(card.close),
+            "focus": focus,
+            "chosen": card.chosen,
+            "state": card.state,
+        }))
+    }).collect();
+    json!(entries)
+}
+
+fn widgets_json(scene: &SceneGraph, ui: &UiMirror, displays: &[Rect]) -> Value {
+    let entries: Vec<Value> = scene.overlay.widget_geometry.iter().filter_map(|geometry| {
+        let instance = scene.widget_registry.instances.get(&geometry.instance_name)?;
+        let visible = instance.current_params.get("tooltip_visible")
+            .is_some_and(|p| matches!(p, tze_hud_scene::WidgetParameterValue::F32(value) if *value >= 0.5));
+        Some(json!({
+            "s": format!("widget:{}", geometry.instance_name),
+            "rect": rect_json(geometry.bounds),
+            "display": display_index(geometry.bounds, displays),
+            "hover_target": ui.hover_targets.get(&geometry.instance_name).copied().map(rect_json),
+            "tooltip_visible": visible,
+        }))
+    }).collect();
+    json!(entries)
 }
 
 fn offset(base: Rect, local: Rect) -> Rect {
@@ -158,7 +232,7 @@ fn part_text(scene: &SceneGraph, tile: SceneId, kind: PortalPartKind) -> Option<
 ///
 /// `displays` are the overlaid display rects in scene pixels, in
 /// `/admin/status` order.
-pub fn portals_json(scene: &SceneGraph, ui: UiMirror, displays: &[Rect]) -> Value {
+pub fn portals_json(scene: &SceneGraph, ui: &UiMirror, displays: &[Rect]) -> Value {
     let mut entries: Vec<(String, Value)> = Vec::new();
     for (&tile_id, tile) in &scene.tiles {
         let Some(surface) = scene.portal_surface(tile_id) else {
@@ -336,6 +410,217 @@ mod tests {
     }
 
     #[test]
+    fn reports_last_frame_cards_and_widgets_without_mutating_the_scene() {
+        use tze_hud_compositor::renderer::hit_regions::populate_notification_hit_regions;
+        use tze_hud_scene::{
+            ContentionPolicy, GeometryPolicy, LayerAttachment, NotificationAction,
+            NotificationPayload, RenderingPolicy, WidgetInstance, WidgetParameterValue,
+            ZoneContent, ZoneDefinition, ZoneMediaType, graph::overlay::WidgetGeometry,
+        };
+        let (mut scene, _, _, _) = portal_scene();
+        let displays = [Rect::new(0.0, 0.0, 1920.0, 1080.0)];
+        assert_eq!(notifications_json(&scene, &displays), json!([]));
+        assert_eq!(
+            widgets_json(&scene, &UiMirror::default(), &displays),
+            json!([])
+        );
+        scene.register_zone(ZoneDefinition {
+            id: SceneId::new(),
+            name: "notification-area".into(),
+            description: String::new(),
+            geometry_policy: GeometryPolicy::Relative {
+                x_pct: 0.6,
+                y_pct: 0.0,
+                width_pct: 0.35,
+                height_pct: 0.3,
+            },
+            accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
+            rendering_policy: RenderingPolicy::default(),
+            contention_policy: ContentionPolicy::Stack { max_depth: 5 },
+            max_publishers: 4,
+            auto_clear_ms: None,
+            layer_attachment: LayerAttachment::Chrome,
+            ephemeral: false,
+        });
+        scene
+            .publish_to_zone(
+                "notification-area",
+                ZoneContent::Notification(NotificationPayload {
+                    text: "private body".into(),
+                    title: String::new(),
+                    icon: String::new(),
+                    urgency: 2,
+                    ttl_ms: None,
+                    actions: vec![
+                        NotificationAction {
+                            label: "Reply".into(),
+                            callback_id: Some("answer".into()),
+                            url: None,
+                        },
+                        NotificationAction {
+                            label: "Read".into(),
+                            callback_id: None,
+                            url: Some("https://example.invalid/?secret=value".into()),
+                        },
+                    ],
+                }),
+                "agent",
+                Some("card-key".into()),
+                None,
+                None,
+            )
+            .unwrap();
+        let refresh = |scene: &mut SceneGraph| {
+            populate_notification_hit_regions(scene, 1920.0, 1080.0, &HashMap::new());
+        };
+        refresh(&mut scene);
+        let card = notifications_json(&scene, &displays)[0].clone();
+        assert_eq!(card["s"], "zone:notification-area");
+        assert_eq!(card["key"], "card-key");
+        assert_eq!(card["display"], 0);
+        assert_eq!(card["actions"][0]["label"], "Reply");
+        assert_eq!(card["actions"][0]["kind"], "callback");
+        assert_eq!(card["actions"][1]["label"], "Read");
+        assert_eq!(card["actions"][1]["kind"], "url");
+        assert_eq!(card["actions"].as_array().unwrap().len(), 2);
+        assert!(card["focus"].is_null());
+        assert!(card["chosen"].is_null());
+        assert!(!card.to_string().contains("private body"));
+        assert!(!card.to_string().contains("secret=value"));
+        for rect in [
+            &card["rect"],
+            &card["close"],
+            &card["actions"][0]["rect"],
+            &card["actions"][1]["rect"],
+        ] {
+            let r = Rect::new(
+                rect["x"].as_f64().unwrap() as f32,
+                rect["y"].as_f64().unwrap() as f32,
+                rect["w"].as_f64().unwrap() as f32,
+                rect["h"].as_f64().unwrap() as f32,
+            );
+            assert!(
+                r.width > 0.0 && r.height > 0.0 && r.is_within(&displays[0]),
+                "{rect}"
+            );
+        }
+        let action = scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|r| matches!(r.kind, ZoneInteractionKind::Action { index: 1 }))
+            .unwrap()
+            .clone();
+        scene.overlay.notification_focus = Some(action.interaction_id.clone());
+        refresh(&mut scene);
+        assert_eq!(notifications_json(&scene, &displays)[0]["focus"], 1);
+        let close = scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .find(|r| matches!(r.kind, ZoneInteractionKind::Dismiss))
+            .unwrap()
+            .clone();
+        scene.overlay.notification_focus = Some(close.interaction_id);
+        refresh(&mut scene);
+        assert_eq!(notifications_json(&scene, &displays)[0]["focus"], "close");
+        scene.overlay.notification_focus = None;
+        scene
+            .overlay
+            .notification_choices
+            .insert(action.publication_id, action.interaction_id);
+        refresh(&mut scene);
+        assert!(
+            scene.overlay.zone_hit_regions.is_empty(),
+            "chosen card takes no input"
+        );
+        for state in ["entering", "shown", "exiting"] {
+            scene.overlay.notification_geometry[0].state = state;
+            let v = notifications_json(&scene, &displays);
+            assert_eq!(
+                v[0]["rect"], card["rect"],
+                "retain exit geometry without hit regions"
+            );
+            assert_eq!(v[0]["state"], state);
+            assert_eq!(v[0]["chosen"], 1);
+            assert!(v[0]["focus"].is_null());
+        }
+        // A replacement record must never inherit old bounds under new labels.
+        scene
+            .zone_registry
+            .active_publishes
+            .get_mut("notification-area")
+            .unwrap()[0]
+            .publication_id = SceneId::new();
+        assert_eq!(notifications_json(&scene, &displays), json!([]));
+        scene.widget_registry.register_instance(WidgetInstance {
+            id: SceneId::new(),
+            widget_type_name: "test".into(),
+            tab_id: scene.active_tab.unwrap(),
+            geometry_override: None,
+            contention_override: None,
+            instance_name: "test".into(),
+            current_params: HashMap::new(),
+            auto_clear_ms: None,
+        });
+        assert_eq!(
+            widgets_json(&scene, &UiMirror::default(), &displays),
+            json!([]),
+            "registry instance without a drawn quad"
+        );
+        scene.overlay.widget_geometry.push(WidgetGeometry {
+            instance_name: "test".into(),
+            bounds: Rect::new(40.0, 20.0, 320.0, 100.0),
+        });
+        let mut ui = UiMirror::default();
+        for (value, visible) in [(0.0, false), (0.499, false), (0.5, true), (1.0, true)] {
+            scene
+                .widget_registry
+                .instances
+                .get_mut("test")
+                .unwrap()
+                .current_params
+                .insert("tooltip_visible".into(), WidgetParameterValue::F32(value));
+            let v = widgets_json(&scene, &ui, &displays);
+            assert_eq!(v[0]["s"], "widget:test");
+            assert_eq!(v[0]["display"], 0);
+            assert_eq!(v[0]["rect"], json!({"x":40.0,"y":20.0,"w":320.0,"h":100.0}));
+            assert!(v[0]["hover_target"].is_null());
+            assert_eq!(v[0]["tooltip_visible"], visible);
+        }
+        let target = Rect::new(320.0, 20.0, 40.0, 32.0);
+        ui.hover_targets.insert("test".into(), target);
+        assert_eq!(
+            widgets_json(&scene, &ui, &displays)[0]["hover_target"],
+            rect_json(target)
+        );
+        let version = scene.version;
+        let scene = Arc::new(tokio::sync::Mutex::new(scene));
+        let launches = Arc::new(AtomicU64::new(7));
+        let observation = probe(scene.clone(), Arc::new(StdMutex::new(ui)), launches);
+        for _ in 0..3 {
+            assert_eq!(observation.read().widgets.as_array().unwrap().len(), 1);
+            assert_eq!(scene.try_lock().unwrap().version, version);
+        }
+        let _held = scene.try_lock().unwrap();
+        let started = std::time::Instant::now();
+        let unavailable = observation.read();
+        assert!(
+            unavailable.portals.is_null()
+                && unavailable.notifications.is_null()
+                && unavailable.widgets.is_null()
+        );
+        assert!(
+            started.elapsed() < std::time::Duration::from_millis(500),
+            "one 100ms acquisition for all blocks"
+        );
+        assert_eq!(
+            unavailable.link_launches, 7,
+            "scene contention must not reset the monotonic counter"
+        );
+    }
+
+    #[test]
     fn reports_portal_panes_focus_and_draft_length() {
         let (mut scene, tile_id, mut driver, clock) = portal_scene();
         let composer = scene.overlay.tile_composer_nodes[&tile_id];
@@ -344,8 +629,9 @@ mod tests {
         let focused = UiMirror {
             focus: Some((tile_id, Some(composer))),
             draft_chars: 5,
+            ..Default::default()
         };
-        let v = portals_json(&scene, focused, &displays);
+        let v = portals_json(&scene, &focused, &displays);
         let p = &v[0];
         assert_eq!(p["s"], "portal:probe");
         assert!(p["header_text"].as_str().unwrap().contains("⋯ writing"));
@@ -363,11 +649,12 @@ mod tests {
         let tile_stop = UiMirror {
             focus: Some((tile_id, None)),
             draft_chars: 5,
+            ..Default::default()
         };
-        let v = portals_json(&scene, tile_stop, &displays);
+        let v = portals_json(&scene, &tile_stop, &displays);
         assert_eq!(v[0]["focus"], "tile");
         assert_eq!(v[0]["input"]["draft_chars"], 0);
-        let v = portals_json(&scene, UiMirror::default(), &displays);
+        let v = portals_json(&scene, &UiMirror::default(), &displays);
         assert_eq!(v[0]["focus"], "none");
 
         // Observe the actual driver clearing both rendered cues, without a
@@ -375,7 +662,7 @@ mod tests {
         clock.advance(2001);
         let tab = scene.active_tab;
         driver.drain(&mut scene, &mut tze_hud_input::InputProcessor::new(), tab);
-        let v = portals_json(&scene, UiMirror::default(), &displays);
+        let v = portals_json(&scene, &UiMirror::default(), &displays);
         assert!(!v[0]["header_text"].as_str().unwrap().contains("⋯ writing"));
         assert_eq!(v[0]["output"]["writing_caret"], false);
     }
@@ -383,8 +670,9 @@ mod tests {
     #[test]
     fn reports_visible_rows_and_tail_state_as_scrolled() {
         let (mut scene, tile_id, _, _) = portal_scene();
-        let out =
-            |scene: &SceneGraph| portals_json(scene, UiMirror::default(), &[])[0]["output"].clone();
+        let out = |scene: &SceneGraph| {
+            portals_json(scene, &UiMirror::default(), &[])[0]["output"].clone()
+        };
         let rows = |scene: &SceneGraph| {
             let o = out(scene);
             (
@@ -419,12 +707,12 @@ mod tests {
     fn unread_badge_is_the_largest_exposed_pill_piece() {
         let (mut scene, tile_id, _, _) = portal_scene();
         let badge = |scene: &SceneGraph| {
-            portals_json(scene, UiMirror::default(), &[])[0]["panes"]["unread_badge"].clone()
+            portals_json(scene, &UiMirror::default(), &[])[0]["panes"]["unread_badge"].clone()
         };
         // No pill region published (at tail, hidden or covered): null.
         assert_eq!(badge(&scene), Value::Null);
         assert_eq!(
-            portals_json(&scene, UiMirror::default(), &[])[0]["panes"]["close"],
+            portals_json(&scene, &UiMirror::default(), &[])[0]["panes"]["close"],
             Value::Null
         );
         let other = SceneId::new();
@@ -445,14 +733,14 @@ mod tests {
         foreign.kind = ZoneInteractionKind::DismissTile { tile_id: other };
         foreign.bounds.width = 500.0;
         scene.overlay.zone_hit_regions.extend([close, foreign]);
-        let v = portals_json(&scene, UiMirror::default(), &[]);
+        let v = portals_json(&scene, &UiMirror::default(), &[]);
         assert_eq!(
             v[0]["panes"]["close"],
             json!({"x": 80.0, "y": 20.0, "w": 24.0, "h": 24.0})
         );
         scene.overlay.zone_hit_regions.clear();
         assert_eq!(
-            portals_json(&scene, UiMirror::default(), &[])[0]["panes"]["close"],
+            portals_json(&scene, &UiMirror::default(), &[])[0]["panes"]["close"],
             Value::Null
         );
     }

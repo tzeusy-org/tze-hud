@@ -7,7 +7,7 @@ Windows): only on a GitHub-hosted VM, through Win32 `SendInput`
 (`hud_sendinput.py`), as an informational step in `windows.yml`. Either way
 the run starts its own HUD from `--exe` with a freshly seeded config, an
 ephemeral loopback MCP port and gRPC disabled, and asserts on state:
-the `/admin/status` `portals` block and MCP results. Pixels are checked only
+the `/admin/status` surface blocks and MCP results. Pixels are checked only
 inside rects that status reports. Readiness is observed (`idle_since_ms`),
 never slept for, and nothing is retried.
 
@@ -126,17 +126,51 @@ def portal_entry(status: dict, surface: str) -> dict | None:
     return next((p for p in status.get("portals") or [] if p.get("s") == surface), None)
 
 
-def resolve_target(status: dict, target: str) -> tuple[int, int]:
-    """Centre of `portal:<id>/<pane>` (or the whole portal) in screen pixels.
+def notification_entry(status: dict, key: str, surface: str = "zone:notification-area") -> dict | None:
+    return next((p for p in status.get("notifications") or []
+                 if p.get("s") == surface and p.get("key") == key), None)
 
-    X11 has no DPI virtualisation and the primary display's top-left is the
-    scene origin, so scene pixels are screen pixels on the primary.
+
+def widget_entry(status: dict, surface: str) -> dict | None:
+    return next((p for p in status.get("widgets") or [] if p.get("s") == surface), None)
+
+
+def resolve_target(status: dict, target: str) -> tuple[int, int]:
+    """Centre of a reported portal pane, card control, or widget hover target.
+
+    Card targets are `zone:<name>/<key>/<index|close>`; widget targets are
+    `widget:<instance>/hover`. No geometry is inferred from pixels or layout.
     """
     surface, _, pane = target.partition("/")
-    portal = portal_entry(status, surface)
-    if portal is None:
-        raise LookupError(f"{surface} is not on screen")
-    rect = portal["rect"] if not pane else (portal.get("panes") or {}).get(pane)
+    if surface.startswith("zone:"):
+        key, sep, control = pane.rpartition("/")
+        if not sep:
+            key, control = pane, ""
+        card = notification_entry(status, key, surface)
+        if card is None:
+            raise LookupError(f"{surface}/{key} is not on screen")
+        if control == "close":
+            rect = card.get("close")
+        elif control:
+            try:
+                index = int(control)
+                if index < 0:
+                    raise IndexError(index)
+                rect = card["actions"][index]["rect"]
+            except (KeyError, ValueError, IndexError):
+                raise LookupError(f"{target} is not shown") from None
+        else:
+            rect = card["rect"]
+    elif surface.startswith("widget:"):
+        widget = widget_entry(status, surface)
+        if widget is None:
+            raise LookupError(f"{surface} is not on screen")
+        rect = widget.get("hover_target") if pane == "hover" else widget["rect"]
+    else:
+        portal = portal_entry(status, surface)
+        if portal is None:
+            raise LookupError(f"{surface} is not on screen")
+        rect = portal["rect"] if not pane else (portal.get("panes") or {}).get(pane)
     if not rect:
         raise LookupError(f"{target} is not shown")
     displays = status.get("displays") or []
@@ -256,6 +290,7 @@ class Run:
     inj: object | None = None  # XTest or hud_sendinput.SendInput
     helper_pids: list[int] = field(default_factory=list)  # owned non-HUD apps (scenario 10's Notepad)
     timeline: list[dict] = field(default_factory=list)
+    publications: set[tuple[str, str | None]] = field(default_factory=set)
 
     @property
     def pid(self) -> int | None:
@@ -437,7 +472,7 @@ class Run:
         try:
             wait_until(probe, what="HUD settles", timeout_s=timeout_s, interval_s=0.05)
         except AssertionError:
-            raise ScenarioFailed("settle", {k: last.get(k) for k in ("frames_presented", "idle_since_ms", "portals")}
+            raise ScenarioFailed("settle", {k: last.get(k) for k in ("frames_presented", "idle_since_ms", "portals", "notifications", "widgets")}
                                  | {"frames_before_action": since}) from None
         status = last
         self._since = None
@@ -458,7 +493,7 @@ class Run:
         try:
             wait_until(probe, what=what, timeout_s=timeout_s, interval_s=interval_s)
         except AssertionError:
-            raise ScenarioFailed(what, {"portals": last.get("portals"), "idle_since_ms": last.get("idle_since_ms")}) from None
+            raise ScenarioFailed(what, {k: last.get(k) for k in ("portals", "notifications", "widgets", "link_launches", "idle_since_ms")}) from None
         self.step(f"ok {what}")
         return last
 
@@ -479,7 +514,9 @@ class Run:
                 valid = False
             if not valid:
                 raise ScenarioFailed(what, {"elapsed_s": round(time.monotonic() - started, 3),
-                                            "safe_mode": status.get("safe_mode"), "portals": status.get("portals")})
+                                            "safe_mode": status.get("safe_mode"), "portals": status.get("portals"),
+                                            "notifications": status.get("notifications"), "widgets": status.get("widgets"),
+                                            "link_launches": status.get("link_launches")})
             left = deadline - time.monotonic()
             if left <= 0:
                 self.step(f"ok {what} throughout {time.monotonic() - started:.3f}s")
@@ -570,6 +607,8 @@ class Run:
         is_error, reply = self.smoke.call("hud_publish", {"surface": surface, **args})
         if is_error:  # the refusal's code and hint, never content
             raise ScenarioFailed(f"hud_publish {surface} refused", {"code": reply.get("code"), "hint": reply.get("hint")})
+        if surface.startswith(("zone:", "widget:")):
+            self.publications.add((surface, args.get("key")))
         self.step(f"publish {surface}")
         return reply
 
@@ -594,12 +633,18 @@ class Run:
             items += self.inputs(wait_ms=int(min(left, 2.0) * 1000))
         return items
 
-    def clear_portals(self) -> list[dict]:
-        """Detach every portal this agent holds; return input nobody took (a failure)."""
+    def clear_publications(self) -> list[dict]:
+        """Release this run's publications and portals; return unhandled input."""
         stray = self.inputs()
         for entry in self.smoke.ok("hud_surfaces").get("surfaces", []):
             if entry.get("s", "").startswith("portal:") and entry.get("state") not in {None, "detached"}:
                 self.smoke.call("hud_clear", {"surface": entry["s"]})
+        for surface, key in sorted(self.publications, key=lambda p: (p[0], p[1] or "")):
+            args = {"surface": surface}
+            if key is not None:
+                args["key"] = key
+            self.smoke.ok("hud_clear", args)
+        self.publications.clear()
         return stray
 
     # Evidence ────────────────────────────────────────────────────────────
@@ -855,6 +900,117 @@ def scenario_keyboard(run: Run) -> None:
     items = run.take(1)
     if [i.get("text") for i in items] != ["k k"]:
         raise ScenarioFailed("keyboard-only submit", {"items": items})
+
+
+def open_card(run: Run, key: str, *, actions: list[dict] | None = None) -> dict:
+    """Publish through MCP, then wait for the actual drawn card, never its estimate."""
+    run.publish("zone:notification-area", key=key, ttl_ms=0,
+                content={"body": "Owned gesture check", "actions": actions or [
+                    {"label": "First", "callback_id": f"{key}-first"},
+                    {"label": "Second", "callback_id": f"{key}-second"}]})
+    run.expect(f"card {key} geometry", lambda s: bool(
+        (card := notification_entry(s, key)) and card["state"] != "exiting"))
+    # A completed fade need not produce one more frame. Last-frame diagnostics
+    # may correctly retain "entering" after the runtime has become quiescent;
+    # wait on actual presentation/idleness rather than inventing a new frame.
+    status = run.settle()
+    return notification_entry(status, key)
+
+
+def take_card_answer(run: Run, key: str, action: str, *, dismiss: bool = False) -> None:
+    """One retained callback/dismiss, its local exit, and no duplicate item."""
+    items = run.take(1)
+    if len(items) != 1 or items[0].get("action") != action or items[0].get("key") != key \
+            or items[0].get("s") != "zone:notification-area" \
+            or (dismiss and items[0].get("kind") != "dismiss"):
+        raise ScenarioFailed(f"card {key} delivers one {action}", {"items": items, "status": run.status()})
+    run.expect(f"card {key} exited", lambda s: notification_entry(s, key) is None)
+    extra = run.inputs()
+    if extra:
+        raise ScenarioFailed(f"card {key} produced duplicate input", {"items": extra, "status": run.status()})
+
+
+def scenario_card_click(run: Run) -> None:
+    """R14.2 S1: a real action click returns one callback and the card exits."""
+    key = "gesture-card-click"
+    open_card(run, key)
+    run.click(f"zone:notification-area/{key}/0")
+    take_card_answer(run, key, f"{key}-first")
+
+
+def scenario_card_keyboard(run: Run) -> None:
+    """R14.2 S2: composer focus wraps with Tab to action two; Enter answers once."""
+    key, surface = "gesture-card-keys", "portal:gesture-card-keys"
+    open_portal(run, surface, "Keyboard", count=2)
+    run.click(f"{surface}/composer")
+    run.expect("composer focused before card", on(surface, lambda p: p["focus"] == "composer"))
+    open_card(run, key)
+    for _ in range(16):
+        run.key("Tab")
+        status = run.settle()
+        card = notification_entry(status, key)
+        if card and card["focus"] == 1:
+            break
+    else:
+        raise ScenarioFailed("Tab wraps to card action two", run.status())
+    run.key("Return")
+    take_card_answer(run, key, f"{key}-second")
+
+
+def scenario_card_dismiss(run: Run) -> None:
+    """R14.2 S3: the reported close target emits one kind=dismiss item."""
+    key = "gesture-card-dismiss"
+    open_card(run, key)
+    run.click(f"zone:notification-area/{key}/close")
+    take_card_answer(run, key, "dismiss", dismiss=True)
+
+
+def scenario_card_link(run: Run) -> None:
+    """R14.2 S4/S5: one real link handoff; same action within 2s is refused, with no input."""
+    key = "gesture-card-link"
+    open_card(run, key, actions=[{"label": "Open test page", "url": "https://example.invalid/"}])
+    before = run.status()["link_launches"]
+    run.point(f"zone:notification-area/{key}/0")
+    first = time.monotonic()
+    run.inj.click()
+    run.expect("one accepted link launch", lambda s: s["link_launches"] == before + 1,
+               timeout_s=1.0, interval_s=0.02)
+    # ShellExecute may have foregrounded a browser. Regain only the owned HUD,
+    # without injecting, and keep the normal guard on every subsequent SendInput.
+    if run.injector == "sendinput":
+        if run.status().get("pid") != run.pid:
+            raise Refused("owned HUD changed before the second link press")
+        def foreground():
+            if WIN.foreground_pid() != run.pid:
+                WIN.bring_to_front(run.pid)
+            return WIN.foreground_pid() == run.pid, WIN.foreground_pid()
+        wait_until(foreground, what="owned HUD foreground before second link press",
+                   timeout_s=max(0.01, first + 1.8 - time.monotonic()), interval_s=0.02)
+    run.inj.click()
+    second = time.monotonic()
+    if second - first >= 2.0:
+        raise ScenarioFailed("second link press must occur within 2s", {"seconds": second - first, "status": run.status()})
+    run.step(f"same link pressed again after {second - first:.3f}s")
+    run.observe_for("link rate limit", lambda s: s["link_launches"] == before + 1
+                    and notification_entry(s, key) is not None, 0.3)
+    if items := run.inputs():
+        raise ScenarioFailed("links create no hud_input item", {"items": items, "status": run.status()})
+
+
+def scenario_widget_hover(run: Run) -> None:
+    """R14.2 S6: the declared widget target shows its tooltip after dwell and hides on leave."""
+    surface = "widget:main-status"
+    run.publish(surface, ttl_ms=0, params={"status": "online", "reason": "Owned hover check"})
+    run.expect("widget rendered", lambda s: widget_entry(s, surface) is not None)
+    # Move to a reported non-hover part of the same quad, not a guessed screen point.
+    widget = widget_entry(run.status(), surface)
+    rect = widget["rect"]
+    run.glide(round(rect["x"] + 1), round(rect["y"] + rect["h"] - 1))
+    run.expect("widget tooltip initially hidden", lambda s: not widget_entry(s, surface)["tooltip_visible"])
+    run.point(f"{surface}/hover")
+    run.expect("widget tooltip after 180ms dwell", lambda s: widget_entry(s, surface)["tooltip_visible"])
+    run.glide(round(rect["x"] + 1), round(rect["y"] + rect["h"] - 1))
+    run.expect("widget tooltip hidden on leave", lambda s: not widget_entry(s, surface)["tooltip_visible"])
 
 
 def shrink(run: Run, s: str, times: int = 4) -> dict:
@@ -1328,6 +1484,11 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "badge-opaque": scenario_badge_opaque,            # 5
     "composer": scenario_composer,                    # 6
     "keyboard": scenario_keyboard,                    # 7
+    "card-click": scenario_card_click,
+    "card-keyboard": scenario_card_keyboard,
+    "card-dismiss": scenario_card_dismiss,
+    "card-link": scenario_card_link,
+    "widget-hover": scenario_widget_hover,
     "drag-alignment": scenario_drag_alignment,        # 8
     "drag-release": scenario_drag_release,            # 9
     "writing": scenario_writing,
@@ -1377,7 +1538,7 @@ def run_scenarios(run: Run, names: list[str]) -> list[dict]:
                 result["diagnostic_error"] = f"{type(err).__name__}: {err}"
         try:
             run.snapshot(f"{name}.after")
-            stray = run.clear_portals()
+            stray = run.clear_publications()
             if stray and result["outcome"] == "PASS":
                 result.update(outcome="FAIL", step="input nobody took (duplicate or stray submit)",
                               last={"items": [i.get("text") for i in stray]})
