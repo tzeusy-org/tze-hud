@@ -58,7 +58,7 @@ fn configured_instance(
         },
     )]);
     let raw = serde_json::from_value(serde_json::json!({
-        "type": definition.id, "instance_id": name, "initial_params": initial_params,
+        "widget_type": definition.id, "instance_id": name, "initial_params": initial_params,
     }))
     .unwrap();
     tze_hud_config::widgets::build_widget_instance(&raw, tab, &types).unwrap()
