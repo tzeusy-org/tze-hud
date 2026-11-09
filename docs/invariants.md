@@ -132,6 +132,13 @@ local scroll feedback does not wait on that lane.
   [`portal_scroll_lag_preserves_visible_window`](../tests/integration/text_stream_portal_surface.rs)
   (local viewport survives notification lag)
 
+The ask-and-wait deadline is classified when the scene accepts an event, in
+its monotonic clock domain. An early answer retains its reservation until
+encoding or cancellation even when dispatch resumes after the deadline; a
+new event at or after the deadline cannot acquire that reservation. A busy
+post-admission scene cannot extend the call's wait: bounded contention uses
+the existing input-state error and releases ownership for ordinary polling.
+
 ## 3. The runtime owns the screen; the human override always wins
 
 Safe mode and dismiss work without any agent's cooperation and take

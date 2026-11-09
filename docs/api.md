@@ -79,7 +79,12 @@ It is consumed only after the reply is encoded and needs no ACK. A cancelled
 call releases its reservation and leaves accepted input in the ordinary FIFO,
 with the same retained id on repeated `hud_input` polls. Other card answers and
 portal replies stay queued; a concurrent `hud_input` cannot steal the reserved
-answer. HTTPS link presses do not fabricate a callback answer.
+answer. Acceptance uses the scene's monotonic clock: an answer accepted before
+this deadline stays reserved even if the request resumes later; a press at or
+after the deadline goes to ordinary input. HTTPS link presses do not fabricate
+a callback answer. Post-admission scene acquisition uses the remaining wait
+window; contention at its end returns the existing bounded `INTERNAL` error
+with a `retry hud_input` hint, releasing the reservation without consuming input.
 
 An unanswered card removed during the wait returns `gone:"expired"`,
 `"replaced"` (same key), `"displaced"` (contention), or `"cleared"`. These endings

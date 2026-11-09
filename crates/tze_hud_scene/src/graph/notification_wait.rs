@@ -39,6 +39,7 @@ pub enum NotificationOutcome {
 pub(super) struct NotificationWait {
     pub namespace: String,
     pub active: Arc<AtomicBool>,
+    pub deadline_mono_us: u64,
     pub materialized: bool,
     pub outcome: Option<NotificationOutcome>,
     pub notified: bool,
@@ -52,6 +53,7 @@ impl SceneGraph {
         publication: SceneId,
         namespace: &str,
         active: Arc<AtomicBool>,
+        deadline_mono_us: u64,
         ready: RenderWakeNotifier,
     ) {
         self.notification_waits
@@ -61,6 +63,7 @@ impl SceneGraph {
             NotificationWait {
                 namespace: namespace.to_owned(),
                 active,
+                deadline_mono_us,
                 materialized: false,
                 outcome: None,
                 notified: false,
@@ -84,8 +87,10 @@ impl SceneGraph {
         publication: SceneId,
         outcome: NotificationOutcome,
     ) {
+        let now = self.now_monotonic_us();
         if let Some(wait) = self.notification_waits.get_mut(&publication)
             && wait.active.load(Ordering::Acquire)
+            && now < wait.deadline_mono_us
             && wait.outcome.is_none()
         {
             wait.outcome = Some(outcome);
@@ -115,7 +120,12 @@ impl SceneGraph {
             .publication_id
             .and_then(|id| self.notification_waits.get(&id))
             .is_some_and(|wait| {
-                wait.namespace == action.publisher_namespace && wait.active.load(Ordering::Acquire)
+                wait.namespace == action.publisher_namespace
+                    && wait.active.load(Ordering::Acquire)
+                    // Early answers remain private until encoding/cancellation.
+                    // New post-deadline input is ordinary even before repoll.
+                    && (wait.outcome == Some(NotificationOutcome::Answered)
+                        || self.now_monotonic_us() < wait.deadline_mono_us)
             })
     }
 

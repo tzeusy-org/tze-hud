@@ -695,7 +695,19 @@ async fn publish_zone<'a>(
         let id = SceneId::new();
         let signal = RenderWakeNotifier::new(move || ready.notify_waiters());
         scene.register_action_notifier(&ns, signal.clone());
-        scene.arm_notification_wait(id, &ns, Arc::clone(&active), signal.clone());
+        // The scene classifies acceptance independently of this task being
+        // polled. Preserve the original call window, including admission time.
+        let remaining_us = deadline
+            .saturating_duration_since(tokio::time::Instant::now())
+            .as_micros() as u64; // bounded by MAX_WAIT_MS
+        let deadline_mono_us = scene.now_monotonic_us().saturating_add(remaining_us);
+        scene.arm_notification_wait(
+            id,
+            &ns,
+            Arc::clone(&active),
+            deadline_mono_us,
+            signal.clone(),
+        );
         Some(WaitClaim {
             scene: Arc::clone(ctx.scene),
             id,
@@ -776,7 +788,12 @@ async fn publish_zone<'a>(
     loop {
         let mut notified = std::pin::pin!(ready.notified());
         notified.as_mut().enable();
-        let mut scene = ctx.scene.lock().await;
+        let mut scene = match ctx.scene.try_lock() {
+            Ok(scene) => scene,
+            Err(_) => tokio::time::timeout_at(deadline, ctx.scene.lock())
+                .await
+                .map_err(|_| tool_err("INTERNAL", "input state busy; retry hud_input"))?,
+        };
         match scene.notification_wait_outcome(claim.id) {
             Some(NotificationOutcome::Answered) => {
                 let action = scene
