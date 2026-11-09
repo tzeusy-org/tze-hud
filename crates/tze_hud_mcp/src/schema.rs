@@ -32,6 +32,7 @@ pub fn tools_list_result() -> Value {
     json!({ "tools": [
         {
             "name": "hud_surfaces",
+            "annotations": {"readOnlyHint": true},
             "description": "List HUD surfaces you may use and what you hold.",
             "inputSchema": {"type": "object", "properties": {}},
         },
@@ -60,6 +61,7 @@ pub fn tools_list_result() -> Value {
         },
         {
             "name": "hud_hold",
+            "annotations": {"idempotentHint": true},
             "description": "Keep your content on a surface without resending it.",
             "inputSchema": {
                 "type": "object",
@@ -69,6 +71,7 @@ pub fn tools_list_result() -> Value {
         },
         {
             "name": "hud_clear",
+            "annotations": {"idempotentHint": true},
             "description": "Remove your content from a surface, or detach a portal.",
             "inputSchema": {
                 "type": "object",
@@ -102,6 +105,15 @@ mod tests {
     /// count is gated by `scripts/ci/check_token_footprint.py`.
     #[test]
     fn tools_list_stays_within_token_budget() {
+        for tool in tools_list_result()["tools"].as_array().unwrap() {
+            match tool["name"].as_str().unwrap() {
+                "hud_surfaces" => assert_eq!(tool["annotations"], json!({"readOnlyHint": true})),
+                "hud_hold" | "hud_clear" => {
+                    assert_eq!(tool["annotations"], json!({"idempotentHint": true}))
+                }
+                _ => assert!(tool.get("annotations").is_none()),
+            }
+        }
         let bytes = serde_json::to_string(&tools_list_result()).unwrap().len();
         assert!(
             bytes <= 3_600,

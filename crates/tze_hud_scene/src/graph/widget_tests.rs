@@ -2,6 +2,121 @@ use super::test_helpers::{make_gauge_definition, scene_with_gauge, scene_with_ga
 use super::*;
 use crate::types::{ContentionPolicy, SceneId, WidgetInstance, WidgetParameterValue};
 
+#[test]
+fn widget_audiences_reject_agent_writes_and_survive_publication_lifecycle() {
+    use crate::types::WidgetParamAudience::{Owner, Runtime};
+    for policy in [
+        ContentionPolicy::LatestWins,
+        ContentionPolicy::Replace,
+        ContentionPolicy::Stack { max_depth: 3 },
+        ContentionPolicy::MergeByKey { max_keys: 3 },
+    ] {
+        let (mut scene, tab, clock) = scene_with_gauge_and_clock(policy);
+        let schema = &mut scene
+            .widget_registry
+            .definitions
+            .get_mut("gauge")
+            .unwrap()
+            .parameter_schema;
+        schema[1].audience = Owner;
+        schema[2].audience = Runtime;
+        let owner = WidgetParameterValue::String("owner label".into());
+        scene
+            .widget_registry
+            .instances
+            .get_mut("gauge")
+            .unwrap()
+            .current_params
+            .insert("label".into(), owner.clone());
+        scene
+            .set_widget_param_local(
+                "gauge",
+                "severity",
+                WidgetParameterValue::Enum("warning".into()),
+            )
+            .unwrap();
+        let before = scene.widget_registry.instances["gauge"]
+            .current_params
+            .clone();
+        for hidden in ["label", "severity"] {
+            let version = scene.version;
+            let result = scene.publish_to_widget(
+                "gauge",
+                std::collections::HashMap::from([
+                    ("level".into(), WidgetParameterValue::F32(0.8)),
+                    (hidden.into(), before[hidden].clone()),
+                ]),
+                "agent.test",
+                None,
+                0,
+                None,
+            );
+            assert!(
+                matches!(
+                    result,
+                    Err(ValidationError::WidgetParameterInvalidValue { .. })
+                ),
+                "{result:?}"
+            );
+            assert_eq!(scene.version, version);
+            assert_eq!(
+                scene.widget_registry.instances["gauge"].current_params,
+                before
+            );
+            assert!(scene.widget_registry.active_for_widget("gauge").is_empty());
+        }
+        scene
+            .publish_to_widget(
+                "gauge",
+                std::collections::HashMap::from([("level".into(), WidgetParameterValue::F32(0.8))]),
+                "agent.test",
+                None,
+                0,
+                None,
+            )
+            .unwrap();
+        for clear in [false, true] {
+            if clear {
+                scene
+                    .clear_widget_for_publisher("gauge", "agent.test")
+                    .unwrap();
+            }
+            let effective = scene
+                .widget_registry
+                .get_occupancy("gauge", tab)
+                .unwrap()
+                .effective_params;
+            assert_eq!(effective["label"], owner);
+            assert_eq!(
+                effective["severity"],
+                WidgetParameterValue::Enum("warning".into())
+            );
+        }
+        scene
+            .publish_to_widget(
+                "gauge",
+                HashMap::from([("level".into(), WidgetParameterValue::F32(0.4))]),
+                "agent.test",
+                None,
+                0,
+                Some(scene.now_wall_us() + 1_000),
+            )
+            .unwrap();
+        clock.advance(1);
+        assert_eq!(scene.drain_expired_widget_publications(), 1);
+        let effective = scene
+            .widget_registry
+            .get_occupancy("gauge", tab)
+            .unwrap()
+            .effective_params;
+        assert_eq!(effective["label"], owner);
+        assert_eq!(
+            effective["severity"],
+            WidgetParameterValue::Enum("warning".into())
+        );
+    }
+}
+
 /// A Suspended lease (safe mode) blocks widget publishes; resuming restores them.
 #[test]
 fn widget_publish_with_suspended_lease_is_safe_mode_active() {
@@ -168,6 +283,7 @@ fn widget_publish_out_of_range_values_rejected() {
         .unwrap()
         .parameter_schema
         .push(crate::types::WidgetParameterDeclaration {
+            audience: Default::default(),
             name: "color".into(),
             param_type: crate::types::WidgetParamType::Color,
             default_value: WidgetParameterValue::Color(Rgba::WHITE),

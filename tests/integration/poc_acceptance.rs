@@ -33,8 +33,11 @@ const NOTIFICATION: &str = "zone:notification-area";
 const SUBTITLE: &str = "zone:subtitle";
 
 // docs/api.md "Token budgets" (model-visible tokens). Discover is the
-// production.toml scene: 6 zones plus the 3 built-in widgets (~230 tokens).
-const DISCOVER_BUDGET: usize = 250;
+// production.toml scene: 6 zones plus the 3 built-in widgets (<=210 tokens).
+const DISCOVER_BUDGET: usize = 210;
+// Existing fixture envelope after publishing/attaching: live holdings and
+// portal defaults cost additional tokens. This is not an arbitrary-state cap.
+const DISCOVER_WITH_HOLDINGS_BUDGET: usize = 250;
 const ZONE_PUBLISH_BUDGET: usize = 80;
 const PORTAL_FLOW_BUDGET: usize = 250;
 
@@ -252,8 +255,8 @@ impl Poc {
         }
     }
 
-    /// Call an MCP tool that must fail; returns the error `code`.
-    async fn call_err(&mut self, tool: &str, arguments: Value) -> String {
+    /// Call an MCP tool that must fail; retain the actual model-visible bytes.
+    async fn call_error_body(&mut self, tool: &str, arguments: Value) -> Value {
         let request = json!({
             "jsonrpc": "2.0", "id": 1, "method": "tools/call",
             "params": {"name": tool, "arguments": arguments},
@@ -280,7 +283,14 @@ impl Poc {
         );
         let text = result["content"][0]["text"].as_str().expect("error text");
         let body: Value = serde_json::from_str(text).expect("error text is JSON");
-        body["code"].as_str().expect("error code").to_string()
+        body
+    }
+
+    async fn call_err(&mut self, tool: &str, arguments: Value) -> String {
+        self.call_error_body(tool, arguments).await["code"]
+            .as_str()
+            .expect("error code")
+            .to_string()
     }
 
     /// `hud_surfaces`, returning this agent's entry for `surface` (if listed)
@@ -288,8 +298,8 @@ impl Poc {
     async fn surface(&mut self, surface: &str) -> Option<Value> {
         let reply = self.call("hud_surfaces", json!({})).await;
         assert!(
-            reply.model_tokens <= DISCOVER_BUDGET,
-            "discover took {} model-visible tokens (budget {DISCOVER_BUDGET})",
+            reply.model_tokens <= DISCOVER_WITH_HOLDINGS_BUDGET,
+            "discover took {} model-visible tokens (budget {DISCOVER_WITH_HOLDINGS_BUDGET})",
             reply.model_tokens
         );
         reply.body["surfaces"]
@@ -640,6 +650,87 @@ async fn post_pair(addr: std::net::SocketAddr, body: &str) -> String {
 
 fn input_items(reply: &Reply) -> &Vec<Value> {
     reply.body["items"].as_array().expect("items array")
+}
+
+/// Production model discovery and rejections must be useful within one call.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn poc_widget_discovery_and_errors_are_self_sufficient() {
+    let mut poc = Poc::boot().await;
+    let discovery = poc.call("hud_surfaces", json!({})).await;
+    assert!(
+        discovery.model_tokens <= DISCOVER_BUDGET,
+        "{} tokens: {}",
+        discovery.model_tokens,
+        discovery.body
+    );
+    let surfaces = discovery.body["surfaces"].as_array().unwrap();
+    let widget = |name: &str| surfaces.iter().find(|s| s["s"] == name).unwrap();
+    for surface in surfaces {
+        if let Some(params) = surface["params"].as_object() {
+            for hidden in ["fill_color", "theme", "tooltip_visible"] {
+                assert!(!params.contains_key(hidden), "{surface}");
+            }
+        }
+        if let Some(accepts) = surface["accepts"].as_str() {
+            assert!(!accepts.contains("static_image"));
+        }
+    }
+    assert_eq!(
+        widget("widget:main-progress")["params"]["severity"],
+        "enum info|warning|error"
+    );
+    assert_eq!(
+        widget("widget:main-progress")["params"]["label"],
+        "string<=32"
+    );
+    assert_eq!(
+        widget("widget:main-status")["params"]["reason"],
+        "string<=160"
+    );
+    for (surface, params, hint) in [
+        (
+            "widget:main-gauge",
+            json!({"level":0.8,"fill_color":"wrong-type"}),
+            "owner-set",
+        ),
+        (
+            "widget:main-status",
+            json!({"status":"online","theme":"friendly"}),
+            "owner-set",
+        ),
+        (
+            "widget:main-progress",
+            json!({"progress":0.8,"tooltip_visible":1}),
+            "runtime-set",
+        ),
+        ("widget:main-gauge", json!({"level":-0.1}), "0..1"),
+        ("widget:main-gauge", json!({"level":"high"}), "f32"),
+        (
+            "widget:main-gauge",
+            json!({"severity":"critical"}),
+            "info|warning|error",
+        ),
+        (
+            "widget:main-progress",
+            json!({"severity":3}),
+            "info|warning|error",
+        ),
+        ("widget:main-status", json!({"reason":false}), "160"),
+    ] {
+        let error = poc
+            .call_error_body("hud_publish", json!({"surface":surface,"params":params}))
+            .await;
+        assert_eq!(error["code"], "WIDGET_PARAMETER_INVALID");
+        assert!(error["hint"].as_str().unwrap().contains(hint), "{error}");
+        assert!(
+            tokens(&error.to_string()) <= 60,
+            "error over budget: {error}"
+        );
+    }
+    println!(
+        "production discovery: {} model-visible tokens; {}",
+        discovery.model_tokens, discovery.body
+    );
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]

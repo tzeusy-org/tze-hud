@@ -16,11 +16,12 @@
 # Parameters:
 #   progress        - Fill level (f32, 0.0-1.0); drives bar width and readout
 #   label           - Label above the bar (string, max 32 bytes)
-#   fill_color      - Bar color; defaults to the theme's primary
+#   fill_color      - Owner info fill; warning/error use severity tokens
+#   severity        - info uses owner/default primary fill; warning/error use tokens
 #   tooltip_visible - Runtime hover visibility (f32 0..1); not for agents
 
 name        = "progress-bar"
-version     = "1.1.0"
+version     = "2.0.0"
 description = "Horizontal progress bar with label and hover percent readout"
 
 [[parameter_schema]]
@@ -42,17 +43,27 @@ string_max_bytes = 32
 
 [[parameter_schema]]
 name    = "fill_color"
+audience = "owner"
 type    = "color"
 default = "{{token.color.primary}}"
 
 [[parameter_schema]]
 name    = "tooltip_visible"
+audience = "runtime"
 type    = "f32"
 default = 0.0
 
 [parameter_schema.constraints]
 f32_min = 0.0
 f32_max = 1.0
+
+[[parameter_schema]]
+name = "severity"
+type = "enum"
+default = "info"
+
+[parameter_schema.constraints]
+enum_allowed_values = ["info", "warning", "error"]
 
 [hover_behavior]
 delay_ms = 180
@@ -111,3 +122,44 @@ target_attribute = "text-content"
 mapping          = "linear"
 attr_min         = 0.0
 attr_max         = 100.0
+
+[[layers.bindings]]
+param = "progress"
+target_element = "severity-fill"
+target_attribute = "width"
+mapping = "linear"
+attr_min = 0.0
+attr_max = 328.0
+
+[[layers.bindings]]
+param = "severity"
+target_element = "severity-fill"
+target_attribute = "fill"
+mapping = "discrete"
+
+[layers.bindings.value_map]
+info = "{{token.color.primary}}"
+warning = "{{token.color.caution}}"
+error = "{{token.color.error}}"
+
+[[layers.bindings]]
+param = "severity"
+target_element = "severity-fill-group"
+target_attribute = "opacity"
+mapping = "discrete"
+
+[layers.bindings.value_map]
+info = "0"
+warning = "1"
+error = "1"
+
+[[layers.bindings]]
+param = "severity"
+target_element = "info-fill"
+target_attribute = "opacity"
+mapping = "discrete"
+
+[layers.bindings.value_map]
+info = "1"
+warning = "0"
+error = "0"

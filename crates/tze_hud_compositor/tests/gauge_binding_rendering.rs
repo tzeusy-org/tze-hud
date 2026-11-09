@@ -20,7 +20,7 @@
 //!
 //! 8.1  LatestWins — Agent B's publish overrides Agent A's.
 //! 8.2  Parameter retention — unpublished params retain previous agent's values.
-//! 8.x  All-four-params simultaneous publish.
+//! 8.x  Model parameters publish together; owner/color bindings render locally.
 //!
 //! ## Sources
 //!
@@ -746,14 +746,14 @@ mod contention {
         }
     }
 
-    // ── All-four-params simultaneous publish ──────────────────────────────────
+    // ── Model parameters in one publication ──────────────────────────────────
 
-    /// All four gauge parameters published simultaneously in a single call.
+    /// All model-owned gauge parameters published simultaneously in a single call.
     ///
-    /// Verifies that a single publish with all four params correctly updates all
+    /// Verifies that a single publish with all model params correctly updates all
     /// effective parameter values in one render pass.
     #[test]
-    fn gauge_all_four_params_simultaneous_publish() {
+    fn gauge_model_params_simultaneous_publish() {
         let (mut scene, tab_id) = scene_with_production_gauge();
 
         let params = HashMap::from([
@@ -763,11 +763,6 @@ mod contention {
                 WidgetParameterValue::String("System".to_string()),
             ),
             (
-                "fill_color".to_string(),
-                // [255, 165, 0, 255] → orange
-                WidgetParameterValue::Color(Rgba::new(1.0, 165.0 / 255.0, 0.0, 1.0)),
-            ),
-            (
                 "severity".to_string(),
                 WidgetParameterValue::Enum("warning".to_string()),
             ),
@@ -775,7 +770,7 @@ mod contention {
 
         scene
             .publish_to_widget("gauge", params, "agent.all", None, 0, None)
-            .expect("all-four-params publish must succeed");
+            .expect("model-params publish must succeed");
 
         let occupancy = scene
             .widget_registry
@@ -797,28 +792,6 @@ mod contention {
                 assert_eq!(s, "System", "label should be 'System', got: '{s}'");
             }
             other => panic!("expected String('System') for label, got: {other:?}"),
-        }
-
-        // Verify fill_color is Color type.
-        match ep.get("fill_color") {
-            Some(WidgetParameterValue::Color(rgba)) => {
-                assert!(
-                    (rgba.r - 1.0).abs() < 1e-3,
-                    "fill_color red channel should be ~1.0, got: {}",
-                    rgba.r
-                );
-                assert!(
-                    rgba.g > 0.6 && rgba.g < 0.7,
-                    "fill_color green channel should be ~0.647 (165/255), got: {}",
-                    rgba.g
-                );
-                assert!(
-                    rgba.b.abs() < 1e-3,
-                    "fill_color blue channel should be ~0.0, got: {}",
-                    rgba.b
-                );
-            }
-            other => panic!("expected Color for fill_color, got: {other:?}"),
         }
 
         // Verify severity.

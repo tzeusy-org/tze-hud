@@ -73,6 +73,7 @@ fn configure_lifetime_surfaces(scene: &mut SceneGraph) {
         name: "Gauge".into(),
         description: String::new(),
         parameter_schema: vec![WidgetParameterDeclaration {
+            audience: Default::default(),
             name: "level".into(),
             param_type: WidgetParamType::F32,
             default_value: WidgetParameterValue::F32(0.0),

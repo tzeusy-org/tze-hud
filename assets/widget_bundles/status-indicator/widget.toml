@@ -5,7 +5,7 @@
 #   opacity.surface, outline.variant edge, as the notification cards) so it
 #   matches the round status disc on it; no always-visible label text
 # - `status` colors the badge content: online = success, away = caution,
-#   busy = error, offline = outline; `theme` picks dot, glyph, or expressive
+#   busy = error, offline = outline; owner `theme` picks dot, glyph, or expressive
 #   glyph
 # - Hover over the badge (runtime-driven `tooltip_visible`) shows a tooltip
 #   panel with a status dot, `label` and `reason`
@@ -17,7 +17,7 @@
 # assets/widget_bundles/status-indicator/.
 
 name        = "status-indicator"
-version     = "1.2.0"
+version     = "2.0.0"
 description = "Compact status badge with selectable glyph style and hover tooltip"
 default_contention_policy = "LatestWins"
 
@@ -31,6 +31,7 @@ enum_allowed_values = ["online", "away", "busy", "offline"]
 
 [[parameter_schema]]
 name    = "theme"
+audience = "owner"
 type    = "enum"
 default = "system"
 
@@ -55,6 +56,7 @@ string_max_bytes = 160
 
 [[parameter_schema]]
 name    = "tooltip_visible"
+audience = "runtime"
 type    = "f32"
 default = 0.0
 

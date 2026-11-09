@@ -14,8 +14,8 @@
 #   tze_hud --config /path/to/tze_hud.toml --window-mode overlay
 #
 # Widget instance names (MCP surfaces widget:<name>):
-#   widget:main-gauge      → gauge widget (level, label, fill_color, severity)
-#   widget:main-progress   → progress-bar widget (progress, label, fill_color)
+#   widget:main-gauge      → gauge widget (level, label, readout, severity)
+#   widget:main-progress   → progress-bar widget (progress, label, severity)
 #   widget:main-status     → status-indicator widget (status, label, reason)
 #
 # See widget semantics in .claude/skills/user-test/SKILL.md:
@@ -66,7 +66,8 @@ default_tab = true
 
 # ── Gauge widget instance ─────────────────────────────────────────────────────
 # MCP widget_name: "main-gauge"
-# Parameters: level (f32 0–1), label (string), fill_color (color), severity (enum)
+# Owner fill_color and status theme belong in initial_params; hover is runtime-local.
+# Parameters: level (f32 0–1), label/readout (strings), severity (enum)
 # Position: left edge, vertically centered; narrow vertical meter clear of subtitles.
 # The control panel's Layout card rewrites an entry's geometry and
 # `auto_clear_ms` (each publication clears that long after it is published).
@@ -85,7 +86,8 @@ height_pct = 0.1555556
 
 # ── Progress-bar widget instance ──────────────────────────────────────────────
 # MCP widget_name: "main-progress"
-# Parameters: progress (f32 0–1), label (string), fill_color (color)
+# Owner info fill: initial_params = { fill_color = [138, 180, 255, 255] }; severity warning/error always use tokens.
+# Parameters: progress (f32 0–1), label (string), severity (enum)
 # Position: bottom centre, above the subtitle zone. 360x52 -> 540x78 at 4K.
 [[tabs.widgets]]
 widget_type = "progress-bar"

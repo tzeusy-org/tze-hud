@@ -112,6 +112,7 @@ mod calibration {
             description: "Deterministic calibration gauge".to_string(),
             parameter_schema: vec![
                 WidgetParameterDeclaration {
+                    audience: Default::default(),
                     name: "level".to_string(),
                     param_type: WidgetParamType::F32,
                     default_value: WidgetParameterValue::F32(0.0),
@@ -123,6 +124,7 @@ mod calibration {
                     }),
                 },
                 WidgetParameterDeclaration {
+                    audience: Default::default(),
                     name: "label".to_string(),
                     param_type: WidgetParamType::String,
                     default_value: WidgetParameterValue::String(String::new()),

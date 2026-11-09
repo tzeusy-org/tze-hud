@@ -255,12 +255,12 @@ fn remaining_ms(expires_at_us: Option<u64>, now_us: u64) -> Option<u64> {
 fn accepts(types: &[ZoneMediaType]) -> String {
     types
         .iter()
-        .map(|t| match t {
-            ZoneMediaType::StreamText => "text",
-            ZoneMediaType::ShortTextWithIcon => "notification",
-            ZoneMediaType::KeyValuePairs => "status_bar",
-            ZoneMediaType::StaticImage => "static_image",
-            ZoneMediaType::SolidColor => "solid_color",
+        .filter_map(|t| match t {
+            ZoneMediaType::StreamText => Some("text"),
+            ZoneMediaType::ShortTextWithIcon => Some("notification"),
+            ZoneMediaType::KeyValuePairs => Some("status_bar"),
+            ZoneMediaType::StaticImage => None,
+            ZoneMediaType::SolidColor => Some("solid_color"),
         })
         .collect::<Vec<_>>()
         .join("|")
@@ -277,13 +277,21 @@ fn widget_params(scene: &SceneGraph, instance: &str) -> Value {
         return Value::Object(out);
     };
     for d in &def.parameter_schema {
+        if d.audience != tze_hud_scene::WidgetParamAudience::Model {
+            continue;
+        }
         let c = d.constraints.as_ref();
         let ty = match d.param_type {
             WidgetParamType::F32 => match (c.and_then(|c| c.f32_min), c.and_then(|c| c.f32_max)) {
-                (Some(lo), Some(hi)) => format!("f32 {lo}..{hi}"),
-                _ => "f32".into(),
+                (Some(lo), Some(hi)) => format!("number {lo}..{hi}"),
+                _ => "number".into(),
             },
-            WidgetParamType::String => "string".into(),
+            WidgetParamType::String => {
+                match c.and_then(|c| c.string_max_bytes).filter(|n| *n > 0) {
+                    Some(n) => format!("string<={n}"),
+                    None => "string".into(),
+                }
+            }
             WidgetParamType::Color => "color".into(),
             WidgetParamType::Enum => match c {
                 Some(c) if !c.enum_allowed_values.is_empty() => {
@@ -333,6 +341,29 @@ pub async fn hud_surfaces(ctx: &ToolCtx<'_>) -> McpResult<Value> {
             let mut o = Map::new();
             o.insert("s".into(), json!(format!("zone:{}", z.name)));
             o.insert("accepts".into(), json!(accepts(&z.accepted_media_types)));
+            match z.contention_policy {
+                tze_hud_scene::ContentionPolicy::LatestWins
+                | tze_hud_scene::ContentionPolicy::Replace => {
+                    o.insert("one".into(), json!(true));
+                    if scene
+                        .zone_registry
+                        .active_publishes
+                        .get(&z.name)
+                        .is_some_and(|items| {
+                            items.iter().any(|item| {
+                                item.publisher_namespace != ns
+                                    && item.expires_at_wall_us.is_none_or(|expiry| expiry > now)
+                            })
+                        })
+                    {
+                        o.insert("busy".into(), json!(true));
+                    }
+                }
+                tze_hud_scene::ContentionPolicy::Stack { max_depth } => {
+                    o.insert("max".into(), json!(max_depth));
+                }
+                _ => {}
+            }
             let expiries: Vec<_> = scene
                 .zone_registry
                 .active_publishes
@@ -537,9 +568,13 @@ pub fn scene_error(e: &ValidationError) -> McpError {
             "WIDGET_PARAMETER_INVALID",
             format!("{widget} has no param {param}; see params in hud_surfaces"),
         ),
-        V::WidgetParameterTypeMismatch { widget, param } => tool_err(
+        V::WidgetParameterTypeMismatch {
+            widget,
+            param,
+            expected,
+        } => tool_err(
             "WIDGET_PARAMETER_INVALID",
-            format!("bad value for {widget}.{param}; see params in hud_surfaces"),
+            format!("{widget}.{param} must be {expected}"),
         ),
         V::WidgetParameterInvalidValue {
             widget,
@@ -1422,17 +1457,20 @@ fn json_to_widget_param_value(
                 format!("{widget_name} has no param {param_name}; see params in hud_surfaces"),
             )
         })?;
+    SceneGraph::validate_widget_param_audience(widget_name, decl).map_err(|e| scene_error(&e))?;
     Ok(match decl.param_type {
         WidgetParamType::F32 => {
-            let number = v.as_f64().ok_or_else(|| bad("a finite f32 number"))?;
+            let number = v.as_f64().ok_or_else(|| bad(&decl.value_hint()))?;
             WidgetParameterValue::F32(
                 SceneGraph::validate_widget_f32_value(widget_name, param_name, decl, number)
                     .map_err(|e| scene_error(&e))?,
             )
         }
-        WidgetParamType::String => {
-            WidgetParameterValue::String(v.as_str().ok_or_else(|| bad("a string"))?.to_string())
-        }
+        WidgetParamType::String => WidgetParameterValue::String(
+            v.as_str()
+                .ok_or_else(|| bad(&decl.value_hint()))?
+                .to_string(),
+        ),
         WidgetParamType::Color => {
             let shape = "#RRGGBB or {r,g,b,a?} with finite numeric channels in 0..1";
             if let Some(hex) = v.as_str() {
@@ -1474,7 +1512,7 @@ fn json_to_widget_param_value(
         }
         WidgetParamType::Enum => WidgetParameterValue::Enum(
             v.as_str()
-                .ok_or_else(|| bad("one of its enum values"))?
+                .ok_or_else(|| bad(&decl.value_hint()))?
                 .to_string(),
         ),
     })

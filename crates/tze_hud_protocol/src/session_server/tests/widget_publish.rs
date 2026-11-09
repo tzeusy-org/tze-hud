@@ -21,6 +21,7 @@ async fn test_durable_widget_publish_receives_result() {
         });
         def.parameter_schema
             .push(tze_hud_scene::WidgetParameterDeclaration {
+                audience: Default::default(),
                 name: "color".into(),
                 param_type: tze_hud_scene::WidgetParamType::Color,
                 default_value: tze_hud_scene::WidgetParameterValue::Color(
@@ -28,6 +29,23 @@ async fn test_durable_widget_publish_receives_result() {
                 ),
                 constraints: None,
             });
+        for (name, audience) in [
+            ("fill_color", tze_hud_scene::WidgetParamAudience::Owner),
+            ("theme", tze_hud_scene::WidgetParamAudience::Owner),
+            (
+                "tooltip_visible",
+                tze_hud_scene::WidgetParamAudience::Runtime,
+            ),
+        ] {
+            def.parameter_schema
+                .push(tze_hud_scene::WidgetParameterDeclaration {
+                    name: name.into(),
+                    audience,
+                    param_type: tze_hud_scene::WidgetParamType::F32,
+                    default_value: tze_hud_scene::WidgetParameterValue::F32(0.0),
+                    constraints: None,
+                });
+        }
     }
     let (mut client, _handle) = setup_widget_test_with_service(service).await;
 
@@ -83,33 +101,47 @@ async fn test_durable_widget_publish_receives_result() {
                 .clone(),
         )
     };
-    let mut bad = vec![
+    let mut bad: Vec<_> = vec![
         ("level", Param::F32Value(-0.1), "0..1"),
         ("level", Param::F32Value(1.1), "0..1"),
         ("level", Param::F32Value(f32::NAN), "finite"),
         ("level", Param::F32Value(f32::INFINITY), "finite"),
-    ];
+        ("fill_color", Param::F32Value(0.5), "severity"),
+        ("theme", Param::F32Value(0.5), "owner-set"),
+        ("tooltip_visible", Param::F32Value(0.5), "runtime-set"),
+    ]
+    .into_iter()
+    .map(|(name, value, hint)| (name, Some(value), hint))
+    .collect();
     for channel in 0..4 {
         for value in [-0.1, 1.1, f32::NAN, f32::INFINITY] {
             let mut c = [0.5; 4];
             c[channel] = value;
             bad.push((
                 "color",
-                Param::ColorValue(crate::proto::Rgba {
+                Some(Param::ColorValue(crate::proto::Rgba {
                     r: c[0],
                     g: c[1],
                     b: c[2],
                     a: c[3],
-                }),
+                })),
                 "0..1",
             ));
         }
+    }
+    for (name, hint) in [
+        ("fill_color", "owner-set"),
+        ("theme", "owner-set"),
+        ("tooltip_visible", "runtime-set"),
+        ("level", "f32"),
+    ] {
+        bad.push((name, None, hint));
     }
     for (index, (param, value, hint)) in bad.into_iter().enumerate() {
         let sequence = 3 + index as u64;
         let mut params = vec![crate::proto::WidgetParameterValueProto {
             param_name: param.into(),
-            value: Some(value),
+            value,
         }];
         params.push(if param == "level" {
             crate::proto::WidgetParameterValueProto {
@@ -165,7 +197,7 @@ async fn test_durable_widget_publish_receives_result() {
             tze_hud_scene::WidgetParameterValue::F32(0.75)
         );
     }
-    for (sequence, level) in [(30, 0.0), (31, 1.0)] {
+    for (sequence, level) in [(40, 0.0), (41, 1.0)] {
         tx.send(ClientMessage {
             sequence,
             timestamp_wall_us: now_wall_us(),
@@ -205,7 +237,7 @@ async fn test_durable_widget_publish_receives_result() {
     let held = request(
         &tx,
         &mut stream,
-        32,
+        42,
         ClientPayload::Hold(Hold {
             surface: "widget:gauge".into(),
             ttl_ms: 100,
@@ -242,7 +274,7 @@ async fn test_durable_widget_publish_receives_result() {
     let held = request(
         &tx,
         &mut stream,
-        33,
+        43,
         ClientPayload::Hold(Hold {
             surface: "widget:gauge".into(),
             ttl_ms: 0,
@@ -263,7 +295,7 @@ async fn test_durable_widget_publish_receives_result() {
         request(
             &tx,
             &mut stream,
-            34,
+            44,
             ClientPayload::Clear(Clear {
                 key: String::new(),
                 surface: "widget:gauge".into()
@@ -571,6 +603,7 @@ async fn test_ephemeral_widget_no_publish_result() {
             name: "LiveBar".to_string(),
             description: "Ephemeral bar widget".to_string(),
             parameter_schema: vec![WidgetParameterDeclaration {
+                audience: Default::default(),
                 name: "value".to_string(),
                 param_type: WidgetParamType::F32,
                 default_value: WidgetParameterValue::F32(0.0),

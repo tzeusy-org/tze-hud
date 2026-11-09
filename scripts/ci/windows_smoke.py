@@ -79,7 +79,7 @@ MAX_PNG_BYTES = 8 * 1024 * 1024
 MAX_RGBA_BYTES = 64 * 1024 * 1024
 CAPTURE_FIXTURES = (
     "all-zones-test", "notification-full-gamut", "subtitle-multiline",
-    "status-indicator-theme-status-matrix-test",
+    "status-indicator-status-matrix-test",
 )
 
 

@@ -361,11 +361,45 @@ fn publish_widget(
     widget: &str,
     publish: &Publish,
 ) -> RequestResult {
-    let params = publish
-        .params
-        .iter()
-        .filter_map(crate::convert::proto_to_widget_param_value)
-        .collect();
+    // Check original wire names before conversion: an absent/unknown oneof must
+    // not silently drop a hidden parameter and admit its valid peers.
+    let definition = scene
+        .widget_registry
+        .instances
+        .get(widget)
+        .and_then(|instance| {
+            scene
+                .widget_registry
+                .definitions
+                .get(&instance.widget_type_name)
+        });
+    let mut params = std::collections::HashMap::new();
+    for parameter in &publish.params {
+        let declaration = definition.and_then(|definition| {
+            definition
+                .parameter_schema
+                .iter()
+                .find(|declaration| declaration.name == parameter.param_name)
+        });
+        if let Some(declaration) = declaration {
+            if let Err(error) =
+                tze_hud_scene::SceneGraph::validate_widget_param_audience(widget, declaration)
+            {
+                return fail(seq, validation_error_code(&error), error.to_string());
+            }
+        }
+        let Some((name, value)) = crate::convert::proto_to_widget_param_value(parameter) else {
+            let expected = declaration
+                .map(|declaration| declaration.value_hint())
+                .unwrap_or_else(|| "a declared typed value; see hud_surfaces".into());
+            return fail(
+                seq,
+                "WIDGET_PARAMETER_INVALID",
+                format!("{widget}.{} must be {expected}", parameter.param_name),
+            );
+        };
+        params.insert(name, value);
+    }
     let now = scene.now_wall_us();
     match scene.publish_to_widget_for_origin(
         widget,

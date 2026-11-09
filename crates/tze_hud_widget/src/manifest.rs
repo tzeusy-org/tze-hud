@@ -78,6 +78,8 @@ pub struct RawManifest {
 pub struct RawParameterDeclaration {
     /// Parameter name. Required.
     pub name: Option<String>,
+    /// Writer: model (default), owner configuration, or runtime-local behavior.
+    pub audience: Option<String>,
     /// Type string: "f32", "string", "color", or "enum". Required.
     #[serde(rename = "type")]
     pub param_type: Option<String>,

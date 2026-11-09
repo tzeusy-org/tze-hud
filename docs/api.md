@@ -45,9 +45,9 @@ milliseconds, named `*_ms`, everywhere.
 
 ```json
 {"surfaces":[
-  {"s":"zone:subtitle","accepts":"text"},
-  {"s":"zone:notification-area","accepts":"notification","held":true,"expires_in_ms":4200},
-  {"s":"widget:gauge","params":{"level":"f32 0..1","label":"string"}},
+  {"s":"zone:subtitle","accepts":"text","one":true},
+  {"s":"zone:notification-area","accepts":"notification","max":5,"held":true,"expires_in_ms":4200},
+  {"s":"widget:gauge","params":{"level":"number 0..1","label":"string<=12"}},
   {"s":"portal:claude-main","state":"attached","pending_input":1}
 ]}
 ```
@@ -56,6 +56,18 @@ It includes nothing the model doesn't act on: no UUIDs, geometry, or
 timestamps. Holdings are the entries with `held: true`; `held` is omitted
 otherwise. Scheduled zone publications count as held before presentation;
 `expires_in_ms`, when present, includes their presentation delay.
+Single-occupant zones carry `one:true`; stacks carry `max:N`. `busy:true`
+appears only when another agent currently occupies a single-occupant zone.
+MCP accepts lists omit `static_image`: resource upload is on gRPC. Strings with
+an explicit positive byte limit appear as `string<=N`; others as `string`. Numeric discovery hints use JSON `number` with the
+declared bounds (for example `number 0..1`); admission still enforces finite f32.
+Widget discovery includes only parameters with `audience = "model"` (the
+manifest default). `owner` and `runtime` parameters remain declared for local
+configuration/rendering but are rejected atomically on both agent transports.
+
+In `tools/list`, only `hud_surfaces` has `readOnlyHint:true`. Only `hud_hold`
+and `hud_clear` have `idempotentHint:true`; publish/input make neither claim.
+
 
 **`hud_publish`** `{surface*, content | params, ttl_ms?, delay_ms?, key?, status?, expects_reply?, display_name?}`
 
@@ -134,7 +146,17 @@ otherwise. Scheduled zone publications count as held before presentation;
 - `zone:ambient-background` draws its fill or image at most
   `opacity.ambient.max` (0.9 by default) opaque, so the desktop under the
   overlay always shows through.
-- Widget: `params` is the typed parameter map. F32 values must be finite and
+- Widget: `params` is the typed model parameter map. The owner sets gauge
+  and progress-bar `fill_color` and status-indicator `theme` through the
+  existing `[[tabs.widgets]] initial_params` config. Owner values survive
+  model publishes, clear and expiry. `tooltip_visible` is runtime-only; config
+  overrides and agent writes reject it. Gauge/progress `severity` is
+  `info|warning|error`: info uses the owner fill or `color.primary`, warning
+  uses `color.caution`, error uses `color.error`. The gauge severity edge stays.
+  Unknown audience values reject the bundle with its name, parameter and
+  allowed audiences. Hidden parameter errors name owner-set/runtime-set;
+  `fill_color` errors direct agents to severity. Enum errors list allowed values;
+  wrong-type/f32 errors state the expected type/range. F32 values must be finite and
   within the declaration's inclusive bounds (including one-sided bounds).
   Both MCP and gRPC reject out-of-range values rather than clamping them.
   MCP colors are exact `#RRGGBB` strings or `{r,g,b,a?}` objects: RGB are
@@ -994,28 +1016,30 @@ baselined against regressions.
 
 | Measure | Before T5 (wire) | Wire | Model-visible | Budget (model-visible) |
 |---|---|---|---|---|
-| `tools/list` | 4,418 | 601 | 564 | ≤ 900 |
-| Discover (default scene) | ~430 (`list_zones`) | 181 | 113 | ≤ 150 |
+| `tools/list` | 4,418 | 627 | 590 | ≤ 900 |
+| Discover (default scene) | ~430 (`list_zones`) | 194 | 126 | ≤ 150 |
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
 | Four-option notification ask + returned answer + ACK | — | 273 | 114 | ≤ 120 |
 | Widget publish | ~168 | 73 | 22 | ≤ 80 |
 | Portal: attach+publish+hold, poll, ack, clear | ~575 over 5 round trips | 343 over 4 | 137 over 4 | ≤ 250 |
-| Discover (`production.toml`: 6 zones, 3 built-in widgets) | n/a | n/a | ~232 | ≤ 250 |
+| Discover (unheld `production.toml`: 6 zones, 3 built-in widgets) | n/a | n/a | 210 | ≤ 210 |
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
 
-All seven measurements use canonical flow version 4. F7 source calibration
-on `53ef94b3` against the
-retained `b52bc65c` baseline changes `tools/list` from 2,451 to 2,455
-model-visible UTF-8 bytes and 562 to 564 o200k tokens (+4 bytes, +2 tokens).
-The tokenizer is `tiktoken-rs` 0.12.0, `o200k_base`.
-The five other established flows and the complete choice flow retain identical
-request/response fingerprints and metrics; every ceiling is unchanged.
-The complete choice remains 114 tokens (69 ask + 28 retained answer + 17 ACK).
-The canonical gate requires two byte-identical final-source measurements.
-The owner accepted this measured baseline on 2026-11-08 (`hud-j7kxn`):
-`approval.status` is `owner_approved`. This separate approval covers the
-existing measured bytes, including tools/list 564, choice 114 and portal 137
-model-visible tokens, with no change to any ceiling or measurement.
+All seven measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
+`o200k_base`. The discovery-audience change (`hud-ljhku.7`, source `177e1096`)
+changes model-visible `tools/list` from 564 to 590 tokens and default discovery
+from 113 to 126. The five other flows retain identical request/response
+fingerprints and metrics: zone 39, widget 22, error 45, complete choice 114 and
+portal 137. Production discovery is 210, down from ~232; occupancy hints and all
+model-owned values/limits remain. The seven canonical flow ceilings are unchanged; the signed production target
+is tighter than its former 250-token envelope. Numeric discovery
+says `number`; admission and error hints still enforce finite f32.
+
+The owner **accepted these concrete new baseline bytes** for PR1598 on
+2026-11-10 (Asia/Singapore). Earlier `hud-j7kxn` approval covered the old baseline
+only. The canonical gate still requires two byte-identical final-source
+measurements. Reply defaults `reattached`, `pending_input` and `remaining` stay
+byte-identical, including the unchanged full portal flow.
 
 The `notification_choice` flow publishes Ship/Hold/Skip/Open, activates Skip through
 `SceneGraph::activate_notification` (the shared pointer/keyboard producer), polls
@@ -1056,24 +1080,24 @@ the previous items and polls, so poll+ack is one round trip.
 
 `integration` `poc_acceptance` checks model-visible counts on the POC
 acceptance flows (`docs/scope.md`), run end to end against `production.toml`.
-Its discover budget is the production row above: the three built-in widgets
-add about 100 tokens, all typed parameter names and ranges the model needs to
-publish, so shrinking further would drop information the model acts on.
+Its fresh, unheld discovery budget is the production row above: <=210 tokens,
+retaining model-owned parameter names, bounds and actionable occupancy hints.
+The existing live-state POC fixtures retain their 250-token envelope when
+holdings or attached portals add state/expiry/pending-input fields. That
+fixture envelope is not a promise for arbitrary numbers of live portals;
+required state fields are never dropped to fit the unheld baseline.
 
-These four parameters remain because they control behavior in the shipped bundles:
+The compact model schema retains `gauge.label` (metric name),
+`progress-bar.label` (32-byte task text), status `label`/`reason`, values and
+severity/status enums. Styling and hover state no longer spend discovery tokens:
 
-- `status-indicator.theme` selects the widget's minimal, system, or friendly
-  appearance independently of the global `[design_tokens].theme`; publishers
-  need that choice when selecting a status presentation.
-- `tooltip_visible` (status-indicator, gauge, progress-bar) is a declared
-  `f32` parameter that the runtime-local hover path drives after 180 ms to
-  reveal the tooltip or readout. The loader validates that hover target and
-  its SVG bindings against the parameter schema.
-- `gauge.label` names the metric under the bar, so a gauge can explain which
-  quantity its value represents.
-- `progress-bar.label` supplies publisher-chosen task text above the bar,
-  bounded to 32 bytes by its schema; hover shows the percent derived from
-  `progress`.
+- `status-indicator.theme` (`minimal|system|friendly`) is an owner choice in
+  `initial_params`, independent of `[design_tokens].theme`.
+- Gauge/progress-bar `fill_color` is an owner info-color override. Severity
+  warning/error always use their theme tokens.
+- `tooltip_visible` stays in the bundle schema for runtime hover after 180 ms,
+  with its declared SVG bindings. Agents neither discover nor publish it.
+
 
 ## Design decisions (T5, 2026-10-02)
 

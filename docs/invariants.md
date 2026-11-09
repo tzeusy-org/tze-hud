@@ -413,9 +413,16 @@ error saves a model a round trip and its tokens.
 
 Typed widget values are rejected rather than silently clamped; invalid mixed
 updates leave publication/current parameters unchanged. Both transports use
-the same scene admission check. MCP urgency and status entries reject wrong
+the same scene admission check. Widget audiences default to model; owner/runtime
+parameters fail before any publication, lease or partial update, including a
+gRPC parameter with an absent value. Errors name the writer, list enum choices
+or the expected type/range, and stay within the 60-token result ceiling.
+Non-model instance values survive every publication policy and clear/expiry;
+only runtime-local hover writes tooltip visibility. MCP urgency and status entries reject wrong
 types, and notification TTL is top-level only.
 
+- `tze_hud_scene` [`widget_audiences_reject_agent_writes_and_survive_publication_lifecycle`](../crates/tze_hud_scene/src/graph/widget_tests.rs)
+- `integration` [`poc_widget_discovery_and_errors_are_self_sufficient`](../tests/integration/poc_acceptance.rs)
 - `tze_hud_scene` [`widget_publish_out_of_range_values_rejected`](../crates/tze_hud_scene/src/graph/widget_tests.rs), [`widget_publish_f32_nan_rejected`](../crates/tze_hud_scene/src/graph/widget_tests.rs)
 - `tze_hud_mcp` [`widget_publish_hold_clear`](../crates/tze_hud_mcp/src/server/tests.rs), [`user_test_zone_fixtures_and_documented_examples_match_production_parser`](../crates/tze_hud_mcp/src/server/tests.rs)
 - `tze_hud_protocol` [`test_durable_widget_publish_receives_result`](../crates/tze_hud_protocol/src/session_server/tests/widget_publish.rs)

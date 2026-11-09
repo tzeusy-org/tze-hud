@@ -237,10 +237,11 @@ pub fn validate_widget_instances(
     }
 }
 
-/// Build a `WidgetInstance` from a validated `RawTabWidget` entry.
+/// Build a `WidgetInstance` after bundles are loaded.
 ///
-/// Called at runtime startup after bundles are loaded and config validation
-/// passes. `tab_id` is the scene ID assigned to the owning tab.
+/// Config-only validation has no bundle schemas, so recheck initial parameters
+/// here before applying any override. Invalid instances return None; the runtime
+/// retains its existing skip-and-warn behavior. `tab_id` is the owning tab.
 pub fn build_widget_instance(
     raw_widget: &RawTabWidget,
     tab_id: tze_hud_scene::types::SceneId,
@@ -248,6 +249,21 @@ pub fn build_widget_instance(
 ) -> Option<WidgetInstance> {
     let widget_type = raw_widget.widget_type.as_deref()?.to_string();
     let loaded = type_map.get(&widget_type)?;
+    let mut errors = Vec::new();
+    validate_initial_params(
+        &raw_widget.initial_params,
+        &loaded.parameter_schema,
+        "widget",
+        &widget_type,
+        "runtime startup",
+        &mut errors,
+    );
+    if !errors.is_empty() {
+        for error in errors {
+            tracing::warn!(field = %error.field_path, hint = %error.hint, "invalid widget initial_params");
+        }
+        return None;
+    }
 
     let instance_name = raw_widget
         .instance_id
@@ -364,6 +380,17 @@ fn validate_initial_params(
                 continue;
             }
         };
+
+        if decl.audience == tze_hud_scene::WidgetParamAudience::Runtime {
+            errors.push(ConfigError {
+                code: ConfigErrorCode::WidgetInvalidInitialParams,
+                field_path,
+                expected: "a model or owner parameter".into(),
+                got: format!("runtime-set parameter {param_name:?}"),
+                hint: "remove this override; the runtime manages this parameter".into(),
+            });
+            continue;
+        }
 
         // Type check.
         if coerce_toml_to_widget_value(raw_val, decl.param_type).is_none() {
@@ -525,6 +552,7 @@ mod tests {
             WidgetParamType::Enum => WidgetParameterValue::Enum("info".to_string()),
         };
         WidgetParameterDeclaration {
+            audience: Default::default(),
             name: name.to_string(),
             param_type: ptype,
             default_value,
@@ -743,13 +771,35 @@ mod tests {
             ..Default::default()
         }]);
         let known: HashSet<String> = ["gauge".to_string()].into();
-        let type_map = type_map_from(&[make_gauge_type()]);
-        let mut errors = Vec::new();
-        validate_widget_instances(&raw, &known, &type_map, &mut errors);
-        assert!(
-            errors.is_empty(),
-            "valid initial_params should produce no errors, got: {errors:?}"
-        );
+        use tze_hud_scene::WidgetParamAudience::{Model, Owner, Runtime};
+        for audience in [Model, Owner, Runtime] {
+            let mut definition = make_gauge_type();
+            definition.parameter_schema[1].audience = audience;
+            let type_map = type_map_from(&[definition]);
+            let mut errors = Vec::new();
+            validate_widget_instances(&raw, &known, &type_map, &mut errors);
+            assert_eq!(
+                errors.is_empty(),
+                audience != Runtime,
+                "{audience:?}: {errors:?}"
+            );
+            let built = build_widget_instance(
+                &raw.tabs[0].widgets[0],
+                tze_hud_scene::SceneId::new(),
+                &type_map,
+            );
+            assert_eq!(
+                built.is_some(),
+                audience != Runtime,
+                "runtime startup must enforce the loaded schema"
+            );
+            if let Some(instance) = built {
+                assert_eq!(
+                    instance.current_params["label"],
+                    WidgetParameterValue::String("CPU".into())
+                );
+            }
+        }
     }
 
     /// WHEN two widget entries have same type and no instance_id THEN error.
@@ -805,6 +855,7 @@ mod tests {
     #[test]
     fn initial_params_enum_out_of_allowed_values_produces_error() {
         let severity_decl = WidgetParameterDeclaration {
+            audience: Default::default(),
             name: "severity".to_string(),
             param_type: WidgetParamType::Enum,
             default_value: WidgetParameterValue::Enum("info".to_string()),

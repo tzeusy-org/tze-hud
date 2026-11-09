@@ -656,7 +656,7 @@ mod tests {
         let args = Args {
             fixture: None,
             widget: Some(bundle),
-            params: json!({"status":"online","theme":"friendly","label":"PNG","reason":"offline authoring"}),
+            params: json!({"status":"online","label":"PNG","reason":"offline authoring"}),
             theme: Some("tonal-glass".into()),
             tokens: None,
             width: 252,

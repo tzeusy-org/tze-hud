@@ -19,12 +19,20 @@
     stroke="{{token.color.outline.variant}}"
     stroke-width="1.5"/>
 
+  <g id="info-fill" opacity="1">
   <rect
     id="bar"
     x="28" y="184"
     width="16" height="0"
     rx="{{token.shape.s}}" ry="{{token.shape.s}}"
     fill="{{token.color.primary}}"/>
+  </g>
+
+  <!-- Severity selects one fill, including its antialiased edges. -->
+  <g id="severity-fill-group" opacity="0">
+  <rect id="severity-fill" x="28" y="184" width="16" height="0" rx="{{token.shape.s}}" ry="{{token.shape.s}}"
+    fill="{{token.color.primary}}"/>
+  </g>
 
   <text
     id="label-text"

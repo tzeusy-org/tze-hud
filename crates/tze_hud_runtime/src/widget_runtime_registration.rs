@@ -38,6 +38,7 @@ mod tests {
             name: "Gauge".to_string(),
             description: "test".to_string(),
             parameter_schema: vec![WidgetParameterDeclaration {
+                audience: Default::default(),
                 name: "level".to_string(),
                 param_type: WidgetParamType::F32,
                 default_value: WidgetParameterValue::F32(0.0),

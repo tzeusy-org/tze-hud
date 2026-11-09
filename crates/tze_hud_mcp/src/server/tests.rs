@@ -40,19 +40,22 @@ fn scene(clock: &TestClock) -> SceneGraph {
         description: "gauge".into(),
         parameter_schema: vec![
             WidgetParameterDeclaration {
+                audience: Default::default(),
                 name: "level".into(),
                 param_type: WidgetParamType::F32,
                 default_value: WidgetParameterValue::F32(0.0),
                 constraints: Some(f32_range),
             },
             WidgetParameterDeclaration {
+                audience: Default::default(),
                 name: "label".into(),
                 param_type: WidgetParamType::String,
                 default_value: WidgetParameterValue::String(String::new()),
                 constraints: None,
             },
             WidgetParameterDeclaration {
-                name: "fill_color".into(),
+                audience: Default::default(),
+                name: "color".into(),
                 param_type: WidgetParamType::Color,
                 default_value: WidgetParameterValue::Color(Rgba {
                     r: 0.0,
@@ -753,7 +756,7 @@ async fn surfaces_lists_only_allowed_surfaces() {
     let (v, _) = call_as(&server, &bot, "hud_surfaces", json!({})).await;
     assert_eq!(
         v["surfaces"][0],
-        json!({"s": "zone:subtitle", "accepts": "text"}),
+        json!({"s": "zone:subtitle", "accepts": "text", "one": true}),
         "held only when true"
     );
     let names: Vec<_> = v["surfaces"]
@@ -1586,7 +1589,7 @@ async fn clear_removes_own_zone_content() {
 
 #[tokio::test]
 async fn surfaces_report_holdings_compactly() {
-    let (server, _) = server();
+    let (server, clock) = server();
     call(
         &server,
         "hud_publish",
@@ -1598,18 +1601,66 @@ async fn surfaces_report_holdings_compactly() {
     let sub = entries.iter().find(|e| e["s"] == "zone:subtitle").unwrap();
     assert_eq!(
         sub,
-        &json!({"s": "zone:subtitle", "accepts": "text", "held": true, "expires_in_ms": 8000})
+        &json!({"s": "zone:subtitle", "accepts": "text", "one": true, "held": true, "expires_in_ms": 8000})
     );
     let gauge = entries.iter().find(|e| e["s"] == "widget:gauge").unwrap();
     assert_eq!(
         gauge["params"],
-        json!({"level": "f32 0..1", "label": "string", "fill_color": "color"})
+        json!({"level": "number 0..1", "label": "string", "color": "color"})
     );
     let text = v.to_string();
     assert!(
         !text.contains("-4") && !text.contains("_us"),
         "no ids or timestamps: {text}"
     );
+    let notice = entries
+        .iter()
+        .find(|e| e["s"] == "zone:notification-area")
+        .unwrap();
+    assert_eq!(notice["max"], 5);
+    assert!(notice.get("one").is_none() && notice.get("busy").is_none());
+    assert!(
+        entries
+            .iter()
+            .find(|e| e["s"] == "zone:status-bar")
+            .unwrap()
+            .get("one")
+            .is_none()
+    );
+    assert!(entries.iter().all(|e| {
+        !e["accepts"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("static_image")
+    }));
+    assert!(sub.get("busy").is_none(), "own occupant is not foreign");
+    server
+        .scene
+        .lock()
+        .await
+        .zone_registry
+        .active_publishes
+        .get_mut("subtitle")
+        .unwrap()[0]
+        .publisher_namespace = "foreign".into();
+    let foreign = call(&server, "hud_surfaces", json!({})).await;
+    let sub = foreign["surfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["s"] == "zone:subtitle")
+        .unwrap();
+    assert_eq!(sub["busy"], true);
+    assert!(sub.get("held").is_none());
+    clock.advance(8000);
+    let expired = call(&server, "hud_surfaces", json!({})).await;
+    let sub = expired["surfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["s"] == "zone:subtitle")
+        .unwrap();
+    assert!(sub.get("busy").is_none());
 }
 
 #[tokio::test]
@@ -1731,6 +1782,82 @@ async fn widget_publish_hold_clear() {
     let mut config = McpConfig::with_psk(psk());
     config.widget_transition_ms = 200;
     let server = server.with_config(config);
+    {
+        use tze_hud_scene::WidgetParamAudience::{Owner, Runtime};
+        let mut scene = server.scene.lock().await;
+        let schema = &mut scene
+            .widget_registry
+            .definitions
+            .get_mut("gauge")
+            .unwrap()
+            .parameter_schema;
+        for (name, audience) in [
+            ("fill_color", Owner),
+            ("theme", Owner),
+            ("tooltip_visible", Runtime),
+        ] {
+            schema.push(WidgetParameterDeclaration {
+                name: name.into(),
+                audience,
+                param_type: WidgetParamType::F32,
+                default_value: WidgetParameterValue::F32(0.0),
+                constraints: None,
+            });
+        }
+        schema.push(WidgetParameterDeclaration {
+            name: "severity".into(),
+            audience: Default::default(),
+            param_type: WidgetParamType::Enum,
+            default_value: WidgetParameterValue::Enum("info".into()),
+            constraints: Some(WidgetParamConstraints {
+                enum_allowed_values: vec!["info".into(), "warning".into(), "error".into()],
+                ..Default::default()
+            }),
+        });
+    }
+    let initial = {
+        let scene = server.scene.lock().await;
+        (
+            scene.version,
+            scene.widget_registry.instances["gauge"]
+                .current_params
+                .clone(),
+        )
+    };
+    for (name, hint) in [
+        ("fill_color", "severity"),
+        ("theme", "owner-set"),
+        ("tooltip_visible", "runtime-set"),
+    ] {
+        for value in [json!(0.5), json!("wrong-type")] {
+            let error = call_err(
+                &server,
+                "hud_publish",
+                json!({"surface":"widget:gauge", "params": {"level":0.8, name: value}}),
+            )
+            .await;
+            assert_eq!(error["code"], "WIDGET_PARAMETER_INVALID");
+            assert!(error["hint"].as_str().unwrap().contains(hint), "{error}");
+            let scene = server.scene.lock().await;
+            assert_eq!(scene.version, initial.0);
+            assert_eq!(
+                scene.widget_registry.instances["gauge"].current_params,
+                initial.1
+            );
+            assert!(scene.leases.is_empty());
+            assert!(scene.widget_registry.active_for_widget("gauge").is_empty());
+        }
+    }
+    let discovery = call(&server, "hud_surfaces", json!({})).await;
+    let gauge = discovery["surfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["s"] == "widget:gauge")
+        .unwrap();
+    for name in ["fill_color", "theme", "tooltip_visible"] {
+        assert!(gauge["params"].get(name).is_none());
+    }
     let invalid = call_err(
         &server,
         "hud_publish",
@@ -1743,7 +1870,7 @@ async fn widget_publish_hold_clear() {
         &server,
         "hud_publish",
         json!({"surface": "widget:gauge", "params": {"level": 0.75, "label": "CPU",
-            "fill_color": {"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}}}),
+            "color": {"r": 1.0, "g": 0.0, "b": 0.0, "a": 1.0}}}),
     )
     .await;
     assert_eq!(v, json!({"ok": true}), "widgets are durable by default");
@@ -1757,7 +1884,7 @@ async fn widget_publish_hold_clear() {
             WidgetParameterValue::String("CPU".into())
         );
         assert_eq!(
-            record.params["fill_color"],
+            record.params["color"],
             WidgetParameterValue::Color(Rgba::new(1.0, 0.0, 0.0, 1.0))
         );
     }
@@ -1781,6 +1908,8 @@ async fn widget_publish_hold_clear() {
         (json!({"level": 1.0000000001}), "0..1"),
         (json!({"level": 1e100}), "finite"),
         (json!({"level": "high"}), "f32"),
+        (json!({"severity": "critical"}), "info|warning|error"),
+        (json!({"severity": 42}), "info|warning|error"),
     ];
     for value in [
         json!({}),
@@ -1794,23 +1923,23 @@ async fn widget_publish_hold_clear() {
         json!("#ééé"),
         json!([0, 1, 0]),
     ] {
-        bad.push((json!({"fill_color": value}), "0..1"));
+        bad.push((json!({"color": value}), "0..1"));
     }
     for channel in ["r", "g", "b", "a"] {
         for value in [json!(true), json!("0.5"), json!(null)] {
             let mut color = json!({"r": 0.2, "g": 0.3, "b": 0.4, "a": 1});
             color[channel] = value;
-            bad.push((json!({"fill_color": color}), "numeric"));
+            bad.push((json!({"color": color}), "numeric"));
         }
         if channel != "a" {
             let mut color = json!({"r": 0.2, "g": 0.3, "b": 0.4});
             color.as_object_mut().unwrap().remove(channel);
-            bad.push((json!({"fill_color": color}), "numeric"));
+            bad.push((json!({"color": color}), "numeric"));
         }
         for value in [-0.1, 1.0000000001, 255.0, 1e100] {
             let mut color = json!({"r": 0.2, "g": 0.3, "b": 0.4, "a": 1});
             color[channel] = json!(value);
-            bad.push((json!({"fill_color": color}), "0..1"));
+            bad.push((json!({"color": color}), "0..1"));
         }
     }
     for (mut params, hint) in bad {
@@ -1857,11 +1986,11 @@ async fn widget_publish_hold_clear() {
         call(
             &server,
             "hud_publish",
-            json!({"surface":"widget:gauge", "params":{"level":level, "fill_color":color}}),
+            json!({"surface":"widget:gauge", "params":{"level":level, "color":color}}),
         )
         .await;
         assert_eq!(
-            server.scene.lock().await.widget_registry.instances["gauge"].current_params["fill_color"],
+            server.scene.lock().await.widget_registry.instances["gauge"].current_params["color"],
             WidgetParameterValue::Color(expected)
         );
     }

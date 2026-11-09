@@ -296,7 +296,7 @@ fn load_bundle_inner(
     let description = raw.description.as_deref().unwrap_or("").to_string();
 
     // Step 4: Parse parameter schema.
-    let parameter_schema = parse_parameter_schema(&raw.parameter_schema, tokens, path_str)?;
+    let parameter_schema = parse_parameter_schema(&raw.parameter_schema, tokens, path_str, name)?;
 
     // Build a set of parameter names for binding validation.
     let param_names: HashSet<&str> = parameter_schema.iter().map(|p| p.name.as_str()).collect();
@@ -516,6 +516,7 @@ fn parse_parameter_schema(
     raw: &[RawParameterDeclaration],
     tokens: &HashMap<String, String>,
     path_str: &str,
+    bundle_name: &str,
 ) -> Result<Vec<WidgetParameterDeclaration>, BundleError> {
     let mut params = Vec::new();
     for raw_param in raw {
@@ -571,8 +572,22 @@ fn parse_parameter_schema(
             wc
         });
 
+        let audience = match raw_param.audience.as_deref().unwrap_or("model") {
+            "model" => tze_hud_scene::WidgetParamAudience::Model,
+            "owner" => tze_hud_scene::WidgetParamAudience::Owner,
+            "runtime" => tze_hud_scene::WidgetParamAudience::Runtime,
+            value => {
+                return Err(BundleError::InvalidManifest {
+                    path: path_str.to_string(),
+                    detail: format!(
+                        "bundle '{bundle_name}', parameter '{name}': unknown audience '{value}' (must be model, owner, or runtime)"
+                    ),
+                });
+            }
+        };
         params.push(WidgetParameterDeclaration {
             name: name.to_string(),
+            audience,
             param_type,
             default_value,
             constraints,
@@ -1255,6 +1270,7 @@ mod tests {
             name: "Gauge".to_string(),
             description: "runtime test".to_string(),
             parameter_schema: vec![WidgetParameterDeclaration {
+                audience: Default::default(),
                 name: "level".to_string(),
                 param_type: WidgetParamType::F32,
                 default_value: WidgetParameterValue::F32(0.0),
@@ -1306,6 +1322,7 @@ mod tests {
             name: "Status".to_string(),
             description: "runtime test".to_string(),
             parameter_schema: vec![WidgetParameterDeclaration {
+                audience: Default::default(),
                 name: "level".to_string(),
                 param_type: WidgetParamType::F32,
                 default_value: WidgetParameterValue::F32(0.0),
