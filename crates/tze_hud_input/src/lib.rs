@@ -1044,6 +1044,19 @@ impl InputProcessor {
             .route_pointer_selection(anchor, cursor)
     }
 
+    /// Leave the current editor on an explicit outer HUD exit. Preserve its
+    /// keyed draft, and synchronize local focus flags and composer suspension.
+    pub fn clear_keyboard_focus(
+        &mut self,
+        focus_manager: &mut FocusManager,
+        scene: &mut SceneGraph,
+        tab_id: SceneId,
+    ) -> FocusTransition {
+        let transition = focus_manager.clear_focus(tab_id, scene);
+        self.apply_focus_transition_side_effects(&transition, scene);
+        transition
+    }
+
     /// Move focus off a tile that left the scene (lease revocation, expiry, or
     /// an agent clearing its portal) and deactivate a composer whose node went
     /// with it, so [`Self::is_composer_active`] turns `false`. The draft is

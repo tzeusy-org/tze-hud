@@ -14,6 +14,8 @@ pub(super) struct NotificationActionLayout {
     pub(super) heights: Vec<f32>,
     pub(super) gap: f32,
     pub(super) padding: f32,
+    /// Reserved in both idle and focused cards so digit hints never reflow labels.
+    pub(super) hint_width: f32,
     pub(super) link_marks: Vec<Option<(String, f32)>>,
 }
 impl NotificationActionLayout {
@@ -168,6 +170,20 @@ impl NotificationLayoutCache {
         };
         let width = (width - 2.0 * inputs.inset).max(1.0);
         let cell = width / inputs.labels.len().max(1) as f32;
+        let hint_width = ["1", "2", "3", "4"]
+            .into_iter()
+            .map(|digit| {
+                self.shapes += 1;
+                crate::text::single_line_width(
+                    fonts,
+                    digit,
+                    inputs.size,
+                    inputs.font,
+                    inputs.weight,
+                )
+            })
+            .fold(0.0_f32, f32::max)
+            + inputs.padding;
         let mut measured = 0;
         let stacked = inputs.labels.iter().any(|label| {
             if label.contains('\n') {
@@ -176,6 +192,7 @@ impl NotificationLayoutCache {
             measured += 1;
             crate::text::single_line_width(fonts, label, inputs.size, inputs.font, inputs.weight)
                 + inputs.padding * 2.0
+                + hint_width
                 > cell
         });
         // Labels retain the existing bounded Clip policy after row/stack
@@ -208,6 +225,7 @@ impl NotificationLayoutCache {
             heights,
             gap: inputs.gap,
             padding: inputs.padding,
+            hint_width,
         };
         self.entries.insert(key, (inputs, layout.clone(), actual));
         layout

@@ -188,6 +188,7 @@ impl WindowedRuntimeState {
             context_menu_open: false,
             context_menu_dismiss_pending: false,
             notification_keydowns: Default::default(),
+            answer_keyboard: Default::default(),
             primary_drag_gesture: None,
             global_tokens: HashMap::new(),
             appearance: None,
@@ -1168,6 +1169,7 @@ impl HeadlessEventLoopHarness {
     /// Run the genuine production drain over the pending queue.
     #[cfg(test)]
     pub(super) fn drain(&mut self) {
+        self.app.sync_answer_focus();
         self.app.drain_pending_keyboard_events();
     }
 
@@ -5127,6 +5129,494 @@ mod tests {
             harness.enqueue(down);
             harness.enqueue(key_up(code, key, 1_100));
             harness.drain();
+        }
+        fn request_answer(harness: &mut HeadlessEventLoopHarness) {
+            harness
+                .app
+                .state
+                .answer_keyboard
+                .requested
+                .store(true, std::sync::atomic::Ordering::Release);
+            harness.drain();
+        }
+        fn card_with_editor() -> HeadlessEventLoopHarness {
+            let mut harness = approve_reject_notification_harness();
+            let (zone, content) = {
+                let scene = harness.scene();
+                (
+                    scene.zone_registry.zones["notification-area"].clone(),
+                    scene.zone_registry.active_for_zone("notification-area")[0]
+                        .content
+                        .clone(),
+                )
+            };
+            harness.focus_composer();
+            {
+                let mut scene = harness.scene();
+                scene.register_zone(zone);
+                scene
+                    .publish_to_zone(
+                        "notification-area",
+                        content,
+                        "notif-agent",
+                        Some("question".into()),
+                        None,
+                        None,
+                    )
+                    .unwrap();
+            }
+            assert!(harness.tick());
+            harness
+        }
+
+        // Use the actual main-thread intent and pending-keyboard drain. Each
+        // digit pins an ordinal, never the current label or another card.
+        for (code, key, callback) in [
+            ("Digit1", "1", "approve"),
+            ("Digit2", "2", "reject"),
+            ("Digit3", "3", "wait"),
+            ("Digit4", "4", "details"),
+        ] {
+            let mut harness = card_with_editor();
+            harness.enqueue(character("kept", 100));
+            harness.drain();
+            request_answer(&mut harness);
+            let publication = harness
+                .app
+                .state
+                .answer_keyboard
+                .focus
+                .unwrap()
+                .publication_id;
+            assert_eq!(
+                harness.scene().overlay.notification_answer,
+                Some(publication)
+            );
+            assert!(
+                harness
+                    .scene()
+                    .overlay
+                    .notification_focus
+                    .as_deref()
+                    .unwrap()
+                    .ends_with(":0")
+            );
+            press(&mut harness, "ArrowLeft", "ArrowLeft", false);
+            assert!(
+                harness
+                    .scene()
+                    .overlay
+                    .notification_focus
+                    .as_deref()
+                    .unwrap()
+                    .ends_with(":3")
+            );
+            press(&mut harness, "Tab", "Tab", false);
+            assert!(
+                harness
+                    .scene()
+                    .overlay
+                    .notification_focus
+                    .as_deref()
+                    .unwrap()
+                    .ends_with(":0")
+            );
+            let tx = tze_hud_protocol::session_server::InputEventSender::new(128);
+            let mut rx = tx.subscribe_all();
+            harness.app.state.input_event_tx = Some(tx);
+            harness.enqueue(key_down(code, key, 200));
+            let mut repeat = key_down(code, key, 201);
+            if let PendingKeyboardEvent::KeyDown(raw) = &mut repeat {
+                raw.repeat = true;
+            }
+            harness.enqueue(repeat);
+            harness.enqueue(character(key, 202));
+            harness.drain();
+            assert_eq!(
+                harness.app.state.answer_keyboard.return_key.as_deref(),
+                Some(code),
+                "return waits for the physical release"
+            );
+            assert!(harness.app.state.answer_keyboard.focus.is_none());
+            assert_eq!(harness.composer_draft().as_deref(), Some("kept"));
+            assert_eq!(take_action_ids(&harness), [callback]);
+            harness.enqueue(key_up(code, key, 203));
+            harness.drain();
+            assert!(harness.app.state.answer_keyboard.return_key.is_none());
+            assert!(received_events(&mut rx).iter().all(|(_, event)| !matches!(
+                event,
+                ProtoInputEvent::KeyDown(_)
+                    | ProtoInputEvent::KeyUp(_)
+                    | ProtoInputEvent::Character(_)
+                    | ProtoInputEvent::CommandInput(_)
+            )));
+            assert!(
+                take_action_ids(&harness).is_empty(),
+                "repeat and release cannot answer twice"
+            );
+            assert!(harness.scene().overlay.notification_answer.is_none());
+        }
+
+        // A primary/secondary HWND blur is not a whole-HUD focus loss. The
+        // production handler receives the current native foreground ownership.
+        for secondary in [None, Some(0)] {
+            for owned in [true, false] {
+                let mut harness = card_with_editor();
+                request_answer(&mut harness);
+                let focused = harness.scene().overlay.notification_focus.clone();
+                harness
+                    .app
+                    .handle_window_focus_with_foreground(secondary, false, owned);
+                if owned {
+                    assert!(harness.app.state.answer_keyboard.focus.is_some());
+                    assert_eq!(harness.scene().overlay.notification_focus, focused);
+                    assert!(
+                        !harness
+                            .app
+                            .state
+                            .input_processor
+                            .chrome_feedback_cancel_pending
+                    );
+                    press(&mut harness, "Digit2", "2", false);
+                    assert_eq!(take_action_ids(&harness), ["reject"]);
+                } else {
+                    assert!(harness.app.state.answer_keyboard.focus.is_none());
+                    assert!(harness.app.state.answer_keyboard.return_key.is_none());
+                    assert!(harness.tick());
+                    assert!(harness.scene().overlay.notification_focus.is_none());
+                    assert!(harness.scene().overlay.notification_answer.is_none());
+                    assert!(take_action_ids(&harness).is_empty());
+                }
+            }
+        }
+
+        // Losing the whole HUD before an exit key is released cancels the
+        // pending return. Its late release stays consumed without answering again.
+        for (code, key, callbacks) in [
+            ("Digit2", "2", vec!["reject"]),
+            ("Escape", "Escape", vec![]),
+        ] {
+            let mut harness = card_with_editor();
+            harness.enqueue(character("kept", 299));
+            harness.drain();
+            request_answer(&mut harness);
+            harness.enqueue(key_down(code, key, 300));
+            harness.drain();
+            assert_eq!(take_action_ids(&harness), callbacks);
+            assert_eq!(
+                harness.app.state.answer_keyboard.return_key.as_deref(),
+                Some(code)
+            );
+            harness
+                .app
+                .handle_window_focus_with_foreground(None, false, false);
+            assert!(harness.app.state.answer_keyboard.return_key.is_none());
+            harness.enqueue(key_up(code, key, 301));
+            harness.drain();
+            assert!(harness.app.state.answer_keyboard.return_key.is_none());
+            assert!(take_action_ids(&harness).is_empty());
+            assert_eq!(harness.composer_draft().as_deref(), Some("kept"));
+        }
+
+        // The global answer chord transfers input from an open running panel.
+        // A request with no card keeps its search and panel completely intact.
+        {
+            let runtime = tokio::runtime::Runtime::new().unwrap();
+            let fixture =
+                runtime.block_on(async { super::super::panel_input::panel_task_tests::fixture() });
+            let panel = fixture.panel.clone();
+            let wait_open = |open| {
+                runtime.block_on(async {
+                    for _ in 0..200 {
+                        if panel.is_open() == open {
+                            return;
+                        }
+                        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                    }
+                    panic!("panel did not reach open={open}");
+                })
+            };
+            use crate::shell::control_panel::PanelEvent;
+            use tze_hud_scene::config::ChordRole;
+            panel.send(PanelEvent::Chord(ChordRole::Panel));
+            wait_open(true);
+            let mut harness = card_with_editor();
+            harness.app.state.control_panel = Some(panel.clone());
+            harness.app.sync_panel_focus();
+            request_answer(&mut harness);
+            assert!(harness.app.state.answer_keyboard.focus.is_some());
+            assert!(!harness.app.state.answer_keyboard.focus.unwrap().nested);
+            let physical = winit::keyboard::PhysicalKey::Code(winit::keyboard::KeyCode::Digit2);
+            let logical = winit::keyboard::Key::Character("2".into());
+            assert!(
+                !harness
+                    .app
+                    .panel_key_input(physical, &logical, Some("2"), true)
+            );
+            assert!(!harness.app.panel_text("2"));
+            wait_open(false);
+            harness.app.sync_panel_focus();
+            assert!(harness.app.state.answer_keyboard.focus.is_some());
+            assert!(harness.scene().overlay.notification_answer.is_some());
+            press(&mut harness, "Digit2", "2", false);
+            assert_eq!(take_action_ids(&harness), ["reject"]);
+            assert!(harness.tick());
+            panel.send(PanelEvent::Chord(ChordRole::Panel));
+            wait_open(true);
+            harness.app.sync_panel_focus();
+            request_answer(&mut harness);
+            assert!(harness.app.state.answer_keyboard.focus.is_none());
+            assert!(panel.is_open(), "no question must not close settings");
+            panel.send(PanelEvent::Chord(ChordRole::Panel));
+            wait_open(false);
+        }
+
+        // An unavailable ordinal is inert; Enter/Space still use the moved
+        // focus ring, and a safe-mode request cannot take card focus.
+        for (activation, key) in [("Enter", "Enter"), ("Space", " ")] {
+            let mut harness = approve_reject_notification_harness();
+            {
+                let mut scene = harness.scene();
+                let tze_hud_scene::ZoneContent::Notification(n) = &mut scene
+                    .zone_registry
+                    .active_publishes
+                    .get_mut("notification-area")
+                    .unwrap()[0]
+                    .content
+                else {
+                    unreachable!()
+                };
+                n.actions.truncate(2);
+            }
+            assert!(harness.tick());
+            harness
+                .app
+                .state
+                .safe_mode_atomic
+                .store(true, std::sync::atomic::Ordering::Release);
+            request_answer(&mut harness);
+            assert!(harness.app.state.answer_keyboard.focus.is_none());
+            harness
+                .app
+                .state
+                .safe_mode_atomic
+                .store(false, std::sync::atomic::Ordering::Release);
+            request_answer(&mut harness);
+            press(&mut harness, "Digit4", "4", false);
+            assert!(take_action_ids(&harness).is_empty());
+            assert!(harness.app.state.answer_keyboard.focus.is_some());
+            press(&mut harness, "ArrowDown", "ArrowDown", false);
+            press(&mut harness, activation, key, false);
+            assert_eq!(take_action_ids(&harness), ["reject"]);
+        }
+
+        // Newest means the newest rendered unanswered callback card. A newer
+        // link-only card is ineligible; no eligible card leaves existing focus
+        // and geometry untouched, rather than flashing an empty visit.
+        {
+            let clock = Arc::new(tze_hud_scene::TestClock::new(1_000));
+            let mut harness = approve_reject_notification_harness_on(clock.clone());
+            let content = harness
+                .scene()
+                .zone_registry
+                .active_for_zone("notification-area")[0]
+                .content
+                .clone();
+            clock.advance(1);
+            harness
+                .scene()
+                .publish_to_zone(
+                    "notification-area",
+                    content.clone(),
+                    "notif-agent",
+                    Some("new".into()),
+                    None,
+                    None,
+                )
+                .unwrap();
+            let newest = harness
+                .scene()
+                .zone_registry
+                .active_for_zone("notification-area")[1]
+                .publication_id;
+            clock.advance(1);
+            let mut link_only = content;
+            let tze_hud_scene::ZoneContent::Notification(n) = &mut link_only else {
+                unreachable!()
+            };
+            for action in &mut n.actions {
+                action.callback_id = None;
+                action.url = Some("https://example.com/only".into());
+            }
+            harness
+                .scene()
+                .publish_to_zone(
+                    "notification-area",
+                    link_only,
+                    "notif-agent",
+                    Some("link".into()),
+                    None,
+                    None,
+                )
+                .unwrap();
+            assert!(harness.tick());
+            request_answer(&mut harness);
+            assert_eq!(
+                harness
+                    .app
+                    .state
+                    .answer_keyboard
+                    .focus
+                    .unwrap()
+                    .publication_id,
+                newest
+            );
+            press(&mut harness, "Escape", "Escape", false);
+            harness.scene().clear_zone("notification-area").unwrap();
+            assert!(harness.tick());
+            let before = harness.scene().geometry_epoch;
+            request_answer(&mut harness);
+            assert!(harness.app.state.answer_keyboard.focus.is_none());
+            assert_eq!(harness.scene().geometry_epoch, before);
+        }
+
+        for terminal in ["replace", "expire"] {
+            let mut harness = card_with_editor();
+            harness.enqueue(character("kept", 100));
+            harness.drain();
+            request_answer(&mut harness);
+            {
+                let mut scene = harness.scene();
+                if terminal == "replace" {
+                    let content = scene.zone_registry.active_for_zone("notification-area")[0]
+                        .content
+                        .clone();
+                    scene
+                        .publish_to_zone(
+                            "notification-area",
+                            content,
+                            "notif-agent",
+                            Some("question".into()),
+                            None,
+                            None,
+                        )
+                        .unwrap();
+                } else {
+                    scene
+                        .zone_registry
+                        .active_publishes
+                        .get_mut("notification-area")
+                        .unwrap()[0]
+                        .expires_at_wall_us = Some(0);
+                    scene.drain_expired_zone_publications();
+                }
+            }
+            assert!(harness.tick());
+            press(&mut harness, "Digit2", "2", false);
+            harness.enqueue(character("2", 200));
+            harness.drain();
+            assert!(
+                take_action_ids(&harness).is_empty(),
+                "a stale chord never retargets its replacement"
+            );
+            assert_eq!(harness.composer_draft().as_deref(), Some("kept"));
+            assert!(harness.app.state.answer_keyboard.focus.is_some());
+            press(&mut harness, "Escape", "Escape", false);
+            assert!(harness.app.state.answer_keyboard.focus.is_none());
+        }
+
+        // Card, selection and draft cancellation are separate inner layers.
+        // A sent reply also keeps the editor; only an empty outer Esc leaves it.
+        {
+            let mut harness = card_with_editor();
+            harness.enqueue(character("draft", 100));
+            harness.drain();
+            assert!(harness.app.focus_newest_question(true).unwrap());
+            press(&mut harness, "Escape", "Escape", false);
+            assert!(harness.app.state.input_processor.is_composer_active());
+            assert_eq!(harness.composer_draft().as_deref(), Some("draft"));
+            harness
+                .app
+                .state
+                .input_processor
+                .route_pointer_selection_to_composer(0, 5);
+            press(&mut harness, "Escape", "Escape", false);
+            assert!(
+                harness
+                    .app
+                    .state
+                    .input_processor
+                    .composer_selected_text()
+                    .is_none()
+            );
+            assert_eq!(harness.composer_draft().as_deref(), Some("draft"));
+            press(&mut harness, "Escape", "Escape", false);
+            assert!(harness.app.state.input_processor.is_composer_active());
+            assert_eq!(harness.composer_draft().as_deref(), Some(""));
+            harness.enqueue(character("reply", 200));
+            harness.drain();
+            press(&mut harness, "Enter", "Enter", false);
+            assert!(harness.app.state.input_processor.is_composer_active());
+            assert_eq!(harness.composer_draft().as_deref(), Some(""));
+            harness.enqueue(key_down("Escape", "Escape", 300));
+            harness.drain();
+            assert!(!harness.app.state.input_processor.is_composer_active());
+            assert_eq!(
+                harness.app.state.answer_keyboard.return_key.as_deref(),
+                Some("Escape")
+            );
+            harness.enqueue(key_up("Escape", "Escape", 301));
+            harness.drain();
+            assert!(harness.app.state.answer_keyboard.return_key.is_none());
+        }
+
+        // A digit URL uses the same per-action 2s limiter, keeps the card, and
+        // leaves the keyboard visit even when the second launch is refused.
+        {
+            let mut harness = approve_reject_notification_harness();
+            {
+                let mut scene = harness.scene();
+                let tze_hud_scene::ZoneContent::Notification(n) = &mut scene
+                    .zone_registry
+                    .active_publishes
+                    .get_mut("notification-area")
+                    .unwrap()[0]
+                    .content
+                else {
+                    unreachable!()
+                };
+                n.actions[1].callback_id = None;
+                n.actions[1].url = Some("https://example.com/digit".into());
+            }
+            assert!(harness.tick());
+            let (tx, rx) = std::sync::mpsc::channel();
+            harness.app.state.notification_link_opener.worker = Some(Arc::new(move |url| {
+                tx.send(url).unwrap();
+                Ok(())
+            }));
+            request_answer(&mut harness);
+            press(&mut harness, "Digit2", "2", false);
+            assert_eq!(
+                rx.recv_timeout(std::time::Duration::from_secs(2)).unwrap(),
+                "https://example.com/digit"
+            );
+            assert!(harness.app.state.answer_keyboard.focus.is_none());
+            assert_eq!(
+                harness
+                    .scene()
+                    .zone_registry
+                    .active_for_zone("notification-area")
+                    .len(),
+                1
+            );
+            request_answer(&mut harness);
+            press(&mut harness, "Digit2", "2", false);
+            assert!(harness.app.state.answer_keyboard.focus.is_none());
+            assert!(rx.try_recv().is_err());
+            assert!(take_action_ids(&harness).is_empty());
+            for worker in harness.app.state.notification_link_opener.workers.drain(..) {
+                worker.join().unwrap();
+            }
         }
         // Links inherit the same reverse-entry/focus and Enter/Space path.
         for (code, key) in [("Enter", "Enter"), ("Space", " ")] {

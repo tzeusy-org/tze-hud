@@ -123,13 +123,14 @@ and `hud_clear` have `idempotentHint:true`; publish/input make neither claim.
   reshape/repaint; existing Stack TTL fade is the only waiting time cue.
   Bare Tab/Shift+Tab joins visible notification controls at the content focus
   cycle's wrap boundary, in dismiss-then-publication-action order. HUD keyboard
-  focus loss clears card focus even when the pointer is over another overlay.
+  focus loss to another app clears card focus even when the pointer is over
+  another overlay; moving keyboard focus between HUD monitors preserves it.
   Enter/Space uses the same exact-publication activation as pointer release. Publication
   never activates an OS window or steals editor focus; Escape, completion and
   removal release local card focus. Panel and shell routing retain precedence.
   Link actions use that same pointer/keyboard operation and exact live
   publication plus zero-based action index. A link leaves the card, lifetime,
-  hold, focus and controls in place: no callback, readiness event, human-X or
+  hold and controls in place (ordinary Tab focus also stays): no callback, readiness event, human-X or
   chosen exit is produced. Per publication/index, accepted launch attempts
   are limited to one every 2 monotonic seconds, including failures; other
   buttons/cards are independent, and retirement removes the transient state.
@@ -386,7 +387,7 @@ agents until one is paired.
   negotiation and no resident principal.
 - `admin` is an operator entry, outside the model surface: it opens
   `GET /admin/status`, `GET /admin/logs`, and `GET /admin/screenshot` on the
-  MCP port, and `*` does not grant it. `/admin/status` includes `tailnet_inbound` (`state`: `allowed`, `blocked`, `unknown`, `not_applicable`; `reason`, `rule` and `fix` when `blocked`; `error` when `unknown`): whether Windows Firewall lets remote agents reach the tailnet bind, and `safe_mode_hotkey`, `panel_hotkey` and `pairing_hotkey`
+  MCP port, and `*` does not grant it. `/admin/status` includes `tailnet_inbound` (`state`: `allowed`, `blocked`, `unknown`, `not_applicable`; `reason`, `rule` and `fix` when `blocked`; `error` when `unknown`): whether Windows Firewall lets remote agents reach the tailnet bind, and `safe_mode_hotkey`, `panel_hotkey`, `pairing_hotkey` and `answer_hotkey`
   (each `chord`, `registered`, `error`; `null` when no hotkey is active; `registered: null` while pending): `registered: false`
   means another program owns that chord; for `safe_mode_hotkey` the human pause override is then lost. The blocked
   firewall `fix` names `tze_hud.exe --allow-remote` with the same listen-port
@@ -645,15 +646,16 @@ default. Ports are read at start; the rest change live from the panel.
 
 ## Human chords and the control panel
 
-Three global chords work while the overlay is unfocused and click-through
+Four global chords work while the overlay is unfocused and click-through
 (Windows; each is set in `[runtime]` as modifiers Ctrl/Shift/Alt/Win plus
-F1-F24, a letter or a digit, and the three must differ):
+F1-F24, a letter or a digit, and all four must differ):
 
 | Chord (default) | Key | Effect |
 |---|---|---|
 | Ctrl+Shift+F12 | `safe_mode_hotkey` | Pause agents and open the control panel; pressed again, resume and close |
 | Ctrl+Shift+F11 | `panel_hotkey` | Open or close the control panel with agents running |
 | Ctrl+Shift+F10 | `pairing_hotkey` | Open the control panel at Connect an agent, agents running |
+| Ctrl+Shift+F9 | `answer_hotkey` | Focus the newest unanswered question with callback actions |
 
 A global chord takes its keys from every other app while the HUD runs, so the
 defaults are F-key chords; rebind one that clashes (Ctrl+Shift+F10 is also
@@ -665,6 +667,34 @@ released, so a chord another program holds is refused and the old one keeps
 working. The new chord is saved to `[runtime]`. Each chord row says
 whether its chord is the default, saved to config, or lasts until restart
 (no config file), and a changed chord has Reset.
+
+Overlay clicks on card buttons, badges and scroll panes act without taking
+Windows keyboard focus. Clicking a text editor (a portal composer or panel
+search/edit field) takes focus explicitly. The same rule applies to every
+monitor. Publication never takes focus. When the HUD takes focus, it remembers
+the external app that was active; nested HUD focus takes preserve that origin.
+A keyboard card answer or the outer Esc returns to it only while a HUD window
+still holds the foreground. Closing that app, or switching to a third app,
+never causes another window to be raised. Sending a portal reply keeps focus
+in its composer.
+
+The answer chord targets the newest visible unanswered card with callback
+actions. With no such card it changes nothing. It transfers input from an open
+running settings panel to the card; it does nothing in safe mode. Tab/Shift+Tab
+and arrows move among that card's actions; Enter/Space activates the focused
+action. Digits 1–4 activate the corresponding action, with token-styled digit
+hints only during this chord visit and no change to button or label geometry.
+A digit beyond the action count does nothing. Callback answers return focus;
+a URL digit uses the same two-second per-action limit, leaves the card visible,
+and finishes the keyboard visit. A replaced or expired card cannot redirect a
+held key to a different card or the composer.
+
+Esc unwinds one layer at a time: it leaves nested card/control focus, collapses
+a composer selection, or cancels its draft before the empty editor's outer
+Esc leaves the HUD. In settings it cancels an edit/section or clears search
+before closing. An answer-chord visit entered from another app uses Esc to
+leave without answering. Key repeats, text and matching releases from a card
+activation stay local; native focus returns after the activation key releases.
 
 The control panel is a full-width pane over the primary display: a search
 field, quick-action tiles, and section cards of settings that scroll

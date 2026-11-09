@@ -19,9 +19,6 @@ use crate::shell::control_panel::{ControlPanelHandle, PanelEvent, PanelKey};
 pub(super) struct PanelInputState {
     /// The panel was open at the last focus sync (open/close edge detection).
     was_open: bool,
-    /// The foreground window before the panel took focus, restored on close.
-    #[cfg(target_os = "windows")]
-    previous_foreground: Option<isize>,
     /// Target under the left press; a release on the same target clicks.
     pressed: Option<PanelHitTarget>,
     /// Right, middle or other buttons that went down over the panel: each
@@ -124,6 +121,11 @@ impl WinitApp {
         text: Option<&str>,
         pressed: bool,
     ) -> bool {
+        if self.state.answer_keyboard.focus.is_some()
+            || self.state.answer_keyboard.return_key.is_some()
+        {
+            return false;
+        }
         let Some(panel) = self.open_panel().cloned() else {
             return false;
         };
@@ -151,6 +153,11 @@ impl WinitApp {
 
     /// IME-composed text goes to the panel's search while it is open.
     pub(super) fn panel_text(&mut self, text: &str) -> bool {
+        if self.state.answer_keyboard.focus.is_some()
+            || self.state.answer_keyboard.return_key.is_some()
+        {
+            return false;
+        }
         let Some(panel) = self.open_panel() else {
             return false;
         };
@@ -192,10 +199,11 @@ impl WinitApp {
             if hit.is_none() {
                 return false;
             }
-            // A click is user input, so Windows lets the panel take focus now
-            // even if it refused when the panel opened.
+            // Ordinary panel buttons retain the external app's focus. A text
+            // field/search click can retry focus refused on panel opening.
             if let Some(window) = &self.state.window
                 && !window_is_foreground(window)
+                && hit.as_ref().is_some_and(|hit| panel.accepts_text(hit))
             {
                 focus_window_for_text_input(window);
             }
@@ -281,10 +289,8 @@ impl WinitApp {
         self.state.panel_input.pressed = None;
         self.state.panel_input.hovered = None;
         if open {
-            #[cfg(target_os = "windows")]
-            {
-                self.state.panel_input.previous_foreground = super::lifecycle::foreground_window();
-            }
+            self.state.answer_keyboard.focus = None;
+            self.state.input_processor.chrome_feedback_cancel_pending = true;
             let focused = self.state.window.as_ref().is_none_or(|window| {
                 focus_window_for_text_input(window);
                 window_is_foreground(window)
@@ -295,11 +301,10 @@ impl WinitApp {
                 );
             }
             self.panel_window_focus(focused);
-        } else {
-            #[cfg(target_os = "windows")]
-            if let Some(previous) = self.state.panel_input.previous_foreground.take() {
-                super::lifecycle::restore_foreground(previous, self.state.window.as_deref());
-            }
+        } else if self.state.answer_keyboard.focus.is_none()
+            && self.state.answer_keyboard.return_key.is_none()
+        {
+            super::lifecycle::restore_foreground();
         }
         self.update_overlay_cursor_hittest();
     }
@@ -1113,7 +1118,11 @@ pub(super) mod panel_task_tests {
         let ids: Vec<_> = items.iter().map(|i| i.id.as_str()).collect();
         assert_eq!(
             ids,
-            ["input.pause_chord", "input.panel_chord"],
+            [
+                "input.pause_chord",
+                "input.panel_chord",
+                "input.answer_chord"
+            ],
             "pairing is off in this fixture, so its chord is not listed"
         );
 
@@ -1370,11 +1379,52 @@ pub(super) mod panel_task_tests {
     /// pointer passes through. After close nothing is captured.
     #[tokio::test(flavor = "multi_thread")]
     async fn winit_routing_keys_and_pointer_reach_the_open_panel_only() {
+        use crate::shell::control_panel::Section;
+        use crate::shell::control_panel::row::{BoxFuture, Control, Edit, Row};
         use crate::windowed::WinitApp;
+        use tze_hud_compositor::PanelPart;
         use winit::event::MouseButton::{Middle, Right};
         use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey, SmolStr};
 
-        let f = fixture();
+        struct TextRows;
+        impl Section for TextRows {
+            fn id(&self) -> &'static str {
+                "text"
+            }
+            fn title(&self) -> &'static str {
+                "Text"
+            }
+            fn rows(&self) -> BoxFuture<'_, Vec<Row>> {
+                Box::pin(async {
+                    vec![
+                        Row::new(
+                            "text.field",
+                            "Field",
+                            Control::Field {
+                                text: "value".into(),
+                                confirm: None,
+                            },
+                        ),
+                        Row::new(
+                            "text.disclosure",
+                            "Disclosure",
+                            Control::Disclosure {
+                                open: false,
+                                text: "value".into(),
+                            },
+                        ),
+                    ]
+                })
+            }
+            fn apply<'a>(&'a self, _: &'a str, _: Edit) -> BoxFuture<'a, Result<(), String>> {
+                Box::pin(async { Ok(()) })
+            }
+        }
+        let f = fixture_with(|deps| {
+            let mut sections = default_sections(deps);
+            sections.push(Box::new(TextRows));
+            sections
+        });
         let panel = f.panel.clone();
         let mut state = f.state;
         state.control_panel = Some(panel.clone());
@@ -1393,6 +1443,14 @@ pub(super) mod panel_task_tests {
 
         panel.send(PanelEvent::Chord(ChordRole::Panel));
         wait("1", || panel.is_open()).await;
+        assert!(panel.accepts_text(&PanelHitTarget::Search));
+        assert!(panel.accepts_text(&PanelHitTarget::Row("text.field".into(), PanelPart::Body)));
+        assert!(!panel.accepts_text(&PanelHitTarget::Row("text.field".into(), PanelPart::Reset)));
+        assert!(!panel.accepts_text(&PanelHitTarget::Row(
+            "text.disclosure".into(),
+            PanelPart::Body
+        )));
+        assert!(!panel.accepts_text(&PanelHitTarget::Panel));
 
         // A typed key searches; its release is swallowed too.
         assert!(app.panel_key_input(code, &logical, None, true));

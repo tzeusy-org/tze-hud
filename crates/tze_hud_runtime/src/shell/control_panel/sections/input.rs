@@ -35,6 +35,7 @@ impl InputSection {
             "input.pause_chord" => ChordRole::Pause,
             "input.panel_chord" => ChordRole::Panel,
             "input.pairing_chord" => ChordRole::Pairing,
+            "input.answer_chord" => ChordRole::Answer,
             _ => return None,
         })
     }
@@ -88,6 +89,18 @@ impl Section for InputSection {
                             "Opens Connect an agent with a one-time code",
                             &["hotkey", "shortcut", "pairing_hotkey", "pair", "connect"],
                         ),
+                        ChordRole::Answer => (
+                            "input.answer_chord",
+                            "Answer chord",
+                            "Focuses the newest question; 1–4 or Enter answers, Esc returns",
+                            &[
+                                "hotkey",
+                                "shortcut",
+                                "answer_hotkey",
+                                "question",
+                                "notification",
+                            ],
+                        ),
                     };
                     let status = hotkey(role);
                     let chord = self.chords.get().get(role);
@@ -131,7 +144,7 @@ impl Section for InputSection {
             };
             let new = match &edit {
                 Edit::Text(text) => Hotkey::parse(text.trim())
-                    .map_err(|e| format!("Type a chord like Ctrl+Shift+F9: {e}"))?,
+                    .map_err(|e| format!("Type a chord like Ctrl+Shift+F8: {e}"))?,
                 Edit::Reset => HudChords::default().get(role),
                 // Enter without typing: nothing to change.
                 Edit::Activate => return Ok(()),
@@ -171,41 +184,46 @@ mod tests {
         });
         let chords = ChordControl::new(HudChords::default(), Some(Arc::new(|_, _| Ok(()))));
         let section = InputSection::new(chords.clone(), false, Some(save));
-        let panel = |rows: Vec<Row>| {
-            rows.into_iter()
-                .find(|r| r.id == "input.panel_chord")
-                .unwrap()
-        };
-        let row = panel(section.rows().await);
-        assert!(row.detail.unwrap().ends_with("· Default"));
-        assert!(!row.reset);
+        for (role, id) in [
+            (ChordRole::Panel, "input.panel_chord"),
+            (ChordRole::Answer, "input.answer_chord"),
+        ] {
+            let row_for = |rows: Vec<Row>| rows.into_iter().find(|r| r.id == id).unwrap();
+            let row = row_for(section.rows().await);
+            assert!(row.detail.unwrap().ends_with("· Default"));
+            assert!(!row.reset);
 
-        section
-            .apply("input.panel_chord", Edit::Text("Ctrl+Shift+F9".into()))
-            .await
-            .unwrap();
-        let row = panel(section.rows().await);
-        assert!(row.detail.unwrap().ends_with("· Saved to config"));
-        assert!(row.reset);
+            section
+                .apply(id, Edit::Text("Ctrl+Shift+F8".into()))
+                .await
+                .unwrap();
+            let row = row_for(section.rows().await);
+            assert!(row.detail.unwrap().ends_with("· Saved to config"));
+            assert!(row.reset);
+            section.apply(id, Edit::Reset).await.unwrap();
+            assert_eq!(chords.get().get(role), HudChords::default().get(role));
+            assert_eq!(
+                saved.lock().unwrap().last().unwrap(),
+                &format!("{:?}", [RuntimeUpdate::Hotkey(role, None)])
+            );
+            assert!(!row_for(section.rows().await).reset);
 
-        section
-            .apply("input.panel_chord", Edit::Reset)
-            .await
-            .unwrap();
-        assert_eq!(chords.get().panel, HudChords::default().panel);
-        assert_eq!(
-            saved.lock().unwrap().last().unwrap(),
-            &format!("{:?}", [RuntimeUpdate::Hotkey(ChordRole::Panel, None)])
+            // Without a config file a change lasts the session.
+            let unsaved = InputSection::new(chords.clone(), false, None);
+            unsaved
+                .apply(id, Edit::Text("Ctrl+Shift+F8".into()))
+                .await
+                .unwrap();
+            let row = row_for(unsaved.rows().await);
+            assert!(row.detail.unwrap().ends_with("· Lasts until restart"));
+            unsaved.apply(id, Edit::Reset).await.unwrap();
+        }
+        assert!(
+            !section
+                .rows()
+                .await
+                .iter()
+                .any(|r| r.id == "input.pairing_chord")
         );
-        assert!(!panel(section.rows().await).reset);
-
-        // Without a config file a change lasts the session.
-        let unsaved = InputSection::new(chords.clone(), false, None);
-        unsaved
-            .apply("input.panel_chord", Edit::Text("Ctrl+Shift+F9".into()))
-            .await
-            .unwrap();
-        let row = panel(unsaved.rows().await);
-        assert!(row.detail.unwrap().ends_with("· Lasts until restart"));
     }
 }

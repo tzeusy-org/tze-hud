@@ -53,6 +53,17 @@ pub(crate) fn on_chord(
 ) -> ChordOutcome {
     let resume_if_paused = paused.then_some(false);
     match (opened_by, chord) {
+        // The main-thread card route sends this only after finding a question.
+        // Never open settings or change pause state from the answer chord.
+        (opened, ChordRole::Answer) => ChordOutcome {
+            pause: None,
+            panel: if opened.is_some() && !paused {
+                PanelChange::Close
+            } else {
+                PanelChange::Keep
+            },
+            connect: false,
+        },
         (None, ChordRole::Pause) => ChordOutcome {
             pause: (!paused).then_some(true),
             panel: PanelChange::Open(ChordRole::Pause),
@@ -1259,6 +1270,18 @@ mod tests {
     #[test]
     fn chord_state_machine_matches_the_spec() {
         use PanelChange::*;
+        for by in [None, Some(PAUSE), Some(PANEL), Some(PAIR)] {
+            for paused in [false, true] {
+                assert_eq!(
+                    on_chord(by, paused, ChordRole::Answer),
+                    outcome(
+                        None,
+                        if by.is_some() && !paused { Close } else { Keep },
+                        false
+                    )
+                );
+            }
+        }
         // Closed.
         assert_eq!(
             on_chord(None, false, PAUSE),

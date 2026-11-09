@@ -190,6 +190,7 @@ impl Drop for FramePacingTimerGuard {
     }
 }
 
+mod answer_focus;
 mod config;
 mod displays;
 mod frame_work;
@@ -480,6 +481,8 @@ struct WindowedRuntimeState {
     context_menu_open: bool,
     context_menu_dismiss_pending: bool,
     notification_keydowns: std::collections::HashSet<String>,
+    /// Coalesced WM_HOTKEY intent; only the main thread resolves a live card.
+    answer_keyboard: answer_focus::AnswerKeyboardState,
     /// Original primary drag identity and, only on a missed Up, its terminal event.
     primary_drag_gesture: Option<portal::PrimaryDragGesture>,
     /// Global design token map from scene startup.
@@ -1006,6 +1009,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             return;
         }
         self.sync_panel_focus();
+        self.sync_answer_focus();
         self.sync_design_tokens();
         if displays::take_dirty(&self.state.displays_dirty) {
             self.sync_displays(event_loop);
@@ -1264,8 +1268,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             }
         };
 
-        let chrome_observer =
-            lifecycle::ChromeWindowObserver::install(&window, self.state.wake.main_work_notifier());
+        let chrome_observer = lifecycle::ChromeWindowObserver::install(
+            &window,
+            self.state.wake.main_work_notifier(),
+            self.state.effective_mode == WindowMode::Overlay,
+        );
 
         // In overlay mode, initialise cursor hittest to false so all pointer
         // events pass through to the desktop until the cursor enters a
@@ -1279,9 +1286,14 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                      may not work on this platform/compositor"
                 );
             }
-            // WS_EX_NOREDIRECTIONBITMAP is set at creation time via
-            // with_no_redirection_bitmap(true) above. No post-creation
-            // flag manipulation needed.
+            if !chrome_observer.activation_ready() {
+                tracing::error!("overlay: native no-activate policy unavailable");
+                leave_event_loop(event_loop);
+                return;
+            }
+            // Hidden/inactive creation lets the subclass/style take effect
+            // before winit's first SW_SHOWNOACTIVATE.
+            window.set_visible(true);
         }
 
         self.state.window = Some(window.clone());
@@ -3137,9 +3149,12 @@ impl WindowedRuntime {
                 shutdown.clone(),
             )
         });
+        let answer_keyboard = answer_focus::AnswerKeyboardState::default();
         #[cfg(target_os = "windows")]
         if let Some(panel) = &control_panel {
             let panel = panel.clone();
+            let answer_intent = Arc::clone(&answer_keyboard.requested);
+            let answer_wake = wake.main_work_notifier();
             // Without pairing (MCP disabled) its chord would only take the
             // key from other apps.
             let roles = tze_hud_scene::config::ChordRole::ALL
@@ -3150,7 +3165,13 @@ impl WindowedRuntime {
                 .collect();
             let (outcomes, thread) =
                 global_hotkey::spawn_global_hotkeys(runtime_context.chords, roles, move |role| {
-                    panel.send(crate::shell::control_panel::PanelEvent::Chord(role))
+                    if role == tze_hud_scene::config::ChordRole::Answer {
+                        answer_intent.store(true, std::sync::atomic::Ordering::Release);
+                        answer_wake.notify();
+                        true
+                    } else {
+                        panel.send(crate::shell::control_panel::PanelEvent::Chord(role))
+                    }
                 });
             for (role, status) in outcomes {
                 crate::operator::status::set_hotkey(role, status);
@@ -3248,6 +3269,7 @@ impl WindowedRuntime {
             context_menu_open: false,
             context_menu_dismiss_pending: false,
             notification_keydowns: Default::default(),
+            answer_keyboard,
             primary_drag_gesture: None,
             global_tokens: startup_compositor_tokens,
             appearance: Some(appearance),

@@ -239,7 +239,7 @@ async fn notification_actions_layout_matches_hit_regions() {
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
     let adversarial = "A full-width label still clips within one button. ".repeat(128);
     for (labels, stacked) in [
-        (["Ship", "Hold", "Skip", "Open"], false),
+        (["Go", "No", "OK", "Do"], false),
         ([adversarial.as_str(), "Hold", "Skip", "Open"], true),
         (
             [
@@ -316,6 +316,7 @@ async fn notification_actions_layout_matches_hit_regions() {
         let policy = &scene.zone_registry.zones["notification-area"].rendering_policy;
         let descriptor =
             compositor.notification_action_layout("notification-area", record, policy, 448.0);
+        let publication_id = record.publication_id;
         assert_eq!(descriptor.stacked, stacked);
         let shapes = compositor.notification_layouts.borrow().shapes;
         let regions = scene.overlay.zone_hit_regions.clone();
@@ -359,12 +360,15 @@ async fn notification_actions_layout_matches_hit_regions() {
                 .iter()
                 .find(|item| &*item.text == labels[index])
                 .unwrap();
-            assert_eq!(item.pixel_x, bounds.x + descriptor.padding);
+            assert_eq!(
+                item.pixel_x,
+                bounds.x + descriptor.padding + descriptor.hint_width
+            );
             let mark = descriptor.link_marks[index].as_ref();
             let mark_width = mark.map_or(0.0, |(_, width)| *width);
             assert_eq!(
                 item.bounds_width,
-                bounds.width - descriptor.padding * 2.0 - mark_width
+                bounds.width - descriptor.padding * 2.0 - descriptor.hint_width - mark_width
             );
             assert!(region.interaction_id.ends_with(&format!(":{index}")));
             if let Some((mark, width)) = mark {
@@ -377,7 +381,7 @@ async fn notification_actions_layout_matches_hit_regions() {
                     })
                     .unwrap();
                 assert_eq!(glyph.bounds_width, *width);
-                assert_eq!(glyph.pixel_x, item.pixel_x + item.bounds_width);
+                assert!((glyph.pixel_x - (item.pixel_x + item.bounds_width)).abs() < 0.001);
                 assert_eq!(glyph.font_size_px, item.font_size_px);
                 assert_eq!(glyph.color, item.color);
             }
@@ -415,6 +419,50 @@ async fn notification_actions_layout_matches_hit_regions() {
         compositor.populate_zone_hit_regions(&mut scene, 1280.0, 1080.0);
         assert_eq!(compositor.notification_layouts.borrow().shapes, shapes);
         assert_eq!(scene.overlay.zone_hit_regions, regions);
+        assert!(
+            !items
+                .iter()
+                .any(|item| ["1", "2", "3", "4"].contains(&item.text.as_ref()))
+        );
+        scene.overlay.notification_answer = Some(publication_id);
+        let with_hints = compositor.collect_text_items(&scene, 1280.0, 1080.0);
+        for (index, action_label) in labels.iter().enumerate() {
+            let label = |items: &[crate::text::TextItem]| {
+                items
+                    .iter()
+                    .find(|item| &*item.text == *action_label)
+                    .map(|item| {
+                        (
+                            item.pixel_x,
+                            item.pixel_y,
+                            item.bounds_width,
+                            item.bounds_height,
+                        )
+                    })
+            };
+            assert_eq!(
+                label(&items),
+                label(&with_hints),
+                "hint visibility cannot move or rewrap labels"
+            );
+            assert_eq!(
+                with_hints
+                    .iter()
+                    .filter(|item| *item.text == (index + 1).to_string())
+                    .count(),
+                1
+            );
+        }
+        compositor.populate_zone_hit_regions(&mut scene, 1280.0, 1080.0);
+        assert_eq!(scene.overlay.zone_hit_regions, regions);
+        assert_eq!(compositor.notification_layouts.borrow().shapes, shapes);
+        scene.focus_notification(None);
+        let after = compositor.collect_text_items(&scene, 1280.0, 1080.0);
+        assert!(
+            !after
+                .iter()
+                .any(|item| ["1", "2", "3", "4"].contains(&item.text.as_ref()))
+        );
     }
 }
 

@@ -530,6 +530,9 @@ impl SceneGraph {
 
     /// Set visible local keyboard focus without changing an agent's focus owner.
     pub fn focus_notification(&mut self, id: Option<String>) {
+        if id.is_none() && self.overlay.notification_answer.take().is_some() {
+            self.bump_geometry_epoch();
+        }
         if self.overlay.notification_focus == id {
             return;
         }

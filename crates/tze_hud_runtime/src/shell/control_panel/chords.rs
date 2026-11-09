@@ -63,12 +63,13 @@ impl ChordControl {
     }
 }
 
-/// "pause chord", "panel chord", "pairing chord".
+/// The owner-facing name of a chord.
 pub(crate) fn label(role: ChordRole) -> &'static str {
     match role {
         ChordRole::Pause => "pause chord",
         ChordRole::Panel => "panel chord",
         ChordRole::Pairing => "pairing chord",
+        ChordRole::Answer => "answer chord",
     }
 }
 
@@ -97,30 +98,30 @@ mod tests {
         let parse = |s| Hotkey::parse(s).unwrap();
 
         chords
-            .rebind(ChordRole::Panel, parse("Ctrl+Shift+F9"))
+            .rebind(ChordRole::Answer, parse("Ctrl+Shift+F8"))
             .unwrap();
-        assert_eq!(chords.get().panel.to_string(), "Ctrl+Shift+F9");
+        assert_eq!(chords.get().answer.to_string(), "Ctrl+Shift+F8");
         let err = chords
-            .rebind(ChordRole::Panel, parse("Ctrl+Shift+F12"))
+            .rebind(ChordRole::Answer, parse("Ctrl+Shift+F12"))
             .unwrap_err();
         assert_eq!(err, "Ctrl+Shift+F12 is already the pause chord");
         let err = chords
-            .rebind(ChordRole::Panel, parse("Ctrl+Alt+F1"))
+            .rebind(ChordRole::Answer, parse("Ctrl+Alt+F1"))
             .unwrap_err();
         assert!(err.contains("Another program"));
-        assert_eq!(chords.get().panel.to_string(), "Ctrl+Shift+F9", "kept");
+        assert_eq!(chords.get().answer.to_string(), "Ctrl+Shift+F8", "kept");
         chords
-            .rebind(ChordRole::Panel, parse("Ctrl+Shift+F9"))
+            .rebind(ChordRole::Answer, parse("Ctrl+Shift+F8"))
             .unwrap();
         assert_eq!(
             *calls.lock().unwrap(),
-            ["Panel Ctrl+Shift+F9", "Panel Ctrl+Alt+F1"]
+            ["Answer Ctrl+Shift+F8", "Answer Ctrl+Alt+F1"]
         );
 
         let fixed = ChordControl::fixed(HudChords::default());
         assert!(
             fixed
-                .rebind(ChordRole::Panel, parse("Ctrl+Shift+F9"))
+                .rebind(ChordRole::Answer, parse("Ctrl+Shift+F8"))
                 .is_err()
         );
     }

@@ -34,6 +34,9 @@ pub struct RawRuntime {
     pub panel_hotkey: Option<String>,
     /// Global chord that opens pairing (default `"Ctrl+Shift+F10"`).
     pub pairing_hotkey: Option<String>,
+    /// Global chord that focuses the newest unanswered callback card
+    /// (default `"Ctrl+Shift+F9"`).
+    pub answer_hotkey: Option<String>,
     /// MCP HTTP port (default 9090; 0 disables). `--mcp-port` and
     /// `TZE_HUD_MCP_PORT` win over it. Read at start.
     pub mcp_port: Option<u16>,

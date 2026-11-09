@@ -423,6 +423,8 @@ pub(super) fn overlay_window_attributes(title: String, spec: &MonitorSpec) -> Wi
         attrs
             .with_skip_taskbar(true)
             .with_no_redirection_bitmap(true)
+            .with_active(false)
+            .with_visible(false)
     }
     #[cfg(not(target_os = "windows"))]
     {
@@ -1033,6 +1035,7 @@ impl super::WinitApp {
         let chrome_observer = super::lifecycle::ChromeWindowObserver::install(
             &window,
             self.state.wake.main_work_notifier(),
+            true,
         );
         if let Err(error) = window.set_cursor_hittest(false) {
             tracing::warn!(%error, "secondary overlay: set_cursor_hittest(false) failed");
@@ -1044,6 +1047,10 @@ impl super::WinitApp {
             (spec.width, spec.height)
         };
         let surface = factory.create(Arc::clone(&window), width, height)?;
+        if !chrome_observer.activation_ready() {
+            return Err("secondary overlay: native no-activate policy unavailable".into());
+        }
+        window.set_visible(true);
         chrome_observer.publish();
         Ok(SecondaryDisplay {
             spec,

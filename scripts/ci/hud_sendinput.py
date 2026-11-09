@@ -89,6 +89,7 @@ class INPUT(ctypes.Structure):
 
 MOUSE_MOVE, LEFT_DOWN, LEFT_UP, WHEEL, ABSOLUTE = 0x1, 0x2, 0x4, 0x800, 0x8000
 GWL_EXSTYLE, WS_EX_TOPMOST, WS_EX_TRANSPARENT = -20, 0x8, 0x20
+WS_EX_NOACTIVATE = 0x08000000
 KEY_UP, KEY_UNICODE = 0x2, 0x4
 WHEEL_DELTA = 120
 
@@ -211,7 +212,9 @@ def pointer_capture_state(pid: int) -> dict:
     # winit's set_cursor_hittest(false) sets WS_EX_TRANSPARENT. Observe the
     # actual native switch, rather than assuming a hover implies capture.
     capturing = not bool(overlays[0]["style_ex"] & WS_EX_TRANSPARENT) if len(overlays) == 1 else None
-    return {"capturing": capturing, "matching_overlays": len(overlays), "windows": windows}
+    no_activate = bool(overlays[0]["style_ex"] & WS_EX_NOACTIVATE) if len(overlays) == 1 else None
+    return {"capturing": capturing, "no_activate": no_activate,
+            "matching_overlays": len(overlays), "windows": windows}
 
 
 def maximize(pid: int) -> None:

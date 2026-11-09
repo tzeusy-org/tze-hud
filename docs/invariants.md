@@ -131,6 +131,37 @@ as status labels. Discovery includes caller-owned scheduled zone holdings.
 
 Owner decision (2026-10-07): freeze promise removed; safe mode already pauses agents; updates during a pause are rejected, not buffered.
 
+All Windows overlay HWNDs start inactive and preserve `WS_EX_NOACTIVATE` across
+cursor hit-test changes. `WM_MOUSEACTIVATE` keeps ordinary clicks local without
+activation; an accepted composer or panel text-field hit explicitly takes focus
+outside scene guards. Each explicit take records one outer external foreground;
+nested primary/secondary takes preserve it. A keyboard answer or outer Esc may
+return only while an installed HUD HWND still owns the foreground and the saved
+origin is live. User app switches win. A sent reply retains composer focus.
+
+The fourth owner chord (`answer_hotkey`, Ctrl+Shift+F9) pins the newest rendered
+unanswered callback card. No target is a no-op; safe mode still captures input.
+Its digits 1–4, arrows, Tab/Shift+Tab and Enter/Space cannot retarget stale
+publications or leak text/repeats/releases to an editor. URL digits keep the
+existing per-action two-second limiter and card lifetime. Chord hints reserve
+geometry in both states. Esc removes only the innermost selection, draft or
+nested card/control state before an outer exit. An owned HWND handoff retains
+card focus; an external loss cancels it. A running panel yields to an explicit
+answer request only after a question is found, without restoring the origin
+underneath the card.
+
+Existing runtime parent
+[`notification_keyboard_cycle_activation_and_return_preserve_portal_editor`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs)
+executes these logical keyboard routes; `outer_focus_return_preserves_origin_and_user_switches`
+checks the outer origin policy. Existing config, registration and panel parents
+cover the fourth chord, conflicts and rebinding. The compositor's
+[`notification_actions_layout_matches_hit_regions`](../crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs)
+checks hint visibility and unchanged label/hit geometry. The owned tier-W
+`overlay-pointer` scenario exercises actual overlay styles, Notepad typing,
+registered hotkey/answer/return, nonactivating pane and card clicks, third-app
+Alt-Tab and a closed origin. Source and headless checks do not substitute for
+that required Windows pass or the epic's owner check of how focus return feels.
+
 A matching human notification × removes that exact publication locally and
 queues one typed dismiss for its owner. Callback auto-removal, TTL and explicit
 clear do not impersonate a human ×. Accepted portal input and truthful rejection

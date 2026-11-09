@@ -760,6 +760,7 @@ mod tests {
                 RuntimeUpdate::LogLevel(Some("debug".into())),
                 RuntimeUpdate::DebugZones(Some(true)),
                 RuntimeUpdate::Hotkey(ChordRole::Panel, Some("Ctrl+Alt+F9".into())),
+                RuntimeUpdate::Hotkey(ChordRole::Answer, Some("Alt+F8".into())),
             ],
         )
         .unwrap();
@@ -779,6 +780,7 @@ mod tests {
         assert_eq!(runtime.log_level.as_deref(), Some("debug"));
         assert_eq!(runtime.debug_zones, Some(true));
         assert_eq!(runtime.panel_hotkey.as_deref(), Some("Ctrl+Alt+F9"));
+        assert_eq!(runtime.answer_hotkey.as_deref(), Some("Alt+F8"));
 
         set_runtime(
             &path,
@@ -789,6 +791,7 @@ mod tests {
                 RuntimeUpdate::LogLevel(None),
                 RuntimeUpdate::DebugZones(None),
                 RuntimeUpdate::Hotkey(ChordRole::Panel, None),
+                RuntimeUpdate::Hotkey(ChordRole::Answer, None),
             ],
         )
         .unwrap();
@@ -829,6 +832,10 @@ mod tests {
             (
                 RuntimeUpdate::Hotkey(ChordRole::Pairing, Some("Ctrl+Shift+F11".into())),
                 "runtime.pairing_hotkey",
+            ),
+            (
+                RuntimeUpdate::Hotkey(ChordRole::Answer, Some("Ctrl+Shift+F11".into())),
+                "runtime.answer_hotkey",
             ),
         ] {
             match set_runtime(&path, &[bad.clone()]) {
