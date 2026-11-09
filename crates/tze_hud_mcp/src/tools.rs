@@ -826,9 +826,9 @@ async fn publish_zone<'a>(
                 })
                 .unwrap_or(expires_at);
             scene.release_notification_wait(claim.id);
-            return Ok(PublishReply::plain(ok_with_expiry(
-                expiry.map(|at| at.saturating_sub(now_us(&scene)) / 1_000),
-            )));
+            let reply = ok_with_expiry(expiry.map(|at| at.saturating_sub(now_us(&scene)) / 1_000));
+            drop(scene);
+            return Ok(PublishReply::plain(reply));
         }
         drop(scene);
         #[cfg(any(test, feature = "test-harness"))]

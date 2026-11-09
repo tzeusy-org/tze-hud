@@ -440,7 +440,7 @@ impl McpServer {
             render_wake: &self.render_wake,
             state: &self.state,
             safe_mode: &self.safe_mode,
-            agent: &identity,
+            agent: identity,
             widget_transition_ms: self.config.widget_transition_ms,
             publication_defaults: &self.config.publication_defaults,
         }

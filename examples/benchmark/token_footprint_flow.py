@@ -152,9 +152,11 @@ def main():
     # Keep canonical flow accounting intact; this candidate reports both the
     # full transaction and the bounded result text returned to the model.
     limit_error = transactions.pop()
+    # Re-arm fixture scene work only after the prior default poll/ACK finished.
+    print("notification-choice-wait-start", flush=True)
     waited = tool(
         "notification_choice_wait", "1_ask_answer", "hud_publish",
-        {"surface": "zone:notification-area", "wait_ms": 30000, "content": {
+        {"surface": "zone:notification-area", "wait_ms": 30000, "ttl_ms": 0, "content": {
             "body": "Next?", "actions": [
                 {"label": label, "callback_id": callback}
                 for label, callback in [("Ship", "a"), ("Hold", "b"), ("Skip", "c"), ("Open", "d")]
