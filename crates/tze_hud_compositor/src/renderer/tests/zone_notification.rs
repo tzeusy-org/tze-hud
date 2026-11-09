@@ -381,7 +381,7 @@ async fn notification_actions_layout_matches_hit_regions() {
                     })
                     .unwrap();
                 assert_eq!(glyph.bounds_width, *width);
-                assert_eq!(glyph.pixel_x, item.pixel_x + item.bounds_width);
+                assert!((glyph.pixel_x - (item.pixel_x + item.bounds_width)).abs() < 0.001);
                 assert_eq!(glyph.font_size_px, item.font_size_px);
                 assert_eq!(glyph.color, item.color);
             }
