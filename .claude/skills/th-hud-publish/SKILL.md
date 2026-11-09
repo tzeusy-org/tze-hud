@@ -29,6 +29,8 @@ updates or end-to-end Windows validation.
 1. Call `hud_surfaces {}` for allowed zones, accepted content and typed widget
    params. Names and available widgets are instance-specific. `held` marks your
    holdings, including scheduled content; expiry may include presentation delay.
+   `one` marks a single occupant, `max` a stack depth, and `busy` a foreign
+   occupant on a single zone. `string<=N` is an explicit UTF-8 byte limit.
 2. Use a brief notification for a milestone or actionable question. Keep one
    work item under a unique session/work `key`; replace it on meaningful changes.
    A card carries one question and at most a couple of short lines. Put depth in
@@ -76,7 +78,10 @@ unreachable or rejects the call, continue in chat and report the limitation once
 - Widgets are durable unless given a TTL; the owner's "Clears after" limit can
   cap even held content. F32 params must be finite and in their declared bounds;
   colors are `#RRGGBB` or numeric `{r,g,b,a?}` channels in 0–1. No geometry or
-  transition parameter belongs in an MCP publish.
+  transition parameter belongs in an MCP publish. Use only discovered model
+  parameters: gauge/progress `severity` selects info/warning/error colors.
+  `fill_color` and status `theme` are owner `initial_params`; `tooltip_visible`
+  is runtime hover state. Agent attempts reject the whole map.
 - Status entries require string values. An empty string removes that entry;
   remove only this session's entry on a shared status surface.
 

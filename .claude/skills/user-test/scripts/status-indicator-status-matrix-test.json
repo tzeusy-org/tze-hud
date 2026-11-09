@@ -3,9 +3,8 @@
     "widget": "main-status",
     "params": {
       "status": "online",
-      "theme": "minimal",
       "label": "Butler",
-      "reason": "minimal / online"
+      "reason": "Status: online"
     },
     "ttl_ms": 60000
   },
@@ -13,9 +12,8 @@
     "widget": "main-status",
     "params": {
       "status": "away",
-      "theme": "minimal",
       "label": "Butler",
-      "reason": "minimal / away"
+      "reason": "Status: away"
     },
     "ttl_ms": 60000
   },
@@ -23,9 +21,8 @@
     "widget": "main-status",
     "params": {
       "status": "busy",
-      "theme": "minimal",
       "label": "Butler",
-      "reason": "minimal / busy"
+      "reason": "Status: busy"
     },
     "ttl_ms": 60000
   },
@@ -33,9 +30,8 @@
     "widget": "main-status",
     "params": {
       "status": "offline",
-      "theme": "minimal",
       "label": "Butler",
-      "reason": "minimal / offline"
+      "reason": "Status: offline"
     },
     "ttl_ms": 60000
   },
@@ -43,9 +39,8 @@
     "widget": "main-status",
     "params": {
       "status": "online",
-      "theme": "system",
       "label": "Butler",
-      "reason": "system / online"
+      "reason": "Status: online"
     },
     "ttl_ms": 60000
   },
@@ -53,9 +48,8 @@
     "widget": "main-status",
     "params": {
       "status": "away",
-      "theme": "system",
       "label": "Butler",
-      "reason": "system / away"
+      "reason": "Status: away"
     },
     "ttl_ms": 60000
   },
@@ -63,9 +57,8 @@
     "widget": "main-status",
     "params": {
       "status": "busy",
-      "theme": "system",
       "label": "Butler",
-      "reason": "system / busy"
+      "reason": "Status: busy"
     },
     "ttl_ms": 60000
   },
@@ -73,9 +66,8 @@
     "widget": "main-status",
     "params": {
       "status": "offline",
-      "theme": "system",
       "label": "Butler",
-      "reason": "system / offline"
+      "reason": "Status: offline"
     },
     "ttl_ms": 60000
   },
@@ -83,9 +75,8 @@
     "widget": "main-status",
     "params": {
       "status": "online",
-      "theme": "friendly",
       "label": "Butler",
-      "reason": "friendly / online"
+      "reason": "Status: online"
     },
     "ttl_ms": 60000
   },
@@ -93,9 +84,8 @@
     "widget": "main-status",
     "params": {
       "status": "away",
-      "theme": "friendly",
       "label": "Butler",
-      "reason": "friendly / away"
+      "reason": "Status: away"
     },
     "ttl_ms": 60000
   },
@@ -103,9 +93,8 @@
     "widget": "main-status",
     "params": {
       "status": "busy",
-      "theme": "friendly",
       "label": "Butler",
-      "reason": "friendly / busy"
+      "reason": "Status: busy"
     },
     "ttl_ms": 60000
   },
@@ -113,9 +102,8 @@
     "widget": "main-status",
     "params": {
       "status": "offline",
-      "theme": "friendly",
       "label": "Butler",
-      "reason": "friendly / offline"
+      "reason": "Status: offline"
     },
     "ttl_ms": 60000
   }

@@ -42,12 +42,7 @@
   {
     "widget": "main-progress",
     "params": {
-      "fill_color": {
-        "r": 0.0,
-        "g": 0.784,
-        "b": 0.325,
-        "a": 1.0
-      }
+      "severity": "info"
     },
     "ttl_ms": 10000
   },

@@ -16,7 +16,7 @@ python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
   --delay-ms 3000
 ```
 
-The gauge should visually cycle through: blue 25% "Low" → yellow 50% "Medium" → red 95% "Critical!" → green 42% "Normal". Report per-step success and whether the user confirmed visual updates.
+The gauge should visually cycle through: blue 25% "Low" → yellow 50% "Medium" → red 95% "Critical!" → primary 42% "Normal". Report per-step success and whether the user confirmed visual updates.
 
 ### Step 6: Widget Reactivity Test (Status Indicator)
 
@@ -41,21 +41,12 @@ The status indicator should visually cycle through:
 
 Each transition is a discrete snap (no interpolation). Require human visual confirmation that both color and glyph change per state.
 
-Next, run the theme cycle to verify all three status-indicator visual themes are separately usable via the `theme` enum parameter:
-
-```bash
-python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
-  --messages-file .claude/skills/user-test/scripts/status-indicator-theme-cycle-test.json \
-  --delay-ms 1200 \
-  --cleanup-on-exit
-```
-
-Expected progression (same `status=online`, different theme):
-- `minimal` → small quiet dot/glyph treatment
-- `system` → bordered micro-badge (ops style)
-- `friendly` → softer circular badge (assistant style)
-
-Require human confirmation that only one theme is visible at a time and each is visually distinct.
+Status style is owner configuration, not an agent parameter. To review each
+style, set `initial_params = { theme = "minimal" }` (then `system`, then
+`friendly`) on the status instance in `[[tabs.widgets]]`, restart that owned
+test HUD, and run the enum cycle for each. Confirm the configured style stays
+fixed across all model status updates. Do not publish `theme` or
+`tooltip_visible`; hover locally to reveal the tooltip.
 
 Next, run the label-update sequence to verify text-content binding:
 
@@ -103,7 +94,7 @@ At each step, prompt the tester to confirm the expected visual state:
 | 3 | `progress=0.5, label="50%"` | Fill animates smoothly to 50%; label reads "50%" |
 | 4 | `progress=0.75, label="75%"` | Fill animates smoothly to 75%; label reads "75%" |
 | 5 | `progress=1.0, label="100%"` | Fill animates smoothly to full width; label reads "100%" |
-| 6 | `fill_color={r:0.0, g:0.784, b:0.325, a:1.0}` | Fill color transitions from blue to green (equivalent to RGBA `[0,200,83,255]`) over 300ms; progress/label unchanged |
+| 6 | `severity="info"` | Fill returns to the owner info override or primary token; progress/label unchanged |
 | 7 | clear | Bar resets to empty with no visual artifacts |
 
 **Human acceptance criteria at each step:**
@@ -111,12 +102,12 @@ At each step, prompt the tester to confirm the expected visual state:
 - **(a) Pill/capsule shape** — The bar has visually rounded end-caps on both the track and the fill. No sharp corners.
 - **(b) Smooth fill animation** — Each step 2-5 fills with a visible 200ms animation. No jumps or jank.
 - **(c) Centered label** — Label text is horizontally and vertically centered on the bar at all non-empty steps.
-- **(d) Correct fill color** — Steps 1-5 use the accent blue (`#4A9EFF` or token override). Step 6 transitions to green.
+- **(d) Correct fill color** — Info uses the owner override or primary token; warning/error use caution/error. Enum changes snap.
 - **(e) Clean reset** — After the clear action, the bar is completely empty with no residual fill or label artifacts.
 
 #### 7b: Color Sweep (Optional)
 
-Optionally, run the color-sweep fixture to validate color interpolation across the full spectrum with `--delay-ms 1000`:
+Optionally, run the color-sweep fixture to validate severity-driven colors with `--delay-ms 1000`:
 
 ```bash
 python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
@@ -125,7 +116,7 @@ python3 .claude/skills/user-test/scripts/publish_widget_batch.py \
   --cleanup-on-exit
 ```
 
-The bar cycles through: blue -> green -> yellow -> red -> blue (reset) -> clear (empty). Each transition should produce a visible smooth color animation over 300ms. Confirm that the fill color matches expectations at each step before the next publish fires, and that after the final clear action the bar is fully empty with no residual fill or label.
+The fixture visits error -> warning -> info -> info, then clears. Severity changes snap; info uses the owner override or primary token. Confirm that the fill color matches expectations at each step before the next publish fires, and that after the final clear action the bar is fully empty with no residual fill or label.
 
 Report pass/fail per step. A step fails if the tester observes: missing animation, wrong color, misaligned label, missing rounded end-caps, or visible artifacts after the reset/clear-to-empty step.
 

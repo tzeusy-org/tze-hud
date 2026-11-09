@@ -1589,7 +1589,7 @@ async fn clear_removes_own_zone_content() {
 
 #[tokio::test]
 async fn surfaces_report_holdings_compactly() {
-    let (server, _) = server();
+    let (server, clock) = server();
     call(
         &server,
         "hud_publish",
@@ -1613,6 +1613,54 @@ async fn surfaces_report_holdings_compactly() {
         !text.contains("-4") && !text.contains("_us"),
         "no ids or timestamps: {text}"
     );
+    let notice = entries
+        .iter()
+        .find(|e| e["s"] == "zone:notification-area")
+        .unwrap();
+    assert_eq!(notice["max"], 5);
+    assert!(notice.get("one").is_none() && notice.get("busy").is_none());
+    assert!(
+        entries
+            .iter()
+            .find(|e| e["s"] == "zone:status-bar")
+            .unwrap()
+            .get("one")
+            .is_none()
+    );
+    assert!(entries.iter().all(|e| {
+        !e["accepts"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("static_image")
+    }));
+    assert!(sub.get("busy").is_none(), "own occupant is not foreign");
+    server
+        .scene
+        .lock()
+        .await
+        .zone_registry
+        .active_publishes
+        .get_mut("subtitle")
+        .unwrap()[0]
+        .publisher_namespace = "foreign".into();
+    let foreign = call(&server, "hud_surfaces", json!({})).await;
+    let sub = foreign["surfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["s"] == "zone:subtitle")
+        .unwrap();
+    assert_eq!(sub["busy"], true);
+    assert!(sub.get("held").is_none());
+    clock.advance(8000);
+    let expired = call(&server, "hud_surfaces", json!({})).await;
+    let sub = expired["surfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|e| e["s"] == "zone:subtitle")
+        .unwrap();
+    assert!(sub.get("busy").is_none());
 }
 
 #[tokio::test]

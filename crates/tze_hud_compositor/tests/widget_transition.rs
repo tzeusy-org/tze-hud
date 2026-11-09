@@ -43,7 +43,7 @@ struct Rig {
 }
 
 impl Rig {
-    /// A gauge already on screen with `level = 0.0`, `fill_color = black`,
+    /// A gauge already on screen with `level = 0.0`, `color = black`,
     /// `severity = info`, published with no transition.
     async fn new() -> Option<Rig> {
         let require_gpu = std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1");
@@ -73,9 +73,29 @@ impl Rig {
         let clock = Arc::new(TestClock::new(1_000));
         let mut scene = SceneGraph::new_with_clock(256.0, 256.0, clock.clone());
         let tab = scene.create_tab("Main", 0).unwrap();
-        let BundleScanResult::Ok(b) = bundle!("gauge", ["background.svg", "fill.svg"]) else {
+        let BundleScanResult::Ok(mut b) = bundle!("gauge", ["background.svg", "fill.svg"]) else {
             panic!("built-in gauge bundle failed to load");
         };
+        // Synthetic model-color fixture: retain the generic color animation
+        // seam without granting agents the shipped owner's fill_color setting.
+        let color = b
+            .definition
+            .parameter_schema
+            .iter_mut()
+            .find(|p| p.name == "fill_color")
+            .unwrap();
+        color.name = "color".into();
+        color.audience = tze_hud_scene::WidgetParamAudience::Model;
+        for binding in b
+            .definition
+            .layers
+            .iter_mut()
+            .flat_map(|layer| &mut layer.bindings)
+        {
+            if binding.param == "fill_color" {
+                binding.param = "color".into();
+            }
+        }
         let type_name = b.definition.id.clone();
         for (file, bytes) in b.svg_contents {
             compositor
@@ -104,7 +124,7 @@ impl Rig {
             [
                 ("level", WidgetParameterValue::F32(0.0)),
                 (
-                    "fill_color",
+                    "color",
                     WidgetParameterValue::Color(Rgba::new(0.0, 0.0, 0.0, 1.0)),
                 ),
                 ("severity", WidgetParameterValue::Enum("info".into())),
@@ -186,14 +206,14 @@ async fn color_param_eases_component_wise() {
     };
     rig.publish(
         [(
-            "fill_color",
+            "color",
             WidgetParameterValue::Color(Rgba::new(1.0, 0.5, 0.0, 1.0)),
         )],
         200,
     );
     rig.step(0);
-    let WidgetParameterValue::Color(mid) = rig.step(100)["fill_color"].clone() else {
-        panic!("fill_color is not a color");
+    let WidgetParameterValue::Color(mid) = rig.step(100)["color"].clone() else {
+        panic!("color is not a color");
     };
     assert!((mid.r - 0.5).abs() < 0.01 && (mid.g - 0.25).abs() < 0.01 && mid.b == 0.0);
 }
@@ -273,7 +293,7 @@ async fn transition_stops_waking_after_completion() {
     let server = tze_hud_mcp::McpServer::with_shared_scene(shared.clone()).with_config(config);
     let caller = tze_hud_mcp::CallerContext::with_bearer("motion-test-key");
     let reply = server.dispatch(
-        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"widget:gauge-1","params":{"level":1.0,"fill_color":{"r":1.0,"g":0.5,"b":0.0,"a":1.0},"severity":"error","label":"CPU"}}}}"#,
+        r#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"widget:gauge-1","params":{"level":1.0,"color":{"r":1.0,"g":0.5,"b":0.0,"a":1.0},"severity":"error","label":"CPU"}}}}"#,
         &caller,
     ).await;
     assert!(
@@ -304,8 +324,8 @@ async fn transition_stops_waking_after_completion() {
     );
     let midway = rig.step(100);
     assert!((level(&midway) - 0.5).abs() < 0.01);
-    let WidgetParameterValue::Color(color) = midway["fill_color"].clone() else {
-        panic!("fill_color must interpolate");
+    let WidgetParameterValue::Color(color) = midway["color"].clone() else {
+        panic!("color must interpolate");
     };
     assert!((color.r - 0.5).abs() < 0.01 && color.g > 0.0 && color.g < 0.5);
 

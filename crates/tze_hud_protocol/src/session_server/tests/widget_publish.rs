@@ -237,7 +237,7 @@ async fn test_durable_widget_publish_receives_result() {
     let held = request(
         &tx,
         &mut stream,
-        32,
+        42,
         ClientPayload::Hold(Hold {
             surface: "widget:gauge".into(),
             ttl_ms: 100,
@@ -274,7 +274,7 @@ async fn test_durable_widget_publish_receives_result() {
     let held = request(
         &tx,
         &mut stream,
-        33,
+        43,
         ClientPayload::Hold(Hold {
             surface: "widget:gauge".into(),
             ttl_ms: 0,
@@ -295,7 +295,7 @@ async fn test_durable_widget_publish_receives_result() {
         request(
             &tx,
             &mut stream,
-            34,
+            44,
             ClientPayload::Clear(Clear {
                 key: String::new(),
                 surface: "widget:gauge".into()

@@ -510,7 +510,7 @@ just render-scene --fixture .claude/skills/user-test/scripts/all-zones-test.json
   --theme tonal-glass --output test_results/render-scene/zones.png \
   > test_results/render-scene/zones.json
 just render-widget --widget assets/widget_bundles/status-indicator \
-  --params '{"status":"online","theme":"friendly","label":"Butler"}' \
+  --params '{"status":"online","label":"Butler"}' \
   --width 252 --height 96 --output test_results/render-scene/widget.png \
   > test_results/render-scene/widget.json
 ```
@@ -532,8 +532,8 @@ explicit `--capture-at-ms 0` captures the initial frame. Delayed publications
 still become active when due and may be entering at the chosen checkpoint;
 this is not a promise that arbitrary delays or streaming content have settled.
 CPU widget mode defaults to 0ms. The status fixture
-`status-indicator-theme-status-matrix-test.json` updates `main-status` twelve
-times: one final image shows **friendly/offline**, not all twelve states.
+`status-indicator-status-matrix-test.json` updates `main-status` twelve
+times: one final image shows **offline in the owner-configured style**, not all twelve updates.
 Use separate checkpoint fixtures/images to make intermediate-state claims.
 
 The PNG is straight-alpha sRGB RGBA: GPU sRGB framebuffer bytes are decoded,

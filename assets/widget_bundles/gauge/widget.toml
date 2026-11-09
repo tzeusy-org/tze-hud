@@ -25,7 +25,7 @@
 #   readout    - Tooltip readout text (e.g. "42/100 (42%)")
 
 name        = "gauge"
-version     = "1.1.0"
+version     = "2.0.0"
 description = "Vertical fill gauge card with severity edge, label and hover readout"
 
 [[parameter_schema]]

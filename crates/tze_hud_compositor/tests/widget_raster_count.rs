@@ -41,6 +41,29 @@ fn token_rgb(key: &str) -> [u8; 3] {
     std::array::from_fn(|i| u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).unwrap())
 }
 
+/// Use the real config builder for owner overrides rather than agent publishes.
+fn configured_instance(
+    definition: &tze_hud_scene::WidgetDefinition,
+    tab: SceneId,
+    name: &str,
+    initial_params: serde_json::Value,
+) -> WidgetInstance {
+    let types = HashMap::from([(
+        definition.id.clone(),
+        tze_hud_config::widgets::LoadedWidgetType {
+            name: definition.id.clone(),
+            parameter_schema: definition.parameter_schema.clone(),
+            default_geometry_policy: definition.default_geometry_policy.clone(),
+            default_contention_policy: definition.default_contention_policy.clone(),
+        },
+    )]);
+    let raw = serde_json::from_value(serde_json::json!({
+        "type": definition.id, "instance_id": name, "initial_params": initial_params,
+    }))
+    .unwrap();
+    tze_hud_config::widgets::build_widget_instance(&raw, tab, &types).unwrap()
+}
+
 fn render(c: &mut Compositor, scene: &mut SceneGraph, s: &mut HeadlessSurface) -> FrameTelemetry {
     c.prime_markdown_cache(scene);
     c.render_frame_headless(scene, s)
@@ -342,15 +365,36 @@ async fn widget_param_update_rasterizes_only_that_instance() {
                       label: &str,
                       reason: &str,
                       tooltip: f32| {
+        let definition = &scene.widget_registry.definitions["status-indicator"];
+        let configured = configured_instance(
+            definition,
+            tab,
+            "status-matrix",
+            serde_json::json!({"theme":theme}),
+        );
+        // Preserve the geometry and model publication while applying the owner
+        // setting produced by the config builder.
+        scene
+            .widget_registry
+            .instances
+            .get_mut("status-matrix")
+            .unwrap()
+            .current_params
+            .insert("theme".into(), configured.current_params["theme"].clone());
+        scene
+            .set_widget_param_local(
+                "status-matrix",
+                "tooltip_visible",
+                WidgetParameterValue::F32(tooltip),
+            )
+            .unwrap();
         scene
             .publish_to_widget(
                 "status-matrix",
                 HashMap::from([
-                    ("theme".into(), WidgetParameterValue::Enum(theme.into())),
                     ("status".into(), WidgetParameterValue::Enum(status.into())),
                     ("label".into(), WidgetParameterValue::String(label.into())),
                     ("reason".into(), WidgetParameterValue::String(reason.into())),
-                    ("tooltip_visible".into(), WidgetParameterValue::F32(tooltip)),
                 ]),
                 "agent-a",
                 None,
@@ -377,6 +421,7 @@ async fn widget_param_update_rasterizes_only_that_instance() {
         "color.outline",
     ]
     .map(token_rgb);
+    let mut glyphs = HashMap::new();
     for (theme, badge_roi, fill_opacity) in [
         ("minimal", (300, 20, 1, 1), 1.0),
         ("system", (300, 10, 1, 1), 0.22),
@@ -403,6 +448,13 @@ async fn widget_param_update_rasterizes_only_that_instance() {
             }
             let pixels = surface.read_pixels(&compositor.device);
             let badge = region(&pixels, badge_roi);
+            if status == "online" {
+                glyphs.insert(theme, region(&pixels, (286, 6, 28, 28)));
+            }
+            assert_eq!(
+                status_scene.widget_registry.instances["status-matrix"].current_params["theme"],
+                WidgetParameterValue::Enum(theme.into())
+            );
             let background = region(&baseline, badge_roi)[0];
             assert_eq!(background[3], 255);
             let expected = expected_badge_pixel(&[tile, (fill, fill_opacity)], background);
@@ -450,6 +502,10 @@ async fn widget_param_update_rasterizes_only_that_instance() {
         }
     }
 
+    assert_ne!(
+        glyphs["system"], glyphs["friendly"],
+        "owner friendly theme must draw a distinct glyph across model publishes"
+    );
     let hidden = surface.read_pixels(&compositor.device);
     let badge_roi = (280, 0, 40, 40);
     let mut tooltip_frames = Vec::new();
@@ -594,6 +650,89 @@ async fn widget_param_update_rasterizes_only_that_instance() {
         "status-indicator: 12 local theme/status cells, separate label/reason controls, hidden/clear baselines, adapter {:?}",
         compositor.adapter_info()
     );
+    // Shipped severity fills, including return-to-info after warning/error.
+    // Fixed logical geometry makes the sampled bar interior independent of
+    // display-relative layout; all expected colors come from theme tokens.
+    for (loaded, level_name, width, height, sample) in [
+        (
+            bundle!("gauge", ["background.svg", "fill.svg"]),
+            "level",
+            72.0,
+            224.0,
+            (36, 100),
+        ),
+        (
+            bundle!("progress-bar", ["track.svg", "fill.svg"]),
+            "progress",
+            360.0,
+            52.0,
+            (100, 37),
+        ),
+    ] {
+        let BundleScanResult::Ok(bundle) = loaded else {
+            panic!("severity bundle");
+        };
+        let name = bundle.definition.id.clone();
+        for (file, bytes) in bundle.svg_contents {
+            compositor
+                .widget_renderer_mut()
+                .unwrap()
+                .register_svg(&name, &file, bytes);
+        }
+        for owner in [false, true] {
+            let mut scene = SceneGraph::new(512.0, 256.0);
+            let tab = scene.create_tab("Severity", 0).unwrap();
+            let initial = if owner {
+                serde_json::json!({"fill_color":[12,210,123,255]})
+            } else {
+                serde_json::json!({})
+            };
+            let mut instance = configured_instance(&bundle.definition, tab, &name, initial);
+            instance.geometry_override = Some(GeometryPolicy::Relative {
+                x_pct: 0.0,
+                y_pct: 0.0,
+                width_pct: width / 512.0,
+                height_pct: height / 256.0,
+            });
+            scene
+                .widget_registry
+                .register_definition(bundle.definition.clone());
+            scene.widget_registry.register_instance(instance);
+            for severity in ["info", "warning", "error", "info"] {
+                scene
+                    .publish_to_widget(
+                        &name,
+                        HashMap::from([
+                            (level_name.into(), WidgetParameterValue::F32(0.75)),
+                            (
+                                "severity".into(),
+                                WidgetParameterValue::Enum(severity.into()),
+                            ),
+                        ]),
+                        "model",
+                        None,
+                        0,
+                        None,
+                    )
+                    .unwrap();
+                render(&mut compositor, &mut scene, &mut surface);
+                let pixels = surface.read_pixels(&compositor.device);
+                let actual = widget_region(&pixels, 512, (0, 0), (sample.0, sample.1, 1, 1))[0];
+                let expected = match severity {
+                    "warning" => token_rgb("color.caution"),
+                    "error" => token_rgb("color.error"),
+                    _ if owner => [12, 210, 123],
+                    _ => token_rgb("color.primary"),
+                };
+                for channel in 0..3 {
+                    assert!(
+                        actual[channel].abs_diff(expected[channel]) <= 2,
+                        "{name} owner={owner} severity={severity}: {actual:?} vs {expected:?}"
+                    );
+                }
+            }
+        }
+    }
 }
 
 /// Owner hiding (control panel, CP-6): while widgets are hidden a publish
