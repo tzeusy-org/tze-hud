@@ -65,9 +65,8 @@ pub struct McpServerConfig {
     /// is null without them).
     pub presents: Option<Arc<crate::idle_efficiency::IdleEfficiencyCounters>>,
 
-    /// Portal UI state reported by `/admin/status` (`portals` is null without
-    /// it).
-    pub portals: Option<crate::operator::portal_status::PortalProbe>,
+    /// Admin-only surface observations (all UI blocks are null without it).
+    pub surfaces: Option<crate::operator::surface_status::SurfaceProbe>,
 
     /// Compositor capture channel behind `/admin/screenshot`; the endpoint
     /// answers 503 without one (no display to read from).
@@ -213,7 +212,7 @@ async fn start_mcp_http_server_inner(
         agents: config.agents.clone(),
         safe_mode: Arc::clone(&safe_mode),
         presents: config.presents.clone(),
-        portals: config.portals.clone(),
+        surfaces: config.surfaces.clone(),
         capture: config.capture.clone(),
         restart: config.restart.clone(),
         update: config.update.clone(),
@@ -760,7 +759,7 @@ mod tests {
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted(psk).shared(),
             presents: None,
-            portals: None,
+            surfaces: None,
             capture: None,
             restart: None,
             update: None,
@@ -857,7 +856,7 @@ mod tests {
             ])),
             safe_mode: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             presents: None,
-            portals: None,
+            surfaces: None,
             capture: None,
             restart: None,
             update: None,
@@ -1417,7 +1416,7 @@ mod tests {
             late_tailnet_port: Some(9090),
             agents: admin_source(std::env::temp_dir().join("no-log")).agents,
             presents: None,
-            portals: None,
+            surfaces: None,
             capture: None,
             restart: None,
             update: None,
@@ -1583,7 +1582,7 @@ mod tests {
             late_tailnet_port: None,
             agents: agents.clone(),
             presents: None,
-            portals: None,
+            surfaces: None,
             capture: None,
             restart: None,
             update: None,

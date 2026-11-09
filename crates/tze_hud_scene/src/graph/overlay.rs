@@ -11,6 +11,34 @@ pub struct PortalOutputReadState {
     pub read_through: u64,
 }
 
+/// Runtime-only geometry of a card from the compositor's last frame. Chosen
+/// cards keep their geometry during exit even though they have no hit regions.
+#[derive(Clone, Debug)]
+pub struct NotificationGeometry {
+    pub zone_name: String,
+    pub publication_id: SceneId,
+    pub bounds: Rect,
+    pub actions: Vec<Rect>,
+    pub close: Rect,
+    pub focus: Option<NotificationControl>,
+    pub chosen: Option<usize>,
+    pub state: &'static str,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum NotificationControl {
+    Action(usize),
+    Close,
+}
+
+/// A widget quad that actually reached the frame's draw list, after pixel
+/// snapping and texture admission. Registry defaults alone are not visible.
+#[derive(Clone, Debug)]
+pub struct WidgetGeometry {
+    pub instance_name: String,
+    pub bounds: Rect,
+}
+
 /// Transient per-frame state owned by the runtime and compositor layers.
 ///
 /// These fields are all `#[serde(skip)]` — they are never serialized and carry
@@ -40,6 +68,11 @@ pub struct RuntimeOverlayState {
     /// at the start of each frame before zone geometry is recomputed.
     #[serde(skip, default)]
     pub zone_hit_regions: Vec<ZoneHitRegion>,
+    /// Last-frame geometry only; admin JSON is built on request, never here.
+    #[serde(skip, default)]
+    pub notification_geometry: Vec<NotificationGeometry>,
+    #[serde(skip, default)]
+    pub widget_geometry: Vec<WidgetGeometry>,
     /// Surface classes the owner hid from the control panel (session-only;
     /// see [`super::visibility`]).
     #[serde(skip, default)]

@@ -374,7 +374,7 @@ mod calibration {
             late_tailnet_port: None,
             agents: tze_hud_scene::config::AgentDirectory::unrestricted(PSK).shared(),
             presents: None,
-            portals: None,
+            surfaces: None,
             capture: None,
             restart: None,
             update: None,
@@ -418,7 +418,7 @@ mod calibration {
 
         fn ingress_wake(&self) -> tze_hud_scene::render_wake::RenderWakeNotifier {
             let (portals, key, phase, input_ready, changed) = (
-                self.portals.clone(),
+                self.surfaces.clone(),
                 self.key.clone(),
                 self.phase.clone(),
                 self.input_ready.clone(),

@@ -1,11 +1,9 @@
-//! The `portals` block of `/admin/status`: read-only portal UI state, so
-//! out-of-process validation (T13) asserts on state instead of inferring it
-//! from pixels. Admin-scoped only; never exposed through MCP.
-//!
-//! Computed when status is requested, from the live scene plus a small
-//! main-thread mirror (keyboard focus and draft length), so an idle HUD does
-//! no extra work. The draft's text is never reported, only its length.
+//! Admin-only surface observations for real-input validation. JSON is built
+//! on request from last-frame geometry and a small main-thread mirror, under
+//! one bounded scene acquisition. It never wakes or advances the renderer.
 
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 
 use serde_json::{Value, json};
@@ -15,29 +13,39 @@ use tze_hud_scene::{
     ZoneInteractionKind,
 };
 
-/// Builds the `portals` array, or `None` while the scene stays locked.
+/// Reads all admin-only UI blocks together, or `None` while the scene stays locked.
 #[derive(Clone)]
-pub struct PortalProbe(Arc<dyn Fn() -> Option<Value> + Send + Sync>);
+pub struct SurfaceProbe(Arc<dyn Fn() -> Option<SurfaceSnapshot> + Send + Sync>);
 
-impl PortalProbe {
-    pub fn read(&self) -> Option<Value> {
+#[derive(Default)]
+pub struct SurfaceSnapshot {
+    pub portals: Value,
+    pub notifications: Value,
+    pub widgets: Value,
+    pub link_launches: u64,
+}
+
+impl SurfaceProbe {
+    pub fn read(&self) -> Option<SurfaceSnapshot> {
         (self.0)()
     }
 }
 
-impl std::fmt::Debug for PortalProbe {
+impl std::fmt::Debug for SurfaceProbe {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str("PortalProbe")
+        f.write_str("SurfaceProbe")
     }
 }
 
 /// Keyboard focus and draft length as the main thread last saw them.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct UiMirror {
     /// Focused `(tile, node)`; `node` is `None` for a tile-level stop.
     pub focus: Option<(SceneId, Option<SceneId>)>,
     /// Characters in the focused composer's draft (0 when none is focused).
     pub draft_chars: usize,
+    /// Actual runtime hover targets, including their configured trigger inset.
+    pub hover_targets: HashMap<String, Rect>,
 }
 
 /// The main thread's [`UiMirror`], written each settle.
@@ -45,17 +53,23 @@ pub type UiHandle = Arc<StdMutex<UiMirror>>;
 
 /// The status probe for one runtime: reads `scene` (only the scene lock, as
 /// the compositor does, waiting up to 100 ms) and the main thread's `ui`.
-pub fn probe(scene: Arc<tokio::sync::Mutex<SceneGraph>>, ui: UiHandle) -> PortalProbe {
-    PortalProbe(Arc::new(move || {
+pub fn probe(
+    scene: Arc<tokio::sync::Mutex<SceneGraph>>,
+    ui: UiHandle,
+    link_launches: Arc<AtomicU64>,
+) -> SurfaceProbe {
+    SurfaceProbe(Arc::new(move || {
         let deadline = std::time::Instant::now() + std::time::Duration::from_millis(100);
         loop {
             if let Ok(scene) = scene.try_lock() {
-                let ui = *ui.lock().unwrap_or_else(|e| e.into_inner());
-                return Some(portals_json(
-                    &scene,
-                    ui,
-                    &crate::operator::status::display_rects(),
-                ));
+                let ui = ui.lock().unwrap_or_else(|e| e.into_inner()).clone();
+                let displays = crate::operator::status::display_rects();
+                return Some(SurfaceSnapshot {
+                    portals: portals_json(&scene, &ui, &displays),
+                    notifications: notifications_json(&scene, &displays),
+                    widgets: widgets_json(&scene, &ui, &displays),
+                    link_launches: link_launches.load(Ordering::Relaxed),
+                });
             }
             if std::time::Instant::now() >= deadline {
                 return None;
@@ -67,6 +81,63 @@ pub fn probe(scene: Arc<tokio::sync::Mutex<SceneGraph>>, ui: UiHandle) -> Portal
 
 fn rect_json(r: Rect) -> Value {
     json!({"x": r.x.round(), "y": r.y.round(), "w": r.width.round(), "h": r.height.round()})
+}
+
+fn display_index(bounds: Rect, displays: &[Rect]) -> Option<usize> {
+    let (x, y) = (
+        bounds.x + bounds.width / 2.0,
+        bounds.y + bounds.height / 2.0,
+    );
+    displays
+        .iter()
+        .position(|d| x >= d.x && x < d.x + d.width && y >= d.y && y < d.y + d.height)
+}
+
+fn notifications_json(scene: &SceneGraph, displays: &[Rect]) -> Value {
+    use tze_hud_scene::graph::overlay::NotificationControl;
+    let entries: Vec<Value> = scene.overlay.notification_geometry.iter().filter_map(|card| {
+        let record = scene.zone_registry.active_publishes.get(&card.zone_name)?
+            .iter().find(|r| r.publication_id == card.publication_id)?;
+        let tze_hud_scene::ZoneContent::Notification(payload) = &record.content else {
+            return None;
+        };
+        let actions: Vec<Value> = payload.actions.iter().zip(&card.actions).map(|(action, rect)| {
+            json!({"label": action.label, "kind": if action.url.is_some() { "url" } else { "callback" }, "rect": rect_json(*rect)})
+        }).collect();
+        let focus = match card.focus {
+            Some(NotificationControl::Action(index)) => json!(index),
+            Some(NotificationControl::Close) => json!("close"),
+            None => Value::Null,
+        };
+        Some(json!({
+            "s": format!("zone:{}", card.zone_name),
+            "key": record.merge_key,
+            "rect": rect_json(card.bounds),
+            "display": display_index(card.bounds, displays),
+            "actions": actions,
+            "close": rect_json(card.close),
+            "focus": focus,
+            "chosen": card.chosen,
+            "state": card.state,
+        }))
+    }).collect();
+    json!(entries)
+}
+
+fn widgets_json(scene: &SceneGraph, ui: &UiMirror, displays: &[Rect]) -> Value {
+    let entries: Vec<Value> = scene.overlay.widget_geometry.iter().filter_map(|geometry| {
+        let instance = scene.widget_registry.instances.get(&geometry.instance_name)?;
+        let visible = instance.current_params.get("tooltip_visible")
+            .is_some_and(|p| matches!(p, tze_hud_scene::WidgetParameterValue::F32(value) if *value >= 0.5));
+        Some(json!({
+            "s": format!("widget:{}", geometry.instance_name),
+            "rect": rect_json(geometry.bounds),
+            "display": display_index(geometry.bounds, displays),
+            "hover_target": ui.hover_targets.get(&geometry.instance_name).copied().map(rect_json),
+            "tooltip_visible": visible,
+        }))
+    }).collect();
+    json!(entries)
 }
 
 fn offset(base: Rect, local: Rect) -> Rect {
@@ -158,7 +229,7 @@ fn part_text(scene: &SceneGraph, tile: SceneId, kind: PortalPartKind) -> Option<
 ///
 /// `displays` are the overlaid display rects in scene pixels, in
 /// `/admin/status` order.
-pub fn portals_json(scene: &SceneGraph, ui: UiMirror, displays: &[Rect]) -> Value {
+pub fn portals_json(scene: &SceneGraph, ui: &UiMirror, displays: &[Rect]) -> Value {
     let mut entries: Vec<(String, Value)> = Vec::new();
     for (&tile_id, tile) in &scene.tiles {
         let Some(surface) = scene.portal_surface(tile_id) else {
@@ -344,8 +415,9 @@ mod tests {
         let focused = UiMirror {
             focus: Some((tile_id, Some(composer))),
             draft_chars: 5,
+            ..Default::default()
         };
-        let v = portals_json(&scene, focused, &displays);
+        let v = portals_json(&scene, &focused, &displays);
         let p = &v[0];
         assert_eq!(p["s"], "portal:probe");
         assert!(p["header_text"].as_str().unwrap().contains("⋯ writing"));
@@ -363,11 +435,12 @@ mod tests {
         let tile_stop = UiMirror {
             focus: Some((tile_id, None)),
             draft_chars: 5,
+            ..Default::default()
         };
-        let v = portals_json(&scene, tile_stop, &displays);
+        let v = portals_json(&scene, &tile_stop, &displays);
         assert_eq!(v[0]["focus"], "tile");
         assert_eq!(v[0]["input"]["draft_chars"], 0);
-        let v = portals_json(&scene, UiMirror::default(), &displays);
+        let v = portals_json(&scene, &UiMirror::default(), &displays);
         assert_eq!(v[0]["focus"], "none");
 
         // Observe the actual driver clearing both rendered cues, without a
@@ -375,7 +448,7 @@ mod tests {
         clock.advance(2001);
         let tab = scene.active_tab;
         driver.drain(&mut scene, &mut tze_hud_input::InputProcessor::new(), tab);
-        let v = portals_json(&scene, UiMirror::default(), &displays);
+        let v = portals_json(&scene, &UiMirror::default(), &displays);
         assert!(!v[0]["header_text"].as_str().unwrap().contains("⋯ writing"));
         assert_eq!(v[0]["output"]["writing_caret"], false);
     }
@@ -383,8 +456,9 @@ mod tests {
     #[test]
     fn reports_visible_rows_and_tail_state_as_scrolled() {
         let (mut scene, tile_id, _, _) = portal_scene();
-        let out =
-            |scene: &SceneGraph| portals_json(scene, UiMirror::default(), &[])[0]["output"].clone();
+        let out = |scene: &SceneGraph| {
+            portals_json(scene, &UiMirror::default(), &[])[0]["output"].clone()
+        };
         let rows = |scene: &SceneGraph| {
             let o = out(scene);
             (
@@ -419,12 +493,12 @@ mod tests {
     fn unread_badge_is_the_largest_exposed_pill_piece() {
         let (mut scene, tile_id, _, _) = portal_scene();
         let badge = |scene: &SceneGraph| {
-            portals_json(scene, UiMirror::default(), &[])[0]["panes"]["unread_badge"].clone()
+            portals_json(scene, &UiMirror::default(), &[])[0]["panes"]["unread_badge"].clone()
         };
         // No pill region published (at tail, hidden or covered): null.
         assert_eq!(badge(&scene), Value::Null);
         assert_eq!(
-            portals_json(&scene, UiMirror::default(), &[])[0]["panes"]["close"],
+            portals_json(&scene, &UiMirror::default(), &[])[0]["panes"]["close"],
             Value::Null
         );
         let other = SceneId::new();
@@ -445,14 +519,14 @@ mod tests {
         foreign.kind = ZoneInteractionKind::DismissTile { tile_id: other };
         foreign.bounds.width = 500.0;
         scene.overlay.zone_hit_regions.extend([close, foreign]);
-        let v = portals_json(&scene, UiMirror::default(), &[]);
+        let v = portals_json(&scene, &UiMirror::default(), &[]);
         assert_eq!(
             v[0]["panes"]["close"],
             json!({"x": 80.0, "y": 20.0, "w": 24.0, "h": 24.0})
         );
         scene.overlay.zone_hit_regions.clear();
         assert_eq!(
-            portals_json(&scene, UiMirror::default(), &[])[0]["panes"]["close"],
+            portals_json(&scene, &UiMirror::default(), &[])[0]["panes"]["close"],
             Value::Null
         );
     }

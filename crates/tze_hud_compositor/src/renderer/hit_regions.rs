@@ -21,6 +21,7 @@
 use std::collections::HashMap;
 
 use tze_hud_scene::graph::SceneGraph;
+use tze_hud_scene::graph::overlay::{NotificationControl, NotificationGeometry};
 use tze_hud_scene::types::*;
 
 use super::Compositor;
@@ -198,6 +199,25 @@ impl Compositor {
             &self.token_map,
             &self.notification_layouts,
         );
+        let now = self
+            .last_animation_frame_at
+            .unwrap_or_else(std::time::Instant::now);
+        for card in &mut scene.overlay.notification_geometry {
+            let zone = self.zone_animation_states.get(&card.zone_name);
+            let publication = self
+                .pub_animation_states
+                .get(&card.zone_name)
+                .and_then(|states| states.get(&card.publication_id));
+            card.state = if publication.is_some_and(|s| s.fade_start.is_some())
+                || zone.is_some_and(|s| s.target_opacity == 0.0)
+            {
+                "exiting"
+            } else if zone.is_some_and(|s| !s.is_complete_at(now)) {
+                "entering"
+            } else {
+                "shown"
+            };
+        }
 
         // ── Jump-to-latest pill hit region (hud-9ci61) ───────────────────────
         // Foreground drawing and hit targets share exposed pieces. A higher
@@ -314,6 +334,7 @@ fn populate_notification_hit_regions_in(
     layouts.borrow_mut().retain(scene);
     scene.prune_notification_feedback();
     scene.overlay.zone_hit_regions.clear();
+    scene.overlay.notification_geometry.clear();
     let mut tab_order: u32 = 0;
 
     // Sort zone names for deterministic tab-order assignment across frames.
@@ -364,14 +385,6 @@ fn populate_notification_hit_regions_in(
 
         for (pub_idx, slot_y, effective_slot_h) in layout.iter_visible(zy) {
             let record = &publishes[pub_idx];
-            if scene
-                .overlay
-                .notification_choices
-                .contains_key(&record.publication_id)
-            {
-                continue;
-            }
-
             let n_payload = match &record.content {
                 ZoneContent::Notification(n) => n,
                 _ => continue, // Only notifications get interactive affordances.
@@ -388,6 +401,55 @@ fn populate_notification_hit_regions_in(
                 notification_inset(policy, scale),
             );
             let dismiss_id = notification_dismiss_interaction_id(zone_name, record);
+            let action_rects = layouts
+                .borrow_mut()
+                .resolve(&zone_tokens, zone_name, record, policy, zw)
+                .bounds(
+                    zx,
+                    slot_y,
+                    zw,
+                    effective_slot_h,
+                    notification_inset(policy, scale),
+                );
+            let choice = scene
+                .overlay
+                .notification_choices
+                .get(&record.publication_id);
+            let chosen = (0..action_rects.len()).find(|&index| {
+                choice
+                    == Some(&notification_action_interaction_id(
+                        zone_name, record, index,
+                    ))
+            });
+            let focus = if scene.overlay.notification_focus.as_ref() == Some(&dismiss_id) {
+                Some(NotificationControl::Close)
+            } else {
+                (0..action_rects.len())
+                    .find(|&index| {
+                        scene.overlay.notification_focus.as_ref()
+                            == Some(&notification_action_interaction_id(
+                                zone_name, record, index,
+                            ))
+                    })
+                    .map(NotificationControl::Action)
+            };
+            scene
+                .overlay
+                .notification_geometry
+                .push(NotificationGeometry {
+                    zone_name: zone_name.clone(),
+                    publication_id: record.publication_id,
+                    bounds: Rect::new(zx, slot_y, zw, effective_slot_h),
+                    actions: action_rects.clone(),
+                    close: dismiss_bounds,
+                    focus,
+                    chosen,
+                    state: "shown",
+                });
+            // Chosen cards still draw their finite exit, but take no input.
+            if choice.is_some() {
+                continue;
+            }
             scene.overlay.zone_hit_regions.push(ZoneHitRegion {
                 zone_name: zone_name.clone(),
                 publication_id: record.publication_id,
@@ -403,17 +465,6 @@ fn populate_notification_hit_regions_in(
             // ── Action buttons ────────────────────────────────────────────
             let n_actions = n_payload.actions.len().min(MAX_NOTIFICATION_ACTIONS);
             if n_actions > 0 {
-                let action_rects = layouts
-                    .borrow_mut()
-                    .resolve(&zone_tokens, zone_name, record, policy, zw)
-                    .bounds(
-                        zx,
-                        slot_y,
-                        zw,
-                        effective_slot_h,
-                        notification_inset(policy, scale),
-                    );
-
                 for (index, (_action, action_bounds)) in
                     n_payload.actions.iter().zip(action_rects).enumerate()
                 {

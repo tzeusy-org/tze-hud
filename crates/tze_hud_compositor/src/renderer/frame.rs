@@ -255,6 +255,7 @@ impl Compositor {
         self.drawn_owner_hidden = scene.owner_hidden();
         // Update zone animation states (fade-in/fade-out) before rendering.
         // Must run before any render_zone_content call below.
+        self.last_animation_frame_at = Some(animation_now);
         self.update_zone_animations_at(scene, animation_now);
         // §6.3 portal transition: advance per-portal-tile fade animations
         // alongside zone animations (hud-58rg1). Folded in here so all three
@@ -420,6 +421,7 @@ impl Compositor {
         // What the owner hid this frame: its animations schedule no frames.
         self.drawn_owner_hidden = scene.owner_hidden();
         // Update zone animation states (fade-in/fade-out) before rendering.
+        self.last_animation_frame_at = Some(animation_now);
         self.update_zone_animations_at(scene, animation_now);
         // §6.3 portal transition: advance per-portal-tile fade animations
         // alongside zone animations (hud-58rg1).
@@ -620,6 +622,27 @@ impl Compositor {
 
         // ── Widget draw geometry (precomputed from the registry) ─────────────
         let widget_quads = self.collect_widget_draw_geometry(scene, sw, sh);
+        scene.overlay.widget_geometry = widget_quads
+            .iter()
+            .filter_map(|quad| {
+                let texture = self
+                    .widget_renderer
+                    .as_ref()?
+                    .texture_entry(&quad.instance_name)?;
+                let (x, y, width, height) = crate::widget::snap_composite_rect(
+                    quad.raw_x,
+                    quad.raw_y,
+                    texture.width as f32,
+                    texture.height as f32,
+                    sw,
+                    sh,
+                );
+                Some(tze_hud_scene::graph::overlay::WidgetGeometry {
+                    instance_name: quad.instance_name.clone(),
+                    bounds: Rect::new(x, y, width, height),
+                })
+            })
+            .collect();
 
         // ── Keyboard focus ring (chrome layer, hud-k6yvb) ───────────────────
         let mut focus_ring_vertices: Vec<RectVertex> = Vec::new();

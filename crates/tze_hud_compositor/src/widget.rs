@@ -3363,7 +3363,7 @@ fn resolve_pixel_geometry(
 }
 
 /// Snap a composite rectangle to integer pixels and clamp it to the surface.
-fn snap_composite_rect(
+pub(crate) fn snap_composite_rect(
     x: f32,
     y: f32,
     w: f32,

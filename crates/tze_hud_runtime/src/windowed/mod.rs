@@ -580,7 +580,7 @@ struct WindowedRuntimeState {
     focus_ring_owner_state: FocusRingOwnerHandle,
     /// Focus and draft length for the `/admin/status` portals block, written
     /// with the focus ring each settle.
-    portal_ui: crate::operator::portal_status::UiHandle,
+    surface_ui: crate::operator::surface_status::UiHandle,
     /// Shared handle carrying the portal tile whose resize-grip corner the pointer
     /// is over to the compositor's grip pass (hud-wgiys). Written each frame in
     /// `about_to_wait`: the focused portal's `SceneId` when the pointer sits over
@@ -2687,7 +2687,8 @@ impl WindowedRuntime {
         monitor_identity::log_monitor_identities();
         let wake = WindowedWake::new(event_loop.create_proxy());
         // Main-thread focus/draft mirror read by the `/admin/status` probe.
-        let portal_ui = crate::operator::portal_status::UiHandle::default();
+        let surface_ui = crate::operator::surface_status::UiHandle::default();
+        let notification_link_opener = crate::shell::link::LinkOpener::default();
         let render_wake = wake.render_notifier();
         let portal_ingress_wake = wake.main_work_notifier();
 
@@ -2997,9 +2998,10 @@ impl WindowedRuntime {
                     late_tailnet_port: Some(cfg.mcp_port),
                     agents: Arc::clone(&cfg.agents),
                     presents: Some(Arc::clone(wake.counters())),
-                    portals: Some(crate::operator::portal_status::probe(
+                    surfaces: Some(crate::operator::surface_status::probe(
                         Arc::clone(&shared_scene),
-                        Arc::clone(&portal_ui),
+                        Arc::clone(&surface_ui),
+                        Arc::clone(&notification_link_opener.launches),
                     )),
                     capture: Some(capture_endpoint),
                     restart: restart.clone(),
@@ -3241,7 +3243,7 @@ impl WindowedRuntime {
             overlay_refits: Default::default(),
             press_window: None,
             zone_press: None,
-            notification_link_opener: Default::default(),
+            notification_link_opener,
             context_menu_press: None,
             context_menu_open: false,
             context_menu_dismiss_pending: false,
@@ -3264,7 +3266,7 @@ impl WindowedRuntime {
             // compositor.  Separate Arc so it works before compositor is created.
             local_composer_state: Arc::new(StdMutex::new(None)),
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
-            portal_ui,
+            surface_ui,
             // Placeholder; replaced in resumed() with the compositor's Arc (hud-wgiys).
             resize_grip_hover_state: Arc::new(StdMutex::new(None)),
             tile_close_hover_state: Arc::new(StdMutex::new(None)),

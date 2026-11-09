@@ -204,7 +204,7 @@ impl WindowedRuntimeState {
             consumed_command_keydowns: HashSet::new(),
             local_composer_state: Arc::new(StdMutex::new(None)),
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
-            portal_ui: Default::default(),
+            surface_ui: Default::default(),
             resize_grip_hover_state: Arc::new(StdMutex::new(None)),
             tile_close_hover_state: Arc::new(StdMutex::new(None)),
             cursor_left_window: false,
@@ -364,9 +364,10 @@ impl HeadlessEventLoopHarness {
             late_tailnet_port: None,
             agents: Arc::clone(&cfg.agents),
             presents: Some(Arc::clone(state.wake.counters())),
-            portals: Some(crate::operator::portal_status::probe(
+            surfaces: Some(crate::operator::surface_status::probe(
                 Arc::clone(&scene_handle),
-                Arc::clone(&state.portal_ui),
+                Arc::clone(&state.surface_ui),
+                Arc::clone(&state.notification_link_opener.launches),
             )),
             capture: None,
             restart: None,
@@ -1375,7 +1376,7 @@ mod tests {
                 std::thread::sleep(std::time::Duration::from_millis(16));
             }
         };
-        let probe = crate::operator::portal_status::probe(
+        let probe = crate::operator::surface_status::probe(
             Arc::clone(
                 &runtime
                     .events
@@ -1386,9 +1387,10 @@ mod tests {
                     .unwrap()
                     .scene,
             ),
-            Arc::clone(&runtime.events.app.state.portal_ui),
+            Arc::clone(&runtime.events.app.state.surface_ui),
+            Arc::clone(&runtime.events.app.state.notification_link_opener.launches),
         );
-        let portal = || probe.read().expect("scene available")[0].clone();
+        let portal = || probe.read().expect("scene available").portals[0].clone();
 
         publish(40);
         settle(&mut runtime);
