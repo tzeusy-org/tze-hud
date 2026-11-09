@@ -1199,6 +1199,16 @@ def scenario_overlay_pointer(run: Run) -> None:
         wait_until(lambda: (WIN.edit_rect(notepad.pid) is not None, None),
                    what="owned Notepad editor", timeout_s=SETTLE_S)
         open_portal(run, s, "overlay", count=5, expects_reply=True)
+        # The production default fills small displays. Prepare outside space
+        # through normal owned controls, then reset to the external app before
+        # the measured entry; a full-display fixture cannot test click-through.
+        run.step("prepare smaller portal before measured entry")
+        run.point(f"{s}/composer")
+        run.inj.move_relative(1, 0)
+        run.expect("preparation reaches composer", on(s, lambda p: p["hover"] == "composer"))
+        shrink(run, s)
+        run.settle()
+        wait_until(foreground, what="owned Notepad foreground before measured entry", timeout_s=15, interval_s=0.2)
         rect = run.portal(s)["rect"]
         # Start outside the portal. Only relative events wake raw-input entry
         # detection while the overlay is passing pointer events through.
@@ -1238,11 +1248,7 @@ def scenario_overlay_pointer(run: Run) -> None:
         items = run.take(1)
         if [item.get("text") for item in items] != ["overlay entry"]:
             raise ScenarioFailed("overlay receives exactly one reply", items)
-        # Leave ample owned editor space outside the portal, without moving
-        # the overlay window or altering any desktop outside this CI VM.
-        for _ in range(4):
-            run.key("ctrl+minus")
-        run.expect("portal shrinks", on(s, lambda p: p["rect"]["w"] < rect["w"]))
+        # The prepared portal leaves owned editor space outside its bounds.
         rect = run.portal(s)["rect"]
         editor = WIN.edit_rect(notepad.pid)
         if editor is None:
