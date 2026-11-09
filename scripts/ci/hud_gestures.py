@@ -1336,9 +1336,142 @@ def scenario_no_focus_steal(run: Run) -> None:
 def expect_overlay_capture(run: Run, wanted: bool, what: str) -> None:
     def sample():
         state = WIN.pointer_capture_state(run.pid)
-        return state["capturing"] is wanted, state
-    state, _ = wait_until(sample, what=what, timeout_s=SETTLE_S)
+        return state["capturing"] is wanted and state["no_activate"] is True, state
+    state, _ = wait_until(sample, what=what + " with WS_EX_NOACTIVATE", timeout_s=SETTLE_S)
     run.step(f"ok {what}: {state}")
+
+
+def overlay_focus_etiquette(run: Run, notepad_pid: int, surface: str) -> None:
+    """Real overlay focus: pane/button no-activate, registered answer chord and return.
+
+    Reuse scenario 11's HUD, ICD and owned editor to keep combined tier-W
+    occupancy bounded. Foreground requests below only prepare owned helpers;
+    measured answer/exit paths never repair the foreground on the HUD's behalf.
+    """
+    def foreground_is(pid: int, what: str) -> None:
+        wait_until(lambda: (WIN.foreground_pid() == pid, WIN.foreground_pid()),
+                   what=what, timeout_s=SETTLE_S)
+        run.step(f"ok {what}")
+
+    def activate_owned(pid: int) -> None:
+        def prepare():
+            WIN.bring_to_front(pid)
+            return WIN.foreground_pid() == pid, WIN.foreground_pid()
+        wait_until(prepare, what="prepare owned app foreground", timeout_s=SETTLE_S)
+
+    def enter(target: str) -> None:
+        run.point(target)
+        run.inj.move_relative(1, 0)
+        expect_overlay_capture(run, True, f"native capture at {target}")
+
+    # A real accepted pane click changes logical portal focus without stealing
+    # native focus. Subsequent typing proves the OS destination as well.
+    enter(f"{surface}/output")
+    run.click()
+    run.expect("pane click handled locally", on(surface, lambda p: p["focus"] == "tile"))
+    foreground_is(notepad_pid, "pane click keeps Notepad foreground")
+    run.type(" pane")
+    expected = "click through pane"
+    wait_until(lambda: (WIN.edit_text(notepad_pid) == expected, WIN.edit_text(notepad_pid)),
+               what="Notepad receives typing after pane click", timeout_s=SETTLE_S)
+
+    # An actual text-field click does take focus. Reply keeps it; the empty
+    # outer Esc returns it, with the next physical key going to Notepad.
+    run.click(f"{surface}/composer")
+    foreground_is(run.pid, "composer click explicitly takes keyboard focus")
+    run.type("focus reply")
+    run.key("Return")
+    items = run.take(1)
+    if [item.get("text") for item in items] != ["focus reply"]:
+        raise ScenarioFailed("focus test sends exactly one reply", items)
+    foreground_is(run.pid, "reply keeps composer foreground")
+    run.key("Escape")
+    foreground_is(notepad_pid, "outer Esc returns to the prior app")
+    run.type(" back")
+    expected += " back"
+    wait_until(lambda: (WIN.edit_text(notepad_pid) == expected, WIN.edit_text(notepad_pid)),
+               what="next key after Esc reaches Notepad", timeout_s=SETTLE_S)
+
+    key = "gesture-answer-chord"
+    open_card(run, key)
+    foreground_is(notepad_pid, "card publish does not activate the overlay")
+    run.key("ctrl+shift+F9")
+    run.expect("real global answer chord focuses action one", lambda status: bool(
+        (card := notification_entry(status, key)) and card["focus"] == 0
+        and WIN.foreground_pid() == run.pid))
+    run.key("2")
+    take_card_answer(run, key, f"{key}-second")
+    foreground_is(notepad_pid, "digit answer restores the prior app")
+    run.type(" answer")
+    expected += " answer"
+    wait_until(lambda: (WIN.edit_text(notepad_pid) == expected, WIN.edit_text(notepad_pid)),
+               what="next physical keystroke after answer reaches Notepad", timeout_s=SETTLE_S)
+    run.expect("answer keys never edit the composer", on(surface, lambda p: p["input"]["draft_chars"] == 0))
+    run.key("ctrl+shift+F9")
+    run.observe_for("no question means no foreground change",
+                    lambda _: WIN.foreground_pid() == notepad_pid, 0.25)
+
+    third = subprocess.Popen(["notepad.exe"])
+    run.helper_pids.append(third.pid)
+    try:
+        activate_owned(third.pid)
+        run.type("third")
+        activate_owned(notepad_pid)
+        key = "gesture-third-app"
+        open_card(run, key)
+        run.key("ctrl+shift+F9")
+        run.expect("third-app test starts with a chord-focused card", lambda status: bool(
+            (card := notification_entry(status, key)) and card["focus"] == 0
+            and WIN.foreground_pid() == run.pid))
+        # The overlay is absent from the taskbar/Alt-Tab list. Depending on
+        # Windows' current selection, one switch reaches the editor or its
+        # immediately preceding owned helper; both requests use real Alt-Tab.
+        switches = []
+        for _ in range(2):
+            before = WIN.foreground_pid()
+            run.key("alt+Tab")
+            wait_until(lambda: (WIN.foreground_pid() != before, WIN.foreground_pid()),
+                       what="real Alt-Tab changes the foreground", timeout_s=SETTLE_S)
+            switches.append(WIN.foreground_pid())
+            if switches[-1] == third.pid:
+                break
+        if WIN.foreground_pid() != third.pid:
+            raise ScenarioFailed("Alt-Tab reaches the third owned app", {"switches": switches})
+        run.step(f"ok real Alt-Tab reaches third app: {switches}")
+        run.observe_for("user app switch is not undone", lambda _: WIN.foreground_pid() == third.pid, 0.25)
+        enter(f"zone:notification-area/{key}/0")
+        run.click()
+        take_card_answer(run, key, f"{key}-first")
+        foreground_is(third.pid, "later card button answer does not undo the app switch")
+        run.key("Escape")
+        run.type(" stays")
+        wait_until(lambda: (WIN.edit_text(third.pid) == "third stays", WIN.edit_text(third.pid)),
+                   what="later Esc and typing stay in the third app", timeout_s=SETTLE_S)
+        run.observe_for("late card exit never restores the old app",
+                        lambda _: WIN.foreground_pid() == third.pid, 0.25)
+
+        # Closing the recorded origin while the HUD is focused must not raise
+        # a different window on Esc, or dereference the retired native handle.
+        key = "gesture-closed-origin"
+        open_card(run, key)
+        run.key("ctrl+shift+F9")
+        run.expect("closed-origin test takes card focus", lambda status: bool(
+            (card := notification_entry(status, key)) and card["focus"] == 0
+            and WIN.foreground_pid() == run.pid))
+        kill_pid(third.pid)
+        third.wait(10)
+        run.helper_pids.remove(third.pid)
+        run.key("Escape")
+        run.observe_for("closed origin leaves foreground to Windows",
+                        lambda _: WIN.foreground_pid() == run.pid, 0.25)
+        run.expect("closed origin does not answer the card", lambda status: bool(
+            (card := notification_entry(status, key)) and card["focus"] is None and card["chosen"] is None))
+    finally:
+        if third.poll() is None:
+            kill_pid(third.pid)
+            third.wait(10)
+        if third.pid in run.helper_pids:
+            run.helper_pids.remove(third.pid)
 
 
 def scenario_overlay_pointer(run: Run) -> None:
@@ -1434,6 +1567,7 @@ def scenario_overlay_pointer(run: Run) -> None:
         run.expect("underlying typing leaves composer empty", on(s, lambda p: p["input"]["draft_chars"] == 0))
         run.screen_grab("overlay-pointer.click-through")
         run.step("ok outside click reaches owned Notepad and typing stays there")
+        overlay_focus_etiquette(run, notepad.pid, s)
     finally:
         kill_pid(notepad.pid)
         notepad.wait(10)

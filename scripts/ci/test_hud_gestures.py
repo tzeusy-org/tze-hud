@@ -250,11 +250,11 @@ class WindowsGuardTests(unittest.TestCase):
 
     def test_native_capture_observes_only_a_unique_primary_overlay(self) -> None:
         native = native_input_boundary()
-        for case in ("capture", "passthrough", "no-overlay", "ambiguous"):
+        for case in ("capture", "passthrough", "activating", "no-overlay", "ambiguous"):
             with self.subTest(case=case):
                 rows = {11: ([5, 5, 100, 100], 0), 12: ([0, 0, 1024, 768], 0)}
                 if case != "no-overlay":
-                    rows[13] = ([0, 0, 1024, 768], 0x8 | (0x20 if case == "passthrough" else 0))
+                    rows[13] = ([0, 0, 1024, 768], 0x8 | (0 if case == "activating" else 0x08000000) | (0x20 if case == "passthrough" else 0))
                 if case == "ambiguous":
                     rows[14] = ([0, 0, 1024, 768], 0x8)
 
@@ -268,8 +268,9 @@ class WindowsGuardTests(unittest.TestCase):
                 with mock.patch.object(native, "_windows_of", return_value=list(rows)), \
                         mock.patch.object(native, "screen_size", return_value=(1024, 768)):
                     result = native.pointer_capture_state(4242)
-                expected = {"capture": True, "passthrough": False, "no-overlay": None, "ambiguous": None}[case]
+                expected = {"capture": True, "passthrough": False, "activating": True, "no-overlay": None, "ambiguous": None}[case]
                 self.assertIs(result["capturing"], expected)
+                self.assertIs(result["no_activate"], None if case in {"no-overlay", "ambiguous"} else case != "activating")
                 self.assertEqual(len(result["windows"]), len(rows))
                 self.assertEqual(result["matching_overlays"], 0 if case == "no-overlay" else 2 if case == "ambiguous" else 1)
 
