@@ -1016,28 +1016,29 @@ baselined against regressions.
 
 | Measure | Before T5 (wire) | Wire | Model-visible | Budget (model-visible) |
 |---|---|---|---|---|
-| `tools/list` | 4,418 | 601 | 564 | ≤ 900 |
-| Discover (default scene) | ~430 (`list_zones`) | 181 | 113 | ≤ 150 |
+| `tools/list` | 4,418 | 627 | 590 | ≤ 900 |
+| Discover (default scene) | ~430 (`list_zones`) | 194 | 126 | ≤ 150 |
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
 | Four-option notification ask + returned answer + ACK | — | 273 | 114 | ≤ 120 |
 | Widget publish | ~168 | 73 | 22 | ≤ 80 |
 | Portal: attach+publish+hold, poll, ack, clear | ~575 over 5 round trips | 343 over 4 | 137 over 4 | ≤ 250 |
-| Discover (`production.toml`: 6 zones, 3 built-in widgets) | n/a | n/a | ~232 | ≤ 210 |
+| Discover (`production.toml`: 6 zones, 3 built-in widgets) | n/a | n/a | 210 | ≤ 210 |
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
 
-All seven measurements use canonical flow version 4. F7 source calibration
-on `53ef94b3` against the
-retained `b52bc65c` baseline changes `tools/list` from 2,451 to 2,455
-model-visible UTF-8 bytes and 562 to 564 o200k tokens (+4 bytes, +2 tokens).
-The tokenizer is `tiktoken-rs` 0.12.0, `o200k_base`.
-The five other established flows and the complete choice flow retain identical
-request/response fingerprints and metrics; every ceiling is unchanged.
-The complete choice remains 114 tokens (69 ask + 28 retained answer + 17 ACK).
-The canonical gate requires two byte-identical final-source measurements.
-The owner accepted this measured baseline on 2026-11-08 (`hud-j7kxn`):
-`approval.status` is `owner_approved`. This separate approval covers the
-existing measured bytes, including tools/list 564, choice 114 and portal 137
-model-visible tokens, with no change to any ceiling or measurement.
+All seven measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
+`o200k_base`. The discovery-audience change (`hud-ljhku.7`, source177e1096)
+changes model-visible `tools/list` from564 to590 tokens and default discovery
+from113 to126. The five other flows retain identical request/response
+fingerprints and metrics: zone39, widget22, error45, complete choice114 and
+portal137. Production discovery is210, down from~232; occupancy hints and all
+model-owned values/limits remain. Every ceiling is unchanged. Numeric discovery
+says `number`; admission and error hints still enforce finite f32.
+
+The baseline is **pending owner review** for these concrete new bytes. Earlier
+`hud-j7kxn` approval covered the old baseline only. The canonical gate requires
+two byte-identical final-source measurements; it never treats pending as owner
+approval. Reply defaults `reattached`, `pending_input` and `remaining` stay
+byte-identical, including the unchanged full portal flow.
 
 The `notification_choice` flow publishes Ship/Hold/Skip/Open, activates Skip through
 `SceneGraph::activate_notification` (the shared pointer/keyboard producer), polls
