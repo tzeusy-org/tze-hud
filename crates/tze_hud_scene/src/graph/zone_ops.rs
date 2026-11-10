@@ -1411,13 +1411,17 @@ impl SceneGraph {
         self.version += 1;
     }
 
-    /// Clear every zone and widget publication recorded under `lease_id`.
+    /// Clear active publications and whole scheduled batches owned by `lease_id`.
     ///
     /// Called when a lease reaches a terminal state (expired after grace,
     /// revoked) per spec §Requirement: Lease Revocation Clears Zone
     /// Publications. Publications by the same namespace under another lease
     /// (e.g. an operator session's MCP notifications) are untouched.
     pub fn clear_publications_for_lease(&mut self, lease_id: SceneId) {
+        let pending_before = self.scheduled_batches.len();
+        self.scheduled_batches
+            .retain(|scheduled| scheduled.batch.lease_id != Some(lease_id));
+        let pending_changed = self.scheduled_batches.len() != pending_before;
         for publishes in self.zone_registry.active_publishes.values_mut() {
             publishes.retain(|r| r.lease_id != Some(lease_id));
         }
@@ -1436,7 +1440,7 @@ impl SceneGraph {
         self.widget_registry
             .active_publishes
             .retain(|_, v| !v.is_empty());
-        if !touched_widgets.is_empty() {
+        if pending_changed || !touched_widgets.is_empty() {
             for widget_name in touched_widgets {
                 self.refresh_widget_current_params(&widget_name);
             }

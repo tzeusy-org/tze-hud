@@ -417,6 +417,8 @@ Already accepted widget-containing scheduled batches wait atomically through
 pause, without an overdue wake or materializing under a suspended lease. On
 resume their deadline and relative TTL start at actual presentation; new incoming
 updates remain rejected while paused.
+Terminal lease cleanup still removes its queued batches during pause, including
+revocation at the maximum suspension bound; other owners' queued work survives.
 
 - `tze_hud_runtime` [`test_ttl_excluded_during_suspension`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),
   [`test_lease_identity_preserved_across_suspend_resume`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),
