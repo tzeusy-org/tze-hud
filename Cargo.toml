@@ -128,6 +128,7 @@ windows = { version = "0.58", features = [
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Dwm",
     "Win32_System_Power",
+    "Win32_System_RemoteDesktop",
     "Win32_System_SystemServices",
     # Windows Firewall policy read (firewall.rs): INetFwPolicy2 over COM.
     "Win32_NetworkManagement_WindowsFirewall",

@@ -193,6 +193,16 @@ pub struct CanonicalToken {
 /// portal divider, claimed-tile placement (`tile.*`) and the control panel
 /// layout (`control_panel.*`).
 pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
+    CanonicalToken {
+        key: "tray.glyph.on_light",
+        description: "Notification-area glyph on a light Windows taskbar",
+        default_value: "#18202C",
+    },
+    CanonicalToken {
+        key: "tray.glyph.on_dark",
+        description: "Notification-area glyph on a dark Windows taskbar",
+        default_value: "#E8EBF0",
+    },
     // Color — text
     CanonicalToken {
         key: "color.text.primary",

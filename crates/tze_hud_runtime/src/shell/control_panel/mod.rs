@@ -65,8 +65,41 @@ use row::{Edit, Row};
 use state::{Effect, Nav, Open, PanelChange, SectionRows, ViewContext};
 
 /// Input to the panel task.
+#[cfg(any(target_os = "windows", test, feature = "test-harness"))]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum TrayCommand {
+    TogglePanel,
+    OpenPanel,
+    Pause,
+    Resume,
+    HideAll,
+    ShowAll,
+    Quit,
+}
+
+#[cfg(any(target_os = "windows", test))]
+impl TrayCommand {
+    pub(crate) fn from_menu_id(
+        id: u32,
+        view: &crate::windowed::shell_presence::Presentation,
+    ) -> Option<Self> {
+        Some(match id {
+            1 => Self::OpenPanel,
+            2 if view.glyph == crate::windowed::shell_presence::GlyphState::Paused => Self::Resume,
+            2 => Self::Pause,
+            3 if view.all_hidden => Self::ShowAll,
+            3 => Self::HideAll,
+            4 => Self::Quit,
+            _ => return None,
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) enum PanelEvent {
+    /// Native tray input is handled even while the panel is closed.
+    #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
+    Tray(TrayCommand),
     /// A native global chord or main-thread answer handoff was requested.
     Chord(ChordRole),
     Key(PanelKey),
@@ -109,6 +142,8 @@ struct Shared {
     /// The panel waits for new geometry to scroll a row into view.
     wants_geometry: AtomicBool,
     events: mpsc::UnboundedSender<PanelEvent>,
+    #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
+    quit: RwLock<Option<crate::operator::handoff::Quit>>,
     render_wake: RenderWakeNotifier,
     /// Wakes the winit loop when new geometry arrives, so the overlay's
     /// click-through state follows the panel's drawn rect.
@@ -125,6 +160,11 @@ pub(crate) struct ControlPanelHandle {
 }
 
 impl ControlPanelHandle {
+    #[cfg(target_os = "windows")]
+    pub(crate) fn set_quit(&self, quit: crate::operator::handoff::Quit) {
+        *self.shared.quit.write().unwrap_or_else(|e| e.into_inner()) = Some(quit);
+    }
+
     /// Only actual fields/search take native focus on a pointer press.
     /// Disclosure rows also draw as Value, so use the core's control metadata.
     pub(crate) fn accepts_text(&self, target: &PanelHitTarget) -> bool {
@@ -399,6 +439,8 @@ pub(crate) fn spawn_control_panel(
             geometry_generation: AtomicU64::new(0),
             wants_geometry: AtomicBool::new(false),
             events: tx,
+            #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
+            quit: RwLock::new(None),
             render_wake: deps.render_wake.clone(),
             main_wake: deps.main_wake.clone(),
             #[cfg(test)]
@@ -509,6 +551,11 @@ impl PanelTask {
                     None => Vec::new(),
                 }
             }
+            #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
+            (PanelEvent::Tray(command), _) => {
+                self.on_tray(command).await;
+                Vec::new()
+            }
             (PanelEvent::Chord(role), _) => {
                 self.on_chord(role).await;
                 Vec::new()
@@ -551,6 +598,8 @@ impl PanelTask {
                         Vec::new()
                     }
                     PanelEvent::Chord(_) | PanelEvent::Applied { .. } => Vec::new(),
+                    #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
+                    PanelEvent::Tray(_) => Vec::new(),
                 }
             }
         };
@@ -585,6 +634,48 @@ impl PanelTask {
                     .wants_geometry
                     .store(false, Ordering::Release);
                 self.rebuild().await;
+            }
+        }
+    }
+
+    #[cfg(any(target_os = "windows", test, feature = "test-harness"))]
+    async fn on_tray(&mut self, command: TrayCommand) {
+        match command {
+            TrayCommand::TogglePanel => self.on_chord(ChordRole::Panel).await,
+            TrayCommand::OpenPanel => {
+                if self.open.is_none() {
+                    self.on_chord(ChordRole::Panel).await;
+                }
+            }
+            TrayCommand::Pause => {
+                // Explicit intent: a concurrent chord must not invert a menu
+                // choice made from an older snapshot.
+                self.deps.pause.set(true).await;
+                if self.open.is_none() {
+                    self.open = Some(Open::new(ChordRole::Pause));
+                    for section in self.sections.iter() {
+                        section.opened();
+                    }
+                    self.refresh().await;
+                }
+            }
+            TrayCommand::Resume => self.close().await,
+            TrayCommand::HideAll | TrayCommand::ShowAll => {
+                let hide = command == TrayCommand::HideAll;
+                self.apply(sections::VisibilitySection::HIDE_ALL, Edit::Set(hide))
+                    .await;
+            }
+            TrayCommand::Quit => {
+                let quit = self
+                    .handle
+                    .shared
+                    .quit
+                    .read()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .clone();
+                if let Some(quit) = quit {
+                    quit();
+                }
             }
         }
     }
@@ -862,8 +953,26 @@ impl PanelTask {
         let panel_chord = crate::operator::status::hotkey(ChordRole::Panel);
         Some(PanelNotice {
             text: parts.join(" · "),
-            key: reopen_chord(&panel_chord, &self.deps.chords.get()).to_string(),
+            key: reopen_hint(
+                &panel_chord,
+                &crate::operator::status::hotkey(ChordRole::Pause),
+                &self.deps.chords.get(),
+            ),
         })
+    }
+}
+
+fn reopen_hint(
+    panel: &crate::operator::status::HotkeyStatus,
+    pause: &crate::operator::status::HotkeyStatus,
+    chords: &HudChords,
+) -> String {
+    use crate::operator::status::HotkeyStatus;
+    if matches!(panel, HotkeyStatus::Failed { .. }) && matches!(pause, HotkeyStatus::Failed { .. })
+    {
+        "Tray → Open panel".to_owned()
+    } else {
+        reopen_chord(panel, chords).to_string()
     }
 }
 
@@ -894,6 +1003,11 @@ mod tests {
             reason: "in use".into(),
         };
         assert_eq!(reopen_chord(&failed, &chords), chords.pause);
+        assert_eq!(reopen_hint(&failed, &failed, &chords), "Tray → Open panel");
+        assert_eq!(
+            reopen_hint(&failed, &HotkeyStatus::NotApplicable, &chords),
+            chords.pause.to_string()
+        );
         assert_eq!(
             reopen_chord(&HotkeyStatus::NotApplicable, &chords),
             chords.panel

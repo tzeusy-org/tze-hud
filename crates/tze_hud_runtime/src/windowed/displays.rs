@@ -1302,12 +1302,16 @@ pub(super) fn take_dirty(flag: &DisplaysDirty) -> bool {
 /// hidden top-level window owned by a dedicated thread, blocked in
 /// `GetMessageW` (zero idle cost). Each change sets `dirty` and calls `wake`.
 ///
-/// Call once per process (from the first `resumed`): the thread, its window
-/// and the leaked `Watch` live for the rest of the process and are never torn
-/// down; the OS reclaims them at exit.
+/// Starts once per process, even across window-mode changes. Clean shutdown
+/// destroys the shared shell window and releases every native registration.
 #[cfg(target_os = "windows")]
 pub(super) fn spawn_display_change_watcher(dirty: DisplaysDirty, wake: impl Fn() + Send + 'static) {
+    use super::shell_presence::native::{self, Host};
     use windows::Win32::Foundation::{HANDLE, HWND, LPARAM, LRESULT, WPARAM};
+    static STARTED: AtomicBool = AtomicBool::new(false);
+    if STARTED.swap(true, Ordering::AcqRel) {
+        return;
+    }
     use windows::Win32::System::Power::{
         POWERBROADCAST_SETTING, RegisterPowerSettingNotification,
         UnregisterPowerSettingNotification,
@@ -1316,15 +1320,16 @@ pub(super) fn spawn_display_change_watcher(dirty: DisplaysDirty, wake: impl Fn()
     use windows::Win32::UI::WindowsAndMessaging::{
         CreateWindowExW, DEVICE_NOTIFY_WINDOW_HANDLE, DefWindowProcW, DispatchMessageW,
         GWLP_USERDATA, GetMessageW, GetWindowLongPtrW, MSG, PBT_APMRESUMEAUTOMATIC,
-        PBT_APMRESUMECRITICAL, PBT_APMRESUMESUSPEND, PBT_POWERSETTINGCHANGE, RegisterClassW,
-        SetWindowLongPtrW, WINDOW_EX_STYLE, WM_DISPLAYCHANGE, WM_POWERBROADCAST, WNDCLASSW,
-        WS_OVERLAPPED,
+        PBT_APMRESUMECRITICAL, PBT_APMRESUMESUSPEND, PBT_POWERSETTINGCHANGE, PostQuitMessage,
+        RegisterClassW, SetWindowLongPtrW, WINDOW_EX_STYLE, WM_DESTROY, WM_DISPLAYCHANGE,
+        WM_POWERBROADCAST, WNDCLASSW, WS_OVERLAPPED,
     };
     use windows::core::w;
 
     struct Watch {
         dirty: DisplaysDirty,
         wake: Box<dyn Fn() + Send>,
+        presence: Option<Host>,
     }
 
     unsafe extern "system" fn wndproc(
@@ -1333,6 +1338,21 @@ pub(super) fn spawn_display_change_watcher(dirty: DisplaysDirty, wake: impl Fn()
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> LRESULT {
+        // SAFETY: owned Box<Watch> lives through the message loop; early
+        // CreateWindow messages see zero. Shared access permits menu reentry.
+        let watch = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const Watch;
+        let watch = unsafe { watch.as_ref() };
+        if let Some(result) = watch
+            .and_then(|w| w.presence.as_ref())
+            .and_then(|host| host.message(msg, wparam, lparam))
+        {
+            return result;
+        }
+        if msg == WM_DESTROY {
+            // SAFETY: quit only this existing watcher thread's message loop.
+            unsafe { PostQuitMessage(0) };
+            return LRESULT(0);
+        }
         let resumed = msg == WM_POWERBROADCAST
             && matches!(
                 wparam.0 as u32,
@@ -1352,10 +1372,7 @@ pub(super) fn spawn_display_change_watcher(dirty: DisplaysDirty, wake: impl Fn()
             false
         };
         if msg == WM_DISPLAYCHANGE || resumed || display_on {
-            // SAFETY: GWLP_USERDATA holds the leaked `Watch` set right after
-            // CreateWindowExW, or 0 before then.
-            let watch = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } as *const Watch;
-            if let Some(watch) = unsafe { watch.as_ref() } {
+            if let Some(watch) = watch {
                 watch.dirty.store(true, Ordering::Release);
                 (watch.wake)();
             }
@@ -1385,7 +1402,7 @@ pub(super) fn spawn_display_change_watcher(dirty: DisplaysDirty, wake: impl Fn()
                     WINDOW_EX_STYLE::default(),
                     class,
                     w!(""),
-                    WS_OVERLAPPED,
+                    WS_OVERLAPPED, PostQuitMessage, WM_DESTROY,
                     0,
                     0,
                     0,
@@ -1403,12 +1420,14 @@ pub(super) fn spawn_display_change_watcher(dirty: DisplaysDirty, wake: impl Fn()
                     return;
                 }
             };
-            let watch = Box::into_raw(Box::new(Watch {
+            let watch = Box::new(Watch {
                 dirty,
                 wake: Box::new(wake),
-            }));
-            // SAFETY: the pointer stays valid for the thread's (process's) life.
-            unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, watch as isize) };
+                presence: native::bridge().map(|bridge| Host::new(hwnd, bridge)),
+            });
+            // SAFETY: the owned box outlives every DispatchMessage, including
+            // native menu reentry. It is dropped after message-loop teardown.
+            unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, (&*watch as *const Watch) as isize) };
             // SAFETY: the recipient is this thread's live hidden top-level window.
             let power_notification = unsafe {
                 RegisterPowerSettingNotification(HANDLE(hwnd.0), &GUID_CONSOLE_DISPLAY_STATE,
@@ -1422,6 +1441,11 @@ pub(super) fn spawn_display_change_watcher(dirty: DisplaysDirty, wake: impl Fn()
             while unsafe { GetMessageW(&mut msg, None, 0, 0) }.0 > 0 {
                 unsafe { DispatchMessageW(&msg) };
             }
+            if let Some(presence) = &watch.presence {
+                presence.stop();
+            }
+            // SAFETY: no message dispatch after this point can read Watch.
+            unsafe { SetWindowLongPtrW(hwnd, GWLP_USERDATA, 0) };
             if let Ok(notification) = power_notification {
                 // SAFETY: registration belongs to this thread and is no longer used.
                 let _ = unsafe { UnregisterPowerSettingNotification(notification) };

@@ -1216,7 +1216,7 @@ async fn poc_override_safe_mode_wins_with_hung_grpc_agent() {
         panic!("hud_input left its armed wait before owner action: {joined:?}");
     }
 
-    poc.hud.press_safe_mode_hotkey();
+    poc.hud.tray_command("pause");
     poc.wait_for("safe mode", |hud| hud.safe_mode_active())
         .await;
     assert_eq!(
@@ -1245,6 +1245,19 @@ async fn poc_override_safe_mode_wins_with_hung_grpc_agent() {
         0,
         "safe-mode exit leaves no leases suspended"
     );
+
+    // Both independent entry points work while winit is not being stepped.
+    // The menu's explicit Resume also closes a panel opened by the pause chord.
+    poc.hud.press_safe_mode_hotkey();
+    poc.wait_for("chord pause with the same hung agent", |hud| {
+        hud.safe_mode_active()
+    })
+    .await;
+    poc.hud.tray_command("resume");
+    poc.wait_for("tray resume and panel close", |hud| {
+        !hud.safe_mode_active() && !hud.control_panel_open()
+    })
+    .await;
 
     // The owner's Clear does not depend on the hung response stream.
     poc.open_panel().await;

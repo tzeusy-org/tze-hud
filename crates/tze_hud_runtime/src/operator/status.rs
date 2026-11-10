@@ -13,6 +13,29 @@ use tze_hud_scene::config::{ChordRole, SharedAgents};
 
 use crate::idle_efficiency::IdleEfficiencyCounters;
 
+/// Native desktop presence is admin-only and absent off Windows.
+fn tray_status() -> Value {
+    #[cfg(target_os = "windows")]
+    {
+        crate::windowed::shell_presence::tray_status()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        Value::Null
+    }
+}
+
+fn session_locked() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        crate::windowed::shell_presence::session_locked()
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        false
+    }
+}
+
 /// Build identity, registered once by the binary at startup.
 #[derive(Debug, Clone)]
 pub struct BuildInfo {
@@ -36,7 +59,7 @@ pub enum HotkeyStatus {
         chord: String,
     },
     /// The chord could not be registered (typically another program owns it);
-    /// for the pause chord the human override is then unavailable.
+    /// The tray remains an independent human pause path on Windows.
     Failed {
         chord: String,
         reason: String,
@@ -47,7 +70,7 @@ impl HotkeyStatus {
     /// One banner line for `role`'s chord, or `None` when there is nothing to say.
     pub fn banner_line(&self, role: ChordRole) -> Option<String> {
         let (label, does, lost) = match role {
-            ChordRole::Pause => ("safe", "pauses agents", "no human safe-mode override"),
+            ChordRole::Pause => ("safe", "pauses agents", "use the tray icon's Pause"),
             ChordRole::Panel => ("panel", "opens the control panel", "use the pause chord"),
             ChordRole::Pairing => ("pair", "opens Connect an agent", "use the control panel"),
             ChordRole::Answer => (
@@ -66,6 +89,24 @@ impl HotkeyStatus {
                 "   {label:<7}: WARNING hotkey {chord} NOT registered ({reason}); {lost}"
             )),
         }
+    }
+
+    pub(crate) fn failure_detail(&self, role: ChordRole) -> Option<String> {
+        match self {
+            Self::Failed { reason, .. } if role == ChordRole::Pause => {
+                Some(format!("{reason}; use the tray icon's Pause"))
+            }
+            Self::Failed { reason, .. } => Some(reason.clone()),
+            _ => None,
+        }
+    }
+
+    fn to_json_for(&self, role: ChordRole) -> Value {
+        let mut value = self.to_json();
+        if let Some(detail) = self.failure_detail(role) {
+            value["error"] = Value::String(detail);
+        }
+        value
     }
 
     /// A `*_hotkey` value for `/admin/status`: `null` when not applicable.
@@ -103,7 +144,7 @@ fn slot(role: ChordRole) -> usize {
 
 /// Record `role`'s registration outcome and log it. Updateable: the hotkey
 /// thread may report after the starter gave up waiting. A pause-chord failure
-/// is logged at error level because the human has no other override. A
+/// is logged at error level so the owner sees the tray fallback. A
 /// `Pending` never replaces a definitive outcome (the thread can win the race
 /// against the starter).
 pub fn set_hotkey(role: ChordRole, status: HotkeyStatus) -> HotkeyStatus {
@@ -120,7 +161,7 @@ pub fn set_hotkey(role: ChordRole, status: HotkeyStatus) -> HotkeyStatus {
     let key = role.config_key();
     match &status {
         HotkeyStatus::Failed { chord, reason } if role == ChordRole::Pause => {
-            tracing::error!(%chord, %reason, key, "safe-mode hotkey NOT registered: no human safe-mode override");
+            tracing::error!(%chord, %reason, key, "safe-mode hotkey NOT registered: use the tray icon's Pause");
         }
         HotkeyStatus::Failed { chord, reason } => {
             tracing::warn!(%chord, %reason, key, "global hotkey NOT registered");
@@ -450,10 +491,12 @@ impl StatusSource {
             "tailnet_inbound": tailnet_inbound.to_json(),
             "agents": agents,
             "safe_mode": self.safe_mode.load(Ordering::Relaxed),
-            "safe_mode_hotkey": hotkey(ChordRole::Pause).to_json(),
-            "panel_hotkey": hotkey(ChordRole::Panel).to_json(),
-            "pairing_hotkey": hotkey(ChordRole::Pairing).to_json(),
-            "answer_hotkey": hotkey(ChordRole::Answer).to_json(),
+            "tray": tray_status(),
+            "session_locked": session_locked(),
+            "safe_mode_hotkey": hotkey(ChordRole::Pause).to_json_for(ChordRole::Pause),
+            "panel_hotkey": hotkey(ChordRole::Panel).to_json_for(ChordRole::Panel),
+            "pairing_hotkey": hotkey(ChordRole::Pairing).to_json_for(ChordRole::Pairing),
+            "answer_hotkey": hotkey(ChordRole::Answer).to_json_for(ChordRole::Answer),
             "displays": displays,
             "unplaced_zones": unplaced_zones,
             "frames_presented": self.presents.as_ref().map(|c| c.snapshot().presents),
@@ -547,10 +590,20 @@ mod tests {
         );
         let line = failed().banner_line(ChordRole::Pause).unwrap();
         assert!(line.contains("NOT registered") && line.contains("already in use"));
+        assert!(line.contains("use the tray icon's Pause"));
+        assert_eq!(
+            failed().to_json_for(ChordRole::Pause)["error"],
+            "already in use; use the tray icon's Pause"
+        );
+        #[cfg(not(target_os = "windows"))]
+        {
+            assert_eq!(tray_status(), Value::Null);
+            assert!(!session_locked());
+        }
     }
 
-    #[test]
-    fn hotkey_status_updates_after_pending() {
+    #[tokio::test]
+    async fn hotkey_status_updates_after_pending() {
         let chord = || "Ctrl+Shift+F12".to_string();
         let pending = HotkeyStatus::Pending { chord: chord() };
         let ok = HotkeyStatus::Registered { chord: chord() };
@@ -586,6 +639,19 @@ mod tests {
         assert_eq!(hotkey(pause), ok);
         set_hotkey(pause, failed());
         assert_eq!(hotkey(pause), failed());
+        use crate::shell::control_panel::row::Section;
+        let input = crate::shell::control_panel::sections::InputSection::new(
+            crate::shell::control_panel::chords::ChordControl::new(Default::default(), None),
+            false,
+            None,
+        );
+        let row = input
+            .rows()
+            .await
+            .into_iter()
+            .find(|row| row.id == "input.pause_chord")
+            .unwrap();
+        assert!(row.detail.unwrap().contains("use the tray icon's Pause"));
         set_hotkey(pause, HotkeyStatus::NotApplicable);
     }
 }
