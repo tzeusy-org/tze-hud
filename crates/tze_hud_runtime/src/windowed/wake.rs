@@ -265,6 +265,8 @@ pub(super) struct WindowedWake {
     compositor_availability_waiting: Arc<AtomicBool>,
     compositor: CompositorWake,
     counters: Arc<IdleEfficiencyCounters>,
+    #[cfg(target_os = "windows")]
+    shell_changes: Arc<tokio::sync::Notify>,
 }
 
 impl WindowedWake {
@@ -277,6 +279,8 @@ impl WindowedWake {
             compositor_availability_waiting: Arc::new(AtomicBool::new(false)),
             compositor: CompositorWake::default(),
             counters: Arc::new(IdleEfficiencyCounters::default()),
+            #[cfg(target_os = "windows")]
+            shell_changes: Arc::new(tokio::sync::Notify::new()),
         }
     }
 
@@ -290,7 +294,14 @@ impl WindowedWake {
             compositor_availability_waiting: Arc::new(AtomicBool::new(false)),
             compositor: CompositorWake::default(),
             counters: Arc::new(IdleEfficiencyCounters::default()),
+            #[cfg(target_os = "windows")]
+            shell_changes: Arc::new(tokio::sync::Notify::new()),
         }
+    }
+
+    #[cfg(target_os = "windows")]
+    pub(super) fn shell_changes(&self) -> Arc<tokio::sync::Notify> {
+        Arc::clone(&self.shell_changes)
     }
 
     pub(super) fn render_notifier(&self) -> tze_hud_scene::render_wake::RenderWakeNotifier {
@@ -489,6 +500,8 @@ impl WindowedWake {
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         main_event.source = source;
         after_source_write();
+        #[cfg(target_os = "windows")]
+        self.shell_changes.notify_one();
         if !main_event.proxy_event_pending {
             main_event.proxy_event_pending = self
                 .proxy

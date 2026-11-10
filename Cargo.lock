@@ -3806,6 +3806,7 @@ dependencies = [
  "minisign-verify",
  "notify",
  "prost",
+ "resvg",
  "serde",
  "serde_json",
  "sha2",

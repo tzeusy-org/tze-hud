@@ -32,9 +32,17 @@ pub(crate) struct AgentEntry {
 }
 
 impl AgentEntry {
+    pub(crate) fn is_active(&self) -> bool {
+        active_agent(self.sessions, self.portals, self.holdings)
+    }
+
     pub(crate) fn holds_nothing(&self) -> bool {
         self.portals == 0 && self.holdings.is_empty()
     }
+}
+
+fn active_agent(sessions: usize, portals: usize, holdings: AgentHoldings) -> bool {
+    sessions > 0 || portals > 0 || !holdings.is_empty()
 }
 
 /// What a Clear removed.
@@ -58,6 +66,40 @@ pub(crate) struct AgentControl {
 }
 
 impl AgentControl {
+    #[cfg(target_os = "windows")]
+    pub(crate) async fn session_changes(&self) -> tokio::sync::watch::Receiver<()> {
+        self.shared.lock().await.sessions.subscribe_changes()
+    }
+
+    /// The same connected-or-showing set as the panel header, without reading
+    /// paired-only records from disk on each visual change.
+    #[cfg(target_os = "windows")]
+    pub(crate) async fn active_names(&self) -> Vec<String> {
+        let portals = self
+            .portals
+            .as_ref()
+            .and_then(|p| p.hub.lock().ok().map(|hub| hub.live_counts()))
+            .unwrap_or_default();
+        let shared = self.shared.lock().await;
+        let scene = self.scene.lock().await;
+        let ids: std::collections::BTreeSet<String> = scene
+            .agent_namespaces()
+            .into_iter()
+            .chain(shared.sessions.namespaces())
+            .chain(portals.keys().cloned())
+            .collect();
+        ids.into_iter()
+            .filter(|id| {
+                id != PORTAL_DRIVER_NAMESPACE
+                    && active_agent(
+                        shared.sessions.connected(id),
+                        portals.get(id).copied().unwrap_or(0),
+                        scene.agent_holdings(id),
+                    )
+            })
+            .collect()
+    }
+
     /// Every paired agent, and every other namespace that is connected or
     /// holds something, sorted by id.
     pub(crate) async fn roster(&self) -> Vec<AgentEntry> {

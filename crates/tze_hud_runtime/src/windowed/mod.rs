@@ -206,6 +206,8 @@ mod monitor_identity;
 mod network;
 mod panel_input;
 mod portal;
+#[cfg(any(target_os = "windows", test))]
+pub(crate) mod shell_presence;
 mod wake;
 mod widgets;
 
@@ -3097,6 +3099,15 @@ impl WindowedRuntime {
                     rt.rt.handle().clone(),
                 )
             });
+        #[cfg(target_os = "windows")]
+        if network_rt.is_none() {
+            // Native owner controls need their existing task even when both
+            // agent listeners are disabled. This remains the network runtime,
+            // not another shell/window thread.
+            network_rt = Some(NetworkRuntime::new()?);
+        }
+        #[cfg(target_os = "windows")]
+        let mut tray_deps = None;
         let control_panel = network_rt.as_ref().map(|rt| {
             let deps = crate::shell::control_panel::ControlPanelDeps {
                 scene: Arc::clone(&shared_scene),
@@ -3141,6 +3152,10 @@ impl WindowedRuntime {
                 render_wake: render_wake.clone(),
                 main_wake: wake.main_work_notifier(),
             };
+            #[cfg(target_os = "windows")]
+            {
+                tray_deps = Some(deps.clone());
+            }
             let sections = crate::shell::control_panel::default_sections(&deps);
             crate::shell::control_panel::spawn_control_panel(
                 rt.rt.handle(),
@@ -3150,6 +3165,20 @@ impl WindowedRuntime {
             )
         });
         let answer_keyboard = answer_focus::AnswerKeyboardState::default();
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(panel) = &control_panel {
+                panel.set_quit(Arc::clone(&quit));
+            }
+            let presence = shell_presence::native::Bridge::install(
+                control_panel.clone(),
+                shell_presence::GlyphColors::from_tokens(&appearance.live.resolved()),
+                Arc::clone(&quit),
+            );
+            if let (Some(rt), Some(deps)) = (&network_rt, tray_deps) {
+                presence.observe(rt.rt.handle(), deps, wake.shell_changes(), shutdown.clone());
+            }
+        }
         #[cfg(target_os = "windows")]
         if let Some(panel) = &control_panel {
             let panel = panel.clone();

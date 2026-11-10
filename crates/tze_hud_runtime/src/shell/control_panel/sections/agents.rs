@@ -84,10 +84,7 @@ fn count(n: usize, one: &str, many: &str) -> Option<String> {
 fn state_line(roster: &[AgentEntry]) -> String {
     let plural =
         |n: usize, one: &str, many: &str| format!("{n} {}", if n == 1 { one } else { many });
-    let active = roster
-        .iter()
-        .filter(|e| e.sessions > 0 || !e.holds_nothing())
-        .count();
+    let active = roster.iter().filter(|e| e.is_active()).count();
     let sum = |f: fn(&AgentEntry) -> usize| roster.iter().map(f).sum::<usize>();
     [
         plural(active, "agent", "agents"),

@@ -38,6 +38,7 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 toml = { workspace = true }
 notify = { workspace = true }
+resvg = { workspace = true }
 # Restart handoff nonce (OS CSPRNG) and its constant-time comparison; both are
 # already in the tree via tze_hud_portal / tze_hud_protocol.
 getrandom = { workspace = true }

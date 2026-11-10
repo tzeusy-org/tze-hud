@@ -231,6 +231,8 @@ impl Clone for AgentSession {
 #[derive(Default)]
 pub struct SessionRegistry {
     sessions: HashMap<String, AgentSession>,
+    /// Allocated only when an owner observes the connected-agent roster.
+    changes: Option<tokio::sync::watch::Sender<()>>,
     /// Observers of the full normal cleanup boundary, never a cleanup trigger.
     #[cfg(test)]
     cleanup_observers: HashMap<SceneId, Vec<tokio::sync::oneshot::Sender<()>>>,
@@ -243,6 +245,20 @@ pub struct SessionRegistry {
 impl SessionRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Subscribe before reading the initial roster. Notices coalesce; readers
+    /// inspect the current registry after each change, without scheduling frames.
+    pub fn subscribe_changes(&mut self) -> tokio::sync::watch::Receiver<()> {
+        self.changes
+            .get_or_insert_with(|| tokio::sync::watch::channel(()).0)
+            .subscribe()
+    }
+
+    fn notify_changed(&self) {
+        if let Some(changes) = &self.changes {
+            changes.send_replace(());
+        }
     }
 
     /// Register a session for an authenticated agent. `closer` is what
@@ -265,11 +281,16 @@ impl SessionRegistry {
             closer,
         };
         self.sessions.insert(session_id, session.clone());
+        self.notify_changed();
         session
     }
 
     pub fn remove_session(&mut self, session_id: &str) -> Option<AgentSession> {
-        self.sessions.remove(session_id)
+        let removed = self.sessions.remove(session_id);
+        if removed.is_some() {
+            self.notify_changed();
+        }
+        removed
     }
 
     #[cfg(test)]
@@ -394,7 +415,11 @@ impl SessionRegistry {
     pub fn remove_closed(&mut self, signal: &SessionCloseSignal) -> usize {
         let before = self.sessions.len();
         self.sessions.retain(|_, s| !signal.is_for(&s.closer));
-        before - self.sessions.len()
+        let removed = before - self.sessions.len();
+        if removed > 0 {
+            self.notify_changed();
+        }
+        removed
     }
 
     /// Register the `ServerMessage` sender for an existing session.

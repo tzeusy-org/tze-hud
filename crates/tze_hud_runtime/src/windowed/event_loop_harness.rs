@@ -569,6 +569,23 @@ impl HeadlessEventLoopHarness {
         self.press_chord(tze_hud_scene::config::ChordRole::Pause);
     }
 
+    /// Feed the same explicit menu intent as the native tray callback, without
+    /// advancing the winit harness. The real panel task applies it asynchronously.
+    pub fn tray_command(&self, action: &str) {
+        use crate::shell::control_panel::{PanelEvent, TrayCommand};
+        let command = match action {
+            "toggle_panel" => TrayCommand::TogglePanel,
+            "open_panel" => TrayCommand::OpenPanel,
+            "pause" => TrayCommand::Pause,
+            "resume" => TrayCommand::Resume,
+            "hide_all" => TrayCommand::HideAll,
+            "show_all" => TrayCommand::ShowAll,
+            "quit" => TrayCommand::Quit,
+            _ => panic!("unknown tray test command"),
+        };
+        assert!(self.control_panel().send(PanelEvent::Tray(command)));
+    }
+
     /// Press one of the HUD's global chords.
     pub fn press_chord(&self, role: tze_hud_scene::config::ChordRole) {
         let panel = self
