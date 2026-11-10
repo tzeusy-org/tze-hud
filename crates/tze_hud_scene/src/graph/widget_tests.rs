@@ -2009,4 +2009,52 @@ fn scheduled_widget_snapshots_at_late_apply_and_clear_cancels_only_its_publisher
     scene.clear_widget_for_publisher("gauge", "a").unwrap();
     assert!(scene.scheduled_batches.is_empty());
     assert_eq!(scene.next_timed_content_wall_us(), None);
+
+    // Terminal ownership ends even while a due batch is waiting for resume.
+    // Revocation and the suspension safety bound share the same cleanup seam.
+    for suspension_timeout in [false, true] {
+        let (mut scene, _, clock) = scene_with_gauge_and_clock(ContentionPolicy::LatestWins);
+        add_test_deadline(&mut scene);
+        let lease = scene.grant_lease("a", 86_400_000);
+        let mut owned = make_batch("a");
+        owned.lease_id = Some(lease);
+        let peer = make_batch("b");
+        let peer_id = peer.batch_id;
+        let peer_origin = SceneId::new();
+        let due = clock.now_us() + 10_000_000;
+        scene.schedule_batch(due, owned);
+        scene.schedule_batch_for_origin(due, peer, Some(peer_origin));
+        scene.pause_widget_ttls();
+        scene.suspend_all_leases(clock.now_millis());
+        clock.advance(if suspension_timeout {
+            SceneGraph::DEFAULT_MAX_SUSPENSION_MS + 1
+        } else {
+            10_000
+        });
+        assert!(scene.apply_due_batches().is_empty());
+        assert_eq!(scene.scheduled_batches.len(), 2);
+        if suspension_timeout {
+            let expired = scene.expire_leases();
+            assert_eq!(expired.len(), 1);
+            assert_eq!(expired[0].lease_id, lease);
+        } else {
+            scene.revoke_lease(lease).unwrap();
+        }
+        assert_eq!(scene.scheduled_batches.len(), 1);
+        assert_eq!(scene.scheduled_batches[0].batch.batch_id, peer_id);
+        assert_eq!(scene.agent_holdings("a").widgets, 0);
+        assert_eq!(scene.agent_holdings("b").widgets, 1);
+        assert_eq!(scene.next_timed_content_wall_us(), None);
+        scene.resume_all_leases(clock.now_millis());
+        scene.resume_widget_ttls();
+        let results = scene.apply_due_batches();
+        assert_eq!(results.len(), 1);
+        assert!(results[0].applied);
+        let records = scene.widget_registry.active_for_widget("gauge");
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].publisher_namespace, "b");
+        assert_eq!(records[0].publication_origin, Some(peer_origin));
+        assert!(scene.apply_due_batches().is_empty());
+        assert_eq!(scene.agent_holdings("a").widgets, 0);
+    }
 }

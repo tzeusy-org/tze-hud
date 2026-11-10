@@ -649,14 +649,18 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
 
 def test_borrowed_url_routes_only_authorized_publications_and_own_cleanup(monkeypatch, capsys):
     import json
+    import tomllib
 
     scripts = Path(__file__).resolve().parents[2] / ".claude/skills/user-test/scripts"
     monkeypatch.syspath_prepend(str(scripts))
     import hud_env
 
     trace, held, faults = [], set(), {}
+    config = tomllib.loads((Path(__file__).resolve().parents[2]
+                           / "app/tze_hud_app/config/production.toml").read_text())
     entries = [{"s": "zone:subtitle", "accepts": "text"},
-               *[{"s": "widget:" + name} for name in ("main-gauge", "main-progress", "main-status")]]
+               *[{"s": "widget:" + widget["instance_id"]}
+                 for tab in config["tabs"] for widget in tab.get("widgets", [])]]
     key = "synthetic-live-smoke-key"
     monkeypatch.setattr(hud_env, "load_psk", lambda selected: key if selected == "http://paired:9090/mcp" else pytest.fail("wrong pairing"))
 
