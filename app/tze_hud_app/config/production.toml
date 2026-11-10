@@ -115,6 +115,21 @@ y_pct      = 0.02
 width_pct  = 0.125
 height_pct = 0.0861111
 
+# ── Countdown widget instance ─────────────────────────────────────────────────
+# Model parameters: ends_in_ms (integer deadline<=24h), label, severity.
+# Starts counting on presentation; stays at 0:00 until clear/expiry. No idle
+# countdown wake until published. KPI and stepper are bundles only.
+# Left of the progress card, clear of the subtitle zone; 360x124 logical px.
+[[tabs.widgets]]
+widget_type = "countdown"
+instance_id = "main-countdown"
+
+[tabs.widgets.geometry]
+x_pct = 0.26
+y_pct = 0.78
+width_pct = 0.140625
+height_pct = 0.0861111
+
 # ── Agents ────────────────────────────────────────────────────────────────────
 # Agents are not configured here. Pairing adds each agent's PSK SHA-256 and
 # `allow` list to agents.toml next to this file.

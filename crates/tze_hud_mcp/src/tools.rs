@@ -210,7 +210,9 @@ fn widget_expires_in(
         .into_iter()
         .flatten()
         .filter(|r| r.publisher_namespace == ns)
-        .filter_map(|r| remaining_ms(scene.widget_expiry(r), now))
+        .map(|r| scene.widget_expiry(r))
+        .chain(scene.scheduled_widget_publication_expiries(widget, ns))
+        .filter_map(|expiry| remaining_ms(expiry, now))
         .max()
 }
 
@@ -282,6 +284,7 @@ fn widget_params(scene: &SceneGraph, instance: &str) -> Value {
         }
         let c = d.constraints.as_ref();
         let ty = match d.param_type {
+            WidgetParamType::Deadline => "deadline<=24h".into(),
             WidgetParamType::F32 => match (c.and_then(|c| c.f32_min), c.and_then(|c| c.f32_max)) {
                 (Some(lo), Some(hi)) => format!("number {lo}..{hi}"),
                 _ => "number".into(),
@@ -716,6 +719,13 @@ async fn publish_zone(ctx: &ToolCtx<'_>, zone: &str, p: PublishParams) -> McpRes
 
 async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> McpResult<Value> {
     let ns = ctx.agent.agent_id.clone();
+    let delay_ms = p.delay_ms.unwrap_or(0);
+    if delay_ms > MAX_DELAY_MS {
+        return Err(tool_err(
+            "TIMESTAMP_TOO_FUTURE",
+            format!("delay_ms is at most {MAX_DELAY_MS}"),
+        ));
+    }
     let params = p
         .params
         .ok_or_else(|| invalid("widget publish needs params; see params in hud_surfaces"))?;
@@ -738,7 +748,41 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
         .map_err(|e| scene_error(&e))?;
     let lease_id = ensure_lease(ctx, &mut scene)?;
     let ttl_ms = p.ttl_ms.unwrap_or(0);
-    let expires = (ttl_ms > 0).then(|| now_us(&scene).saturating_add(ttl_ms * 1_000));
+    let now = now_us(&scene);
+    let ttl_us = (ttl_ms > 0).then(|| ttl_ms.saturating_mul(1_000));
+    if delay_ms > 0 {
+        let present_at = now.saturating_add(delay_ms.saturating_mul(1_000));
+        let owner_ttl = scene
+            .widget_registry
+            .instances
+            .get(widget)
+            .and_then(|instance| instance.auto_clear_ms)
+            .map(|ms| ms.saturating_mul(1_000));
+        let expiry = match (ttl_us, owner_ttl) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+        .map(|ttl| present_at.saturating_add(ttl));
+        scene.schedule_batch(
+            present_at,
+            MutationBatch {
+                batch_id: SceneId::new(),
+                agent_namespace: ns,
+                mutations: vec![SceneMutation::PublishToWidget {
+                    widget_name: widget.into(),
+                    params: typed,
+                    merge_key: p.key,
+                    transition_ms: ctx.widget_transition_ms,
+                    ttl_us,
+                    expires_at_wall_us: None,
+                }],
+                timing_hints: None,
+                lease_id: Some(lease_id),
+            },
+        );
+        return Ok(ok_with_expiry(remaining_ms(expiry, now)));
+    }
+    let expires = ttl_us.map(|ttl| now.saturating_add(ttl));
     let key = p.key.clone();
     scene
         .publish_to_widget_for_lease(
@@ -1459,6 +1503,11 @@ fn json_to_widget_param_value(
         })?;
     SceneGraph::validate_widget_param_audience(widget_name, decl).map_err(|e| scene_error(&e))?;
     Ok(match decl.param_type {
+        WidgetParamType::Deadline => {
+            WidgetParameterValue::Deadline(tze_hud_scene::WidgetDeadline::relative(
+                v.as_i64().ok_or_else(|| bad(&decl.value_hint()))?,
+            ))
+        }
         WidgetParamType::F32 => {
             let number = v.as_f64().ok_or_else(|| bad(&decl.value_hint()))?;
             WidgetParameterValue::F32(

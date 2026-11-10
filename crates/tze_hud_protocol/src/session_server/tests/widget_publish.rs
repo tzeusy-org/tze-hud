@@ -29,6 +29,16 @@ async fn test_durable_widget_publish_receives_result() {
                 ),
                 constraints: None,
             });
+        def.parameter_schema
+            .push(tze_hud_scene::WidgetParameterDeclaration {
+                name: "ends_in_ms".into(),
+                audience: Default::default(),
+                param_type: tze_hud_scene::WidgetParamType::Deadline,
+                default_value: tze_hud_scene::WidgetParameterValue::Deadline(
+                    tze_hud_scene::WidgetDeadline::relative(0),
+                ),
+                constraints: None,
+            });
         for (name, audience) in [
             ("fill_color", tze_hud_scene::WidgetParamAudience::Owner),
             ("theme", tze_hud_scene::WidgetParamAudience::Owner),
@@ -104,6 +114,14 @@ async fn test_durable_widget_publish_receives_result() {
     let mut bad: Vec<_> = vec![
         ("level", Param::F32Value(-0.1), "0..1"),
         ("level", Param::F32Value(1.1), "0..1"),
+        ("ends_in_ms", Param::DeadlineMs(-1), "deadline<=24h"),
+        ("ends_in_ms", Param::DeadlineMs(86400001), "deadline<=24h"),
+        ("ends_in_ms", Param::F32Value(1.5), "deadline<=24h"),
+        (
+            "ends_in_ms",
+            Param::StringValue("300000".into()),
+            "deadline<=24h",
+        ),
         ("level", Param::F32Value(f32::NAN), "finite"),
         ("level", Param::F32Value(f32::INFINITY), "finite"),
         ("fill_color", Param::F32Value(0.5), "severity"),
@@ -134,6 +152,7 @@ async fn test_durable_widget_publish_receives_result() {
         ("theme", "owner-set"),
         ("tooltip_visible", "runtime-set"),
         ("level", "f32"),
+        ("ends_in_ms", "deadline<=24h"),
     ] {
         bad.push((name, None, hint));
     }

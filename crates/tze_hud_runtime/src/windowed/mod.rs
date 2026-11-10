@@ -1909,6 +1909,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             let scene_deadline_wall_us = scene
                                 .next_publication_expiry_wall_us()
                                 .into_iter()
+                                .chain(compositor.next_widget_deadline_wall_us(&scene))
                                 .chain(scene.next_timed_content_wall_us())
                                 .chain(
                                     scene

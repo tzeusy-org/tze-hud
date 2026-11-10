@@ -21,6 +21,7 @@ pub mod test_scenes;
 pub mod timing;
 pub mod types;
 pub mod validation;
+pub mod widget_deadline;
 
 // ── v1 subsystem trait contracts ─────────────────────────────────────────────
 pub mod config;
@@ -62,6 +63,7 @@ pub use test_scenes::{
 pub use timing::{MonoUs, WallUs};
 pub use types::*;
 pub use validation::{BatchRejected, BatchValidationError, ValidationError, ValidationErrorCode};
+pub use widget_deadline::WidgetDeadline;
 
 // ── Lease governance public API ───────────────────────────────────────────────
 pub use lease::degradation::DegradationLevel;

@@ -400,19 +400,44 @@ fn publish_widget(
         };
         params.insert(name, value);
     }
+    // Reject malformed parameters before scheduling, then validate again on
+    // atomic application against the current declaration and lease state.
+    let params = match scene.validate_widget_params(widget, &params) {
+        Ok(params) => params,
+        Err(error) => return fail(seq, validation_error_code(&error), error.to_string()),
+    };
     let now = scene.now_wall_us();
-    match scene.publish_to_widget_for_origin(
-        widget,
-        params,
-        &session.namespace,
-        (!publish.key.is_empty()).then(|| publish.key.clone()),
-        publish.transition_ms,
-        expires_at_wall_us(publish, now),
-        None,
-        Some(session.publication_origin),
-    ) {
-        Ok(_) => ok(seq),
-        Err(e) => fail(seq, validation_error_code(&e), e.to_string()),
+    // Widget existence was already checked by typed admission above.
+    if let Some((code, message)) = timing_error(publish, now, widget, true) {
+        return fail(seq, code, message);
+    }
+    let batch = SceneMutationBatch {
+        batch_id: SceneId::new(),
+        agent_namespace: session.namespace.clone(),
+        mutations: vec![SceneMutation::PublishToWidget {
+            widget_name: widget.into(),
+            params,
+            merge_key: (!publish.key.is_empty()).then(|| publish.key.clone()),
+            transition_ms: publish.transition_ms,
+            ttl_us: (publish.ttl_ms > 0).then(|| publish.ttl_ms.saturating_mul(1_000)),
+            expires_at_wall_us: (publish.expires_at_us > 0).then_some(publish.expires_at_us),
+        }],
+        timing_hints: None,
+        lease_id: None,
+    };
+    if publish.present_at_us > now {
+        scene.schedule_batch_for_origin(
+            publish.present_at_us,
+            batch,
+            Some(session.publication_origin),
+        );
+        return ok(seq);
+    }
+    let result = scene.apply_batch_for_origin(&batch, Some(session.publication_origin));
+    match result.error {
+        None if result.applied => ok(seq),
+        Some(error) => fail(seq, validation_error_code(&error), error.to_string()),
+        None => fail(seq, "INTERNAL", "widget publish was not applied"),
     }
 }
 

@@ -1,0 +1,55 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="124" viewBox="0 0 360 124">
+<rect id="card" data-role="backdrop" x="0.5" y="0.5" width="359" height="75" rx="{{token.shape.m}}" fill="{{token.color.surface.container.high}}" fill-opacity="{{token.opacity.surface}}" stroke="{{token.color.outline.variant}}" stroke-width="{{token.stroke.border.width}}"/>
+<text id="label" x="16" y="27" font-family="{{token.type.title.m.family}}, sans-serif" font-size="{{token.type.title.m.size}}" fill="{{token.color.on_surface}}"></text>
+<!-- Exclusive current/previous branches avoid colored antialias fringes. -->
+<g id="total-1"><circle id="empty-1" cx="20" cy="54" r="6" fill="{{token.color.outline.variant}}"/><g id="filled-1">
+<g id="past-step-1"><g id="past-total-1"><circle id="past-1" cx="20" cy="54" r="6" fill="{{token.color.primary}}"/></g></g>
+<g id="current-step-1"><circle id="current-a-1" cx="20" cy="54" r="6" fill="{{token.color.primary}}"/></g>
+<g id="clamped-step-1"><g id="clamped-total-1"><circle id="current-b-1" cx="20" cy="54" r="6" fill="{{token.color.primary}}"/></g></g></g></g>
+<g id="total-2"><circle id="empty-2" cx="49" cy="54" r="6" fill="{{token.color.outline.variant}}"/><g id="filled-2">
+<g id="past-step-2"><g id="past-total-2"><circle id="past-2" cx="49" cy="54" r="6" fill="{{token.color.primary}}"/></g></g>
+<g id="current-step-2"><circle id="current-a-2" cx="49" cy="54" r="6" fill="{{token.color.primary}}"/></g>
+<g id="clamped-step-2"><g id="clamped-total-2"><circle id="current-b-2" cx="49" cy="54" r="6" fill="{{token.color.primary}}"/></g></g></g></g>
+<g id="total-3"><circle id="empty-3" cx="78" cy="54" r="6" fill="{{token.color.outline.variant}}"/><g id="filled-3">
+<g id="past-step-3"><g id="past-total-3"><circle id="past-3" cx="78" cy="54" r="6" fill="{{token.color.primary}}"/></g></g>
+<g id="current-step-3"><circle id="current-a-3" cx="78" cy="54" r="6" fill="{{token.color.primary}}"/></g>
+<g id="clamped-step-3"><g id="clamped-total-3"><circle id="current-b-3" cx="78" cy="54" r="6" fill="{{token.color.primary}}"/></g></g></g></g>
+<g id="total-4"><circle id="empty-4" cx="107" cy="54" r="6" fill="{{token.color.outline.variant}}"/><g id="filled-4">
+<g id="past-step-4"><g id="past-total-4"><circle id="past-4" cx="107" cy="54" r="6" fill="{{token.color.primary}}"/></g></g>
+<g id="current-step-4"><circle id="current-a-4" cx="107" cy="54" r="6" fill="{{token.color.primary}}"/></g>
+<g id="clamped-step-4"><g id="clamped-total-4"><circle id="current-b-4" cx="107" cy="54" r="6" fill="{{token.color.primary}}"/></g></g></g></g>
+<g id="total-5"><circle id="empty-5" cx="136" cy="54" r="6" fill="{{token.color.outline.variant}}"/><g id="filled-5">
+<g id="past-step-5"><g id="past-total-5"><circle id="past-5" cx="136" cy="54" r="6" fill="{{token.color.primary}}"/></g></g>
+<g id="current-step-5"><circle id="current-a-5" cx="136" cy="54" r="6" fill="{{token.color.primary}}"/></g>
+<g id="clamped-step-5"><g id="clamped-total-5"><circle id="current-b-5" cx="136" cy="54" r="6" fill="{{token.color.primary}}"/></g></g></g></g>
+<g id="total-6"><circle id="empty-6" cx="165" cy="54" r="6" fill="{{token.color.outline.variant}}"/><g id="filled-6">
+<g id="past-step-6"><g id="past-total-6"><circle id="past-6" cx="165" cy="54" r="6" fill="{{token.color.primary}}"/></g></g>
+<g id="current-step-6"><circle id="current-a-6" cx="165" cy="54" r="6" fill="{{token.color.primary}}"/></g>
+<g id="clamped-step-6"><g id="clamped-total-6"><circle id="current-b-6" cx="165" cy="54" r="6" fill="{{token.color.primary}}"/></g></g></g></g>
+<g id="total-7"><circle id="empty-7" cx="194" cy="54" r="6" fill="{{token.color.outline.variant}}"/><g id="filled-7">
+<g id="past-step-7"><g id="past-total-7"><circle id="past-7" cx="194" cy="54" r="6" fill="{{token.color.primary}}"/></g></g>
+<g id="current-step-7"><circle id="current-a-7" cx="194" cy="54" r="6" fill="{{token.color.primary}}"/></g>
+<g id="clamped-step-7"><g id="clamped-total-7"><circle id="current-b-7" cx="194" cy="54" r="6" fill="{{token.color.primary}}"/></g></g></g></g>
+<g id="total-8"><circle id="empty-8" cx="223" cy="54" r="6" fill="{{token.color.outline.variant}}"/><g id="filled-8">
+<g id="past-step-8"><g id="past-total-8"><circle id="past-8" cx="223" cy="54" r="6" fill="{{token.color.primary}}"/></g></g>
+<g id="current-step-8"><circle id="current-a-8" cx="223" cy="54" r="6" fill="{{token.color.primary}}"/></g>
+<g id="clamped-step-8"><g id="clamped-total-8"><circle id="current-b-8" cx="223" cy="54" r="6" fill="{{token.color.primary}}"/></g></g></g></g>
+<g id="total-9"><circle id="empty-9" cx="252" cy="54" r="6" fill="{{token.color.outline.variant}}"/><g id="filled-9">
+<g id="past-step-9"><g id="past-total-9"><circle id="past-9" cx="252" cy="54" r="6" fill="{{token.color.primary}}"/></g></g>
+<g id="current-step-9"><circle id="current-a-9" cx="252" cy="54" r="6" fill="{{token.color.primary}}"/></g>
+<g id="clamped-step-9"><g id="clamped-total-9"><circle id="current-b-9" cx="252" cy="54" r="6" fill="{{token.color.primary}}"/></g></g></g></g>
+<g id="total-10"><circle id="empty-10" cx="281" cy="54" r="6" fill="{{token.color.outline.variant}}"/><g id="filled-10">
+<g id="past-step-10"><g id="past-total-10"><circle id="past-10" cx="281" cy="54" r="6" fill="{{token.color.primary}}"/></g></g>
+<g id="current-step-10"><circle id="current-a-10" cx="281" cy="54" r="6" fill="{{token.color.primary}}"/></g>
+<g id="clamped-step-10"><g id="clamped-total-10"><circle id="current-b-10" cx="281" cy="54" r="6" fill="{{token.color.primary}}"/></g></g></g></g>
+<g id="total-11"><circle id="empty-11" cx="310" cy="54" r="6" fill="{{token.color.outline.variant}}"/><g id="filled-11">
+<g id="past-step-11"><g id="past-total-11"><circle id="past-11" cx="310" cy="54" r="6" fill="{{token.color.primary}}"/></g></g>
+<g id="current-step-11"><circle id="current-a-11" cx="310" cy="54" r="6" fill="{{token.color.primary}}"/></g>
+<g id="clamped-step-11"><g id="clamped-total-11"><circle id="current-b-11" cx="310" cy="54" r="6" fill="{{token.color.primary}}"/></g></g></g></g>
+<g id="total-12"><circle id="empty-12" cx="339" cy="54" r="6" fill="{{token.color.outline.variant}}"/><g id="filled-12">
+<g id="past-step-12"><g id="past-total-12"><circle id="past-12" cx="339" cy="54" r="6" fill="{{token.color.primary}}"/></g></g>
+<g id="current-step-12"><circle id="current-a-12" cx="339" cy="54" r="6" fill="{{token.color.primary}}"/></g>
+<g id="clamped-step-12"><g id="clamped-total-12"><circle id="current-b-12" cx="339" cy="54" r="6" fill="{{token.color.primary}}"/></g></g></g></g>
+<g id="tooltip" opacity="0"><rect x="0.5" y="82.5" width="359" height="41" rx="{{token.shape.s}}" fill="{{token.color.surface.container.highest}}" stroke="{{token.color.outline.variant}}" stroke-width="{{token.stroke.border.width}}"/>
+<text id="tooltip-label" x="16" y="109" font-family="{{token.type.body.m.family}}, sans-serif" font-size="{{token.type.body.m.size}}" fill="{{token.color.on_surface}}"></text>
+</g></svg>

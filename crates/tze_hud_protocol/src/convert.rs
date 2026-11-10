@@ -714,6 +714,9 @@ pub fn proto_to_widget_param_value(
 ) -> Option<(String, WidgetParameterValue)> {
     use proto::widget_parameter_value_proto::Value;
     let value = match p.value.as_ref()? {
+        Value::DeadlineMs(ms) => {
+            WidgetParameterValue::Deadline(tze_hud_scene::WidgetDeadline::relative(*ms))
+        }
         Value::F32Value(f) => WidgetParameterValue::F32(*f),
         Value::StringValue(s) => WidgetParameterValue::String(s.clone()),
         Value::ColorValue(c) => WidgetParameterValue::Color(Rgba::new(c.r, c.g, c.b, c.a)),

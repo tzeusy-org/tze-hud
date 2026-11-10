@@ -2432,6 +2432,8 @@ pub const WIDGET_TILE_Z_MIN: u32 = 0x9000_0000;
 /// Parameter types supported by the widget system in v1.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum WidgetParamType {
+    /// Integer relative milliseconds, snapshotted to wall time on presentation.
+    Deadline,
     /// IEEE 754 32-bit float, range-clamped to [min, max].
     F32,
     /// UTF-8 string, max 1024 bytes by default.
@@ -2451,6 +2453,7 @@ pub enum WidgetParamType {
 ///   corresponding `WidgetParamConstraints`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum WidgetParameterValue {
+    Deadline(crate::WidgetDeadline),
     F32(f32),
     String(std::string::String),
     /// RGBA color as 4x u8 in [0, 255].
@@ -2502,6 +2505,7 @@ impl WidgetParameterDeclaration {
     pub fn value_hint(&self) -> std::string::String {
         let constraints = self.constraints.as_ref();
         match self.param_type {
+            WidgetParamType::Deadline => "deadline<=24h (integer milliseconds 0..86400000)".into(),
             WidgetParamType::F32 => {
                 let min = constraints.and_then(|c| c.f32_min);
                 let max = constraints.and_then(|c| c.f32_max);
@@ -2533,6 +2537,12 @@ impl WidgetParameterDeclaration {
 /// How a parameter value is mapped to an SVG attribute.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum WidgetBindingMapping {
+    /// f32 parameter: opacity/visibility switches on at the inclusive threshold.
+    Threshold {
+        threshold: f32,
+        below: f32,
+        at_or_above: f32,
+    },
     /// f32 parameter: maps [min, max] range to [attr_min, attr_max] via linear interpolation.
     Linear { attr_min: f32, attr_max: f32 },
     /// String and Color parameters: use the value as-is.
@@ -2662,6 +2672,9 @@ pub struct WidgetInstance {
 /// A recorded widget publication (the third level of the widget ontology).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct WidgetPublishRecord {
+    /// Completed safe-mode time excluded from the owner's auto-clear limit.
+    #[serde(default)]
+    pub ttl_paused_us: u64,
     /// Instance addressing key.
     pub widget_name: std::string::String,
     pub publisher_namespace: std::string::String,

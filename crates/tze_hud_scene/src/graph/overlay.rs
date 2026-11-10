@@ -50,6 +50,9 @@ pub struct WidgetGeometry {
 /// clears them; the runtime drains pending SVG assets before the render loop.
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct RuntimeOverlayState {
+    /// Current global safe-mode pause, independent of wall-time countdowns.
+    #[serde(skip, default)]
+    pub widget_ttls_paused_at_wall_us: Option<u64>,
     /// Owner placement of a zone slot for this runtime session, independent
     /// of publications. Restart and the human Reset restore its policy.
     #[serde(skip, default)]

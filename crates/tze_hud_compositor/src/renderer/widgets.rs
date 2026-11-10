@@ -1,11 +1,47 @@
 //! Widget renderer methods for the compositor.
 
 use tze_hud_scene::DegradationLevel;
+use tze_hud_scene::WidgetParameterValue;
 use tze_hud_scene::graph::SceneGraph;
+use tze_hud_scene::widget_deadline::widget_params_at;
 
 use crate::widget::WidgetRenderer;
 
 impl super::Compositor {
+    /// Countdowns are a one-shot display deadline, never a frame-rate animation.
+    pub fn next_widget_deadline_wall_us(&self, scene: &SceneGraph) -> Option<u64> {
+        if self.safe_mode_overlay {
+            None
+        } else {
+            scene.next_widget_deadline_wall_us()
+        }
+    }
+
+    /// The idle gate runs before texture sync. Compare the text that would be
+    /// drawn now against the last submitted widget parameters before parking.
+    pub fn widget_deadline_needs_render(&self, scene: &SceneGraph) -> bool {
+        if self.safe_mode_overlay || scene.widget_time_paused() || !scene.widgets_shown() {
+            return false;
+        }
+        let Some(renderer) = self.widget_renderer.as_ref() else {
+            return false;
+        };
+        let now = scene.now_wall_us();
+        scene.widget_registry.instances.values().any(|instance| {
+            scene.widget_visible(instance)
+                && instance.current_params.iter().any(|(name, value)| {
+                    let WidgetParameterValue::Deadline(deadline) = value else {
+                        return false;
+                    };
+                    let displayed = WidgetParameterValue::String(deadline.display_at(now));
+                    renderer
+                        .texture_entry(&instance.instance_name)
+                        .and_then(|e| e.last_rendered_params.get(name))
+                        != Some(&displayed)
+                })
+        })
+    }
+
     /// Initialize (or re-initialize) the widget renderer for the given surface format.
     ///
     /// Must be called once before widget textures can be composited. For headless
@@ -58,6 +94,7 @@ impl super::Compositor {
         scene: &SceneGraph,
         degradation_level: DegradationLevel,
     ) {
+        let countdowns_paused = self.safe_mode_overlay || scene.widget_time_paused();
         let wr = match &mut self.widget_renderer {
             Some(r) => r,
             None => return,
@@ -124,7 +161,25 @@ impl super::Compositor {
             let needs_initial = wr.texture_entry(&instance_name).is_none();
 
             // Resolve animated or static params, applying degradation-aware snapping.
-            let current_params = &instance.current_params;
+            let has_deadline = instance
+                .current_params
+                .values()
+                .any(|v| matches!(v, WidgetParameterValue::Deadline(_)));
+            if has_deadline && !scene.widget_visible(&instance) {
+                wr.remove_texture(&instance_name);
+                continue;
+            }
+            if has_deadline && countdowns_paused {
+                // Leave the last pixels in place. Resume is an existing render
+                // event; no timer or repeated overdue repaint is needed.
+                if let Some(entry) = wr.texture_entry_mut(&instance_name) {
+                    entry.animation = None;
+                }
+                continue;
+            }
+            let projected = has_deadline
+                .then(|| widget_params_at(&instance.current_params, scene.now_wall_us()));
+            let current_params = projected.as_ref().unwrap_or(&instance.current_params);
 
             // A published change on an already-visible widget starts a
             // transition of the newest publication's `transition_ms`, from
@@ -145,7 +200,13 @@ impl super::Compositor {
                     .animation
                     .as_ref()
                     .map_or(&entry.last_rendered_params, |a| &a.to_params);
-                if target != current_params {
+                let interpolated_change = current_params.iter().any(|(name, value)| {
+                    matches!(
+                        value,
+                        WidgetParameterValue::F32(_) | WidgetParameterValue::Color(_)
+                    ) && target.get(name).is_some_and(|old| old != value)
+                });
+                if interpolated_change {
                     let from = entry.last_rendered_params.clone();
                     wr.start_transition(
                         &instance_name,
@@ -154,6 +215,13 @@ impl super::Compositor {
                         transition_ms,
                         now_us,
                     );
+                } else if let Some(animation) = wr
+                    .texture_entry_mut(&instance_name)
+                    .and_then(|e| e.animation.as_mut())
+                {
+                    // Text and enums snap even during a running numeric
+                    // transition; changing countdown text never restarts it.
+                    animation.to_params.clone_from(current_params);
                 }
             }
             let (effective_params, still_animating) = wr.resolve_animated_params(

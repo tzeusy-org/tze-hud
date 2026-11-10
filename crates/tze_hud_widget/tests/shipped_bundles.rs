@@ -382,6 +382,9 @@ fn shipped_bundles_have_no_hardcoded_hex_colors() {
             &["track.svg", "fill.svg", "widget.toml"][..],
         ),
         ("status-indicator", &["indicator.svg", "widget.toml"][..]),
+        ("countdown", &["card.svg", "widget.toml"][..]),
+        ("kpi", &["card.svg", "widget.toml"][..]),
+        ("stepper", &["card.svg", "widget.toml"][..]),
     ] {
         for file in files {
             let raw = std::fs::read_to_string(shipped_path(bundle).join(file)).unwrap();
