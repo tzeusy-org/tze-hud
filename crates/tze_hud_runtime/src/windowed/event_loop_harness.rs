@@ -2259,7 +2259,46 @@ mod tests {
             });
             scene.widget_registry.register_definition(bundle.definition);
         }
-        call(addr, "hud_publish", serde_json::json!({"surface":"widget:clock", "params":{"ends_in_ms":300000}, "delay_ms":10000})).await;
+        call(addr, "hud_publish", serde_json::json!({"surface":"widget:clock", "params":{"ends_in_ms":300000}, "delay_ms":10000, "ttl_ms":20000})).await;
+        let pending_lease = runtime.events.scene().scheduled_batches[0]
+            .batch
+            .lease_id
+            .expect("MCP publication has an explicit lease");
+        let shared = runtime.events.shared_state();
+        let chrome = Arc::clone(&runtime.events.app.state.chrome_state);
+        let portals = runtime
+            .events
+            .app
+            .state
+            .portal_projection_driver
+            .portal_handle();
+        assert!(
+            crate::shell::safe_mode::enter_safe_mode(&shared, &chrome, Some(&portals))
+                .await
+                .entered
+        );
+        clock.advance(15_000);
+        assert!(runtime.events.tick()); // Actual timed sweep while paused.
+        {
+            let scene = runtime.events.scene();
+            assert_eq!(
+                scene.scheduled_batches.len(),
+                1,
+                "accepted delayed MCP publication must remain pending during pause"
+            );
+            assert_eq!(
+                scene.scheduled_batches[0].batch.lease_id,
+                Some(pending_lease)
+            );
+            assert_eq!(scene.next_timed_content_wall_us(), None);
+            assert_eq!(scene.next_widget_deadline_wall_us(), None);
+        }
+        clock.advance(45_000);
+        assert!(
+            crate::shell::safe_mode::exit_safe_mode(&shared, &chrome, Some(&portals))
+                .await
+                .exited
+        );
         assert!(
             runtime
                 .events
@@ -2268,8 +2307,28 @@ mod tests {
                 .active_for_widget("clock")
                 .is_empty()
         );
-        clock.advance(15_000); // Deliberately drain late: snapshot actual presentation.
-        assert!(runtime.turn(true));
+        assert!(runtime.turn(true)); // First actual presentation is after resume.
+        {
+            let scene = runtime.events.scene();
+            let record = &scene.widget_registry.active_for_widget("clock")[0];
+            let tze_hud_scene::WidgetParameterValue::Deadline(deadline) =
+                &record.params["ends_in_ms"]
+            else {
+                panic!("deadline")
+            };
+            assert_eq!(deadline.at_wall_us, Some(clock.now_us() + 300_000_000));
+            assert_eq!(record.expires_at_wall_us, Some(clock.now_us() + 20_000_000));
+            assert_eq!(record.lease_id, Some(pending_lease));
+            assert_eq!(record.ttl_paused_us, 0, "never materialized during pause");
+            assert!(scene.scheduled_batches.is_empty());
+        }
+        call(
+            addr,
+            "hud_hold",
+            serde_json::json!({"surface":"widget:clock", "ttl_ms":0}),
+        )
+        .await;
+        runtime.turn(true);
         assert!(!runtime.turn(true));
         let version = runtime.events.scene().version;
         let visible = |runtime: &CaptureRenderHarness| {

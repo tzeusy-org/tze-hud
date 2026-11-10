@@ -242,7 +242,7 @@ use self::panel_input::PanelInputState;
 use self::portal::PortalProjectionDrain;
 use self::wake::{
     CursorEntryTurn, Deadline, RuntimeWakeEvent, WindowedWake, control_flow_for_deadlines,
-    deadline_from_wall_us,
+    deadline_from_wall_us_at,
 };
 use crate::portal::PortalWakeDeadline;
 
@@ -703,9 +703,9 @@ fn portal_deadline_after_drain(
         (!portal_drain.is_deferred()).then_some(Deadline::new(now, portal_deadline.wakeup_source()))
     } else {
         // Keep the wall-clock observation paired with `now`. Calling
-        // `deadline_from_wall_us` here would take a second wall-clock sample;
-        // a deadline crossing between the two reads could become an accidental
-        // immediate retry while the portal drain is still deferred.
+        // Keep using the supplied observation here; a second wall-clock
+        // sample could turn a crossing deadline into an accidental immediate
+        // retry while the portal drain is still deferred.
         Some(Deadline::new(
             now + std::time::Duration::from_micros(remaining_us),
             portal_deadline.wakeup_source(),
@@ -1906,7 +1906,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             // signalling the main thread to present. A secondary
                             // whose retry came due gets a build, presented to it
                             // alone (nothing animates, so building steps nothing).
-                            let scene_deadline_wall_us = scene
+                            let scene_deadline = scene
                                 .next_publication_expiry_wall_us()
                                 .into_iter()
                                 .chain(compositor.next_widget_deadline_wall_us(&scene))
@@ -1919,7 +1919,15 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                         .map(|ms| ms.saturating_mul(1_000)),
                                 )
                                 .chain(card_frame.wake_at_wall_us)
-                                .min();
+                                .min()
+                                .map(|wall_us| {
+                                    deadline_from_wall_us_at(
+                                        wall_us,
+                                        scene.now_wall_us(),
+                                        std::time::Instant::now(),
+                                        crate::idle_efficiency::RuntimeWakeupSource::TtlDeadline,
+                                    )
+                                });
                             drop(scene);
                             if let Some(build) = render
                                 && displays::present_to_secondaries(
@@ -1953,11 +1961,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                     crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
                                 ));
                             }
-                            if let Some(wall_us) = scene_deadline_wall_us {
-                                let deadline = deadline_from_wall_us(
-                                    wall_us,
-                                    crate::idle_efficiency::RuntimeWakeupSource::TtlDeadline,
-                                );
+                            if let Some(deadline) = scene_deadline {
                                 timed_deadline = timed_deadline
                                     .into_iter()
                                     .chain(Some(deadline))

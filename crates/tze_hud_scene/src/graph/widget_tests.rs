@@ -1969,10 +1969,15 @@ fn scheduled_widget_snapshots_at_late_apply_and_clear_cancels_only_its_publisher
     scene.schedule_batch(due, make_batch("b"));
     assert_eq!(scene.agent_holdings("a").widgets, 1);
     assert!(scene.hold_widget_publications("gauge", "a", Some(clock.now_us() + 20_000_000)));
+    scene.pause_widget_ttls();
     scene.clear_widget_for_publisher("gauge", "b").unwrap();
     assert_eq!(scene.scheduled_batches.len(), 1);
     assert_eq!(scene.next_widget_deadline_wall_us(), None);
     clock.advance(15_000);
+    assert!(scene.apply_due_batches().is_empty());
+    assert_eq!(scene.scheduled_batches.len(), 1);
+    assert_eq!(scene.next_timed_content_wall_us(), None);
+    scene.resume_widget_ttls();
     let results = scene.apply_due_batches();
     assert!(results.iter().all(|r| r.applied));
     let record = &scene.widget_registry.active_for_widget("gauge")[0];

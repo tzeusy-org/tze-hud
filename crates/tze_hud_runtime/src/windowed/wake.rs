@@ -104,8 +104,10 @@ pub(super) fn device_events_transition(
     })
 }
 
-pub(super) fn deadline_from_wall_us(
+pub(super) fn deadline_from_wall_us_at(
     deadline_wall_us: u64,
+    _now_wall_us: u64,
+    _now: Instant,
     source: RuntimeWakeupSource,
 ) -> Deadline {
     let now_wall_us = SystemTime::now()
@@ -567,7 +569,35 @@ mod tests {
 
     #[test]
     fn earliest_future_deadline_selects_wait_until() {
+        use tze_hud_scene::Clock;
+        let clock = tze_hud_scene::TestClock::new(1_000);
         let now = Instant::now();
+        for wall in [clock.now_us(), u64::MAX - 60_000_000] {
+            let mapped = super::deadline_from_wall_us_at(
+                wall + 60_000_000,
+                wall,
+                now,
+                RuntimeWakeupSource::TtlDeadline,
+            );
+            assert_eq!(mapped.at, now + Duration::from_secs(60));
+            assert_eq!(
+                control_flow_for_deadlines(now, [mapped]),
+                winit::event_loop::ControlFlow::WaitUntil(mapped.at)
+            );
+            for due in [0, wall] {
+                assert_eq!(
+                    super::deadline_from_wall_us_at(
+                        due,
+                        wall,
+                        now,
+                        RuntimeWakeupSource::TtlDeadline
+                    )
+                    .at,
+                    now,
+                    "due wall deadlines saturate at the paired instant"
+                );
+            }
+        }
         let later = Deadline::new(
             now + Duration::from_millis(40),
             RuntimeWakeupSource::TtlDeadline,
