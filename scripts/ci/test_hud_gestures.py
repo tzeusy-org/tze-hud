@@ -176,22 +176,32 @@ class WindowsGuardTests(unittest.TestCase):
                 native.user32.ReleaseDC.assert_called_with(0, screen)
 
     def test_failed_diagnostic_keeps_original_result_and_next_scenario(self) -> None:
-        run = mock.Mock(out=Path("unused"))
-        run.clear_publications.return_value = []
-        run.screen_grab.side_effect = OSError("capture unavailable")
+        cases = [(g.ScenarioFailed("original failure", {"marker": 1}),
+                  "original failure", {"marker": 1})]
+        for stderr in ("x" * 5000 + "provider failure", b"provider \xff failure", None):
+            expected = stderr.decode("utf-8", errors="replace") if isinstance(stderr, bytes) else stderr or ""
+            cases.append((g.subprocess.CalledProcessError(1, ["powershell.exe", "-Command", "script"],
+                                                        stderr=stderr),
+                          "CalledProcessError: powershell.exe exited 1",
+                          {"exit_code": 1, "stderr": expected[-4096:]}))
+        for failure, step, last in cases:
+            with self.subTest(failure=type(failure).__name__, stderr=getattr(failure, "stderr", None)):
+                run = mock.Mock(out=Path("unused"))
+                run.clear_publications.return_value = []
+                run.screen_grab.side_effect = OSError("capture unavailable")
 
-        def first(_run):
-            raise g.ScenarioFailed("original failure", {"marker": 1})
+                def first(_run):
+                    raise failure
 
-        second = mock.Mock(__doc__="second scenario")
-        with mock.patch.dict(g.SCENARIOS, {"first": first, "second": second}, clear=True), \
-                contextlib.redirect_stdout(io.StringIO()):
-            results = g.run_scenarios(run, ["first", "second"])
-        self.assertEqual([result["outcome"] for result in results], ["FAIL", "PASS"])
-        self.assertEqual(results[0]["step"], "original failure")
-        self.assertEqual(results[0]["last"], {"marker": 1})
-        self.assertIn("capture unavailable", results[0]["diagnostic_error"])
-        second.assert_called_once_with(run)
+                second = mock.Mock(__doc__="second scenario")
+                with mock.patch.dict(g.SCENARIOS, {"first": first, "second": second}, clear=True), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    results = g.run_scenarios(run, ["first", "second"])
+                self.assertEqual([result["outcome"] for result in results], ["FAIL", "PASS"])
+                self.assertEqual(results[0]["last"], last)
+                self.assertEqual(results[0]["step"], step)
+                self.assertIn("capture unavailable", results[0]["diagnostic_error"])
+                second.assert_called_once_with(run)
 
     def test_owned_hud_or_helper_foreground_passes(self) -> None:
         g.check_owned_windows(**WIN_OWNED)

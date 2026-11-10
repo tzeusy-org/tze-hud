@@ -1631,9 +1631,11 @@ def scenario_tray(run: Run) -> None:
         return WIN.foreground_pid() == run.pid, WIN.foreground_pid()
     wait_until(foreground, what="owned HUD foreground before tray input", timeout_s=SETTLE_S)
     probe = {}
-    rect = WIN.tray_rect(tray["hwnd"], tray["icon_id"], run.pid,
-                         expected_tooltip=tooltip, diagnostics=probe)
-    run.step(f"owned tray visibility probe {json.dumps(probe)}")
+    try:
+        rect = WIN.tray_rect(tray["hwnd"], tray["icon_id"], run.pid,
+                             expected_tooltip=tooltip, diagnostics=probe)
+    finally:
+        run.step(f"owned tray visibility probe {json.dumps(probe)}")
     if rect is None:
         run.step("limited tray proof: registration/tooltip/idle passed; icon in overflow or not exposed, no menu input injected")
         return
@@ -1706,6 +1708,13 @@ def run_scenarios(run: Run, names: list[str]) -> list[dict]:
             result.update(outcome="FAIL", step=failure.step, last=failure.last)
         except Refused:
             raise
+        except subprocess.CalledProcessError as err:
+            stderr = err.stderr or ""
+            if isinstance(stderr, bytes):
+                stderr = stderr.decode("utf-8", errors="replace")
+            program = err.cmd[0] if isinstance(err.cmd, (list, tuple)) else "command"
+            result.update(outcome="FAIL", step=f"CalledProcessError: {program} exited {err.returncode}",
+                          last={"exit_code": err.returncode, "stderr": stderr[-4096:]})
         except Exception as err:  # noqa: BLE001 - every scenario reports, the run continues
             result.update(outcome="FAIL", step=f"{type(err).__name__}: {err}", last=None)
         result["seconds"] = round(time.monotonic() - started, 2)
