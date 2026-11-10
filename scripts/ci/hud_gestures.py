@@ -1612,8 +1612,36 @@ def scenario_safe_mode(run: Run) -> None:
     run.step(f"ok unheld portal paused for {paused_s:.3f}s; survived 5s after resume before refresh")
 
 
+def scenario_tray(run: Run) -> None:
+    """Windows tray registration/tooltip and idle proof; real native Hide/Show when the icon is exposed."""
+    status = run.expect("tray registered", lambda st: st.get("tray", {}).get("registered") is True)
+    tray = status["tray"]
+    tooltip = tray.get("tooltip", "")
+    if len(tooltip.splitlines()) != 2 or len(tooltip.encode("utf-16-le")) > 254:
+        raise ScenarioFailed("two-line bounded tray tooltip", tray)
+    idle = run.settle()
+    frames, since = idle["frames_presented"], idle["idle_since_ms"]
+    run.observe_for("tray schedules no idle frames", lambda st:
+                    st["frames_presented"] == frames and st["idle_since_ms"] >= since, 0.5)
+    rect = WIN.tray_rect(tray["hwnd"], tray["icon_id"], run.pid)
+    if rect is None:
+        run.step("limited tray proof: registration/tooltip/idle passed; icon in overflow or not exposed, no menu input injected")
+        return
+    x, y = (rect[0] + rect[2]) // 2, (rect[1] + rect[3]) // 2
+    for hidden in (True, False):
+        run.inj.move_abs(x, y)
+        run.inj.click(3)
+        run.expect("native tray menu active", lambda st: st["tray"]["menu_open"] is True)
+        # Default Open panel is first, Pause/Resume second, Hide/Show third.
+        for key in ("Home", "Down", "Down", "Return"):
+            run.inj.key(key)
+        run.expect("native Hide all" if hidden else "native Show all",
+                   lambda st: st["tray"]["all_hidden"] is hidden and st["tray"]["menu_open"] is False)
+    run.step("ok exposed tray: real right-click and keyboard Hide all / Show all")
+
+
 # Windows only: they need Win32 foreground/edit-control access or global hotkeys.
-TIER_W_ONLY = {"no-focus-steal", "safe-mode", "overlay-pointer"}
+TIER_W_ONLY = {"no-focus-steal", "safe-mode", "overlay-pointer", "tray"}
 
 SCENARIOS: dict[str, Callable[[Run], None]] = {
     "output-anchor": scenario_output_anchor,          # 1
@@ -1636,6 +1664,7 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "resize-hotkey": scenario_resize_hotkey,          # 16
     "unicode-typing": scenario_unicode_typing,
     "no-focus-steal": scenario_no_focus_steal,        # 10 (tier W)
+    "tray": scenario_tray,                            # tier W, overlay only
     "overlay-pointer": scenario_overlay_pointer,      # 11 (tier W, overlay only)
     "safe-mode": scenario_safe_mode,                  # 12 (tier W)
     "restart": scenario_restart,                      # 14 (last: replaces the HUD)
@@ -1717,9 +1746,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{', '.join(sorted(TIER_W_ONLY))} run only with --injector sendinput")
     if args.window_mode == "overlay" and not tier_w:
         parser.error("overlay gestures require --injector sendinput")
-    overlay_names = {"overlay-pointer"}
+    overlay_names = {"overlay-pointer", "tray"}
     if args.scenarios and any((n in overlay_names) != (args.window_mode == "overlay") for n in args.scenarios):
-        parser.error("overlay-pointer requires --window-mode overlay; other scenarios require fullscreen")
+        parser.error("overlay-pointer and tray require --window-mode overlay; other scenarios require fullscreen")
     names = args.scenarios or [n for n in SCENARIOS
                                if (tier_w or n not in TIER_W_ONLY)
                                and ((n in overlay_names) == (args.window_mode == "overlay"))]

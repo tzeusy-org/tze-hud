@@ -241,7 +241,7 @@ class WindowsGuardTests(unittest.TestCase):
         native = native_input_boundary()
         injector = native.SendInput(lambda: g.check_owned_windows(**{**WIN_OWNED, "foreground_pid": 9}))
         actions = (lambda: injector.move_abs(1, 2), lambda: injector.move_relative(3, 4),
-                   lambda: injector.click(), lambda: injector.button(True), lambda: injector.key("Tab"),
+                   lambda: injector.click(), lambda: injector.click(3), lambda: injector.button(True), lambda: injector.key("Tab"),
                    lambda: injector.type_unicode("x"))
         for action in actions:
             with self.assertRaises(g.Refused):
@@ -291,7 +291,8 @@ class WindowsGuardTests(unittest.TestCase):
                                              "--window-mode", mode, "--out", directory]), 0)
                     selected = scenarios.call_args.args[1]
                     self.assertEqual("overlay-pointer" in selected, mode == "overlay")
-                    self.assertEqual(len(selected), 1 if mode == "overlay" else 22)
+                    self.assertEqual("tray" in selected, mode == "overlay")
+                    self.assertEqual(len(selected), 2 if mode == "overlay" else 22)
             for mode, scenario in (("fullscreen", "overlay-pointer"), ("overlay", "composer")):
                 with mock.patch.object(g, "WINDOWS", True), contextlib.redirect_stderr(io.StringIO()), \
                         self.assertRaises(SystemExit) as failure:

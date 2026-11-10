@@ -300,7 +300,13 @@ the pill and its hit targets; partial coverage preserves the full label placemen
   [`test_mutations_rejected_via_shared_state_flag`](../crates/tze_hud_runtime/src/shell/safe_mode.rs)
 - `tze_hud_runtime` control panel (global pause chord, default
   Ctrl+Shift+F12, `[runtime].safe_mode_hotkey`, handled on the network
-  runtime, never the winit loop or an agent)
+  runtime, never the winit loop or an agent). Windows tray Pause uses the
+  same panel task and safe-mode control even when another app owns the chord;
+  Resume closes the panel. The native icon and WTS state share the existing
+  display-watcher window/thread and schedule no idle frames.
+  [`tray_presentation_and_session_transitions`](../crates/tze_hud_runtime/src/windowed/shell_presence.rs),
+  [`tray_svg_uses_taskbar_contrast_and_semantic_state_tokens`](../crates/tze_hud_runtime/src/windowed/shell_presence.rs),
+  `integration` [`poc_override_safe_mode_wins_with_hung_grpc_agent`](../tests/integration/poc_acceptance.rs),
   [`portal_liveness_paused_during_safe_mode`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
   [`panel_chord_opens_running_and_escape_closes_and_resumes`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
   [`winit_routing_keys_and_pointer_reach_the_open_panel_only`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
@@ -519,7 +525,9 @@ publishes keep landing and draw, as they are now, when shown again. The set is
 runtime-only overlay state beside the scene model, never serialized and never
 in `CompositorDegradationPolicy` (§6); a restart shows everything. While
 anything is hidden and the panel is closed, a pill at the bottom right of the
-primary display names what is hidden and the chord that opens the panel. A
+primary display names what is hidden and the chord that opens the panel.
+When both panel and pause chords are refused it names Tray → Open panel;
+the tray's Hide all / Show all uses the same visibility action as Alt+H. A
 word-by-word reveal under way when its zone was hidden finishes after the
 zone is shown again.
 

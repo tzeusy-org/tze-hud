@@ -106,6 +106,7 @@ fn ellipsize(text: &str, units: usize) -> String {
     result
 }
 
+#[cfg(test)]
 use crate::shell::control_panel::TrayCommand;
 
 /// Track lock and connection independently: a connect event alone must not

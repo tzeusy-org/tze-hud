@@ -389,7 +389,7 @@ agents until one is paired.
   `GET /admin/status`, `GET /admin/logs`, and `GET /admin/screenshot` on the
   MCP port, and `*` does not grant it. `/admin/status` includes `tailnet_inbound` (`state`: `allowed`, `blocked`, `unknown`, `not_applicable`; `reason`, `rule` and `fix` when `blocked`; `error` when `unknown`): whether Windows Firewall lets remote agents reach the tailnet bind, and `safe_mode_hotkey`, `panel_hotkey`, `pairing_hotkey` and `answer_hotkey`
   (each `chord`, `registered`, `error`; `null` when no hotkey is active; `registered: null` while pending): `registered: false`
-  means another program owns that chord; for `safe_mode_hotkey` the human pause override is then lost. The blocked
+  means another program owns that chord; for `safe_mode_hotkey`, its error names the tray icon's Pause as the independent override. The blocked
   firewall `fix` names `tze_hud.exe --allow-remote` with the same listen-port
   overrides as startup; see [the reversible Windows helper](operations/windows-install.md#remote-agents).
   This policy-derived result is cached for five seconds, not a network probe.
@@ -657,6 +657,34 @@ F1-F24, a letter or a digit, and all four must differ):
 | Ctrl+Shift+F10 | `pairing_hotkey` | Open the control panel at Connect an agent, agents running |
 | Ctrl+Shift+F9 | `answer_hotkey` | Focus the newest unanswered question with callback actions |
 
+Windows also has one notification-area **tray icon**, even when no agent
+content is showing. Click it, or select it with Win+B and Enter, to toggle
+the control panel. Its native context menu offers **Open panel** (default),
+**Pause agents** / **Resume agents**, **Hide all** / **Show all**, and **Quit**.
+Every item supports keyboard navigation. Pause opens the panel and suspends
+agents; Resume closes it and resumes them. These commands run on the network
+runtime like global chords, independently of the window event loop or agents.
+Quit uses the normal clean shutdown path, without confirmation; relaunch
+through Win+R `tze_hud` when installed, or its executable.
+
+The glyph shows paused, hidden, questions waiting, or normal, in that priority.
+Its contrast follows the Windows taskbar's light/dark setting rather than the
+HUD theme. The two-line tooltip reports question count (or Paused / Everything
+hidden) and the names of agents connected or showing something, as in the
+panel header. Long names are ellipsized within the shell's UTF-16 limit.
+Windows 11 initially places new icons in overflow; pin this one through
+**Settings > Personalization > Taskbar > Other system tray icons**.
+
+`/admin/status` reports `tray` with `registered`, `glyph`, `tooltip`,
+`all_hidden` and native test identity, plus `session_locked`. `tray` is null
+and `session_locked` false off Windows. Failed watcher creation leaves
+`registered` and `session_locked` false; a missing icon can therefore be
+distinguished from overflow. Explorer restart re-adds the icon; an unsuccessful
+registration is logged and retried at the next Explorer restart. WTS lock,
+unlock and console/remote connection events update `session_locked` without
+polling. This observation alone does **not** freeze question deadlines or hold
+new cards; that separate desktop-presence delivery remains outstanding.
+
 A global chord takes its keys from every other app while the HUD runs, so the
 defaults are F-key chords; rebind one that clashes (Ctrl+Shift+F10 is also
 JetBrains IDEs' "Run"). The pairing chord is not registered when the MCP port
@@ -719,7 +747,8 @@ is hidden, shows it all again. Hidden content is not drawn and takes no input
 or focus; agents keep their leases and publications and are not told. While
 anything is hidden and the panel is closed, a pill at the bottom right of the
 primary display says what is hidden and which chord opens the panel (the
-pause chord when Windows refused the panel chord). A restart shows everything.
+pause chord when Windows refused the panel chord, or Tray → Open panel when
+both chords are refused). A restart shows everything.
 
 The Agents card's **Questions wait for an answer** choice offers 15 s,
 30 s, 1 min, 2 min and 5 min. Its detail is "How long a question card waits

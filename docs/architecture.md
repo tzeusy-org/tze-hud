@@ -108,6 +108,19 @@ admin-authorized `/admin/*` outside the five MCP tools. Installation, firewall,
 restart and signed-update semantics belong in the
 [Windows runbook](operations/windows-install.md), not in agent payloads.
 
+**Windows desktop presence.** The existing hidden top-level display-watcher
+window/thread owns the tray icon, native menu, Explorer restart recovery and
+WTS session notifications. [`displays`](../crates/tze_hud_runtime/src/windowed/displays.rs)
+routes messages; [`shell_presence`](../crates/tze_hud_runtime/src/windowed/shell_presence.rs)
+and its native owner keep shell resources off the window loop. A latest-only
+snapshot on the network runtime reads the panel's connected-or-showing agent
+set and live question state after existing work notifications, then posts only
+changed tray state to its window. There is no tray polling timer or additional
+message thread. Native commands feed the existing panel task; Quit triggers
+the normal shutdown callback. Shutdown removes the icon and unregisters WTS
+before releasing window-owned resources. `/admin/status` observes this state;
+actual lock-aware publication lifetimes belong to the later desktop delivery.
+
 **Portal state [Observed].**
 [`PortalHandle`](../crates/tze_hud_mcp/src/server.rs) shares one hub, clock
 and per-agent input Notify registry between MCP and

@@ -20,10 +20,14 @@ from typing import Callable
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+shell32 = ctypes.WinDLL("shell32", use_last_error=True)
 
 # Handles are pointer-sized; ctypes' default int restype would truncate them.
 for fn, res, args in (
     ("GetForegroundWindow", wintypes.HWND, []),
+    ("FindWindowW", wintypes.HWND, [wintypes.LPCWSTR, wintypes.LPCWSTR]),
+    ("WindowFromPoint", wintypes.HWND, [wintypes.POINT]),
+    ("IsChild", wintypes.BOOL, [wintypes.HWND, wintypes.HWND]),
     ("FindWindowExW", wintypes.HWND, [wintypes.HWND, wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR]),
     ("GetWindowThreadProcessId", wintypes.DWORD, [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]),
     ("IsWindowVisible", wintypes.BOOL, [wintypes.HWND]),
@@ -88,6 +92,7 @@ class INPUT(ctypes.Structure):
 
 
 MOUSE_MOVE, LEFT_DOWN, LEFT_UP, WHEEL, ABSOLUTE = 0x1, 0x2, 0x4, 0x800, 0x8000
+RIGHT_DOWN, RIGHT_UP = 0x8, 0x10
 GWL_EXSTYLE, WS_EX_TOPMOST, WS_EX_TRANSPARENT = -20, 0x8, 0x20
 WS_EX_NOACTIVATE = 0x08000000
 KEY_UP, KEY_UNICODE = 0x2, 0x4
@@ -153,6 +158,43 @@ def foreground_pid() -> int:
     pid = wintypes.DWORD()
     user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), ctypes.byref(pid))
     return pid.value
+
+
+class NOTIFYICONIDENTIFIER(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("hWnd", wintypes.HWND),
+                ("uID", wintypes.UINT), ("guidItem", ctypes.c_ubyte * 16)]
+
+
+shell32.Shell_NotifyIconGetRect.restype = ctypes.c_long
+shell32.Shell_NotifyIconGetRect.argtypes = [ctypes.POINTER(NOTIFYICONIDENTIFIER), ctypes.POINTER(wintypes.RECT)]
+
+
+def tray_rect(hwnd: int, icon_id: int, owned_pid: int) -> tuple[int, int, int, int] | None:
+    """Only the owned icon, exposed on the taskbar (not hidden overflow).
+
+    GetRect can return an overflow rectangle even while its flyout is closed.
+    Require the actual point to belong to the visible primary taskbar too.
+    None explicitly means there is no safe real-input target for this proof.
+    """
+    owner = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+    if owner.value != owned_pid:
+        raise ValueError("tray HWND does not belong to the owned HUD")
+    identity = NOTIFYICONIDENTIFIER(cbSize=ctypes.sizeof(NOTIFYICONIDENTIFIER), hWnd=hwnd, uID=icon_id)
+    rect = wintypes.RECT()
+    if shell32.Shell_NotifyIconGetRect(ctypes.byref(identity), ctypes.byref(rect)) < 0:
+        return None
+    taskbar = user32.FindWindowW("Shell_TrayWnd", None)
+    bounds = wintypes.RECT()
+    if not taskbar or not user32.IsWindowVisible(taskbar) or not user32.GetWindowRect(taskbar, ctypes.byref(bounds)):
+        return None
+    x, y = (rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2
+    if not (rect.left < rect.right and rect.top < rect.bottom and bounds.left <= x < bounds.right and bounds.top <= y < bounds.bottom):
+        return None
+    at_point = user32.WindowFromPoint(wintypes.POINT(x, y))
+    if at_point != taskbar and not user32.IsChild(taskbar, at_point):
+        return None
+    return rect.left, rect.top, rect.right, rect.bottom
 
 
 def process_alive(pid: int) -> bool:
@@ -339,9 +381,10 @@ class SendInput:
             delta = WHEEL_DELTA if button == 4 else -WHEEL_DELTA
             self._send(f"wheel {repeat}x{delta}", [_mouse(WHEEL, data=delta) for _ in range(repeat)])
             return
-        if button != 1:
+        flags = {1: (LEFT_DOWN, LEFT_UP), 3: (RIGHT_DOWN, RIGHT_UP)}
+        if button not in flags:
             raise ValueError(f"button {button}")
-        self._send(f"click x{repeat}", [_mouse(flag) for _ in range(repeat) for flag in (LEFT_DOWN, LEFT_UP)])
+        self._send(f"click button {button} x{repeat}", [_mouse(flag) for _ in range(repeat) for flag in flags[button]])
 
     def key(self, chord: str) -> None:
         vks = chord_vks(chord)

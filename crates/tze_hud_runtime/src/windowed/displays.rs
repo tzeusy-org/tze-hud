@@ -1402,7 +1402,7 @@ pub(super) fn spawn_display_change_watcher(dirty: DisplaysDirty, wake: impl Fn()
                     WINDOW_EX_STYLE::default(),
                     class,
                     w!(""),
-                    WS_OVERLAPPED, PostQuitMessage, WM_DESTROY,
+                    WS_OVERLAPPED,
                     0,
                     0,
                     0,

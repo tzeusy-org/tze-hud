@@ -17,16 +17,17 @@ use windows::Win32::System::RemoteDesktop::{
     WTSFreeMemory, WTSINFOEXW, WTSQuerySessionInformationW, WTSRegisterSessionNotification,
     WTSSessionInfoEx, WTSUnRegisterSessionNotification,
 };
+use windows::Win32::UI::HiDpi::{GetDpiForWindow, GetSystemMetricsForDpi};
 use windows::Win32::UI::Shell::{
     NIF_ICON, NIF_MESSAGE, NIF_SHOWTIP, NIF_TIP, NIM_ADD, NIM_DELETE, NIM_MODIFY, NIM_SETVERSION,
     NIN_SELECT, NOTIFYICON_VERSION_4, NOTIFYICONDATAW, Shell_NotifyIconW,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreateIconIndirect, CreatePopupMenu, DestroyIcon, DestroyMenu, DestroyWindow,
-    GetCursorPos, GetSystemMetrics, HICON, HMENU, ICONINFO, MF_STRING, PostMessageW,
-    RegisterWindowMessageW, SM_CXSMICON, SetForegroundWindow, SetMenuDefaultItem, TPM_RETURNCMD,
-    TPM_RIGHTBUTTON, TrackPopupMenu, WM_APP, WM_CONTEXTMENU, WM_DPICHANGED, WM_NULL,
-    WM_SETTINGCHANGE, WM_WTSSESSION_CHANGE,
+    GetCursorPos, HICON, HMENU, ICONINFO, MF_STRING, PostMessageW, RegisterWindowMessageW,
+    SM_CXSMICON, SetForegroundWindow, SetMenuDefaultItem, TPM_RETURNCMD, TPM_RIGHTBUTTON,
+    TrackPopupMenu, WM_APP, WM_CONTEXTMENU, WM_DPICHANGED, WM_NULL, WM_SETTINGCHANGE,
+    WM_WTSSESSION_CHANGE,
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
@@ -34,6 +35,7 @@ use super::{GlyphColors, GlyphState, Inputs, Presentation, SessionState};
 use crate::shell::control_panel::{ControlPanelHandle, PanelEvent, TrayCommand};
 
 const ICON_ID: u32 = 1;
+const NIN_KEYSELECT: u32 = NIN_SELECT | 1;
 const CALLBACK: u32 = WM_APP + 31;
 const REFRESH: u32 = WM_APP + 32;
 const STOP: u32 = WM_APP + 33;
@@ -51,6 +53,8 @@ pub(in crate::windowed) struct Bridge {
     pending: AtomicBool,
     latest: RwLock<Snapshot>,
     registered: AtomicBool,
+    menu_open: AtomicBool,
+    stopping: AtomicBool,
     session_locked: AtomicBool,
     panel: Option<ControlPanelHandle>,
     quit: crate::operator::handoff::Quit,
@@ -71,6 +75,8 @@ pub(crate) fn status() -> Value {
         "registered": bridge.registered.load(Ordering::Acquire),
         "glyph": latest.view.glyph,
         "tooltip": latest.view.tooltip,
+        "all_hidden": latest.view.all_hidden,
+        "menu_open": bridge.menu_open.load(Ordering::Acquire),
         // Admin-only native identity for the tier-W real-input harness.
         "hwnd": bridge.hwnd.load(Ordering::Acquire),
         "icon_id": ICON_ID,
@@ -97,6 +103,8 @@ impl Bridge {
                 colors,
             }),
             registered: AtomicBool::new(false),
+            menu_open: AtomicBool::new(false),
+            stopping: AtomicBool::new(false),
             session_locked: AtomicBool::new(false),
             panel,
             quit,
@@ -133,6 +141,7 @@ impl Bridge {
     }
 
     pub(in crate::windowed) fn stop(&self) {
+        self.stopping.store(true, Ordering::Release);
         let hwnd = self.hwnd.load(Ordering::Acquire);
         if hwnd != 0 {
             // SAFETY: no pointer payload, asynchronous owner-thread teardown.
@@ -243,7 +252,12 @@ impl Host {
             icon: RefCell::new(None),
             stopped: Cell::new(false),
         };
-        host.update(true);
+        if host.bridge.stopping.load(Ordering::Acquire) {
+            host.stop();
+            let _ = unsafe { DestroyWindow(hwnd) };
+        } else {
+            host.update(true);
+        }
         host
     }
 
@@ -269,7 +283,7 @@ impl Host {
         let light = light_taskbar();
         // The watcher is a primary-taskbar window. Windows reports the actual
         // small-icon metric rather than a HUD zoom or a hardcoded pixel size.
-        let size = unsafe { GetSystemMetrics(SM_CXSMICON) };
+        let size = unsafe { GetSystemMetricsForDpi(SM_CXSMICON, GetDpiForWindow(self.hwnd)) };
         if !add && self.applied.borrow().as_ref() == Some(&(next.clone(), light, size)) {
             return;
         }
@@ -369,7 +383,7 @@ impl Host {
                     return Some(LRESULT(0));
                 }
                 match event {
-                    NIN_SELECT | 0x401 => self.bridge.command(TrayCommand::TogglePanel), // NIN_KEYSELECT
+                    NIN_SELECT | NIN_KEYSELECT => self.bridge.command(TrayCommand::TogglePanel), // NIN_KEYSELECT
                     WM_CONTEXTMENU => self.menu(wparam),
                     _ => {}
                 }
@@ -431,6 +445,7 @@ impl Host {
         // Notification menus require foreground ownership and the trailing
         // WM_NULL for reliable dismiss/reopen. TrackPopupMenu dispatches this
         // same thread's display/session messages while it is open.
+        self.bridge.menu_open.store(true, Ordering::Release);
         let id = unsafe {
             let _ = SetMenuDefaultItem(menu.0, 1, 0);
             let _ = SetForegroundWindow(self.hwnd);
@@ -447,6 +462,7 @@ impl Host {
             let _ = PostMessageW(self.hwnd, WM_NULL, WPARAM(0), LPARAM(0));
             id
         };
+        self.bridge.menu_open.store(false, Ordering::Release);
         if let Some(command) = TrayCommand::from_menu_id(id, &view) {
             self.bridge.command(command);
         }
