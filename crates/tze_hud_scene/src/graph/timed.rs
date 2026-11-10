@@ -21,6 +21,19 @@ pub struct ScheduledBatch {
     pub(crate) publication_origin: Option<SceneId>,
 }
 
+impl ScheduledBatch {
+    /// Preserve an already accepted widget publication until it can present.
+    /// A mixed batch waits as a whole so its mutations remain atomic.
+    fn waits_for_widget_resume(&self, widgets_paused: bool) -> bool {
+        widgets_paused
+            && self
+                .batch
+                .mutations
+                .iter()
+                .any(|mutation| matches!(mutation, SceneMutation::PublishToWidget { .. }))
+    }
+}
+
 impl SceneGraph {
     /// Hold `batch` until `present_at_wall_us`, then apply it on the first
     /// commit at or after that time. Validation happens at apply time.
@@ -237,16 +250,17 @@ impl SceneGraph {
         // Grace cancellation precedes materializing due content in every runtime.
         self.reap_orphaned_publications(self.clock.now_millis());
         let now_us = self.clock.now_us();
-        if !self
-            .scheduled_batches
-            .iter()
-            .any(|s| s.present_at_wall_us <= now_us)
-        {
+        let widgets_paused = self.widget_time_paused();
+        let can_present_now = |scheduled: &ScheduledBatch| {
+            scheduled.present_at_wall_us <= now_us
+                && !scheduled.waits_for_widget_resume(widgets_paused)
+        };
+        if !self.scheduled_batches.iter().any(can_present_now) {
             return Vec::new();
         }
         let (mut due, pending): (Vec<_>, Vec<_>) = std::mem::take(&mut self.scheduled_batches)
             .into_iter()
-            .partition(|s| s.present_at_wall_us <= now_us);
+            .partition(can_present_now);
         self.scheduled_batches = pending;
         due.sort_by_key(|s| s.present_at_wall_us);
         // Due payloads stay outside the scene's per-batch rollback snapshots.
@@ -300,9 +314,11 @@ impl SceneGraph {
 
     /// Earliest wall-clock deadline among scheduled batches and tile expiries.
     pub fn next_timed_content_wall_us(&self) -> Option<u64> {
+        let widgets_paused = self.widget_time_paused();
         let scheduled = self
             .scheduled_batches
             .iter()
+            .filter(|scheduled| !scheduled.waits_for_widget_resume(widgets_paused))
             .map(|s| s.present_at_wall_us)
             .min();
         let tile_expiry = self.tiles.values().filter_map(|t| t.expires_at).min();

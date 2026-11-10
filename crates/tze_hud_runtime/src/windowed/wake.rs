@@ -7,7 +7,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use winit::event_loop::{ControlFlow, EventLoopProxy};
 
@@ -104,18 +104,17 @@ pub(super) fn device_events_transition(
     })
 }
 
+/// Convert the scene's injected wall deadline using one paired observation.
+/// Taking another host wall sample here would invalidate TestClock epochs and
+/// could repeatedly arm an immediate wait without any content becoming due.
 pub(super) fn deadline_from_wall_us_at(
     deadline_wall_us: u64,
-    _now_wall_us: u64,
-    _now: Instant,
+    now_wall_us: u64,
+    now: Instant,
     source: RuntimeWakeupSource,
 ) -> Deadline {
-    let now_wall_us = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_micros() as u64;
     Deadline::new(
-        Instant::now() + Duration::from_micros(deadline_wall_us.saturating_sub(now_wall_us)),
+        now + Duration::from_micros(deadline_wall_us.saturating_sub(now_wall_us)),
         source,
     )
 }

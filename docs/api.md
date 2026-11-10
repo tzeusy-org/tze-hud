@@ -200,6 +200,9 @@ and `hud_clear` have `idempotentHint:true`; publish/input make neither claim.
   Hidden, cleared, absent and safe-mode countdowns schedule no countdown wake.
   Safe mode freezes widget publication TTL and the owner's auto-clear allowance,
   while the absolute countdown keeps passing; resume displays current wall time.
+  An already accepted delayed widget stays pending through safe mode, without
+  an overdue retry wake. Its whole batch presents after resume; its deadline
+  snapshot and relative TTL start at that actual presentation.
   Hover remains runtime-local. SVG `threshold` bindings compare f32 `>= k`
   into opacity 0/1; optional `attr_min`/`attr_max` in 0..1 select below/above
   outputs for mutually exclusive dot branches, without an expression language.

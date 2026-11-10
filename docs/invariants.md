@@ -413,6 +413,10 @@ Widget publication TTLs and owner auto-clear allowances also pause, without
 moving their original publication timestamp. Countdown parameter deadlines are
 absolute wall time: they keep passing, retain their last pixels without retries
 while paused, and refresh to current remaining time on resume.
+Already accepted widget-containing scheduled batches wait atomically through
+pause, without an overdue wake or materializing under a suspended lease. On
+resume their deadline and relative TTL start at actual presentation; new incoming
+updates remain rejected while paused.
 
 - `tze_hud_runtime` [`test_ttl_excluded_during_suspension`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),
   [`test_lease_identity_preserved_across_suspend_resume`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),
@@ -483,11 +487,16 @@ clock object between scene, MCP, portal driver and pause control before cloning
 handles. Wall deadlines use `now_us`; monotonic readings and `Instant` are only
 elapsed-time and OS-wait domains. The panel parent exercises divergent domains,
 wall rewind and saturated deadlines.
+The compositor converts scene deadlines into OS waits using one paired injected
+wall-time/`Instant` observation, carried across scene unlock; it never resamples
+host wall time for that conversion.
 
 - `tze_hud_scene` [`countdown_format_and_next_change_share_rounded_boundaries`](../crates/tze_hud_scene/src/widget_deadline.rs),
   [`widget_deadline_presentation_retention_cadence_and_safe_mode`](../crates/tze_hud_scene/src/graph/widget_tests.rs),
   [`scheduled_widget_snapshots_at_late_apply_and_clear_cancels_only_its_publisher`](../crates/tze_hud_scene/src/graph/widget_tests.rs)
-- `tze_hud_runtime` [`portal_liveness_paused_during_safe_mode`](../crates/tze_hud_runtime/src/windowed/panel_input.rs)
+- `tze_hud_runtime` [`portal_liveness_paused_during_safe_mode`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
+  [`earliest_future_deadline_selects_wait_until`](../crates/tze_hud_runtime/src/windowed/wake.rs),
+  [`building_an_idle_frame_leaves_the_idle_gate_inputs_unchanged`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs)
 
 - `integration` (POC acceptance: zone TTL, `delay_ms`, and portal liveness
   and lease grace all advanced by one `TestClock`) [`poc_portal_abandoned_is_reclaimed`](../tests/integration/poc_acceptance.rs),
