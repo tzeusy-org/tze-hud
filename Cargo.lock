@@ -1352,6 +1352,7 @@ dependencies = [
  "tiktoken-rs",
  "tokio",
  "tokio-stream",
+ "toml 0.8.23",
  "tonic",
  "tze_hud_compositor",
  "tze_hud_config",

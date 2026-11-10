@@ -237,7 +237,7 @@ and `hud_clear` have `idempotentHint:true`; publish/input make neither claim.
   return `SAFE_MODE_ACTIVE`, with no replay buffer. Input polling remains
   available and refreshes real activity without double-counting pause time.
   Input expiry, existing orphan grace and the maximum scene suspension continue.
-- `delay_ms` (zones, ≤ 300000) holds the content until then (invariant 1);
+- `delay_ms` (zones and widgets, ≤ 300000) holds the content until then (invariant 1);
   the expiry counts from presentation, and `ttl_ms: 0` holds a delayed
   publish until cleared just like an immediate one.
 - Returns `{"ok":true,"expires_in_ms":8000}` when a TTL is set. Portal
