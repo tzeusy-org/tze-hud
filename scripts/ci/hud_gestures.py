@@ -1623,6 +1623,13 @@ def scenario_tray(run: Run) -> None:
     frames, since = idle["frames_presented"], idle["idle_since_ms"]
     run.observe_for("tray schedules no idle frames", lambda st:
                     st["frames_presented"] == frames and st["idle_since_ms"] >= since, 0.5)
+    # Overlay startup need not activate a window. Prepare only our own HUD,
+    # including when this scenario runs without overlay-pointer before it.
+    def foreground():
+        if WIN.foreground_pid() != run.pid:
+            WIN.bring_to_front(run.pid)
+        return WIN.foreground_pid() == run.pid, WIN.foreground_pid()
+    wait_until(foreground, what="owned HUD foreground before tray input", timeout_s=SETTLE_S)
     rect = WIN.tray_rect(tray["hwnd"], tray["icon_id"], run.pid)
     if rect is None:
         run.step("limited tray proof: registration/tooltip/idle passed; icon in overflow or not exposed, no menu input injected")
