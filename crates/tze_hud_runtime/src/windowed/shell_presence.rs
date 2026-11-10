@@ -109,6 +109,62 @@ fn ellipsize(text: &str, units: usize) -> String {
 #[cfg(test)]
 use crate::shell::control_panel::TrayCommand;
 
+/// The four shell operations form the native I/O seam. Keeping registration
+/// transitions here lets failure/restart/teardown run against the same logic
+/// on headless hosts, without pretending that a fake proves Explorer behavior.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum ShellOperation {
+    Add,
+    Version4,
+    Modify,
+    Delete,
+}
+
+pub(super) trait ShellIcon {
+    fn call(&mut self, operation: ShellOperation) -> bool;
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct Registration {
+    pub registered: bool,
+    attempted: bool,
+    stopped: bool,
+}
+
+impl Registration {
+    pub(super) fn apply(
+        &mut self,
+        restart: bool,
+        changed: bool,
+        shell: &mut impl ShellIcon,
+    ) -> bool {
+        if self.stopped {
+            return false;
+        }
+        if restart || !self.attempted {
+            self.attempted = true;
+            self.registered = shell.call(ShellOperation::Add);
+            if self.registered && !shell.call(ShellOperation::Version4) {
+                shell.call(ShellOperation::Delete);
+                self.registered = false;
+            }
+        } else if self.registered && changed {
+            self.registered = shell.call(ShellOperation::Modify);
+        }
+        self.registered
+    }
+
+    pub(super) fn stop(&mut self, shell: &mut impl ShellIcon) {
+        if !self.stopped {
+            self.stopped = true;
+            if self.attempted {
+                shell.call(ShellOperation::Delete);
+            }
+            self.registered = false;
+        }
+    }
+}
+
 /// Track lock and connection independently: a connect event alone must not
 /// unlock a locked session, nor may unlock expose a disconnected session.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -233,6 +289,54 @@ mod tests {
         let units: Vec<_> = view.tooltip.encode_utf16().collect();
         assert!(units.len() <= 127);
         assert!(String::from_utf16(&units).is_ok());
+
+        struct Shell {
+            calls: Vec<ShellOperation>,
+            succeeds: bool,
+        }
+        impl ShellIcon for Shell {
+            fn call(&mut self, operation: ShellOperation) -> bool {
+                self.calls.push(operation);
+                self.succeeds
+            }
+        }
+        use ShellOperation::{Add, Delete, Modify, Version4};
+        let mut shell = Shell {
+            calls: Vec::new(),
+            succeeds: true,
+        };
+        let mut registration = Registration::default();
+        assert!(registration.apply(false, false, &mut shell));
+        assert!(registration.apply(false, false, &mut shell));
+        assert_eq!(
+            shell.calls,
+            [Add, Version4],
+            "one icon, VERSION_4, no idle shell work"
+        );
+        assert!(registration.apply(false, true, &mut shell));
+        assert_eq!(shell.calls.last(), Some(&Modify));
+        shell.succeeds = false;
+        assert!(!registration.apply(true, false, &mut shell));
+        let failed_calls = shell.calls.len();
+        shell.succeeds = true;
+        assert!(!registration.apply(false, true, &mut shell));
+        assert_eq!(
+            shell.calls.len(),
+            failed_calls,
+            "failed add waits for TaskbarCreated"
+        );
+        assert!(registration.apply(true, false, &mut shell));
+        assert_eq!(&shell.calls[shell.calls.len() - 2..], &[Add, Version4]);
+        registration.stop(&mut shell);
+        let stopped_calls = shell.calls.len();
+        registration.stop(&mut shell);
+        assert!(!registration.apply(true, true, &mut shell));
+        assert_eq!(shell.calls.last(), Some(&Delete));
+        assert_eq!(
+            shell.calls.len(),
+            stopped_calls,
+            "idempotent clean teardown"
+        );
 
         let mut session = SessionState::default();
         for (code, held) in [

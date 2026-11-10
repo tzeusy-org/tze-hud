@@ -640,7 +640,7 @@ mod tests {
         set_hotkey(pause, failed());
         assert_eq!(hotkey(pause), failed());
         use crate::shell::control_panel::row::Section;
-        let input = crate::shell::control_panel::sections::InputSection::new(
+        let input = crate::shell::control_panel::InputSection::new(
             crate::shell::control_panel::chords::ChordControl::new(Default::default(), None),
             false,
             None,

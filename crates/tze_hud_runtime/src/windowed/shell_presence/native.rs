@@ -31,7 +31,10 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{PCWSTR, PWSTR, w};
 
-use super::{GlyphColors, GlyphState, Inputs, Presentation, SessionState};
+use super::{
+    GlyphColors, GlyphState, Inputs, Presentation, Registration, SessionState, ShellIcon,
+    ShellOperation,
+};
 use crate::shell::control_panel::{ControlPanelHandle, PanelEvent, TrayCommand};
 
 const ICON_ID: u32 = 1;
@@ -200,6 +203,24 @@ impl Bridge {
     }
 }
 
+struct ShellCall<'a>(&'a mut NOTIFYICONDATAW);
+impl ShellIcon for ShellCall<'_> {
+    fn call(&mut self, operation: ShellOperation) -> bool {
+        let message = match operation {
+            ShellOperation::Add => NIM_ADD,
+            ShellOperation::Modify => NIM_MODIFY,
+            ShellOperation::Delete => NIM_DELETE,
+            ShellOperation::Version4 => {
+                self.0.Anonymous.uVersion = NOTIFYICON_VERSION_4;
+                NIM_SETVERSION
+            }
+        };
+        // SAFETY: the owner supplies a full live-HWND structure and retains
+        // its icon through this synchronous operation.
+        unsafe { Shell_NotifyIconW(message, self.0) }.as_bool()
+    }
+}
+
 struct Icon(HICON);
 impl Drop for Icon {
     fn drop(&mut self) {
@@ -224,6 +245,7 @@ pub(in crate::windowed) struct Host {
     bridge: Arc<Bridge>,
     taskbar_created: u32,
     session: Cell<SessionState>,
+    registration: Cell<Registration>,
     wts_registered: bool,
     applied: RefCell<Option<(Snapshot, bool, i32)>>,
     icon: RefCell<Option<Icon>>,
@@ -247,6 +269,7 @@ impl Host {
             bridge,
             taskbar_created: unsafe { RegisterWindowMessageW(w!("TaskbarCreated")) },
             session: Cell::new(session),
+            registration: Cell::new(Registration::default()),
             wts_registered,
             applied: RefCell::new(None),
             icon: RefCell::new(None),
@@ -323,25 +346,22 @@ impl Host {
         for (out, unit) in data.szTip.iter_mut().zip(next.view.tooltip.encode_utf16()) {
             *out = unit;
         }
-        // SAFETY: fully initialized structure; szTip's trailing NUL is retained.
-        let ok =
-            unsafe { Shell_NotifyIconW(if add { NIM_ADD } else { NIM_MODIFY }, &data) }.as_bool();
+        let mut registration = self.registration.get();
+        let ok = registration.apply(add, true, &mut ShellCall(&mut data));
+        self.registration.set(registration);
+        self.bridge.registered.store(ok, Ordering::Release);
         if !ok {
-            self.bridge.registered.store(false, Ordering::Release);
             tracing::warn!(
                 add,
                 "tray registration/update failed; retry on TaskbarCreated"
             );
             return;
         }
-        if add {
-            data.Anonymous.uVersion = NOTIFYICON_VERSION_4;
-            if !unsafe { Shell_NotifyIconW(NIM_SETVERSION, &data) }.as_bool() {
-                let _ = unsafe { Shell_NotifyIconW(NIM_DELETE, &self.data()) };
-                self.bridge.registered.store(false, Ordering::Release);
-                tracing::warn!("tray VERSION_4 registration failed; retry on TaskbarCreated");
-                return;
-            }
+        if self.stopped.get() {
+            registration.stop(&mut ShellCall(&mut data));
+            self.registration.set(registration);
+            self.bridge.registered.store(false, Ordering::Release);
+            return;
         }
         if let Some(icon) = replacement {
             *self.icon.borrow_mut() = Some(icon);
@@ -477,7 +497,9 @@ impl Host {
         self.bridge.session_locked.store(false, Ordering::Release);
         // SAFETY: all registrations and resources belong to this thread/HWND.
         unsafe {
-            let _ = Shell_NotifyIconW(NIM_DELETE, &self.data());
+            let mut registration = self.registration.get();
+            registration.stop(&mut ShellCall(&mut self.data()));
+            self.registration.set(registration);
             if self.wts_registered {
                 let _ = WTSUnRegisterSessionNotification(self.hwnd);
             }

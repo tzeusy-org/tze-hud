@@ -58,6 +58,8 @@ pub(crate) use connect::ConnectControl;
 pub(crate) use pause::PauseControl;
 pub(crate) use row::Section;
 pub(crate) use runtime::RuntimeControl;
+#[cfg(test)]
+pub(crate) use sections::InputSection;
 pub(crate) use state::PanelKey;
 
 use crate::threads::ShutdownToken;
