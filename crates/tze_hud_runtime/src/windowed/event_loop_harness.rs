@@ -1555,14 +1555,8 @@ mod tests {
         let _gpu = crate::test_support::lock_headless_runtime().await;
         let mut compositor = tze_hud_compositor::Compositor::new_headless(320, 200)
             .await
-            .unwrap_or_else(|error| {
-                let bytes = sink.0.lock().unwrap();
-                let startup = &bytes[bytes.len().saturating_sub(16384)..];
-                panic!(
-                    "software compositor for real frame builds: {error:?}; startup trace: {}",
-                    String::from_utf8_lossy(startup)
-                );
-            });
+            .expect("software compositor for real frame builds");
+        println!("capture_runtime_adapter={:?}", compositor.adapter_info());
         compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
         let clock = Arc::new(TestClock::new(1_000));
         let mut cfg = super::super::WindowedConfig::default();

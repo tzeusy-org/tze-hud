@@ -146,7 +146,7 @@ impl SceneGraph {
             .instances
             .get(widget)
             .and_then(|instance| instance.auto_clear_ms)
-            .map(|ms| u64::from(ms).saturating_mul(1_000));
+            .map(|ms| ms.saturating_mul(1_000));
         self.scheduled_batches
             .iter()
             .filter(move |scheduled| scheduled.batch.agent_namespace == namespace)

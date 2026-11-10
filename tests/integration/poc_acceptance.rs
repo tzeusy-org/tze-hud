@@ -665,8 +665,34 @@ fn input_items(reply: &Reply) -> &Vec<Value> {
 /// Production model discovery and rejections must be useful within one call.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn poc_widget_discovery_and_errors_are_self_sufficient() {
+    // Measure the previous production instance set through the same public
+    // handler, preserving every other config field and the actual serializer.
+    let mut prior_config = runtime_config();
+    let mut prior: toml::Value = PRODUCTION_CONFIG.parse().unwrap();
+    prior["tabs"][0]["widgets"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|widget| widget["widget_type"].as_str() != Some("countdown"));
+    prior_config.config_toml = Some(toml::to_string(&prior).unwrap());
+    let mut previous = Poc::boot_from(prior_config, None).await;
+    let old_discovery = previous.call("hud_surfaces", json!({})).await;
+    println!(
+        "production_discovery_old={}",
+        json!({"model_tokens":old_discovery.model_tokens,"model_bytes":old_discovery.model_bytes,"wire_tokens":old_discovery.wire_tokens,"wire_bytes":old_discovery.wire_bytes,"body":old_discovery.body})
+    );
+    assert_eq!(old_discovery.model_tokens, 210);
+    drop(previous);
     let mut poc = Poc::boot().await;
     let discovery = poc.call("hud_surfaces", json!({})).await;
+    let mut retained = discovery.body.clone();
+    retained["surfaces"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|surface| surface["s"] != "widget:main-countdown");
+    assert_eq!(
+        retained, old_discovery.body,
+        "all prior model parameters and occupancy hints survive"
+    );
     assert!(
         discovery.model_tokens <= DISCOVER_BUDGET,
         "{} tokens: {}",

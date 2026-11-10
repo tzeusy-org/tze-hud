@@ -1152,6 +1152,7 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
         Err(CompositorError::NoAdapter) if !require_gpu => return,
         Err(error) => panic!("bundle compositor: {error}"),
     };
+    println!("countdown_adapter={:?}", compositor.adapter_info());
     compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
     let mut surface = HeadlessSurface::new(&compositor.device, 360, 124);
     let clock = Arc::new(TestClock::new(1_000));

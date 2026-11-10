@@ -488,7 +488,6 @@ fn check_fields(surface: &Surface, p: &PublishParams) -> McpResult<()> {
         .find(|(_, set)| *set),
         Surface::Widget(_) => [
             ("content", p.content.is_some()),
-            ("delay_ms", p.delay_ms.is_some()),
             ("status", p.status.is_some()),
             ("expects_reply", p.expects_reply.is_some()),
             ("display_name", p.display_name.is_some()),
