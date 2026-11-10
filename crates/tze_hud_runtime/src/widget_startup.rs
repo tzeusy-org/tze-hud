@@ -56,7 +56,7 @@ macro_rules! builtin_bundle {
 }
 
 /// Widget bundles compiled into the executable so a lone `tze_hud.exe` exposes
-/// `gauge`, `progress-bar` and `status-indicator` with no asset files beside it.
+/// all shipped definitions with no asset files beside it.
 type BundleFiles = &'static [(&'static str, &'static [u8])];
 
 const BUILTIN_BUNDLES: &[(&str, BundleFiles)] = &[
@@ -347,7 +347,7 @@ mod tests {
         v
     }
 
-    /// WHEN no [widget_bundles] section exists THEN the three built-in bundles
+    /// WHEN no [widget_bundles] section exists THEN all six built-in bundles
     /// are still registered, and a missing on-disk root does not break startup.
     #[test]
     fn builtin_bundles_register_without_any_paths() {

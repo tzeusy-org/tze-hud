@@ -39,11 +39,11 @@ impl SceneGraph {
     /// of tab, while owner-visible and with a drawable box.
     pub fn widget_visible(&self, instance: &crate::WidgetInstance) -> bool {
         if !self.widgets_shown()
-            || !self
+            || self
                 .widget_registry
                 .active_publishes
                 .get(&instance.instance_name)
-                .is_some_and(|records| !records.is_empty())
+                .is_none_or(|records| records.is_empty())
         {
             return false;
         }

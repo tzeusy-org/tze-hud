@@ -1338,12 +1338,39 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
     render(&mut compositor, &mut scene, &mut surface);
     assert_eq!(count(&compositor), first + 1);
     assert!(!compositor.has_inflight_animation(&scene));
+    use tze_hud_scene::graph::SurfaceClasses;
+    scene.set_owner_hidden(SurfaceClasses {
+        widgets: true,
+        ..SurfaceClasses::NONE
+    });
+    clock.advance(60_000);
+    assert_eq!(compositor.next_widget_deadline_wall_us(&scene), None);
+    assert!(!compositor.widget_deadline_needs_render(&scene));
+    assert!(
+        render(&mut compositor, &mut scene, &mut surface)
+            .widget_rasterized
+            .is_empty()
+    );
+    assert_eq!(count(&compositor), first + 1);
+    scene.set_owner_hidden(SurfaceClasses::NONE);
+    assert!(compositor.widget_deadline_needs_render(&scene));
+    render(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(count(&compositor), first + 2);
+    assert_eq!(
+        compositor
+            .widget_renderer()
+            .unwrap()
+            .texture_entry("countdown")
+            .unwrap()
+            .last_rendered_params["ends_in_ms"],
+        string("3 min")
+    );
     scene.pause_widget_ttls();
-    clock.advance(240_000);
+    clock.advance(180_000);
     assert_eq!(compositor.next_widget_deadline_wall_us(&scene), None);
     assert!(!compositor.widget_deadline_needs_render(&scene));
     render(&mut compositor, &mut scene, &mut surface);
-    assert_eq!(count(&compositor), first + 1);
+    assert_eq!(count(&compositor), first + 2);
     scene.resume_widget_ttls();
     assert!(compositor.widget_deadline_needs_render(&scene));
     render(&mut compositor, &mut scene, &mut surface);
@@ -1355,6 +1382,43 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
     assert_eq!(entry.last_rendered_params["ends_in_ms"], string("0:00"));
     assert_eq!(entry.last_rendered_params["severity"], enumeration("error"));
     assert_eq!(compositor.next_widget_deadline_wall_us(&scene), None);
-    assert_ne!(five, surface.read_pixels(&compositor.device));
+    let zero = surface.read_pixels(&compositor.device);
+    assert_ne!(five, zero);
+    assert!(
+        widget_region(&zero, 360, (0, 0), (16, 40, 160, 24))
+            .iter()
+            .any(|pixel| (0..3).all(|c| pixel[c].abs_diff(error[c]) <= 5)),
+        "zero retains its actual severity-colored text pixels"
+    );
+    publish(
+        &mut scene,
+        "countdown",
+        HashMap::from([(
+            "ends_in_ms".into(),
+            WidgetParameterValue::Deadline(WidgetDeadline::relative(90_000)),
+        )]),
+    );
+    assert!(compositor.next_widget_deadline_wall_us(&scene).is_some());
+    scene
+        .widget_registry
+        .instances
+        .get_mut("countdown")
+        .unwrap()
+        .geometry_override = Some(GeometryPolicy::Relative {
+        x_pct: 0.0,
+        y_pct: 0.0,
+        width_pct: 0.0,
+        height_pct: 1.0,
+    });
+    assert_eq!(compositor.next_widget_deadline_wall_us(&scene), None);
+    assert!(!compositor.widget_deadline_needs_render(&scene));
+    render(&mut compositor, &mut scene, &mut surface);
+    assert!(
+        compositor
+            .widget_renderer()
+            .unwrap()
+            .texture_entry("countdown")
+            .is_none()
+    );
     assert_eq!(clock.now_us(), scene.now_wall_us());
 }
