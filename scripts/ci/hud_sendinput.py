@@ -188,9 +188,12 @@ $element = [System.Windows.Automation.AutomationElement]::FromPoint(
 for ($level = 0; $level -lt 5 -and $null -ne $element; $level++) {
     $info = $element.Current
     if ($info.ControlType -eq [System.Windows.Automation.ControlType]::Button) { break }
-    $element = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($element)
+    $parent = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($element)
+    # A null parent ends the current view; retain its last readable control.
+    if ($null -eq $parent) { break }
+    $element = $parent
 }
-if ($null -eq $element) { throw 'No accessible control at the tray candidate' }
+if ($null -eq $element) { throw 'No accessible control at the initial tray point' }
 $info = $element.Current
 $bounds = $info.BoundingRectangle
 [pscustomobject]@{
