@@ -316,6 +316,44 @@ def check_notification_error_result(measurement, baseline, report):
             report["status"] = "failed"
 
 
+def report_client_layer(measurement, report):
+    """Report teaching and model-call costs without arming skill ceilings.
+
+    These are additional measurements, not canonical MCP payloads: existing
+    baseline fingerprints, comparison metrics and budgets remain unchanged.
+    Missing/malformed measurement evidence still fails closed.
+    """
+    client = measurement.get("client_layer")
+    if not isinstance(client, dict):
+        reasons = ["missing client_layer measurements"]
+    else:
+        reasons = []
+        skills = client.get("skill_bodies")
+        if not isinstance(skills, dict) or set(skills) != {
+            "th-hud-publish", "hud-projection"
+        }:
+            reasons.append("client_layer needs both skill bodies")
+        else:
+            for name, counts in sorted(skills.items()):
+                reasons.extend(_validate_counts(counts, f"client_layer.skill_bodies.{name}"))
+        turns = client.get("model_turns")
+        flows = measurement.get("flows")
+        if not isinstance(turns, dict) or not isinstance(flows, dict) or set(turns) != set(flows):
+            reasons.append("client_layer model_turns must cover every canonical flow")
+        else:
+            for name, value in sorted(turns.items()):
+                if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+                    reasons.append(f"invalid model tool-call count: {name}")
+    if reasons:
+        report["incompatibilities"].extend(reasons)
+        if report["status"] in {"passed", "warning"}:
+            report["status"] = "failed"
+    else:
+        report["client_layer"] = {
+            "report_only": True, "skill_bodies": skills, "model_turns": turns
+        }
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--measurement", required=True, type=pathlib.Path)
@@ -327,6 +365,7 @@ def main():
     baseline = json.loads(args.baseline.read_text(encoding="utf-8"))
     report = compare(measurement, baseline)
     check_notification_error_result(measurement, baseline, report)
+    report_client_layer(measurement, report)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2, sort_keys=True))

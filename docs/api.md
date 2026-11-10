@@ -1063,6 +1063,17 @@ The budgets are enforced on model-visible tokens; the JSON-RPC envelope adds
 about 50 tokens per call that the model never sees. Both measures are
 baselined against regressions.
 
+The same artifact separately reports `client_layer.skill_bodies` (the complete
+`th-hud-publish` and `hud-projection` `SKILL.md` files, including frontmatter,
+counted with that pinned tokenizer) and `client_layer.model_turns` (one per
+executed `tools/call`; protocol `tools/list` is zero). These are report-only:
+the later skill diet arms its own ceiling. They do not alter canonical MCP
+flow bytes, fingerprints or budgets. Skill and reference JSON examples are
+checked against production MCP argument types by
+[`skill_json_examples_use_production_arguments`](../crates/tze_hud_mcp/tests/skill_examples.rs);
+the [annotation convention](../.claude/skills/th-hud-publish/references/examples.md)
+distinguishes arguments from responses and partial configuration examples.
+
 | Measure | Before T5 (wire) | Wire | Model-visible | Budget (model-visible) |
 |---|---|---|---|---|
 | `tools/list` | 4,418 | 627 | 590 | ≤ 900 |

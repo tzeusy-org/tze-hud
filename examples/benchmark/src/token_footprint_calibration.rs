@@ -87,6 +87,13 @@ mod calibration {
         fixture_fingerprint: String,
         flows: BTreeMap<String, FlowMeasurement>,
         notification_action_limit_error: ErrorCandidateMeasurement,
+        client_layer: ClientLayerMeasurement,
+    }
+
+    #[derive(Debug, Serialize)]
+    struct ClientLayerMeasurement {
+        skill_bodies: BTreeMap<String, Counts>,
+        model_turns: BTreeMap<String, usize>,
     }
 
     fn headless_config() -> HeadlessConfig {
@@ -282,7 +289,19 @@ mod calibration {
 
         let mut fixture_parts = Vec::new();
         let mut flows = BTreeMap::new();
+        let mut model_turns = BTreeMap::new();
         for (flow_name, transactions) in grouped {
+            model_turns.insert(
+                flow_name.clone(),
+                transactions
+                    .iter()
+                    .filter(|transaction| {
+                        let request: serde_json::Value =
+                            serde_json::from_str(&transaction.request_body).expect("request JSON");
+                        request["method"] == "tools/call"
+                    })
+                    .count(),
+            );
             let mut operations = BTreeMap::new();
             let mut flow_total = Counts {
                 bytes: 0,
@@ -339,6 +358,16 @@ mod calibration {
             );
         }
 
+        let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+        let skill_bodies = ["th-hud-publish", "hud-projection"]
+            .into_iter()
+            .map(|name| {
+                let path = root.join(".claude/skills").join(name).join("SKILL.md");
+                let body = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|error| panic!("{}: {error}", path.display()));
+                (name.to_string(), count(&body, &bpe))
+            })
+            .collect();
         CalibrationOutput {
             schema_version: 1,
             runtime_build: env!("CARGO_PKG_VERSION"),
@@ -352,6 +381,10 @@ mod calibration {
             fixture_fingerprint: fingerprint(fixture_parts),
             flows,
             notification_action_limit_error,
+            client_layer: ClientLayerMeasurement {
+                skill_bodies,
+                model_turns,
+            },
         }
     }
 
