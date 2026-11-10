@@ -7,7 +7,7 @@
 # On Windows, double-clicking tze_hud.exe installs it per user and writes this
 # file to %APPDATA%\tze_hud\config.toml if none exists. Or copy tze_hud.exe and
 # this file as tze_hud.toml next to it. No other files are needed: the gauge,
-# progress-bar and status-indicator widget bundles are built into the exe.
+# progress-bar, status-indicator, countdown, KPI and stepper bundles are built into the exe.
 #
 # Usage:
 #   tze_hud --window-mode overlay
@@ -42,7 +42,7 @@ pairing_hotkey = "Ctrl+Shift+F10"
 # log_level = "info"   # log file: error, warn, info, debug, trace
 # debug_zones = false  # zone outlines
 
-# Widget bundles: gauge, progress-bar and status-indicator are built into the
+# Widget bundles: gauge, progress-bar, status-indicator, countdown, KPI and stepper are built into the
 # exe. To override one (or add your own), add a [widget_bundles] table with
 # `paths = ["dir"]` (relative to this file); each subdirectory holding a
 # widget.toml is loaded, and a bundle with the same type name replaces the
