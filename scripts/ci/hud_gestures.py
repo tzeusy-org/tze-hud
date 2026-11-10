@@ -1631,7 +1631,8 @@ def scenario_tray(run: Run) -> None:
         return WIN.foreground_pid() == run.pid, WIN.foreground_pid()
     wait_until(foreground, what="owned HUD foreground before tray input", timeout_s=SETTLE_S)
     probe = {}
-    rect = WIN.tray_rect(tray["hwnd"], tray["icon_id"], run.pid, diagnostics=probe)
+    rect = WIN.tray_rect(tray["hwnd"], tray["icon_id"], run.pid,
+                         expected_tooltip=tooltip, diagnostics=probe)
     run.step(f"owned tray visibility probe {json.dumps(probe)}")
     if rect is None:
         run.step("limited tray proof: registration/tooltip/idle passed; icon in overflow or not exposed, no menu input injected")

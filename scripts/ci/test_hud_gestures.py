@@ -9,6 +9,7 @@ import ctypes
 import hashlib
 import importlib.util
 import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -292,18 +293,38 @@ class WindowsGuardTests(unittest.TestCase):
         native.user32.GetWindowRect.side_effect = bounds
         native.user32.WindowFromPoint.return_value = 12
         native.user32.IsChild.return_value = True
-        for hresult in (-1, 1, 0):
-            def locate(_identity, output):
-                rect = output._obj
-                rect.left, rect.top, rect.right, rect.bottom = (800, 728, 824, 760)
-                return hresult
+        tooltip = "No questions\nNo agents"
+        identity = {"name": tooltip, "control_type": "ControlType.Button",
+                    "offscreen": False, "enabled": True, "rect": [800, 728, 824, 760]}
+        with mock.patch.object(native.subprocess, "run", return_value=mock.Mock(stdout=json.dumps(identity))) as query:
+            for hresult in (-1, 1, 0):
+                def locate(_identity, output):
+                    rect = output._obj
+                    rect.left, rect.top, rect.right, rect.bottom = (800, 728, 824, 760)
+                    return hresult
 
-            native.shell32.Shell_NotifyIconGetRect.side_effect = locate
-            with self.subTest(hresult=hresult):
-                self.assertEqual(native.tray_rect(99, 1, 4242),
-                                 (800, 728, 824, 760) if hresult == 0 else None)
-        with self.assertRaises(ValueError):
-            native.tray_rect(99, 1, 9)
+                native.shell32.Shell_NotifyIconGetRect.side_effect = locate
+                with self.subTest(hresult=hresult):
+                    self.assertEqual(native.tray_rect(99, 1, 4242, expected_tooltip=tooltip),
+                                     (800, 728, 824, 760) if hresult == 0 else None)
+            # S_OK and the taskbar parent also describe the overflow chevron.
+            # Only the visible, enabled button carrying our tooltip is ours.
+            for change in ({"name": "Show hidden icons"}, {"name": "another app"},
+                           {"offscreen": True}, {"enabled": False},
+                           {"control_type": "ControlType.Pane"},
+                           {"rect": [0, 0, 10, 10]}):
+                query.return_value.stdout = json.dumps({**identity, **change})
+                with self.subTest(identity=change):
+                    self.assertIsNone(native.tray_rect(99, 1, 4242, expected_tooltip=tooltip))
+            query.return_value.stdout = json.dumps({**identity, "name": "No questions\r\nNo agents"})
+            self.assertEqual(native.tray_rect(99, 1, 4242, expected_tooltip=tooltip), (800, 728, 824, 760))
+            query.side_effect = native.subprocess.TimeoutExpired("powershell.exe", 10)
+            with self.assertRaises(native.subprocess.TimeoutExpired):
+                native.tray_rect(99, 1, 4242, expected_tooltip=tooltip)
+            query.reset_mock()
+            with self.assertRaises(ValueError):
+                native.tray_rect(99, 1, 9, expected_tooltip=tooltip)
+            query.assert_not_called()
 
     def test_modes_select_only_their_scenarios_and_refuse_mismatches(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
