@@ -61,8 +61,19 @@ one paired host without `HUD_HOST`; multiple hosts require explicit `HUD_HOST`.
 An old key without metadata uses 9090; an old custom port needs re-pairing or
 explicit selection. Ordinary Python clients still use `HUD_HOST`. The adapter
 runs on Linux/WSL; native Windows/macOS client lifetime support is not claimed.
-Fresh authenticated Claude discovery, including five upstream tools, remains
-the live acceptance check; cached tools alone are insufficient. The paired agent gets
+
+For sessions outside this repository, use the managed user-scope installation
+in [ai-bootstrap PR63](https://github.com/tzeusy-org/ai-bootstrap/pull/63).
+After the owner merges that PR, run
+`./scripts/install-tze-hud.sh /path/to/tze-hud` from the installed ai-bootstrap
+checkout with its standard tool homes linked. Select this repository's `main`
+checkout: the MCP entry and both HUD skills stay sourced from it; pairing
+secrets stay local. Follow ai-bootstrap's installation docs to verify existing
+MCP entries; the installer preserves them rather than replacing them.
+
+Fresh authenticated Claude discovery from another repository, including five
+upstream tools, remains the live acceptance check after pairing and restarting
+the client; cached tools or successful installation alone are insufficient. The paired agent gets
 `allow = ["*"]`; an `[agents.<id>] allow` list in the HUD's `agents.toml` (PSK
 hashes only, beside the config) must include `portal`. For one-shot
 zone publishing, use **`th-hud-publish`**.
