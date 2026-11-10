@@ -2232,6 +2232,9 @@ mod tests {
             }
             let mut scene = runtime.events.scene();
             scene.clear_zone("subtitle").unwrap();
+            // Retire prior test-only timed owners; only this section's 24h MCP
+            // lease should influence its countdown-only idle observations.
+            scene.leases.clear();
             let tab = scene.active_tab.unwrap();
             scene.widget_registry.register_instance(WidgetInstance {
                 id: SceneId::new(),

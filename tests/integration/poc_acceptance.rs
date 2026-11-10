@@ -33,8 +33,8 @@ const NOTIFICATION: &str = "zone:notification-area";
 const SUBTITLE: &str = "zone:subtitle";
 
 // docs/api.md "Token budgets" (model-visible tokens). Discover is the
-// production.toml scene: 6 zones plus the 3 built-in widgets (<=210 tokens).
-const DISCOVER_BUDGET: usize = 210;
+// production.toml scene: 6 zones plus four widget instances (<=250 tokens).
+const DISCOVER_BUDGET: usize = 250;
 // Existing fixture envelope after publishing/attaching: live holdings and
 // portal defaults cost additional tokens. This is not an arbitrary-state cap.
 const DISCOVER_WITH_HOLDINGS_BUDGET: usize = 250;
@@ -100,6 +100,9 @@ struct Reply {
     body: Value,
     /// Tool name + arguments + result text: what enters the model's context.
     model_tokens: usize,
+    model_bytes: usize,
+    wire_tokens: usize,
+    wire_bytes: usize,
 }
 
 struct Poc {
@@ -228,6 +231,8 @@ impl Poc {
             "params": {"name": tool, "arguments": arguments},
         })
         .to_string();
+        let request_bytes = request.len();
+        let request_tokens = tokens(&request);
         let mut call = tokio::spawn(post(self.hud.mcp_addr(), psk, request));
         let deadline = Instant::now() + WAIT;
         let response = loop {
@@ -243,6 +248,8 @@ impl Poc {
         };
         self.settle().await;
 
+        let wire_bytes = request_bytes + response.len();
+        let wire_tokens = request_tokens + tokens(&response);
         let response: Value = serde_json::from_str(&response).expect("JSON-RPC response");
         let result = &response["result"];
         let text = result["content"][0]["text"]
@@ -252,6 +259,9 @@ impl Poc {
         Reply {
             body: serde_json::from_str(text).expect("result text is JSON"),
             model_tokens: tokens(&format!("{tool}{arguments}{text}")),
+            model_bytes: format!("{tool}{arguments}{text}").len(),
+            wire_tokens,
+            wire_bytes,
         }
     }
 
@@ -663,8 +673,28 @@ async fn poc_widget_discovery_and_errors_are_self_sufficient() {
         discovery.model_tokens,
         discovery.body
     );
+    println!(
+        "production_discovery={}",
+        json!({"model_tokens":discovery.model_tokens,"model_bytes":discovery.model_bytes,"wire_tokens":discovery.wire_tokens,"wire_bytes":discovery.wire_bytes,"body":discovery.body})
+    );
     let surfaces = discovery.body["surfaces"].as_array().unwrap();
     let widget = |name: &str| surfaces.iter().find(|s| s["s"] == name).unwrap();
+    assert_eq!(
+        widget("widget:main-countdown")["params"]["ends_in_ms"],
+        "deadline<=24h"
+    );
+    assert_eq!(
+        surfaces
+            .iter()
+            .filter(|surface| surface["s"]
+                .as_str()
+                .is_some_and(|name| name.starts_with("widget:")))
+            .count(),
+        4
+    );
+    assert!(surfaces.iter().all(|surface| {
+        !["widget:kpi", "widget:stepper"].contains(&surface["s"].as_str().unwrap())
+    }));
     for surface in surfaces {
         if let Some(params) = surface["params"].as_object() {
             for hidden in ["fill_color", "theme", "tooltip_visible"] {
@@ -716,6 +746,21 @@ async fn poc_widget_discovery_and_errors_are_self_sufficient() {
             "info|warning|error",
         ),
         ("widget:main-status", json!({"reason":false}), "160"),
+        (
+            "widget:main-countdown",
+            json!({"ends_in_ms":-1}),
+            "deadline<=24h",
+        ),
+        (
+            "widget:main-countdown",
+            json!({"ends_in_ms":1.5}),
+            "deadline<=24h",
+        ),
+        (
+            "widget:main-countdown",
+            json!({"ends_in_ms":86400001}),
+            "deadline<=24h",
+        ),
     ] {
         let error = poc
             .call_error_body("hud_publish", json!({"surface":surface,"params":params}))
