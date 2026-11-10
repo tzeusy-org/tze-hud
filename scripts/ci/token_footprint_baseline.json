@@ -362,8 +362,38 @@
     }
   },
   "approval": {
+    "status": "pending_owner_review",
+    "decision_reference": "hud-ljhku.9 signed widget primitives option A (2026-11-09) authorizes one production countdown and <=250 fresh discovery; these concrete new production bytes await owner review. PR1598 approval remains historical for the previous baseline only.",
+    "basis": "Canonical seven flow objects, tokenizer, fingerprints, versions, ceilings and reply defaults retained. Source-bound production handler comparison at c3355f61 measures prior three-instance config model754bytes/210tokens and wire1025bytes/283tokens; four-instance config model882bytes/245tokens and wire1171bytes/321tokens. The only discovery addition is main-countdown with ends_in_ms deadline<=24h, label<=24, severity info|warning|error. All previous rows compare equal. New source requires final repeatable canonical measurements and independent review; no owner or Windows acceptance is inferred."
+  },
+  "previous_approval": {
     "status": "owner_approved",
     "decision_reference": "hud-ljhku.7 owner-signed discovery spec (2026-11-09); owner explicitly approved PR1598 and its concrete measured baseline (tools/list590, default discovery126, production discovery210) on 2026-11-10 (Asia/Singapore). Prior hud-j7kxn acceptance covers only the retained old baseline.",
     "basis": "Source-bound measurement on 177e1096: model-visible tools/list564->590 and default discovery113->126; production POC discovery satisfies210. Zone39, widget22, error45, complete choice114 and portal137 retain identical request/response fingerprints and metrics. Numeric discovery uses JSON number with identical finitef32 admission/bounds; audiences/occupancy/tool annotations supply the new bytes. All seven canonical flow ceilings, tokenizer, flow version4, serialization/accounting and reply defaults reattached/pending_input/remaining are unchanged. Canonical gate still requires two byte-identical final-source measurements. The owner explicitly accepted these new baseline bytes for PR1598 on 2026-11-10 (Asia/Singapore). This approval changes no measurement, fingerprint, tokenizer, accounting, flow version or ceiling. No Windows acceptance is inferred."
+  },
+  "production_discovery": {
+    "source": "c3355f6144805c219f240ab4272a33da1e33364e",
+    "old": {
+      "model_visible": {
+        "bytes": 754,
+        "tokens": 210
+      },
+      "total": {
+        "bytes": 1025,
+        "tokens": 283
+      }
+    },
+    "new": {
+      "model_visible": {
+        "bytes": 882,
+        "tokens": 245
+      },
+      "total": {
+        "bytes": 1171,
+        "tokens": 321
+      }
+    },
+    "budget": 250,
+    "scope": "Fresh unheld app/tze_hud_app/config/production.toml. Prior instance set measured through the same actual public handler; other config fields and previous discovery rows preserved."
   }
 }

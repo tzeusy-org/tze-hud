@@ -1136,7 +1136,7 @@ distinguishes arguments from responses and partial configuration examples.
 | Four-option notification ask + returned answer + ACK | — | 273 | 114 | ≤ 120 |
 | Widget publish | ~168 | 73 | 22 | ≤ 80 |
 | Portal: attach+publish+hold, poll, ack, clear | ~575 over 5 round trips | 343 over 4 | 137 over 4 | ≤ 250 |
-| Discover (unheld `production.toml`: 6 zones, 3 built-in widgets) | n/a | n/a | 210 | ≤ 210 |
+| Discover (unheld `production.toml`: 6 zones, 4 widget instances) | n/a | 321 | 245 | ≤ 250 |
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
 
 All seven measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
@@ -1144,10 +1144,16 @@ All seven measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
 changes model-visible `tools/list` from 564 to 590 tokens and default discovery
 from 113 to 126. The five other flows retain identical request/response
 fingerprints and metrics: zone 39, widget 22, error 45, complete choice 114 and
-portal 137. Production discovery is 210, down from ~232; occupancy hints and all
-model-owned values/limits remain. The seven canonical flow ceilings are unchanged; the signed production target
-is tighter than its former 250-token envelope. Numeric discovery
+portal 137. At that baseline production discovery was 210, down from ~232; occupancy hints and all
+model-owned values/limits remain. The seven canonical flow ceilings are unchanged; the countdown package uses the signed 250-token production envelope. Numeric discovery
 says `number`; admission and error hints still enforce finite f32.
+
+The countdown (`hud-ljhku.9`) adds one production instance: the actual handler
+comparison measures model-visible 754 → 882 bytes / 210 → 245 tokens and wire
+1025 → 1171 bytes / 283 → 321 tokens. All prior discovery rows compare equal;
+KPI and stepper remain bundles without production instances. The new production
+bytes are **pending owner review**; the prior approval below does not cover them.
+The seven canonical flow objects and ceilings remain unchanged in the baseline.
 
 The owner **accepted these concrete new baseline bytes** for PR1598 on
 2026-11-10 (Asia/Singapore). Earlier `hud-j7kxn` approval covered the old baseline
@@ -1194,7 +1200,7 @@ the previous items and polls, so poll+ack is one round trip.
 
 `integration` `poc_acceptance` checks model-visible counts on the POC
 acceptance flows (`docs/scope.md`), run end to end against `production.toml`.
-Its fresh, unheld discovery budget is the production row above: <=210 tokens,
+Its fresh, unheld discovery budget is the production row above: <=250 tokens,
 retaining model-owned parameter names, bounds and actionable occupancy hints.
 The existing live-state POC fixtures retain their 250-token envelope when
 holdings or attached portals add state/expiry/pending-input fields. That
