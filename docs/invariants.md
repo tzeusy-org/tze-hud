@@ -409,6 +409,10 @@ also crediting the elapsed pause on resume. Repeated transitions are no-ops.
 Output updates are rejected, never buffered for replay. Input TTL, finite poll
 ownership, prior orphan grace and the maximum scene suspension still expire.
 Blocked render/cue work stays pending until resume without periodic retries.
+Widget publication TTLs and owner auto-clear allowances also pause, without
+moving their original publication timestamp. Countdown parameter deadlines are
+absolute wall time: they keep passing, retain their last pixels without retries
+while paused, and refresh to current remaining time on resume.
 
 - `tze_hud_runtime` [`test_ttl_excluded_during_suspension`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),
   [`test_lease_identity_preserved_across_suspend_resume`](../crates/tze_hud_runtime/src/shell/safe_mode.rs),
@@ -472,7 +476,7 @@ types, and notification TTL is top-level only.
 
 ## 9. Time is injected
 
-Anything with a deadline (TTL, grace periods, degradation windows, expiry)
+Anything with a deadline (TTL, grace periods, degradation windows, expiry, widget countdowns)
 reads time from an injectable clock (`TestClock`, or `*_at(now)` methods), so
 its tests are deterministic and never sleep. Runtime composition shares one
 clock object between scene, MCP, portal driver and pause control before cloning
@@ -480,6 +484,9 @@ handles. Wall deadlines use `now_us`; monotonic readings and `Instant` are only
 elapsed-time and OS-wait domains. The panel parent exercises divergent domains,
 wall rewind and saturated deadlines.
 
+- `tze_hud_scene` [`countdown_format_and_next_change_share_rounded_boundaries`](../crates/tze_hud_scene/src/widget_deadline.rs),
+  [`widget_deadline_presentation_retention_cadence_and_safe_mode`](../crates/tze_hud_scene/src/graph/widget_tests.rs),
+  [`scheduled_widget_snapshots_at_late_apply_and_clear_cancels_only_its_publisher`](../crates/tze_hud_scene/src/graph/widget_tests.rs)
 - `tze_hud_runtime` [`portal_liveness_paused_during_safe_mode`](../crates/tze_hud_runtime/src/windowed/panel_input.rs)
 
 - `integration` (POC acceptance: zone TTL, `delay_ms`, and portal liveness
@@ -519,7 +526,8 @@ From the control panel the owner can hide portals, zones, widgets, or all of the
 screen). Hidden content is not drawn, catches no pointer input, holds no
 keyboard focus (a focused composer blurs), and costs no raster or upload work;
 its fades, reveals and scroll catch-up schedule no frames, and widgets shown
-again draw their newest values directly.
+again draw their newest values directly. Hidden countdowns keep their absolute
+wall deadline but schedule no display-change wake; showing them refreshes once.
 Leases, publications and agents are untouched and nothing tells an agent:
 publishes keep landing and draw, as they are now, when shown again. The set is
 runtime-only overlay state beside the scene model, never serialized and never

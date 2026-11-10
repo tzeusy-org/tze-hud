@@ -64,6 +64,9 @@ unreachable or rejects the call, continue in chat and report the limitation once
 | `status_bar` | `{"entries":{"session-a":"testing"}}` as `content`, with a work `key` |
 | `solid_color` | `{"r":0.05,"g":0.1,"b":0.2,"a":1.0}` as `content` |
 | Widget `params` declaration | `{"progress":0.5,"label":"Tests"}` as `params`, using discovered names/types |
+| Countdown `deadline<=24h` | `{"ends_in_ms":300000,"label":"Tests","severity":"info"}`; relative integer ms, starts at presentation |
+| KPI bundle | `{"value":"3 fail","label":"Tests","trend":"down","severity":"error"}` |
+| Stepper bundle | `{"step":2,"total":5,"state":"blocked","label":"Deploy"}`; step floors and clamps to total |
 
 - Structured zone `type` is inferred from the zone; set it explicitly when
   selecting another accepted type in a mixed zone. Unknown fields are rejected.

@@ -2195,6 +2195,154 @@ mod tests {
                 .unwrap();
             runtime.turn(true);
         }
+
+        // The countdown's typed value and scene version stay unchanged as wall
+        // time passes. Real capture builds may update its raster cache, but an
+        // unsuccessful ordinary submission must retain the repaint obligation.
+        runtime
+            .compositor
+            .init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+        {
+            use tze_hud_scene::{GeometryPolicy, WidgetInstance};
+            use tze_hud_widget::loader::{BundleScanResult, load_bundle_from_files};
+            let tokens =
+                tze_hud_config::tokens::resolve_tokens(&Default::default(), &Default::default());
+            let BundleScanResult::Ok(bundle) = load_bundle_from_files(
+                "countdown",
+                &[
+                    (
+                        "widget.toml",
+                        include_bytes!("../../../../assets/widget_bundles/countdown/widget.toml"),
+                    ),
+                    (
+                        "card.svg",
+                        include_bytes!("../../../../assets/widget_bundles/countdown/card.svg"),
+                    ),
+                ],
+                &tokens,
+            ) else {
+                panic!("shipped countdown")
+            };
+            for (file, bytes) in bundle.svg_contents {
+                runtime
+                    .compositor
+                    .widget_renderer_mut()
+                    .unwrap()
+                    .register_svg("countdown", &file, bytes);
+            }
+            let mut scene = runtime.events.scene();
+            scene.clear_zone("subtitle").unwrap();
+            let tab = scene.active_tab.unwrap();
+            scene.widget_registry.register_instance(WidgetInstance {
+                id: SceneId::new(),
+                widget_type_name: "countdown".into(),
+                tab_id: tab,
+                instance_name: "clock".into(),
+                geometry_override: Some(GeometryPolicy::Relative {
+                    x_pct: 0.0,
+                    y_pct: 0.0,
+                    width_pct: 1.0,
+                    height_pct: 0.62,
+                }),
+                contention_override: None,
+                auto_clear_ms: None,
+                current_params: bundle
+                    .definition
+                    .parameter_schema
+                    .iter()
+                    .map(|p| (p.name.clone(), p.default_value.clone()))
+                    .collect(),
+            });
+            scene.widget_registry.register_definition(bundle.definition);
+        }
+        call(addr, "hud_publish", serde_json::json!({"surface":"widget:clock", "params":{"ends_in_ms":300000}, "delay_ms":10000})).await;
+        assert!(
+            runtime
+                .events
+                .scene()
+                .widget_registry
+                .active_for_widget("clock")
+                .is_empty()
+        );
+        clock.advance(15_000); // Deliberately drain late: snapshot actual presentation.
+        assert!(runtime.turn(true));
+        assert!(!runtime.turn(true));
+        let version = runtime.events.scene().version;
+        let visible = |runtime: &CaptureRenderHarness| {
+            runtime
+                .compositor
+                .widget_renderer()
+                .unwrap()
+                .texture_entry("clock")
+                .unwrap()
+                .last_rendered_params["ends_in_ms"]
+                .clone()
+        };
+        assert_eq!(
+            visible(&runtime),
+            tze_hud_scene::WidgetParameterValue::String("5 min".into())
+        );
+        clock.advance(60_000);
+        assert_eq!(runtime.events.scene().version, version);
+        let capture = tokio::spawn({
+            let endpoint = endpoint.clone();
+            async move { endpoint.capture_frame(0).await }
+        });
+        queued.notified().await;
+        assert!(
+            runtime.turn(false),
+            "due wall text must pass idle gate despite unchanged scene version"
+        );
+        let (_, permit) = capture.await.unwrap().unwrap();
+        drop(permit);
+        assert_eq!(
+            visible(&runtime),
+            tze_hud_scene::WidgetParameterValue::String("4 min".into())
+        );
+        assert!(
+            runtime.turn(true),
+            "capture/failed primary did not acknowledge screen repaint"
+        );
+        assert!(
+            !runtime.turn(true),
+            "countdown is not an inflight animation"
+        );
+        runtime.events.scene().pause_widget_ttls();
+        clock.advance(120_000);
+        assert!(!runtime.turn(true), "pause does not retry due countdowns");
+        assert_eq!(
+            runtime
+                .compositor
+                .next_widget_deadline_wall_us(&runtime.events.scene()),
+            None
+        );
+        runtime.events.scene().resume_widget_ttls();
+        assert!(runtime.turn(true));
+        assert_eq!(
+            visible(&runtime),
+            tze_hud_scene::WidgetParameterValue::String("2 min".into())
+        );
+        clock.advance(1_000);
+        assert!(runtime.turn(true));
+        assert_eq!(
+            visible(&runtime),
+            tze_hud_scene::WidgetParameterValue::String("1:59".into())
+        );
+        assert!(!runtime.turn(true));
+        call(
+            addr,
+            "hud_clear",
+            serde_json::json!({"surface":"widget:clock"}),
+        )
+        .await;
+        assert!(runtime.turn(true));
+        assert_eq!(
+            runtime
+                .compositor
+                .next_widget_deadline_wall_us(&runtime.events.scene()),
+            None
+        );
+        assert!(!runtime.turn(true));
     }
 
     fn character(ch: &str, ts: u64) -> PendingKeyboardEvent {

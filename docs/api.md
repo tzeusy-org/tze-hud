@@ -178,6 +178,31 @@ and `hud_clear` have `idempotentHint:true`; publish/input make neither claim.
   is separate work. Zone enter/exit durations use the resolved motion tokens
   unless explicitly overridden by zone policy, and Stack TTL fades use the
   exit duration/curve without extending authoritative expiry.
+  Shipped bundles also include `countdown` (`ends_in_ms`, `label<=24`,
+  `severity`), `kpi` (`value<=12`, `label<=24`, `trend=up|down|flat`,
+  `severity`), and `stepper` (`step` 0..12, `total` 1..12,
+  `state=active|blocked|done`, `label<=24`). Production config instantiates
+  only `main-countdown` from these additions; KPI and stepper are available
+  for owner configuration. Stepper dots floor fractional steps and clamp to
+  total; the current dot uses primary/caution/success for active/blocked/done.
+
+  `deadline` appears in discovery as `deadline<=24h`. Send integer relative
+  milliseconds 0..86400000 (`ends_in_ms` in the countdown bundle); gRPC uses
+  the `deadline_ms` integer oneof, never the f32 oneof. Both planes reject
+  negatives, fractions, overflow and wrong types with that bound in the hint.
+  The runtime snapshots the absolute wall deadline when content actually
+  presents, including a late delayed drain. A label-only republish under the
+  same publisher/key preserves it; explicitly resending the duration resets it.
+  Remaining time rounds up: `125 min` → `2 h 05`, `30 min` → `30 min`,
+  `90 s` → `1:30`. Only a visible published countdown schedules its next
+  display change: minute granularity above two minutes, second granularity
+  in the last two minutes. At `0:00` it retains severity and stops waking.
+  Hidden, cleared, absent and safe-mode countdowns schedule no countdown wake.
+  Safe mode freezes widget publication TTL and the owner's auto-clear allowance,
+  while the absolute countdown keeps passing; resume displays current wall time.
+  Hover remains runtime-local. SVG `threshold` bindings compare f32 `>= k`
+  into opacity 0/1; optional `attr_min`/`attr_max` in 0..1 select below/above
+  outputs for mutually exclusive dot branches, without an expression language.
 - Portal: the first publish to `portal:<id>` attaches (`display_name` is
   optional). Omit content for a bare attach or status-only update.
   `content` appends only the new output text; `status` labels agent activity

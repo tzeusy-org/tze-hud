@@ -235,6 +235,36 @@ fn shipped_bundles_load_and_bind() {
                 ("tooltip_visible", "tooltip-group", "opacity"),
             ],
         ),
+        (
+            "countdown",
+            &["label", "ends_in_ms", "severity", "tooltip_visible"],
+            &["card.svg"],
+            &[
+                ("ends_in_ms", "value", "text-content"),
+                ("severity", "value", "fill"),
+                ("tooltip_visible", "tooltip", "opacity"),
+            ],
+        ),
+        (
+            "kpi",
+            &["label", "value", "trend", "severity", "tooltip_visible"],
+            &["card.svg"],
+            &[
+                ("value", "value", "text-content"),
+                ("trend", "trend-down", "opacity"),
+                ("severity", "glyph-down", "stroke"),
+            ],
+        ),
+        (
+            "stepper",
+            &["label", "step", "total", "state", "tooltip_visible"],
+            &["card.svg"],
+            &[
+                ("step", "filled-2", "opacity"),
+                ("total", "total-5", "opacity"),
+                ("state", "current-a-2", "fill"),
+            ],
+        ),
     ];
 
     for (name, params, layers, bindings) in table {
@@ -273,7 +303,14 @@ fn shipped_bundles_load_and_bind() {
 
 #[test]
 fn shipped_bundles_need_their_tokens() {
-    for name in ["gauge", "progress-bar", "status-indicator"] {
+    for name in [
+        "gauge",
+        "progress-bar",
+        "status-indicator",
+        "countdown",
+        "kpi",
+        "stepper",
+    ] {
         let err = expect_err(load_bundle_dir(&shipped_path(name)));
         assert_eq!(err.wire_code(), "WIDGET_BUNDLE_UNRESOLVED_TOKEN", "{name}");
     }
@@ -282,7 +319,14 @@ fn shipped_bundles_need_their_tokens() {
 /// The hover tooltips all reveal after the same short delay.
 #[test]
 fn shipped_hover_tooltips_share_the_gauge_delay() {
-    for name in ["gauge", "progress-bar", "status-indicator"] {
+    for name in [
+        "gauge",
+        "progress-bar",
+        "status-indicator",
+        "countdown",
+        "kpi",
+        "stepper",
+    ] {
         let hover = load_shipped(name)
             .definition
             .hover_behavior
@@ -762,4 +806,71 @@ fn wire_code_unresolved_token() {
         &HashMap::new(),
     ));
     assert_eq!(err.wire_code(), "WIDGET_BUNDLE_INVALID_MANIFEST");
+}
+
+#[test]
+fn deadline_defaults_and_threshold_bindings_admit_only_their_typed_contract() {
+    use tze_hud_scene::{WidgetDeadline, WidgetParamType};
+    for (value, accepted) in [
+        ("0", true),
+        ("86400000", true),
+        ("-1", false),
+        ("86400001", false),
+        ("1.5", false),
+        ("\"1000\"", false),
+    ] {
+        let source = manifest(
+            "deadline",
+            &format!(
+                "[[parameter_schema]]\nname = \"ends_in_ms\"\ntype = \"deadline\"\ndefault = {value}\n"
+            ),
+        );
+        match load_files(&[("widget.toml", &source)], &HashMap::new()) {
+            BundleScanResult::Ok(bundle) if accepted => {
+                let declaration = &bundle.definition.parameter_schema[0];
+                assert_eq!(declaration.param_type, WidgetParamType::Deadline);
+                assert_eq!(
+                    declaration.default_value,
+                    WidgetParameterValue::Deadline(WidgetDeadline::relative(
+                        value.parse().unwrap()
+                    ))
+                );
+            }
+            BundleScanResult::Err(error) if !accepted => {
+                assert!(error.to_string().contains("deadline<=24h"), "{error}")
+            }
+            other => panic!("{value}: {other:?}"),
+        }
+    }
+    for (kind, threshold, outputs, attribute, accepted) in [
+        ("f32", "2", "", "opacity", true),
+        (
+            "f32",
+            "2",
+            "attr_min = 1.0\nattr_max = 0.0\n",
+            "opacity",
+            true,
+        ),
+        ("f32", "nan", "", "opacity", false),
+        ("f32", "2", "attr_max = 1.1\n", "opacity", false),
+        ("f32", "2", "", "width", false),
+        ("deadline", "2", "", "text-content", false),
+    ] {
+        let default = if kind == "f32" { "0.0" } else { "0" };
+        let source = manifest(
+            "threshold",
+            &format!(
+                "[[parameter_schema]]\nname = \"level\"\ntype = \"{kind}\"\ndefault = {default}\n[[layers]]\nsvg_file = \"test.svg\"\n[[layers.bindings]]\nparam = \"level\"\ntarget_element = \"bar\"\ntarget_attribute = \"{attribute}\"\nmapping = \"threshold\"\nthreshold = {threshold}\n{outputs}"
+            ),
+        );
+        let result = load_files(
+            &[("widget.toml", &source), ("test.svg", SVG)],
+            &HashMap::new(),
+        );
+        assert_eq!(
+            matches!(result, BundleScanResult::Ok(_)),
+            accepted,
+            "{source}: {result:?}"
+        );
+    }
 }

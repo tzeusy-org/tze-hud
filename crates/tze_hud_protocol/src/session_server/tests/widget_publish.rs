@@ -332,6 +332,73 @@ async fn test_durable_widget_publish_receives_result() {
             .get("gauge")
             .is_none_or(Vec::is_empty)
     );
+    // Relative countdown and TTL both begin at actual (late) presentation.
+    let delayed = Publish {
+        surface: "widget:gauge".into(),
+        present_at_us: clock.now_us() + 10_000_000,
+        ttl_ms: 20_000,
+        params: vec![crate::proto::WidgetParameterValueProto {
+            param_name: "ends_in_ms".into(),
+            value: Some(Param::DeadlineMs(86_399_999)),
+        }],
+        ..Default::default()
+    };
+    assert!(
+        request(
+            &tx,
+            &mut stream,
+            45,
+            ClientPayload::Publish(delayed.clone())
+        )
+        .await
+        .ok
+    );
+    {
+        let scene = scene_ref.lock().await;
+        assert_eq!(scene.scheduled_batches.len(), 1);
+        assert_eq!(scene.agent_holdings("widget-agent").widgets, 1);
+        assert!(scene.widget_registry.active_for_widget("gauge").is_empty());
+    }
+    clock.advance(15_000);
+    {
+        let mut scene = scene_ref.lock().await;
+        assert!(scene.apply_due_batches()[0].applied);
+        let record = &scene.widget_registry.active_for_widget("gauge")[0];
+        let tze_hud_scene::WidgetParameterValue::Deadline(deadline) = &record.params["ends_in_ms"]
+        else {
+            panic!("deadline")
+        };
+        assert_eq!(deadline.at_wall_us, Some(clock.now_us() + 86_399_999_000));
+        assert_eq!(record.expires_at_wall_us, Some(clock.now_us() + 20_000_000));
+        assert_eq!(record.publication_origin, Some(origin));
+    }
+    assert!(
+        request(
+            &tx,
+            &mut stream,
+            46,
+            ClientPayload::Publish(Publish {
+                present_at_us: clock.now_us() + 10_000_000,
+                ..delayed
+            })
+        )
+        .await
+        .ok
+    );
+    assert!(
+        request(
+            &tx,
+            &mut stream,
+            47,
+            ClientPayload::Clear(Clear {
+                surface: "widget:gauge".into(),
+                ..Default::default()
+            })
+        )
+        .await
+        .ok
+    );
+    assert!(scene_ref.lock().await.scheduled_batches.is_empty());
     drop(tx);
 }
 
