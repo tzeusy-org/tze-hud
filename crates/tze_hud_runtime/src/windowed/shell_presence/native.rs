@@ -171,29 +171,40 @@ impl Bridge {
         runtime.spawn(async move {
             let mut shutdown_rx = shutdown.subscribe();
             loop {
-                if shutdown.is_triggered() { bridge.stop(); break; }
+                if shutdown.is_triggered() {
+                    bridge.stop();
+                    break;
+                }
                 let agents = match &deps.agents {
                     Some(agents) => agents.active_names().await,
                     None => Vec::new(),
                 };
                 let (hidden, visible_questions) = {
                     let scene = deps.scene.lock().await;
-                    let now = scene.now_wall_us();
-                    let questions = scene.zone_registry.active_publishes.values().flatten()
-                        .filter(|record| record.expires_at_wall_us.is_none_or(|end| end > now)
-                            && !scene.overlay.notification_choices.contains_key(&record.publication_id)
-                            && matches!(&record.content, tze_hud_scene::ZoneContent::Notification(payload)
-                                if payload.actions.iter().any(|action| action.callback_id.is_some() && action.validate().is_ok())))
-                        .count();
-                    (scene.owner_hidden(), questions)
+                    (scene.owner_hidden(), super::question_count(&scene))
                 };
-                let colors = deps.appearance.as_ref()
+                let colors = deps
+                    .appearance
+                    .as_ref()
                     .map(|appearance| GlyphColors::from_tokens(&appearance.live.resolved()))
-                    .unwrap_or_else(|| bridge.latest.read().unwrap_or_else(|e| e.into_inner()).colors.clone());
-                bridge.publish(Inputs {
-                    paused: deps.pause.is_paused(), hidden, visible_questions,
-                    held_questions: 0, agents,
-                }, colors);
+                    .unwrap_or_else(|| {
+                        bridge
+                            .latest
+                            .read()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .colors
+                            .clone()
+                    });
+                bridge.publish(
+                    Inputs {
+                        paused: deps.pause.is_paused(),
+                        hidden,
+                        visible_questions,
+                        held_questions: 0,
+                        agents,
+                    },
+                    colors,
+                );
                 tokio::select! {
                     _ = changes.notified() => {},
                     _ = shutdown_rx.recv() => { bridge.stop(); break; }

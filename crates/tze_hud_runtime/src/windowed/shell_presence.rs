@@ -4,6 +4,7 @@
 use serde::Serialize;
 use tze_hud_config::tokens::DesignTokenMap;
 use tze_hud_scene::graph::SurfaceClasses;
+use tze_hud_scene::{SceneGraph, ZoneContent};
 
 #[cfg(target_os = "windows")]
 pub(super) mod native;
@@ -36,6 +37,28 @@ pub(crate) struct Inputs {
     pub held_questions: usize,
     /// The panel header's connected-or-showing set, already sorted by id.
     pub agents: Vec<String>,
+}
+
+/// Count unanswered cards once, regardless of how many callback buttons each
+/// card contains. Hidden cards still wait for an answer; URL-only cards do not.
+fn question_count(scene: &SceneGraph) -> usize {
+    let now = scene.now_wall_us();
+    scene
+        .zone_registry
+        .active_publishes
+        .values()
+        .flatten()
+        .filter(|record| {
+            record.expires_at_wall_us.is_none_or(|end| end > now)
+                && !scene
+                    .overlay
+                    .notification_choices
+                    .contains_key(&record.publication_id)
+                && matches!(&record.content, ZoneContent::Notification(payload)
+                    if payload.actions.iter().any(|action|
+                        action.callback_id.is_some() && action.validate().is_ok()))
+        })
+        .count()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -265,6 +288,60 @@ mod tests {
 
     #[test]
     fn tray_presentation_and_session_transitions() {
+        use std::sync::Arc;
+        use tze_hud_scene::clock::TestClock;
+        use tze_hud_scene::{NotificationAction, NotificationPayload};
+
+        let clock = Arc::new(TestClock::new(100));
+        let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
+        scene.register_zone(crate::windowed::test_support::make_test_zone("questions"));
+        let callback = NotificationAction {
+            label: "Answer".into(),
+            callback_id: Some("answer".into()),
+            url: None,
+        };
+        for actions in [
+            vec![callback.clone(), callback.clone()],
+            vec![callback],
+            vec![NotificationAction {
+                label: "Open link".into(),
+                callback_id: None,
+                url: Some("https://example.com".into()),
+            }],
+        ] {
+            scene
+                .publish_to_zone(
+                    "questions",
+                    ZoneContent::Notification(NotificationPayload {
+                        text: "A question".into(),
+                        actions,
+                        ..Default::default()
+                    }),
+                    "agent",
+                    None,
+                    Some(200_000),
+                    None,
+                )
+                .unwrap();
+        }
+        assert_eq!(
+            question_count(&scene),
+            2,
+            "count cards, not buttons or links"
+        );
+        let answered = scene.zone_registry.active_publishes["questions"][0].publication_id;
+        scene
+            .overlay
+            .notification_choices
+            .insert(answered, "answer".into());
+        assert_eq!(question_count(&scene), 1, "chosen feedback is not waiting");
+        clock.set(200);
+        assert_eq!(
+            question_count(&scene),
+            0,
+            "expiry precedes physical reaping"
+        );
+
         let mut input = Inputs::default();
         assert_eq!(Presentation::from(&input).glyph, GlyphState::Normal);
         assert_eq!(
