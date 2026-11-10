@@ -860,7 +860,7 @@ fn visible_transcript_markdown(
             result.push_str(PORTAL_TIMESTAMP_SEPARATOR);
             last_stamped_minute = Some(minute_bucket);
         }
-        result.push_str(clamp_utf8(&unit.output_text, 4_096));
+        result.push_str(&unit.output_text);
     }
     result
 }
@@ -1066,13 +1066,7 @@ mod tests {
                     .get(&key)
                     .unwrap()
                     .visible_transcript(hub.limits().visible_bytes)
-                    .map(|u| TranscriptUnit {
-                        sequence: u.seq,
-                        output_text: u.text.clone(),
-                        output_kind: OutputKind::Assistant,
-                        expects_reply: u.expects_reply,
-                        appended_at_wall_us: u.at_us,
-                    })
+                    .map(|u| unit(&u.text, u.at_us))
                     .collect();
                 let settled_at = 1 + PORTAL_ACTIVITY_QUIESCE_WINDOW_US + 1;
                 let settled = output_markdown(&state, settled_at, TimestampGranularity::Off);
