@@ -724,6 +724,7 @@ async fn test_graceful_disconnect_session_close() {
 
     let mut service = HudSessionImpl::new(SceneGraph::new(800.0, 600.0), "test-key");
     let owned_state = Arc::clone(&service.state);
+    let mut registry_changes = owned_state.lock().await.sessions.subscribe_changes();
     let (registered_tx, mut registrations) = tokio::sync::mpsc::unbounded_channel();
     let witness = Arc::new(RecordingEnforcer {
         state: Arc::clone(&owned_state),
@@ -786,6 +787,7 @@ async fn test_graceful_disconnect_session_close() {
             assert!(witness.barrier.lock().unwrap().is_some());
         } else {
             ready(&mut stream, false).await;
+            registry_changes.borrow_and_update();
         }
         let ObservedSessionHandler { task, panic } = handler;
         if panic_handler {
@@ -808,6 +810,21 @@ async fn test_graceful_disconnect_session_close() {
         drop(barrier);
         drop(tx);
         assert!(observe_stream_end(&mut stream, Duration::from_millis(500)).await);
+
+        if !preguard {
+            tokio::time::timeout(Duration::from_secs(1), registry_changes.changed())
+                .await
+                .expect("cancelled or panicking handlers must notify roster removal")
+                .expect("the live registry retains its observer");
+            assert_eq!(
+                owned_state
+                    .lock()
+                    .await
+                    .sessions
+                    .connected("budget-cleanup"),
+                1
+            );
+        }
 
         for (_namespace, peer_id, peer_tx, peer_stream, _handler, sequence) in &mut peers {
             assert!(witness.entries.lock().unwrap().contains_key(peer_id));
@@ -1426,10 +1443,19 @@ async fn test_handshake_unpaired_mid_flight_is_refused_at_registration() {
     // Closed before its handler armed a registry guard, the task's close
     // branch still unregisters exactly this session.
     let mut st = service.state.lock().await;
+    let mut registry_changes = st.sessions.subscribe_changes();
     let (other, _other_signal) = crate::session::SessionCloser::pair();
     st.sessions.register("late", &[], other);
+    registry_changes.borrow_and_update();
     assert_eq!(st.sessions.remove_closed(&close), 1);
+    assert!(registry_changes.has_changed().unwrap());
     assert_eq!(st.sessions.connected("late"), 1, "another session stays");
+    registry_changes.borrow_and_update();
+    assert_eq!(st.sessions.remove_closed(&close), 0);
+    assert!(
+        !registry_changes.has_changed().unwrap(),
+        "missing removal is quiet"
+    );
     drop(st);
     drop(close);
     tokio::time::timeout(

@@ -169,7 +169,7 @@ shell32.Shell_NotifyIconGetRect.restype = ctypes.c_long
 shell32.Shell_NotifyIconGetRect.argtypes = [ctypes.POINTER(NOTIFYICONIDENTIFIER), ctypes.POINTER(wintypes.RECT)]
 
 
-def tray_rect(hwnd: int, icon_id: int, owned_pid: int) -> tuple[int, int, int, int] | None:
+def tray_rect(hwnd: int, icon_id: int, owned_pid: int, *, diagnostics: dict | None = None) -> tuple[int, int, int, int] | None:
     """Only the owned icon, exposed on the taskbar (not hidden overflow).
 
     GetRect can return an overflow rectangle even while its flyout is closed.
@@ -182,7 +182,12 @@ def tray_rect(hwnd: int, icon_id: int, owned_pid: int) -> tuple[int, int, int, i
         raise ValueError("tray HWND does not belong to the owned HUD")
     identity = NOTIFYICONIDENTIFIER(cbSize=ctypes.sizeof(NOTIFYICONIDENTIFIER), hWnd=hwnd, uID=icon_id)
     rect = wintypes.RECT()
-    if shell32.Shell_NotifyIconGetRect(ctypes.byref(identity), ctypes.byref(rect)) < 0:
+    hresult = shell32.Shell_NotifyIconGetRect(ctypes.byref(identity), ctypes.byref(rect))
+    if diagnostics is not None:
+        diagnostics.update(hresult=hresult, rect=[rect.left, rect.top, rect.right, rect.bottom])
+    # The documented success result is S_OK. In particular a positive HRESULT
+    # is not proof of an exposed icon suitable for real desktop input.
+    if hresult != 0:
         return None
     taskbar = user32.FindWindowW("Shell_TrayWnd", None)
     bounds = wintypes.RECT()
@@ -192,6 +197,10 @@ def tray_rect(hwnd: int, icon_id: int, owned_pid: int) -> tuple[int, int, int, i
     if not (rect.left < rect.right and rect.top < rect.bottom and bounds.left <= x < bounds.right and bounds.top <= y < bounds.bottom):
         return None
     at_point = user32.WindowFromPoint(wintypes.POINT(x, y))
+    if diagnostics is not None:
+        class_name = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(at_point, class_name, len(class_name))
+        diagnostics.update(point_window=at_point, point_class=class_name.value)
     if at_point != taskbar and not user32.IsChild(taskbar, at_point):
         return None
     return rect.left, rect.top, rect.right, rect.bottom

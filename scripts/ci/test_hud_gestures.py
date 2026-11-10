@@ -274,6 +274,37 @@ class WindowsGuardTests(unittest.TestCase):
                 self.assertEqual(len(result["windows"]), len(rows))
                 self.assertEqual(result["matching_overlays"], 0 if case == "no-overlay" else 2 if case == "ambiguous" else 1)
 
+    def test_tray_rect_requires_documented_success_and_owned_icon(self) -> None:
+        native = native_input_boundary()
+
+        def owner(_hwnd, output):
+            output._obj.value = 4242
+            return 1
+
+        def bounds(_hwnd, output):
+            rect = output._obj
+            rect.left, rect.top, rect.right, rect.bottom = (0, 728, 1024, 768)
+            return True
+
+        native.user32.GetWindowThreadProcessId.side_effect = owner
+        native.user32.FindWindowW.return_value = 11
+        native.user32.IsWindowVisible.return_value = True
+        native.user32.GetWindowRect.side_effect = bounds
+        native.user32.WindowFromPoint.return_value = 12
+        native.user32.IsChild.return_value = True
+        for hresult in (-1, 1, 0):
+            def locate(_identity, output):
+                rect = output._obj
+                rect.left, rect.top, rect.right, rect.bottom = (800, 728, 824, 760)
+                return hresult
+
+            native.shell32.Shell_NotifyIconGetRect.side_effect = locate
+            with self.subTest(hresult=hresult):
+                self.assertEqual(native.tray_rect(99, 1, 4242),
+                                 (800, 728, 824, 760) if hresult == 0 else None)
+        with self.assertRaises(ValueError):
+            native.tray_rect(99, 1, 9)
+
     def test_modes_select_only_their_scenarios_and_refuse_mismatches(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fake = mock.Mock(home=None, log=None, display="", port=0)

@@ -170,6 +170,12 @@ impl Bridge {
         let bridge = Arc::clone(self);
         runtime.spawn(async move {
             let mut shutdown_rx = shutdown.subscribe();
+            // Subscribe before the first roster read, including connections
+            // that publish nothing and removals owned by cancellation guards.
+            let mut session_changes = match &deps.agents {
+                Some(agents) => Some(agents.session_changes().await),
+                None => None,
+            };
             loop {
                 if shutdown.is_triggered() {
                     bridge.stop();
@@ -207,6 +213,16 @@ impl Bridge {
                 );
                 tokio::select! {
                     _ = changes.notified() => {},
+                    changed = async {
+                        match &mut session_changes {
+                            Some(changes) => changes.changed().await,
+                            None => std::future::pending().await,
+                        }
+                    } => {
+                        if changed.is_err() {
+                            session_changes = None;
+                        }
+                    },
                     _ = shutdown_rx.recv() => { bridge.stop(); break; }
                 }
             }

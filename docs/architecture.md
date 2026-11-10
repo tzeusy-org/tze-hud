@@ -114,8 +114,10 @@ WTS session notifications. [`displays`](../crates/tze_hud_runtime/src/windowed/d
 routes messages; [`shell_presence`](../crates/tze_hud_runtime/src/windowed/shell_presence.rs)
 and its native owner keep shell resources off the window loop. A latest-only
 snapshot on the network runtime reads the panel's connected-or-showing agent
-set and live question state after existing work notifications, then posts only
-changed tray state to its window. There is no tray polling timer or additional
+set and live question state after existing work notifications. Session-registry
+membership notices also refresh the roster on connection and every cleanup path,
+without waking the renderer. The observer posts only changed tray state to its
+window. There is no tray polling timer or additional
 message thread. Native commands feed the existing panel task; Quit triggers
 the normal shutdown callback. Shutdown removes the icon and unregisters WTS
 before releasing window-owned resources. `/admin/status` observes this state;

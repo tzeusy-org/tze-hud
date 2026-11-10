@@ -66,6 +66,11 @@ pub(crate) struct AgentControl {
 }
 
 impl AgentControl {
+    #[cfg(target_os = "windows")]
+    pub(crate) async fn session_changes(&self) -> tokio::sync::watch::Receiver<()> {
+        self.shared.lock().await.sessions.subscribe_changes()
+    }
+
     /// The same connected-or-showing set as the panel header, without reading
     /// paired-only records from disk on each visual change.
     #[cfg(target_os = "windows")]

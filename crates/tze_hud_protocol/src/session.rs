@@ -255,6 +255,12 @@ impl SessionRegistry {
             .subscribe()
     }
 
+    fn notify_changed(&self) {
+        if let Some(changes) = &self.changes {
+            changes.send_replace(());
+        }
+    }
+
     /// Register a session for an authenticated agent. `closer` is what
     /// [`Self::close_namespace`] uses to end it; it is attached here, at
     /// registration, so no unpair can fall between the two.
@@ -275,11 +281,16 @@ impl SessionRegistry {
             closer,
         };
         self.sessions.insert(session_id, session.clone());
+        self.notify_changed();
         session
     }
 
     pub fn remove_session(&mut self, session_id: &str) -> Option<AgentSession> {
-        self.sessions.remove(session_id)
+        let removed = self.sessions.remove(session_id);
+        if removed.is_some() {
+            self.notify_changed();
+        }
+        removed
     }
 
     #[cfg(test)]
@@ -404,7 +415,11 @@ impl SessionRegistry {
     pub fn remove_closed(&mut self, signal: &SessionCloseSignal) -> usize {
         let before = self.sessions.len();
         self.sessions.retain(|_, s| !signal.is_for(&s.closer));
-        before - self.sessions.len()
+        let removed = before - self.sessions.len();
+        if removed > 0 {
+            self.notify_changed();
+        }
+        removed
     }
 
     /// Register the `ServerMessage` sender for an existing session.
