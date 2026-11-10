@@ -143,7 +143,11 @@ A uniquely identifiable visible plain-text row anchors append, reflow and rollin
 head trim. Repeated identical lines without a unique visible anchor keep their
 pixel offset, clamped to the retained range; this does not guarantee original
 turn identity. Measured origin corrections rebase the native smoother once, so
-ordinary wheel easing never animates a reading coordinate through a new origin. Existing 16 KiB history/render limits are unchanged. Resize
+ordinary wheel easing never animates a reading coordinate through a new origin.
+The hub accepts up to 16 KiB per publish, and the renderer preserves each unit
+within the existing 16 KiB rolling output window without a smaller per-unit cap.
+Timestamps, separators and the writing caret share that window; overflow trims
+its oldest UTF-8 bytes, preserving the newest output tail. Resize
 completion broadcasts member geometry and optionally persists it after unlock.
 Detach revokes while
 scene-owned; hub tombstones and scene terminal state retain missed-lock cleanup.
