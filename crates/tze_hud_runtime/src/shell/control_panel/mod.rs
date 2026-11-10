@@ -162,7 +162,7 @@ pub(crate) struct ControlPanelHandle {
 }
 
 impl ControlPanelHandle {
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", test))]
     pub(crate) fn set_quit(&self, quit: crate::operator::handoff::Quit) {
         *self.shared.quit.write().unwrap_or_else(|e| e.into_inner()) = Some(quit);
     }

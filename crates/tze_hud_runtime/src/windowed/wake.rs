@@ -494,14 +494,14 @@ impl WindowedWake {
         source: RuntimeWakeupSource,
         after_source_write: impl FnOnce(),
     ) {
-        #[cfg(target_os = "windows")]
-        self.shell_changes.notify_one();
         let mut main_event = self
             .main_event
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         main_event.source = source;
         after_source_write();
+        #[cfg(target_os = "windows")]
+        self.shell_changes.notify_one();
         if !main_event.proxy_event_pending {
             main_event.proxy_event_pending = self
                 .proxy
