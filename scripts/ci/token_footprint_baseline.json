@@ -394,6 +394,11 @@
       }
     },
     "budget": 250,
-    "scope": "Fresh unheld app/tze_hud_app/config/production.toml. Prior instance set measured through the same actual public handler; other config fields and previous discovery rows preserved."
+    "scope": "Fresh unheld app/tze_hud_app/config/production.toml. Prior instance set measured through the same actual public handler; other config fields and previous discovery rows preserved.",
+    "live_fixture_envelope": {
+      "old": 250,
+      "new": 285,
+      "basis": "Retain the existing 40-token state allowance over measured unheld production210->245; exactly the same new35-token countdown row. Fresh production remains<=250; canonical seven flow ceilings unchanged. Pending owner review alongside production bytes."
+    }
   }
 }

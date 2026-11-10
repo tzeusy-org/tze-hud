@@ -35,9 +35,10 @@ const SUBTITLE: &str = "zone:subtitle";
 // docs/api.md "Token budgets" (model-visible tokens). Discover is the
 // production.toml scene: 6 zones plus four widget instances (<=250 tokens).
 const DISCOVER_BUDGET: usize = 250;
-// Existing fixture envelope after publishing/attaching: live holdings and
-// portal defaults cost additional tokens. This is not an arbitrary-state cap.
-const DISCOVER_WITH_HOLDINGS_BUDGET: usize = 250;
+// Existing live-state allowance stays 40 tokens over the measured unheld
+// scene (formerly 210+40=250, now 245+40=285). Only the new countdown
+// row adds 35; no required holding/portal state is omitted to fit fresh discovery.
+const DISCOVER_WITH_HOLDINGS_BUDGET: usize = 285;
 const ZONE_PUBLISH_BUDGET: usize = 80;
 const PORTAL_FLOW_BUDGET: usize = 250;
 

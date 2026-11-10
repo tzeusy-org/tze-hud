@@ -1202,8 +1202,11 @@ the previous items and polls, so poll+ack is one round trip.
 acceptance flows (`docs/scope.md`), run end to end against `production.toml`.
 Its fresh, unheld discovery budget is the production row above: <=250 tokens,
 retaining model-owned parameter names, bounds and actionable occupancy hints.
-The existing live-state POC fixtures retain their 250-token envelope when
-holdings or attached portals add state/expiry/pending-input fields. That
+The live-state POC fixture envelope is 285 tokens (previously 250): it adds
+the same measured 35-token countdown row while retaining the prior 40-token
+allowance for holdings/portal state above the actual unheld baseline.
+This fixture-only change is included in the pending byte/budget review;
+none of the seven canonical flow ceilings changes. That
 fixture envelope is not a promise for arbitrary numbers of live portals;
 required state fields are never dropped to fit the unheld baseline.
 

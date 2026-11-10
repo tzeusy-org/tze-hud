@@ -1258,6 +1258,15 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
             );
         }
     }
+    for (state, token) in [("active", "color.primary"), ("done", "color.success")] {
+        publish(
+            &mut scene,
+            "stepper",
+            HashMap::from([("state".into(), enumeration(state))]),
+        );
+        render(&mut compositor, &mut scene, &mut surface);
+        color_at(&surface.read_pixels(&compositor.device), 136, 54, token);
+    }
     scene
         .clear_widget_for_publisher("stepper", "agent")
         .unwrap();
@@ -1302,6 +1311,9 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
         "down differs from up"
     );
     scene.clear_widget_for_publisher("kpi", "agent").unwrap();
+    render(&mut compositor, &mut scene, &mut surface);
+    let clean = surface.read_pixels(&compositor.device);
+    let clear_pixel: [u8; 4] = clean[..4].try_into().unwrap();
     publish(
         &mut scene,
         "countdown",
@@ -1384,11 +1396,19 @@ async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
     assert_eq!(compositor.next_widget_deadline_wall_us(&scene), None);
     let zero = surface.read_pixels(&compositor.device);
     assert_ne!(five, zero);
+    // Small text may have no fully opaque glyph pixel. Its brightest red
+    // pixel must still match the error token at nontrivial mask coverage,
+    // independently composited over the shipped card and clean frame.
+    let readout = widget_region(&zero, 360, (0, 0), (16, 40, 160, 24));
+    let actual = readout.iter().max_by_key(|pixel| pixel[0]).unwrap();
+    let tile = (token_rgb("color.surface.container.high"), 0.92);
     assert!(
-        widget_region(&zero, 360, (0, 0), (16, 40, 160, 24))
-            .iter()
-            .any(|pixel| (0..3).all(|c| pixel[c].abs_diff(error[c]) <= 5)),
-        "zero retains its actual severity-colored text pixels"
+        (32..=255).any(|coverage| {
+            let expected =
+                expected_badge_pixel(&[tile, (error, f64::from(coverage) / 255.0)], clear_pixel);
+            (0..3).all(|c| actual[c].abs_diff(expected[c]) <= 4)
+        }),
+        "zero retains its severity at antialiased coverage: {actual:?}"
     );
     publish(
         &mut scene,
