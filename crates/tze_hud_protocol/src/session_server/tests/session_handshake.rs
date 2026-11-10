@@ -179,6 +179,7 @@ async fn test_session_registration_rejections_carry_recovery_hints() {
 async fn test_handshake_init_established_and_current_degradation() {
     use prost::Message;
     let (mut client, _server, state) = setup_test_with_state().await;
+    let mut registry_changes = state.lock().await.sessions.subscribe_changes();
     // Foreign portal content and an unsent composer draft must never cross
     // the session boundary, including for an unrestricted paired agent.
     {
@@ -214,6 +215,11 @@ async fn test_handshake_init_established_and_current_degradation() {
     }
 
     let (_tx, messages, _stream) = handshake(&mut client, "test-agent", "test-key").await;
+
+    tokio::time::timeout(Duration::from_secs(1), registry_changes.changed())
+        .await
+        .expect("a fresh authenticated connection must notify the owner without a publication")
+        .expect("the live registry must retain its observer");
 
     assert_eq!(messages.len(), 2);
     for message in &messages {

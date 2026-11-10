@@ -231,6 +231,8 @@ impl Clone for AgentSession {
 #[derive(Default)]
 pub struct SessionRegistry {
     sessions: HashMap<String, AgentSession>,
+    /// Allocated only when an owner observes the connected-agent roster.
+    changes: Option<tokio::sync::watch::Sender<()>>,
     /// Observers of the full normal cleanup boundary, never a cleanup trigger.
     #[cfg(test)]
     cleanup_observers: HashMap<SceneId, Vec<tokio::sync::oneshot::Sender<()>>>,
@@ -243,6 +245,14 @@ pub struct SessionRegistry {
 impl SessionRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Subscribe before reading the initial roster. Notices coalesce; readers
+    /// inspect the current registry after each change, without scheduling frames.
+    pub fn subscribe_changes(&mut self) -> tokio::sync::watch::Receiver<()> {
+        self.changes
+            .get_or_insert_with(|| tokio::sync::watch::channel(()).0)
+            .subscribe()
     }
 
     /// Register a session for an authenticated agent. `closer` is what
