@@ -429,21 +429,13 @@ async fn test_zone_status_bar_renders_visible_text() {
         )
         .unwrap();
 
-    // Verify collect_text_items produces a TextItem with the formatted pairs.
+    // One TextItem per entry, sorted by key ("battery" < "time"). The 36px
+    // zone fits one row, so only "battery" shows.
     let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-    assert_eq!(
-        items.len(),
-        1,
-        "expected exactly one TextItem for StatusBar"
-    );
+    let texts: Vec<&str> = items.iter().map(|i| &*i.text).collect();
+    assert_eq!(texts, ["battery: 95%"], "rows sorted by key, capped to the zone");
     let item = &items[0];
-    // Entries are sorted by key ("battery" < "time") and separated by newlines.
-    assert_eq!(
-        &*item.text, "battery: 95%\ntime: 12:34",
-        "Entries should be sorted by key and formatted correctly"
-    );
-    // The TextItem position should be within the zone geometry.
-    // Zone top-edge: y = 8.0 (margin_px), height = 720*0.05 = 36, width = 1280*0.8 = 1024.
+    // Zone top-edge: y = 8.0 (margin_px), height = 720*0.05 = 36.
     assert!(
         item.pixel_y >= 8.0,
         "text y should be at or below zone top margin"

@@ -2970,16 +2970,19 @@ impl ZoneRegistry {
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
 
-        // 1. status-bar: edge-anchored bottom, MergeByKey, Chrome layer
+        // 1. status-bar: bottom-right corner card, MergeByKey, Chrome layer.
+        // The region is the most the card may grow to; the drawn card hugs its
+        // rows and sits on the region's bottom edge (1% margins, like the
+        // notification column above it).
         registry.register(ZoneDefinition {
             id: SceneId::new(),
             name: "status-bar".to_string(),
-            description: "Status bar — right edge, vertical layout, chrome layer".to_string(),
+            description: "Status bar — bottom-right card, one row per key".to_string(),
             geometry_policy: GeometryPolicy::Relative {
-                x_pct: 0.92,
-                y_pct: 0.10,
-                width_pct: 0.07,
-                height_pct: 0.40,
+                x_pct: 0.83,
+                y_pct: 0.74,
+                width_pct: 0.16,
+                height_pct: 0.24,
             },
             accepted_media_types: vec![ZoneMediaType::KeyValuePairs],
             rendering_policy: RenderingPolicy::default(),
@@ -2990,14 +2993,17 @@ impl ZoneRegistry {
             layer_attachment: LayerAttachment::Chrome,
         });
 
-        // 2. notification-area: top-right relative, Stack, Chrome layer
+        // 2. notification-area: top-right relative, Stack, Chrome layer.
+        // Starts just below the main-status badge (production config: top-right
+        // corner, badge bottom at ~4.7% of display height) so cards never sit
+        // under it.
         registry.register(ZoneDefinition {
             id: SceneId::new(),
             name: "notification-area".to_string(),
             description: "Notification overlay area".to_string(),
             geometry_policy: GeometryPolicy::Relative {
                 x_pct: 0.75,
-                y_pct: 0.02,
+                y_pct: 0.055,
                 width_pct: 0.24,
                 height_pct: 0.30,
             },
@@ -3030,14 +3036,15 @@ impl ZoneRegistry {
             layer_attachment: LayerAttachment::Content,
         });
 
-        // 4. pip: picture-in-picture, Relative geometry, Replace, Content layer
+        // 4. pip: picture-in-picture, Relative geometry, Replace, Content layer.
+        // Right side, between the notification column and the status-bar card.
         registry.register(ZoneDefinition {
             id: SceneId::new(),
             name: "pip".to_string(),
             description: "Picture-in-picture overlay zone".to_string(),
             geometry_policy: GeometryPolicy::Relative {
                 x_pct: 0.75,
-                y_pct: 0.70,
+                y_pct: 0.40,
                 width_pct: 0.22,
                 height_pct: 0.26,
             },

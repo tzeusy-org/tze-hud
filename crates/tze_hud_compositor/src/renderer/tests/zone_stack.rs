@@ -555,8 +555,8 @@ fn test_zone_slot_layout_iter_visible_clips_and_clamps() {
     assert_eq!(tight[0].0, 0, "only slot 0 is emitted");
 }
 
-/// MergeByKey zone: collect_text_items must merge ALL StatusBar publications'
-/// entries and produce a single TextItem containing all unique keys.
+/// MergeByKey zone: every StatusBar publication's entries are merged, one
+/// row (TextItem) per unique key, in key order.
 #[tokio::test]
 async fn test_merge_by_key_zone_merges_all_status_bar_entries() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
@@ -568,7 +568,7 @@ async fn test_merge_by_key_zone_merges_all_status_bar_entries() {
         description: "merge-by-key zone test".to_owned(),
         geometry_policy: GeometryPolicy::EdgeAnchored {
             edge: DisplayEdge::Bottom,
-            height_pct: 0.04,
+            height_pct: 0.20,
             width_pct: 1.0,
             margin_px: 0.0,
         },
@@ -585,7 +585,6 @@ async fn test_merge_by_key_zone_merges_all_status_bar_entries() {
         layer_attachment: LayerAttachment::Chrome,
     });
 
-    // Agent A publishes "cpu" and "mem" keys.
     let mut entries_a = std::collections::HashMap::new();
     entries_a.insert("cpu".to_owned(), "45%".to_owned());
     entries_a.insert("mem".to_owned(), "8.2 GB".to_owned());
@@ -599,8 +598,6 @@ async fn test_merge_by_key_zone_merges_all_status_bar_entries() {
             None,
         )
         .unwrap();
-
-    // Agent B publishes a "net" key.
     let mut entries_b = std::collections::HashMap::new();
     entries_b.insert("net".to_owned(), "1.2 MB/s".to_owned());
     scene
@@ -614,37 +611,12 @@ async fn test_merge_by_key_zone_merges_all_status_bar_entries() {
         )
         .unwrap();
 
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-
-    // MergeByKey must produce exactly ONE TextItem containing all merged entries.
-    assert_eq!(
-        items.len(),
-        1,
-        "MergeByKey zone must produce a single merged TextItem, got {}",
-        items.len()
-    );
-
-    let text = &items[0].text;
-    assert!(
-        text.contains("cpu"),
-        "merged text must include 'cpu' key; got: {text}"
-    );
-    assert!(
-        text.contains("mem"),
-        "merged text must include 'mem' key; got: {text}"
-    );
-    assert!(
-        text.contains("net"),
-        "merged text must include 'net' key; got: {text}"
-    );
-    assert!(
-        text.contains("45%"),
-        "merged text must include cpu value '45%'; got: {text}"
-    );
-    assert!(
-        text.contains("1.2 MB/s"),
-        "merged text must include net value '1.2 MB/s'; got: {text}"
-    );
+    let texts: Vec<String> = compositor
+        .collect_text_items(&scene, 1280.0, 720.0)
+        .iter()
+        .map(|i| i.text.to_string())
+        .collect();
+    assert_eq!(texts, ["cpu: 45%", "mem: 8.2 GB", "net: 1.2 MB/s"]);
 }
 
 /// MergeByKey zone: when a key appears in multiple publications, the latest
@@ -727,78 +699,12 @@ async fn test_merge_by_key_latest_value_wins_for_duplicate_keys() {
 
 // ── StatusBar icon layout tests [hud-x2v1.2] ─────────────────────────────
 
-/// `key_icon_map` empty → single merged TextItem (backward-compatible).
-///
-/// When `key_icon_map` is empty, the existing single-TextItem newline-joined
-/// behavior must be preserved unchanged.
-#[tokio::test]
-async fn test_status_bar_empty_key_icon_map_produces_single_text_item() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "status-bar".to_owned(),
-        description: "icon layout: empty map regression".to_owned(),
-        geometry_policy: GeometryPolicy::EdgeAnchored {
-            edge: DisplayEdge::Bottom,
-            height_pct: 0.04,
-            width_pct: 1.0,
-            margin_px: 0.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::KeyValuePairs],
-        rendering_policy: RenderingPolicy {
-            backdrop: Some(Rgba::new(0.08, 0.08, 0.08, 1.0)),
-            text_color: Some(Rgba::WHITE),
-            // key_icon_map defaults to empty HashMap via serde(default).
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::MergeByKey { max_keys: 16 },
-        max_publishers: 4,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Chrome,
-    });
-
-    let mut entries = std::collections::HashMap::new();
-    entries.insert("cpu".to_owned(), "45%".to_owned());
-    entries.insert("mem".to_owned(), "8 GB".to_owned());
-    scene
-        .publish_to_zone(
-            "status-bar",
-            ZoneContent::StatusBar(StatusBarPayload { entries }),
-            "agent",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-
-    // Must still produce exactly ONE TextItem (no icon layout).
-    assert_eq!(
-        items.len(),
-        1,
-        "empty key_icon_map must produce one merged TextItem; got {}",
-        items.len()
-    );
-    let text = &items[0].text;
-    assert!(text.contains("cpu"), "text must contain 'cpu'");
-    assert!(text.contains("mem"), "text must contain 'mem'");
-    // Entries joined with newline (alphabetically sorted).
-    assert!(
-        text.contains('\n'),
-        "multiple entries must be newline-separated; got: {text}"
-    );
-}
-
 /// `key_icon_map` non-empty → per-entry TextItems; icon-mapped entries have
 /// text `pixel_x` inset by `ICON_SIZE_PX + ICON_TEXT_GAP_PX`.
 ///
 /// We don't use real SVG files here since tests can't rely on specific
 /// filesystem paths.  Instead we verify the TextItem layout (pixel_x
-/// position) produced by `status_bar_icon_text_items` directly — the icon
+/// position) produced by `status_bar_text_items` directly — the icon
 /// draw command path is exercised separately.
 #[tokio::test]
 async fn test_status_bar_key_icon_map_produces_per_entry_text_items() {

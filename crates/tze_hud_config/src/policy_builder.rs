@@ -176,15 +176,22 @@ pub fn apply_notification_area_token_defaults(
 
 /// Apply token-derived defaults for the `status-bar` zone to `policy`.
 ///
+/// The status bar is a compact card styled like a notification card: the
+/// theme's tonal container surface, rounded, inset like a card. Values read in
+/// `text_color`; the compositor dims each row's key with `color.text.secondary`.
+///
 /// Token mappings:
-/// - `text_color` ← `color.text.secondary`
+/// - `text_color` ← `color.text.primary`
 /// - `font_family` ← `typography.body.family`
 /// - `font_size_px` ← `typography.body.size`
-/// - `backdrop` ← `color.backdrop.default`
-/// - `backdrop_opacity` ← `opacity.backdrop.opaque`
+/// - `backdrop` ← `color.surface.container`
+/// - `backdrop_opacity` ← `opacity.surface`
+/// - `backdrop_radius` ← `border.radius.medium`
+/// - `margin_horizontal`, `margin_vertical` ← `spacing.notification.inset`
+/// - `text_align` ← `Start`; `overflow` ← `Ellipsis` (one line per entry)
 pub fn apply_status_bar_token_defaults(policy: &mut RenderingPolicy, tokens: &DesignTokenMap) {
     if policy.text_color.is_none() {
-        policy.text_color = token_color(tokens, "color.text.secondary");
+        policy.text_color = token_color(tokens, "color.text.primary");
     }
     if policy.font_family.is_none() {
         policy.font_family = token_font_family(tokens, "typography.body.family");
@@ -192,17 +199,27 @@ pub fn apply_status_bar_token_defaults(policy: &mut RenderingPolicy, tokens: &De
     if policy.font_size_px.is_none() {
         policy.font_size_px = token_f32(tokens, "typography.body.size");
     }
-    // OpaqueBackdrop readability required per component type contract
-    // (heart-and-soul/presence.md line 281: opacity >= 0.8).
     if policy.backdrop.is_none() {
-        policy.backdrop = token_color(tokens, "color.backdrop.default");
+        policy.backdrop = token_color(tokens, "color.surface.container");
     }
     if policy.backdrop_opacity.is_none() {
-        policy.backdrop_opacity = token_f32(tokens, "opacity.backdrop.opaque");
+        policy.backdrop_opacity = token_f32(tokens, "opacity.surface");
     }
-    // Right-aligned, compact vertical layout.
+    if policy.backdrop_radius.is_none() {
+        policy.backdrop_radius = token_f32(tokens, "border.radius.medium");
+    }
+    let inset = token_f32(tokens, "spacing.notification.inset");
+    if policy.margin_horizontal.is_none() {
+        policy.margin_horizontal = inset;
+    }
+    if policy.margin_vertical.is_none() {
+        policy.margin_vertical = inset;
+    }
     if policy.text_align.is_none() {
-        policy.text_align = Some(TextAlign::End);
+        policy.text_align = Some(TextAlign::Start);
+    }
+    if policy.overflow.is_none() {
+        policy.overflow = Some(TextOverflow::Ellipsis);
     }
 }
 
@@ -580,11 +597,21 @@ mod tests {
         let mut policy = RenderingPolicy::default();
         apply_token_defaults_for_zone("status-bar", &mut policy, &tokens);
 
-        assert!(policy.text_color.is_some());
+        // A card on the theme's tonal surface, values in primary text.
+        assert_eq!(policy.text_color, token_color(&tokens, "color.text.primary"));
         assert!(policy.font_family.is_some());
         assert!(policy.font_size_px.is_some());
-        assert!(policy.backdrop.is_some());
-        assert!(policy.backdrop_opacity.is_some());
+        assert_eq!(policy.backdrop, token_color(&tokens, "color.surface.container"));
+        assert_eq!(policy.backdrop_opacity, token_f32(&tokens, "opacity.surface"));
+        assert_eq!(
+            policy.backdrop_radius,
+            token_f32(&tokens, "border.radius.medium")
+        );
+        assert_eq!(
+            policy.margin_horizontal,
+            token_f32(&tokens, "spacing.notification.inset")
+        );
+        assert_eq!(policy.overflow, Some(TextOverflow::Ellipsis));
     }
 
     #[test]

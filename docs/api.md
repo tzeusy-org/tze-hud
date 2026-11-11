@@ -388,6 +388,17 @@ control panel's Layout card writes);
 `[displays.<NAME>].zones` remains the supported way to assign built-in zones
 to a display.
 
+Built-in zone placement, as fractions of the display (1% margins):
+`notification-area` is the top-right column (x 75–99%, from y 5.5%, below
+the production `main-status` badge in the top-right corner);
+`pip` sits below it (x 75–97%, y 40–66%); `status-bar` is a card in the
+bottom-right corner (x 83–99%, ending at y 98%). The status-bar card hugs
+its content: one `key: value` row per entry in key order (keys dimmed, values
+in primary text, a long value cut with an ellipsis), as tall as its rows and
+padding on the tonal surface with a card border, growing upward to at most
+24% of the display; with no entries nothing is drawn. `subtitle` and
+`alert-banner` are bottom- and top-anchored strips.
+
 `[runtime]` also holds the launch settings the control panel edits:
 `mcp_port` (default 9090) and `grpc_port` (50051), 0 disabling either and
 the two different; `fps` (1-240, default 60); `log_level` for the log file

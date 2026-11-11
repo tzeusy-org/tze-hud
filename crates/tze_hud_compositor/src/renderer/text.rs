@@ -29,7 +29,8 @@ use super::token_colors::{
     notification_action_button_bounds, notification_action_row_reserve,
     notification_dismiss_bounds, notification_inset, resolve_composer_overlay_tokens,
     resolve_jump_to_latest_tokens, resolve_notification_action_tokens,
-    resolve_scroll_indicator_tokens, resolve_transcript_max_measure_px, resolve_viewer_echo_tokens,
+    resolve_scroll_indicator_tokens, resolve_text_secondary_color, resolve_transcript_max_measure_px,
+    resolve_viewer_echo_tokens,
     urgency_to_on_severity_color,
 };
 
@@ -56,23 +57,9 @@ const TILE_CLOSE_GLYPH_SCALE: f32 = 0.9;
 // ─── Text-collection impl block ───────────────────────────────────────────────
 
 impl super::Compositor {
-    /// Build per-entry `TextItem`s for a StatusBar zone with icon mappings.
-    ///
-    /// Called when `RenderingPolicy::key_icon_map` is non-empty.  Each entry
-    /// occupies one slot (height = `stack_slot_height(policy)`).  Entries whose
-    /// key is mapped to an SVG icon have their text x-origin shifted right by
-    /// `ICON_SIZE_PX + ICON_TEXT_GAP_PX` so the icon quad can be rendered to
-    /// the left without overlap.  Entries without an icon mapping are rendered
-    /// at the unshifted position.
-    ///
-    /// Returns a unicode emoji prefix for well-known status-bar keys.
-    /// Used as a v1 fallback when no SVG icon mapping exists.
-    ///
-    /// # Parameters
-    /// - `key` — the status-bar entry key.
-    ///
-    /// # Returns
-    /// A unicode emoji string, or empty string if key is not recognized.
+    /// Returns a unicode emoji prefix for well-known status-bar keys: the
+    /// fallback for an unmapped key while other rows show `key_icon_map` icons.
+    /// Empty when the key is not recognized.
     fn status_bar_icon_prefix(key: &str) -> &str {
         match key {
             "battery" => "🔋",
@@ -86,66 +73,65 @@ impl super::Compositor {
         }
     }
 
-    /// Each entry is a single `TextItem` rendered by delegating to
-    /// `TextItem::from_zone_policy` with adjusted `(x, y, w, h)` that place
-    /// the text in its row and account for icon inset.
+    /// One `TextItem` per status-bar card row (see `status_bar_card`).
     ///
-    /// # Parameters
-    /// - `sorted` — entries sorted by key (deterministic row order).
-    /// - `key_icon_map` — key → SVG path mapping from `RenderingPolicy`.
-    /// - `zx`, `zy`, `zw` — zone pixel bounds (x, y, width).
-    /// - `policy` — the zone's `RenderingPolicy`.
-    /// - `opacity` — current animation opacity.
-    #[allow(clippy::too_many_arguments)]
-    fn status_bar_icon_text_items(
-        sorted: &[(&String, &String)],
-        key_icon_map: &HashMap<String, String>,
-        zx: f32,
-        zy: f32,
-        zw: f32,
+    /// Each row is a single `key: value` line, vertically centred in its row
+    /// and cut with an ellipsis rather than wrapped. The key (and its `:`) is
+    /// drawn in `key_color` (`color.text.secondary`), the value in the policy's
+    /// `text_color`. A row whose key has an icon is inset past it.
+    fn status_bar_text_items(
+        card: &super::zone_render::StatusBarCard,
         policy: &RenderingPolicy,
         opacity: f32,
         scale: f32,
+        key_color: [u8; 4],
     ) -> Vec<TextItem> {
-        const STATUS_BAR_MAX_ENTRIES: usize = 8;
-        let slot_h = Self::stack_slot_height(policy, scale);
-
-        sorted
+        let key_color = crate::text::apply_opacity_to_color(key_color, opacity);
+        card.rows
             .iter()
-            .take(STATUS_BAR_MAX_ENTRIES)
             .enumerate()
             .map(|(i, (k, v))| {
-                let entry_y = zy + i as f32 * slot_h;
-                let has_icon = key_icon_map.contains_key(k.as_str());
+                let has_icon = card.icon_layout && policy.key_icon_map.contains_key(k.as_str());
                 let icon_inset = if has_icon {
                     (ICON_SIZE_PX + ICON_TEXT_GAP_PX) * scale
                 } else {
                     0.0
                 };
-                // Pass adjusted bounds to from_zone_policy so it applies margins
-                // on top of the per-entry position and icon inset.
-                // Effective pixel_x = (zx + icon_inset) + margin_h
-                // Effective bounds_width = (zw - icon_inset) - 2*margin_h
-                let text = if has_icon {
-                    format!("{k}: {v}")
+                let prefix = if card.icon_layout && !has_icon {
+                    Self::status_bar_icon_prefix(k.as_str())
                 } else {
-                    let prefix = Self::status_bar_icon_prefix(k.as_str());
-                    if prefix.is_empty() {
-                        format!("{k}: {v}")
-                    } else {
-                        format!("{prefix} {k}: {v}")
-                    }
+                    ""
                 };
-                TextItem::from_zone_policy(
+                let key = if prefix.is_empty() {
+                    format!("{k}:")
+                } else {
+                    format!("{prefix} {k}:")
+                };
+                let text = format!("{key} {v}");
+                // from_zone_policy supplies font, colour and the horizontal
+                // inset; the row fixes the vertical placement.
+                let mut item = TextItem::from_zone_policy(
                     &text,
-                    zx + icon_inset,
-                    entry_y,
-                    zw - icon_inset,
-                    slot_h,
+                    card.rect.x + icon_inset,
+                    0.0,
+                    card.rect.width - icon_inset,
+                    0.0,
                     policy,
                     opacity,
                     scale,
-                )
+                );
+                let y = card.row_y(i) + (card.row_h - card.line_h) * 0.5;
+                item.pixel_y = y;
+                item.clip_pixel_y = y;
+                item.bounds_height = card.line_h;
+                item.clip_bounds_height = card.line_h;
+                item.overflow = TextOverflow::Ellipsis;
+                item.color_runs = Box::new([crate::text::ColorRunItem {
+                    start_byte: 0,
+                    end_byte: key.len(),
+                    color: key_color,
+                }]);
+                item
             })
             .collect()
     }
@@ -255,7 +241,8 @@ impl super::Compositor {
     }
 
     /// Collect the `Ellipsis`-overflow `ZoneContent::StreamText` `TextItem`s in
-    /// the scene, for off-frame truncation-cache priming.
+    /// the scene, plus every status-bar row (always ellipsized), for off-frame
+    /// truncation-cache priming.
     ///
     /// Zone StreamText items are not produced by the tile-node walk in
     /// [`Compositor::prime_truncation_cache`], so without this pass an
@@ -300,12 +287,33 @@ impl super::Compositor {
             let zone_tokens = self.zone_tokens(zone_name);
             let scale = tze_hud_config::tokens::px_scale(zone_tokens);
             let policy = &zone_def.rendering_policy;
+            let (zx, zy, zw, zh) = self.zone_geometry(zone_name, &zone_def.geometry_policy, sw, sh);
+
+            // Status-bar rows are always ellipsized, whatever the policy says,
+            // so prime exactly the rows the frame path draws.
+            if !matches!(zone_def.contention_policy, ContentionPolicy::Stack { .. }) {
+                if let Some(card) = Self::status_bar_card(
+                    publishes,
+                    zone_def.contention_policy,
+                    policy,
+                    scale,
+                    Rect::new(zx, zy, zw, zh),
+                ) {
+                    items.extend(Self::status_bar_text_items(
+                        &card,
+                        policy,
+                        1.0,
+                        scale,
+                        resolve_text_secondary_color(zone_tokens),
+                    ));
+                    continue;
+                }
+            }
+
             // Truncation (and thus anchoring) only applies to Ellipsis overflow.
             if policy.overflow != Some(TextOverflow::Ellipsis) {
                 continue;
             }
-
-            let (zx, zy, zw, zh) = self.zone_geometry(zone_name, &zone_def.geometry_policy, sw, sh);
 
             match zone_def.contention_policy {
                 ContentionPolicy::Stack { .. } => {
@@ -810,61 +818,21 @@ impl super::Compositor {
                         }
                     }
                 }
-                ContentionPolicy::MergeByKey { max_keys } => {
-                    // Collect all StatusBar publications and merge their entries.
-                    // For each key, the last publish wins (latest value).
-                    let mut merged: HashMap<String, String> =
-                        HashMap::with_capacity(max_keys as usize);
-                    for record in publishes.iter() {
-                        if let ZoneContent::StatusBar(payload) = &record.content {
-                            for (k, v) in &payload.entries {
-                                merged.insert(k.clone(), v.clone());
-                            }
-                        }
-                    }
-                    if !merged.is_empty() {
-                        let mut sorted: Vec<(&String, &String)> = merged.iter().collect();
-                        sorted.sort_by_key(|(k, _)| k.as_str());
-                        // Use per-entry layout only when key_icon_map is non-empty AND
-                        // at least one current entry key has an icon mapping.  This
-                        // avoids switching layout when the map is configured but none
-                        // of the currently displayed entries are mapped.
-                        let use_icon_layout = !policy.key_icon_map.is_empty()
-                            && sorted
-                                .iter()
-                                .any(|(k, _)| policy.key_icon_map.contains_key(k.as_str()));
-                        if !use_icon_layout {
-                            // No icons for current entries: render all as a single
-                            // newline-joined TextItem (existing behavior).
-                            let text = sorted
-                                .iter()
-                                .map(|(k, v)| format!("{k}: {v}"))
-                                .collect::<Vec<_>>()
-                                .join("\n");
-                            items.push(TextItem::from_zone_policy(
-                                &text,
-                                zx,
-                                zy,
-                                zw,
-                                zh,
-                                policy,
-                                anim_opacity,
-                                scale,
-                            ));
-                        } else {
-                            // Icons configured for current entries: render each as an
-                            // individual TextItem, with text x-inset when an icon is mapped.
-                            items.extend(Self::status_bar_icon_text_items(
-                                &sorted,
-                                &policy.key_icon_map,
-                                zx,
-                                zy,
-                                zw,
-                                policy,
-                                anim_opacity,
-                                scale,
-                            ));
-                        }
+                ContentionPolicy::MergeByKey { .. } => {
+                    if let Some(card) = Self::status_bar_card(
+                        publishes,
+                        zone_def.contention_policy,
+                        policy,
+                        scale,
+                        Rect::new(zx, zy, zw, zh),
+                    ) {
+                        items.extend(Self::status_bar_text_items(
+                            &card,
+                            policy,
+                            anim_opacity,
+                            scale,
+                            resolve_text_secondary_color(zone_tokens),
+                        ));
                     } else {
                         // Fallback: render whatever the latest publication contains.
                         for record in publishes.iter().rev() {
@@ -1099,46 +1067,20 @@ impl super::Compositor {
                                 // Only render the most-recent publish.
                                 break;
                             }
-                            ZoneContent::StatusBar(payload) => {
-                                // Format key-value pairs as "key: value" lines, sorted by key
-                                // for deterministic output.
-                                let mut sorted: Vec<(&String, &String)> =
-                                    payload.entries.iter().collect();
-                                sorted.sort_by_key(|(k, _)| k.as_str());
-                                // Use per-entry layout only when key_icon_map is non-empty AND
-                                // at least one current entry key has an icon mapping.
-                                let use_icon_layout = !policy.key_icon_map.is_empty()
-                                    && sorted
-                                        .iter()
-                                        .any(|(k, _)| policy.key_icon_map.contains_key(k.as_str()));
-                                if !use_icon_layout {
-                                    // No icons for current entries: single newline-joined TextItem.
-                                    let text = sorted
-                                        .iter()
-                                        .map(|(k, v)| format!("{k}: {v}"))
-                                        .collect::<Vec<_>>()
-                                        .join("\n");
-                                    items.push(TextItem::from_zone_policy(
-                                        &text,
-                                        zx,
-                                        zy,
-                                        zw,
-                                        zh,
+                            ZoneContent::StatusBar(_) => {
+                                if let Some(card) = Self::status_bar_card(
+                                    publishes,
+                                    zone_def.contention_policy,
+                                    policy,
+                                    scale,
+                                    Rect::new(zx, zy, zw, zh),
+                                ) {
+                                    items.extend(Self::status_bar_text_items(
+                                        &card,
                                         policy,
                                         anim_opacity,
                                         scale,
-                                    ));
-                                } else {
-                                    // Icons configured for current entries: per-entry TextItems.
-                                    items.extend(Self::status_bar_icon_text_items(
-                                        &sorted,
-                                        &policy.key_icon_map,
-                                        zx,
-                                        zy,
-                                        zw,
-                                        policy,
-                                        anim_opacity,
-                                        scale,
+                                        resolve_text_secondary_color(zone_tokens),
                                     ));
                                 }
                                 // Only render the most-recent StatusBar publish.

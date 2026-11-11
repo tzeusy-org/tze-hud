@@ -13,8 +13,8 @@
 //!   active zone publications, respecting `RenderingPolicy` and layer filter.
 //!
 //! **Zone layout**:
-//! - `collect_sorted_status_bar_entries` — shared merge/sort helper for
-//!   `MergeByKey` and single-publish status-bar zones.
+//! - `status_bar_card` — the content-hugging status-bar card rect and rows,
+//!   shared by backdrop, SDF, text, icon and drag-handle paths.
 //! - `stack_slot_height` — per-slot height for single-line Stack zones.
 //! - `notification_slot_height` — per-slot height for notification publications
 //!   (one-line or two-line depending on `payload.title`).
@@ -41,6 +41,30 @@ use super::token_colors::{
 };
 use crate::pipeline::RectVertex;
 use crate::pipeline::rect_vertices;
+
+/// A laid-out status-bar card (see [`Compositor::status_bar_card`]).
+#[derive(Debug, Clone, PartialEq)]
+pub(crate) struct StatusBarCard {
+    /// The drawn card: backdrop, border, rows and drag handle all use it.
+    pub(crate) rect: Rect,
+    /// Height of one row (a text line, or the icon if taller).
+    pub(crate) row_h: f32,
+    /// Height of one text line (`font_size_px × LINE_HEIGHT_MULTIPLIER`).
+    pub(crate) line_h: f32,
+    /// Vertical padding above the first row and below the last.
+    pub(crate) pad_v: f32,
+    /// Whether rows reserve space for `key_icon_map` icons.
+    pub(crate) icon_layout: bool,
+    /// The shown `(key, value)` rows, sorted by key.
+    pub(crate) rows: Vec<(String, String)>,
+}
+
+impl StatusBarCard {
+    /// Top of row `i`.
+    pub(crate) fn row_y(&self, i: usize) -> f32 {
+        self.rect.y + self.pad_v + i as f32 * self.row_h
+    }
+}
 
 impl Compositor {
     /// Render zone content backdrop quads driven by `RenderingPolicy`.
@@ -151,8 +175,9 @@ impl Compositor {
             //   by item (two-line notifications occupy a taller slot).  Dynamic zone
             //   height for alert-banner: sum(slot_heights) — zero when empty.
             //
-            // MergeByKey zones: single backdrop for the full zone (entries are merged
-            //   at the data level; visually one unified strip).
+            // MergeByKey zones: one backdrop (entries are merged at the data
+            //   level). Status-bar content draws as a card hugging its rows
+            //   (`status_bar_card`), not the full zone.
             //
             // LatestWins / Replace: single backdrop from the most-recent publish only.
             match zone_def.contention_policy {
@@ -303,6 +328,21 @@ impl Compositor {
                     // For MergeByKey and single-publish policies: render a single backdrop
                     // for the zone using the latest publication's content type.
                     let latest = &publishes[publishes.len() - 1];
+                    // Status-bar content draws as a card hugging its rows; with no
+                    // entries nothing is drawn at all.
+                    let card = Self::status_bar_card(
+                        publishes,
+                        zone_def.contention_policy,
+                        policy,
+                        scale,
+                        Rect::new(x, y, w, h),
+                    );
+                    if card.is_none() && matches!(&latest.content, ZoneContent::StatusBar(_)) {
+                        continue;
+                    }
+                    let (x, y, w, h) = card
+                        .as_ref()
+                        .map_or((x, y, w, h), |c| (c.rect.x, c.rect.y, c.rect.width, c.rect.height));
                     let is_notification_content =
                         matches!(&latest.content, ZoneContent::Notification(_));
                     let backdrop_rgba: Option<Rgba> = match &latest.content {
@@ -416,56 +456,34 @@ impl Compositor {
                     }
 
                     // ── StatusBar icon rendering ──────────────────────────────
-                    // Emit TexturedDrawCmd for each status-bar entry whose key
-                    // is mapped to a cached icon texture.  Only runs when the
-                    // zone has key_icon_map entries AND at least one current
-                    // entry key has an icon mapping (avoids spurious layout
-                    // changes when key_icon_map is non-empty but no displayed
-                    // keys are mapped).
-                    if !policy.key_icon_map.is_empty() {
-                        // Reuse shared helper for consistent merge/sort behavior.
-                        let sorted = Self::collect_sorted_status_bar_entries(
-                            publishes,
-                            zone_def.contention_policy,
-                        );
-
-                        // Only proceed when at least one displayed key has an icon.
-                        let has_any_icon = sorted
-                            .iter()
-                            .any(|(k, _)| policy.key_icon_map.contains_key(k.as_str()));
-                        if has_any_icon {
-                            let slot_h = Self::stack_slot_height(policy, scale);
-                            let margin_h = policy
-                                .margin_horizontal
-                                .or(policy.margin_px)
-                                .unwrap_or(8.0 * scale);
-
-                            for (row, (k, _v)) in sorted.iter().enumerate() {
-                                let svg_path = match policy.key_icon_map.get(k.as_str()) {
-                                    Some(p) => p,
-                                    None => continue, // no icon for this key
-                                };
-                                // Icons are stored in image_texture_cache under the path-derived
-                                // ResourceId by ensure_icon_texture (called via
-                                // ensure_scene_icon_textures before this render pass).
-                                let resource_id = ResourceId::of(svg_path.as_bytes());
-                                if !self.image_texture_cache.contains_key(&resource_id) {
-                                    continue; // texture not cached — rasterization failed, skip
-                                }
-                                // Position: vertically centered within the entry's slot.
-                                let icon_x = x + margin_h;
-                                let icon_y =
-                                    y + row as f32 * slot_h + (slot_h - ICON_SIZE_PX * scale) * 0.5;
-                                textured_cmds.push(TexturedDrawCmd {
-                                    resource_id,
-                                    x: icon_x,
-                                    y: icon_y,
-                                    w: ICON_SIZE_PX * scale,
-                                    h: ICON_SIZE_PX * scale,
-                                    uv_rect: [0.0, 0.0, 1.0, 1.0],
-                                    tint: [1.0, 1.0, 1.0, anim_opacity.clamp(0.0, 1.0)],
-                                });
+                    // One icon per shown row whose key maps to a cached icon
+                    // texture, at the left inset, centred in the row.
+                    if let Some(card) = card.as_ref().filter(|c| c.icon_layout) {
+                        let margin_h = policy
+                            .margin_horizontal
+                            .or(policy.margin_px)
+                            .unwrap_or(8.0 * scale);
+                        let icon = ICON_SIZE_PX * scale;
+                        for (row, (k, _v)) in card.rows.iter().enumerate() {
+                            let Some(svg_path) = policy.key_icon_map.get(k.as_str()) else {
+                                continue;
+                            };
+                            // Cached under the path-derived ResourceId by
+                            // ensure_scene_icon_textures before this pass; a
+                            // failed rasterization leaves it absent.
+                            let resource_id = ResourceId::of(svg_path.as_bytes());
+                            if !self.image_texture_cache.contains_key(&resource_id) {
+                                continue;
                             }
+                            textured_cmds.push(TexturedDrawCmd {
+                                resource_id,
+                                x: card.rect.x + margin_h,
+                                y: card.row_y(row) + (card.row_h - icon) * 0.5,
+                                w: icon,
+                                h: icon,
+                                uv_rect: [0.0, 0.0, 1.0, 1.0],
+                                tint: [1.0, 1.0, 1.0, anim_opacity.clamp(0.0, 1.0)],
+                            });
                         }
                     }
                 }
@@ -519,53 +537,89 @@ impl Compositor {
         }
     }
 
-    /// Collect and sort the active StatusBar entries for a zone.
+    /// Lay out the status-bar card for a zone: the one rect that its backdrop,
+    /// border, text rows, icons and drag handle all use, plus its visible rows.
     ///
-    /// Shared by `collect_text_items` (text layout) and `render_zone_content`
-    /// (icon rendering) so both paths use the same source of truth for entry
-    /// ordering, merge semantics, and max_keys behavior.
+    /// Returns `None` when the zone shows no status-bar entries — nothing is
+    /// drawn, not even an empty backdrop.
     ///
-    /// - `MergeByKey`: merges entries from all active publications, respecting
-    ///   `max_keys` as the initial capacity hint.
-    /// - All other policies (LatestWins, Replace): uses the most-recent
-    ///   StatusBar publication only.
-    ///
-    /// Returns entries sorted by key (deterministic row ordering).
-    fn collect_sorted_status_bar_entries(
+    /// - Entries: `MergeByKey` merges every active StatusBar publication (the
+    ///   latest value per key wins); other policies use the most-recent
+    ///   publication only, and only while it is a StatusBar. Rows are sorted
+    ///   by key (`StatusBarPayload.entries` carries no publish order).
+    /// - Rows: one line each, `font_size_px × LINE_HEIGHT_MULTIPLIER` tall (at
+    ///   least the icon height while any shown key has a `key_icon_map` icon).
+    ///   As many rows as fit the zone are shown, never fewer than one.
+    /// - Rect: the zone's full width, `rows × row_h + 2 × margin_v` tall,
+    ///   anchored to the zone's bottom edge (the zone is the most it may grow
+    ///   to, not the drawn size).
+    pub(crate) fn status_bar_card(
         publishes: &[ZonePublishRecord],
         contention_policy: ContentionPolicy,
-    ) -> Vec<(String, String)> {
+        policy: &RenderingPolicy,
+        scale: f32,
+        zone: Rect,
+    ) -> Option<StatusBarCard> {
         let mut entries: Vec<(String, String)> = match contention_policy {
             ContentionPolicy::MergeByKey { max_keys } => {
-                let mut merged: HashMap<String, String> = HashMap::with_capacity(max_keys as usize);
-                for record in publishes.iter() {
+                let mut merged: HashMap<&str, &str> = HashMap::with_capacity(max_keys as usize);
+                for record in publishes {
                     if let ZoneContent::StatusBar(payload) = &record.content {
                         for (k, v) in &payload.entries {
-                            merged.insert(k.clone(), v.clone());
+                            merged.insert(k, v);
                         }
                     }
                 }
-                merged.into_iter().collect()
+                merged
+                    .into_iter()
+                    .map(|(k, v)| (k.to_owned(), v.to_owned()))
+                    .collect()
             }
-            _ => publishes
-                .iter()
-                .rev()
-                .find_map(|r| {
-                    if let ZoneContent::StatusBar(p) = &r.content {
-                        Some(
-                            p.entries
-                                .iter()
-                                .map(|(k, v)| (k.clone(), v.clone()))
-                                .collect(),
-                        )
-                    } else {
-                        None
-                    }
-                })
-                .unwrap_or_default(),
+            _ => match publishes.last().map(|r| &r.content) {
+                Some(ZoneContent::StatusBar(p)) => p
+                    .entries
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
+                _ => Vec::new(),
+            },
         };
+        if entries.is_empty() {
+            return None;
+        }
         entries.sort_by(|(a, _), (b, _)| a.cmp(b));
-        entries
+
+        // Per-entry icons only while a shown key is mapped, so configuring
+        // the map for absent keys never changes the layout.
+        let icon_layout = !policy.key_icon_map.is_empty()
+            && entries
+                .iter()
+                .any(|(k, _)| policy.key_icon_map.contains_key(k.as_str()));
+        let font_size_px = policy
+            .font_size_px
+            .unwrap_or(16.0 * scale)
+            .clamp(6.0, 200.0);
+        let line_h = font_size_px * crate::text::LINE_HEIGHT_MULTIPLIER;
+        let row_h = if icon_layout {
+            line_h.max(ICON_SIZE_PX * scale)
+        } else {
+            line_h
+        };
+        let pad_v = policy
+            .margin_vertical
+            .or(policy.margin_px)
+            .unwrap_or(8.0 * scale);
+        let fit = ((zone.height - 2.0 * pad_v) / row_h).floor().max(1.0) as usize;
+        entries.truncate(fit);
+        let height = (entries.len() as f32 * row_h + 2.0 * pad_v).min(zone.height);
+        Some(StatusBarCard {
+            rect: Rect::new(zone.x, zone.y + zone.height - height, zone.width, height),
+            row_h,
+            line_h,
+            pad_v,
+            icon_layout,
+            rows: entries,
+        })
     }
 
     /// Compute the per-slot height for a Stack zone (single-line content).

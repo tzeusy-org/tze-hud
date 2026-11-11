@@ -139,7 +139,23 @@ impl Compositor {
                 continue;
             }
             let (x, y, w, h) = Self::resolve_zone_geometry(&zone_def.geometry_policy, sw, sh);
-            let element_bounds_zone = Rect::new(x, y, w, h);
+            // A status-bar card's handle sits on the card it draws, not on the
+            // (taller) region the card may grow to.
+            let zone_rect = Rect::new(x, y, w, h);
+            let element_bounds_zone = scene
+                .zone_registry
+                .active_publishes
+                .get(zone_name)
+                .and_then(|publishes| {
+                    Self::status_bar_card(
+                        publishes,
+                        zone_def.contention_policy,
+                        &zone_def.rendering_policy,
+                        tze_hud_config::tokens::px_scale(self.zone_tokens(zone_name)),
+                        zone_rect,
+                    )
+                })
+                .map_or(zone_rect, |card| card.rect);
             let bounds = Self::drag_handle_bounds(element_bounds_zone, style, scale, sw, sh);
             let interaction_id = format!("drag-handle:{}", Self::scene_id_hex(zone_def.id));
             entries.push(DragHandleEntry {
