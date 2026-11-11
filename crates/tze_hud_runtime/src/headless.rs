@@ -190,6 +190,17 @@ pub struct HeadlessRuntime {
     degradation_clock_start: Instant,
 }
 
+// [DEBUG-T7_5-MISS] Coarse own-thread runtime; optional Linux scheduler accounting.
+// IO is strictly before/after Stage4, but remains inside whole-frame timing.
+fn debug_t75_own_thread_runtime_ns() -> Option<u64> {
+    std::fs::read_to_string("/proc/thread-self/schedstat")
+        .ok()?
+        .split_whitespace()
+        .next()?
+        .parse()
+        .ok()
+}
+
 impl HeadlessRuntime {
     /// Create a new headless runtime.
     ///
@@ -519,9 +530,15 @@ impl HeadlessRuntime {
         let stage3_us = s3_start.elapsed().as_micros() as u64;
 
         // Stage 4: Scene Commit (headless — scene already committed)
+        // [DEBUG-T7_5-MISS] Probe before original Stage4 timer; no IO inside it.
+        let debug_t75_cpu_before = debug_t75_own_thread_runtime_ns();
         let s4_start = Instant::now();
+        // [DEBUG-T7_5-PRIME] Original total timer boundary is unchanged.
+        let debug_t75_snapshot_start = Instant::now();
         let new_snap = HitTestSnapshot::from_scene(&scene_guard);
         self.pipeline.hit_test_snapshot.store(Arc::new(new_snap));
+        // [DEBUG-T7_5-PRIME] Component only, no output inside timed work.
+        let debug_t75_snapshot_ns = debug_t75_snapshot_start.elapsed().as_nanos() as u64;
 
         // ── Commit-time markdown cache prime (hud-380dl) ──────────────────────
         // Prime the markdown parse cache here, at the end of Stage 4 (scene
@@ -537,13 +554,22 @@ impl HeadlessRuntime {
         // Prime the truncation cache after markdown, at the end of Stage 4,
         // so render_frame_headless never does shaping work in the frame loop.
         // Gated internally on scene.version; no-op when unchanged.
+        // [DEBUG-T7_5-PRIME] Component only, original prime call unchanged.
+        let debug_t75_truncation_start = Instant::now();
         self.compositor.prime_truncation_cache(&scene_guard);
+        let debug_t75_truncation_ns = debug_t75_truncation_start.elapsed().as_nanos() as u64;
 
         let applied_degradation_level = self.degradation_controller.level();
         self.compositor
             .set_degradation_policy(self.degradation_controller.compositor_policy());
 
         let stage4_us = s4_start.elapsed().as_micros() as u64;
+        // [DEBUG-T7_5-MISS] Copy immediately after Stage4 stop, before Stage6 overwrite.
+        let debug_t75_prime = self.compositor.debug_t7_5_prime_record();
+        let debug_t75_cpu_after = debug_t75_own_thread_runtime_ns();
+        let debug_t75_cpu_delta = debug_t75_cpu_before
+            .zip(debug_t75_cpu_after)
+            .and_then(|(before, after)| after.checked_sub(before));
 
         // Stage 5: Layout Resolve
         let s5_start = Instant::now();
@@ -672,6 +698,29 @@ impl HeadlessRuntime {
         let s8_start = Instant::now();
         self.telemetry.record(telemetry.clone());
         telemetry.stage8_telemetry_emit_us = s8_start.elapsed().as_micros() as u64;
+
+        // [DEBUG-T7_5-PRIME] Output AFTER original total frame and Stage8 timers.
+        eprintln!(
+            "[DEBUG-T7_5-PRIME] frame={} stage4_us={} markdown_us={} snapshot_ns={} truncation_ns={} outcome={} previous_bytes={} elapsed_ns={:?} interval_ms={} forced={} scene_version={} previous_version={} primed_items={} primed_bytes={} thread_cpu_before_ns={:?} thread_cpu_after_ns={:?} thread_cpu_delta_ns={:?} trunc_details={:?}",
+            telemetry.frame_number,
+            stage4_us,
+            markdown_prime_us,
+            debug_t75_snapshot_ns,
+            debug_t75_truncation_ns,
+            debug_t75_prime.outcome,
+            debug_t75_prime.previous_cached_bytes,
+            debug_t75_prime.elapsed_ns,
+            debug_t75_prime.interval_ms,
+            debug_t75_prime.forced,
+            debug_t75_prime.scene_version,
+            debug_t75_prime.previous_cached_version,
+            debug_t75_prime.actual_primed_items,
+            debug_t75_prime.actual_primed_bytes,
+            debug_t75_cpu_before,
+            debug_t75_cpu_after,
+            debug_t75_cpu_delta,
+            debug_t75_prime.truncation,
+        );
 
         (telemetry, input_result.map(|input| (input, response)))
     }

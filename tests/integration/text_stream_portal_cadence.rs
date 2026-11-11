@@ -341,6 +341,10 @@ async fn frame_budgets_hold_under_burst() {
         runtime.render_frame().await;
     }
 
+    // [DEBUG-T7_5-PRIME] Diagnostic eligibility only; not normal acceptance.
+    // Original five empty warmups and every workload/frame timer stay unchanged.
+    std::thread::sleep(std::time::Duration::from_millis(20));
+
     let payload = vec![b'x'; CADENCE_BURST_BYTES];
     clock.set_us(1_000_000);
     publish_stream(&handle, &key, &payload, 1_000_000);
@@ -372,6 +376,30 @@ async fn frame_budgets_hold_under_burst() {
     );
 
     let burst_telemetry = runtime.render_frame().await;
+
+    // [DEBUG-T7_5-PRIME] Case scalars only AFTER measured burst frame.
+    let (diagnostic_tile_count, diagnostic_node_count) = {
+        let scene_arc = scene_handle(&runtime).await;
+        let scene = scene_arc.lock().await;
+        (scene.tiles.len(), scene.nodes.len())
+    };
+    eprintln!(
+        "[DEBUG-T7_5-PRIME] case stage3_us={} stage4_us={} stage5_us={} stage6_us={} stage7_us={} frame_us={} markdown_prime_us={} workload_bytes={} tile_count={} node_count={}",
+        burst_telemetry.stage3_mutation_intake_us,
+        burst_telemetry.stage4_scene_commit_us,
+        burst_telemetry.stage5_layout_resolve_us,
+        burst_telemetry.stage6_render_encode_us,
+        burst_telemetry.stage7_gpu_submit_us,
+        burst_telemetry.frame_time_us,
+        burst_telemetry.markdown_prime_us,
+        CADENCE_BURST_BYTES,
+        diagnostic_tile_count,
+        diagnostic_node_count,
+    );
+
+    // [DEBUG-BKE9C-PUBLIC-API] Read only after the existing measured burst frame.
+    let complete_context = tze_hud_compositor::overflow::debug_bke_complete_context_record();
+    eprintln!("[DEBUG-BKE9C-PUBLIC-API] complete_context={complete_context:?}");
 
     // Stage 3 + 4 + 5 must respect per-stage budgets.
     assert!(

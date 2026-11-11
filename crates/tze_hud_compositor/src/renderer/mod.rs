@@ -99,6 +99,21 @@ use token_colors::*;
 use viewer_echo::ViewerEchoEntry;
 pub use viewer_echo::{PortalViewerEchoQueue, ViewerEchoAppend};
 
+// [DEBUG-T7_5-PRIME] Temporary fixed-size diagnostic; removed after investigation.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DebugT75PrimeRecord {
+    pub outcome: &'static str,
+    pub previous_cached_bytes: usize,
+    pub elapsed_ns: Option<u64>,
+    pub interval_ms: u64,
+    pub forced: bool,
+    pub scene_version: u64,
+    pub previous_cached_version: u64,
+    pub actual_primed_items: usize,
+    pub actual_primed_bytes: usize,
+    pub truncation: crate::overflow::DebugT75TruncationRecord,
+}
+
 /// Stable, dependency-free identity for the adapter selected by wgpu.
 ///
 /// Benchmark and validation crates use this instead of depending directly on
@@ -515,6 +530,8 @@ pub struct Compositor {
     /// (which is effectively bypassed because `resize_reprime_last_at` is
     /// `None` and the gate never defers on the first call).
     resize_reprime_content_bytes: usize,
+    // [DEBUG-T7_5-PRIME] Temporary fixed-size last-call diagnostic.
+    debug_t75_prime_record: DebugT75PrimeRecord,
     /// Shared handle for receiving local composer echo state from the
     /// input-event thread (main thread) without blocking on the scene lock.
     ///
@@ -880,6 +897,8 @@ impl Compositor {
             text_format: None,
             resize_reprime_last_at: None,
             resize_reprime_content_bytes: 0,
+            // [DEBUG-T7_5-PRIME] Both existing constructors retain all defaults.
+            debug_t75_prime_record: DebugT75PrimeRecord::default(),
             image_bytes: HashMap::new(),
             image_dims: HashMap::new(),
             image_texture_cache: HashMap::new(),
@@ -1217,6 +1236,8 @@ impl Compositor {
             text_format: None,
             resize_reprime_last_at: None,
             resize_reprime_content_bytes: 0,
+            // [DEBUG-T7_5-PRIME] Both existing constructors retain all defaults.
+            debug_t75_prime_record: DebugT75PrimeRecord::default(),
             image_bytes: HashMap::new(),
             image_dims: HashMap::new(),
             image_texture_cache: HashMap::new(),
@@ -1910,6 +1931,11 @@ impl Compositor {
     /// *eventually* reflected — not only at drag-end.  When the geometry
     /// settles (scene.version stops changing), the last geometry is primed on
     /// the next frame after the interval elapses.
+    // [DEBUG-T7_5-PRIME] Copy accessor; no logging or allocation.
+    pub fn debug_t7_5_prime_record(&self) -> DebugT75PrimeRecord {
+        self.debug_t75_prime_record
+    }
+
     pub fn prime_truncation_cache(&mut self, scene: &SceneGraph) {
         // Skip if the scene has not changed since we last primed. Checks the
         // scene INSTANCE identity alongside the version number (hud-u4lq2) —
@@ -1917,7 +1943,22 @@ impl Compositor {
         // `scene.version` alone is not a reliable "unchanged" signal across
         // independently-constructed `SceneGraph`s sharing one `Compositor`.
         let same_instance = self.truncation_cache_scene_instance == Some(scene.instance_id);
+        // [DEBUG-T7_5-PRIME] Fixed-size bookkeeping, never I/O or allocation.
+        self.debug_t75_prime_record = DebugT75PrimeRecord {
+            outcome: "entered",
+            previous_cached_bytes: self.resize_reprime_content_bytes,
+            elapsed_ns: None,
+            interval_ms: adaptive_reprime_interval_ms(self.resize_reprime_content_bytes),
+            forced: self.truncation_cache_scene_version == u64::MAX || !same_instance,
+            scene_version: scene.version,
+            previous_cached_version: self.truncation_cache_scene_version,
+            actual_primed_items: 0,
+            actual_primed_bytes: 0,
+            truncation: crate::overflow::DebugT75TruncationRecord::default(),
+        };
         if same_instance && scene.version == self.truncation_cache_scene_version {
+            // [DEBUG-T7_5-PRIME] elapsed=None: unchanged predicate avoids elapsed read.
+            self.debug_t75_prime_record.outcome = "unchanged";
             return;
         }
 
@@ -1959,10 +2000,15 @@ impl Compositor {
         let forced_prime = self.truncation_cache_scene_version == u64::MAX || !same_instance;
         let interval_ms = adaptive_reprime_interval_ms(self.resize_reprime_content_bytes);
         if !forced_prime
-            && self
-                .resize_reprime_last_at
-                .is_some_and(|last| last.elapsed() < std::time::Duration::from_millis(interval_ms))
+            && self.resize_reprime_last_at.is_some_and(|last| {
+                // [DEBUG-T7_5-PRIME] Exactly the original single elapsed read.
+                let elapsed = last.elapsed();
+                self.debug_t75_prime_record.elapsed_ns = Some(elapsed.as_nanos() as u64);
+                elapsed < std::time::Duration::from_millis(interval_ms)
+            })
         {
+            // [DEBUG-T7_5-PRIME] Deferred; no sentinel/cache/timestamp action added.
+            self.debug_t75_prime_record.outcome = "deferred";
             // Within the debounce window: defer, do not update the sentinel.
             tracing::trace!(
                 scene_version = scene.version,
@@ -1985,6 +2031,8 @@ impl Compositor {
         // while recording the version, subsequent frames would skip priming even
         // once the rasterizer is initialized — until the scene changes again.
         if self.text_rasterizer.is_none() {
+            // [DEBUG-T7_5-PRIME] No rasterizer, original return remains.
+            self.debug_t75_prime_record.outcome = "missing-rasterizer";
             return; // text renderer not yet initialized; retry next version change
         }
 
@@ -2094,7 +2142,13 @@ impl Compositor {
         // so it stays within the prime-time O(n) budget.
         self.resize_reprime_content_bytes = live_items.iter().map(|item| item.text.len()).sum();
 
+        // [DEBUG-T7_5-PRIME] Record actual work, not inferred scene workload.
+        self.debug_t75_prime_record.outcome = "primed";
+        self.debug_t75_prime_record.actual_primed_items = live_items.len();
+        self.debug_t75_prime_record.actual_primed_bytes = self.resize_reprime_content_bytes;
         let mut live_keys = rasterizer.prime_truncation_cache(&live_items);
+        // [DEBUG-T7_5-MISS] Copy actual miss/call counters before a later frame prime.
+        self.debug_t75_prime_record.truncation = rasterizer.debug_t75_truncation_record();
 
         // Evict stale truncation entries for nodes/geometry no longer in the scene.
         //

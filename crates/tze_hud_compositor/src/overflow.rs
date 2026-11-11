@@ -60,13 +60,169 @@
 //!
 //! `truncate_for_ellipsis` still shapes the full text once to determine its
 //! layout. It locates the ellipsis cut point by growing a short-prefix bracket
-//! exponentially, then binary-searching that bracket. There are O(log W)
-//! candidate measurements for W word (or grapheme) boundaries, under the
+//! exponentially, then binary-searching that bracket. There are O(log (W + G))
+//! candidate measurements for the union of word and grapheme boundaries, under the
 //! existing monotone-fit assumption. Each measurement shapes the entire
 //! candidate; the search avoids an unconditional longest-prefix measurement
 //! but does not bound the initial full-text shaping cost or guarantee a frame
 //! budget. Results must be cached by the caller keyed on content, geometry and
 //! the effective shaping attributes.
+
+// [DEBUG-BKE9C-SITE] Two actual call sites; fixed own-thread records, no extra shapes.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DebugBkeSiteRecord {
+    pub set_count: u64,
+    pub input_bytes_total: u64,
+    pub input_bytes_max: u64,
+    pub first_input_bytes: u64,
+    pub ellipsis_probe_count: u64,
+    pub set_total_ns: u64,
+    pub set_max_ns: u64,
+    pub set_first_ns: u64,
+    pub shape_count: u64,
+    pub shape_total_ns: u64,
+    pub shape_max_ns: u64,
+    pub shape_first_ns: u64,
+}
+
+impl DebugBkeSiteRecord {
+    const ZERO: Self = Self {
+        set_count: 0,
+        input_bytes_total: 0,
+        input_bytes_max: 0,
+        first_input_bytes: 0,
+        ellipsis_probe_count: 0,
+        set_total_ns: 0,
+        set_max_ns: 0,
+        set_first_ns: 0,
+        shape_count: 0,
+        shape_total_ns: 0,
+        shape_max_ns: 0,
+        shape_first_ns: 0,
+    };
+
+    pub(crate) fn merge(&mut self, incoming: Self) {
+        if self.set_count == 0 && incoming.set_count != 0 {
+            self.set_first_ns = incoming.set_first_ns;
+            self.first_input_bytes = incoming.first_input_bytes;
+        }
+        if self.shape_count == 0 && incoming.shape_count != 0 {
+            self.shape_first_ns = incoming.shape_first_ns;
+        }
+        self.set_count += incoming.set_count;
+        self.input_bytes_total += incoming.input_bytes_total;
+        self.input_bytes_max = self.input_bytes_max.max(incoming.input_bytes_max);
+        self.ellipsis_probe_count += incoming.ellipsis_probe_count;
+        self.set_total_ns += incoming.set_total_ns;
+        self.set_max_ns = self.set_max_ns.max(incoming.set_max_ns);
+        self.shape_count += incoming.shape_count;
+        self.shape_total_ns += incoming.shape_total_ns;
+        self.shape_max_ns = self.shape_max_ns.max(incoming.shape_max_ns);
+    }
+}
+
+// [DEBUG-T7_5-MISS] Temporary fixed-size own-thread counters; no extra shaping.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DebugT75BufferRecord {
+    pub initial_full_paragraph: DebugBkeSiteRecord,
+    pub single_line_measure: DebugBkeSiteRecord,
+    pub set_count: u64,
+    pub set_total_ns: u64,
+    pub set_max_ns: u64,
+    pub set_first_ns: u64,
+    pub shape_count: u64,
+    pub shape_total_ns: u64,
+    pub shape_max_ns: u64,
+    pub shape_first_ns: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DebugT75TruncationRecord {
+    pub last_miss_bounds_width: f32,
+    pub last_miss_bounds_height: f32,
+    pub last_miss_font_size_px: f32,
+    pub last_miss_font_weight: u16,
+    pub last_miss_font_family: &'static str,
+    pub last_miss_line_height: f32,
+    pub calls: u64,
+    pub misses: u64,
+    pub hits: u64,
+    pub input_bytes: usize,
+    pub shaped_input_bytes: usize,
+    pub algorithm: &'static str,
+    pub buffers: DebugT75BufferRecord,
+}
+
+thread_local! {
+    static DEBUG_T75_BUFFERS: std::cell::Cell<DebugT75BufferRecord> = const {
+        std::cell::Cell::new(DebugT75BufferRecord {
+            initial_full_paragraph: DebugBkeSiteRecord::ZERO,
+            single_line_measure: DebugBkeSiteRecord::ZERO,
+            set_count: 0, set_total_ns: 0, set_max_ns: 0, set_first_ns: 0,
+            shape_count: 0, shape_total_ns: 0, shape_max_ns: 0, shape_first_ns: 0,
+        })
+    };
+}
+
+pub(crate) fn debug_t75_reset_buffers() {
+    DEBUG_T75_BUFFERS.set(DebugT75BufferRecord::default());
+}
+
+pub(crate) fn debug_t75_buffers() -> DebugT75BufferRecord {
+    DEBUG_T75_BUFFERS.get()
+}
+
+fn debug_t75_record_buffer(
+    site: u8,
+    input_bytes: usize,
+    is_ellipsis_probe: bool,
+    set_text: bool,
+    elapsed_ns: u64,
+) {
+    DEBUG_T75_BUFFERS.with(|cell| {
+        let mut r = cell.get();
+        if set_text {
+            if r.set_count == 0 {
+                r.set_first_ns = elapsed_ns;
+            }
+            r.set_count += 1;
+            r.set_total_ns += elapsed_ns;
+            r.set_max_ns = r.set_max_ns.max(elapsed_ns);
+        } else {
+            if r.shape_count == 0 {
+                r.shape_first_ns = elapsed_ns;
+            }
+            r.shape_count += 1;
+            r.shape_total_ns += elapsed_ns;
+            r.shape_max_ns = r.shape_max_ns.max(elapsed_ns);
+        }
+        let s = if site == 0 {
+            &mut r.initial_full_paragraph
+        } else {
+            &mut r.single_line_measure
+        };
+        if set_text {
+            if s.set_count == 0 {
+                s.set_first_ns = elapsed_ns;
+                s.first_input_bytes = input_bytes as u64;
+            }
+            s.set_count += 1;
+            s.input_bytes_total += input_bytes as u64;
+            s.input_bytes_max = s.input_bytes_max.max(input_bytes as u64);
+            s.ellipsis_probe_count += u64::from(is_ellipsis_probe);
+            s.set_total_ns += elapsed_ns;
+            s.set_max_ns = s.set_max_ns.max(elapsed_ns);
+        } else {
+            if s.shape_count == 0 {
+                s.shape_first_ns = elapsed_ns;
+            }
+            s.shape_count += 1;
+            s.shape_total_ns += elapsed_ns;
+            s.shape_max_ns = s.shape_max_ns.max(elapsed_ns);
+        }
+        cell.set(r);
+    });
+}
 
 use glyphon::{Attrs, Buffer, FontSystem, Metrics, Shaping, Wrap};
 use unicode_segmentation::UnicodeSegmentation;
@@ -274,7 +430,7 @@ pub fn truncate_for_ellipsis<'a>(
     font_system: &mut FontSystem,
 ) -> TruncationResult {
     // ── Shared setup: guard geometry, compute max_lines/ellipsis_w, shape ────
-    let shaped = match shape_runs(
+    let shaped = match debug_bke_shape_runs_head(
         text,
         base_attrs,
         bounds_width,
@@ -711,24 +867,41 @@ fn shape_runs<'a>(
     }
 
     // ── Step 2: measure the ellipsis glyph width ────────────────────────────
-    let ellipsis_w = measure_single_line(
-        ELLIPSIS,
-        base_attrs,
-        bounds_width * 2.0,
-        font_size_px,
-        line_height,
-        font_system,
-    );
+    let mut full_buf = Buffer::new_empty(Metrics::new(font_size_px, line_height));
+    full_buf.set_size(font_system, Some(bounds_width * 2.0), None);
+    full_buf.set_wrap(font_system, Wrap::None);
+    let ellipsis_w =
+        measure_single_line_in_buffer(ELLIPSIS, base_attrs, font_system, &mut full_buf);
 
     // ── Step 3: shape the full text with word-wrap enabled ───────────────────
     // We shape with Wrap::Word and bounds_width so that layout_runs() reflects
     // the actual word-wrapped line structure.  Multiple LayoutRuns can share the
     // same line_i when a paragraph soft-wraps.
-    let mut full_buf = Buffer::new(font_system, Metrics::new(font_size_px, line_height));
+    // Carry only scratch from this required ellipsis measurement. Clear its
+    // lines before the eager setters so they cannot relayout the ellipsis.
+    full_buf.lines.clear();
+    full_buf.set_scroll(Default::default());
     full_buf.set_size(font_system, Some(bounds_width), None);
     full_buf.set_wrap(font_system, Wrap::Word);
+    // [DEBUG-T7_5-MISS] Time the existing calls; no IO inside these timers.
+    let debug_t75_set_start = std::time::Instant::now();
     full_buf.set_text(font_system, text, base_attrs, Shaping::Advanced);
+    debug_t75_record_buffer(
+        0,
+        text.len(),
+        false,
+        true,
+        debug_t75_set_start.elapsed().as_nanos() as u64,
+    );
+    let debug_t75_shape_start = std::time::Instant::now();
     full_buf.shape_until_scroll(font_system, false);
+    debug_t75_record_buffer(
+        0,
+        text.len(),
+        false,
+        false,
+        debug_t75_shape_start.elapsed().as_nanos() as u64,
+    );
 
     // ── Step 4: collect rendered lines and their widths ───────────────────────
     // LayoutRun gives us (line_i, line_w, glyphs, text).
@@ -737,11 +910,14 @@ fn shape_runs<'a>(
     let runs: Vec<LayoutRunEntry> = full_buf
         .layout_runs()
         .map(|run| {
-            // Collect (start_byte_in_line, end_byte_in_line, glyph_x_right) per glyph.
+            // Retain one real glyph attaining the minimum logical start.
+            // Consumers only need that minimum, not a full glyph inventory.
             let glyph_info: Vec<GlyphInfo> = run
                 .glyphs
                 .iter()
+                .min_by_key(|g| g.start)
                 .map(|g| (g.start, g.end, g.x + g.w))
+                .into_iter()
                 .collect();
             (run.line_i, run.line_w, glyph_info)
         })
@@ -761,6 +937,418 @@ fn shape_runs<'a>(
         max_lines,
         ellipsis_w,
     }))
+}
+
+// [DEBUG-BKE9C-PUBLIC-API] TEMP complete-context attribution, not a shipping fast path.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DebugBkeParagraphPhase {
+    pub line_index: usize,
+    pub bytes: usize,
+    pub shape_ns: u64,
+    pub layout_ns: u64,
+    pub glyphs: usize,
+    pub runs: usize,
+    pub rtl: bool,
+    pub shape_before: bool,
+    pub layout_before: bool,
+    pub shape_after: bool,
+    pub layout_after: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct DebugBkeCompleteContextRecord {
+    pub input_bytes: usize,
+    pub construction_ns: u64,
+    pub complete_shape_ns: u64,
+    pub cached_layout_ns: u64,
+    pub paragraphs: usize,
+    pub glyphs: usize,
+    pub runs: usize,
+    pub recorded_paragraphs: usize,
+    pub capacity_exceeded: bool,
+    pub completed: bool,
+    pub paragraph: [DebugBkeParagraphPhase; 32],
+}
+
+thread_local! {
+    static DEBUG_BKE_PHASES: std::cell::Cell<DebugBkeCompleteContextRecord> =
+        std::cell::Cell::new(DebugBkeCompleteContextRecord::default());
+}
+
+/// TEMP own-thread snapshot; read only after the measured frame.
+pub fn debug_bke_complete_context_record() -> DebugBkeCompleteContextRecord {
+    DEBUG_BKE_PHASES.get()
+}
+
+// Preserve complete set_text construction and the original paragraph processing order.
+fn debug_bke_set_complete_text(
+    buffer: &mut Buffer,
+    font_system: &mut FontSystem,
+    text: &str,
+    attrs: Attrs<'_>,
+) {
+    use glyphon::cosmic_text::{AttrsList, BufferLine, LineEnding, LineIter, Scroll};
+
+    let mut record = DebugBkeCompleteContextRecord {
+        input_bytes: text.len(),
+        ..Default::default()
+    };
+    let construction_start = std::time::Instant::now();
+    buffer.lines.clear();
+    for (range, ending) in LineIter::new(text) {
+        buffer.lines.push(BufferLine::new(
+            &text[range],
+            ending,
+            AttrsList::new(attrs),
+            Shaping::Advanced,
+        ));
+    }
+    if buffer.lines.is_empty() {
+        buffer.lines.push(BufferLine::new(
+            "",
+            LineEnding::default(),
+            AttrsList::new(attrs),
+            Shaping::Advanced,
+        ));
+    }
+    buffer.set_scroll(Scroll::default());
+    record.construction_ns = construction_start.elapsed().as_nanos() as u64;
+
+    for line_i in 0..buffer.lines.len() {
+        let mut phase = DebugBkeParagraphPhase {
+            line_index: line_i,
+            bytes: buffer.lines[line_i].text().len(),
+            shape_before: buffer.lines[line_i].shape_opt().is_some(),
+            layout_before: buffer.lines[line_i].layout_opt().is_some(),
+            ..Default::default()
+        };
+        let shape_start = std::time::Instant::now();
+        let shape = buffer
+            .line_shape(font_system, line_i)
+            .expect("TEMP complete-context paragraph exists");
+        phase.shape_ns = shape_start.elapsed().as_nanos() as u64;
+        phase.rtl = shape.rtl;
+        phase.glyphs = shape
+            .spans
+            .iter()
+            .flat_map(|span| &span.words)
+            .map(|word| word.glyphs.len())
+            .sum();
+        let layout_start = std::time::Instant::now();
+        let layout = buffer
+            .line_layout(font_system, line_i)
+            .expect("TEMP complete-context paragraph exists");
+        phase.layout_ns = layout_start.elapsed().as_nanos() as u64;
+        phase.runs = layout.len();
+        phase.shape_after = buffer.lines[line_i].shape_opt().is_some();
+        phase.layout_after = buffer.lines[line_i].layout_opt().is_some();
+        record.complete_shape_ns += phase.shape_ns;
+        record.cached_layout_ns += phase.layout_ns;
+        record.paragraphs += 1;
+        record.glyphs += phase.glyphs;
+        record.runs += phase.runs;
+        if let Some(slot) = record.paragraph.get_mut(line_i) {
+            *slot = phase;
+            record.recorded_paragraphs += 1;
+        } else {
+            // Continue all real work; missing per-line evidence disqualifies attribution.
+            record.capacity_exceeded = true;
+        }
+    }
+    record.completed = true;
+    DEBUG_BKE_PHASES.set(record);
+}
+
+#[cfg(test)]
+pub(crate) fn debug_bke_assert_complete_parity(
+    text: &str,
+    attrs: Attrs<'_>,
+    width: f32,
+    height: f32,
+    font_size: f32,
+    line_height: f32,
+) {
+    // Semantic-only comparison: independent equally configured FontSystems.
+    let mut original_fonts = FontSystem::new();
+    let mut diagnostic_fonts = FontSystem::new();
+    let mut original = Buffer::new(&mut original_fonts, Metrics::new(font_size, line_height));
+    let mut diagnostic = Buffer::new(&mut diagnostic_fonts, Metrics::new(font_size, line_height));
+    for (buffer, fonts) in [
+        (&mut original, &mut original_fonts),
+        (&mut diagnostic, &mut diagnostic_fonts),
+    ] {
+        buffer.set_size(fonts, Some(width), None);
+        buffer.set_wrap(fonts, Wrap::Word);
+    }
+    // Reference calls the unchanged backend entry, never the diagnostic.
+    original.set_text(&mut original_fonts, text, attrs, Shaping::Advanced);
+    original.shape_until_scroll(&mut original_fonts, false);
+    debug_bke_set_complete_text(&mut diagnostic, &mut diagnostic_fonts, text, attrs);
+    diagnostic.shape_until_scroll(&mut diagnostic_fonts, false);
+    let snapshot = |buffer: &Buffer| {
+        // Entire ordered cache includes attrs/endings, glyph/font IDs, clusters,
+        // bidi levels, advances/offsets and complete line widths/metrics.
+        let lines = format!("{:?}", buffer.lines);
+        let runs: Vec<_> = buffer.layout_runs().map(|run| format!("{run:?}")).collect();
+        (lines, runs)
+    };
+    assert_eq!(snapshot(&diagnostic), snapshot(&original));
+    assert_eq!(diagnostic.scroll(), original.scroll());
+    assert_eq!(diagnostic.size(), original.size());
+    let record = debug_bke_complete_context_record();
+    assert!(record.completed);
+    assert_eq!(record.input_bytes, text.len());
+    assert_eq!(record.paragraphs, original.lines.len());
+    assert!(!record.capacity_exceeded);
+    assert!(
+        record.paragraph[..record.recorded_paragraphs]
+            .iter()
+            .all(|p| { !p.shape_before && !p.layout_before && p.shape_after && p.layout_after })
+    );
+    let mut incomplete = diagnostic.clone();
+    incomplete.lines.last_mut().unwrap().reset_shaping();
+    assert_ne!(snapshot(&incomplete), snapshot(&original));
+    let actual = truncate_for_ellipsis(
+        text,
+        attrs,
+        width,
+        height,
+        font_size,
+        line_height,
+        &mut diagnostic_fonts,
+    );
+    let expected = debug_bke_unmodified_head_result(
+        text,
+        attrs,
+        width,
+        height,
+        font_size,
+        line_height,
+        &mut original_fonts,
+    );
+    assert_eq!(actual, expected);
+}
+
+fn debug_bke_shape_runs_head<'a>(
+    text: &str,
+    base_attrs: Attrs<'a>,
+    bounds_width: f32,
+    bounds_height: f32,
+    font_size_px: f32,
+    line_height: f32,
+    font_system: &mut FontSystem,
+) -> ShapeOutcome {
+    DEBUG_BKE_PHASES.set(DebugBkeCompleteContextRecord::default());
+    // Guard: degenerate or non-finite geometry produces an empty result.
+    // NaN comparisons always return false, so we must check is_finite() before
+    // arithmetic that feeds into floor() / usize casts.
+    if !bounds_width.is_finite()
+        || !bounds_height.is_finite()
+        || !font_size_px.is_finite()
+        || !line_height.is_finite()
+        || bounds_width <= 0.0
+        || bounds_height <= 0.0
+        || font_size_px <= 0.0
+    {
+        return ShapeOutcome::EarlyReturn(TruncationResult {
+            text: String::new(),
+            was_truncated: !text.is_empty(),
+        });
+    }
+
+    // ── Step 1: determine how many whole lines fit vertically ────────────────
+    let max_lines = max_whole_lines(bounds_height, line_height);
+    if max_lines == 0 {
+        return ShapeOutcome::EarlyReturn(TruncationResult {
+            text: String::new(),
+            was_truncated: !text.is_empty(),
+        });
+    }
+
+    // ── Step 2: measure the ellipsis glyph width ────────────────────────────
+    let mut full_buf = Buffer::new_empty(Metrics::new(font_size_px, line_height));
+    full_buf.set_size(font_system, Some(bounds_width * 2.0), None);
+    full_buf.set_wrap(font_system, Wrap::None);
+    let ellipsis_w =
+        measure_single_line_in_buffer(ELLIPSIS, base_attrs, font_system, &mut full_buf);
+
+    // ── Step 3: shape the full text with word-wrap enabled ───────────────────
+    // We shape with Wrap::Word and bounds_width so that layout_runs() reflects
+    // the actual word-wrapped line structure.  Multiple LayoutRuns can share the
+    // same line_i when a paragraph soft-wraps.
+    // Carry only scratch from this required ellipsis measurement. Clear its
+    // lines before the eager setters so they cannot relayout the ellipsis.
+    full_buf.lines.clear();
+    full_buf.set_scroll(Default::default());
+    full_buf.set_size(font_system, Some(bounds_width), None);
+    full_buf.set_wrap(font_system, Wrap::Word);
+    // [DEBUG-T7_5-MISS] Time the existing calls; no IO inside these timers.
+    let debug_t75_set_start = std::time::Instant::now();
+    debug_bke_set_complete_text(&mut full_buf, font_system, text, base_attrs);
+    debug_t75_record_buffer(
+        0,
+        text.len(),
+        false,
+        true,
+        debug_t75_set_start.elapsed().as_nanos() as u64,
+    );
+    let debug_t75_shape_start = std::time::Instant::now();
+    full_buf.shape_until_scroll(font_system, false);
+    debug_t75_record_buffer(
+        0,
+        text.len(),
+        false,
+        false,
+        debug_t75_shape_start.elapsed().as_nanos() as u64,
+    );
+
+    // ── Step 4: collect rendered lines and their widths ───────────────────────
+    // LayoutRun gives us (line_i, line_w, glyphs, text).
+    // line_i is the index into buffer.lines[] (which is a paragraph/hard-wrap unit).
+    // Multiple LayoutRuns can share the same line_i when word-wrap splits a paragraph.
+    let runs: Vec<LayoutRunEntry> = full_buf
+        .layout_runs()
+        .map(|run| {
+            // Retain one real glyph attaining the minimum logical start.
+            // Consumers only need that minimum, not a full glyph inventory.
+            let glyph_info: Vec<GlyphInfo> = run
+                .glyphs
+                .iter()
+                .min_by_key(|g| g.start)
+                .map(|g| (g.start, g.end, g.x + g.w))
+                .into_iter()
+                .collect();
+            (run.line_i, run.line_w, glyph_info)
+        })
+        .collect();
+
+    // If the text produces no runs at all (empty text), return as-is.
+    if runs.is_empty() {
+        return ShapeOutcome::EarlyReturn(TruncationResult {
+            text: text.to_owned(),
+            was_truncated: false,
+        });
+    }
+
+    ShapeOutcome::Proceed(Box::new(ShapedRuns {
+        full_buf,
+        runs,
+        max_lines,
+        ellipsis_w,
+    }))
+}
+
+#[cfg(test)]
+fn debug_bke_unmodified_head_result<'a>(
+    text: &str,
+    base_attrs: Attrs<'a>,
+    bounds_width: f32,
+    bounds_height: f32,
+    font_size_px: f32,
+    line_height: f32,
+    font_system: &mut FontSystem,
+) -> TruncationResult {
+    // ── Shared setup: guard geometry, compute max_lines/ellipsis_w, shape ────
+    let shaped = match shape_runs(
+        text,
+        base_attrs,
+        bounds_width,
+        bounds_height,
+        font_size_px,
+        line_height,
+        font_system,
+    ) {
+        ShapeOutcome::EarlyReturn(result) => return result,
+        ShapeOutcome::Proceed(shaped) => shaped,
+    };
+    let ShapedRuns {
+        full_buf,
+        runs,
+        max_lines,
+        ellipsis_w,
+    } = &*shaped;
+    // `full_buf` and `runs` stay borrowed from `shaped`; copy the scalars out.
+    let (max_lines, ellipsis_w) = (*max_lines, *ellipsis_w);
+
+    // ── Step 5: whole-line vertical visibility ────────────────────────────────
+    // If the text produces more runs than max_lines, we must truncate.
+    let total_runs = runs.len();
+    if total_runs <= max_lines {
+        // All lines fit vertically; only horizontal overflow can force a cut.
+        return try_horizontal_truncate(
+            &shaped,
+            text,
+            base_attrs,
+            bounds_width,
+            font_size_px,
+            line_height,
+            font_system,
+        )
+        .unwrap_or(TruncationResult {
+            text: text.to_owned(),
+            was_truncated: false,
+        });
+    }
+
+    // More runs than fit: take only the first `max_lines` runs.
+    // Before truncating the last visible run, check whether any visible run
+    // overflows horizontally.  With Shaping::Advanced, an unbreakable word
+    // (e.g. "Mk0") can measure wider than bounds_width even in the visible
+    // prefix.  In that case, treat it the same as the horizontal-overflow path:
+    // truncate at the first overflowing run and drop everything after it.
+    let visible_runs = &runs[..max_lines];
+    let first_overflow_in_visible = visible_runs.iter().position(|run| run.1 > bounds_width);
+
+    let (truncation_run_idx, _truncation_line_i, truncation_line_text) =
+        if let Some(overflow_idx) = first_overflow_in_visible {
+            // A run in the visible window overflows — truncate there.
+            let overflow_run = &runs[overflow_idx];
+            let line_i = overflow_run.0;
+            let line_text = if let Some(line) = full_buf.lines.get(line_i) {
+                line.text().to_owned()
+            } else {
+                return TruncationResult {
+                    text: text.to_owned(),
+                    was_truncated: true,
+                };
+            };
+            (overflow_idx, line_i, line_text)
+        } else {
+            // No horizontal overflow in the visible window — truncate the last
+            // visible run with an ellipsis (the standard vertical-truncation path).
+            let last_visible_run = &runs[max_lines - 1];
+            let line_i = last_visible_run.0;
+            let line_text = if let Some(line) = full_buf.lines.get(line_i) {
+                line.text().to_owned()
+            } else {
+                return TruncationResult {
+                    text: text.to_owned(),
+                    was_truncated: true,
+                };
+            };
+            (max_lines - 1, line_i, line_text)
+        };
+
+    let prefix = text_prefix_up_to_run(runs, truncation_run_idx, text, full_buf);
+    // Use min(g.start) so RTL runs resolve to the logical start, not the
+    // visual-first (logical-last) glyph that glyphs[0] gives for RTL text.
+    let truncation_run = &runs[truncation_run_idx];
+    let run_start = run_logical_start(&truncation_run.2);
+    let run_slice = run_start_slice(&truncation_line_text, run_start);
+    let truncated_last = truncate_line_to_ellipsis(
+        run_slice,
+        base_attrs,
+        bounds_width,
+        font_size_px,
+        line_height,
+        ellipsis_w,
+        font_system,
+    );
+    let result = format!("{prefix}{truncated_last}");
+    TruncationResult {
+        text: result,
+        was_truncated: true,
+    }
 }
 
 /// Handle the "all lines fit vertically" case: check every run for horizontal
@@ -846,6 +1434,7 @@ fn max_whole_lines(bounds_height: f32, line_height: f32) -> usize {
 ///
 /// This shapes the text in a buffer wide enough that no word-wrapping occurs
 /// (width = `max_width`), so the result is the natural single-line width.
+#[cfg(test)]
 fn measure_single_line<'a>(
     text: &str,
     base_attrs: Attrs<'a>,
@@ -854,11 +1443,39 @@ fn measure_single_line<'a>(
     line_height: f32,
     font_system: &mut FontSystem,
 ) -> f32 {
-    let mut buf = Buffer::new(font_system, Metrics::new(font_size_px, line_height));
+    let mut buf = Buffer::new_empty(Metrics::new(font_size_px, line_height));
     buf.set_size(font_system, Some(max_width), None);
     buf.set_wrap(font_system, Wrap::None);
+    measure_single_line_in_buffer(text, base_attrs, font_system, &mut buf)
+}
+
+/// Measure the complete candidate with a callback-local, equally configured buffer.
+/// `set_text` resets lines, attributes, endings and scroll while retaining scratch.
+fn measure_single_line_in_buffer<'a>(
+    text: &str,
+    base_attrs: Attrs<'a>,
+    font_system: &mut FontSystem,
+    buf: &mut Buffer,
+) -> f32 {
+    // [DEBUG-T7_5-MISS] Time the existing calls; no IO inside these timers.
+    let debug_t75_set_start = std::time::Instant::now();
     buf.set_text(font_system, text, base_attrs, Shaping::Advanced);
+    debug_t75_record_buffer(
+        1,
+        text.len(),
+        text == ELLIPSIS,
+        true,
+        debug_t75_set_start.elapsed().as_nanos() as u64,
+    );
+    let debug_t75_shape_start = std::time::Instant::now();
     buf.shape_until_scroll(font_system, false);
+    debug_t75_record_buffer(
+        1,
+        text.len(),
+        text == ELLIPSIS,
+        false,
+        debug_t75_shape_start.elapsed().as_nanos() as u64,
+    );
     buf.layout_runs().next().map(|r| r.line_w).unwrap_or(0.0)
 }
 
@@ -953,18 +1570,22 @@ fn run_start_slice(paragraph_text: &str, run_start_byte: usize) -> &str {
 /// O(n²) total in the worst case).  This version uses binary search to reduce
 /// shape calls from O(W) to O(log W), starting with short prefixes:
 ///
-/// 1. Collect word-boundary byte offsets into a sorted slice.
+/// 1. Collect the sorted, deduplicated union of word ends and grapheme ends.
 /// 2. Grow an exponential fit/nonfit bracket, then binary-search for the
-///    largest boundary where `measure("prefix…") ≤
+///    largest union boundary where `measure("prefix…") ≤
 ///    bounds_width`.  The combined shape is measured as a single unit so that
 ///    any kerning/ligature between the last glyph of the prefix and `"…"` is
 ///    accounted for (critical with `Shaping::Advanced`).  The predicate is
 ///    required to be monotone: once a prefix+ellipsis is too wide, longer
 ///    prefixes must not fit again. This is the existing search assumption,
 ///    not a universal guarantee about context-sensitive shaping. Bracketing
-///    and binary search together issue O(log W) shape calls.
-/// 3. If no non-empty word boundary fits, repeat the binary search over
-///    grapheme-cluster boundaries (O(log G) shapes, G = grapheme count).
+///    and binary search together issue O(log (W + G)) shape calls.
+/// 3. Prefer the last word end at or before that fitting boundary. If there
+///    is none, use the fitting grapheme end. Under the same monotone-fit
+///    assumption this retains word preference without first probing a whole
+///    giant word. Word ends are retained explicitly, not assumed to be
+///    grapheme ends. Context-sensitive nonmonotone inputs require parity
+///    investigation; this is not a universal output-equivalence claim.
 /// 4. If even a single grapheme + ellipsis does not fit, return just `"…"`.
 ///
 /// # RTL / bidi safety
@@ -976,9 +1597,9 @@ fn run_start_slice(paragraph_text: &str, run_start_byte: usize) -> &str {
 ///
 /// # Grapheme-cluster safety
 ///
-/// Boundaries come from `unicode_segmentation::grapheme_indices`, which
-/// guarantees whole-cluster cuts.  The binary-search pivot is always clamped
-/// to a `char_boundary` before slicing.
+/// Grapheme fallback boundaries come from `unicode_segmentation::grapheme_indices`.
+/// The union also retains original word ends without assuming they are grapheme
+/// ends. Both species are filtered at char boundaries before search and slicing.
 fn truncate_line_to_ellipsis<'a>(
     line: &str,
     base_attrs: Attrs<'a>,
@@ -1002,77 +1623,57 @@ fn truncate_line_to_ellipsis<'a>(
     // as one shaped unit is the only way to guarantee the result fits within
     // bounds_width.  We therefore use bounds_width as the fitting budget rather
     // than the pre-subtracted `budget`.
+    let mut measurement_buffer = None;
     let mut measure_with_ellipsis = |boundary: usize| -> f32 {
-        if boundary == 0 {
-            // Zero-length prefix: the result is just ELLIPSIS.
-            return measure_single_line(
-                ELLIPSIS,
-                base_attrs,
-                bounds_width * 2.0,
-                font_size_px,
-                line_height,
-                font_system,
-            );
-        }
-        let candidate = &line[..boundary];
-        let trimmed = candidate.trim_end();
-        // Shape "prefix…" as a single unit so kerning/ligatures between the
-        // last glyph of the prefix and "…" are accounted for.
-        let with_ellipsis = format!("{trimmed}{ELLIPSIS}");
-        measure_single_line(
-            &with_ellipsis,
-            base_attrs,
-            bounds_width * 2.0,
-            font_size_px,
-            line_height,
-            font_system,
-        )
+        let with_ellipsis;
+        let text = if boundary == 0 {
+            ELLIPSIS
+        } else {
+            let trimmed = line[..boundary].trim_end();
+            // Shape the complete prefix+ellipsis as one contextual unit.
+            with_ellipsis = format!("{trimmed}{ELLIPSIS}");
+            &with_ellipsis
+        };
+        let buf = measurement_buffer.get_or_insert_with(|| {
+            let mut buf = Buffer::new_empty(Metrics::new(font_size_px, line_height));
+            buf.set_size(font_system, Some(bounds_width * 2.0), None);
+            buf.set_wrap(font_system, Wrap::None);
+            buf
+        });
+        measure_single_line_in_buffer(text, base_attrs, font_system, buf)
     };
 
-    // ── Step 1: word-boundary binary search ──────────────────────────────────
-    //
-    // Collect only valid char-boundary word ends (unicode_word_indices yields
-    // pairs whose end bytes are always char boundaries, but we guard anyway).
-    //
-    // `unicode_word_indices()` yields `(start, word)` pairs where every word
-    // has length >= 1, so every boundary > 0.  No empty-prefix guard needed.
+    // Search short prefixes across both boundary species, then preserve the
+    // original word preference. A long first word must not force a full-word
+    // measurement before we discover a nonfitting short grapheme prefix.
     let word_boundaries: Vec<usize> = line
         .unicode_word_indices()
         .map(|(i, word)| i + word.len())
         .filter(|&b| line.is_char_boundary(b))
         .collect();
-
-    // Binary search: find the rightmost word boundary such that
-    // `measure_with_ellipsis(boundary) ≤ bounds_width`.
-    //
-    // We compare against bounds_width (not budget) because measure_with_ellipsis
-    // already includes the ellipsis in the shaped measurement.
-    if let Some(boundary) =
-        binary_search_largest_fitting(&word_boundaries, bounds_width, &mut measure_with_ellipsis)
-    {
-        let candidate = &line[..boundary];
-        let trimmed = candidate.trim_end();
-        return format!("{trimmed}{ELLIPSIS}");
-    }
-
-    // ── Step 2: grapheme-cluster fallback (binary search) ────────────────────
-    //
-    // No word boundary fits — fall back to grapheme-cluster boundaries so that
-    // long unbroken tokens still show a visible prefix before the ellipsis.
-    let grapheme_boundaries: Vec<usize> = line
+    let mut boundaries: Vec<usize> = line
         .grapheme_indices(true)
         .map(|(i, g)| i + g.len())
         .filter(|&b| line.is_char_boundary(b))
+        .chain(word_boundaries.iter().copied())
         .collect();
+    boundaries.sort_unstable();
+    boundaries.dedup();
 
-    if let Some(boundary) = binary_search_largest_fitting(
-        &grapheme_boundaries,
-        bounds_width,
-        &mut measure_with_ellipsis,
-    ) {
-        let candidate = &line[..boundary];
-        let trimmed = candidate.trim_end();
-        return format!("{trimmed}{ELLIPSIS}");
+    if let Some(fitting_boundary) =
+        binary_search_largest_fitting(&boundaries, bounds_width, &mut measure_with_ellipsis)
+    {
+        // With the existing monotone predicate, the fitting union boundary
+        // bounds every fitting word end. If none is available, this boundary
+        // belongs to the grapheme fallback. The measurement itself remains
+        // the complete Advanced-shaped prefix plus ellipsis.
+        let boundary = word_boundaries
+            .iter()
+            .rev()
+            .find(|&&boundary| boundary <= fitting_boundary)
+            .copied()
+            .unwrap_or(fitting_boundary);
+        return format!("{}{ELLIPSIS}", line[..boundary].trim_end());
     }
 
     // Even a single grapheme + ellipsis does not fit — return just the ellipsis.
@@ -1130,28 +1731,23 @@ fn truncate_line_to_leading_ellipsis<'a>(
     // ── Helper: measure "…" + suffix-from-`cut` as a single shaped unit ──────
     // Measuring the combined string accounts for kerning/ligatures between the
     // ellipsis and the first glyph of the suffix under Shaping::Advanced.
+    let mut measurement_buffer = None;
     let mut measure_with_leading_ellipsis = |cut: usize| -> f32 {
-        if cut >= line.len() {
-            // Empty suffix: the result is just ELLIPSIS.
-            return measure_single_line(
-                ELLIPSIS,
-                base_attrs,
-                bounds_width * 2.0,
-                font_size_px,
-                line_height,
-                font_system,
-            );
-        }
-        let suffix = line[cut..].trim_start();
-        let with_ellipsis = format!("{ELLIPSIS}{suffix}");
-        measure_single_line(
-            &with_ellipsis,
-            base_attrs,
-            bounds_width * 2.0,
-            font_size_px,
-            line_height,
-            font_system,
-        )
+        let with_ellipsis;
+        let text = if cut >= line.len() {
+            ELLIPSIS
+        } else {
+            let suffix = line[cut..].trim_start();
+            with_ellipsis = format!("{ELLIPSIS}{suffix}");
+            &with_ellipsis
+        };
+        let buf = measurement_buffer.get_or_insert_with(|| {
+            let mut buf = Buffer::new_empty(Metrics::new(font_size_px, line_height));
+            buf.set_size(font_system, Some(bounds_width * 2.0), None);
+            buf.set_wrap(font_system, Wrap::None);
+            buf
+        });
+        measure_single_line_in_buffer(text, base_attrs, font_system, buf)
     };
 
     // Fast path: the whole line plus a leading ellipsis fits — show it all.
@@ -1625,6 +2221,376 @@ mod tests {
             shaped_width(&next_candidate) > bounds_width,
             "one more whole x grapheme must exceed the box"
         );
+
+        // PARTIAL union-search parity against the prior word-first algorithm.
+        // The reference uses independent complete Buffer shaping; it does not
+        // call the changed truncation helper or derive its expected cut.
+        let reference_cut = |line: &str, width: f32, fonts: &mut FontSystem| {
+            let mut measure = |boundary: usize| {
+                let candidate = format!("{}{ELLIPSIS}", line[..boundary].trim_end());
+                let mut buffer = Buffer::new(fonts, Metrics::new(16.0, 22.4));
+                buffer.set_size(fonts, Some(width * 2.0), None);
+                buffer.set_wrap(fonts, Wrap::None);
+                buffer.set_text(fonts, &candidate, base_attrs(), Shaping::Advanced);
+                buffer.shape_until_scroll(fonts, false);
+                buffer
+                    .layout_runs()
+                    .next()
+                    .map(|run| run.line_w)
+                    .unwrap_or(0.0)
+            };
+            let words: Vec<_> = line
+                .unicode_word_indices()
+                .map(|(start, word)| start + word.len())
+                .filter(|&boundary| line.is_char_boundary(boundary))
+                .collect();
+            if let Some(boundary) = binary_search_largest_fitting(&words, width, &mut measure) {
+                return format!("{}{ELLIPSIS}", line[..boundary].trim_end());
+            }
+            let graphemes: Vec<_> = line
+                .grapheme_indices(true)
+                .map(|(start, grapheme)| start + grapheme.len())
+                .filter(|&boundary| line.is_char_boundary(boundary))
+                .collect();
+            binary_search_largest_fitting(&graphemes, width, &mut measure)
+                .map(|boundary| format!("{}{ELLIPSIS}", line[..boundary].trim_end()))
+                .unwrap_or_else(|| ELLIPSIS.to_owned())
+        };
+        for line in [
+            payload.as_str(),
+            "alpha beta gamma delta",
+            "alpha   beta\tlongwordlongwordlongword",
+            "العربية الطويلة مع نص آخر",
+            "LTR العربية ffi e\u{301} 👨‍👩‍👧‍👦 tail",
+            "👨‍👩‍👧‍👦👨‍👩‍👧‍👦e\u{301}e\u{301}ffi",
+        ] {
+            for width in [60.0, 120.0, 400.0] {
+                let mut reference_fonts = make_font_system();
+                let expected = reference_cut(line, width, &mut reference_fonts);
+                let ellipsis_width =
+                    measure_single_line(ELLIPSIS, base_attrs(), width * 2.0, 16.0, 22.4, &mut fs);
+                let actual = truncate_line_to_ellipsis(
+                    line,
+                    base_attrs(),
+                    width,
+                    16.0,
+                    22.4,
+                    ellipsis_width,
+                    &mut fs,
+                );
+                assert_eq!(
+                    actual, expected,
+                    "prior word preference/output: {line:?}, {width}"
+                );
+                let mut check = Buffer::new(&mut fs, Metrics::new(16.0, 22.4));
+                check.set_size(&mut fs, Some(width * 2.0), None);
+                check.set_wrap(&mut fs, Wrap::None);
+                check.set_text(&mut fs, &actual, base_attrs(), Shaping::Advanced);
+                check.shape_until_scroll(&mut fs, false);
+                assert!(check.layout_runs().all(|run| run.line_w <= width));
+            }
+        }
+
+        // A fitting grapheme extension must not replace a fitting word end.
+        let preferred_line = format!("alpha {}", payload);
+        let preferred_width =
+            measure_single_line("alpha zz…", base_attrs(), 800.0, 16.0, 22.4, &mut fs);
+        let ellipsis_width =
+            measure_single_line(ELLIPSIS, base_attrs(), 800.0, 16.0, 22.4, &mut fs);
+        assert!(
+            measure_single_line(
+                &format!("{preferred_line}{ELLIPSIS}"),
+                base_attrs(),
+                preferred_width * 2.0,
+                16.0,
+                22.4,
+                &mut fs,
+            ) > preferred_width
+        );
+        assert_eq!(
+            truncate_line_to_ellipsis(
+                &preferred_line,
+                base_attrs(),
+                preferred_width,
+                16.0,
+                22.4,
+                ellipsis_width,
+                &mut fs,
+            ),
+            "alpha…"
+        );
+
+        // TEMP full-context parity; this is never a timed-frame payload warmup.
+        for text in [
+            payload.as_str(),
+            "fits",
+            "",
+            "one\r\ntwo\rthree\n\rfour",
+            "العربية الطويلة مع نص آخر",
+            "LTR العربية ffi e\u{301} 👨‍👩‍👧‍👦 tail",
+            "heading\nline with several words\nlast row",
+        ] {
+            debug_bke_assert_complete_parity(text, base_attrs(), 60.0, 100.0, 16.0, 22.4);
+        }
+        for (width, height) in [(0.0, 100.0), (60.0, 0.0), (f32::NAN, 100.0)] {
+            let mut reference_fonts = make_font_system();
+            let mut diagnostic_fonts = make_font_system();
+            assert_eq!(
+                truncate_for_ellipsis(
+                    "not empty",
+                    base_attrs(),
+                    width,
+                    height,
+                    16.0,
+                    22.4,
+                    &mut diagnostic_fonts
+                ),
+                debug_bke_unmodified_head_result(
+                    "not empty",
+                    base_attrs(),
+                    width,
+                    height,
+                    16.0,
+                    22.4,
+                    &mut reference_fonts
+                ),
+            );
+        }
+
+        // Check both collectors against a fresh, unmodified backend buffer,
+        // before any final-string comparison can share the changed summary.
+        for (font_size, width) in [(12.0, 60.0), (16.0, 120.0), (24.0, 400.0)] {
+            let line_height = font_size * 1.4;
+            let height = line_height * 3.0;
+            for text in [
+                "",
+                "العربية الطويلة مع نص آخر",
+                "LTR العربية ffi e\u{301} 👨‍👩‍👧‍👦 tail",
+                "several words that soft wrap across lines",
+                "first\r\nsecond\nthird\tfourth",
+            ] {
+                for diagnostic in [false, true] {
+                    let mut ellipse_reference =
+                        Buffer::new(&mut fs, Metrics::new(font_size, line_height));
+                    ellipse_reference.set_size(&mut fs, Some(width * 2.0), None);
+                    ellipse_reference.set_wrap(&mut fs, Wrap::None);
+                    ellipse_reference.set_text(&mut fs, ELLIPSIS, base_attrs(), Shaping::Advanced);
+                    ellipse_reference.shape_until_scroll(&mut fs, false);
+                    let expected_ellipsis_w = ellipse_reference
+                        .layout_runs()
+                        .next()
+                        .map(|run| run.line_w)
+                        .unwrap_or(0.0);
+                    let mut reference = Buffer::new(&mut fs, Metrics::new(font_size, line_height));
+                    reference.set_size(&mut fs, Some(width), None);
+                    reference.set_wrap(&mut fs, Wrap::Word);
+                    reference.set_text(&mut fs, text, base_attrs(), Shaping::Advanced);
+                    reference.shape_until_scroll(&mut fs, false);
+                    let expected: Vec<_> = reference
+                        .layout_runs()
+                        .map(|run| {
+                            let glyphs: Vec<GlyphInfo> = run
+                                .glyphs
+                                .iter()
+                                .map(|g| (g.start, g.end, g.x + g.w))
+                                .collect();
+                            (run.line_i, run.line_w, glyphs)
+                        })
+                        .collect();
+                    let expected_ordered_layouts: Vec<_> = reference
+                        .layout_runs()
+                        .map(|run| format!("{run:?}"))
+                        .collect();
+                    let actual = if diagnostic {
+                        debug_bke_shape_runs_head(
+                            text,
+                            base_attrs(),
+                            width,
+                            height,
+                            font_size,
+                            line_height,
+                            &mut fs,
+                        )
+                    } else {
+                        shape_runs(
+                            text,
+                            base_attrs(),
+                            width,
+                            height,
+                            font_size,
+                            line_height,
+                            &mut fs,
+                        )
+                    };
+                    match actual {
+                        ShapeOutcome::EarlyReturn(result) => {
+                            assert!(expected.is_empty());
+                            assert_eq!(result.text, text);
+                            assert!(!result.was_truncated);
+                        }
+                        ShapeOutcome::Proceed(actual) => {
+                            assert_eq!(actual.ellipsis_w, expected_ellipsis_w);
+                            assert_eq!(actual.max_lines, (height / line_height).floor() as usize);
+                            assert_eq!(actual.runs.len(), expected.len());
+                            for ((line_i, width, summary), (expected_i, expected_w, glyphs)) in
+                                actual.runs.iter().zip(&expected)
+                            {
+                                assert_eq!((*line_i, *width), (*expected_i, *expected_w));
+                                let minimum = glyphs.iter().map(|g| g.0).min().unwrap_or(0);
+                                assert_eq!(run_logical_start(summary), minimum);
+                                assert_eq!(summary.len(), usize::from(!glyphs.is_empty()));
+                                let first_minimum: Vec<GlyphInfo> = glyphs
+                                    .iter()
+                                    .min_by_key(|g| g.0)
+                                    .copied()
+                                    .into_iter()
+                                    .collect();
+                                assert_eq!(*summary, first_minimum);
+                                for glyph in summary {
+                                    assert_eq!(glyph.0, minimum);
+                                    assert!(
+                                        glyphs.contains(glyph),
+                                        "summary must retain a real glyph"
+                                    );
+                                }
+                            }
+                            assert_eq!(
+                                format!("{:?}", actual.full_buf.lines),
+                                format!("{:?}", reference.lines)
+                            );
+                            assert_eq!(actual.full_buf.scroll(), reference.scroll());
+                            assert_eq!(actual.full_buf.size(), reference.size());
+                            assert_eq!(actual.full_buf.metrics(), reference.metrics());
+                            assert_eq!(actual.full_buf.wrap(), reference.wrap());
+                            assert_eq!(actual.full_buf.tab_width(), reference.tab_width());
+                            assert_eq!(actual.full_buf.tab_width(), 8);
+                            assert_eq!(
+                                actual.full_buf.monospace_width(),
+                                reference.monospace_width()
+                            );
+                            assert_eq!(actual.full_buf.monospace_width(), None);
+                            let actual_ordered_layouts: Vec<_> = actual
+                                .full_buf
+                                .layout_runs()
+                                .map(|run| format!("{run:?}"))
+                                .collect();
+                            assert_eq!(actual_ordered_layouts, expected_ordered_layouts);
+                        }
+                    }
+                }
+            }
+
+            // A fixed-config callback must completely reset every candidate.
+            // Independent fresh Buffer::new preserves the original setup path.
+            let mut reused = Buffer::new_empty(Metrics::new(font_size, line_height));
+            reused.set_size(&mut fs, Some(width * 2.0), None);
+            reused.set_wrap(&mut fs, Wrap::None);
+            for text in [
+                "",
+                "العربية…",
+                "LTR ffi e\u{301} 👨‍👩‍👧‍👦…",
+                "one\ttwo…",
+                "",
+                "one\r\ntwo\rthree\n",
+            ] {
+                let actual_width =
+                    measure_single_line_in_buffer(text, base_attrs(), &mut fs, &mut reused);
+                let mut reference = Buffer::new(&mut fs, Metrics::new(font_size, line_height));
+                reference.set_size(&mut fs, Some(width * 2.0), None);
+                reference.set_wrap(&mut fs, Wrap::None);
+                reference.set_text(&mut fs, text, base_attrs(), Shaping::Advanced);
+                reference.shape_until_scroll(&mut fs, false);
+                assert_eq!(
+                    actual_width,
+                    reference
+                        .layout_runs()
+                        .next()
+                        .map(|r| r.line_w)
+                        .unwrap_or(0.0)
+                );
+                assert_eq!(
+                    format!("{:?}", reused.lines),
+                    format!("{:?}", reference.lines)
+                );
+                let actual_runs: Vec<_> = reused.layout_runs().map(|r| format!("{r:?}")).collect();
+                let expected_runs: Vec<_> =
+                    reference.layout_runs().map(|r| format!("{r:?}")).collect();
+                assert_eq!(actual_runs, expected_runs);
+                assert_eq!(reused.scroll(), reference.scroll());
+                assert_eq!(reused.size(), reference.size());
+            }
+        }
+
+        // Independent complete candidate measurement protects leading-ellipsis
+        // search as well as the existing trailing reference_cut controls.
+        let reference_tail = |line: &str, width: f32, fonts: &mut FontSystem| {
+            let mut measure = |cut: usize| {
+                let candidate = format!("{ELLIPSIS}{}", line[cut..].trim_start());
+                let mut buffer = Buffer::new(fonts, Metrics::new(16.0, 22.4));
+                buffer.set_size(fonts, Some(width * 2.0), None);
+                buffer.set_wrap(fonts, Wrap::None);
+                buffer.set_text(fonts, &candidate, base_attrs(), Shaping::Advanced);
+                buffer.shape_until_scroll(fonts, false);
+                buffer.layout_runs().next().map(|r| r.line_w).unwrap_or(0.0)
+            };
+            if measure(0) <= width {
+                return format!("{ELLIPSIS}{}", line.trim_start());
+            }
+            let words: Vec<_> = line
+                .unicode_word_indices()
+                .map(|(i, _)| i)
+                .filter(|&i| i > 0 && line.is_char_boundary(i))
+                .collect();
+            if let Some(cut) = binary_search_smallest_fitting(&words, width, &mut measure) {
+                return format!("{ELLIPSIS}{}", line[cut..].trim_start());
+            }
+            let graphemes: Vec<_> = line
+                .grapheme_indices(true)
+                .map(|(i, _)| i)
+                .filter(|&i| i > 0 && line.is_char_boundary(i))
+                .collect();
+            binary_search_smallest_fitting(&graphemes, width, &mut measure)
+                .map(|cut| format!("{ELLIPSIS}{}", line[cut..].trim_start()))
+                .unwrap_or_else(|| ELLIPSIS.to_owned())
+        };
+        for line in [
+            "alpha beta gamma delta",
+            "العربية الطويلة مع نص آخر",
+            "ffi e\u{301} 👨‍👩‍👧‍👦 tail",
+        ] {
+            let ellipsis = measure_single_line(ELLIPSIS, base_attrs(), 240.0, 16.0, 22.4, &mut fs);
+            let expected = reference_tail(line, 120.0, &mut fs);
+            assert_eq!(
+                truncate_line_to_leading_ellipsis(
+                    line,
+                    base_attrs(),
+                    120.0,
+                    16.0,
+                    22.4,
+                    ellipsis,
+                    &mut fs
+                ),
+                expected
+            );
+        }
+        // Whole-line selection must still use the original full backend runs.
+        let text = "first\nsecond\nthird";
+        let mut reference = Buffer::new(&mut fs, Metrics::new(16.0, 22.4));
+        reference.set_size(&mut fs, Some(400.0), None);
+        reference.set_wrap(&mut fs, Wrap::Word);
+        reference.set_text(&mut fs, text, base_attrs(), Shaping::Advanced);
+        reference.shape_until_scroll(&mut fs, false);
+        let runs: Vec<_> = reference.layout_runs().collect();
+        assert_eq!(runs.len(), 3);
+        let first = reference.lines[runs[0].line_i].text();
+        let last = reference.lines[runs[2].line_i].text();
+        let expected_head = reference_cut(first, 400.0, &mut fs);
+        let expected_tail = reference_tail(last, 400.0, &mut fs);
+        let head = truncate_for_ellipsis(text, base_attrs(), 400.0, 22.4, 16.0, 22.4, &mut fs);
+        let tail = truncate_tail_anchored(text, base_attrs(), 400.0, 22.4, 16.0, 22.4, &mut fs);
+        assert!(head.was_truncated && tail.was_truncated);
+        assert_eq!(head.text, expected_head);
+        assert_eq!(tail.text, expected_tail);
     }
 
     /// Canonical repro from the bug report: `'W'×30` in a `200px` box must yield

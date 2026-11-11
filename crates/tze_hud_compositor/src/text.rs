@@ -177,6 +177,8 @@ pub(crate) struct TruncationCache {
     /// transcript, keeping a single uncached call within the Stage-5 Layout
     /// Resolve budget (< 1 ms).
     max_truncation_input_bytes: usize,
+    // [DEBUG-T7_5-MISS] Batch-scoped fixed-size diagnostic only.
+    debug_t75_truncation: overflow::DebugT75TruncationRecord,
 }
 
 impl Default for TruncationCache {
@@ -185,6 +187,7 @@ impl Default for TruncationCache {
             entries: HashMap::new(),
             by_content: HashMap::new(),
             max_truncation_input_bytes: overflow::DEFAULT_MAX_TRUNCATION_INPUT_BYTES,
+            debug_t75_truncation: overflow::DebugT75TruncationRecord::default(),
         }
     }
 }
@@ -294,7 +297,13 @@ impl TruncationCache {
         // on every prime call (hit or miss) so the freshest geometry wins.
         self.by_content.insert(key.content_hash(), key);
         let max_truncation_input_bytes = self.max_truncation_input_bytes;
-        self.entries.entry(key).or_insert_with(|| {
+        // [DEBUG-T7_5-MISS] Closure entry is the actual miss witness; no extra lookup.
+        let mut debug_t75_miss = false;
+        let mut debug_t75_shaped_bytes = 0;
+        let mut debug_t75_buffers = overflow::DebugT75BufferRecord::default();
+        let result = self.entries.entry(key).or_insert_with(|| {
+            debug_t75_miss = true;
+            overflow::debug_t75_reset_buffers();
             let family = match font_family {
                 FontFamily::SystemSansSerif => Family::SansSerif,
                 FontFamily::SystemMonospace => Family::Monospace,
@@ -323,7 +332,8 @@ impl TruncationCache {
             // Dispatch to the correct truncation algorithm via TruncationViewport.
             // TailAnchored shows the LAST max_lines runs (newest content visible).
             // HeadAnchored shows the FIRST max_lines runs (default / scrolled-back).
-            match viewport {
+            debug_t75_shaped_bytes = shaped_input.len();
+            let result = match viewport {
                 TruncationViewport::TailAnchored => overflow::truncate_tail_anchored(
                     shaped_input,
                     base_attrs,
@@ -342,8 +352,53 @@ impl TruncationCache {
                     line_height,
                     font_system,
                 ),
+            };
+            debug_t75_buffers = overflow::debug_t75_buffers();
+            result
+        });
+        // [DEBUG-T7_5-MISS] Disjoint diagnostic field, original cached reference returned.
+        let r = &mut self.debug_t75_truncation;
+        r.calls += 1;
+        r.input_bytes += content.len();
+        if debug_t75_miss {
+            r.last_miss_bounds_width = bounds_width;
+            r.last_miss_bounds_height = bounds_height;
+            r.last_miss_font_size_px = font_size_px;
+            r.last_miss_font_weight = font_weight.clamp(100, 900);
+            r.last_miss_font_family = match font_family {
+                FontFamily::SystemSansSerif => "sans",
+                FontFamily::SystemMonospace => "monospace",
+                FontFamily::SystemSerif => "serif",
+            };
+            r.last_miss_line_height = font_size_px * line_height_multiplier;
+            r.buffers
+                .initial_full_paragraph
+                .merge(debug_t75_buffers.initial_full_paragraph);
+            r.buffers
+                .single_line_measure
+                .merge(debug_t75_buffers.single_line_measure);
+            r.misses += 1;
+            r.shaped_input_bytes += debug_t75_shaped_bytes;
+            r.algorithm = match viewport {
+                TruncationViewport::TailAnchored => "tail",
+                TruncationViewport::HeadAnchored => "head",
+            };
+            if r.buffers.set_count == 0 {
+                r.buffers.set_first_ns = debug_t75_buffers.set_first_ns;
             }
-        })
+            if r.buffers.shape_count == 0 {
+                r.buffers.shape_first_ns = debug_t75_buffers.shape_first_ns;
+            }
+            r.buffers.set_count += debug_t75_buffers.set_count;
+            r.buffers.set_total_ns += debug_t75_buffers.set_total_ns;
+            r.buffers.set_max_ns = r.buffers.set_max_ns.max(debug_t75_buffers.set_max_ns);
+            r.buffers.shape_count += debug_t75_buffers.shape_count;
+            r.buffers.shape_total_ns += debug_t75_buffers.shape_total_ns;
+            r.buffers.shape_max_ns = r.buffers.shape_max_ns.max(debug_t75_buffers.shape_max_ns);
+        } else {
+            r.hits += 1;
+        }
+        result
     }
 
     /// Evict all entries whose key is not in `live_keys`.
@@ -1191,6 +1246,8 @@ impl TextRasterizer {
     /// Returns the set of live [`TruncationKey`]s so the caller can evict stale
     /// entries with [`TruncationCache::evict_except`].
     pub(crate) fn prime_truncation_cache(&mut self, items: &[TextItem]) -> Vec<TruncationKey> {
+        // [DEBUG-T7_5-MISS] Reset only diagnostic counters for this actual batch.
+        self.truncation_cache.debug_t75_truncation = overflow::DebugT75TruncationRecord::default();
         let mut live_keys: Vec<TruncationKey> = Vec::new();
         for item in items {
             // effective_truncation_key returns None for non-Ellipsis items.
@@ -1221,6 +1278,11 @@ impl TextRasterizer {
             );
         }
         live_keys
+    }
+
+    // [DEBUG-T7_5-MISS] Fixed copy after actual prime; no cache lookup or shaping.
+    pub(crate) fn debug_t75_truncation_record(&self) -> overflow::DebugT75TruncationRecord {
+        self.truncation_cache.debug_t75_truncation
     }
 
     /// Prepare text areas for the upcoming render pass.
@@ -5812,6 +5874,158 @@ mod tests {
             assert!(!runs.is_empty());
             assert!(runs.len() <= 1, "the 40px box contains one whole line");
             assert!(runs.iter().all(|run| run.line_w <= narrow_w));
+        }
+
+        // The same retained consumer must keep contextual Unicode output and
+        // weight-separated cache slots after the candidate-search change.
+        for text in [
+            "WWW ffi e\u{301} 👨‍👩‍👧‍👦 WWW tail",
+            "العربية الطويلة WWW العربية ffi",
+            "heading\nWWW ffi e\u{301} 👨‍👩‍👧‍👦\nlast row",
+        ] {
+            for weight in [base_weight, eff_weight] {
+                crate::overflow::debug_bke_assert_complete_parity(
+                    text,
+                    Attrs::new()
+                        .family(Family::SansSerif)
+                        .weight(Weight(weight)),
+                    narrow_w,
+                    height,
+                    font_size,
+                    font_size * 1.4,
+                );
+                let key = TruncationKey::new(
+                    text,
+                    narrow_w,
+                    height,
+                    font_size,
+                    FontFamily::SystemSansSerif,
+                    weight,
+                    TruncationViewport::HeadAnchored,
+                );
+                let first = cache_bold
+                    .prime(
+                        key,
+                        text,
+                        narrow_w,
+                        height,
+                        font_size,
+                        FontFamily::SystemSansSerif,
+                        weight,
+                        TruncationViewport::HeadAnchored,
+                        1.4,
+                        &mut fs,
+                    )
+                    .clone();
+                let entries = cache_bold.entries.len();
+                let repeated = cache_bold
+                    .prime(
+                        key,
+                        text,
+                        narrow_w,
+                        height,
+                        font_size,
+                        FontFamily::SystemSansSerif,
+                        weight,
+                        TruncationViewport::HeadAnchored,
+                        1.4,
+                        &mut fs,
+                    )
+                    .clone();
+                assert_eq!(repeated, first);
+                assert_eq!(cache_bold.entries.len(), entries);
+                assert_eq!(cache_bold.entries.get(&key), Some(&first));
+            }
+        }
+
+        // TEMP full-context cache/output parity under both effective weights.
+        for weight in [base_weight, eff_weight] {
+            crate::overflow::debug_bke_assert_complete_parity(
+                content,
+                Attrs::new()
+                    .family(Family::SansSerif)
+                    .weight(Weight(weight)),
+                narrow_w,
+                height,
+                font_size,
+                font_size * 1.4,
+            );
+        }
+
+        // Source-independent full backend layout is the oracle for these
+        // fitting consumer inputs, rather than another truncation helper.
+        // Fixed weight/configuration per call must not leak previous attributes.
+        for text in [
+            "",
+            "العربية ffi",
+            "LTR e\u{301} 👨‍👩‍👧‍👦",
+            "one\ttwo",
+            "first\r\nsecond\nthird",
+        ] {
+            for weight in [eff_weight, base_weight, eff_weight] {
+                let attrs = Attrs::new()
+                    .family(Family::SansSerif)
+                    .weight(Weight(weight));
+                let mut reference = Buffer::new(&mut fs, Metrics::new(font_size, font_size * 1.4));
+                reference.set_size(&mut fs, Some(400.0), None);
+                reference.set_wrap(&mut fs, Wrap::Word);
+                reference.set_text(&mut fs, text, attrs, Shaping::Advanced);
+                reference.shape_until_scroll(&mut fs, false);
+                let expected_runs: Vec<_> = reference.layout_runs().collect();
+                assert!(expected_runs.len() <= 4);
+                assert!(expected_runs.iter().all(|run| run.line_w <= 400.0));
+                for run in &expected_runs {
+                    let min_start = run.glyphs.iter().map(|g| g.start).min().unwrap_or(0);
+                    assert!(
+                        reference.lines[run.line_i]
+                            .text()
+                            .is_char_boundary(min_start)
+                    );
+                }
+                let key = TruncationKey::new(
+                    text,
+                    400.0,
+                    100.0,
+                    font_size,
+                    FontFamily::SystemSansSerif,
+                    weight,
+                    TruncationViewport::HeadAnchored,
+                );
+                let actual = cache_bold
+                    .prime(
+                        key,
+                        text,
+                        400.0,
+                        100.0,
+                        font_size,
+                        FontFamily::SystemSansSerif,
+                        weight,
+                        TruncationViewport::HeadAnchored,
+                        1.4,
+                        &mut fs,
+                    )
+                    .clone();
+                assert_eq!(actual.text, text);
+                assert!(!actual.was_truncated);
+                let entries = cache_bold.entries.len();
+                let repeated = cache_bold
+                    .prime(
+                        key,
+                        text,
+                        400.0,
+                        100.0,
+                        font_size,
+                        FontFamily::SystemSansSerif,
+                        weight,
+                        TruncationViewport::HeadAnchored,
+                        1.4,
+                        &mut fs,
+                    )
+                    .clone();
+                assert_eq!(repeated, actual);
+                assert_eq!(cache_bold.entries.len(), entries);
+                assert_eq!(cache_bold.entries.get(&key), Some(&actual));
+            }
         }
     }
 
