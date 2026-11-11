@@ -24,6 +24,7 @@ use tze_hud_scene::types::*;
 
 use super::Compositor;
 use super::draw_cmds::DragHandleEntry;
+use super::token_colors::resolve_resize_grip_tokens;
 use crate::pipeline::{RectVertex, RoundedRectDrawCmd, rect_vertices};
 
 impl Compositor {
@@ -59,6 +60,31 @@ impl Compositor {
         let x = (element_bounds.x + (element_bounds.width - w) * 0.5).clamp(0.0, (sw - w).max(0.0));
         let y = (element_bounds.y - h * 0.5).clamp(0.0, (sh - h).max(0.0));
         Rect::new(x, y, w, h)
+    }
+
+    /// The pip resize grip: a square the move handle's width (at most half
+    /// the element), inside the element's `(left, top)` corner.
+    fn resize_grip_bounds(
+        element_bounds: Rect,
+        (left, top): (bool, bool),
+        style: DragHandleStyle,
+        scale: f32,
+    ) -> Rect {
+        let side = (style.width_dp * scale)
+            .min(element_bounds.width * 0.5)
+            .min(element_bounds.height * 0.5)
+            .max(1.0);
+        let x = if left {
+            element_bounds.x
+        } else {
+            element_bounds.x + element_bounds.width - side
+        };
+        let y = if top {
+            element_bounds.y
+        } else {
+            element_bounds.y + element_bounds.height - side
+        };
+        Rect::new(x, y, side, side)
     }
 
     pub(super) fn collect_drag_handle_entries(
@@ -103,6 +129,7 @@ impl Compositor {
                     interaction_id,
                     style,
                     is_header_band: true,
+                    resize_grip: None,
                 });
                 continue;
             }
@@ -115,6 +142,7 @@ impl Compositor {
                 interaction_id,
                 style,
                 is_header_band: false,
+                resize_grip: None,
             });
         }
 
@@ -142,16 +170,46 @@ impl Compositor {
                 Self::resolve_zone_geometry(&scene.effective_zone_geometry(zone_def), sw, sh);
             let element_bounds_zone = Rect::new(x, y, w, h);
             let bounds = Self::drag_handle_bounds(element_bounds_zone, style, scale, sw, sh);
-            let interaction_id = format!("drag-handle:{}", Self::scene_id_hex(zone_def.id));
+            let id_hex = Self::scene_id_hex(zone_def.id);
             entries.push(DragHandleEntry {
                 element_id: zone_def.id,
                 element_kind: DragHandleElementKind::Zone,
                 bounds,
                 element_bounds: element_bounds_zone,
-                interaction_id,
+                interaction_id: format!("drag-handle:{id_hex}"),
                 style,
                 is_header_band: false,
+                resize_grip: None,
             });
+            if zone_name.as_str() == PIP_ZONE {
+                // The grip faces the display centre, but keeps the corner it
+                // was pressed in while a drag is active: a pip grown across
+                // the centre must not move its grip out from under the pointer.
+                // A plain move freezes it too; intended, as the runtime pins
+                // the grip's own corner from the press.
+                let corner = scene
+                    .is_drag_active(zone_def.id)
+                    .then(|| {
+                        scene
+                            .overlay
+                            .drag_handle_hit_regions
+                            .iter()
+                            .filter(|r| r.element_id == zone_def.id)
+                            .find_map(|r| r.resize_grip)
+                    })
+                    .flatten()
+                    .unwrap_or_else(|| rect_corner_toward(element_bounds_zone, sw * 0.5, sh * 0.5));
+                entries.push(DragHandleEntry {
+                    element_id: zone_def.id,
+                    element_kind: DragHandleElementKind::Zone,
+                    bounds: Self::resize_grip_bounds(element_bounds_zone, corner, style, scale),
+                    element_bounds: element_bounds_zone,
+                    interaction_id: format!("{RESIZE_GRIP_PREFIX}{id_hex}"),
+                    style,
+                    is_header_band: false,
+                    resize_grip: Some(corner),
+                });
+            }
         }
 
         // Widgets get no handle: widget geometry is set from the control
@@ -178,7 +236,9 @@ impl Compositor {
         };
         handles
             .iter()
-            .filter(|entry| scene.is_drag_active(entry.element_id))
+            // The pip's grip shares its element with the move handle: one
+            // border per element.
+            .filter(|entry| entry.resize_grip.is_none() && scene.is_drag_active(entry.element_id))
             .filter_map(|entry| {
                 let mut bounds = entry.element_bounds;
                 if entry.element_kind == DragHandleElementKind::Zone {
@@ -242,6 +302,28 @@ impl Compositor {
             // translucent slab over the whole header would double-draw the client
             // header and look wrong.
             if entry.is_header_band {
+                continue;
+            }
+
+            // The pip's resize grip draws exactly like a portal tile's: the
+            // `portal.window.resize_grip.*` dot mark (no fill), in its corner,
+            // hover-tinted while hovered, pressed or dragging.
+            if let Some(corner) = entry.resize_grip {
+                let tokens = resolve_resize_grip_tokens(&self.token_map);
+                let side = tokens
+                    .size_px
+                    .min(entry.bounds.width)
+                    .min(entry.bounds.height);
+                let color = self.gpu_color_raw(
+                    tokens.mark_color(local_state.hovered || local_state.pressed || is_active_drag),
+                );
+                for dot in Self::resize_grip_dot_rects(entry.bounds, side, corner) {
+                    if dot.width > 0.0 {
+                        vertices.extend_from_slice(&rect_vertices(
+                            dot.x, dot.y, dot.width, dot.height, sw, sh, color,
+                        ));
+                    }
+                }
                 continue;
             }
 

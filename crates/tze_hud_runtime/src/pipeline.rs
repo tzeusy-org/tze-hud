@@ -70,6 +70,8 @@ pub struct TileBoundsEntry {
 pub struct DragHandleBoundsEntry {
     /// Display-space drag-handle bounds.
     pub bounds: Rect,
+    /// For the pip resize grip, the diagonal resize cursor of its corner.
+    pub resize_cursor: Option<tze_hud_input::PortalCursor>,
 }
 
 impl HitTestSnapshot {
@@ -108,6 +110,9 @@ impl HitTestSnapshot {
             .filter(|region| region.hit_region.accepts_pointer)
             .map(|region| DragHandleBoundsEntry {
                 bounds: region.bounds,
+                resize_cursor: region
+                    .resize_grip
+                    .map(tze_hud_input::PortalCursor::for_grip_corner),
             })
             .collect();
         Self {
@@ -147,6 +152,14 @@ impl HitTestSnapshot {
         self.drag_handles
             .iter()
             .any(|handle| handle.bounds.contains_point(x, y))
+    }
+
+    /// The resize cursor when (x, y) is over the pip resize grip.
+    pub fn resize_grip_cursor(&self, x: f32, y: f32) -> Option<tze_hud_input::PortalCursor> {
+        self.drag_handles
+            .iter()
+            .filter(|handle| handle.bounds.contains_point(x, y))
+            .find_map(|handle| handle.resize_cursor)
     }
 }
 
@@ -260,6 +273,73 @@ pub fn sweep_timed_scene_state(scene: &mut SceneGraph) -> Vec<tze_hud_scene::typ
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A resize grip's hover cursor is the diagonal of its corner: `╲` for
+    /// top-left/bottom-right, `╱` for top-right/bottom-left; a move handle
+    /// contributes none.
+    #[test]
+    fn resize_grip_cursor_maps_each_corner_to_its_diagonal() {
+        use tze_hud_input::PortalCursor::{NeswResize, NwseResize};
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        let corners = [
+            ((true, true), NwseResize),
+            ((false, false), NwseResize),
+            ((false, true), NeswResize),
+            ((true, false), NeswResize),
+        ];
+        for (i, (corner, _)) in corners.iter().enumerate() {
+            let bounds = Rect::new(100.0 * i as f32, 0.0, 24.0, 24.0);
+            scene
+                .overlay
+                .drag_handle_hit_regions
+                .push(tze_hud_scene::DragHandleHitRegion {
+                    element_id: tze_hud_scene::SceneId::new(),
+                    element_kind: tze_hud_scene::DragHandleElementKind::Zone,
+                    bounds,
+                    interaction_id: format!("resize-grip:{i}"),
+                    hit_region: tze_hud_scene::HitRegionNode {
+                        bounds,
+                        accepts_pointer: true,
+                        ..Default::default()
+                    },
+                    tab_order: 0,
+                    is_header_band: false,
+                    resize_grip: Some(*corner),
+                });
+        }
+        let handle = Rect::new(1000.0, 0.0, 24.0, 8.0);
+        scene
+            .overlay
+            .drag_handle_hit_regions
+            .push(tze_hud_scene::DragHandleHitRegion {
+                element_id: tze_hud_scene::SceneId::new(),
+                element_kind: tze_hud_scene::DragHandleElementKind::Zone,
+                bounds: handle,
+                interaction_id: "drag-handle:move".to_string(),
+                hit_region: tze_hud_scene::HitRegionNode {
+                    bounds: handle,
+                    accepts_pointer: true,
+                    ..Default::default()
+                },
+                tab_order: 0,
+                is_header_band: false,
+                resize_grip: None,
+            });
+        let snap = HitTestSnapshot::from_scene(&scene);
+        for (i, (_, cursor)) in corners.iter().enumerate() {
+            assert_eq!(
+                snap.resize_grip_cursor(100.0 * i as f32 + 12.0, 12.0),
+                Some(*cursor)
+            );
+        }
+        assert_eq!(snap.resize_grip_cursor(1012.0, 4.0), None, "move handle");
+        assert!(snap.hit_test_drag_handle(1012.0, 4.0));
+        assert_eq!(
+            snap.resize_grip_cursor(1500.0, 500.0),
+            None,
+            "off any handle"
+        );
+    }
 
     /// Verify the HitTestSnapshot correctly builds from a scene and performs hit-testing.
     #[test]

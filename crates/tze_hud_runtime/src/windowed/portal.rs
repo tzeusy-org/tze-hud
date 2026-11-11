@@ -2,7 +2,7 @@ use tze_hud_input::{
     DragEventOutcome, InputProcessor, PointerEvent, PointerEventKind, PortalRect,
     PortalResizeState, PortalWindowTokens, ResizeBounds, ResizeEdge, ResizeOutcome, hit_affordance,
 };
-use tze_hud_scene::types::{DragHandleElementKind, ZoneInteractionKind};
+use tze_hud_scene::types::{DragHandleElementKind, GeometryPolicy, ZoneInteractionKind};
 use tze_hud_scene::{HitResult, Rect, SceneGraph, SceneId};
 
 use super::WinitApp;
@@ -229,9 +229,66 @@ pub(super) struct PortalResizePointerOutcome {
     pub(super) persist: bool,
 }
 
-// The input processor, pointer event, hit result, scene, and display dimensions
-// are all separate concerns that cannot be bundled into a context struct without
-// creating an artificial abstraction; the argument count is genuinely necessary.
+/// The pip resize grip's smallest box, `(width, height)`: the portal window
+/// minimum tokens.
+pub(super) fn zone_resize_min(tokens: &std::collections::HashMap<String, String>) -> (f32, f32) {
+    let part = tze_hud_config::resolve_portal_tokens(tokens);
+    (part.window_min_width_px, part.window_min_height_px)
+}
+
+/// `start` scaled uniformly as its `grip` corner (`(left, top)`) moves by
+/// `(dx, dy)`: the opposite corner stays put, the width/height ratio is kept,
+/// and the box stays on screen and at least `min` (or its start size, if
+/// smaller).
+fn aspect_locked_resize(
+    start: Rect,
+    (grip_left, grip_top): (bool, bool),
+    (dx, dy): (f32, f32),
+    (min_w, min_h): (f32, f32),
+    (display_w, display_h): (f32, f32),
+) -> Rect {
+    if start.width <= 0.0 || start.height <= 0.0 {
+        return start;
+    }
+    let right = start.x + start.width;
+    let bottom = start.y + start.height;
+    // Average the two axes' scale so a diagonal drag tracks the pointer and
+    // a mostly-horizontal or mostly-vertical one still resizes.
+    let scale_x = if grip_left { -dx } else { dx } / start.width + 1.0;
+    let scale_y = if grip_top { -dy } else { dy } / start.height + 1.0;
+    let room_w = if grip_left {
+        right
+    } else {
+        display_w - start.x
+    };
+    let room_h = if grip_top {
+        bottom
+    } else {
+        display_h - start.y
+    };
+    let max_scale = (room_w / start.width)
+        .min(room_h / start.height)
+        .max(f32::EPSILON);
+    let min_scale = (min_w / start.width)
+        .max(min_h / start.height)
+        .min(1.0)
+        .min(max_scale);
+    let s = ((scale_x + scale_y) * 0.5).clamp(min_scale, max_scale);
+    let (w, h) = (start.width * s, start.height * s);
+    Rect::new(
+        if grip_left { right - w } else { start.x },
+        if grip_top { bottom - h } else { start.y },
+        w,
+        h,
+    )
+}
+
+/// A drag on the pip's resize grip runs through the same recognizer (so it
+/// shares feedback and lost-Up recovery) but resizes the zone with its aspect
+/// ratio pinned, never smaller than `resize_min` (w, h).
+// The input processor, pointer event, hit result, scene, display dimensions
+// and resize minimum are all separate concerns that cannot be bundled into a
+// context struct without creating an artificial abstraction.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn apply_drag_handle_pointer_event(
     input_processor: &mut InputProcessor,
@@ -240,6 +297,7 @@ pub(super) fn apply_drag_handle_pointer_event(
     scene: &mut tze_hud_scene::graph::SceneGraph,
     display_width: f32,
     display_height: f32,
+    resize_min: (f32, f32),
 ) -> Option<DragRelease> {
     let device_id = pointer_event.device_id;
 
@@ -269,15 +327,18 @@ pub(super) fn apply_drag_handle_pointer_event(
         input_processor.drag_states.remove(&device_id);
         if let Some((interaction_id, element_id, element_kind, is_header_band)) = hit_drag_info {
             let target = DragTarget::capture(scene, element_id, element_kind);
+            let region = scene.overlay.drag_handle_hit_regions.iter().find(|h| {
+                h.element_id == element_id
+                    && h.element_kind == element_kind
+                    && h.interaction_id == interaction_id
+            });
+            // A grip keeps the corner it was drawn in for the whole gesture.
+            let resize_grip = region.and_then(|h| h.resize_grip);
             let live_handle = !matches!(target, Some(DragTarget::Zone(_)))
-                || scene.overlay.drag_handle_hit_regions.iter().any(|h| {
-                    h.element_id == element_id
-                        && h.element_kind == element_kind
-                        && h.interaction_id == interaction_id
-                        && scene.shown_zone_publishes().any(|(name, p)| {
-                            !p.is_empty() && scene.zone_registry.zones[name].id == element_id
-                        })
-                });
+                || (region.is_some()
+                    && scene.shown_zone_publishes().any(|(name, p)| {
+                        !p.is_empty() && scene.zone_registry.zones[name].id == element_id
+                    }));
             let Some(element_bounds) = target
                 .filter(|_| live_handle)
                 .and_then(|t| t.bounds(scene, element_id, display_width, display_height))
@@ -295,6 +356,9 @@ pub(super) fn apply_drag_handle_pointer_event(
                 display_height,
                 is_header_band,
             );
+            if let Some(state) = input_processor.drag_states.get_mut(&device_id) {
+                state.resize_grip = resize_grip;
+            }
             tracing::trace!(
                 element_id = %element_id,
                 x = pointer_event.x,
@@ -308,12 +372,16 @@ pub(super) fn apply_drag_handle_pointer_event(
     }
 
     // On PointerMove or PointerUp, check for an in-flight drag on this device.
-    let drag_info = input_processor
-        .drag_states
-        .get(&device_id)
-        .map(|s| (s.interaction_id.clone(), s.element_id, s.element_kind));
+    let drag_info = input_processor.drag_states.get(&device_id).map(|s| {
+        // A grip resize scales from the box, corner and press point it
+        // started with.
+        let grip = s
+            .resize_grip
+            .map(|corner| (s.start_bounds, corner, s.press_x, s.press_y));
+        (s.interaction_id.clone(), s.element_id, s.element_kind, grip)
+    });
 
-    let Some((interaction_id, element_id, element_kind)) = drag_info else {
+    let Some((interaction_id, element_id, element_kind, grip)) = drag_info else {
         // No drag in progress for this device — nothing to do.
         return None;
     };
@@ -341,6 +409,32 @@ pub(super) fn apply_drag_handle_pointer_event(
         display_height,
         false,
     );
+
+    if let (Some(DragTarget::Zone(_)), Some((start, corner, press_x, press_y))) = (&target, grip) {
+        if matches!(
+            outcome,
+            DragEventOutcome::Moved { .. } | DragEventOutcome::Released { .. }
+        ) {
+            let rect = aspect_locked_resize(
+                start,
+                corner,
+                (pointer_event.x - press_x, pointer_event.y - press_y),
+                resize_min,
+                (display_width, display_height),
+            );
+            scene.set_zone_placement(
+                element_id,
+                GeometryPolicy::Relative {
+                    x_pct: rect.x / display_width,
+                    y_pct: rect.y / display_height,
+                    width_pct: rect.width / display_width,
+                    height_pct: rect.height / display_height,
+                },
+            );
+        }
+        reconcile_drag_feedback(input_processor, scene);
+        return matches!(outcome, DragEventOutcome::Released { .. }).then_some(DragRelease::Zone);
+    }
 
     if let Some(DragTarget::Zone(_)) = target {
         let position = match outcome {
@@ -1246,6 +1340,7 @@ impl WinitApp {
                     &mut scene,
                     self.state.config.window.width as f32,
                     self.state.config.window.height as f32,
+                    zone_resize_min(&self.state.global_tokens),
                 )
             } else {
                 // A late terminal cannot remove a newer drag, resurrect a removed
@@ -1767,6 +1862,9 @@ mod tests {
     };
     use super::*;
 
+    /// No resize floor: the grip tests below pass their own minimum.
+    const NO_RESIZE_MIN: (f32, f32) = (0.0, 0.0);
+
     // ── Drag-to-move: long-press drag moves a text stream portal tile [hud-9yfce] ──
 
     /// A long-press drag on a tile's drag handle must move the tile's bounds and
@@ -1815,6 +1913,7 @@ mod tests {
             &mut scene,
             1920.0,
             1080.0,
+            NO_RESIZE_MIN,
         );
         assert!(
             released_on_down.is_none(),
@@ -1848,6 +1947,7 @@ mod tests {
             &mut scene,
             1920.0,
             1080.0,
+            NO_RESIZE_MIN,
         );
         assert!(
             released_on_move1.is_none(),
@@ -1874,6 +1974,7 @@ mod tests {
             &mut scene,
             1920.0,
             1080.0,
+            NO_RESIZE_MIN,
         );
         assert!(
             released_on_move2.is_none(),
@@ -1926,6 +2027,7 @@ mod tests {
             &mut scene,
             1920.0,
             1080.0,
+            NO_RESIZE_MIN,
         );
 
         let Some(DragRelease::Tile(released)) = released_on_up else {
@@ -1962,6 +2064,7 @@ mod tests {
                 &mut scene,
                 1920.0,
                 1080.0,
+                NO_RESIZE_MIN
             )
             .is_some()
         );
@@ -1984,6 +2087,7 @@ mod tests {
             &mut scene,
             1920.0,
             1080.0,
+            NO_RESIZE_MIN,
         );
         assert!(!scene.is_drag_active(unrelated_id));
         let result_down = processor.process(&down, &mut scene);
@@ -1994,6 +2098,7 @@ mod tests {
             &mut scene,
             1920.0,
             1080.0,
+            NO_RESIZE_MIN,
         );
         processor.drag_states.get_mut(&0).unwrap().press_start -= Duration::from_millis(250);
         super::apply_drag_handle_pointer_event(
@@ -2003,6 +2108,7 @@ mod tests {
             &mut scene,
             1920.0,
             1080.0,
+            NO_RESIZE_MIN,
         );
         assert!(scene.is_drag_active(tile_id));
         scene.delete_tile(tile_id, "portal-agent").unwrap();
@@ -2013,7 +2119,8 @@ mod tests {
                 &HitResult::Passthrough,
                 &mut scene,
                 1920.0,
-                1080.0
+                1080.0,
+                NO_RESIZE_MIN
             )
             .is_none()
         );
@@ -2027,6 +2134,7 @@ mod tests {
             &mut scene,
             1920.0,
             1080.0,
+            NO_RESIZE_MIN,
         );
         assert!(
             !processor.drag_states.contains_key(&0),
@@ -2070,6 +2178,7 @@ mod tests {
             &mut scene,
             1920.0,
             1080.0,
+            NO_RESIZE_MIN,
         );
 
         // PointerUp immediately — no long-press threshold met.
@@ -2085,6 +2194,7 @@ mod tests {
             &mut scene,
             1920.0,
             1080.0,
+            NO_RESIZE_MIN,
         );
 
         // Must NOT return release data — this was a tap, not a drag.
@@ -2114,6 +2224,7 @@ mod tests {
             &mut scene,
             1920.0,
             1080.0,
+            NO_RESIZE_MIN,
         );
         // A mouse drags a grip on its first move, like a window titlebar: no
         // hold needed (the owner found the long-press grip read as dead).
@@ -2129,6 +2240,7 @@ mod tests {
             &mut scene,
             1920.0,
             1080.0,
+            NO_RESIZE_MIN,
         );
         assert!(
             scene.is_drag_active(tile_id),
@@ -4440,6 +4552,7 @@ mod tests {
                 },
                 tab_order: 0,
                 is_header_band: true,
+                resize_grip: None,
             });
         assert_eq!(
             drag_feedback_target(&scene, transcript_id),
@@ -4770,6 +4883,348 @@ mod tests {
                 assert!(scene.zone_registry.active_for_zone("slot").is_empty());
             }
         }
+    }
+
+    // ── Pip resize grip ──────────────────────────────────────────────────────
+
+    const GRIP_SCREEN: (f32, f32) = (1920.0, 1080.0);
+    const GRIP_MIN: (f32, f32) = (320.0, 160.0);
+
+    fn close(a: f32, b: f32) -> bool {
+        (a - b).abs() < 0.5
+    }
+
+    /// A published `pip` zone at `pip` (display pixels) with its resize grip
+    /// in the corner toward the display centre, as the compositor emits it.
+    fn pip_grip_scene(pip: Rect) -> (SceneGraph, SceneId, Rect) {
+        let (sw, sh) = GRIP_SCREEN;
+        let mut scene = SceneGraph::new(sw, sh);
+        let mut zone = super::super::test_support::make_test_zone(tze_hud_scene::types::PIP_ZONE);
+        zone.geometry_policy = GeometryPolicy::Relative {
+            x_pct: pip.x / sw,
+            y_pct: pip.y / sh,
+            width_pct: pip.width / sw,
+            height_pct: pip.height / sh,
+        };
+        let id = zone.id;
+        scene.register_zone(zone);
+        scene
+            .publish_to_zone(
+                tze_hud_scene::types::PIP_ZONE,
+                tze_hud_scene::ZoneContent::Notification(Default::default()),
+                "owner",
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        let corner = tze_hud_scene::types::rect_corner_toward(pip, sw * 0.5, sh * 0.5);
+        let grip = Rect::new(
+            if corner.0 {
+                pip.x
+            } else {
+                pip.x + pip.width - 24.0
+            },
+            if corner.1 {
+                pip.y
+            } else {
+                pip.y + pip.height - 24.0
+            },
+            24.0,
+            24.0,
+        );
+        let interaction_id = format!("{}{id}", tze_hud_scene::types::RESIZE_GRIP_PREFIX);
+        scene
+            .overlay
+            .drag_handle_hit_regions
+            .push(tze_hud_scene::DragHandleHitRegion {
+                element_id: id,
+                element_kind: DragHandleElementKind::Zone,
+                bounds: grip,
+                interaction_id: interaction_id.clone(),
+                hit_region: tze_hud_scene::HitRegionNode {
+                    bounds: grip,
+                    interaction_id,
+                    accepts_pointer: true,
+                    ..Default::default()
+                },
+                tab_order: 0,
+                is_header_band: false,
+                resize_grip: Some(corner),
+            });
+        (scene, id, grip)
+    }
+
+    fn drive_grip(
+        input: &mut InputProcessor,
+        scene: &mut SceneGraph,
+        kind: PointerEventKind,
+        (x, y): (f32, f32),
+    ) -> Option<DragRelease> {
+        let region = scene.overlay.drag_handle_hit_regions[0].clone();
+        let hit = HitResult::ZoneInteraction {
+            zone_name: tze_hud_scene::types::PIP_ZONE.to_string(),
+            published_at_wall_us: 0,
+            publisher_namespace: String::new(),
+            interaction_id: region.interaction_id,
+            kind: ZoneInteractionKind::DragHandle {
+                element_id: region.element_id,
+                element_kind: DragHandleElementKind::Zone,
+                is_header_band: false,
+            },
+        };
+        let event = PointerEvent {
+            x,
+            y,
+            kind,
+            device_id: 0,
+            timestamp: None,
+        };
+        apply_drag_handle_pointer_event(
+            input,
+            &event,
+            &hit,
+            scene,
+            GRIP_SCREEN.0,
+            GRIP_SCREEN.1,
+            GRIP_MIN,
+        )
+    }
+
+    fn pip_placement(scene: &SceneGraph, id: SceneId) -> Rect {
+        let Some(GeometryPolicy::Relative {
+            x_pct,
+            y_pct,
+            width_pct,
+            height_pct,
+        }) = scene.overlay.zone_placements.get(&id).copied()
+        else {
+            panic!("pip has no session placement");
+        };
+        let (sw, sh) = GRIP_SCREEN;
+        Rect::new(x_pct * sw, y_pct * sh, width_pct * sw, height_pct * sh)
+    }
+
+    /// Dragging the grip scales the box with its ratio pinned and the
+    /// opposite corner fixed, for a pip on either side of the display; the
+    /// result is a session placement, like a zone move.
+    #[test]
+    fn pip_resize_grip_keeps_the_aspect_and_pins_the_opposite_corner() {
+        // (box, pointer delta that grows it): one pip per display quadrant,
+        // so the grip is in each of the four corners.
+        for (pip, (dx, dy)) in [
+            (Rect::new(1300.0, 700.0, 480.0, 270.0), (-100.0, -60.0)), // grip top-left
+            (Rect::new(100.0, 100.0, 400.0, 225.0), (100.0, 60.0)),    // grip bottom-right
+            (Rect::new(1300.0, 100.0, 480.0, 270.0), (-100.0, 60.0)),  // grip bottom-left
+            (Rect::new(100.0, 700.0, 400.0, 225.0), (100.0, -60.0)),   // grip top-right
+        ] {
+            let (mut scene, id, grip) = pip_grip_scene(pip);
+            let corner = scene.overlay.drag_handle_hit_regions[0].resize_grip;
+            let mut input = InputProcessor::new();
+            let (px, py) = (grip.x + 12.0, grip.y + 12.0);
+            use PointerEventKind::{Down, Move, Up};
+            assert!(drive_grip(&mut input, &mut scene, Down, (px, py)).is_none());
+            assert_eq!(
+                input.drag_states[&0].resize_grip, corner,
+                "the press freezes the grip's emitted corner"
+            );
+            assert!(drive_grip(&mut input, &mut scene, Move, (px + dx / 2.0, py)).is_none());
+            assert!(scene.is_drag_active(id), "the zone shows resize feedback");
+            assert!(drive_grip(&mut input, &mut scene, Move, (px + dx, py + dy)).is_none());
+
+            let grown = pip_placement(&scene, id);
+            assert!(grown.width > pip.width + 50.0, "{grown:?}");
+            assert!((grown.width / grown.height - pip.width / pip.height).abs() < 1e-3);
+            let (grip_left, grip_top) = corner.unwrap();
+            if grip_left {
+                assert!(
+                    close(grown.x + grown.width, pip.x + pip.width),
+                    "right pinned"
+                );
+            } else {
+                assert!(close(grown.x, pip.x), "left pinned");
+            }
+            if grip_top {
+                assert!(
+                    close(grown.y + grown.height, pip.y + pip.height),
+                    "bottom pinned"
+                );
+            } else {
+                assert!(close(grown.y, pip.y), "top pinned");
+            }
+
+            assert!(matches!(
+                drive_grip(&mut input, &mut scene, Up, (px + dx, py + dy)),
+                Some(DragRelease::Zone)
+            ));
+            assert!(!scene.is_drag_active(id), "feedback ends with the resize");
+            assert!(input.drag_states.is_empty());
+        }
+    }
+
+    /// A pip grown across the display centre keeps resizing from the corner it
+    /// was pressed in: the corner is frozen on the drag state, not re-derived
+    /// from the moving box.
+    #[test]
+    fn a_grip_keeps_its_corner_when_the_pip_grows_across_the_centre() {
+        let pip = Rect::new(1300.0, 700.0, 480.0, 270.0);
+        let (mut scene, id, grip) = pip_grip_scene(pip);
+        let mut input = InputProcessor::new();
+        let (px, py) = (grip.x + 12.0, grip.y + 12.0);
+        use PointerEventKind::{Down, Move, Up};
+        drive_grip(&mut input, &mut scene, Down, (px, py));
+        drive_grip(&mut input, &mut scene, Move, (px - 1.0, py));
+        // Grow far up-left: the box's centre passes the display centre.
+        drive_grip(&mut input, &mut scene, Move, (px - 1200.0, py - 700.0));
+        let grown = pip_placement(&scene, id);
+        assert!(grown.x + grown.width * 0.5 < 960.0, "{grown:?}");
+        assert!(
+            close(grown.x + grown.width, pip.x + pip.width),
+            "right still pinned"
+        );
+        assert!(
+            close(grown.y + grown.height, pip.y + pip.height),
+            "bottom still pinned"
+        );
+        assert_eq!(input.drag_states[&0].resize_grip, Some((true, true)));
+        // Moving back shrinks it from the same corner.
+        drive_grip(&mut input, &mut scene, Move, (px - 50.0, py - 30.0));
+        let back = pip_placement(&scene, id);
+        assert!(back.width < grown.width && close(back.x + back.width, pip.x + pip.width));
+        assert!(matches!(
+            drive_grip(&mut input, &mut scene, Up, (px - 50.0, py - 30.0)),
+            Some(DragRelease::Zone)
+        ));
+    }
+
+    /// The real pointer path: hovering the grip shows its diagonal cursor,
+    /// and an active resize keeps it even where hover would say otherwise.
+    #[test]
+    fn grip_cursor_follows_hover_and_the_active_resize() {
+        let pip = Rect::new(1300.0, 100.0, 480.0, 270.0); // grip bottom-left: ╱
+        let (scene, id, grip) = pip_grip_scene(pip);
+        let snapshot = crate::pipeline::HitTestSnapshot::from_scene(&scene);
+        let (mut app, _rx) =
+            make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
+        app.state
+            .pipeline
+            .hit_test_snapshot
+            .store(Arc::new(snapshot));
+        app.state.cursor_x = grip.x + 12.0;
+        app.state.cursor_y = grip.y + 12.0;
+        app.enqueue_pointer_event(PointerEventKind::Move);
+        assert_eq!(
+            app.state.cursor_tracker.current(),
+            tze_hud_input::PortalCursor::NeswResize,
+            "hover"
+        );
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        app.state.cursor_x -= 300.0;
+        app.state.cursor_y += 150.0;
+        app.enqueue_pointer_event(PointerEventKind::Move);
+        assert!(app.state.input_processor.drag_states[&0].is_active_resize());
+        assert_eq!(
+            app.state.cursor_tracker.current(),
+            tze_hud_input::PortalCursor::NeswResize,
+            "off the grip mid-resize"
+        );
+        app.enqueue_pointer_event(PointerEventKind::Up);
+        let shared = app.state.shared_state.try_lock().unwrap();
+        let scene = shared.scene.try_lock().unwrap();
+        assert!(pip_placement(&scene, id).width > pip.width);
+    }
+
+    /// A press with no prior hover (stale or empty hover snapshot) still
+    /// shows the resize cursor once the resize activates.
+    #[test]
+    fn an_unhovered_grip_press_still_shows_the_resize_cursor() {
+        let pip = Rect::new(100.0, 100.0, 400.0, 225.0); // grip bottom-right: ╲
+        let (scene, _, grip) = pip_grip_scene(pip);
+        let (mut app, _rx) =
+            make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
+        app.state.cursor_x = grip.x + 12.0;
+        app.state.cursor_y = grip.y + 12.0;
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        app.state.cursor_x += 40.0;
+        app.enqueue_pointer_event(PointerEventKind::Move);
+        assert_eq!(
+            app.state.cursor_tracker.current(),
+            tze_hud_input::PortalCursor::NwseResize
+        );
+    }
+
+    /// An Up missed under scene-lock contention is retained and applied by
+    /// `drain_pending_drag_terminal` through the grip path: the final box is
+    /// the resized one, feedback ends, and nothing is persisted.
+    #[test]
+    fn a_retained_grip_release_finishes_the_resize() {
+        let pip = Rect::new(1300.0, 700.0, 480.0, 270.0);
+        let (scene, id, grip) = pip_grip_scene(pip);
+        let (mut app, _rx) =
+            make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
+        app.state.cursor_x = grip.x + 12.0;
+        app.state.cursor_y = grip.y + 12.0;
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        app.state.cursor_x -= 1.0;
+        app.enqueue_pointer_event(PointerEventKind::Move);
+        app.state.cursor_x -= 99.0;
+        app.state.cursor_y -= 60.0;
+        let shared_state = Arc::clone(&app.state.shared_state);
+        let held = shared_state.try_lock().unwrap();
+        app.enqueue_pointer_event(PointerEventKind::Up);
+        assert!(
+            app.state
+                .primary_drag_gesture
+                .as_ref()
+                .is_some_and(|g| g.terminal.is_some()),
+            "the Up is retained for its gesture"
+        );
+        let generation = app.state.wake.main_work_generation();
+        drop(held);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while app.state.wake.main_work_generation() == generation {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "release wakes the main loop"
+            );
+            std::thread::yield_now();
+        }
+        app.settle_scene_work();
+        assert!(app.state.primary_drag_gesture.is_none());
+        assert!(app.state.input_processor.drag_states.is_empty());
+        let shared = shared_state.try_lock().unwrap();
+        let scene = shared.scene.try_lock().unwrap();
+        let resized = pip_placement(&scene, id);
+        assert!(resized.width > pip.width + 50.0, "{resized:?}");
+        assert!((resized.width / resized.height - pip.width / pip.height).abs() < 1e-3);
+        assert!(close(resized.x + resized.width, pip.x + pip.width));
+        assert!(!scene.is_drag_active(id));
+        assert!(shared.element_store.entries.is_empty(), "session-only");
+    }
+
+    #[test]
+    fn aspect_locked_resize_stops_at_the_minimum_and_the_screen_edge() {
+        // Grip bottom-right: the top-left corner is pinned.
+        let start = Rect::new(100.0, 100.0, 400.0, 200.0);
+        let grip = (false, false);
+        let tiny = aspect_locked_resize(start, grip, (-1000.0, -1000.0), GRIP_MIN, GRIP_SCREEN);
+        assert!(
+            close(tiny.width, 320.0) && close(tiny.height, 160.0),
+            "{tiny:?}"
+        );
+        assert!(
+            close(tiny.x, 100.0) && close(tiny.y, 100.0),
+            "top-left pinned"
+        );
+        let huge = aspect_locked_resize(start, grip, (5000.0, 5000.0), GRIP_MIN, GRIP_SCREEN);
+        assert!(
+            close(huge.width, 1820.0) && close(huge.height, 910.0),
+            "{huge:?}"
+        );
+        // A box already under the minimum may stay that size.
+        let small = Rect::new(100.0, 100.0, 100.0, 50.0);
+        let same = aspect_locked_resize(small, grip, (-10.0, -10.0), GRIP_MIN, GRIP_SCREEN);
+        assert!(close(same.width, 100.0), "{same:?}");
     }
 
     /// A single non-portal tile drag must NOT engage the whole-portal translate

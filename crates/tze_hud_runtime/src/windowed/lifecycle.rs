@@ -3158,6 +3158,7 @@ impl WinitApp {
                     &mut scene,
                     display_w,
                     display_h,
+                    super::portal::zone_resize_min(&self.state.global_tokens),
                 );
                 if pointer_event.kind == PointerEventKind::Down {
                     self.state.primary_drag_gesture = self

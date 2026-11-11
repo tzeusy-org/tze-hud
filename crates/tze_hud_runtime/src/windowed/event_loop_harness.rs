@@ -4747,6 +4747,7 @@ mod tests {
                     },
                     tab_order: 0,
                     is_header_band: true,
+                    resize_grip: None,
                 });
             scene.overlay.zone_hit_regions.clear();
             scene.overlay.zone_hit_regions.push(ZoneHitRegion {
