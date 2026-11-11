@@ -4,7 +4,7 @@
 //! criteria (rig-j90m, rig-umgy) and `configuration/spec.md`.
 
 use crate::loader::TzeHudConfig;
-use tze_hud_scene::config::{ConfigErrorCode, ConfigLoader, ParseError};
+use tze_hud_scene::config::{ChordRole, ConfigErrorCode, ConfigLoader, Hotkey, ParseError};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -630,6 +630,13 @@ fn safe_mode_hotkey_defaults_overrides_and_rejects_garbage() {
         Some(tze_hud_scene::config::ChordRole::Answer),
         "the owner answer chord is enabled by default"
     );
+    assert_eq!(
+        default
+            .chords
+            .role_of(&tze_hud_scene::config::Hotkey::parse("Ctrl+Shift+F8").unwrap()),
+        Some(tze_hud_scene::config::ChordRole::Hide),
+        "the hide chord is bound by default"
+    );
 
     let custom = parse_ok(&cfg("safe_mode_hotkey = \"Ctrl+Alt+F11\""))
         .freeze()
@@ -653,6 +660,10 @@ fn safe_mode_hotkey_defaults_overrides_and_rejects_garbage() {
     assert_eq!(custom.chords.panel.to_string(), "Ctrl+Alt+F10");
     assert_eq!(custom.chords.pairing.to_string(), "Ctrl+Alt+9");
     assert_eq!(custom.chords.answer.to_string(), "Alt+F8");
+    let custom = parse_ok(&cfg("hide_hotkey = \"Ctrl+Alt+H\""))
+        .freeze()
+        .expect("freeze");
+    assert_eq!(custom.chords.hide.to_string(), "Ctrl+Alt+H");
     let errors = parse_ok(&cfg("answer_hotkey = \"F9\""))
         .freeze()
         .expect_err("answer chord needs a modifier too");
@@ -696,4 +707,56 @@ fn hud_chords_must_be_distinct() {
                 .any(|e| e.field_path == "runtime.answer_hotkey")
         );
     }
+    // R5.1 S5: the hide chord is the fifth distinct chord; a clash names both
+    // keys, against a default or an explicit chord.
+    for (runtime, other) in [
+        (
+            "hide_hotkey = \"Ctrl+Shift+F12\"",
+            "runtime.safe_mode_hotkey",
+        ),
+        ("hide_hotkey = \"Ctrl+Shift+F9\"", "runtime.answer_hotkey"),
+        (
+            "pairing_hotkey = \"Alt+7\"\nhide_hotkey = \"Alt+7\"",
+            "runtime.pairing_hotkey",
+        ),
+    ] {
+        let errors = parse_ok(&cfg(runtime)).freeze().expect_err("hide clash");
+        let dup = errors
+            .iter()
+            .find(|e| e.field_path == "runtime.hide_hotkey")
+            .unwrap_or_else(|| panic!("{runtime}: clash reported on hide_hotkey"));
+        assert!(dup.hint.contains(other), "{runtime}: {}", dup.hint);
+    }
+}
+
+/// A config written before the hide chord existed, using its default for
+/// another chord (the Input card once suggested Ctrl+Shift+F8), still
+/// loads: that chord wins and the hide chord is left unbound.
+#[test]
+fn an_older_chord_on_the_hide_default_leaves_hide_unbound() {
+    for (runtime, owner) in [
+        ("answer_hotkey = \"Ctrl+Shift+F8\"", ChordRole::Answer),
+        ("panel_hotkey = \"Ctrl+Shift+F8\"", ChordRole::Panel),
+    ] {
+        let src = format!(
+            "[runtime]\nprofile = \"full-display\"\n{runtime}\n[[tabs]]\nname = \"Main\"\n"
+        );
+        let resolved = parse_ok(&src).freeze().expect("config still loads");
+        let chords = resolved.chords;
+        assert_eq!(chords.get(owner).to_string(), "Ctrl+Shift+F8");
+        assert!(chords.is_bound(owner));
+        assert!(!chords.is_bound(ChordRole::Hide), "{runtime}");
+        assert_eq!(chords.role_of(&Hotkey::DEFAULT_HIDE), Some(owner));
+        assert!(
+            crate::loader::runtime_section(&src).is_some(),
+            "launcher reads it"
+        );
+    }
+    // Setting hide_hotkey too is an explicit clash again.
+    let errors = parse_ok(
+        "[runtime]\nprofile = \"full-display\"\nanswer_hotkey = \"Ctrl+Shift+F8\"\nhide_hotkey = \"Ctrl+Shift+F8\"\n[[tabs]]\nname = \"Main\"\n",
+    )
+    .freeze()
+    .expect_err("explicit clash");
+    assert!(errors.iter().any(|e| e.field_path == "runtime.hide_hotkey"));
 }

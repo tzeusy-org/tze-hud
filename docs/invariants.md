@@ -552,8 +552,8 @@ closes the separate overnight visibility acceptance.
 
 ## 10. Owner hiding changes the view, never state
 
-From the control panel the owner can hide portals, zones, widgets, or all of them (Hide all, Alt+H; also how to present a shared
-screen). Hidden content is not drawn, catches no pointer input, holds no
+From the control panel the owner can hide portals, zones, widgets, or all of them (Hide all: Alt+H in the panel, the hide chord or the tray; also how to present a shared
+screen, or turn on Hide from screen capture). Hidden content is not drawn, catches no pointer input, holds no
 keyboard focus (a focused composer blurs), and costs no raster or upload work;
 its fades, reveals and scroll catch-up schedule no frames, and widgets shown
 again draw their newest values directly. Hidden countdowns keep their absolute
@@ -575,6 +575,8 @@ zone is shown again.
 - `tze_hud_runtime` [`hiding_focused_composer_tile_blurs_it_and_passes_clicks_through`](../crates/tze_hud_runtime/src/windowed/lifecycle.rs),
   [`hidden_tile_does_not_register_capture_region`](../crates/tze_hud_runtime/src/windowed/hittest.rs),
   [`hide_all_class_rows_and_the_closed_notice`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
+  [`hide_chord_toggles_hide_all_like_the_tile`](../crates/tze_hud_runtime/src/windowed/panel_input.rs),
+  [`switch_excludes_every_overlay_and_off_restores_them`](../crates/tze_hud_runtime/src/capture_exclusion.rs),
   [`reopen_chord_falls_back_to_the_pause_chord`](../crates/tze_hud_runtime/src/shell/control_panel/mod.rs),
   [`hidden_names_read_as_a_phrase`](../crates/tze_hud_runtime/src/shell/control_panel/sections/visibility.rs)
 - `tze_hud_compositor` [`hidden_content_is_not_drawn_and_the_closed_notice_is`](../crates/tze_hud_compositor/src/renderer/tests/control_panel.rs),

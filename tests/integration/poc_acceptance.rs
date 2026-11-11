@@ -862,6 +862,58 @@ async fn poc_portal_attach_stream_reply_detach() {
     );
 }
 
+/// §10 / spec R5.1: the hide chord pressed while typing in a portal
+/// composer hides everything and blurs it, so keys can never reach a hidden
+/// surface; pressed while paused it hides and shows without leaving pause.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn poc_hide_chord_blurs_the_composer_and_works_while_paused() {
+    use tze_hud_scene::config::ChordRole;
+
+    let mut poc = Poc::boot().await;
+    poc.call(
+        "hud_publish",
+        json!({"surface": PORTAL, "content": "Ship it?", "expects_reply": true}),
+    )
+    .await;
+    let (x, y) = poc.hud.composer_center().expect("a composer");
+    poc.hud.click(x, y);
+    poc.hud.type_text("draft");
+    assert_eq!(poc.hud.composer_draft().as_deref(), Some("draft"));
+
+    poc.hud.press_chord(ChordRole::Hide);
+    poc.wait_for("everything hides", |hud| hud.all_hidden())
+        .await;
+    poc.wait_for("the composer blurs", |hud| hud.composer_draft().is_none())
+        .await;
+    poc.hud.type_text("lost");
+    poc.settle().await;
+    poc.hud.press_chord(ChordRole::Hide);
+    poc.wait_for("everything shows", |hud| !hud.all_hidden())
+        .await;
+    // Refocused, the draft is exactly what was typed before hiding: keys
+    // typed while hidden reached no composer.
+    let (x, y) = poc.hud.composer_center().expect("the composer is back");
+    poc.hud.click(x, y);
+    poc.settle().await;
+    assert_eq!(
+        poc.hud.composer_draft().as_deref(),
+        Some("draft"),
+        "no keys reach a hidden composer"
+    );
+
+    poc.hud.press_safe_mode_hotkey();
+    poc.wait_for("paused", |hud| hud.safe_mode_active()).await;
+    poc.hud.press_chord(ChordRole::Hide);
+    poc.wait_for("hidden while paused", |hud| hud.all_hidden())
+        .await;
+    assert!(poc.hud.safe_mode_active(), "hiding never resumes");
+    poc.hud.press_chord(ChordRole::Hide);
+    poc.wait_for("shown while paused", |hud| !hud.all_hidden())
+        .await;
+    assert!(poc.hud.safe_mode_active(), "showing never resumes");
+    assert_eq!(poc.hud.tile_count(), 1, "hiding keeps the portal");
+}
+
 /// docs/api.md "Viewer dismiss": after the viewer closes a portal, the agent's
 /// cached holding is dead. `hud_hold` is NOT_HELD, `hud_clear` is an ok no-op,
 /// and the next `hud_publish` attaches a fresh portal.

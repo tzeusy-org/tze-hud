@@ -62,6 +62,7 @@ impl Compositor {
                     hit_region,
                     tab_order,
                     is_header_band: entry.is_header_band,
+                    resize_grip: entry.resize_grip,
                 });
         }
 

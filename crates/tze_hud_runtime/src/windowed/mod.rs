@@ -500,6 +500,8 @@ struct WindowedRuntimeState {
     appearance: Option<Arc<crate::appearance::Appearance>>,
     /// The `appearance` generation `global_tokens` reflects.
     tokens_seen: u64,
+    /// Last capture-exclusion change applied to the overlay windows.
+    capture_seen: u64,
     /// Watches the config for `[design_tokens]` edits while it lives.
     _config_watch: Option<crate::appearance::watch::ConfigWatch>,
     /// Broadcast sender for `ElementRepositionedEvent`.
@@ -628,6 +630,14 @@ struct WindowedRuntimeState {
     /// `pending_input_capture_commands` — bounded in practice by the number of
     /// keystrokes that arrive during a single lock-contention window.
     pending_keyboard_events: VecDeque<PendingKeyboardEvent>,
+    /// Wheel input that found the scene lock busy (hud-65gpz). Applied in
+    /// order on the next successful lock; consecutive notches at the same
+    /// pointer position coalesce, so the queue stays tiny.
+    pending_scroll: VecDeque<lifecycle::RetainedScroll>,
+    /// A pointer Move found the scene lock busy (hud-65gpz). Hover and
+    /// hit-testing follow the latest position, so one flag suffices: the
+    /// retry replays a Move at the current cursor position.
+    pending_pointer_move: bool,
     /// Cumulative count of interactive-feedback scene updates dropped because the
     /// main-thread `spin_acquire` timed out on the scene / shared-state lock
     /// during a guaranteed-feedback gesture (drag-move / live resize) — the exact
@@ -909,6 +919,8 @@ impl WinitApp {
         // was busy during dispatch (hud-2fz34).  Runs after composer flush so
         // deferred keystrokes re-enter the same path as fresh ones.
         self.drain_pending_keyboard_events();
+        // Retry pointer input that found the scene lock busy (hud-65gpz).
+        let retained_pointer_changed = self.drain_retained_pointer_input();
         // Render the portals (hud-2iup7).
         // Must run AFTER composer flush so draft state is settled before portal
         // content is refreshed.  Uses try_lock on the scene to avoid blocking
@@ -918,7 +930,8 @@ impl WinitApp {
         // scene (hud-kgu8u). Uses try_lock; silently deferred if lock is busy.
         let pruned_drag = self.prune_portal_resize_states();
         let settled_drag = self.drain_pending_drag_terminal();
-        let drag_scene_changed = pruned_drag || settled_drag || chrome_scene_changed;
+        let drag_scene_changed =
+            pruned_drag || settled_drag || chrome_scene_changed || retained_pointer_changed;
         if self.state.input_processor.chrome_feedback_cancel_pending {
             // Preserve any mutation already made by the ordinary portal turn;
             // retry chrome via the existing coalesced scene-availability wake.
@@ -1013,6 +1026,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         self.sync_panel_focus();
         self.sync_answer_focus();
         self.sync_design_tokens();
+        self.sync_capture_exclusion();
         if displays::take_dirty(&self.state.displays_dirty) {
             self.sync_displays(event_loop);
         }
@@ -1129,6 +1143,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         let has_deferred_scene_work = portal_drain.is_deferred()
             || !self.state.pending_input_capture_commands.is_empty()
             || !self.state.pending_keyboard_events.is_empty()
+            || !self.state.pending_scroll.is_empty()
+            || self.state.pending_pointer_move
             || self
                 .state
                 .primary_drag_gesture
@@ -1275,6 +1291,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             self.state.wake.main_work_notifier(),
             self.state.effective_mode == WindowMode::Overlay,
         );
+        // Before the first present: a saved "Hide from screen capture".
+        self.state
+            .live
+            .capture
+            .apply_new(0, &window, displays::set_capture_affinity);
 
         // In overlay mode, initialise cursor hittest to false so all pointer
         // events pass through to the desktop until the cursor enters a
@@ -2824,9 +2845,21 @@ impl WindowedRuntime {
         let active_tab_mirror = Arc::new(std::sync::Mutex::new(None));
         let chrome_state = Arc::new(std::sync::RwLock::new(crate::shell::ChromeState::new()));
         let system_card = crate::shell::system_card::SystemCardHandle::new(render_wake.clone());
+        // Hide from screen capture: the saved switch, applied by the main
+        // thread to every overlay before its first present.
+        let capture = Arc::new(crate::capture_exclusion::CaptureExclusion::for_platform(
+            cfg.config_toml
+                .as_deref()
+                .and_then(tze_hud_config::runtime_section)
+                .and_then(|r| r.exclude_from_capture)
+                .unwrap_or(false),
+            wake.main_work_notifier(),
+        ));
+        crate::capture_exclusion::install(Arc::clone(&capture));
         let live = Arc::new(
             crate::launch::LiveSettings::new(cfg.target_fps, cfg.debug_zones, render_wake.clone())
-                .with_answer_window(cfg.answer_window_ms),
+                .with_answer_window(cfg.answer_window_ms)
+                .with_capture(capture),
         );
         let appearance = Arc::new(crate::appearance::Appearance::for_startup(
             raw_config_for_startup.as_ref(),
@@ -3199,10 +3232,20 @@ impl WindowedRuntime {
             let answer_wake = wake.main_work_notifier();
             // Without pairing (MCP disabled) its chord would only take the
             // key from other apps.
+            // A role the config left unbound registers nothing and says why.
             let roles = tze_hud_scene::config::ChordRole::ALL
                 .into_iter()
                 .filter(|role| {
                     pairing.is_some() || *role != tze_hud_scene::config::ChordRole::Pairing
+                })
+                .filter(|role| {
+                    let unbound =
+                        crate::operator::status::unbound_status(&runtime_context.chords, *role);
+                    let bound = unbound.is_none();
+                    if let Some(status) = unbound {
+                        crate::operator::status::set_hotkey(*role, status);
+                    }
+                    bound
                 })
                 .collect();
             let (outcomes, thread) =
@@ -3316,6 +3359,7 @@ impl WindowedRuntime {
             global_tokens: startup_compositor_tokens,
             appearance: Some(appearance),
             tokens_seen: 0,
+            capture_seen: 0,
             _config_watch: config_watch,
             element_repositioned_tx,
             input_event_tx,
@@ -3340,6 +3384,8 @@ impl WindowedRuntime {
             portal_projection_driver,
             capture_inbox,
             pending_keyboard_events: VecDeque::new(),
+            pending_scroll: VecDeque::new(),
+            pending_pointer_move: false,
             interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
         };
 

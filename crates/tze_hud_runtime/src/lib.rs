@@ -38,6 +38,7 @@
 //!
 pub(crate) mod agent_store;
 pub(crate) mod appearance;
+pub(crate) mod capture_exclusion;
 pub use appearance::Appearance;
 pub(crate) mod channels;
 pub(crate) mod degradation;

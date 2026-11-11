@@ -5,6 +5,10 @@
 //! not drawn, catches no input and holds no focus, but leases, publications
 //! and agents are untouched and nothing tells an agent. The set lives in the
 //! scene's runtime-only overlay state, so a restart shows everything again.
+//!
+//! "Hide from screen capture" (spec R5.2) is the one saved row here: it keeps
+//! the overlays, and so the panel and the pill, out of captures and shares
+//! while the owner still sees them.
 
 use std::sync::Arc;
 
@@ -12,11 +16,17 @@ use tokio::sync::Mutex;
 use tze_hud_scene::graph::{SceneGraph, SurfaceClasses};
 use tze_hud_scene::render_wake::RenderWakeNotifier;
 
+use tze_hud_config::RuntimeUpdate;
+
 use super::super::row::{BoxFuture, Control, Edit, Row, Section};
+use super::super::runtime::RuntimeControl;
+use crate::capture_exclusion::{BELOW_FLOOR, CaptureExclusion};
 
 pub(crate) struct VisibilitySection {
     scene: Arc<Mutex<SceneGraph>>,
     render_wake: RenderWakeNotifier,
+    /// Saves Hide from screen capture; `None` (no runtime): no capture row.
+    runtime: Option<RuntimeControl>,
 }
 
 /// One row per surface class: (row id, label, what it covers, search terms).
@@ -96,9 +106,104 @@ impl VisibilitySection {
     pub(crate) const PORTALS: &'static str = "visibility.portals";
     pub(crate) const ZONES: &'static str = "visibility.zones";
     pub(crate) const WIDGETS: &'static str = "visibility.widgets";
+    pub(crate) const CAPTURE: &'static str = "visibility.capture";
 
     pub(crate) fn new(scene: Arc<Mutex<SceneGraph>>, render_wake: RenderWakeNotifier) -> Self {
-        Self { scene, render_wake }
+        Self {
+            scene,
+            render_wake,
+            runtime: None,
+        }
+    }
+
+    /// Offer Hide from screen capture, saved through `runtime`.
+    pub(crate) fn with_capture(mut self, runtime: Option<RuntimeControl>) -> Self {
+        self.runtime = runtime;
+        self
+    }
+
+    /// The capture switch, where there are overlay windows to exclude.
+    fn capture(&self) -> Option<(&RuntimeControl, &CaptureExclusion)> {
+        let runtime = self.runtime.as_ref()?;
+        let capture = runtime.live.capture.as_ref();
+        capture.available().then_some((runtime, capture))
+    }
+
+    fn capture_row(runtime: &RuntimeControl, capture: &CaptureExclusion) -> Row {
+        let keywords: &'static [&'static str] = &[
+            "capture",
+            "share",
+            "screenshot",
+            "recording",
+            "OBS",
+            "Teams",
+            "exclude_from_capture",
+        ];
+        if !capture.supported() {
+            return Row::new(
+                Self::CAPTURE,
+                "Hide from screen capture",
+                Control::ReadOnly {
+                    text: "Unavailable".into(),
+                    mono: false,
+                },
+            )
+            .detail(BELOW_FLOOR)
+            .keywords(keywords);
+        }
+        let on = capture.is_on();
+        let failed = capture.failed();
+        let detail = if !on {
+            "Keeps the HUD out of screen captures and shares".to_owned()
+        } else if capture.reason() == Some("remote") {
+            "Paused during Remote Desktop, so the remote viewer sees the HUD".to_owned()
+        } else if !failed.is_empty() {
+            let displays: Vec<String> = failed.iter().map(|i| (i + 1).to_string()).collect();
+            format!("Not applied on display {}", displays.join(", "))
+        } else {
+            format!(
+                "Shares and screenshots show no HUD; you still see it · {}",
+                runtime.sources().exclude_from_capture.describe()
+            )
+        };
+        Row::new(
+            Self::CAPTURE,
+            "Hide from screen capture",
+            Control::Toggle(on),
+        )
+        .detail(detail)
+        .keywords(keywords)
+        .resettable(on)
+    }
+
+    fn apply_capture(&self, edit: Edit) -> Result<(), String> {
+        let (runtime, capture) = self
+            .capture()
+            .ok_or("Screen capture exclusion needs Windows")?;
+        if !capture.supported() {
+            return Err(BELOW_FLOOR.to_owned());
+        }
+        let saved = match edit {
+            Edit::Set(on) => {
+                capture.set_on(on);
+                runtime.save(RuntimeUpdate::ExcludeFromCapture(Some(on)), |s| {
+                    &mut s.exclude_from_capture
+                })
+            }
+            // Reset: off now, and the key leaves the config.
+            Edit::Reset => {
+                capture.set_on(false);
+                runtime.clear(RuntimeUpdate::ExcludeFromCapture(None), |s| {
+                    &mut s.exclude_from_capture
+                })
+            }
+            edit => return Err(format!("{} does not support {edit:?}", Self::CAPTURE)),
+        };
+        tracing::info!(
+            on = capture.is_on(),
+            "control panel: screen capture exclusion changed"
+        );
+        saved.map_err(|e| format!("Applied until restart; not saved: {e}"))
     }
 
     async fn hidden(&self) -> SurfaceClasses {
@@ -151,12 +256,18 @@ impl Section for VisibilitySection {
                     .resettable(off),
                 );
             }
+            if let Some((runtime, capture)) = self.capture() {
+                rows.push(Self::capture_row(runtime, capture));
+            }
             rows
         })
     }
 
     fn apply<'a>(&'a self, row: &'a str, edit: Edit) -> BoxFuture<'a, Result<(), String>> {
         Box::pin(async move {
+            if row == Self::CAPTURE {
+                return self.apply_capture(edit);
+            }
             let mut scene = self.scene.lock().await;
             let old = scene.owner_hidden();
             let mut new = old;
@@ -294,5 +405,102 @@ mod tests {
             None,
             "completed notice computation ignores only the internal tile bit"
         );
+    }
+
+    fn capture_section(
+        build: Option<u32>,
+    ) -> (VisibilitySection, Arc<CaptureExclusion>, tempfile::TempDir) {
+        let dir = tempfile::tempdir().unwrap();
+        let mut control = crate::shell::control_panel::runtime::tests::fake(
+            &dir.path().join("c.toml"),
+            Arc::default(),
+            None,
+        );
+        let capture = Arc::new(CaptureExclusion::new(
+            build,
+            false,
+            RenderWakeNotifier::default(),
+        ));
+        control.live = Arc::new(
+            crate::launch::LiveSettings::new(60, false, RenderWakeNotifier::default())
+                .with_capture(Arc::clone(&capture)),
+        );
+        let scene = Arc::new(Mutex::new(SceneGraph::new(800.0, 600.0)));
+        let section = VisibilitySection::new(scene, RenderWakeNotifier::default())
+            .with_capture(Some(control));
+        (section, capture, dir)
+    }
+
+    fn capture_row(rows: &[Row]) -> Option<&Row> {
+        rows.iter().find(|r| r.id == VisibilitySection::CAPTURE)
+    }
+
+    /// R5.2 S4: Hide from screen capture applies live and is saved; Reset
+    /// turns it off and removes the key, so a restart starts without it.
+    #[tokio::test]
+    async fn capture_switch_applies_live_saves_and_resets() {
+        let (section, capture, dir) = capture_section(Some(22631));
+        let config = dir.path().join("c.toml");
+        let rows = section.rows().await;
+        let row = capture_row(&rows).expect("a capture row on Windows");
+        assert_eq!(row.control, Control::Toggle(false));
+        assert!(!row.reset);
+        assert!(row.keywords.contains(&"share") && row.keywords.contains(&"OBS"));
+
+        section
+            .apply(VisibilitySection::CAPTURE, Edit::Set(true))
+            .await
+            .unwrap();
+        assert!(capture.is_on());
+        let saved = std::fs::read_to_string(&config).unwrap();
+        assert!(saved.contains("exclude_from_capture = true"), "{saved}");
+        let rows = section.rows().await;
+        let row = capture_row(&rows).unwrap();
+        assert_eq!(row.control, Control::Toggle(true));
+        assert!(row.reset);
+        assert!(row.detail.as_deref().unwrap().ends_with("Saved to config"));
+
+        // A remote session pauses it, and the row says why.
+        capture.set_remote(true);
+        let rows = section.rows().await;
+        assert!(
+            capture_row(&rows)
+                .unwrap()
+                .detail
+                .as_deref()
+                .unwrap()
+                .contains("Remote Desktop")
+        );
+        capture.set_remote(false);
+
+        section
+            .apply(VisibilitySection::CAPTURE, Edit::Reset)
+            .await
+            .unwrap();
+        assert!(!capture.is_on());
+        let saved = std::fs::read_to_string(&config).unwrap();
+        assert!(!saved.contains("exclude_from_capture"), "{saved}");
+        assert!(!capture_row(&section.rows().await).unwrap().reset);
+    }
+
+    /// R5.2 S5: below build 19041 the row is disabled with its reason and
+    /// nothing is switched; off Windows there is no row at all.
+    #[tokio::test]
+    async fn capture_row_is_disabled_below_the_floor_and_absent_off_windows() {
+        let (section, capture, _dir) = capture_section(Some(18363));
+        let rows = section.rows().await;
+        let row = capture_row(&rows).unwrap();
+        assert!(matches!(row.control, Control::ReadOnly { .. }));
+        assert_eq!(row.detail.as_deref(), Some(BELOW_FLOOR));
+        assert_eq!(
+            section
+                .apply(VisibilitySection::CAPTURE, Edit::Set(true))
+                .await,
+            Err(BELOW_FLOOR.to_owned())
+        );
+        assert!(!capture.is_on());
+
+        let (section, _, _dir) = capture_section(None);
+        assert!(capture_row(&section.rows().await).is_none());
     }
 }

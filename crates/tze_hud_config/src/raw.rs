@@ -37,6 +37,9 @@ pub struct RawRuntime {
     /// Global chord that focuses the newest unanswered callback card
     /// (default `"Ctrl+Shift+F9"`).
     pub answer_hotkey: Option<String>,
+    /// Global chord that toggles Hide all without opening the panel
+    /// (default `"Ctrl+Shift+F8"`).
+    pub hide_hotkey: Option<String>,
     /// MCP HTTP port (default 9090; 0 disables). `--mcp-port` and
     /// `TZE_HUD_MCP_PORT` win over it. Read at start.
     pub mcp_port: Option<u16>,
@@ -52,6 +55,9 @@ pub struct RawRuntime {
     pub log_level: Option<String>,
     /// Draw zone outlines (default false). `--debug-zones` wins.
     pub debug_zones: Option<bool>,
+    /// Keep every overlay window out of screen capture and sharing
+    /// (`SetWindowDisplayAffinity`, Windows 10 2004+; default false).
+    pub exclude_from_capture: Option<bool>,
 }
 
 // ─── [[tabs]] ────────────────────────────────────────────────────────────────

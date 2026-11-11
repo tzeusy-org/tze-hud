@@ -432,6 +432,41 @@ pub(super) fn overlay_window_attributes(title: String, spec: &MonitorSpec) -> Wi
     }
 }
 
+/// Set one overlay window's display affinity and read it back.
+#[cfg(target_os = "windows")]
+pub(super) fn set_capture_affinity(
+    window: &Arc<Window>,
+    affinity: crate::capture_exclusion::Affinity,
+) -> Result<(), String> {
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetWindowDisplayAffinity, SetWindowDisplayAffinity, WDA_EXCLUDEFROMCAPTURE, WDA_NONE,
+    };
+    let hwnd = overlay_hwnd(window).ok_or("no native window handle")?;
+    let wanted = match affinity {
+        crate::capture_exclusion::Affinity::None => WDA_NONE,
+        crate::capture_exclusion::Affinity::ExcludeFromCapture => WDA_EXCLUDEFROMCAPTURE,
+    };
+    // SAFETY: called on the window thread while `window` keeps the HWND alive.
+    unsafe { SetWindowDisplayAffinity(hwnd, wanted) }.map_err(|e| e.to_string())?;
+    let mut current = 0u32;
+    // SAFETY: as above; `current` is a writable DWORD.
+    unsafe { GetWindowDisplayAffinity(hwnd, &mut current) }.map_err(|e| e.to_string())?;
+    if current == wanted.0 {
+        Ok(())
+    } else {
+        Err(format!("affinity reads back {current:#x}"))
+    }
+}
+
+/// No overlay affinity off Windows (exclusion is never available there).
+#[cfg(not(target_os = "windows"))]
+pub(super) fn set_capture_affinity(
+    _window: &Arc<Window>,
+    _affinity: crate::capture_exclusion::Affinity,
+) -> Result<(), String> {
+    Ok(())
+}
+
 /// Find a secondary by window id.
 pub(super) fn secondary_index(secondaries: &[SecondaryDisplay], id: WindowId) -> Option<usize> {
     secondaries.iter().position(|s| s.window.id() == id)
@@ -718,6 +753,23 @@ impl super::WinitApp {
     ///
     /// Only overlay auto-size runs one window per monitor; fullscreen and an
     /// explicit `--width/--height` keep the single primary window.
+    /// Apply a changed "Hide from screen capture" switch or remote-session
+    /// state to every overlay window (display 0 is the primary).
+    pub(super) fn sync_capture_exclusion(&mut self) {
+        let capture = Arc::clone(&self.state.live.capture);
+        if !capture.take_change(&mut self.state.capture_seen) {
+            return;
+        }
+        let windows = self
+            .state
+            .window
+            .iter()
+            .cloned()
+            .chain(self.state.secondaries.iter().map(|s| Arc::clone(&s.window)))
+            .enumerate();
+        capture.apply_all(windows, set_capture_affinity);
+    }
+
     pub(super) fn sync_displays(&mut self, event_loop: &ActiveEventLoop) {
         let Some(primary_window) = self.state.window.clone() else {
             return;
@@ -812,6 +864,7 @@ impl super::WinitApp {
             };
             super::lifecycle::remove_chrome_observer(&self.state.secondaries[i].window);
             self.state.secondaries.remove(i);
+            self.state.live.capture.windows_removed();
             lost_any = true;
             let attempts = self
                 .state
@@ -871,6 +924,7 @@ impl super::WinitApp {
             super::lifecycle::remove_chrome_observer(&self.state.secondaries[i].window);
             let gone = self.state.secondaries.remove(i);
             tracing::info!(display = %gone.spec.name, "closing secondary overlay");
+            self.state.live.capture.windows_removed();
         }
         for spec in add {
             match self.create_secondary(event_loop, spec.clone()) {
@@ -1032,6 +1086,13 @@ impl super::WinitApp {
             .ok_or("no surface factory (compositor not windowed)")?;
         let attrs = overlay_window_attributes(self.state.config.window.title.clone(), &spec);
         let window = Arc::new(event_loop.create_window(attrs).map_err(|e| e.to_string())?);
+        // Hot-plug or recreate while "Hide from screen capture" is on: the
+        // new window is excluded before its first present.
+        self.state.live.capture.apply_new(
+            self.state.secondaries.len() + 1,
+            &window,
+            set_capture_affinity,
+        );
         let chrome_observer = super::lifecycle::ChromeWindowObserver::install(
             &window,
             self.state.wake.main_work_notifier(),

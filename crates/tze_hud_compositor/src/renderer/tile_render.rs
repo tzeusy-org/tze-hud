@@ -619,12 +619,15 @@ impl Compositor {
         Self::append_clipped_rect_vertices(tile, rect, sw, sh, caret_color, vertices);
     }
 
-    /// Dot rects for the portal resize-grip affordance: a diagonal dot-grid mark
-    /// in the bottom-right corner of `region`, occupying a `size_px` square.
+    /// Dot rects for a resize-grip affordance: a diagonal dot-grid mark in the
+    /// `(left, top)` corner of `region`, occupying a `size_px` square. Portal
+    /// tiles use the bottom-right corner `(false, false)`; the pip zone's grip
+    /// uses whichever corner faces the display centre.
     ///
-    /// The dots form the lower-right triangle of a 3×3 grid (cells where
-    /// `col + row >= 2`), so the mark reads as a diagonal grip pointing at the
-    /// bottom-right resize corner — the conventional window-grip glyph:
+    /// The dots form the triangle of a 3×3 grid that hugs that corner (for
+    /// bottom-right, cells where `col + row >= 2`; other corners mirror it), so
+    /// the mark reads as a diagonal grip pointing at the resize corner — the
+    /// conventional window-grip glyph, shown here for bottom-right:
     ///
     /// ```text
     ///     · · ●
@@ -635,14 +638,26 @@ impl Compositor {
     /// Each dot is a square inset within its grid cell. Returns all-zero rects
     /// (dropped by [`Self::append_clipped_rect_vertices`], which discards
     /// zero-area rects) when `size_px <= 0` so callers need no separate guard.
-    pub(super) fn resize_grip_dot_rects(region: Rect, size_px: f32) -> [Rect; 6] {
+    pub(super) fn resize_grip_dot_rects(
+        region: Rect,
+        size_px: f32,
+        (left, top): (bool, bool),
+    ) -> [Rect; 6] {
         let empty = [Rect::new(0.0, 0.0, 0.0, 0.0); 6];
         if !size_px.is_finite() || size_px <= 0.0 || region.width <= 0.0 || region.height <= 0.0 {
             return empty;
         }
-        // Anchor the grip square at the bottom-right corner of the region.
-        let grip_x = region.x + region.width - size_px;
-        let grip_y = region.y + region.height - size_px;
+        // Anchor the grip square at the requested corner of the region.
+        let grip_x = if left {
+            region.x
+        } else {
+            region.x + region.width - size_px
+        };
+        let grip_y = if top {
+            region.y
+        } else {
+            region.y + region.height - size_px
+        };
         let cell = size_px / 3.0;
         // Dot square inset within its cell (half the cell, centred).
         let dot = cell * 0.5;
@@ -653,8 +668,11 @@ impl Compositor {
         const CELLS: [(u8, u8); 6] = [(2, 0), (1, 1), (2, 1), (0, 2), (1, 2), (2, 2)];
         let mut rects = empty;
         for (i, (col, row)) in CELLS.iter().enumerate() {
-            let cell_x = grip_x + f32::from(*col) * cell;
-            let cell_y = grip_y + f32::from(*row) * cell;
+            // Mirror each axis toward a left or top corner.
+            let col = if left { 2 - col } else { *col };
+            let row = if top { 2 - row } else { *row };
+            let cell_x = grip_x + f32::from(col) * cell;
+            let cell_y = grip_y + f32::from(row) * cell;
             rects[i] = Rect::new(cell_x + dot_off, cell_y + dot_off, dot, dot);
         }
         rects
@@ -704,7 +722,7 @@ impl Compositor {
             } else {
                 resting
             };
-            for dot in Self::resize_grip_dot_rects(tile.bounds, grip.size_px) {
+            for dot in Self::resize_grip_dot_rects(tile.bounds, grip.size_px, (false, false)) {
                 Self::append_clipped_rect_vertices(tile, dot, sw, sh, color, vertices);
             }
         }
@@ -2318,7 +2336,7 @@ mod resize_grip_tests {
     fn dots_anchor_bottom_right_and_form_diagonal() {
         let region = Rect::new(50.0, 40.0, 300.0, 200.0);
         let size = 30.0;
-        let dots = Compositor::resize_grip_dot_rects(region, size);
+        let dots = Compositor::resize_grip_dot_rects(region, size, (false, false));
 
         // Grip square: bottom-right `size`×`size` corner of the region.
         let grip_x = region.x + region.width - size; // 320
@@ -2365,7 +2383,7 @@ mod resize_grip_tests {
     fn nonpositive_size_yields_empty_dots() {
         let region = Rect::new(0.0, 0.0, 100.0, 100.0);
         for size in [0.0, -5.0] {
-            let dots = Compositor::resize_grip_dot_rects(region, size);
+            let dots = Compositor::resize_grip_dot_rects(region, size, (false, false));
             assert!(
                 dots.iter().all(|d| d.width == 0.0 && d.height == 0.0),
                 "size {size} must produce only zero-area dots"

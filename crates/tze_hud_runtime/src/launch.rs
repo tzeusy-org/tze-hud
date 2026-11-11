@@ -56,6 +56,8 @@ pub struct LaunchSources {
     pub answer_window_ms: Source,
     pub log_level: Source,
     pub debug_zones: Source,
+    /// `[runtime] exclude_from_capture` (no flag or variable).
+    pub exclude_from_capture: Source,
     /// `--window-mode` / `TZE_HUD_WINDOW_MODE` (no config key).
     pub window_mode: Source,
     /// `--width` / `TZE_HUD_WINDOW_WIDTH` (no config key).
@@ -74,6 +76,9 @@ pub(crate) struct LiveSettings {
     zone_outlines: std::sync::atomic::AtomicBool,
     generation: std::sync::atomic::AtomicU64,
     wake: tze_hud_scene::render_wake::RenderWakeNotifier,
+    /// Hide from screen capture; the main thread applies it, the compositor
+    /// never reads it.
+    pub(crate) capture: std::sync::Arc<crate::capture_exclusion::CaptureExclusion>,
 }
 
 impl LiveSettings {
@@ -88,7 +93,16 @@ impl LiveSettings {
             zone_outlines: zone_outlines.into(),
             generation: 0.into(),
             wake,
+            capture: Default::default(),
         }
+    }
+
+    pub(crate) fn with_capture(
+        mut self,
+        capture: std::sync::Arc<crate::capture_exclusion::CaptureExclusion>,
+    ) -> Self {
+        self.capture = capture;
+        self
     }
 
     pub(crate) fn with_answer_window(mut self, ms: u32) -> Self {

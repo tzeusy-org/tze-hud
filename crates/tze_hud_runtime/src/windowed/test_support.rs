@@ -145,6 +145,7 @@ pub(super) fn scene_with_drag_handle_tile(
             },
             tab_order: 0,
             is_header_band: false,
+            resize_grip: None,
         });
 
     (scene, tile_id, element_id, interaction_id)
@@ -332,6 +333,7 @@ pub(super) fn make_windowed_keyboard_test_app(
         global_tokens: std::collections::HashMap::new(),
         appearance: None,
         tokens_seen: 0,
+        capture_seen: 0,
         _config_watch: None,
         element_repositioned_tx: None,
         input_event_tx: Some(input_event_tx),
@@ -354,6 +356,8 @@ pub(super) fn make_windowed_keyboard_test_app(
         portal_projection_driver: crate::portal::PortalDriver::new(portals),
         capture_inbox: crate::operator::screenshot::CaptureInbox::detached(),
         pending_keyboard_events: VecDeque::new(),
+        pending_scroll: VecDeque::new(),
+        pending_pointer_move: false,
         interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
     };
 

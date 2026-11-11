@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use tze_hud_scene::config::{ChordRole, SharedAgents};
+use tze_hud_scene::config::{ChordRole, HudChords, SharedAgents};
 
 use crate::idle_efficiency::IdleEfficiencyCounters;
 
@@ -78,6 +78,11 @@ impl HotkeyStatus {
                 "focuses the newest question",
                 "use the card buttons",
             ),
+            ChordRole::Hide => (
+                "hide",
+                "toggles Hide all",
+                "use Hide all in the panel or tray",
+            ),
         };
         match self {
             Self::NotApplicable => None,
@@ -131,6 +136,7 @@ static HOTKEYS: Mutex<[HotkeyStatus; ChordRole::ALL.len()]> = Mutex::new([
     HotkeyStatus::NotApplicable,
     HotkeyStatus::NotApplicable,
     HotkeyStatus::NotApplicable,
+    HotkeyStatus::NotApplicable,
 ]);
 
 fn slot(role: ChordRole) -> usize {
@@ -139,6 +145,7 @@ fn slot(role: ChordRole) -> usize {
         ChordRole::Panel => 1,
         ChordRole::Pairing => 2,
         ChordRole::Answer => 3,
+        ChordRole::Hide => 4,
     }
 }
 
@@ -176,6 +183,26 @@ pub fn set_hotkey(role: ChordRole, status: HotkeyStatus) -> HotkeyStatus {
     }
     *cur = status.clone();
     status
+}
+
+/// `role`'s outcome when the config left it unbound (its default is another
+/// role's explicit chord): not registered, saying which key to set.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn unbound_status(chords: &HudChords, role: ChordRole) -> Option<HotkeyStatus> {
+    if chords.is_bound(role) {
+        return None;
+    }
+    let chord = chords.get(role);
+    let taken = chords
+        .role_of(&chord)
+        .map_or("another chord", |owner| owner.config_key());
+    Some(HotkeyStatus::Failed {
+        chord: chord.to_string(),
+        reason: format!(
+            "not bound: {chord} is runtime.{taken}; set runtime.{} to bind one",
+            role.config_key()
+        ),
+    })
 }
 
 /// Hand `role`'s outcome to the starter waiting on `tx`. If the starter has
@@ -497,6 +524,9 @@ impl StatusSource {
             "panel_hotkey": hotkey(ChordRole::Panel).to_json_for(ChordRole::Panel),
             "pairing_hotkey": hotkey(ChordRole::Pairing).to_json_for(ChordRole::Pairing),
             "answer_hotkey": hotkey(ChordRole::Answer).to_json_for(ChordRole::Answer),
+            "hide_hotkey": hotkey(ChordRole::Hide).to_json_for(ChordRole::Hide),
+            // Hide from screen capture: null off Windows.
+            "capture_exclusion": crate::capture_exclusion::status(),
             "displays": displays,
             "unplaced_zones": unplaced_zones,
             "frames_presented": self.presents.as_ref().map(|c| c.snapshot().presents),
@@ -595,11 +625,52 @@ mod tests {
             failed().to_json_for(ChordRole::Pause)["error"],
             "already in use; use the tray icon's Pause"
         );
+        // R5.1 S6: a refused hide chord names the panel and tray paths.
+        let hide = HotkeyStatus::Failed {
+            chord: "Ctrl+Shift+F8".into(),
+            reason: "already in use".into(),
+        };
+        let line = hide.banner_line(ChordRole::Hide).unwrap();
+        assert!(
+            line.contains("hide") && line.contains("NOT registered"),
+            "{line}"
+        );
+        assert!(line.contains("use Hide all in the panel or tray"), "{line}");
+        assert_eq!(
+            hide.to_json_for(ChordRole::Hide),
+            json!({"chord": "Ctrl+Shift+F8", "registered": false, "error": "already in use"})
+        );
         #[cfg(not(target_os = "windows"))]
         {
             assert_eq!(tray_status(), Value::Null);
             assert!(!session_locked());
+            assert_eq!(crate::capture_exclusion::status(), Value::Null);
         }
+    }
+
+    /// A role whose default another role took explicitly reports
+    /// registered:false with the keys to change; bound roles report nothing.
+    #[test]
+    fn an_unbound_default_reports_why() {
+        let mut chords = HudChords::default();
+        chords.set(ChordRole::Answer, chords.hide);
+        chords.unbind(ChordRole::Hide);
+        assert_eq!(unbound_status(&chords, ChordRole::Answer), None);
+        let status = unbound_status(&chords, ChordRole::Hide).unwrap();
+        assert_eq!(
+            status.to_json_for(ChordRole::Hide),
+            json!({
+                "chord": "Ctrl+Shift+F8",
+                "registered": false,
+                "error": "not bound: Ctrl+Shift+F8 is runtime.answer_hotkey; set runtime.hide_hotkey to bind one"
+            })
+        );
+        assert!(
+            status
+                .banner_line(ChordRole::Hide)
+                .unwrap()
+                .contains("NOT registered (not bound")
+        );
     }
 
     #[tokio::test]

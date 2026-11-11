@@ -249,6 +249,18 @@ pub enum PortalCursor {
     Grabbing,
 }
 
+impl PortalCursor {
+    /// The diagonal resize cursor for a resize grip in the `(left, top)`
+    /// corner of its element: `╲` for top-left/bottom-right, `╱` otherwise.
+    pub fn for_grip_corner((left, top): (bool, bool)) -> Self {
+        if left == top {
+            Self::NwseResize
+        } else {
+            Self::NeswResize
+        }
+    }
+}
+
 /// Resolve the cursor shape for the current pointer location over the focused
 /// portal, applying gesture and hover precedence.
 ///

@@ -443,9 +443,9 @@ agents until one is paired.
   negotiation and no resident principal.
 - `admin` is an operator entry, outside the model surface: it opens
   `GET /admin/status`, `GET /admin/logs`, and `GET /admin/screenshot` on the
-  MCP port, and `*` does not grant it. `/admin/status` includes `tailnet_inbound` (`state`: `allowed`, `blocked`, `unknown`, `not_applicable`; `reason`, `rule` and `fix` when `blocked`; `error` when `unknown`): whether Windows Firewall lets remote agents reach the tailnet bind, and `safe_mode_hotkey`, `panel_hotkey`, `pairing_hotkey` and `answer_hotkey`
+  MCP port, and `*` does not grant it. `/admin/status` includes `tailnet_inbound` (`state`: `allowed`, `blocked`, `unknown`, `not_applicable`; `reason`, `rule` and `fix` when `blocked`; `error` when `unknown`): whether Windows Firewall lets remote agents reach the tailnet bind, and `safe_mode_hotkey`, `panel_hotkey`, `pairing_hotkey`, `answer_hotkey` and `hide_hotkey`
   (each `chord`, `registered`, `error`; `null` when no hotkey is active; `registered: null` while pending): `registered: false`
-  means another program owns that chord; for `safe_mode_hotkey`, its error names the tray icon's Pause as the independent override. The blocked
+  means another program owns that chord, or (`error` starting `not bound:`) the config left the hide chord unbound; for `safe_mode_hotkey`, its error names the tray icon's Pause as the independent override (a refused `hide_hotkey` loses nothing else: the startup banner names Hide all in the panel or tray). `capture_exclusion` is `null` off Windows, else `{on, supported, applied, reason, failed}`: `reason` is `null`, `"remote"` or `"unsupported"` while on, and `failed` lists `displays` indexes whose window refused the affinity. The blocked
   firewall `fix` names `tze_hud.exe --allow-remote` with the same listen-port
   overrides as startup; see [the reversible Windows helper](operations/windows-install.md#remote-agents).
   This policy-derived result is cached for five seconds, not a network probe.
@@ -702,9 +702,13 @@ default. Ports are read at start; the rest change live from the panel.
 
 ## Human chords and the control panel
 
-Four global chords work while the overlay is unfocused and click-through
+Five global chords work while the overlay is unfocused and click-through
 (Windows; each is set in `[runtime]` as modifiers Ctrl/Shift/Alt/Win plus
-F1-F24, a letter or a digit, and all four must differ):
+F1-F24, a letter or a digit, and all five must differ; one exception keeps
+older configs loading: when `hide_hotkey` is unset and another key already
+uses Ctrl+Shift+F8, that key keeps it and the hide chord is left unbound,
+logged as a warning and reported in `hide_hotkey` as `registered: false`
+with an `error` naming both keys; set `hide_hotkey` to bind one):
 
 | Chord (default) | Key | Effect |
 |---|---|---|
@@ -712,6 +716,7 @@ F1-F24, a letter or a digit, and all four must differ):
 | Ctrl+Shift+F11 | `panel_hotkey` | Open or close the control panel with agents running |
 | Ctrl+Shift+F10 | `pairing_hotkey` | Open the control panel at Connect an agent, agents running |
 | Ctrl+Shift+F9 | `answer_hotkey` | Focus the newest unanswered question with callback actions |
+| Ctrl+Shift+F8 | `hide_hotkey` | Hide all, or show all when everything is hidden, from any app; the panel and pause stay as they are |
 
 Windows also has one notification-area **tray icon**, even when no agent
 content is showing. Click it, or select it with Win+B and Enter, to toggle
@@ -732,7 +737,8 @@ Windows 11 initially places new icons in overflow; pin this one through
 **Settings > Personalization > Taskbar > Other system tray icons**.
 
 `/admin/status` reports `tray` with `registered`, `glyph`, `tooltip`,
-`all_hidden` and native test identity, plus `session_locked`. `tray` is null
+`all_hidden`, `hidden_notice` (the pill's text, or null when no pill shows)
+and native test identity, plus `session_locked`. `tray` is null
 and `session_locked` false off Windows. Failed watcher creation leaves
 `registered` and `session_locked` false; a missing icon can therefore be
 distinguished from overflow. Explorer restart re-adds the icon; an unsuccessful
@@ -743,10 +749,11 @@ new cards; that separate desktop-presence delivery remains outstanding.
 
 A global chord takes its keys from every other app while the HUD runs, so the
 defaults are F-key chords; rebind one that clashes (Ctrl+Shift+F10 is also
-JetBrains IDEs' "Run"). The pairing chord is not registered when the MCP port
+JetBrains IDEs' "Run", and Ctrl+Shift+F8 its "View Breakpoints" on Windows). The pairing chord is not registered when the MCP port
 is disabled. The control panel's Input card changes a chord while the HUD
 runs: type it (`Ctrl+Alt+F9`) and press Enter. A chord another role has is
-refused; otherwise Windows registers the new chord before the old one is
+refused; an unbound hide chord's row is empty, and typing one binds it.
+Otherwise Windows registers the new chord before the old one is
 released, so a chord another program holds is refused and the old one keeps
 working. The new chord is saved to `[runtime]`. Each chord row says
 whether its chord is the default, saved to config, or lasts until restart
@@ -804,7 +811,26 @@ or focus; agents keep their leases and publications and are not told. While
 anything is hidden and the panel is closed, a pill at the bottom right of the
 primary display says what is hidden and which chord opens the panel (the
 pause chord when Windows refused the panel chord, or Tray → Open panel when
-both chords are refused). A restart shows everything.
+both chords are refused). A restart shows everything. The hide chord and the
+tray's Hide all / Show all make the same edit as the tile, with the panel open
+or closed; the pill is always kept.
+
+The Visibility card's **Hide from screen capture** (`[runtime]
+exclude_from_capture`, default off, live and saved; Reset removes the key)
+keeps every overlay window, and so the panel and the pill, out of screen
+captures and shares (Teams, OBS, Snipping Tool, `BitBlt` with `CAPTUREBLT`,
+Graphics Capture) while the owner's monitors still show it. Windows applies
+`WDA_EXCLUDEFROMCAPTURE` to the primary and every secondary overlay, including
+one opened on hot-plug or recreated after surface loss, before its first
+present. It needs Windows 10 version 2004 (build 19041); below that the row is
+disabled ("Needs Windows 10 version 2004 or later") and nothing is applied,
+because older builds draw a black box instead. While the session is a Remote
+Desktop session every overlay stays visible to captures (so the remote viewer
+sees the HUD; a share started inside that session shows it too), and the
+exclusion returns on console reconnect. Not covered: the tray icon and its menu
+(Explorer's windows) and a photo of the screen; this is a view setting, not a
+security feature, and agents are not told. `/admin/screenshot` is unaffected.
+Search capture, share, screenshot, recording, OBS or Teams to find it.
 
 The Agents card's **Questions wait for an answer** choice offers 15 s,
 30 s, 1 min, 2 min and 5 min. Its detail is "How long a question card waits
@@ -906,7 +932,13 @@ save fails the change lasts the session and the row says so. A
 `[displays.<NAME>]` table's zones show read-only until monitor names are
 stable across reboots. This read-only assignment does not prevent live zone
 placement: drag an existing zone grip to move the whole zone for this runtime
-session. During notification drag, the border encloses the slots actually
+session. The shown `pip` zone also has a resize grip in its corner facing the
+display centre (diagonal resize cursor): dragging it scales the zone with its
+width/height ratio pinned and the opposite corner fixed, kept on screen and no
+smaller than the `portal.window.min_*` tokens (a pip already below that size
+may keep it, but not shrink further). The grip keeps its corner for the whole
+drag. A resize is a session placement
+like a move, with the same Reset and restart behavior. During notification drag, the border encloses the slots actually
 shown (including the gaps), while the logical zone box and its movement limits
 stay unchanged. Right-click the grip for the labelled Reset to default action;
 its menu fits the originating display at that display's DPI times UI scale.
@@ -1032,8 +1064,8 @@ not be saved survives an unrelated edit. A
 table that startup would refuse (an unknown theme, a reserved or malformed
 key) or a file that is not valid TOML keeps the current tokens and is
 reported in `/admin/status` `config_reload`. Still read once at startup: the MCP widget
-transition time and widget text fonts (widgets draw with the bundled
-faces). Other config sections apply after a
+transition time. Widget text follows the live `font.*` roles like
+zone text. Other config sections apply after a
 restart (or live from the control panel). Keep config
 overrides for values specific to one deployment. The visual design
 belongs in a theme.
@@ -1131,8 +1163,11 @@ A name that resolves nowhere logs one warning with the requested name and
 the family used instead, and the role keeps its default. Code points a
 family lacks (symbols, box drawing, Arabic, and so on) fall back per glyph
 to the bundled DejaVu faces. With no font tokens set, only bundled fonts load,
-which is what CI and the tests use. Widget SVG text uses the bundled fonts
-with the default roles; it does not follow `font.*` yet.
+which is what CI and the tests use. Widget SVG text uses the same fonts and
+roles as zone text (bundled faces plus the fonts-dir and system files the
+roles loaded). A code point its family lacks falls back per glyph to the
+first loaded face that has it, preferring a face of the same spacing:
+monospaced text normally gets DejaVu Sans Mono, other text DejaVu Sans.
 
 Programmatic entry point: `Compositor::set_font_config(FontConfig { sans,
 mono, serif, fonts_dir })`. `set_token_map` calls it with

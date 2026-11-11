@@ -193,6 +193,7 @@ impl WindowedRuntimeState {
             global_tokens: HashMap::new(),
             appearance: None,
             tokens_seen: 0,
+            capture_seen: 0,
             _config_watch: None,
             element_repositioned_tx: None,
             input_event_tx: None,
@@ -213,6 +214,8 @@ impl WindowedRuntimeState {
             portal_projection_driver: crate::portal::PortalDriver::new(portals),
             capture_inbox: crate::operator::screenshot::CaptureInbox::detached(),
             pending_keyboard_events: VecDeque::new(),
+            pending_scroll: VecDeque::new(),
+            pending_pointer_move: false,
             interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
         }
     }
@@ -1068,6 +1071,11 @@ impl HeadlessEventLoopHarness {
                 .portal_projection_driver
                 .viewer_dismiss_tile(&mut scene, id);
         }
+    }
+
+    /// Everything is owner-hidden (Hide all).
+    pub fn all_hidden(&self) -> bool {
+        self.scene().owner_hidden() == tze_hud_scene::graph::SurfaceClasses::ALL
     }
 
     /// Number of tiles on screen (portal surfaces included).
@@ -4747,6 +4755,7 @@ mod tests {
                     },
                     tab_order: 0,
                     is_header_band: true,
+                    resize_grip: None,
                 });
             scene.overlay.zone_hit_regions.clear();
             scene.overlay.zone_hit_regions.push(ZoneHitRegion {
@@ -6483,6 +6492,154 @@ mod tests {
         assert_eq!(
             pointer_offset_y, 40.0,
             "wheel scroll must retain its pointer-hit-test ownership"
+        );
+    }
+
+    /// A busy scene lock never loses pointer input (hud-65gpz): the Move and
+    /// the wheel delta that arrive while an agent holds the scene both take
+    /// effect once it frees, through the one coalesced availability wake and
+    /// no periodic retry while held.
+    #[test]
+    fn held_scene_lock_retains_pointer_move_and_wheel_until_release() {
+        use std::time::{Duration, Instant};
+
+        let mut harness = HeadlessEventLoopHarness::new();
+        let (tile_id, node_id, _rx) = install_button(&mut harness, false);
+        {
+            let shared = harness.app.state.shared_state.blocking_lock();
+            shared
+                .scene
+                .blocking_lock()
+                .register_tile_scroll_config(tile_id, tze_hud_scene::TileScrollConfig::vertical())
+                .unwrap();
+        }
+        harness.app.state.cursor_x = 900.0;
+        harness.app.state.cursor_y = 900.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Move);
+
+        let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
+        let held = scene_handle.blocking_lock();
+        let main_work_before = harness.app.state.wake.main_work_generation();
+
+        // y = 12 hits the button (local 10..58) both before and after the
+        // 40 px scroll, whichever order the retained input applies in.
+        harness.app.state.cursor_x = 50.0;
+        harness.app.state.cursor_y = 12.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Move);
+        harness.app.enqueue_scroll_event(0.0, 20.0);
+        harness.app.enqueue_scroll_event(0.0, 20.0);
+        harness.app.settle_scene_work();
+        std::thread::sleep(Duration::from_millis(20));
+        assert_eq!(
+            harness.app.state.wake.main_work_generation(),
+            main_work_before,
+            "a held scene lock must cause no periodic retry wakes"
+        );
+        drop(held);
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while harness.app.state.wake.main_work_generation() == main_work_before {
+            assert!(
+                Instant::now() < deadline,
+                "releasing the scene lock must wake the main loop to retry"
+            );
+            std::thread::yield_now();
+        }
+        harness.app.settle_scene_work();
+
+        let shared = harness.app.state.shared_state.blocking_lock();
+        let scene = shared.scene.blocking_lock();
+        assert!(
+            scene.hit_region_states[&node_id].hovered,
+            "the Move made while the scene was busy must still update hover"
+        );
+        assert_eq!(
+            scene.tile_scroll_offset_local(tile_id).1,
+            40.0,
+            "both wheel deltas made while the scene was busy must apply"
+        );
+    }
+
+    /// A Move retained across a busy lock is dropped, not kept as deferred
+    /// work, once a context-menu press owns the pointer; otherwise the free
+    /// lock's availability wake would fire every turn while the button is
+    /// held (hud-65gpz).
+    #[test]
+    fn held_scene_lock_retained_move_yields_to_context_menu_press() {
+        let mut harness = HeadlessEventLoopHarness::new();
+        let (_tile_id, _node_id, _rx) = install_button(&mut harness, false);
+        let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
+        let held = scene_handle.blocking_lock();
+        harness.app.state.cursor_x = 50.0;
+        harness.app.state.cursor_y = 12.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Move);
+        assert!(harness.app.state.pending_pointer_move);
+        harness.app.state.context_menu_press = Some(
+            super::super::widgets::ContextMenuPress::unarmed(winit::window::WindowId::dummy()),
+        );
+        drop(held);
+
+        harness.app.settle_scene_work();
+        assert!(
+            !harness.app.state.pending_pointer_move,
+            "a moot retained Move must not stay deferred scene work"
+        );
+    }
+
+    /// Held wheel input keeps its direction changes: 60 px past the tail then
+    /// 3 px back must still scroll back, not net out to "stay at tail".
+    #[test]
+    fn held_scene_lock_retained_wheel_keeps_a_reversal_after_the_tail() {
+        let mut harness = HeadlessEventLoopHarness::new();
+        let (tile_id, _node_id, _rx) = install_button(&mut harness, false);
+        {
+            let shared = harness.app.state.shared_state.blocking_lock();
+            shared
+                .scene
+                .blocking_lock()
+                .register_tile_scroll_config(
+                    tile_id,
+                    tze_hud_scene::TileScrollConfig {
+                        content_height: Some(500.0),
+                        ..tze_hud_scene::TileScrollConfig::vertical()
+                    },
+                )
+                .unwrap();
+        }
+        harness.app.state.cursor_x = 50.0;
+        harness.app.state.cursor_y = 12.0;
+        harness.app.enqueue_scroll_event(0.0, 1.0e6);
+        let tail = 500.0;
+
+        let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
+        let held = scene_handle.blocking_lock();
+        let main_work_before = harness.app.state.wake.main_work_generation();
+        harness.app.enqueue_scroll_event(0.0, 60.0);
+        harness.app.enqueue_scroll_event(0.0, -3.0);
+        drop(held);
+        // Retry on the release-driven wake, as the event loop does: until it
+        // fires, the availability waiter may itself hold the scene briefly.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while harness.app.state.wake.main_work_generation() == main_work_before {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "releasing the scene lock must wake the main loop to retry"
+            );
+            std::thread::yield_now();
+        }
+        harness.app.settle_scene_work();
+        assert!(harness.app.state.pending_scroll.is_empty());
+
+        let shared = harness.app.state.shared_state.blocking_lock();
+        let offset = shared
+            .scene
+            .blocking_lock()
+            .tile_scroll_offset_local(tile_id)
+            .1;
+        assert_eq!(
+            offset,
+            tail - 3.0,
+            "the clamp applies to the 60 px before the 3 px reversal"
         );
     }
 

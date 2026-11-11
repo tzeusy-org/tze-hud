@@ -1883,6 +1883,10 @@ impl InputProcessor {
                     immediate,
                     now,
                 );
+                let state = DeviceDragState {
+                    start_bounds: element_bounds,
+                    ..state
+                };
                 self.drag_states.insert(device_id, state);
                 DragEventOutcome::Accumulating { progress: 0.0 }
             }
