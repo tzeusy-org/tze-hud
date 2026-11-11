@@ -75,6 +75,7 @@ impl WidgetRenderPlan {
 }
 
 #[derive(Clone)]
+#[cfg_attr(test, derive(Debug, PartialEq))]
 struct PrimitiveSvgLayerPlan {
     view_box: SvgViewBox,
     items: Vec<PrimitiveItem>,
@@ -83,6 +84,7 @@ struct PrimitiveSvgLayerPlan {
 }
 
 #[derive(Clone, Copy)]
+#[cfg_attr(test, derive(Debug, PartialEq))]
 struct SvgViewBox {
     min_x: f32,
     min_y: f32,
@@ -91,6 +93,7 @@ struct SvgViewBox {
 }
 
 #[derive(Clone)]
+#[cfg_attr(test, derive(Debug, PartialEq))]
 enum PrimitiveItem {
     Rect(PrimitiveRect),
     Circle(PrimitiveCircle),
@@ -98,6 +101,7 @@ enum PrimitiveItem {
 }
 
 #[derive(Clone)]
+#[cfg_attr(test, derive(Debug, PartialEq))]
 struct PrimitiveRect {
     id: Option<String>,
     ancestor_ids: Vec<String>,
@@ -118,6 +122,7 @@ struct PrimitiveRect {
 }
 
 #[derive(Clone)]
+#[cfg_attr(test, derive(Debug, PartialEq))]
 struct PrimitiveCircle {
     id: Option<String>,
     ancestor_ids: Vec<String>,
@@ -135,6 +140,7 @@ struct PrimitiveCircle {
 }
 
 #[derive(Clone)]
+#[cfg_attr(test, derive(Debug, PartialEq))]
 struct PrimitiveText {
     id: Option<String>,
     ancestor_ids: Vec<String>,
@@ -154,6 +160,7 @@ struct PrimitiveText {
 }
 
 #[derive(Clone)]
+#[cfg_attr(test, derive(Debug, PartialEq))]
 struct PrimitiveGroup {
     id: Option<String>,
     opacity: f32,
@@ -216,12 +223,8 @@ impl PrimitiveSvgLayerPlan {
             let rest = &svg_text[tag_start..];
             // Comments and declarations are not tags: quote characters inside
             // them are prose, so skip them before attribute-aware scanning.
-            if let Some(body) = rest.strip_prefix("<!--") {
-                pos = tag_start + 4 + body.find("-->")? + 3;
-                continue;
-            }
-            if let Some(body) = rest.strip_prefix("<?") {
-                pos = tag_start + 2 + body.find("?>")? + 2;
+            if let Some(len) = non_tag_markup_len(rest)? {
+                pos = tag_start + len;
                 continue;
             }
             if rest.starts_with("<![CDATA[") {
@@ -1194,9 +1197,37 @@ fn contains_unsupported_primitive_svg(svg_text: &str) -> bool {
 }
 
 fn find_start_tag<'a>(svg_text: &'a str, name: &str) -> Option<&'a str> {
-    let start = svg_text.find(&format!("<{name}"))?;
-    let end = start + find_tag_end(&svg_text[start..])?;
-    Some(&svg_text[start..=end])
+    let mut pos = 0usize;
+    while let Some(rel) = svg_text[pos..].find('<') {
+        let start = pos + rel;
+        let rest = &svg_text[start..];
+        if let Some(len) = non_tag_markup_len(rest)? {
+            pos = start + len;
+            continue;
+        }
+        if !rest.starts_with("</") && tag_name(rest) == Some(name) {
+            let end = start + find_tag_end(rest)?;
+            return Some(&svg_text[start..=end]);
+        }
+        pos = start + 1;
+    }
+    None
+}
+
+/// Length of a comment or `<?...?>` declaration at the start of `rest`.
+///
+/// `Some(Some(len))` skips that markup, `Some(None)` means `rest`
+/// does not start with one, and `None` means it is unterminated. Quote
+/// characters inside comments are prose, so callers skip these before
+/// attribute-aware tag scanning.
+fn non_tag_markup_len(rest: &str) -> Option<Option<usize>> {
+    if let Some(body) = rest.strip_prefix("<!--") {
+        return Some(Some(4 + body.find("-->")? + 3));
+    }
+    if let Some(body) = rest.strip_prefix("<?") {
+        return Some(Some(2 + body.find("?>")? + 2));
+    }
+    Some(None)
 }
 
 fn tag_name(raw_tag: &str) -> Option<&str> {
@@ -4176,13 +4207,55 @@ mod tests {
             <!-- trailing <rect id="ghost"/> stays commented out -->
         </svg>"##;
 
+        let comment_free = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+            <rect id="box" x="0" y="0" width="16" height="16" fill="#00ff00"/>
+        </svg>"##;
+
         let plan = PrimitiveSvgLayerPlan::parse(svg)
             .expect("comment punctuation must not push a primitive SVG onto the resvg fallback");
-        assert_eq!(plan.items.len(), 1, "commented-out markup is not drawn");
-        let PrimitiveItem::Rect(rect) = &plan.items[0] else {
-            panic!("expected the visible rect to be parsed");
-        };
-        assert_eq!(rect.id.as_deref(), Some("box"));
+        let twin = PrimitiveSvgLayerPlan::parse(comment_free).expect("twin parses");
+        assert_eq!(plan, twin, "comments must not change the retained plan");
+    }
+
+    #[test]
+    fn primitive_plan_with_grouped_text_matches_its_comment_free_twin() {
+        let commented = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40">
+            <!-- don't draw: <rect id="ghost" x="0" y="0" width="1" height="1"/> -->
+            <g id="card" opacity="0.8"><!-- the owner's "card" -->
+              <rect id="bg" x="0" y="0" width="100" height="40" fill="#202020"/>
+              <text id="label" x="4" y="20" font-size="12" fill="#ffffff">Hi</text>
+            </g>
+        </svg>"##;
+        let comment_free = r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 40">
+            <g id="card" opacity="0.8">
+              <rect id="bg" x="0" y="0" width="100" height="40" fill="#202020"/>
+              <text id="label" x="4" y="20" font-size="12" fill="#ffffff">Hi</text>
+            </g>
+        </svg>"##;
+
+        let plan = PrimitiveSvgLayerPlan::parse(commented).expect("commented SVG parses");
+        let twin = PrimitiveSvgLayerPlan::parse(comment_free).expect("twin parses");
+        assert_eq!(plan, twin);
+    }
+
+    #[test]
+    fn primitive_plan_takes_its_view_box_from_the_real_root_not_a_commented_one() {
+        let svg = r##"<!-- old: <svg viewBox="0 0 8 8"> -->
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+            <rect id="box" x="0" y="0" width="16" height="16" fill="#00ff00"/>
+        </svg>"##;
+
+        let plan = PrimitiveSvgLayerPlan::parse(svg).expect("primitive SVG parses");
+        assert_eq!(
+            plan.view_box,
+            SvgViewBox {
+                min_x: 0.0,
+                min_y: 0.0,
+                width: 16.0,
+                height: 16.0,
+            },
+            "a commented-out <svg> must not supply the viewBox"
+        );
     }
 
     #[test]
