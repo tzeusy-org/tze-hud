@@ -356,6 +356,8 @@ pub(super) fn make_windowed_keyboard_test_app(
         portal_projection_driver: crate::portal::PortalDriver::new(portals),
         capture_inbox: crate::operator::screenshot::CaptureInbox::detached(),
         pending_keyboard_events: VecDeque::new(),
+        pending_scroll: VecDeque::new(),
+        pending_pointer_move: false,
         interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
     };
 

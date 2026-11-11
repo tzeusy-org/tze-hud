@@ -556,15 +556,17 @@ class Run:
         self.handled(target)
 
     def glide(self, x: int, y: int) -> None:
-        """Arrive at x,y in three motion events, all inside the destination, as a real pointer does.
+        """Arrive at x,y in one motion event.
 
-        The runtime drops a pointer move that finds the scene lock busy
-        (hud-65gpz), and hover follows the last move it handled; a single
-        synthetic jump can therefore leave hover stale. It also guarantees
-        motion when the pointer already rests at x,y.
+        The runtime retains a pointer move that finds the scene lock busy and
+        replays it when the lock frees (hud-65gpz), so one jump updates hover.
+        A pointer already resting at x,y gets a one-pixel lead-in so the
+        arrival still produces motion.
         """
-        for dx in (-2, -1, 0):
-            self.inj.move_abs(x + dx, y)
+        if getattr(self, "_glide_at", None) == (x, y):
+            self.inj.move_abs(x - 1, y)
+        self.inj.move_abs(x, y)
+        self._glide_at = (x, y)
 
     def handled(self, target: str) -> None:
         """Prove queued input was handled: hover a pane whose hover state differs, and observe it.

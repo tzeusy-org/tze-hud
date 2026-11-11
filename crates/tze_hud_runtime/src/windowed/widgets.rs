@@ -122,6 +122,18 @@ pub(super) struct ContextMenuPress {
     pub(super) armed: bool,
 }
 
+#[cfg(test)]
+impl ContextMenuPress {
+    /// A press on no menu target, for input-retention tests.
+    pub(super) fn unarmed(window: winit::window::WindowId) -> Self {
+        Self {
+            menu: None,
+            window,
+            armed: false,
+        }
+    }
+}
+
 fn menu_target_live(scene: &tze_hud_scene::SceneGraph, id: tze_hud_scene::SceneId) -> bool {
     scene.tile_id_shown(id)
         || (scene.zones_shown()
