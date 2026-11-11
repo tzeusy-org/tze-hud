@@ -549,14 +549,17 @@ impl WinitApp {
             drag_active,
         );
         // The pip resize grip shows its diagonal cursor instead of the move
-        // hand, and keeps it for the whole resize.
-        let grip_resizing = self.state.input_processor.drag_states.values().any(|s| {
-            s.phase == tze_hud_input::DragPhase::Activated
-                && s.interaction_id
-                    .starts_with(tze_hud_scene::types::RESIZE_GRIP_PREFIX)
-        });
-        if grip_resizing {
-            desired = self.state.cursor_tracker.current();
+        // hand, from hover through the whole resize (its corner is frozen on
+        // the drag state, so a press without a prior hover still shows it).
+        let resizing = self
+            .state
+            .input_processor
+            .drag_states
+            .values()
+            .find(|s| s.is_active_resize())
+            .and_then(|s| s.resize_grip);
+        if let Some(corner) = resizing {
+            desired = PortalCursor::for_grip_corner(corner);
         } else if matches!(desired, PortalCursor::Grab | PortalCursor::Default)
             && let Some(cursor) = snapshot.resize_grip_cursor(x, y)
         {

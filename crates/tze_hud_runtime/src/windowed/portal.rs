@@ -327,15 +327,18 @@ pub(super) fn apply_drag_handle_pointer_event(
         input_processor.drag_states.remove(&device_id);
         if let Some((interaction_id, element_id, element_kind, is_header_band)) = hit_drag_info {
             let target = DragTarget::capture(scene, element_id, element_kind);
+            let region = scene.overlay.drag_handle_hit_regions.iter().find(|h| {
+                h.element_id == element_id
+                    && h.element_kind == element_kind
+                    && h.interaction_id == interaction_id
+            });
+            // A grip keeps the corner it was drawn in for the whole gesture.
+            let resize_grip = region.and_then(|h| h.resize_grip);
             let live_handle = !matches!(target, Some(DragTarget::Zone(_)))
-                || scene.overlay.drag_handle_hit_regions.iter().any(|h| {
-                    h.element_id == element_id
-                        && h.element_kind == element_kind
-                        && h.interaction_id == interaction_id
-                        && scene.shown_zone_publishes().any(|(name, p)| {
-                            !p.is_empty() && scene.zone_registry.zones[name].id == element_id
-                        })
-                });
+                || (region.is_some()
+                    && scene.shown_zone_publishes().any(|(name, p)| {
+                        !p.is_empty() && scene.zone_registry.zones[name].id == element_id
+                    }));
             let Some(element_bounds) = target
                 .filter(|_| live_handle)
                 .and_then(|t| t.bounds(scene, element_id, display_width, display_height))
@@ -353,6 +356,9 @@ pub(super) fn apply_drag_handle_pointer_event(
                 display_height,
                 is_header_band,
             );
+            if let Some(state) = input_processor.drag_states.get_mut(&device_id) {
+                state.resize_grip = resize_grip;
+            }
             tracing::trace!(
                 element_id = %element_id,
                 x = pointer_event.x,
@@ -367,11 +373,11 @@ pub(super) fn apply_drag_handle_pointer_event(
 
     // On PointerMove or PointerUp, check for an in-flight drag on this device.
     let drag_info = input_processor.drag_states.get(&device_id).map(|s| {
-        // A grip resize scales from the box and press point it started with.
+        // A grip resize scales from the box, corner and press point it
+        // started with.
         let grip = s
-            .interaction_id
-            .starts_with(tze_hud_scene::types::RESIZE_GRIP_PREFIX)
-            .then_some((s.start_bounds, s.press_x, s.press_y));
+            .resize_grip
+            .map(|corner| (s.start_bounds, corner, s.press_x, s.press_y));
         (s.interaction_id.clone(), s.element_id, s.element_kind, grip)
     });
 
@@ -404,12 +410,11 @@ pub(super) fn apply_drag_handle_pointer_event(
         false,
     );
 
-    if let (Some(DragTarget::Zone(_)), Some((start, press_x, press_y))) = (&target, grip) {
+    if let (Some(DragTarget::Zone(_)), Some((start, corner, press_x, press_y))) = (&target, grip) {
         if matches!(
             outcome,
             DragEventOutcome::Moved { .. } | DragEventOutcome::Released { .. }
         ) {
-            let corner = tze_hud_scene::types::rect_corner_toward(start, press_x, press_y);
             let rect = aspect_locked_resize(
                 start,
                 corner,
@@ -5005,18 +5010,24 @@ mod tests {
     /// result is a session placement, like a zone move.
     #[test]
     fn pip_resize_grip_keeps_the_aspect_and_pins_the_opposite_corner() {
-        let right_of_centre = Rect::new(1300.0, 700.0, 480.0, 270.0);
-        let left_of_centre = Rect::new(100.0, 100.0, 400.0, 225.0);
-        // (box, pointer delta that grows it)
+        // (box, pointer delta that grows it): one pip per display quadrant,
+        // so the grip is in each of the four corners.
         for (pip, (dx, dy)) in [
-            (right_of_centre, (-100.0, -60.0)),
-            (left_of_centre, (100.0, 60.0)),
+            (Rect::new(1300.0, 700.0, 480.0, 270.0), (-100.0, -60.0)), // grip top-left
+            (Rect::new(100.0, 100.0, 400.0, 225.0), (100.0, 60.0)),    // grip bottom-right
+            (Rect::new(1300.0, 100.0, 480.0, 270.0), (-100.0, 60.0)),  // grip bottom-left
+            (Rect::new(100.0, 700.0, 400.0, 225.0), (100.0, -60.0)),   // grip top-right
         ] {
             let (mut scene, id, grip) = pip_grip_scene(pip);
+            let corner = scene.overlay.drag_handle_hit_regions[0].resize_grip;
             let mut input = InputProcessor::new();
             let (px, py) = (grip.x + 12.0, grip.y + 12.0);
             use PointerEventKind::{Down, Move, Up};
             assert!(drive_grip(&mut input, &mut scene, Down, (px, py)).is_none());
+            assert_eq!(
+                input.drag_states[&0].resize_grip, corner,
+                "the press freezes the grip's emitted corner"
+            );
             assert!(drive_grip(&mut input, &mut scene, Move, (px + dx / 2.0, py)).is_none());
             assert!(scene.is_drag_active(id), "the zone shows resize feedback");
             assert!(drive_grip(&mut input, &mut scene, Move, (px + dx, py + dy)).is_none());
@@ -5024,7 +5035,7 @@ mod tests {
             let grown = pip_placement(&scene, id);
             assert!(grown.width > pip.width + 50.0, "{grown:?}");
             assert!((grown.width / grown.height - pip.width / pip.height).abs() < 1e-3);
-            let (grip_left, grip_top) = tze_hud_scene::types::rect_corner_toward(pip, px, py);
+            let (grip_left, grip_top) = corner.unwrap();
             if grip_left {
                 assert!(
                     close(grown.x + grown.width, pip.x + pip.width),
@@ -5049,6 +5060,146 @@ mod tests {
             assert!(!scene.is_drag_active(id), "feedback ends with the resize");
             assert!(input.drag_states.is_empty());
         }
+    }
+
+    /// A pip grown across the display centre keeps resizing from the corner it
+    /// was pressed in: the corner is frozen on the drag state, not re-derived
+    /// from the moving box.
+    #[test]
+    fn a_grip_keeps_its_corner_when_the_pip_grows_across_the_centre() {
+        let pip = Rect::new(1300.0, 700.0, 480.0, 270.0);
+        let (mut scene, id, grip) = pip_grip_scene(pip);
+        let mut input = InputProcessor::new();
+        let (px, py) = (grip.x + 12.0, grip.y + 12.0);
+        use PointerEventKind::{Down, Move, Up};
+        drive_grip(&mut input, &mut scene, Down, (px, py));
+        drive_grip(&mut input, &mut scene, Move, (px - 1.0, py));
+        // Grow far up-left: the box's centre passes the display centre.
+        drive_grip(&mut input, &mut scene, Move, (px - 1200.0, py - 700.0));
+        let grown = pip_placement(&scene, id);
+        assert!(grown.x + grown.width * 0.5 < 960.0, "{grown:?}");
+        assert!(
+            close(grown.x + grown.width, pip.x + pip.width),
+            "right still pinned"
+        );
+        assert!(
+            close(grown.y + grown.height, pip.y + pip.height),
+            "bottom still pinned"
+        );
+        assert_eq!(input.drag_states[&0].resize_grip, Some((true, true)));
+        // Moving back shrinks it from the same corner.
+        drive_grip(&mut input, &mut scene, Move, (px - 50.0, py - 30.0));
+        let back = pip_placement(&scene, id);
+        assert!(back.width < grown.width && close(back.x + back.width, pip.x + pip.width));
+        assert!(matches!(
+            drive_grip(&mut input, &mut scene, Up, (px - 50.0, py - 30.0)),
+            Some(DragRelease::Zone)
+        ));
+    }
+
+    /// The real pointer path: hovering the grip shows its diagonal cursor,
+    /// and an active resize keeps it even where hover would say otherwise.
+    #[test]
+    fn grip_cursor_follows_hover_and_the_active_resize() {
+        let pip = Rect::new(1300.0, 100.0, 480.0, 270.0); // grip bottom-left: ╱
+        let (scene, id, grip) = pip_grip_scene(pip);
+        let snapshot = crate::pipeline::HitTestSnapshot::from_scene(&scene);
+        let (mut app, _rx) =
+            make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
+        app.state
+            .pipeline
+            .hit_test_snapshot
+            .store(Arc::new(snapshot));
+        app.state.cursor_x = grip.x + 12.0;
+        app.state.cursor_y = grip.y + 12.0;
+        app.enqueue_pointer_event(PointerEventKind::Move);
+        assert_eq!(
+            app.state.cursor_tracker.current(),
+            tze_hud_input::PortalCursor::NeswResize,
+            "hover"
+        );
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        app.state.cursor_x -= 300.0;
+        app.state.cursor_y += 150.0;
+        app.enqueue_pointer_event(PointerEventKind::Move);
+        assert!(app.state.input_processor.drag_states[&0].is_active_resize());
+        assert_eq!(
+            app.state.cursor_tracker.current(),
+            tze_hud_input::PortalCursor::NeswResize,
+            "off the grip mid-resize"
+        );
+        app.enqueue_pointer_event(PointerEventKind::Up);
+        let shared = app.state.shared_state.try_lock().unwrap();
+        let scene = shared.scene.try_lock().unwrap();
+        assert!(pip_placement(&scene, id).width > pip.width);
+    }
+
+    /// A press with no prior hover (stale or empty hover snapshot) still
+    /// shows the resize cursor once the resize activates.
+    #[test]
+    fn an_unhovered_grip_press_still_shows_the_resize_cursor() {
+        let pip = Rect::new(100.0, 100.0, 400.0, 225.0); // grip bottom-right: ╲
+        let (scene, _, grip) = pip_grip_scene(pip);
+        let (mut app, _rx) =
+            make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
+        app.state.cursor_x = grip.x + 12.0;
+        app.state.cursor_y = grip.y + 12.0;
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        app.state.cursor_x += 40.0;
+        app.enqueue_pointer_event(PointerEventKind::Move);
+        assert_eq!(
+            app.state.cursor_tracker.current(),
+            tze_hud_input::PortalCursor::NwseResize
+        );
+    }
+
+    /// An Up missed under scene-lock contention is retained and applied by
+    /// `drain_pending_drag_terminal` through the grip path: the final box is
+    /// the resized one, feedback ends, and nothing is persisted.
+    #[test]
+    fn a_retained_grip_release_finishes_the_resize() {
+        let pip = Rect::new(1300.0, 700.0, 480.0, 270.0);
+        let (scene, id, grip) = pip_grip_scene(pip);
+        let (mut app, _rx) =
+            make_windowed_keyboard_test_app(scene, FocusManager::new(), InputProcessor::new());
+        app.state.cursor_x = grip.x + 12.0;
+        app.state.cursor_y = grip.y + 12.0;
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        app.state.cursor_x -= 1.0;
+        app.enqueue_pointer_event(PointerEventKind::Move);
+        app.state.cursor_x -= 99.0;
+        app.state.cursor_y -= 60.0;
+        let shared_state = Arc::clone(&app.state.shared_state);
+        let held = shared_state.try_lock().unwrap();
+        app.enqueue_pointer_event(PointerEventKind::Up);
+        assert!(
+            app.state
+                .primary_drag_gesture
+                .as_ref()
+                .is_some_and(|g| g.terminal.is_some()),
+            "the Up is retained for its gesture"
+        );
+        let generation = app.state.wake.main_work_generation();
+        drop(held);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while app.state.wake.main_work_generation() == generation {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "release wakes the main loop"
+            );
+            std::thread::yield_now();
+        }
+        app.settle_scene_work();
+        assert!(app.state.primary_drag_gesture.is_none());
+        assert!(app.state.input_processor.drag_states.is_empty());
+        let shared = shared_state.try_lock().unwrap();
+        let scene = shared.scene.try_lock().unwrap();
+        let resized = pip_placement(&scene, id);
+        assert!(resized.width > pip.width + 50.0, "{resized:?}");
+        assert!((resized.width / resized.height - pip.width / pip.height).abs() < 1e-3);
+        assert!(close(resized.x + resized.width, pip.x + pip.width));
+        assert!(!scene.is_drag_active(id));
+        assert!(shared.element_store.entries.is_empty(), "session-only");
     }
 
     #[test]

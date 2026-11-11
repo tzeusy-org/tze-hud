@@ -86,6 +86,32 @@ impl Compositor {
         Rect::new(x, y, side, side)
     }
 
+    /// The resize grip's glyph: six dots on a 3×3 grid of the grip square,
+    /// forming a staircase that hugs its `(left, top)` corner (the classic
+    /// window resize grip), each `(x, y, side)`. It always fits the square.
+    pub(super) fn resize_grip_glyph(
+        grip: Rect,
+        (left, top): (bool, bool),
+    ) -> impl Iterator<Item = (f32, f32, f32)> {
+        let cell = grip.width.min(grip.height) / 3.0;
+        let dot = (cell * 0.5).max(1.0).min(cell);
+        let inset = (cell - dot) * 0.5;
+        (0..3_u8)
+            .flat_map(|row| (0..3_u8).map(move |col| (row, col)))
+            // Toward the bottom-right corner: col + row >= 2. Mirror each axis
+            // for a left or top corner.
+            .filter(|(row, col)| row + col >= 2)
+            .map(move |(row, col)| {
+                let c = if left { 2 - col } else { col };
+                let r = if top { 2 - row } else { row };
+                (
+                    grip.x + f32::from(c) * cell + inset,
+                    grip.y + f32::from(r) * cell + inset,
+                    dot,
+                )
+            })
+    }
+
     pub(super) fn collect_drag_handle_entries(
         &self,
         scene: &SceneGraph,
@@ -181,7 +207,21 @@ impl Compositor {
                 resize_grip: None,
             });
             if zone_name.as_str() == PIP_ZONE {
-                let corner = rect_corner_toward(element_bounds_zone, sw * 0.5, sh * 0.5);
+                // The grip faces the display centre, but keeps the corner it
+                // was pressed in while a drag is active: a pip grown across
+                // the centre must not move its grip out from under the pointer.
+                let corner = scene
+                    .is_drag_active(zone_def.id)
+                    .then(|| {
+                        scene
+                            .overlay
+                            .drag_handle_hit_regions
+                            .iter()
+                            .filter(|r| r.element_id == zone_def.id)
+                            .find_map(|r| r.resize_grip)
+                    })
+                    .flatten()
+                    .unwrap_or_else(|| rect_corner_toward(element_bounds_zone, sw * 0.5, sh * 0.5));
                 entries.push(DragHandleEntry {
                     element_id: zone_def.id,
                     element_kind: DragHandleElementKind::Zone,
@@ -299,6 +339,22 @@ impl Compositor {
                 sh,
                 self.gpu_color(base),
             ));
+
+            if let Some(corner) = entry.resize_grip {
+                let grip = Rgba::new(base.r, base.g, base.b, (base.a * 0.9).clamp(0.0, 1.0));
+                for (x, y, side) in Self::resize_grip_glyph(entry.bounds, corner) {
+                    vertices.extend_from_slice(&rect_vertices(
+                        x,
+                        y,
+                        side,
+                        side,
+                        sw,
+                        sh,
+                        self.gpu_color(grip),
+                    ));
+                }
+                continue;
+            }
 
             match entry.style.grip_pattern {
                 DragHandleGripPattern::Dots => {

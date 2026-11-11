@@ -129,6 +129,16 @@ pub struct DeviceDragState {
     /// The element's bounds when the pointer pressed down; a resize grip
     /// scales from these.
     pub start_bounds: tze_hud_scene::Rect,
+    /// For a resize-grip press, the grip's element corner `(left, top)` as
+    /// emitted at press time; frozen for the whole gesture. `None` for a move.
+    pub resize_grip: Option<(bool, bool)>,
+}
+
+impl DeviceDragState {
+    /// Whether this is an activated resize-grip gesture.
+    pub fn is_active_resize(&self) -> bool {
+        self.phase == DragPhase::Activated && self.resize_grip.is_some()
+    }
 }
 
 impl DeviceDragState {
@@ -185,6 +195,7 @@ impl DeviceDragState {
             last_progress: 0.0,
             immediate,
             start_bounds: tze_hud_scene::Rect::new(0.0, 0.0, 0.0, 0.0),
+            resize_grip: None,
         }
     }
 

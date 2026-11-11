@@ -884,7 +884,9 @@ placement: drag an existing zone grip to move the whole zone for this runtime
 session. The shown `pip` zone also has a resize grip in its corner facing the
 display centre (diagonal resize cursor): dragging it scales the zone with its
 width/height ratio pinned and the opposite corner fixed, kept on screen and no
-smaller than the `portal.window.min_*` tokens. A resize is a session placement
+smaller than the `portal.window.min_*` tokens (a pip already below that size
+may keep it, but not shrink further). The grip keeps its corner for the whole
+drag. A resize is a session placement
 like a move, with the same Reset and restart behavior. During notification drag, the border encloses the slots actually
 shown (including the gaps), while the logical zone box and its movement limits
 stay unchanged. Right-click the grip for the labelled Reset to default action;

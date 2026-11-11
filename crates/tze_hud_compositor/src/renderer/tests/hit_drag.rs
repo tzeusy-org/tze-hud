@@ -1708,3 +1708,148 @@ async fn pip_zone_gets_a_resize_grip_in_the_corner_toward_the_centre() {
         );
     }
 }
+
+/// One published pip at `(x_pct, y_pct)` (25%×25% of 1920×1080) with its
+/// drag-handle regions populated.
+fn pip_regions(
+    compositor: &Compositor,
+    scene: &mut SceneGraph,
+    x_pct: f32,
+    y_pct: f32,
+) -> (SceneId, Rect) {
+    let (sw, sh) = (1920.0, 1080.0);
+    let id = SceneId::new();
+    scene.register_zone(ZoneDefinition {
+        id,
+        name: PIP_ZONE.to_string(),
+        description: "pip".to_string(),
+        geometry_policy: GeometryPolicy::Relative {
+            x_pct,
+            y_pct,
+            width_pct: 0.25,
+            height_pct: 0.25,
+        },
+        accepted_media_types: vec![ZoneMediaType::StreamText],
+        rendering_policy: RenderingPolicy::default(),
+        contention_policy: ContentionPolicy::LatestWins,
+        max_publishers: 1,
+        auto_clear_ms: None,
+        layer_attachment: LayerAttachment::Chrome,
+        ephemeral: false,
+    });
+    scene
+        .publish_to_zone(
+            PIP_ZONE,
+            ZoneContent::StreamText("shown".to_string()),
+            "agent-a",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    populate_drag_handles(compositor, scene, sw, sh);
+    (id, Rect::new(x_pct * sw, y_pct * sh, 0.25 * sw, 0.25 * sh))
+}
+
+fn grip_region(scene: &SceneGraph) -> DragHandleHitRegion {
+    scene
+        .overlay
+        .drag_handle_hit_regions
+        .iter()
+        .find(|r| r.resize_grip.is_some())
+        .cloned()
+        .expect("the pip has a grip")
+}
+
+/// In each display quadrant the grip takes the pip corner facing the centre,
+/// its region sits in that corner, and its glyph fits inside the square.
+#[tokio::test]
+async fn pip_grip_takes_the_corner_facing_the_centre_in_every_quadrant() {
+    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    for ((x_pct, y_pct), corner) in [
+        ((0.70, 0.70), (true, true)),   // bottom-right quadrant: grip top-left
+        ((0.05, 0.05), (false, false)), // top-left quadrant: grip bottom-right
+        ((0.70, 0.05), (true, false)),  // top-right quadrant: grip bottom-left
+        ((0.05, 0.70), (false, true)),  // bottom-left quadrant: grip top-right
+    ] {
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        let (_, pip) = pip_regions(&compositor, &mut scene, x_pct, y_pct);
+        let grip = grip_region(&scene);
+        assert_eq!(grip.resize_grip, Some(corner), "pip at {x_pct},{y_pct}");
+        let b = grip.bounds;
+        let (left, top) = corner;
+        assert!(
+            (if left {
+                b.x - pip.x
+            } else {
+                b.x + b.width - (pip.x + pip.width)
+            })
+            .abs()
+                < 0.5
+        );
+        assert!(
+            (if top {
+                b.y - pip.y
+            } else {
+                b.y + b.height - (pip.y + pip.height)
+            })
+            .abs()
+                < 0.5
+        );
+        let dots: Vec<_> = Compositor::resize_grip_glyph(b, corner).collect();
+        assert_eq!(dots.len(), 6);
+        for (x, y, side) in dots {
+            assert!(
+                x >= b.x && y >= b.y && x + side <= b.x + b.width && y + side <= b.y + b.height,
+                "glyph dot ({x},{y},{side}) escapes the grip {b:?}"
+            );
+        }
+        // The staircase hugs the grip's own corner: that corner cell has a
+        // dot, the opposite one has none.
+        let cell = b.width / 3.0;
+        let has_dot_in = |(l, t): (bool, bool)| {
+            let (x0, y0) = (
+                if l { b.x } else { b.x + 2.0 * cell },
+                if t { b.y } else { b.y + 2.0 * cell },
+            );
+            Compositor::resize_grip_glyph(b, corner)
+                .any(|(x, y, _)| x >= x0 && x < x0 + cell && y >= y0 && y < y0 + cell)
+        };
+        assert!(has_dot_in(corner), "corner cell");
+        assert!(!has_dot_in((!left, !top)), "opposite cell");
+    }
+}
+
+/// While its drag is active the grip keeps its emitted corner, even when the
+/// pip's box has moved past the display centre.
+#[tokio::test]
+async fn pip_grip_keeps_its_corner_while_dragging() {
+    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    let mut scene = SceneGraph::new(1920.0, 1080.0);
+    let (id, _) = pip_regions(&compositor, &mut scene, 0.70, 0.70);
+    assert_eq!(grip_region(&scene).resize_grip, Some((true, true)));
+    // Grow the pip up-left past the centre (as a grip resize does).
+    scene.set_zone_placement(
+        id,
+        GeometryPolicy::Relative {
+            x_pct: 0.02,
+            y_pct: 0.02,
+            width_pct: 0.85,
+            height_pct: 0.85,
+        },
+    );
+    scene.set_drag_active(id);
+    populate_drag_handles(&compositor, &mut scene, 1920.0, 1080.0);
+    assert_eq!(
+        grip_region(&scene).resize_grip,
+        Some((true, true)),
+        "frozen"
+    );
+    scene.clear_drag_active(id);
+    populate_drag_handles(&compositor, &mut scene, 1920.0, 1080.0);
+    assert_eq!(
+        grip_region(&scene).resize_grip,
+        Some((false, false)),
+        "after release it faces the centre again"
+    );
+}
