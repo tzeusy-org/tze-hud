@@ -1613,8 +1613,19 @@ def scenario_safe_mode(run: Run) -> None:
 
 
 def scenario_tray(run: Run) -> None:
-    """Windows tray registration/tooltip and idle proof; real native Hide/Show when the icon is exposed."""
+    """Windows tray registration/tooltip, real hide chord, idle proof; real native Hide/Show when the icon is exposed."""
     status = run.expect("tray registered", lambda st: st.get("tray", {}).get("registered") is True)
+    # The hide chord toggles Hide all from whatever app is foreground; the
+    # tray mirrors the result (spec R5.1 S1/S2, informational).
+    if (status.get("hide_hotkey") or {}).get("registered") is True:
+        chord = status["hide_hotkey"]["chord"].lower()
+        for hidden in (True, False):
+            run.key(chord)
+            run.expect("hide chord hides everything" if hidden else "hide chord shows everything",
+                       lambda st: st["tray"].get("all_hidden") is hidden)
+        run.step(f"ok real hide chord {chord}: Hide all and back")
+    else:
+        run.step(f"hide chord not registered: {json.dumps(status.get('hide_hotkey'))}")
     tray = status["tray"]
     tooltip = tray.get("tooltip", "")
     if len(tooltip.splitlines()) != 2 or len(tooltip.encode("utf-16-le")) > 254:
@@ -1784,6 +1795,10 @@ def main(argv: list[str] | None = None) -> int:
     try:
         run.start()
         status = run.status()
+        # Gesture scenarios read desktop pixels: a HUD excluded from capture
+        # would make every pixel check vacuous.
+        if (status.get("capture_exclusion") or {}).get("on"):
+            raise Refused("Hide from screen capture is on; gesture scenarios read desktop pixels")
         run.step(f"owned HUD pid {run.pid} on display {run.display or 'primary'} via {args.injector}")
         results = run_scenarios(run, names)
         unacked = run.smoke.ok("hud_input", {"max_items": 0}).get("remaining", 0)

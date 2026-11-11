@@ -1141,6 +1141,84 @@ pub(super) mod panel_task_tests {
         );
     }
 
+    /// The hide chord (R5.1) makes exactly the Hide all tile's edit from any
+    /// app: with the panel closed it hides everything and the pill shows,
+    /// or shows everything and the pill goes; a partial hide becomes
+    /// everything; with the panel open the tile flips and the panel stays.
+    /// It never opens, closes or pauses anything, and leases stay untouched.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn hide_chord_toggles_hide_all_like_the_tile() {
+        use tze_hud_scene::graph::SurfaceClasses;
+
+        let f = fixture();
+        let scene = Arc::clone(&f.state.shared_state.lock().await.scene);
+        let lease_id = scene.lock().await.grant_lease("agent", 60_000);
+        let hidden = || scene.try_lock().map(|s| s.owner_hidden()).ok();
+        let pill = |f: &Fixture| f.panel.current_closed_notice().map(|n| n.text);
+
+        // S1: nothing hidden, panel closed: everything hidden, the pill shows.
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Hide), |f| {
+            hidden() == Some(SurfaceClasses::ALL) && pill(f).is_some()
+        })
+        .await;
+        assert_eq!(pill(&f).as_deref(), Some("Everything hidden"));
+        assert!(!f.panel.is_open() && !f.paused(), "nothing opens or pauses");
+
+        // S2: everything hidden: everything shows and the pill goes.
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Hide), |f| {
+            hidden() == Some(SurfaceClasses::NONE) && pill(f).is_none()
+        })
+        .await;
+        assert!(!f.panel.is_open() && !f.paused());
+
+        // S3: only widgets hidden (the Show widgets row's state): everything.
+        scene.lock().await.set_owner_hidden(SurfaceClasses {
+            widgets: true,
+            ..SurfaceClasses::NONE
+        });
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Hide), |_| {
+            hidden() == Some(SurfaceClasses::ALL)
+        })
+        .await;
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Hide), |_| {
+            hidden() == Some(SurfaceClasses::NONE)
+        })
+        .await;
+
+        // S4: panel open: the chord flips the tile and the panel stays open.
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Panel), |f| f.panel.is_open())
+            .await;
+        let tile = |f: &Fixture| f.model().map(|m| m.tiles[0].clone());
+        assert_eq!(
+            tile(&f).map(|t| (t.id, t.control)),
+            Some((
+                "visibility.hide_all".to_owned(),
+                tze_hud_compositor::PanelControl::Toggle(false)
+            ))
+        );
+        for on in [true, false] {
+            f.send_and_wait(PanelEvent::Chord(ChordRole::Hide), |f| {
+                tile(f).is_some_and(|t| t.control == tze_hud_compositor::PanelControl::Toggle(on))
+            })
+            .await;
+            assert!(f.panel.is_open(), "the panel stays open");
+            assert_eq!(
+                hidden(),
+                Some(if on {
+                    SurfaceClasses::ALL
+                } else {
+                    SurfaceClasses::NONE
+                })
+            );
+        }
+        assert!(!f.paused());
+        assert_eq!(
+            scene.lock().await.leases[&lease_id].state,
+            LeaseState::Active,
+            "hiding never touches leases"
+        );
+    }
+
     /// Typing searches; input after close is ignored; input that changes
     /// nothing republishes nothing (no wake, so no frame).
     #[tokio::test(flavor = "multi_thread")]
@@ -1161,7 +1239,8 @@ pub(super) mod panel_task_tests {
             [
                 "input.pause_chord",
                 "input.panel_chord",
-                "input.answer_chord"
+                "input.answer_chord",
+                "input.hide_chord"
             ],
             "pairing is off in this fixture, so its chord is not listed"
         );

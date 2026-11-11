@@ -630,6 +630,13 @@ fn safe_mode_hotkey_defaults_overrides_and_rejects_garbage() {
         Some(tze_hud_scene::config::ChordRole::Answer),
         "the owner answer chord is enabled by default"
     );
+    assert_eq!(
+        default
+            .chords
+            .role_of(&tze_hud_scene::config::Hotkey::parse("Ctrl+Shift+F8").unwrap()),
+        Some(tze_hud_scene::config::ChordRole::Hide),
+        "the hide chord is bound by default"
+    );
 
     let custom = parse_ok(&cfg("safe_mode_hotkey = \"Ctrl+Alt+F11\""))
         .freeze()
@@ -653,6 +660,10 @@ fn safe_mode_hotkey_defaults_overrides_and_rejects_garbage() {
     assert_eq!(custom.chords.panel.to_string(), "Ctrl+Alt+F10");
     assert_eq!(custom.chords.pairing.to_string(), "Ctrl+Alt+9");
     assert_eq!(custom.chords.answer.to_string(), "Alt+F8");
+    let custom = parse_ok(&cfg("hide_hotkey = \"Ctrl+Alt+H\""))
+        .freeze()
+        .expect("freeze");
+    assert_eq!(custom.chords.hide.to_string(), "Ctrl+Alt+H");
     let errors = parse_ok(&cfg("answer_hotkey = \"F9\""))
         .freeze()
         .expect_err("answer chord needs a modifier too");
@@ -695,5 +706,26 @@ fn hud_chords_must_be_distinct() {
                 .iter()
                 .any(|e| e.field_path == "runtime.answer_hotkey")
         );
+    }
+    // R5.1 S5: the hide chord is the fifth distinct chord; a clash names both
+    // keys, against a default or an explicit chord.
+    for (runtime, other) in [
+        (
+            "hide_hotkey = \"Ctrl+Shift+F12\"",
+            "runtime.safe_mode_hotkey",
+        ),
+        ("hide_hotkey = \"Ctrl+Shift+F9\"", "runtime.answer_hotkey"),
+        ("panel_hotkey = \"Ctrl+Shift+F8\"", "runtime.panel_hotkey"),
+        (
+            "pairing_hotkey = \"Alt+7\"\nhide_hotkey = \"Alt+7\"",
+            "runtime.pairing_hotkey",
+        ),
+    ] {
+        let errors = parse_ok(&cfg(runtime)).freeze().expect_err("hide clash");
+        let dup = errors
+            .iter()
+            .find(|e| e.field_path == "runtime.hide_hotkey")
+            .unwrap_or_else(|| panic!("{runtime}: clash reported on hide_hotkey"));
+        assert!(dup.hint.contains(other), "{runtime}: {}", dup.hint);
     }
 }

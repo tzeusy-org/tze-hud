@@ -65,6 +65,16 @@ impl Hotkey {
         key: HotkeyKey::Function(9),
     };
 
+    /// Default chord that toggles Hide all from any app. Continues the
+    /// F12..F9 family so every HUD chord lives in one place on the keyboard.
+    pub const DEFAULT_HIDE: Hotkey = Hotkey {
+        ctrl: true,
+        shift: true,
+        alt: false,
+        win: false,
+        key: HotkeyKey::Function(8),
+    };
+
     /// Parse a chord such as `"Ctrl+Shift+F12"` (case-insensitive, `+`-separated,
     /// modifiers `Ctrl|Shift|Alt|Win`, any order).
     pub fn parse(s: &str) -> Result<Hotkey, HotkeyParseError> {
@@ -173,14 +183,17 @@ pub enum ChordRole {
     Pairing,
     /// Focus the newest unanswered callback card (`[runtime].answer_hotkey`).
     Answer,
+    /// Toggle Hide all without opening the panel (`[runtime].hide_hotkey`).
+    Hide,
 }
 
 impl ChordRole {
-    pub const ALL: [ChordRole; 4] = [
+    pub const ALL: [ChordRole; 5] = [
         ChordRole::Pause,
         ChordRole::Panel,
         ChordRole::Pairing,
         ChordRole::Answer,
+        ChordRole::Hide,
     ];
 
     /// The `[runtime]` key that configures this chord.
@@ -190,6 +203,7 @@ impl ChordRole {
             ChordRole::Panel => "panel_hotkey",
             ChordRole::Pairing => "pairing_hotkey",
             ChordRole::Answer => "answer_hotkey",
+            ChordRole::Hide => "hide_hotkey",
         }
     }
 
@@ -199,6 +213,7 @@ impl ChordRole {
             ChordRole::Panel => Hotkey::DEFAULT_PANEL,
             ChordRole::Pairing => Hotkey::DEFAULT_PAIRING,
             ChordRole::Answer => Hotkey::DEFAULT_ANSWER,
+            ChordRole::Hide => Hotkey::DEFAULT_HIDE,
         }
     }
 }
@@ -210,6 +225,7 @@ pub struct HudChords {
     pub panel: Hotkey,
     pub pairing: Hotkey,
     pub answer: Hotkey,
+    pub hide: Hotkey,
 }
 
 impl Default for HudChords {
@@ -219,6 +235,7 @@ impl Default for HudChords {
             panel: Hotkey::DEFAULT_PANEL,
             pairing: Hotkey::DEFAULT_PAIRING,
             answer: Hotkey::DEFAULT_ANSWER,
+            hide: Hotkey::DEFAULT_HIDE,
         }
     }
 }
@@ -230,6 +247,7 @@ impl HudChords {
             ChordRole::Panel => self.panel,
             ChordRole::Pairing => self.pairing,
             ChordRole::Answer => self.answer,
+            ChordRole::Hide => self.hide,
         }
     }
 
@@ -239,6 +257,7 @@ impl HudChords {
             ChordRole::Panel => self.panel = hotkey,
             ChordRole::Pairing => self.pairing = hotkey,
             ChordRole::Answer => self.answer = hotkey,
+            ChordRole::Hide => self.hide = hotkey,
         }
     }
 
@@ -280,6 +299,8 @@ mod tests {
         assert_eq!(chords.panel.to_string(), "Ctrl+Shift+F11");
         assert_eq!(chords.pairing.to_string(), "Ctrl+Shift+F10");
         assert_eq!(chords.answer.to_string(), "Ctrl+Shift+F9");
+        assert_eq!(chords.hide.to_string(), "Ctrl+Shift+F8");
+        assert_eq!(ChordRole::Hide.config_key(), "hide_hotkey");
         for role in ChordRole::ALL {
             assert_eq!(chords.role_of(&chords.get(role)), Some(role));
         }

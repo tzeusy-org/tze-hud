@@ -253,6 +253,7 @@ impl ConfigLoader for TzeHudConfig {
             panel: chord(ChordRole::Panel),
             pairing: chord(ChordRole::Pairing),
             answer: chord(ChordRole::Answer),
+            hide: chord(ChordRole::Hide),
         };
 
         let source_path = None; // Set by caller after file load.
@@ -506,6 +507,7 @@ fn raw_chord(runtime: &crate::raw::RawRuntime, role: ChordRole) -> Option<&str> 
         ChordRole::Panel => runtime.panel_hotkey.as_deref(),
         ChordRole::Pairing => runtime.pairing_hotkey.as_deref(),
         ChordRole::Answer => runtime.answer_hotkey.as_deref(),
+        ChordRole::Hide => runtime.hide_hotkey.as_deref(),
     }
 }
 

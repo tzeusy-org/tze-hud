@@ -15,6 +15,7 @@ fn base_id(role: ChordRole) -> i32 {
         ChordRole::Panel => 2,
         ChordRole::Pairing => 3,
         ChordRole::Answer => 4,
+        ChordRole::Hide => 5,
     }
 }
 
@@ -136,6 +137,8 @@ mod tests {
             (12, ChordRole::Panel),
             (13, ChordRole::Pairing),
             (14, ChordRole::Answer),
+            (5, ChordRole::Hide),
+            (15, ChordRole::Hide),
         ] {
             assert_eq!(Bindings::role_for_id(id), Some(role));
         }

@@ -193,6 +193,7 @@ impl WindowedRuntimeState {
             global_tokens: HashMap::new(),
             appearance: None,
             tokens_seen: 0,
+            capture_seen: 0,
             _config_watch: None,
             element_repositioned_tx: None,
             input_event_tx: None,

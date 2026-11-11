@@ -374,10 +374,10 @@ pub(crate) fn default_sections(deps: &ControlPanelDeps) -> Vec<Box<dyn Section>>
             deps.connect.is_some(),
             deps.runtime.clone(),
         )),
-        Box::new(sections::VisibilitySection::new(
-            Arc::clone(&deps.scene),
-            deps.render_wake.clone(),
-        )),
+        Box::new(
+            sections::VisibilitySection::new(Arc::clone(&deps.scene), deps.render_wake.clone())
+                .with_capture(deps.runtime.clone()),
+        ),
     ];
     if let Some(appearance) = &deps.appearance {
         sections.push(Box::new(sections::AppearanceSection::new(
@@ -683,6 +683,12 @@ impl PanelTask {
     }
 
     async fn on_chord(&mut self, role: ChordRole) {
+        if role == ChordRole::Hide {
+            // Exactly the Hide all tile's edit: hide everything unless it all
+            // is hidden, then show everything. Panel and pause stay as they are.
+            self.toggle(sections::VisibilitySection::HIDE_ALL).await;
+            return;
+        }
         let paused = self.deps.pause.is_paused();
         let outcome = state::on_chord(self.open.as_ref().map(|o| o.opened_by), paused, role);
         tracing::info!(chord = role.config_key(), ?outcome, "control panel: chord");
@@ -704,6 +710,21 @@ impl PanelTask {
         }
         if outcome.connect {
             self.open_connect();
+        }
+    }
+
+    /// Flip a toggle row the way pressing it does (`Set(!on)` from the row's
+    /// current state), whether or not the panel is open.
+    async fn toggle(&mut self, row: &str) {
+        let section_id = row.split('.').next().unwrap_or_default();
+        let Some(section) = self.sections.iter().find(|s| s.id() == section_id) else {
+            tracing::warn!(row, "control panel: no section owns this row");
+            return;
+        };
+        let current = section.rows().await.into_iter().find(|r| r.id == row);
+        match current.map(|r| r.control) {
+            Some(row::Control::Toggle(on)) => self.apply(row, Edit::Set(!on)).await,
+            other => tracing::warn!(row, ?other, "control panel: not a toggle row"),
         }
     }
 

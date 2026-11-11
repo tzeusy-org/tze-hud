@@ -78,6 +78,11 @@ impl HotkeyStatus {
                 "focuses the newest question",
                 "use the card buttons",
             ),
+            ChordRole::Hide => (
+                "hide",
+                "toggles Hide all",
+                "use Hide all in the panel or tray",
+            ),
         };
         match self {
             Self::NotApplicable => None,
@@ -131,6 +136,7 @@ static HOTKEYS: Mutex<[HotkeyStatus; ChordRole::ALL.len()]> = Mutex::new([
     HotkeyStatus::NotApplicable,
     HotkeyStatus::NotApplicable,
     HotkeyStatus::NotApplicable,
+    HotkeyStatus::NotApplicable,
 ]);
 
 fn slot(role: ChordRole) -> usize {
@@ -139,6 +145,7 @@ fn slot(role: ChordRole) -> usize {
         ChordRole::Panel => 1,
         ChordRole::Pairing => 2,
         ChordRole::Answer => 3,
+        ChordRole::Hide => 4,
     }
 }
 
@@ -497,6 +504,9 @@ impl StatusSource {
             "panel_hotkey": hotkey(ChordRole::Panel).to_json_for(ChordRole::Panel),
             "pairing_hotkey": hotkey(ChordRole::Pairing).to_json_for(ChordRole::Pairing),
             "answer_hotkey": hotkey(ChordRole::Answer).to_json_for(ChordRole::Answer),
+            "hide_hotkey": hotkey(ChordRole::Hide).to_json_for(ChordRole::Hide),
+            // Hide from screen capture: null off Windows.
+            "capture_exclusion": crate::capture_exclusion::status(),
             "displays": displays,
             "unplaced_zones": unplaced_zones,
             "frames_presented": self.presents.as_ref().map(|c| c.snapshot().presents),
@@ -595,10 +605,26 @@ mod tests {
             failed().to_json_for(ChordRole::Pause)["error"],
             "already in use; use the tray icon's Pause"
         );
+        // R5.1 S6: a refused hide chord names the panel and tray paths.
+        let hide = HotkeyStatus::Failed {
+            chord: "Ctrl+Shift+F8".into(),
+            reason: "already in use".into(),
+        };
+        let line = hide.banner_line(ChordRole::Hide).unwrap();
+        assert!(
+            line.contains("hide") && line.contains("NOT registered"),
+            "{line}"
+        );
+        assert!(line.contains("use Hide all in the panel or tray"), "{line}");
+        assert_eq!(
+            hide.to_json_for(ChordRole::Hide),
+            json!({"chord": "Ctrl+Shift+F8", "registered": false, "error": "already in use"})
+        );
         #[cfg(not(target_os = "windows"))]
         {
             assert_eq!(tray_status(), Value::Null);
             assert!(!session_locked());
+            assert_eq!(crate::capture_exclusion::status(), Value::Null);
         }
     }
 

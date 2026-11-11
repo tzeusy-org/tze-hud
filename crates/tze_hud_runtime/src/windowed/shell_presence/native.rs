@@ -287,6 +287,15 @@ impl Host {
                 .inspect_err(|e| tracing::warn!(%e, "Windows session notifications unavailable"))
                 .is_ok();
         let session = initial_session().unwrap_or_default();
+        if let Some(capture) = crate::capture_exclusion::global() {
+            // SAFETY: a plain system-metrics query.
+            let remote = unsafe {
+                windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(
+                    windows::Win32::UI::WindowsAndMessaging::SM_REMOTESESSION,
+                )
+            } != 0;
+            capture.set_remote(remote);
+        }
         bridge
             .session_locked
             .store(session.held(), Ordering::Release);
@@ -414,6 +423,14 @@ impl Host {
                 let _ = unsafe { DestroyWindow(self.hwnd) };
             }
             WM_WTSSESSION_CHANGE => {
+                if let Some(capture) = crate::capture_exclusion::global() {
+                    // A remote viewer always sees the HUD (spec R5.2 S7).
+                    let remote = crate::capture_exclusion::remote_after(
+                        wparam.0 as u32,
+                        capture.is_remote(),
+                    );
+                    capture.set_remote(remote);
+                }
                 let mut session = self.session.get();
                 session.event(wparam.0 as u32);
                 self.session.set(session);

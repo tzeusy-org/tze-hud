@@ -70,6 +70,7 @@ pub(crate) fn label(role: ChordRole) -> &'static str {
         ChordRole::Panel => "panel chord",
         ChordRole::Pairing => "pairing chord",
         ChordRole::Answer => "answer chord",
+        ChordRole::Hide => "hide chord",
     }
 }
 
@@ -98,9 +99,9 @@ mod tests {
         let parse = |s| Hotkey::parse(s).unwrap();
 
         chords
-            .rebind(ChordRole::Answer, parse("Ctrl+Shift+F8"))
+            .rebind(ChordRole::Answer, parse("Ctrl+Shift+F7"))
             .unwrap();
-        assert_eq!(chords.get().answer.to_string(), "Ctrl+Shift+F8");
+        assert_eq!(chords.get().answer.to_string(), "Ctrl+Shift+F7");
         let err = chords
             .rebind(ChordRole::Answer, parse("Ctrl+Shift+F12"))
             .unwrap_err();
@@ -109,19 +110,19 @@ mod tests {
             .rebind(ChordRole::Answer, parse("Ctrl+Alt+F1"))
             .unwrap_err();
         assert!(err.contains("Another program"));
-        assert_eq!(chords.get().answer.to_string(), "Ctrl+Shift+F8", "kept");
+        assert_eq!(chords.get().answer.to_string(), "Ctrl+Shift+F7", "kept");
         chords
-            .rebind(ChordRole::Answer, parse("Ctrl+Shift+F8"))
+            .rebind(ChordRole::Answer, parse("Ctrl+Shift+F7"))
             .unwrap();
         assert_eq!(
             *calls.lock().unwrap(),
-            ["Answer Ctrl+Shift+F8", "Answer Ctrl+Alt+F1"]
+            ["Answer Ctrl+Shift+F7", "Answer Ctrl+Alt+F1"]
         );
 
         let fixed = ChordControl::fixed(HudChords::default());
         assert!(
             fixed
-                .rebind(ChordRole::Answer, parse("Ctrl+Shift+F8"))
+                .rebind(ChordRole::Answer, parse("Ctrl+Shift+F7"))
                 .is_err()
         );
     }

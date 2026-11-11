@@ -36,6 +36,7 @@ impl InputSection {
             "input.panel_chord" => ChordRole::Panel,
             "input.pairing_chord" => ChordRole::Pairing,
             "input.answer_chord" => ChordRole::Answer,
+            "input.hide_chord" => ChordRole::Hide,
             _ => return None,
         })
     }
@@ -101,6 +102,20 @@ impl Section for InputSection {
                                 "notification",
                             ],
                         ),
+                        ChordRole::Hide => (
+                            "input.hide_chord",
+                            "Hide chord",
+                            "Hides or shows every agent surface from any app",
+                            &[
+                                "hotkey",
+                                "shortcut",
+                                "hide_hotkey",
+                                "hide all",
+                                "presenting",
+                                "screen share",
+                                "visitor",
+                            ],
+                        ),
                     };
                     let status = hotkey(role);
                     let chord = self.chords.get().get(role);
@@ -142,7 +157,7 @@ impl Section for InputSection {
             };
             let new = match &edit {
                 Edit::Text(text) => Hotkey::parse(text.trim())
-                    .map_err(|e| format!("Type a chord like Ctrl+Shift+F8: {e}"))?,
+                    .map_err(|e| format!("Type a chord like Ctrl+Shift+F7: {e}"))?,
                 Edit::Reset => HudChords::default().get(role),
                 // Enter without typing: nothing to change.
                 Edit::Activate => return Ok(()),
@@ -192,7 +207,7 @@ mod tests {
             assert!(!row.reset);
 
             section
-                .apply(id, Edit::Text("Ctrl+Shift+F8".into()))
+                .apply(id, Edit::Text("Ctrl+Shift+F7".into()))
                 .await
                 .unwrap();
             let row = row_for(section.rows().await);
@@ -209,7 +224,7 @@ mod tests {
             // Without a config file a change lasts the session.
             let unsaved = InputSection::new(chords.clone(), false, None);
             unsaved
-                .apply(id, Edit::Text("Ctrl+Shift+F8".into()))
+                .apply(id, Edit::Text("Ctrl+Shift+F7".into()))
                 .await
                 .unwrap();
             let row = row_for(unsaved.rows().await);
