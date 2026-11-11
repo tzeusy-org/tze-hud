@@ -333,7 +333,7 @@ class Run:
             self.hud = subprocess.Popen(
                 [str(self.exe), "--config", str(config), "--window-mode", self.window_mode,
                  *dimensions, "--grpc-port", "0", "--mcp-port", str(self.port)],
-                # The runtime writes a relative diagnostic file on Linux; keep it out of the repo.
+                # Run from the scratch HOME for hygiene: nothing the HUD writes lands in the repo.
                 env=env, cwd=self.home, stdout=log, stderr=subprocess.STDOUT,
             )
         self.owned_pids.append(self.hud.pid)

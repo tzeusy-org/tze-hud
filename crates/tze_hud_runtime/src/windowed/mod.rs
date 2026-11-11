@@ -1344,7 +1344,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         // requested cfg.window.width/height.  Using the configured values
         // directly causes wgpu to configure the swapchain at a size that
         // doesn't match the surface handle's drawable area, which triggers a
-        // validation panic before `surface.configure()` can write alpha_diag.txt.
+        // validation panic in `surface.configure()`.
         //
         // `window.inner_size()` returns `PhysicalSize<u32>` — physical pixels —
         // when per-monitor DPI awareness is active (guaranteed by the embedded
@@ -1386,21 +1386,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 }
             }
         }
-        // Diagnostic: write surface resolution so remote operators can verify.
-        let _ = std::fs::write(
-            "C:\\tze_hud\\logs\\surface_diag.txt",
-            format!(
-                "configured={}x{} inner={}x{} scale={} surface={}x{}\n",
-                cfg.window.width,
-                cfg.window.height,
-                actual_size.width,
-                actual_size.height,
-                scale,
-                surface_width,
-                surface_height,
-            ),
-        );
-
         // ── Create compositor + surface (async in a blocking context) ──────
         // We need an async context to call Compositor::new_windowed.
         // Use a temporary single-thread Tokio runtime here — this runs only
