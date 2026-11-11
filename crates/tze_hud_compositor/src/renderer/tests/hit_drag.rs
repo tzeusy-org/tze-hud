@@ -1796,24 +1796,39 @@ async fn pip_grip_takes_the_corner_facing_the_centre_in_every_quadrant() {
             .abs()
                 < 0.5
         );
-        let dots: Vec<_> = Compositor::resize_grip_glyph(b, corner).collect();
-        assert_eq!(dots.len(), 6);
-        for (x, y, side) in dots {
+        // The mark is the portal tile grip's, sized from its token and
+        // clamped to the grip square, exactly as the render pass draws it.
+        let side = crate::renderer::token_colors::resolve_resize_grip_tokens(
+            &std::collections::HashMap::new(),
+        )
+        .size_px
+        .min(b.width)
+        .min(b.height);
+        let dots = Compositor::resize_grip_dot_rects(b, side, corner);
+        for d in dots {
+            assert!(d.width > 0.0, "every dot is drawn");
             assert!(
-                x >= b.x && y >= b.y && x + side <= b.x + b.width && y + side <= b.y + b.height,
-                "glyph dot ({x},{y},{side}) escapes the grip {b:?}"
+                d.x >= b.x
+                    && d.y >= b.y
+                    && d.x + d.width <= b.x + b.width
+                    && d.y + d.height <= b.y + b.height,
+                "glyph dot {d:?} escapes the grip {b:?}"
             );
         }
         // The staircase hugs the grip's own corner: that corner cell has a
         // dot, the opposite one has none.
-        let cell = b.width / 3.0;
+        let (gx, gy) = (
+            if left { b.x } else { b.x + b.width - side },
+            if top { b.y } else { b.y + b.height - side },
+        );
+        let cell = side / 3.0;
         let has_dot_in = |(l, t): (bool, bool)| {
             let (x0, y0) = (
-                if l { b.x } else { b.x + 2.0 * cell },
-                if t { b.y } else { b.y + 2.0 * cell },
+                if l { gx } else { gx + 2.0 * cell },
+                if t { gy } else { gy + 2.0 * cell },
             );
-            Compositor::resize_grip_glyph(b, corner)
-                .any(|(x, y, _)| x >= x0 && x < x0 + cell && y >= y0 && y < y0 + cell)
+            dots.iter()
+                .any(|d| d.x >= x0 && d.x < x0 + cell && d.y >= y0 && d.y < y0 + cell)
         };
         assert!(has_dot_in(corner), "corner cell");
         assert!(!has_dot_in((!left, !top)), "opposite cell");

@@ -24,6 +24,7 @@ use tze_hud_scene::types::*;
 
 use super::Compositor;
 use super::draw_cmds::DragHandleEntry;
+use super::token_colors::resolve_resize_grip_tokens;
 use crate::pipeline::{RectVertex, RoundedRectDrawCmd, rect_vertices};
 
 impl Compositor {
@@ -84,32 +85,6 @@ impl Compositor {
             element_bounds.y + element_bounds.height - side
         };
         Rect::new(x, y, side, side)
-    }
-
-    /// The resize grip's glyph: six dots on a 3×3 grid of the grip square,
-    /// forming a staircase that hugs its `(left, top)` corner (the classic
-    /// window resize grip), each `(x, y, side)`. It always fits the square.
-    pub(super) fn resize_grip_glyph(
-        grip: Rect,
-        (left, top): (bool, bool),
-    ) -> impl Iterator<Item = (f32, f32, f32)> {
-        let cell = grip.width.min(grip.height) / 3.0;
-        let dot = (cell * 0.5).max(1.0).min(cell);
-        let inset = (cell - dot) * 0.5;
-        (0..3_u8)
-            .flat_map(|row| (0..3_u8).map(move |col| (row, col)))
-            // Toward the bottom-right corner: col + row >= 2. Mirror each axis
-            // for a left or top corner.
-            .filter(|(row, col)| row + col >= 2)
-            .map(move |(row, col)| {
-                let c = if left { 2 - col } else { col };
-                let r = if top { 2 - row } else { row };
-                (
-                    grip.x + f32::from(c) * cell + inset,
-                    grip.y + f32::from(r) * cell + inset,
-                    dot,
-                )
-            })
     }
 
     pub(super) fn collect_drag_handle_entries(
@@ -210,6 +185,8 @@ impl Compositor {
                 // The grip faces the display centre, but keeps the corner it
                 // was pressed in while a drag is active: a pip grown across
                 // the centre must not move its grip out from under the pointer.
+                // A plain move freezes it too; intended, as the runtime pins
+                // the grip's own corner from the press.
                 let corner = scene
                     .is_drag_active(zone_def.id)
                     .then(|| {
@@ -328,6 +305,28 @@ impl Compositor {
                 continue;
             }
 
+            // The pip's resize grip draws exactly like a portal tile's: the
+            // `portal.window.resize_grip.*` dot mark (no fill), in its corner,
+            // hover-tinted while hovered, pressed or dragging.
+            if let Some(corner) = entry.resize_grip {
+                let tokens = resolve_resize_grip_tokens(&self.token_map);
+                let side = tokens
+                    .size_px
+                    .min(entry.bounds.width)
+                    .min(entry.bounds.height);
+                let color = self.gpu_color_raw(
+                    tokens.mark_color(local_state.hovered || local_state.pressed || is_active_drag),
+                );
+                for dot in Self::resize_grip_dot_rects(entry.bounds, side, corner) {
+                    if dot.width > 0.0 {
+                        vertices.extend_from_slice(&rect_vertices(
+                            dot.x, dot.y, dot.width, dot.height, sw, sh, color,
+                        ));
+                    }
+                }
+                continue;
+            }
+
             let mut base = entry.style.color;
             base.a = (base.a * opacity).clamp(0.0, 1.0);
             vertices.extend_from_slice(&rect_vertices(
@@ -339,22 +338,6 @@ impl Compositor {
                 sh,
                 self.gpu_color(base),
             ));
-
-            if let Some(corner) = entry.resize_grip {
-                let grip = Rgba::new(base.r, base.g, base.b, (base.a * 0.9).clamp(0.0, 1.0));
-                for (x, y, side) in Self::resize_grip_glyph(entry.bounds, corner) {
-                    vertices.extend_from_slice(&rect_vertices(
-                        x,
-                        y,
-                        side,
-                        side,
-                        sw,
-                        sh,
-                        self.gpu_color(grip),
-                    ));
-                }
-                continue;
-            }
 
             match entry.style.grip_pattern {
                 DragHandleGripPattern::Dots => {
