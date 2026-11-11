@@ -500,6 +500,8 @@ struct WindowedRuntimeState {
     appearance: Option<Arc<crate::appearance::Appearance>>,
     /// The `appearance` generation `global_tokens` reflects.
     tokens_seen: u64,
+    /// Last capture-exclusion change applied to the overlay windows.
+    capture_seen: u64,
     /// Watches the config for `[design_tokens]` edits while it lives.
     _config_watch: Option<crate::appearance::watch::ConfigWatch>,
     /// Broadcast sender for `ElementRepositionedEvent`.
@@ -1013,6 +1015,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         self.sync_panel_focus();
         self.sync_answer_focus();
         self.sync_design_tokens();
+        self.sync_capture_exclusion();
         if displays::take_dirty(&self.state.displays_dirty) {
             self.sync_displays(event_loop);
         }
@@ -1275,6 +1278,11 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             self.state.wake.main_work_notifier(),
             self.state.effective_mode == WindowMode::Overlay,
         );
+        // Before the first present: a saved "Hide from screen capture".
+        self.state
+            .live
+            .capture
+            .apply_new(0, &window, displays::set_capture_affinity);
 
         // In overlay mode, initialise cursor hittest to false so all pointer
         // events pass through to the desktop until the cursor enters a
@@ -2816,9 +2824,21 @@ impl WindowedRuntime {
         let active_tab_mirror = Arc::new(std::sync::Mutex::new(None));
         let chrome_state = Arc::new(std::sync::RwLock::new(crate::shell::ChromeState::new()));
         let system_card = crate::shell::system_card::SystemCardHandle::new(render_wake.clone());
+        // Hide from screen capture: the saved switch, applied by the main
+        // thread to every overlay before its first present.
+        let capture = Arc::new(crate::capture_exclusion::CaptureExclusion::for_platform(
+            cfg.config_toml
+                .as_deref()
+                .and_then(tze_hud_config::runtime_section)
+                .and_then(|r| r.exclude_from_capture)
+                .unwrap_or(false),
+            wake.main_work_notifier(),
+        ));
+        crate::capture_exclusion::install(Arc::clone(&capture));
         let live = Arc::new(
             crate::launch::LiveSettings::new(cfg.target_fps, cfg.debug_zones, render_wake.clone())
-                .with_answer_window(cfg.answer_window_ms),
+                .with_answer_window(cfg.answer_window_ms)
+                .with_capture(capture),
         );
         let appearance = Arc::new(crate::appearance::Appearance::for_startup(
             raw_config_for_startup.as_ref(),
@@ -3191,10 +3211,20 @@ impl WindowedRuntime {
             let answer_wake = wake.main_work_notifier();
             // Without pairing (MCP disabled) its chord would only take the
             // key from other apps.
+            // A role the config left unbound registers nothing and says why.
             let roles = tze_hud_scene::config::ChordRole::ALL
                 .into_iter()
                 .filter(|role| {
                     pairing.is_some() || *role != tze_hud_scene::config::ChordRole::Pairing
+                })
+                .filter(|role| {
+                    let unbound =
+                        crate::operator::status::unbound_status(&runtime_context.chords, *role);
+                    let bound = unbound.is_none();
+                    if let Some(status) = unbound {
+                        crate::operator::status::set_hotkey(*role, status);
+                    }
+                    bound
                 })
                 .collect();
             let (outcomes, thread) =
@@ -3308,6 +3338,7 @@ impl WindowedRuntime {
             global_tokens: startup_compositor_tokens,
             appearance: Some(appearance),
             tokens_seen: 0,
+            capture_seen: 0,
             _config_watch: config_watch,
             element_repositioned_tx,
             input_event_tx,

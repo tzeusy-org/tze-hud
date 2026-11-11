@@ -339,6 +339,7 @@ pub enum RuntimeUpdate {
     AnswerWindowMs(Option<u32>),
     LogLevel(Option<String>),
     DebugZones(Option<bool>),
+    ExcludeFromCapture(Option<bool>),
     Hotkey(ChordRole, Option<String>),
 }
 
@@ -352,6 +353,7 @@ impl RuntimeUpdate {
             Self::AnswerWindowMs(_) => "answer_window_ms",
             Self::LogLevel(_) => "log_level",
             Self::DebugZones(_) => "debug_zones",
+            Self::ExcludeFromCapture(_) => "exclude_from_capture",
             Self::Hotkey(role, _) => role.config_key(),
         }
     }
@@ -361,7 +363,7 @@ impl RuntimeUpdate {
             Self::McpPort(v) | Self::GrpcPort(v) => v.map(|p| Value::from(i64::from(p))),
             Self::Fps(v) | Self::AnswerWindowMs(v) => v.map(|f| Value::from(i64::from(f))),
             Self::LogLevel(v) | Self::Hotkey(_, v) => v.as_deref().map(Value::from),
-            Self::DebugZones(v) => v.map(Value::from),
+            Self::DebugZones(v) | Self::ExcludeFromCapture(v) => v.map(Value::from),
         }
     }
 }
@@ -761,6 +763,8 @@ mod tests {
                 RuntimeUpdate::DebugZones(Some(true)),
                 RuntimeUpdate::Hotkey(ChordRole::Panel, Some("Ctrl+Alt+F9".into())),
                 RuntimeUpdate::Hotkey(ChordRole::Answer, Some("Alt+F8".into())),
+                RuntimeUpdate::Hotkey(ChordRole::Hide, Some("Ctrl+Alt+H".into())),
+                RuntimeUpdate::ExcludeFromCapture(Some(true)),
             ],
         )
         .unwrap();
@@ -781,6 +785,9 @@ mod tests {
         assert_eq!(runtime.debug_zones, Some(true));
         assert_eq!(runtime.panel_hotkey.as_deref(), Some("Ctrl+Alt+F9"));
         assert_eq!(runtime.answer_hotkey.as_deref(), Some("Alt+F8"));
+        assert_eq!(runtime.hide_hotkey.as_deref(), Some("Ctrl+Alt+H"));
+        assert_eq!(runtime.exclude_from_capture, Some(true));
+        assert!(got.contains("exclude_from_capture = true"), "{got}");
 
         set_runtime(
             &path,
@@ -792,6 +799,8 @@ mod tests {
                 RuntimeUpdate::DebugZones(None),
                 RuntimeUpdate::Hotkey(ChordRole::Panel, None),
                 RuntimeUpdate::Hotkey(ChordRole::Answer, None),
+                RuntimeUpdate::Hotkey(ChordRole::Hide, None),
+                RuntimeUpdate::ExcludeFromCapture(None),
             ],
         )
         .unwrap();
@@ -836,6 +845,10 @@ mod tests {
             (
                 RuntimeUpdate::Hotkey(ChordRole::Answer, Some("Ctrl+Shift+F11".into())),
                 "runtime.answer_hotkey",
+            ),
+            (
+                RuntimeUpdate::Hotkey(ChordRole::Hide, Some("Ctrl+Shift+F12".into())),
+                "runtime.hide_hotkey",
             ),
         ] {
             match set_runtime(&path, &[bad.clone()]) {

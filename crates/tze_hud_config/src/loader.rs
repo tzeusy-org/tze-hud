@@ -240,20 +240,23 @@ impl ConfigLoader for TzeHudConfig {
             .filter_map(|t| t.name.clone())
             .collect();
 
-        let chord = |role: ChordRole| {
-            self.raw
-                .runtime
-                .as_ref()
-                .and_then(|r| raw_chord(r, role))
-                .map(|c| Hotkey::parse(c).expect("validated chord parses"))
-                .unwrap_or(role.default_chord())
-        };
-        let chords = HudChords {
-            pause: chord(ChordRole::Pause),
-            panel: chord(ChordRole::Panel),
-            pairing: chord(ChordRole::Pairing),
-            answer: chord(ChordRole::Answer),
-        };
+        let mut chords = HudChords::default();
+        if let Some(runtime) = &self.raw.runtime {
+            for role in ChordRole::ALL {
+                if let Some(c) = raw_chord(runtime, role) {
+                    chords.set(role, Hotkey::parse(c).expect("validated chord parses"));
+                }
+            }
+            for (role, owner) in shadowed_defaults(runtime) {
+                tracing::warn!(
+                    chord = %role.default_chord(),
+                    unbound = role.config_key(),
+                    taken_by = owner.config_key(),
+                    "default chord is another chord's explicit value; leaving it unbound"
+                );
+                chords.unbind(role);
+            }
+        }
 
         let source_path = None; // Set by caller after file load.
 
@@ -416,10 +419,14 @@ pub const DEFAULT_FPS: u32 = 60;
 /// ports differ, fps and log level are in range.
 pub(crate) fn validate_runtime(runtime: &crate::raw::RawRuntime, errors: &mut Vec<ConfigError>) {
     // Chords parse and are distinct.
+    // A default that an explicit chord took is unbound, not a clash.
+    let shadowed = shadowed_defaults(runtime);
     let mut seen: Vec<(Hotkey, ChordRole)> = Vec::new();
     for role in ChordRole::ALL {
         let Some(chord) = raw_chord(runtime, role) else {
-            seen.push((role.default_chord(), role));
+            if !shadowed.iter().any(|(r, _)| *r == role) {
+                seen.push((role.default_chord(), role));
+            }
             continue;
         };
         match Hotkey::parse(chord) {
@@ -499,6 +506,26 @@ pub(crate) fn validate_runtime(runtime: &crate::raw::RawRuntime, errors: &mut Ve
 
 // ─── Unit tests ───────────────────────────────────────────────────────────────
 
+/// Roles with no chord set whose default chord another role sets
+/// explicitly, each with that role. They stay unbound rather than failing
+/// the config, so a chord picked before a newer default existed (say
+/// `answer_hotkey = "Ctrl+Shift+F8"`, which the Input card once suggested,
+/// before the hide chord) keeps the config loading. Only the hide chord's
+/// default is that new; every other clash stays an error, so the pause
+/// chord is never silently unbound.
+pub(crate) fn shadowed_defaults(runtime: &crate::raw::RawRuntime) -> Vec<(ChordRole, ChordRole)> {
+    [ChordRole::Hide]
+        .into_iter()
+        .filter(|role| raw_chord(runtime, *role).is_none())
+        .filter_map(|role| {
+            ChordRole::ALL.into_iter().find_map(|owner| {
+                let chord = Hotkey::parse(raw_chord(runtime, owner)?).ok()?;
+                (chord == role.default_chord()).then_some((role, owner))
+            })
+        })
+        .collect()
+}
+
 /// The configured chord string for `role`, if set.
 fn raw_chord(runtime: &crate::raw::RawRuntime, role: ChordRole) -> Option<&str> {
     match role {
@@ -506,6 +533,7 @@ fn raw_chord(runtime: &crate::raw::RawRuntime, role: ChordRole) -> Option<&str> 
         ChordRole::Panel => runtime.panel_hotkey.as_deref(),
         ChordRole::Pairing => runtime.pairing_hotkey.as_deref(),
         ChordRole::Answer => runtime.answer_hotkey.as_deref(),
+        ChordRole::Hide => runtime.hide_hotkey.as_deref(),
     }
 }
 

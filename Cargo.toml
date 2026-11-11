@@ -131,6 +131,8 @@ windows = { version = "0.58", features = [
     "Win32_System_Power",
     "Win32_System_RemoteDesktop",
     "Win32_System_SystemServices",
+    # RtlGetVersion: the real build number for the capture-exclusion floor.
+    "Wdk_System_SystemServices",
     # Windows Firewall policy read (firewall.rs): INetFwPolicy2 over COM.
     "Win32_NetworkManagement_WindowsFirewall",
     # Event-driven late Tailscale address discovery (both families).

@@ -354,7 +354,8 @@ class WindowsGuardTests(unittest.TestCase):
                     selected = scenarios.call_args.args[1]
                     self.assertEqual("overlay-pointer" in selected, mode == "overlay")
                     self.assertEqual("tray" in selected, mode == "overlay")
-                    self.assertEqual(len(selected), 2 if mode == "overlay" else 22)
+                    self.assertEqual(len(selected), 2 if mode == "overlay" else 23)
+                    self.assertEqual(selected[-1] == "restart", mode == "fullscreen")
             for mode, scenario in (("fullscreen", "overlay-pointer"), ("overlay", "composer")):
                 with mock.patch.object(g, "WINDOWS", True), contextlib.redirect_stderr(io.StringIO()), \
                         self.assertRaises(SystemExit) as failure:
@@ -461,6 +462,43 @@ class TargetTests(unittest.TestCase):
         moved = {**STATUS, "displays": [{"x": -1920, "y": 0}]}
         with self.assertRaisesRegex(LookupError, "origin"):
             g.resolve_target(moved, "portal:demo/output")
+
+    def test_colour_pixels_counts_only_near_matches(self) -> None:
+        magenta, grey = bytes((255, 0, 255, 255)), bytes((40, 40, 40, 255))
+        frame = (4, 2, magenta * 3 + grey + bytes((250, 6, 250, 255)) + grey * 3)
+        self.assertEqual(g.colour_pixels(frame, g.CAPTURE_RGB, step=1), 4)
+        self.assertEqual(g.colour_pixels(frame, g.CAPTURE_RGB, tolerance=0, step=1), 3)
+
+    def test_exclude_from_capture_is_written_into_runtime_and_restored(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            run = g.Run(Path("unused"), Path(directory))
+            run.config = Path(directory) / "tze_hud.toml"
+            original = '[runtime]\nprofile = "full-display"\n'
+            g.set_exclude_from_capture(run, original, True)
+            self.assertEqual(run.config.read_text(),
+                             '[runtime]\nexclude_from_capture = true\nprofile = "full-display"\n')
+            g.set_exclude_from_capture(run, original, False)
+            self.assertEqual(run.config.read_text(), original)
+
+    def test_a_failed_restore_restart_never_masks_the_scenario_failure(self) -> None:
+        run = mock.Mock()
+        run.config.read_text.return_value = "[runtime]\n"
+        run.smoke.ok.return_value = {"surfaces": [{"s": "zone:pip"}]}
+        restarts = iter([{"capture_exclusion": {"supported": True}}, RuntimeError("no replacement")])
+
+        def restart(_run):
+            outcome = next(restarts)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+        with mock.patch.object(g, "WIN") as win, mock.patch.object(g, "restart_owned", side_effect=restart), \
+                mock.patch.object(g, "prove_excluded", side_effect=g.ScenarioFailed("excluded", {})), \
+                mock.patch.object(g, "colour_pixels", return_value=5):
+            win.desktop_rgba.return_value = (1, 1, b"\0\0\0\0")
+            with self.assertRaises(g.ScenarioFailed) as failure:
+                g.scenario_capture_exclusion(run)
+        self.assertEqual(failure.exception.step, "excluded")
+        run.step.assert_any_call("restore restart failed: RuntimeError: no replacement")
 
     def test_region_crops_rows_inside_a_rect(self) -> None:
         width, height = 4, 3

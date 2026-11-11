@@ -43,6 +43,7 @@ pub(crate) struct ChordOutcome {
 /// Open   --panel chord--> close, resuming agents if paused
 /// Closed --pairing chord--> Open(running, opened_by=Pairing) at Connect
 /// Open   --pairing chord--> show Connect (pause unchanged)
+/// any    --hide chord-->    unchanged (the task toggles Hide all)
 /// ```
 ///
 /// Closing always resumes, so "paused with the panel closed" cannot happen.
@@ -55,6 +56,13 @@ pub(crate) fn on_chord(
     match (opened_by, chord) {
         // The main-thread card route sends this only after finding a question.
         // Never open settings or change pause state from the answer chord.
+        // Hide all is a visibility edit the panel task makes itself; the
+        // chord never opens, closes, pauses or resumes anything.
+        (_, ChordRole::Hide) => ChordOutcome {
+            pause: None,
+            panel: PanelChange::Keep,
+            connect: false,
+        },
         (opened, ChordRole::Answer) => ChordOutcome {
             pause: None,
             panel: if opened.is_some() && !paused {
@@ -1279,6 +1287,16 @@ mod tests {
                         if by.is_some() && !paused { Close } else { Keep },
                         false
                     )
+                );
+            }
+        }
+        // The hide chord never opens, closes, pauses or resumes (R5.1 S4: the
+        // panel stays as it was; the task flips Hide all itself).
+        for by in [None, Some(PAUSE), Some(PANEL), Some(PAIR)] {
+            for paused in [false, true] {
+                assert_eq!(
+                    on_chord(by, paused, ChordRole::Hide),
+                    outcome(None, Keep, false)
                 );
             }
         }

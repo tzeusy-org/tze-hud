@@ -95,7 +95,7 @@ impl RuntimeControl {
         firewall: Option<Arc<FirewallProbe>>,
     ) -> Self {
         let config_path = cfg.config_file_path.clone().map(PathBuf::from);
-        let sources = cfg.sources;
+        let mut sources = cfg.sources;
         let running = Ports {
             mcp: cfg.mcp_port,
             grpc: cfg.grpc_port,
@@ -107,6 +107,9 @@ impl RuntimeControl {
             .as_deref()
             .and_then(tze_hud_config::runtime_section)
             .unwrap_or_default();
+        if config.exclude_from_capture.is_some() {
+            sources.exclude_from_capture = crate::launch::Source::Config;
+        }
         let saved = Ports {
             mcp: config
                 .mcp_port

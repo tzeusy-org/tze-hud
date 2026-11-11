@@ -193,6 +193,7 @@ impl WindowedRuntimeState {
             global_tokens: HashMap::new(),
             appearance: None,
             tokens_seen: 0,
+            capture_seen: 0,
             _config_watch: None,
             element_repositioned_tx: None,
             input_event_tx: None,
@@ -1068,6 +1069,11 @@ impl HeadlessEventLoopHarness {
                 .portal_projection_driver
                 .viewer_dismiss_tile(&mut scene, id);
         }
+    }
+
+    /// Everything is owner-hidden (Hide all).
+    pub fn all_hidden(&self) -> bool {
+        self.scene().owner_hidden() == tze_hud_scene::graph::SurfaceClasses::ALL
     }
 
     /// Number of tiles on screen (portal surfaces included).
