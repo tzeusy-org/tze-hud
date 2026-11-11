@@ -1644,3 +1644,67 @@ fn zone_hit_regions_and_slot_pitch_scale_with_px_scale() {
     let secondary = regions(&[(PX_SCALE_KEY, "1.5"), ("runtime.px_scale@notif", "1")]);
     assert_eq!(secondary, one, "a 1x secondary ignores the 1.5x primary");
 }
+
+/// The published pip zone gets a resize grip in its corner toward the display
+/// centre, beside its move handle; other zones get only the move handle.
+#[tokio::test]
+async fn pip_zone_gets_a_resize_grip_in_the_corner_toward_the_centre() {
+    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    let (sw, sh) = (1920.0, 1080.0);
+    let mut scene = SceneGraph::new(sw, sh);
+    let mut ids = Vec::new();
+    for (name, x_pct) in [(PIP_ZONE, 0.70), ("other-zone", 0.05)] {
+        let id = SceneId::new();
+        ids.push(id);
+        scene.register_zone(ZoneDefinition {
+            id,
+            name: name.to_string(),
+            description: name.to_string(),
+            geometry_policy: GeometryPolicy::Relative {
+                x_pct,
+                y_pct: 0.70,
+                width_pct: 0.25,
+                height_pct: 0.25,
+            },
+            accepted_media_types: vec![ZoneMediaType::StreamText],
+            rendering_policy: RenderingPolicy::default(),
+            contention_policy: ContentionPolicy::LatestWins,
+            max_publishers: 1,
+            auto_clear_ms: None,
+            layer_attachment: LayerAttachment::Chrome,
+            ephemeral: false,
+        });
+        scene
+            .publish_to_zone(
+                name,
+                ZoneContent::StreamText("shown".to_string()),
+                "agent-a",
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+    }
+    populate_drag_handles(&compositor, &mut scene, sw, sh);
+
+    let regions = &scene.overlay.drag_handle_hit_regions;
+    let grips: Vec<_> = regions.iter().filter(|r| r.resize_grip.is_some()).collect();
+    assert_eq!(grips.len(), 1, "only the pip has a grip: {regions:?}");
+    let grip = grips[0];
+    assert_eq!(grip.element_id, ids[0]);
+    assert!(grip.interaction_id.starts_with(RESIZE_GRIP_PREFIX));
+    // The pip sits right of and below the centre: its grip is top-left.
+    assert_eq!(grip.resize_grip, Some((true, true)));
+    let pip = Rect::new(0.70 * sw, 0.70 * sh, 0.25 * sw, 0.25 * sh);
+    assert!((grip.bounds.x - pip.x).abs() < 0.5 && (grip.bounds.y - pip.y).abs() < 0.5);
+    for id in &ids {
+        assert_eq!(
+            regions
+                .iter()
+                .filter(|r| r.element_id == *id && r.resize_grip.is_none())
+                .count(),
+            1,
+            "each zone keeps one move handle"
+        );
+    }
+}

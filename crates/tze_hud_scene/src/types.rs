@@ -2264,6 +2264,29 @@ pub struct DragHandleHitRegion {
     /// chrome-priority precedence.
     #[serde(default)]
     pub is_header_band: bool,
+    /// For the pip zone's resize grip, the element corner it sits in, as
+    /// `(left, top)`; `None` for a move handle. Dragging the grip resizes the
+    /// zone with its aspect ratio pinned and the opposite corner fixed.
+    #[serde(default)]
+    pub resize_grip: Option<(bool, bool)>,
+}
+
+/// The picture-in-picture zone: the one zone with a resize grip.
+pub const PIP_ZONE: &str = "pip";
+
+/// Interaction-id prefix of the pip resize grip (`resize-grip:<zone id>`);
+/// the move handle's is `drag-handle:`.
+pub const RESIZE_GRIP_PREFIX: &str = "resize-grip:";
+
+/// The corner of `rect` toward the point `(x, y)`, as `(left, top)`.
+///
+/// The pip's resize grip sits in the corner toward the display centre (the
+/// side with room to grow); the opposite corner stays put while resizing.
+pub fn rect_corner_toward(rect: Rect, x: f32, y: f32) -> (bool, bool) {
+    (
+        x < rect.x + rect.width * 0.5,
+        y < rect.y + rect.height * 0.5,
+    )
 }
 
 /// Local-first hover/press state for runtime chrome controls: drag handles
