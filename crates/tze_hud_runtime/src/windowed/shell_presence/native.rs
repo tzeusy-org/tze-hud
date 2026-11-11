@@ -79,6 +79,12 @@ pub(crate) fn status() -> Value {
         "glyph": latest.view.glyph,
         "tooltip": latest.view.tooltip,
         "all_hidden": latest.view.all_hidden,
+        // The hidden pill's text, for the tier-W harness (null: no pill).
+        "hidden_notice": bridge
+            .panel
+            .as_ref()
+            .and_then(|panel| panel.current_closed_notice())
+            .map(|notice| notice.text),
         "menu_open": bridge.menu_open.load(Ordering::Acquire),
         // Admin-only native identity for the tier-W real-input harness.
         "hwnd": bridge.hwnd.load(Ordering::Acquire),
@@ -288,13 +294,8 @@ impl Host {
                 .is_ok();
         let session = initial_session().unwrap_or_default();
         if let Some(capture) = crate::capture_exclusion::global() {
-            // SAFETY: a plain system-metrics query.
-            let remote = unsafe {
-                windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(
-                    windows::Win32::UI::WindowsAndMessaging::SM_REMOTESESSION,
-                )
-            } != 0;
-            capture.set_remote(remote);
+            // Seeded at start; catch a connect before notifications began.
+            capture.set_remote(crate::capture_exclusion::platform_remote());
         }
         bridge
             .session_locked

@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use serde_json::{Value, json};
-use tze_hud_scene::config::{ChordRole, SharedAgents};
+use tze_hud_scene::config::{ChordRole, HudChords, SharedAgents};
 
 use crate::idle_efficiency::IdleEfficiencyCounters;
 
@@ -183,6 +183,26 @@ pub fn set_hotkey(role: ChordRole, status: HotkeyStatus) -> HotkeyStatus {
     }
     *cur = status.clone();
     status
+}
+
+/// `role`'s outcome when the config left it unbound (its default is another
+/// role's explicit chord): not registered, saying which key to set.
+#[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+pub(crate) fn unbound_status(chords: &HudChords, role: ChordRole) -> Option<HotkeyStatus> {
+    if chords.is_bound(role) {
+        return None;
+    }
+    let chord = chords.get(role);
+    let taken = chords
+        .role_of(&chord)
+        .map_or("another chord", |owner| owner.config_key());
+    Some(HotkeyStatus::Failed {
+        chord: chord.to_string(),
+        reason: format!(
+            "not bound: {chord} is runtime.{taken}; set runtime.{} to bind one",
+            role.config_key()
+        ),
+    })
 }
 
 /// Hand `role`'s outcome to the starter waiting on `tx`. If the starter has
@@ -626,6 +646,31 @@ mod tests {
             assert!(!session_locked());
             assert_eq!(crate::capture_exclusion::status(), Value::Null);
         }
+    }
+
+    /// A role whose default another role took explicitly reports
+    /// registered:false with the keys to change; bound roles report nothing.
+    #[test]
+    fn an_unbound_default_reports_why() {
+        let mut chords = HudChords::default();
+        chords.set(ChordRole::Answer, chords.hide);
+        chords.unbind(ChordRole::Hide);
+        assert_eq!(unbound_status(&chords, ChordRole::Answer), None);
+        let status = unbound_status(&chords, ChordRole::Hide).unwrap();
+        assert_eq!(
+            status.to_json_for(ChordRole::Hide),
+            json!({
+                "chord": "Ctrl+Shift+F8",
+                "registered": false,
+                "error": "not bound: Ctrl+Shift+F8 is runtime.answer_hotkey; set runtime.hide_hotkey to bind one"
+            })
+        );
+        assert!(
+            status
+                .banner_line(ChordRole::Hide)
+                .unwrap()
+                .contains("NOT registered (not bound")
+        );
     }
 
     #[tokio::test]

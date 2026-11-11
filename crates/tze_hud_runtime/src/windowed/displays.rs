@@ -864,6 +864,7 @@ impl super::WinitApp {
             };
             super::lifecycle::remove_chrome_observer(&self.state.secondaries[i].window);
             self.state.secondaries.remove(i);
+            self.state.live.capture.windows_removed();
             lost_any = true;
             let attempts = self
                 .state
@@ -923,6 +924,7 @@ impl super::WinitApp {
             super::lifecycle::remove_chrome_observer(&self.state.secondaries[i].window);
             let gone = self.state.secondaries.remove(i);
             tracing::info!(display = %gone.spec.name, "closing secondary overlay");
+            self.state.live.capture.windows_removed();
         }
         for spec in add {
             match self.create_secondary(event_loop, spec.clone()) {

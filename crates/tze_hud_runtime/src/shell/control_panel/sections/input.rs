@@ -131,7 +131,14 @@ impl Section for InputSection {
                         Some(reason) => format!("{does} · {source} · {reason}"),
                         None => format!("{does} · {source}"),
                     };
-                    let text = chord.to_string();
+                    // Unbound: an empty field to type one into; the
+                    // detail says which chord took its default.
+                    let bound = self.chords.get().is_bound(role);
+                    let text = if bound {
+                        chord.to_string()
+                    } else {
+                        String::new()
+                    };
                     let control = if self.chords.rebind.is_some() {
                         Control::Field {
                             text,

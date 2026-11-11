@@ -1071,6 +1071,11 @@ impl HeadlessEventLoopHarness {
         }
     }
 
+    /// Everything is owner-hidden (Hide all).
+    pub fn all_hidden(&self) -> bool {
+        self.scene().owner_hidden() == tze_hud_scene::graph::SurfaceClasses::ALL
+    }
+
     /// Number of tiles on screen (portal surfaces included).
     pub fn tile_count(&self) -> usize {
         self.scene().tiles.len()

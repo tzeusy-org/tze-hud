@@ -3211,10 +3211,20 @@ impl WindowedRuntime {
             let answer_wake = wake.main_work_notifier();
             // Without pairing (MCP disabled) its chord would only take the
             // key from other apps.
+            // A role the config left unbound registers nothing and says why.
             let roles = tze_hud_scene::config::ChordRole::ALL
                 .into_iter()
                 .filter(|role| {
                     pairing.is_some() || *role != tze_hud_scene::config::ChordRole::Pairing
+                })
+                .filter(|role| {
+                    let unbound =
+                        crate::operator::status::unbound_status(&runtime_context.chords, *role);
+                    let bound = unbound.is_none();
+                    if let Some(status) = unbound {
+                        crate::operator::status::set_hotkey(*role, status);
+                    }
+                    bound
                 })
                 .collect();
             let (outcomes, thread) =

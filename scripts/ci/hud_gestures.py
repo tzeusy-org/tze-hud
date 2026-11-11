@@ -283,6 +283,7 @@ class Run:
     owned_pids: list[int] = field(default_factory=list)
     home: Path | None = None
     config_dir: Path | None = None
+    config: Path | None = None
     log: Path | None = None
     smoke: Smoke | None = None
     injector: str = "xtest"
@@ -324,6 +325,7 @@ class Run:
         self.port = free_port()
         config = seed_config(CONFIG, self.psk)
         self.config_dir = config.parent
+        self.config = config
         self.log = self.out / "hud.log"
         dimensions = (["--width", str(SCREEN[0]), "--height", str(SCREEN[1])]
                       if self.window_mode == "fullscreen" else [])
@@ -1191,10 +1193,8 @@ def scenario_dismiss(run: Run) -> None:
         raise ScenarioFailed("the fresh composer's real pointer hit and submit work", {})
 
 
-def scenario_restart(run: Run) -> None:
-    """14. Across a restart the client sees unavailable, rediscovers, and nothing replays."""
-    s = "portal:g-restart"
-    open_portal(run, s, "x", count=5)
+def restart_owned(run: Run) -> dict:
+    """POST /admin/restart, own the replacement and wait out the old instance."""
     old = run.pid
     status, _, _ = run.smoke.request("POST", "/admin/restart")
     if status != 202:
@@ -1209,10 +1209,21 @@ def scenario_restart(run: Run) -> None:
     status, _ = wait_until(new_instance, what="replacement HUD answers", timeout_s=60, interval_s=0.25)
     run.owned_pids.append(status["pid"])
     run.guard()
-    try:
-        run.hud.wait(30)
-    except subprocess.TimeoutExpired:
-        raise ScenarioFailed("old instance exits", {"pid": old}) from None
+    if old == run.hud.pid:
+        try:
+            run.hud.wait(30)
+        except subprocess.TimeoutExpired:
+            raise ScenarioFailed("old instance exits", {"pid": old}) from None
+    else:
+        wait_until(lambda: (not pid_alive(old), old), what="old instance exits", timeout_s=30)
+    return status
+
+
+def scenario_restart(run: Run) -> None:
+    """14. Across a restart the client sees unavailable, rediscovers, and nothing replays."""
+    s = "portal:g-restart"
+    open_portal(run, s, "x", count=5)
+    restart_owned(run)
     surfaces = run.smoke.ok("hud_surfaces")["surfaces"]
     if any(e["s"] == s and e.get("state") not in {None, "detached"} for e in surfaces):
         raise ScenarioFailed("the restarted HUD holds no portal until republished", {"surfaces": surfaces})
@@ -1619,11 +1630,19 @@ def scenario_tray(run: Run) -> None:
     # tray mirrors the result (spec R5.1 S1/S2, informational).
     if (status.get("hide_hotkey") or {}).get("registered") is True:
         chord = status["hide_hotkey"]["chord"].lower()
+        foreground = WIN.foreground_pid()
         for hidden in (True, False):
             run.key(chord)
-            run.expect("hide chord hides everything" if hidden else "hide chord shows everything",
-                       lambda st: st["tray"].get("all_hidden") is hidden)
-        run.step(f"ok real hide chord {chord}: Hide all and back")
+            # The pill names what is hidden while the panel is closed.
+            pill = "Everything hidden" if hidden else None
+            run.expect("hide chord hides everything, pill shown" if hidden
+                       else "hide chord shows everything, pill gone",
+                       lambda st: st["tray"].get("all_hidden") is hidden
+                       and st["tray"].get("hidden_notice") == pill)
+            if WIN.foreground_pid() != foreground:
+                raise ScenarioFailed("the hide chord leaves the foreground app as it was",
+                                     {"before": foreground, "after": WIN.foreground_pid()})
+        run.step(f"ok real hide chord {chord}: Hide all and back, pill shown, foreground kept")
     else:
         run.step(f"hide chord not registered: {json.dumps(status.get('hide_hotkey'))}")
     tray = status["tray"]
@@ -1663,8 +1682,83 @@ def scenario_tray(run: Run) -> None:
     run.step("ok exposed tray: real right-click and keyboard Hide all / Show all")
 
 
+CAPTURE_RGB = (255, 0, 255)  # magenta: nothing else on a CI desktop is this colour
+
+
+def colour_pixels(frame: tuple[int, int, bytes], rgb: tuple[int, int, int], tolerance: int = 12,
+                  step: int = 3) -> int:
+    """Sampled pixels within `tolerance` of `rgb` (every `step`th pixel each way)."""
+    width, height, rgba = frame
+    count = 0
+    for y in range(0, height, step):
+        row = y * width * 4
+        for x in range(0, width, step):
+            i = row + x * 4
+            if all(abs(rgba[i + c] - rgb[c]) <= tolerance for c in range(3)):
+                count += 1
+    return count
+
+
+def set_exclude_from_capture(run: Run, original: str, on: bool) -> None:
+    """Rewrite the owned config with `[runtime] exclude_from_capture`, or restore it."""
+    text = original
+    if on:
+        text = original.replace("[runtime]\n", "[runtime]\nexclude_from_capture = true\n", 1)
+        if text == original:
+            text = original + "\n[runtime]\nexclude_from_capture = true\n"
+    run.config.write_text(text, encoding="utf-8")
+    run.step(f"config exclude_from_capture = {str(on).lower()}")
+
+
+def scenario_capture_exclusion(run: Run) -> None:
+    """R5.2 S1: Hide from screen capture removes the HUD from desktop captures, not /admin/screenshot."""
+    pip = "zone:pip"
+    if not any(e["s"] == pip for e in run.smoke.ok("hud_surfaces")["surfaces"]):
+        run.step(f"skipped: no {pip} to publish a solid colour into")
+        return
+    r, g, b = (c / 255 for c in CAPTURE_RGB)
+
+    def show_colour() -> None:
+        run.publish(pip, content={"type": "solid_color", "r": r, "g": g, "b": b})
+        run.settle()
+
+    show_colour()
+    shown = colour_pixels(WIN.desktop_rgba(), CAPTURE_RGB)
+    if shown == 0:
+        raise ScenarioFailed("the published colour is on the desktop before exclusion", {"pixels": 0})
+    run.step(f"ok desktop shows the colour ({shown} sampled pixels)")
+
+    original = run.config.read_text(encoding="utf-8")
+    try:
+        set_exclude_from_capture(run, original, True)
+        status = restart_owned(run)
+        exclusion = status.get("capture_exclusion") or {}
+        if exclusion.get("supported") is False or exclusion.get("reason") == "remote":
+            run.step(f"limited proof: exclusion not in force here: {json.dumps(exclusion)}")
+            return
+        run.expect("capture exclusion applied",
+                   lambda st: (st.get("capture_exclusion") or {}).get("applied") is True)
+        show_colour()
+        on_desktop = colour_pixels(WIN.desktop_rgba(), CAPTURE_RGB)
+        in_screenshot = colour_pixels(run.frame(), CAPTURE_RGB)
+        run.screen_grab("capture-exclusion.on")
+        if on_desktop:
+            raise ScenarioFailed("an excluded HUD is absent from the desktop capture",
+                                 {"desktop_pixels": on_desktop})
+        if not in_screenshot:
+            raise ScenarioFailed("/admin/screenshot still shows the excluded HUD", {"frame_pixels": 0})
+        run.step(f"ok excluded: desktop 0 pixels, /admin/screenshot {in_screenshot}")
+    finally:
+        set_exclude_from_capture(run, original, False)
+        restart_owned(run)
+    show_colour()
+    if not colour_pixels(WIN.desktop_rgba(), CAPTURE_RGB):
+        raise ScenarioFailed("the colour is back on the desktop once the setting is restored", {})
+    run.step("ok restored: the desktop shows the HUD again")
+
+
 # Windows only: they need Win32 foreground/edit-control access or global hotkeys.
-TIER_W_ONLY = {"no-focus-steal", "safe-mode", "overlay-pointer", "tray"}
+TIER_W_ONLY = {"no-focus-steal", "safe-mode", "overlay-pointer", "tray", "capture-exclusion"}
 
 SCENARIOS: dict[str, Callable[[Run], None]] = {
     "output-anchor": scenario_output_anchor,          # 1
@@ -1690,6 +1784,7 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "tray": scenario_tray,                            # tier W, overlay only
     "overlay-pointer": scenario_overlay_pointer,      # 11 (tier W, overlay only)
     "safe-mode": scenario_safe_mode,                  # 12 (tier W)
+    "capture-exclusion": scenario_capture_exclusion,  # tier W, informational (restarts the HUD twice)
     "restart": scenario_restart,                      # 14 (last: replaces the HUD)
 }
 

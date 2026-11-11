@@ -4,7 +4,7 @@
 //! criteria (rig-j90m, rig-umgy) and `configuration/spec.md`.
 
 use crate::loader::TzeHudConfig;
-use tze_hud_scene::config::{ConfigErrorCode, ConfigLoader, ParseError};
+use tze_hud_scene::config::{ChordRole, ConfigErrorCode, ConfigLoader, Hotkey, ParseError};
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -715,7 +715,6 @@ fn hud_chords_must_be_distinct() {
             "runtime.safe_mode_hotkey",
         ),
         ("hide_hotkey = \"Ctrl+Shift+F9\"", "runtime.answer_hotkey"),
-        ("panel_hotkey = \"Ctrl+Shift+F8\"", "runtime.panel_hotkey"),
         (
             "pairing_hotkey = \"Alt+7\"\nhide_hotkey = \"Alt+7\"",
             "runtime.pairing_hotkey",
@@ -728,4 +727,36 @@ fn hud_chords_must_be_distinct() {
             .unwrap_or_else(|| panic!("{runtime}: clash reported on hide_hotkey"));
         assert!(dup.hint.contains(other), "{runtime}: {}", dup.hint);
     }
+}
+
+/// A config written before the hide chord existed, using its default for
+/// another chord (the Input card once suggested Ctrl+Shift+F8), still
+/// loads: that chord wins and the hide chord is left unbound.
+#[test]
+fn an_older_chord_on_the_hide_default_leaves_hide_unbound() {
+    for (runtime, owner) in [
+        ("answer_hotkey = \"Ctrl+Shift+F8\"", ChordRole::Answer),
+        ("panel_hotkey = \"Ctrl+Shift+F8\"", ChordRole::Panel),
+    ] {
+        let src = format!(
+            "[runtime]\nprofile = \"full-display\"\n{runtime}\n[[tabs]]\nname = \"Main\"\n"
+        );
+        let resolved = parse_ok(&src).freeze().expect("config still loads");
+        let chords = resolved.chords;
+        assert_eq!(chords.get(owner).to_string(), "Ctrl+Shift+F8");
+        assert!(chords.is_bound(owner));
+        assert!(!chords.is_bound(ChordRole::Hide), "{runtime}");
+        assert_eq!(chords.role_of(&Hotkey::DEFAULT_HIDE), Some(owner));
+        assert!(
+            crate::loader::runtime_section(&src).is_some(),
+            "launcher reads it"
+        );
+    }
+    // Setting hide_hotkey too is an explicit clash again.
+    let errors = parse_ok(
+        "[runtime]\nprofile = \"full-display\"\nanswer_hotkey = \"Ctrl+Shift+F8\"\nhide_hotkey = \"Ctrl+Shift+F8\"\n[[tabs]]\nname = \"Main\"\n",
+    )
+    .freeze()
+    .expect_err("explicit clash");
+    assert!(errors.iter().any(|e| e.field_path == "runtime.hide_hotkey"));
 }

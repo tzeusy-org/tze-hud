@@ -224,7 +224,7 @@ impl ControlPanelHandle {
     }
 
     /// The closed-panel notice last published.
-    #[cfg(test)]
+    #[cfg(any(target_os = "windows", test))]
     pub(crate) fn current_closed_notice(&self) -> Option<PanelNotice> {
         self.shared
             .closed_notice

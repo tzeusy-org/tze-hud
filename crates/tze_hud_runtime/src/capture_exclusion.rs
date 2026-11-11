@@ -75,9 +75,13 @@ impl CaptureExclusion {
         }
     }
 
-    /// This machine's build (`RtlGetVersion` on Windows, none elsewhere).
+    /// This machine's build (`RtlGetVersion` on Windows, none elsewhere),
+    /// already remote when the HUD starts inside a Remote Desktop session,
+    /// so its first frames are never hidden from the remote viewer.
     pub(crate) fn for_platform(on: bool, wake: RenderWakeNotifier) -> Self {
-        Self::new(platform_build(), on, wake)
+        let exclusion = Self::new(platform_build(), on, wake);
+        exclusion.remote.store(platform_remote(), Ordering::Release);
+        exclusion
     }
 
     /// There are overlay windows to exclude (Windows).
@@ -113,6 +117,12 @@ impl CaptureExclusion {
     #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
     pub(crate) fn is_remote(&self) -> bool {
         self.remote.load(Ordering::Acquire)
+    }
+
+    /// Overlay windows closed: display indices shifted, so the next main
+    /// turn reapplies to the remaining windows and rebuilds `failed`.
+    pub(crate) fn windows_removed(&self) {
+        self.changed();
     }
 
     fn changed(&self) {
@@ -277,6 +287,19 @@ fn platform_build() -> Option<u32> {
     None
 }
 
+/// The process runs in a Remote Desktop session (`SM_REMOTESESSION`).
+#[cfg(target_os = "windows")]
+pub(crate) fn platform_remote() -> bool {
+    use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_REMOTESESSION};
+    // SAFETY: a plain system-metrics query.
+    unsafe { GetSystemMetrics(SM_REMOTESESSION) != 0 }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub(crate) fn platform_remote() -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -376,6 +399,27 @@ mod tests {
         );
         assert!(c.failed().is_empty());
         assert_eq!(c.status_json()["applied"], json!(true));
+
+        // Display 1 refuses, then display 1 is unplugged: display 2 becomes
+        // 1. The removal schedules a reapply, which rebuilds `failed` with
+        // the shifted indices instead of blaming the new display 1.
+        c.apply_all([(0, 0usize), (1, 1), (2, 2)], setter(&log, Some(1)));
+        assert_eq!(c.failed(), [1]);
+        let mut seen = c.generation.load(Ordering::Acquire);
+        c.windows_removed();
+        assert!(c.take_change(&mut seen));
+        c.apply_all([(0, 0usize), (1, 2)], setter(&log, None));
+        assert!(c.failed().is_empty());
+        assert_eq!(c.status_json()["applied"], json!(true));
+    }
+
+    /// Off Windows a session is never remote; on Windows it is read once at
+    /// start.
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn off_windows_the_session_is_local() {
+        assert!(!platform_remote());
+        assert!(!CaptureExclusion::for_platform(true, RenderWakeNotifier::default()).is_remote());
     }
 
     /// R5.2 S5: below build 19041 nothing is ever called (an older build

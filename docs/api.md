@@ -420,7 +420,7 @@ agents until one is paired.
   `GET /admin/status`, `GET /admin/logs`, and `GET /admin/screenshot` on the
   MCP port, and `*` does not grant it. `/admin/status` includes `tailnet_inbound` (`state`: `allowed`, `blocked`, `unknown`, `not_applicable`; `reason`, `rule` and `fix` when `blocked`; `error` when `unknown`): whether Windows Firewall lets remote agents reach the tailnet bind, and `safe_mode_hotkey`, `panel_hotkey`, `pairing_hotkey`, `answer_hotkey` and `hide_hotkey`
   (each `chord`, `registered`, `error`; `null` when no hotkey is active; `registered: null` while pending): `registered: false`
-  means another program owns that chord; for `safe_mode_hotkey`, its error names the tray icon's Pause as the independent override (a refused `hide_hotkey` loses nothing else: the startup banner names Hide all in the panel or tray). `capture_exclusion` is `null` off Windows, else `{on, supported, applied, reason, failed}`: `reason` is `null`, `"remote"` or `"unsupported"` while on, and `failed` lists `displays` indexes whose window refused the affinity. The blocked
+  means another program owns that chord, or (`error` starting `not bound:`) the config left the hide chord unbound; for `safe_mode_hotkey`, its error names the tray icon's Pause as the independent override (a refused `hide_hotkey` loses nothing else: the startup banner names Hide all in the panel or tray). `capture_exclusion` is `null` off Windows, else `{on, supported, applied, reason, failed}`: `reason` is `null`, `"remote"` or `"unsupported"` while on, and `failed` lists `displays` indexes whose window refused the affinity. The blocked
   firewall `fix` names `tze_hud.exe --allow-remote` with the same listen-port
   overrides as startup; see [the reversible Windows helper](operations/windows-install.md#remote-agents).
   This policy-derived result is cached for five seconds, not a network probe.
@@ -679,7 +679,11 @@ default. Ports are read at start; the rest change live from the panel.
 
 Five global chords work while the overlay is unfocused and click-through
 (Windows; each is set in `[runtime]` as modifiers Ctrl/Shift/Alt/Win plus
-F1-F24, a letter or a digit, and all five must differ):
+F1-F24, a letter or a digit, and all five must differ; one exception keeps
+older configs loading: when `hide_hotkey` is unset and another key already
+uses Ctrl+Shift+F8, that key keeps it and the hide chord is left unbound,
+logged as a warning and reported in `hide_hotkey` as `registered: false`
+with an `error` naming both keys; set `hide_hotkey` to bind one):
 
 | Chord (default) | Key | Effect |
 |---|---|---|
@@ -708,7 +712,8 @@ Windows 11 initially places new icons in overflow; pin this one through
 **Settings > Personalization > Taskbar > Other system tray icons**.
 
 `/admin/status` reports `tray` with `registered`, `glyph`, `tooltip`,
-`all_hidden` and native test identity, plus `session_locked`. `tray` is null
+`all_hidden`, `hidden_notice` (the pill's text, or null when no pill shows)
+and native test identity, plus `session_locked`. `tray` is null
 and `session_locked` false off Windows. Failed watcher creation leaves
 `registered` and `session_locked` false; a missing icon can therefore be
 distinguished from overflow. Explorer restart re-adds the icon; an unsuccessful
@@ -722,7 +727,8 @@ defaults are F-key chords; rebind one that clashes (Ctrl+Shift+F10 is also
 JetBrains IDEs' "Run", and Ctrl+Shift+F8 its "View Breakpoints" on Windows). The pairing chord is not registered when the MCP port
 is disabled. The control panel's Input card changes a chord while the HUD
 runs: type it (`Ctrl+Alt+F9`) and press Enter. A chord another role has is
-refused; otherwise Windows registers the new chord before the old one is
+refused; an unbound hide chord's row is empty, and typing one binds it.
+Otherwise Windows registers the new chord before the old one is
 released, so a chord another program holds is refused and the old one keeps
 working. The new chord is saved to `[runtime]`. Each chord row says
 whether its chord is the default, saved to config, or lasts until restart

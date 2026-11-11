@@ -218,7 +218,9 @@ impl ChordRole {
     }
 }
 
-/// The HUD's global chords, one per [`ChordRole`], all distinct.
+/// The HUD's global chords, one per [`ChordRole`]; the bound ones are
+/// distinct. A role left at its default when another role was explicitly
+/// given that chord is unbound (see [`HudChords::unbind`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct HudChords {
     pub pause: Hotkey,
@@ -226,6 +228,8 @@ pub struct HudChords {
     pub pairing: Hotkey,
     pub answer: Hotkey,
     pub hide: Hotkey,
+    /// Bit per [`ChordRole::ALL`] position: the role registers no chord.
+    unbound: u8,
 }
 
 impl Default for HudChords {
@@ -236,6 +240,7 @@ impl Default for HudChords {
             pairing: Hotkey::DEFAULT_PAIRING,
             answer: Hotkey::DEFAULT_ANSWER,
             hide: Hotkey::DEFAULT_HIDE,
+            unbound: 0,
         }
     }
 }
@@ -251,7 +256,9 @@ impl HudChords {
         }
     }
 
+    /// Bind `role` to `hotkey` (binding an unbound role).
     pub fn set(&mut self, role: ChordRole, hotkey: Hotkey) {
+        self.unbound &= !bit(role);
         match role {
             ChordRole::Pause => self.pause = hotkey,
             ChordRole::Panel => self.panel = hotkey,
@@ -262,9 +269,30 @@ impl HudChords {
     }
 
     /// The role whose chord is `hotkey`, if any.
+    /// The bound role using `hotkey`.
     pub fn role_of(&self, hotkey: &Hotkey) -> Option<ChordRole> {
-        ChordRole::ALL.into_iter().find(|r| self.get(*r) == *hotkey)
+        ChordRole::ALL
+            .into_iter()
+            .find(|r| self.is_bound(*r) && self.get(*r) == *hotkey)
     }
+
+    /// Leave `role` without a chord: its default is another role's explicit
+    /// chord. [`HudChords::set`] binds it again.
+    pub fn unbind(&mut self, role: ChordRole) {
+        self.unbound |= bit(role);
+    }
+
+    pub fn is_bound(&self, role: ChordRole) -> bool {
+        self.unbound & bit(role) == 0
+    }
+}
+
+fn bit(role: ChordRole) -> u8 {
+    let slot = ChordRole::ALL
+        .iter()
+        .position(|r| *r == role)
+        .expect("every role is in ALL");
+    1 << slot
 }
 
 /// Why a chord string was rejected.
