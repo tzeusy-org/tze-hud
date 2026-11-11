@@ -2973,6 +2973,23 @@ pub struct ZoneRegistry {
 /// box takes the aspect ratio of the image it shows.
 pub const PIP_ZONE: &str = "pip";
 
+/// Interaction-id prefix of the pip resize grip (`resize-grip:<zone id>`);
+/// the move handle's is `drag-handle:`.
+pub const RESIZE_GRIP_PREFIX: &str = "resize-grip:";
+
+/// The corner of `rect` toward the point `(x, y)`, as `(left, top)`.
+///
+/// One rule for the pip's corners: the resize grip sits in the corner toward
+/// the display centre, the opposite corner is the one the box hugs (pinned
+/// while resizing or fitting an image), and the grip's own centre, or a press
+/// on it, names the grip corner.
+pub fn rect_corner_toward(rect: Rect, x: f32, y: f32) -> (bool, bool) {
+    (
+        x < rect.x + rect.width * 0.5,
+        y < rect.y + rect.height * 0.5,
+    )
+}
+
 impl ZoneRegistry {
     pub fn new() -> Self {
         Self {

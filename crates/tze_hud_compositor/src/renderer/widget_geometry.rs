@@ -64,9 +64,10 @@ impl Compositor {
         Rect::new(x, y, w, h)
     }
 
-    /// The pip resize grip: a square, twice the move handle's height, inside
-    /// the element's corner nearest the display centre — the corner with room
-    /// to grow — so the opposite corner stays pinned while resizing.
+    /// The pip resize grip: a square the move handle's width (at most half
+    /// the element), inside the element's corner toward the display centre —
+    /// the corner with room to grow — so the opposite corner stays pinned
+    /// while resizing.
     fn resize_grip_bounds(
         element_bounds: Rect,
         style: DragHandleStyle,
@@ -74,18 +75,17 @@ impl Compositor {
         sw: f32,
         sh: f32,
     ) -> Rect {
-        let side = (style.height_dp * 2.0 * scale)
-            .max(1.0)
-            .min(element_bounds.width.max(1.0))
-            .min(element_bounds.height.max(1.0));
-        let center_x = element_bounds.x + element_bounds.width * 0.5;
-        let center_y = element_bounds.y + element_bounds.height * 0.5;
-        let x = if center_x > sw * 0.5 {
+        let side = (style.width_dp * scale)
+            .min(element_bounds.width * 0.5)
+            .min(element_bounds.height * 0.5)
+            .max(1.0);
+        let (left, top) = rect_corner_toward(element_bounds, sw * 0.5, sh * 0.5);
+        let x = if left {
             element_bounds.x
         } else {
             element_bounds.x + element_bounds.width - side
         };
-        let y = if center_y > sh * 0.5 {
+        let y = if top {
             element_bounds.y
         } else {
             element_bounds.y + element_bounds.height - side
@@ -192,7 +192,7 @@ impl Compositor {
                     element_kind: DragHandleElementKind::Zone,
                     bounds: Self::resize_grip_bounds(element_bounds_zone, style, scale, sw, sh),
                     element_bounds: element_bounds_zone,
-                    interaction_id: format!("resize-grip:{id_hex}"),
+                    interaction_id: format!("{RESIZE_GRIP_PREFIX}{id_hex}"),
                     style,
                     is_header_band: false,
                     is_resize_grip: true,
@@ -224,7 +224,9 @@ impl Compositor {
         };
         handles
             .iter()
-            .filter(|entry| scene.is_drag_active(entry.element_id))
+            // The pip's grip shares its element with the move handle: one
+            // border per element.
+            .filter(|entry| !entry.is_resize_grip && scene.is_drag_active(entry.element_id))
             .map(|entry| {
                 self.border_only_cmd(
                     entry.element_bounds,

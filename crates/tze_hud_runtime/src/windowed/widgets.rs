@@ -500,58 +500,37 @@ impl WinitApp {
     /// but runs on the main thread without async, using the stored broadcast sender.
     ///
     /// No-op if the element has no user override.
-    fn perform_reset_element_geometry(&mut self, element_id: tze_hud_scene::SceneId) {
+    pub(super) fn perform_reset_element_geometry(&mut self, element_id: tze_hud_scene::SceneId) {
         // Collect previous override, fallback geometry, and optional persist path.
+        // Both locks are held before anything changes, so the store and the
+        // live scene (the viewer lock, a zone's live override) move together:
+        // a contended reset changes nothing rather than half of it.
         let (previous_override, fallback_geometry, store_snapshot, persist_path) = {
-            let Ok(mut state) = self.state.shared_state.try_lock() else {
+            let Some(mut state) = super::lifecycle::spin_acquire(
+                &self.state.shared_state,
+                super::lifecycle::INTERACTION_LOCK_BUDGET,
+            ) else {
                 tracing::warn!("perform_reset_element_geometry: could not acquire shared state");
                 return;
             };
-            // Hand geometry authority back to the adapter FIRST (hud-lyqun),
-            // before the override no-op short-circuit below: a whole-portal
-            // move/resize takes the viewer lock but does not always write an
-            // element-store override, so the lock must be released here even when
-            // there is no override to clear. A portal member's reset releases the
-            // WHOLE portal group so every constituent surface becomes
-            // adapter-controlled again — not just the one the reset menu was
-            // opened on.
-            if let Ok(mut scene) = state.scene.try_lock() {
-                match super::portal::resolve_portal_group(&scene, element_id) {
-                    Some(group) => {
-                        for member_id in group.member_ids {
-                            scene.unlock_viewer_geometry(member_id);
-                        }
-                    }
-                    None => scene.unlock_viewer_geometry(element_id),
-                }
-            }
-
-            // Clear the override.
-            let previous = state.element_store.reset_geometry_override(element_id);
-            let Some(previous) = previous else {
+            let scene_lock = std::sync::Arc::clone(&state.scene);
+            let Some(mut scene) = super::lifecycle::spin_acquire(
+                &scene_lock,
+                super::lifecycle::INTERACTION_LOCK_BUDGET,
+            ) else {
+                tracing::warn!("perform_reset_element_geometry: could not acquire the scene");
+                return;
+            };
+            let Some((previous, fallback)) =
+                reset_element_geometry_locked(&mut state.element_store, &mut scene, element_id)
+            else {
                 tracing::debug!(
                     element_id = %element_id,
                     "perform_reset_element_geometry: no override — geometry lock released, no override to clear"
                 );
                 return;
             };
-            // Resolve fallback geometry (agent bounds → config → default policy).
-            let fallback = {
-                let Ok(mut scene) = state.scene.try_lock() else {
-                    return;
-                };
-                state
-                    .element_store
-                    .entries
-                    .get(&element_id)
-                    .map(|entry| {
-                        tze_hud_scene::element_store::clear_live_zone_override(entry, &mut scene);
-                        tze_hud_scene::element_store::fallback_geometry_for_element(
-                            element_id, entry, &scene,
-                        )
-                    })
-                    .unwrap_or(tze_hud_scene::ZERO_GEOMETRY_POLICY)
-            };
+            drop(scene);
             let store_snapshot = state.element_store.clone();
             let persist_path = state.element_store_path.clone();
             (previous, fallback, store_snapshot, persist_path)
@@ -592,6 +571,42 @@ impl WinitApp {
             );
         }
     }
+}
+
+/// "Reset to default" for `element_id` with both locks held: hand geometry
+/// authority back to the adapter, clear the element-store override, and
+/// return a zone to its default box. Returns the cleared override and the
+/// geometry the element falls back to, or `None` when there was no override.
+pub(super) fn reset_element_geometry_locked(
+    store: &mut tze_hud_scene::element_store::ElementStore,
+    scene: &mut tze_hud_scene::graph::SceneGraph,
+    element_id: tze_hud_scene::SceneId,
+) -> Option<(
+    tze_hud_scene::types::GeometryPolicy,
+    tze_hud_scene::types::GeometryPolicy,
+)> {
+    // Release the viewer lock FIRST (hud-lyqun), before the no-override
+    // short-circuit: a whole-portal move/resize takes the lock without always
+    // writing an override. A portal member's reset releases the WHOLE group.
+    match super::portal::resolve_portal_group(scene, element_id) {
+        Some(group) => {
+            for member_id in group.member_ids {
+                scene.unlock_viewer_geometry(member_id);
+            }
+        }
+        None => scene.unlock_viewer_geometry(element_id),
+    }
+    let previous = store.reset_geometry_override(element_id)?;
+    // Fallback: agent bounds → config → default policy.
+    let fallback = store
+        .entries
+        .get(&element_id)
+        .map(|entry| {
+            tze_hud_scene::element_store::clear_live_zone_override(entry, scene);
+            tze_hud_scene::element_store::fallback_geometry_for_element(element_id, entry, scene)
+        })
+        .unwrap_or(tze_hud_scene::ZERO_GEOMETRY_POLICY);
+    Some((previous, fallback))
 }
 
 #[cfg(test)]

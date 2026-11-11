@@ -110,8 +110,11 @@ impl HitTestSnapshot {
                 resize_cursor: region.is_resize_grip.then(|| {
                     // The grip sits in one corner of the element: `╲` for
                     // top-left/bottom-right, `╱` for the other two.
-                    let left = region.bounds.x <= region.element_bounds.x + 0.5;
-                    let top = region.bounds.y <= region.element_bounds.y + 0.5;
+                    let (left, top) = tze_hud_scene::types::rect_corner_toward(
+                        region.element_bounds,
+                        region.bounds.x + region.bounds.width * 0.5,
+                        region.bounds.y + region.bounds.height * 0.5,
+                    );
                     if left == top {
                         tze_hud_input::PortalCursor::NwseResize
                     } else {

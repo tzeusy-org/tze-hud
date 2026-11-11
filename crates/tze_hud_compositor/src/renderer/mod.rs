@@ -819,8 +819,13 @@ pub(crate) fn fit_rect_to_aspect(r: Rect, aspect: f32, bounds: Rect) -> Rect {
     let (w, h) = ((area * aspect).sqrt(), (area / aspect).sqrt());
     let shrink = (bounds.width / w).min(bounds.height / h).min(1.0);
     let (w, h) = (w * shrink, h * shrink);
-    let right = r.x + r.width * 0.5 > bounds.x + bounds.width * 0.5;
-    let bottom = r.y + r.height * 0.5 > bounds.y + bounds.height * 0.5;
+    // The grip corner faces the centre; the opposite one stays put.
+    let (grip_left, grip_top) = rect_corner_toward(
+        r,
+        bounds.x + bounds.width * 0.5,
+        bounds.y + bounds.height * 0.5,
+    );
+    let (right, bottom) = (grip_left, grip_top);
     let x = if right { r.x + r.width - w } else { r.x };
     let y = if bottom { r.y + r.height - h } else { r.y };
     Rect::new(
@@ -829,6 +834,24 @@ pub(crate) fn fit_rect_to_aspect(r: Rect, aspect: f32, bounds: Rect) -> Rect {
         w,
         h,
     )
+}
+
+/// The policy a zone is placed with: the viewer's override, except for a
+/// zone on another connected display, which has no handle and keeps its
+/// default (overrides are fractions of the primary canvas).
+pub(crate) fn zone_policy_in(
+    layout: &crate::display::DisplayLayout,
+    scene: &SceneGraph,
+    zone_name: &str,
+) -> Option<GeometryPolicy> {
+    if layout.zone_display_rect(zone_name).is_some() {
+        return scene
+            .zone_registry
+            .zones
+            .get(zone_name)
+            .map(|z| z.geometry_policy);
+    }
+    scene.zone_registry.geometry_policy_for(zone_name)
 }
 
 /// [`Compositor::zone_geometry`] for callers without a compositor (the
@@ -1416,7 +1439,7 @@ impl Compositor {
         sw: f32,
         sh: f32,
     ) -> (f32, f32, f32, f32) {
-        let Some(policy) = scene.zone_registry.geometry_policy_for(zone_name) else {
+        let Some(policy) = zone_policy_in(&self.display_layout, scene, zone_name) else {
             return (0.0, 0.0, 0.0, 0.0);
         };
         let (x, y, w, h) = zone_geometry_in(&self.display_layout, zone_name, &policy, sw, sh);

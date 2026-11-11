@@ -1416,3 +1416,72 @@ fn fit_rect_to_aspect_shrinks_to_fit_and_stays_on_screen() {
     let b = Rect::new(1.0, 2.0, 3.0, 4.0);
     assert_eq!(fit_rect_to_aspect(b, 0.0, screen), b);
 }
+
+/// Left of and above centre, the pip's grip moves to its bottom-right corner
+/// (toward the centre) and an image fit pins the top-left corner instead.
+#[tokio::test]
+async fn pip_left_of_centre_puts_its_grip_bottom_right_and_pins_top_left() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
+    let bytes = [255u8; 4].repeat(16 * 8);
+    let image = ResourceId::of(&bytes);
+    compositor.register_image_bytes(image, std::sync::Arc::from(bytes), 16, 8);
+    let mut scene = pip_scene(ZoneContent::StaticImage(image));
+    let stored = Rect::new(100.0, 100.0, 300.0, 300.0);
+    scene.zone_registry.geometry_overrides.insert(
+        PIP_ZONE.to_string(),
+        rect_to_relative_geometry_policy(stored, 1920.0, 1080.0),
+    );
+    populate_drag_handles(&compositor, &mut scene, 1920.0, 1080.0);
+    let (handle, grip) = pip_handles(&scene);
+    let r = handle.element_bounds;
+    assert!((r.width / r.height - 2.0).abs() < 1e-3, "2:1 box: {r:?}");
+    assert_close(r.x, 100.0, "left edge pinned");
+    assert_close(r.y, 100.0, "top edge pinned");
+    assert_close(
+        grip.bounds.x + grip.bounds.width,
+        r.x + r.width,
+        "grip right",
+    );
+    assert_close(
+        grip.bounds.y + grip.bounds.height,
+        r.y + r.height,
+        "grip bottom",
+    );
+    // One highlight border for the pip while it is dragged, not one per handle.
+    let pip_id = scene.zone_registry.zones[PIP_ZONE].id;
+    scene.set_drag_active(pip_id);
+    let entries = compositor.collect_drag_handle_entries(&scene, 1920.0, 1080.0);
+    assert_eq!(compositor.drag_highlight_cmds(&scene, &entries).len(), 1);
+}
+
+/// A zone on another connected display keeps its default box: viewer
+/// overrides are fractions of the primary canvas, and it has no handle.
+#[test]
+fn a_zone_on_another_display_ignores_the_viewer_override() {
+    let mut scene = SceneGraph::new(1920.0, 1080.0);
+    scene.zone_registry = ZoneRegistry::with_defaults();
+    let moved = rect_to_relative_geometry_policy(Rect::new(0.0, 0.0, 100.0, 100.0), 1920.0, 1080.0);
+    scene
+        .zone_registry
+        .geometry_overrides
+        .insert(PIP_ZONE.to_string(), moved);
+    let default = scene.zone_registry.zones[PIP_ZONE].geometry_policy;
+    let primary_only = crate::DisplayLayout::default();
+    assert_eq!(zone_policy_in(&primary_only, &scene, PIP_ZONE), Some(moved));
+    let side = crate::DisplayLayout::new(
+        vec![
+            crate::DisplayRect {
+                name: "MAIN".into(),
+                rect: Rect::new(0.0, 0.0, 1920.0, 1080.0),
+                primary: true,
+            },
+            crate::DisplayRect {
+                name: "SIDE".into(),
+                rect: Rect::new(1920.0, 0.0, 1920.0, 1080.0),
+                primary: false,
+            },
+        ],
+        &HashMap::from([(PIP_ZONE.to_string(), "side".to_string())]),
+    );
+    assert_eq!(zone_policy_in(&side, &scene, PIP_ZONE), Some(default));
+}

@@ -577,8 +577,6 @@ struct WindowedRuntimeState {
     /// abandoned cleanly because the tile is gone; the monotonic counter is
     /// discarded with the entry.
     portal_resize_states: std::collections::HashMap<tze_hud_scene::SceneId, PortalResizeState>,
-    /// The pip resize-grip drag in flight, if any.
-    zone_resize: Option<portal::ZoneResizeGesture>,
     /// Resize chord identities whose `KeyDown` was consumed by the focused-portal
     /// hotkey path and whose matching `KeyUp` must therefore be swallowed.
     ///
@@ -3332,7 +3330,6 @@ impl WindowedRuntime {
             pending_blur_delivery_context: None,
             composer_pointer_drag_anchor: None,
             portal_resize_states: std::collections::HashMap::new(),
-            zone_resize: None,
             consumed_portal_resize_keydowns: std::collections::HashSet::new(),
             consumed_shell_shortcut_keydowns: std::collections::HashSet::new(),
             panel_input: PanelInputState::default(),

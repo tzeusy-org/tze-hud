@@ -397,8 +397,9 @@ centre, which scales it with its width/height ratio pinned and the opposite
 corner fixed (the `portal.window.min_*` tokens set the smallest size). Both
 are saved as the zone's override in `element_store.toml`, not the config
 file, and restored at startup; right-clicking the handle offers "Reset to
-default", which returns the zone to its built-in box. Zones assigned to
-another display have no handle.
+default", which returns the zone to its built-in box. A drag whose zone
+stops showing mid-gesture keeps the zone where it was left. Zones assigned to
+a connected other display have no handle and keep their built-in box.
 
 `[runtime]` also holds the launch settings the control panel edits:
 `mcp_port` (default 9090) and `grpc_port` (50051), 0 disabling either and

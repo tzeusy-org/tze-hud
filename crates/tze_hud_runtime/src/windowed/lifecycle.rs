@@ -12,7 +12,7 @@ use tze_hud_input::{
 };
 use tze_hud_scene::HitResult;
 use tze_hud_scene::graph::SceneGraph;
-use tze_hud_scene::types::ZoneInteractionKind;
+use tze_hud_scene::types::{DragHandleElementKind, ZoneInteractionKind};
 use tze_hud_telemetry::{
     ConstrainedProfileIdentity, EfficiencyGpuCounters, EfficiencyPacingIdentity,
     EfficiencyPacingMode, EfficiencyRendererIdentity, EfficiencyRuntimeIdentity,
@@ -33,8 +33,8 @@ use super::input_dispatch::{
 use super::keyboard::ComposerDeliveryContext;
 use super::portal::{
     DragReleasedData, PortalResizePointerOutcome, PrimaryDragGesture,
-    apply_drag_handle_pointer_event, apply_portal_resize_pointer_event,
-    apply_zone_resize_pointer_event, drag_feedback_target, reconcile_drag_feedback,
+    apply_drag_handle_pointer_event, apply_portal_resize_pointer_event, drag_feedback_target,
+    reconcile_drag_feedback,
 };
 use super::{WindowedQuiescentEfficiencyConfig, WinitApp};
 
@@ -2374,6 +2374,7 @@ impl WinitApp {
         // initiating PointerDown for drag handles / portal resize affordances.
         // Ordinary content PointerDown stays on the single try_lock path to
         // preserve click-to-focus latency.
+        let resize_min = self.zone_resize_min();
         let active_gesture_needs_guaranteed_feedback = matches!(
             pointer_event.kind,
             PointerEventKind::Move | PointerEventKind::Up
@@ -2799,13 +2800,14 @@ impl WinitApp {
                     }
                     reconcile_drag_feedback(&self.state.input_processor, &mut scene);
                 }
-                let dragged = apply_drag_handle_pointer_event(
+                drag_released = apply_drag_handle_pointer_event(
                     &mut self.state.input_processor,
                     &pointer_event,
                     &result.hit,
                     &mut scene,
                     display_w,
                     display_h,
+                    resize_min,
                 );
                 if pointer_event.kind == PointerEventKind::Down {
                     self.state.primary_drag_gesture = self
@@ -2814,20 +2816,25 @@ impl WinitApp {
                         .drag_states
                         .get(&0)
                         .and_then(|drag| {
-                            scene
-                                .tiles
-                                .get(&drag.element_id)
-                                .map(|tile| PrimaryDragGesture {
-                                    element_id: drag.element_id,
-                                    lease_id: tile.lease_id,
-                                    feedback_target: drag_feedback_target(&scene, drag.element_id),
-                                    interaction_id: drag.interaction_id.clone(),
-                                    press_start: drag.press_start,
-                                    window_id: self.state.press_window,
-                                    window_allocation: self
-                                        .primary_drag_window_allocation(self.state.press_window),
-                                    terminal: None,
-                                })
+                            // A tile drag is bound to its lease; a zone drag
+                            // (handle or pip grip) to the zone.
+                            let lease_id = match drag.element_kind {
+                                DragHandleElementKind::Tile => {
+                                    Some(scene.tiles.get(&drag.element_id)?.lease_id)
+                                }
+                                DragHandleElementKind::Zone => None,
+                            };
+                            Some(PrimaryDragGesture {
+                                element_id: drag.element_id,
+                                lease_id,
+                                feedback_target: drag_feedback_target(&scene, drag.element_id),
+                                interaction_id: drag.interaction_id.clone(),
+                                press_start: drag.press_start,
+                                window_id: self.state.press_window,
+                                window_allocation: self
+                                    .primary_drag_window_allocation(self.state.press_window),
+                                terminal: None,
+                            })
                         });
                 } else if !self.state.input_processor.drag_states.contains_key(&0) {
                     self.state.primary_drag_gesture = None;
@@ -2848,18 +2855,6 @@ impl WinitApp {
                     resize_step_px: portal_part.window_resize_step_px,
                     affordance_px: portal_part.window_resize_affordance_px,
                 };
-                // The pip resize grip: aspect-locked, persisted like a drag.
-                let resized = apply_zone_resize_pointer_event(
-                    &mut self.state.zone_resize,
-                    &pointer_event,
-                    &result.hit,
-                    &mut scene,
-                    display_w,
-                    display_h,
-                    portal_tokens.min_width_px,
-                    portal_tokens.min_height_px,
-                );
-                drag_released = dragged.or(resized);
                 portal_resize_outcome = apply_portal_resize_pointer_event(
                     &pointer_event,
                     &mut self.state.portal_resize_states,

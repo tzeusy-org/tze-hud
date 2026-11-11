@@ -126,6 +126,9 @@ pub struct DeviceDragState {
     /// Set for every mouse handle and for header bands of either device class.
     /// `false` for a nonzero-device grip, which retains hold/tolerance checks.
     pub immediate: bool,
+    /// The element's bounds when the pointer pressed down (a resize grip
+    /// scales from these).
+    pub start_bounds: tze_hud_scene::Rect,
 }
 
 impl DeviceDragState {
@@ -181,6 +184,7 @@ impl DeviceDragState {
             threshold_ms,
             last_progress: 0.0,
             immediate,
+            start_bounds: tze_hud_scene::Rect::new(0.0, 0.0, 0.0, 0.0),
         }
     }
 

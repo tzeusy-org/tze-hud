@@ -334,10 +334,8 @@ pub(crate) fn populate_notification_hit_regions_in(
         let policy = &zone_def.rendering_policy;
         let zone_tokens = tze_hud_config::tokens::for_zone(token_map, zone_name);
         let scale = tze_hud_config::tokens::px_scale(&zone_tokens);
-        let zone_policy = scene
-            .zone_registry
-            .geometry_policy_for(zone_name)
-            .unwrap_or(zone_def.geometry_policy);
+        let zone_policy =
+            super::zone_policy_in(layout, scene, zone_name).unwrap_or(zone_def.geometry_policy);
         let (zx, zy, zw, zh) = super::zone_geometry_in(layout, zone_name, &zone_policy, sw, sh);
         let layout = Compositor::zone_slot_layout_with_tokens(
             &zone_tokens,
