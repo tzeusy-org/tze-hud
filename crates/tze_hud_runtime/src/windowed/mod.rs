@@ -206,6 +206,8 @@ mod monitor_identity;
 mod network;
 mod panel_input;
 mod portal;
+#[cfg(any(target_os = "windows", test))]
+pub(crate) mod shell_presence;
 mod wake;
 mod widgets;
 
@@ -240,7 +242,7 @@ use self::panel_input::PanelInputState;
 use self::portal::PortalProjectionDrain;
 use self::wake::{
     CursorEntryTurn, Deadline, RuntimeWakeEvent, WindowedWake, control_flow_for_deadlines,
-    deadline_from_wall_us,
+    deadline_from_wall_us_at,
 };
 use crate::portal::PortalWakeDeadline;
 
@@ -701,9 +703,9 @@ fn portal_deadline_after_drain(
         (!portal_drain.is_deferred()).then_some(Deadline::new(now, portal_deadline.wakeup_source()))
     } else {
         // Keep the wall-clock observation paired with `now`. Calling
-        // `deadline_from_wall_us` here would take a second wall-clock sample;
-        // a deadline crossing between the two reads could become an accidental
-        // immediate retry while the portal drain is still deferred.
+        // Keep using the supplied observation here; a second wall-clock
+        // sample could turn a crossing deadline into an accidental immediate
+        // retry while the portal drain is still deferred.
         Some(Deadline::new(
             now + std::time::Duration::from_micros(remaining_us),
             portal_deadline.wakeup_source(),
@@ -1904,9 +1906,10 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             // signalling the main thread to present. A secondary
                             // whose retry came due gets a build, presented to it
                             // alone (nothing animates, so building steps nothing).
-                            let scene_deadline_wall_us = scene
+                            let scene_deadline = scene
                                 .next_publication_expiry_wall_us()
                                 .into_iter()
+                                .chain(compositor.next_widget_deadline_wall_us(&scene))
                                 .chain(scene.next_timed_content_wall_us())
                                 .chain(
                                     scene
@@ -1916,7 +1919,15 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                         .map(|ms| ms.saturating_mul(1_000)),
                                 )
                                 .chain(card_frame.wake_at_wall_us)
-                                .min();
+                                .min()
+                                .map(|wall_us| {
+                                    deadline_from_wall_us_at(
+                                        wall_us,
+                                        scene.now_wall_us(),
+                                        std::time::Instant::now(),
+                                        crate::idle_efficiency::RuntimeWakeupSource::TtlDeadline,
+                                    )
+                                });
                             let question_wakes = scene.take_notification_wait_notifiers();
                             drop(scene);
                             for wake in question_wakes {
@@ -1954,11 +1965,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                                     crate::idle_efficiency::RuntimeWakeupSource::AnimationDeadline,
                                 ));
                             }
-                            if let Some(wall_us) = scene_deadline_wall_us {
-                                let deadline = deadline_from_wall_us(
-                                    wall_us,
-                                    crate::idle_efficiency::RuntimeWakeupSource::TtlDeadline,
-                                );
+                            if let Some(deadline) = scene_deadline {
                                 timed_deadline = timed_deadline
                                     .into_iter()
                                     .chain(Some(deadline))
@@ -3105,6 +3112,15 @@ impl WindowedRuntime {
                     rt.rt.handle().clone(),
                 )
             });
+        #[cfg(target_os = "windows")]
+        if network_rt.is_none() {
+            // Native owner controls need their existing task even when both
+            // agent listeners are disabled. This remains the network runtime,
+            // not another shell/window thread.
+            network_rt = Some(NetworkRuntime::new()?);
+        }
+        #[cfg(target_os = "windows")]
+        let mut tray_deps = None;
         let control_panel = network_rt.as_ref().map(|rt| {
             let deps = crate::shell::control_panel::ControlPanelDeps {
                 scene: Arc::clone(&shared_scene),
@@ -3149,6 +3165,10 @@ impl WindowedRuntime {
                 render_wake: render_wake.clone(),
                 main_wake: wake.main_work_notifier(),
             };
+            #[cfg(target_os = "windows")]
+            {
+                tray_deps = Some(deps.clone());
+            }
             let sections = crate::shell::control_panel::default_sections(&deps);
             crate::shell::control_panel::spawn_control_panel(
                 rt.rt.handle(),
@@ -3158,6 +3178,20 @@ impl WindowedRuntime {
             )
         });
         let answer_keyboard = answer_focus::AnswerKeyboardState::default();
+        #[cfg(target_os = "windows")]
+        {
+            if let Some(panel) = &control_panel {
+                panel.set_quit(Arc::clone(&quit));
+            }
+            let presence = shell_presence::native::Bridge::install(
+                control_panel.clone(),
+                shell_presence::GlyphColors::from_tokens(&appearance.live.resolved()),
+                Arc::clone(&quit),
+            );
+            if let (Some(rt), Some(deps)) = (&network_rt, tray_deps) {
+                presence.observe(rt.rt.handle(), deps, wake.shell_changes(), shutdown.clone());
+            }
+        }
         #[cfg(target_os = "windows")]
         if let Some(panel) = &control_panel {
             let panel = panel.clone();

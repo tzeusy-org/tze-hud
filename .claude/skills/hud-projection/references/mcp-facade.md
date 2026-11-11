@@ -1,11 +1,12 @@
 # Portal over MCP: wiring and boundary
 
 Agents drive a portal with the standard MCP verbs on the surface
-`portal:<id>` (`docs/api.md`). Every call is `tools/call`:
+`portal:<id>` (`docs/api.md`). Every call is `tools/call`; for example,
+`name: "hud_publish"` with these `arguments`:
 
+<!-- tool: hud_publish -->
 ```json
-{"jsonrpc":"2.0","id":1,"method":"tools/call",
- "params":{"name":"hud_publish","arguments":{"surface":"portal:my-session","content":"hello"}}}
+{"surface":"portal:my-session","content":"hello"}
 ```
 
 There is no other dialect: bare tool-name methods return `-32601`.

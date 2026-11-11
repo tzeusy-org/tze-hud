@@ -182,6 +182,17 @@ pub enum SceneMutation {
         zone_name: String,
         publish_token: ZonePublishToken,
     },
+    /// Typed widget publication. Relative lifetime and deadline parameters are
+    /// resolved when this mutation applies, including a late scheduled drain.
+    PublishToWidget {
+        widget_name: String,
+        params: std::collections::HashMap<String, WidgetParameterValue>,
+        merge_key: Option<String>,
+        transition_ms: u32,
+        ttl_us: Option<u64>,
+        /// An explicit transport timestamp takes precedence over relative TTL.
+        expires_at_wall_us: Option<u64>,
+    },
     /// Clear all publications by this agent on the specified widget instance.
     ///
     /// Mirrors ClearZone semantics for widgets: removes only the calling agent's
@@ -230,6 +241,7 @@ impl SceneMutation {
             SceneMutation::UpdateNodeContent { .. } => "UpdateNodeContent",
             SceneMutation::PublishToZone { .. } => "PublishToZone",
             SceneMutation::ClearZone { .. } => "ClearZone",
+            SceneMutation::PublishToWidget { .. } => "PublishToWidget",
             SceneMutation::ClearWidget { .. } => "ClearWidget",
             SceneMutation::RegisterTileScroll { .. } => "RegisterTileScroll",
             SceneMutation::SetScrollOffset { .. } => "SetScrollOffset",
@@ -776,6 +788,28 @@ impl SceneGraph {
             } => {
                 // Per spec: ClearZone clears publications by THIS agent in the zone.
                 self.clear_zone_for_publisher(zone_name, namespace)?;
+                Ok(vec![])
+            }
+            SceneMutation::PublishToWidget {
+                widget_name,
+                params,
+                merge_key,
+                transition_ms,
+                ttl_us,
+                expires_at_wall_us,
+            } => {
+                let expiry = expires_at_wall_us
+                    .or_else(|| ttl_us.map(|ttl| self.now_wall_us().saturating_add(ttl)));
+                self.publish_to_widget_for_origin(
+                    widget_name,
+                    params.clone(),
+                    namespace,
+                    merge_key.clone(),
+                    *transition_ms,
+                    expiry,
+                    batch_lease_id,
+                    publication_origin,
+                )?;
                 Ok(vec![])
             }
             SceneMutation::ClearWidget {

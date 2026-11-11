@@ -102,7 +102,7 @@ def main(argv: list[str] | None = None) -> int:
                 receipt["setup_seconds"] = round(time.monotonic() - started, 3)
                 result = hud_gestures.main(["--exe", str(args.exe), "--injector", "sendinput",
                                            "--window-mode", "overlay", "--out", str(args.out),
-                                           "overlay-pointer"])
+                                           "overlay-pointer", "tray"])
                 receipt["scenario_exit"] = result
             receipt["registration_removed"] = True
     except Exception as error:  # retain setup/cleanup failures alongside the scenario artifacts

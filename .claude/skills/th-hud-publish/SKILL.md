@@ -52,6 +52,7 @@ unreachable or rejects the call, continue in chat and report the limitation once
 
 `hud_publish` takes `surface` plus zone `content` or widget `params`:
 
+<!-- tool: hud_publish -->
 ```json
 {"surface":"zone:notification-area","content":{"title":"Tests","body":"All checks passed","urgency":0},"key":"session-a:tests","ttl_ms":10000}
 ```
@@ -63,6 +64,9 @@ unreachable or rejects the call, continue in chat and report the limitation once
 | `status_bar` | `{"entries":{"session-a":"testing"}}` as `content`, with a work `key` |
 | `solid_color` | `{"r":0.05,"g":0.1,"b":0.2,"a":1.0}` as `content` |
 | Widget `params` declaration | `{"progress":0.5,"label":"Tests"}` as `params`, using discovered names/types |
+| Countdown `deadline<=24h` | `{"ends_in_ms":300000,"label":"Tests","severity":"info"}`; relative integer ms, starts at presentation |
+| KPI bundle | `{"value":"3 fail","label":"Tests","trend":"down","severity":"error"}` |
+| Stepper bundle | `{"step":2,"total":5,"state":"blocked","label":"Deploy"}`; step floors and clamps to total |
 
 - Structured zone `type` is inferred from the zone; set it explicitly when
   selecting another accepted type in a mixed zone. Unknown fields are rejected.
@@ -104,6 +108,7 @@ accept at most **four** `{label, callback_id}` actions; both strings must be
 nonempty. Use explicit labels such as Yes / No / Later. Callback ids must identify
 the session, question and fresh generation; a reusable visual key is not a nonce.
 
+<!-- tool: hud_publish -->
 ```json
 {"surface":"zone:notification-area","content":{"title":"Release tests","body":"Run the soak now?","actions":[{"label":"Run","callback_id":"session-a:soak:q1:run"},{"label":"Later","callback_id":"session-a:soak:q1:later"}]},"key":"session-a:soak"}
 ```

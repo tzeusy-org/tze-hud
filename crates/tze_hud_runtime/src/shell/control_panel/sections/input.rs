@@ -112,11 +112,9 @@ impl Section for InputSection {
                         (true, Some(_)) => "Saved to config",
                         (true, None) => "Lasts until restart",
                     };
-                    let detail = match &status {
-                        HotkeyStatus::Failed { reason, .. } => {
-                            format!("{does} · {source} · {reason}")
-                        }
-                        _ => format!("{does} · {source}"),
+                    let detail = match status.failure_detail(role) {
+                        Some(reason) => format!("{does} · {source} · {reason}"),
+                        None => format!("{does} · {source}"),
                     };
                     let text = chord.to_string();
                     let control = if self.chords.rebind.is_some() {

@@ -860,7 +860,7 @@ fn visible_transcript_markdown(
             result.push_str(PORTAL_TIMESTAMP_SEPARATOR);
             last_stamped_minute = Some(minute_bucket);
         }
-        result.push_str(clamp_utf8(&unit.output_text, 4_096));
+        result.push_str(&unit.output_text);
     }
     result
 }
@@ -1036,6 +1036,62 @@ mod tests {
 
     #[test]
     fn portal_output_markdown_keeps_newest_turn_when_formatting_exceeds_wire_cap() {
+        use crate::{PortalHub, PortalKey, Publish};
+
+        // Admission and rendering must agree for one accepted unit, including
+        // a multibyte tail beyond the former private 4 KiB rendering limit.
+        for bytes in [4_097, 16_384] {
+            for fill in ["x", "界"] {
+                let tail = "TAIL 日本語";
+                let prefix_bytes = bytes - tail.len();
+                let text = format!(
+                    "{}{}{tail}",
+                    fill.repeat(prefix_bytes / fill.len()),
+                    "x".repeat(prefix_bytes % fill.len())
+                );
+                assert_eq!(text.len(), bytes);
+                let mut hub = PortalHub::default();
+                let key = PortalKey::new("accepted-output", "main");
+                hub.publish(
+                    &key,
+                    Publish {
+                        text: Some(text.clone()),
+                        ..Default::default()
+                    },
+                    1,
+                )
+                .unwrap();
+                let mut state = view();
+                state.visible_transcript = hub
+                    .get(&key)
+                    .unwrap()
+                    .visible_transcript(hub.limits().visible_bytes)
+                    .map(|u| unit(&u.text, u.at_us))
+                    .collect();
+                let settled_at = 1 + PORTAL_ACTIVITY_QUIESCE_WINDOW_US + 1;
+                let settled = output_markdown(&state, settled_at, TimestampGranularity::Off);
+                assert!(
+                    settled.ends_with(tail),
+                    "accepted {bytes}-byte output lost its tail"
+                );
+                assert_eq!(settled, text);
+                let rendered = render(
+                    &state,
+                    &PortalVisualTokens::default(),
+                    DEFAULT_PORTAL_SIZE,
+                    settled_at,
+                );
+                assert!(rendered.children.iter().any(
+                    |node| matches!(&node.data, NodeData::TextMarkdown(markdown) if markdown.content == text)
+                ));
+                // Decorations may trim the oldest bytes of the same bounded
+                // rolling window, but never the newest accepted output tail.
+                let streaming = output_markdown(&state, 1, TimestampGranularity::PerTurn);
+                assert!(streaming.len() <= MAX_PORTAL_MARKDOWN_BYTES);
+                assert!(streaming.ends_with(&format!("{tail}{PORTAL_STREAMING_CURSOR_GLYPH}")));
+            }
+        }
+
         let mut state = view();
         state.visible_transcript = (0..8).map(|_| unit(&"é".repeat(2048), 0)).collect();
         state.visible_transcript.push(unit("newest tail 日本語", 1));

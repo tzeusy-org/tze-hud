@@ -87,22 +87,29 @@ impl SceneGraph {
             .filter(|(_, records)| records.iter().any(|r| r.publisher_namespace == namespace))
             .map(|(zone, _)| zone.as_str())
             .collect();
+        let mut widgets: BTreeSet<&str> = self
+            .widget_registry
+            .active_publishes
+            .iter()
+            .filter(|(_, records)| records.iter().any(|r| r.publisher_namespace == namespace))
+            .map(|(widget, _)| widget.as_str())
+            .collect();
         for scheduled in &self.scheduled_batches {
             if scheduled.batch.agent_namespace != namespace {
                 continue;
             }
             for mutation in &scheduled.batch.mutations {
-                if let SceneMutation::PublishToZone { zone_name, .. } = mutation {
-                    zones.insert(zone_name);
+                match mutation {
+                    SceneMutation::PublishToZone { zone_name, .. } => {
+                        zones.insert(zone_name);
+                    }
+                    SceneMutation::PublishToWidget { widget_name, .. } => {
+                        widgets.insert(widget_name);
+                    }
+                    _ => {}
                 }
             }
         }
-        let widgets = self
-            .widget_registry
-            .active_publishes
-            .values()
-            .filter(|records| records.iter().any(|r| r.publisher_namespace == namespace))
-            .count();
         let leases = self.agent_lease_ids(namespace);
         let tiles = self
             .tiles
@@ -111,7 +118,7 @@ impl SceneGraph {
             .count();
         AgentHoldings {
             zones: zones.len(),
-            widgets,
+            widgets: widgets.len(),
             tiles,
         }
     }

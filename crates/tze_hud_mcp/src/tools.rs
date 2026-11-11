@@ -212,7 +212,9 @@ fn widget_expires_in(
         .into_iter()
         .flatten()
         .filter(|r| r.publisher_namespace == ns)
-        .filter_map(|r| remaining_ms(scene.widget_expiry(r), now))
+        .map(|r| scene.widget_expiry(r))
+        .chain(scene.scheduled_widget_publication_expiries(widget, ns))
+        .filter_map(|expiry| remaining_ms(expiry, now))
         .max()
 }
 
@@ -284,6 +286,7 @@ fn widget_params(scene: &SceneGraph, instance: &str) -> Value {
         }
         let c = d.constraints.as_ref();
         let ty = match d.param_type {
+            WidgetParamType::Deadline => "deadline<=24h".into(),
             WidgetParamType::F32 => match (c.and_then(|c| c.f32_min), c.and_then(|c| c.f32_max)) {
                 (Some(lo), Some(hi)) => format!("number {lo}..{hi}"),
                 _ => "number".into(),
@@ -493,7 +496,6 @@ fn check_fields(surface: &Surface, p: &PublishParams) -> McpResult<()> {
         Surface::Widget(_) => [
             ("wait_ms", p.wait_ms.is_some()),
             ("content", p.content.is_some()),
-            ("delay_ms", p.delay_ms.is_some()),
             ("status", p.status.is_some()),
             ("expects_reply", p.expects_reply.is_some()),
             ("display_name", p.display_name.is_some()),
@@ -859,6 +861,13 @@ async fn publish_zone<'a>(
 
 async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> McpResult<Value> {
     let ns = ctx.agent.agent_id.clone();
+    let delay_ms = p.delay_ms.unwrap_or(0);
+    if delay_ms > MAX_DELAY_MS {
+        return Err(tool_err(
+            "TIMESTAMP_TOO_FUTURE",
+            format!("delay_ms is at most {MAX_DELAY_MS}"),
+        ));
+    }
     let params = p
         .params
         .ok_or_else(|| invalid("widget publish needs params; see params in hud_surfaces"))?;
@@ -881,7 +890,41 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
         .map_err(|e| scene_error(&e))?;
     let lease_id = ensure_lease(ctx, &mut scene)?;
     let ttl_ms = p.ttl_ms.unwrap_or(0);
-    let expires = (ttl_ms > 0).then(|| now_us(&scene).saturating_add(ttl_ms * 1_000));
+    let now = now_us(&scene);
+    let ttl_us = (ttl_ms > 0).then(|| ttl_ms.saturating_mul(1_000));
+    if delay_ms > 0 {
+        let present_at = now.saturating_add(delay_ms.saturating_mul(1_000));
+        let owner_ttl = scene
+            .widget_registry
+            .instances
+            .get(widget)
+            .and_then(|instance| instance.auto_clear_ms)
+            .map(|ms| ms.saturating_mul(1_000));
+        let expiry = match (ttl_us, owner_ttl) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        }
+        .map(|ttl| present_at.saturating_add(ttl));
+        scene.schedule_batch(
+            present_at,
+            MutationBatch {
+                batch_id: SceneId::new(),
+                agent_namespace: ns,
+                mutations: vec![SceneMutation::PublishToWidget {
+                    widget_name: widget.into(),
+                    params: typed,
+                    merge_key: p.key,
+                    transition_ms: ctx.widget_transition_ms,
+                    ttl_us,
+                    expires_at_wall_us: None,
+                }],
+                timing_hints: None,
+                lease_id: Some(lease_id),
+            },
+        );
+        return Ok(ok_with_expiry(remaining_ms(expiry, now)));
+    }
+    let expires = ttl_us.map(|ttl| now.saturating_add(ttl));
     let key = p.key.clone();
     scene
         .publish_to_widget_for_lease(
@@ -1149,6 +1192,33 @@ pub struct InputParams {
 
 static NEXT_ACTION_ID: AtomicU64 = AtomicU64::new(1);
 
+/// The runtime shares a synchronous Hub mutex. Cooperatively wait only while
+/// it is contended, without blocking an executor or leaving a detached owner
+/// after cancellation. Ordinary empty input waits still use readiness below.
+async fn with_input_hub<T>(
+    portals: &PortalHandle,
+    deadline: tokio::time::Instant,
+    apply: impl FnOnce(&mut PortalHub) -> McpResult<T>,
+) -> McpResult<T> {
+    loop {
+        match portals.hub.try_lock() {
+            Ok(mut hub) => return apply(&mut hub),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                return Err(tool_err(
+                    "INTERNAL",
+                    "input state unavailable; retry hud_input",
+                ));
+            }
+            Err(std::sync::TryLockError::WouldBlock) => {}
+        }
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return Err(tool_err("INTERNAL", "input state busy; retry hud_input"));
+        }
+        tokio::time::sleep_until(deadline.min(now + std::time::Duration::from_millis(1))).await;
+    }
+}
+
 /// Own one finite active poll. Drop releases ownership without inventing
 /// activity, including cancellation before the first portal attachment.
 pub(crate) struct InputPollLease {
@@ -1160,7 +1230,7 @@ pub(crate) struct InputPollLease {
 }
 
 impl InputPollLease {
-    fn start(
+    async fn start(
         ctx: &ToolCtx<'_>,
         namespace: &str,
         deadline: tokio::time::Instant,
@@ -1170,11 +1240,7 @@ impl InputPollLease {
         }
         let portals = ctx.portals.expect("enabled portal handle");
         let active = Arc::new(AtomicBool::new(true));
-        let (request, changed) = {
-            let mut hub = portals
-                .hub
-                .try_lock()
-                .map_err(|_| tool_err("INTERNAL", "input state unavailable; retry hud_input"))?;
+        let (request, changed) = with_input_hub(portals, deadline, |hub| {
             let before = hub.next_deadline();
             let remaining_us = deadline
                 .saturating_duration_since(tokio::time::Instant::now())
@@ -1191,8 +1257,9 @@ impl InputPollLease {
                     tool_err("INTERNAL", "input ownership unavailable; retry hud_input")
                 })?;
             let changed = !hub.list(namespace).is_empty() && before != hub.next_deadline();
-            (request, changed)
-        };
+            Ok((request, changed))
+        })
+        .await?;
         if changed {
             ctx.portal_wake.notify();
         }
@@ -1244,7 +1311,7 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(wait_ms);
     let max_items = p.max_items.unwrap_or(usize::MAX);
     let input_ready = ctx.input_notifiers.try_for_agent(&ns)?;
-    let _active_poll = InputPollLease::start(ctx, &ns, deadline)?;
+    let _active_poll = InputPollLease::start(ctx, &ns, deadline).await?;
     let action_ready = Arc::clone(&input_ready);
     {
         let mut scene = match ctx.scene.try_lock() {
@@ -1306,17 +1373,15 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
         };
         if portals_enabled(ctx) {
             let portals = ctx.portals.expect("enabled portal handle");
-            let (batch, changed) = {
-                let mut hub = portals.hub.try_lock().map_err(|_| {
-                    tool_err("INTERNAL", "input state unavailable; retry hud_input")
-                })?;
-                hub.poll_input_with_changes(
+            let (batch, changed) = with_input_hub(portals, deadline, |hub| {
+                Ok(hub.poll_input_with_changes(
                     &ns,
                     &std::mem::take(&mut ack),
                     Some(max_items - items.len()),
                     portals.clock.now_us(),
-                )
-            };
+                ))
+            })
+            .await?;
             if changed {
                 ctx.portal_wake.notify();
             }
@@ -1602,6 +1667,11 @@ fn json_to_widget_param_value(
         })?;
     SceneGraph::validate_widget_param_audience(widget_name, decl).map_err(|e| scene_error(&e))?;
     Ok(match decl.param_type {
+        WidgetParamType::Deadline => {
+            WidgetParameterValue::Deadline(tze_hud_scene::WidgetDeadline::relative(
+                v.as_i64().ok_or_else(|| bad(&decl.value_hint()))?,
+            ))
+        }
         WidgetParamType::F32 => {
             let number = v.as_f64().ok_or_else(|| bad(&decl.value_hint()))?;
             WidgetParameterValue::F32(

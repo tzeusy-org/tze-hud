@@ -395,8 +395,43 @@
     }
   },
   "approval": {
-    "status": "pending_owner_review",
-    "decision_reference": "hud-ljhku.3: concrete one-call flow and discovery bytes await owner PR review",
-    "basis": "Source-bound calibration on 8129fda4: new notification_choice_wait measures 77 model-visible tokens in one call (129 wire), with four callback options, wait_ms 30000 and explicit ttl_ms 0 to avoid wall-clock-dependent expiry bytes. tools/list rises from 590 to 622 model-visible tokens (627 to 659 wire) to advertise the optional argument. Every other existing flow retains byte-identical fingerprints and metrics: discover126, zone39, widget22, error45, complete choice114, portal137. Existing ceilings, tokenizer, flow version4, serialization/accounting and reply defaults remain unchanged; new flow ceiling90. Prior PR1598 owner approval covers the previous baseline only. This candidate does not establish approval of the new bytes, new budget row, or necessary tools/list exception to the original byte-identity criterion. Final gate requires two byte-identical current-source measurements."
+    "status": "owner_approved",
+    "decision_reference": "hud-ljhku.3: the owner explicitly accepted the concrete one-call notification_choice_wait flow (77 model-visible / 129 wire tokens in one call), its new 90-token ceiling row, and the tools/list 590->622 model-visible (627->659 wire) exception to the original byte-identity criterion for PR1602 on 2026-11-12 (Asia/Singapore). hud-ljhku.9: the owner explicitly accepted production discovery 754->882 bytes / 210->245 tokens (wire 1025->1171 / 283->321) and live-state envelope 250->285 for PR1606 on 2026-11-12. PR1598 approval remains historical for the previous baseline only.",
+    "basis": "Source-bound calibration on 8129fda4: new notification_choice_wait measures 77 model-visible tokens in one call (129 wire), with four callback options, wait_ms 30000 and explicit ttl_ms 0 to avoid wall-clock-dependent expiry bytes. tools/list rises from 590 to 622 model-visible tokens (627 to 659 wire) to advertise the optional argument. Every other existing flow retains byte-identical fingerprints and metrics: discover126, zone39, widget22, error45, complete choice114, portal137. Existing ceilings, tokenizer, flow version4, serialization/accounting and reply defaults remain unchanged; new flow ceiling90. PR1606 production discovery comparison at c3355f61 is recorded under production_discovery; canonical flow objects unchanged by it. Final gate requires two byte-identical current-source measurements. No Windows acceptance is inferred."
+  },
+  "previous_approval": {
+    "status": "owner_approved",
+    "decision_reference": "hud-ljhku.7 owner-signed discovery spec (2026-11-09); owner explicitly approved PR1598 and its concrete measured baseline (tools/list590, default discovery126, production discovery210) on 2026-11-10 (Asia/Singapore). Prior hud-j7kxn acceptance covers only the retained old baseline.",
+    "basis": "Source-bound measurement on 177e1096: model-visible tools/list564->590 and default discovery113->126; production POC discovery satisfies210. Zone39, widget22, error45, complete choice114 and portal137 retain identical request/response fingerprints and metrics. Numeric discovery uses JSON number with identical finitef32 admission/bounds; audiences/occupancy/tool annotations supply the new bytes. All seven canonical flow ceilings, tokenizer, flow version4, serialization/accounting and reply defaults reattached/pending_input/remaining are unchanged. Canonical gate still requires two byte-identical final-source measurements. The owner explicitly accepted these new baseline bytes for PR1598 on 2026-11-10 (Asia/Singapore). This approval changes no measurement, fingerprint, tokenizer, accounting, flow version or ceiling. No Windows acceptance is inferred."
+  },
+  "production_discovery": {
+    "source": "c3355f6144805c219f240ab4272a33da1e33364e",
+    "old": {
+      "model_visible": {
+        "bytes": 754,
+        "tokens": 210
+      },
+      "total": {
+        "bytes": 1025,
+        "tokens": 283
+      }
+    },
+    "new": {
+      "model_visible": {
+        "bytes": 882,
+        "tokens": 245
+      },
+      "total": {
+        "bytes": 1171,
+        "tokens": 321
+      }
+    },
+    "budget": 250,
+    "scope": "Fresh unheld app/tze_hud_app/config/production.toml. Prior instance set measured through the same actual public handler; other config fields and previous discovery rows preserved.",
+    "live_fixture_envelope": {
+      "old": 250,
+      "new": 285,
+      "basis": "Retain the existing 40-token state allowance over measured unheld production210->245; exactly the same new35-token countdown row. Fresh production remains<=250; canonical seven flow ceilings unchanged. Owner accepted alongside production bytes for PR1606 on 2026-11-12."
+    }
   }
 }

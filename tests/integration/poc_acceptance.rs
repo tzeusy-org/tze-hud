@@ -33,11 +33,12 @@ const NOTIFICATION: &str = "zone:notification-area";
 const SUBTITLE: &str = "zone:subtitle";
 
 // docs/api.md "Token budgets" (model-visible tokens). Discover is the
-// production.toml scene: 6 zones plus the 3 built-in widgets (<=210 tokens).
-const DISCOVER_BUDGET: usize = 210;
-// Existing fixture envelope after publishing/attaching: live holdings and
-// portal defaults cost additional tokens. This is not an arbitrary-state cap.
-const DISCOVER_WITH_HOLDINGS_BUDGET: usize = 250;
+// production.toml scene: 6 zones plus four widget instances (<=250 tokens).
+const DISCOVER_BUDGET: usize = 250;
+// Existing live-state allowance stays 40 tokens over the measured unheld
+// scene (formerly 210+40=250, now 245+40=285). Only the new countdown
+// row adds 35; no required holding/portal state is omitted to fit fresh discovery.
+const DISCOVER_WITH_HOLDINGS_BUDGET: usize = 285;
 const ZONE_PUBLISH_BUDGET: usize = 80;
 const PORTAL_FLOW_BUDGET: usize = 250;
 
@@ -100,6 +101,9 @@ struct Reply {
     body: Value,
     /// Tool name + arguments + result text: what enters the model's context.
     model_tokens: usize,
+    model_bytes: usize,
+    wire_tokens: usize,
+    wire_bytes: usize,
 }
 
 struct Poc {
@@ -228,6 +232,8 @@ impl Poc {
             "params": {"name": tool, "arguments": arguments},
         })
         .to_string();
+        let request_bytes = request.len();
+        let request_tokens = tokens(&request);
         let mut call = tokio::spawn(post(self.hud.mcp_addr(), psk, request));
         let deadline = Instant::now() + WAIT;
         let response = loop {
@@ -243,6 +249,8 @@ impl Poc {
         };
         self.settle().await;
 
+        let wire_bytes = request_bytes + response.len();
+        let wire_tokens = request_tokens + tokens(&response);
         let response: Value = serde_json::from_str(&response).expect("JSON-RPC response");
         let result = &response["result"];
         let text = result["content"][0]["text"]
@@ -252,6 +260,9 @@ impl Poc {
         Reply {
             body: serde_json::from_str(text).expect("result text is JSON"),
             model_tokens: tokens(&format!("{tool}{arguments}{text}")),
+            model_bytes: format!("{tool}{arguments}{text}").len(),
+            wire_tokens,
+            wire_bytes,
         }
     }
 
@@ -655,16 +666,62 @@ fn input_items(reply: &Reply) -> &Vec<Value> {
 /// Production model discovery and rejections must be useful within one call.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn poc_widget_discovery_and_errors_are_self_sufficient() {
+    // Measure the previous production instance set through the same public
+    // handler, preserving every other config field and the actual serializer.
+    let mut prior_config = runtime_config();
+    let mut prior: toml::Value = PRODUCTION_CONFIG.parse().unwrap();
+    prior["tabs"][0]["widgets"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|widget| widget["widget_type"].as_str() != Some("countdown"));
+    prior_config.config_toml = Some(toml::to_string(&prior).unwrap());
+    let mut previous = Poc::boot_from(prior_config, None).await;
+    let old_discovery = previous.call("hud_surfaces", json!({})).await;
+    println!(
+        "production_discovery_old={}",
+        json!({"model_tokens":old_discovery.model_tokens,"model_bytes":old_discovery.model_bytes,"wire_tokens":old_discovery.wire_tokens,"wire_bytes":old_discovery.wire_bytes,"body":old_discovery.body})
+    );
+    assert_eq!(old_discovery.model_tokens, 210);
+    drop(previous);
     let mut poc = Poc::boot().await;
     let discovery = poc.call("hud_surfaces", json!({})).await;
+    let mut retained = discovery.body.clone();
+    retained["surfaces"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|surface| surface["s"] != "widget:main-countdown");
+    assert_eq!(
+        retained, old_discovery.body,
+        "all prior model parameters and occupancy hints survive"
+    );
     assert!(
         discovery.model_tokens <= DISCOVER_BUDGET,
         "{} tokens: {}",
         discovery.model_tokens,
         discovery.body
     );
+    println!(
+        "production_discovery={}",
+        json!({"model_tokens":discovery.model_tokens,"model_bytes":discovery.model_bytes,"wire_tokens":discovery.wire_tokens,"wire_bytes":discovery.wire_bytes,"body":discovery.body})
+    );
     let surfaces = discovery.body["surfaces"].as_array().unwrap();
     let widget = |name: &str| surfaces.iter().find(|s| s["s"] == name).unwrap();
+    assert_eq!(
+        widget("widget:main-countdown")["params"]["ends_in_ms"],
+        "deadline<=24h"
+    );
+    assert_eq!(
+        surfaces
+            .iter()
+            .filter(|surface| surface["s"]
+                .as_str()
+                .is_some_and(|name| name.starts_with("widget:")))
+            .count(),
+        4
+    );
+    assert!(surfaces.iter().all(|surface| {
+        !["widget:kpi", "widget:stepper"].contains(&surface["s"].as_str().unwrap())
+    }));
     for surface in surfaces {
         if let Some(params) = surface["params"].as_object() {
             for hidden in ["fill_color", "theme", "tooltip_visible"] {
@@ -716,6 +773,21 @@ async fn poc_widget_discovery_and_errors_are_self_sufficient() {
             "info|warning|error",
         ),
         ("widget:main-status", json!({"reason":false}), "160"),
+        (
+            "widget:main-countdown",
+            json!({"ends_in_ms":-1}),
+            "deadline<=24h",
+        ),
+        (
+            "widget:main-countdown",
+            json!({"ends_in_ms":1.5}),
+            "deadline<=24h",
+        ),
+        (
+            "widget:main-countdown",
+            json!({"ends_in_ms":86400001}),
+            "deadline<=24h",
+        ),
     ] {
         let error = poc
             .call_error_body("hud_publish", json!({"surface":surface,"params":params}))
@@ -1252,7 +1324,7 @@ async fn poc_override_safe_mode_wins_with_hung_grpc_agent() {
         panic!("hud_input left its armed wait before owner action: {joined:?}");
     }
 
-    poc.hud.press_safe_mode_hotkey();
+    poc.hud.tray_command("pause");
     poc.wait_for("safe mode", |hud| hud.safe_mode_active())
         .await;
     assert_eq!(
@@ -1281,6 +1353,19 @@ async fn poc_override_safe_mode_wins_with_hung_grpc_agent() {
         0,
         "safe-mode exit leaves no leases suspended"
     );
+
+    // Both independent entry points work while winit is not being stepped.
+    // The menu's explicit Resume also closes a panel opened by the pause chord.
+    poc.hud.press_safe_mode_hotkey();
+    poc.wait_for("chord pause with the same hung agent", |hud| {
+        hud.safe_mode_active()
+    })
+    .await;
+    poc.hud.tray_command("resume");
+    poc.wait_for("tray resume and panel close", |hud| {
+        !hud.safe_mode_active() && !hud.control_panel_open()
+    })
+    .await;
 
     // The owner's Clear does not depend on the hung response stream.
     poc.open_panel().await;

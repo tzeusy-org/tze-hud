@@ -9,6 +9,7 @@ import ctypes
 import hashlib
 import importlib.util
 import io
+import json
 import tempfile
 import unittest
 from pathlib import Path
@@ -175,22 +176,32 @@ class WindowsGuardTests(unittest.TestCase):
                 native.user32.ReleaseDC.assert_called_with(0, screen)
 
     def test_failed_diagnostic_keeps_original_result_and_next_scenario(self) -> None:
-        run = mock.Mock(out=Path("unused"))
-        run.clear_publications.return_value = []
-        run.screen_grab.side_effect = OSError("capture unavailable")
+        cases = [(g.ScenarioFailed("original failure", {"marker": 1}),
+                  "original failure", {"marker": 1})]
+        for stderr in ("x" * 5000 + "provider failure", b"provider \xff failure", None):
+            expected = stderr.decode("utf-8", errors="replace") if isinstance(stderr, bytes) else stderr or ""
+            cases.append((g.subprocess.CalledProcessError(1, ["powershell.exe", "-Command", "script"],
+                                                        stderr=stderr),
+                          "CalledProcessError: powershell.exe exited 1",
+                          {"exit_code": 1, "stderr": expected[-4096:]}))
+        for failure, step, last in cases:
+            with self.subTest(failure=type(failure).__name__, stderr=getattr(failure, "stderr", None)):
+                run = mock.Mock(out=Path("unused"))
+                run.clear_publications.return_value = []
+                run.screen_grab.side_effect = OSError("capture unavailable")
 
-        def first(_run):
-            raise g.ScenarioFailed("original failure", {"marker": 1})
+                def first(_run):
+                    raise failure
 
-        second = mock.Mock(__doc__="second scenario")
-        with mock.patch.dict(g.SCENARIOS, {"first": first, "second": second}, clear=True), \
-                contextlib.redirect_stdout(io.StringIO()):
-            results = g.run_scenarios(run, ["first", "second"])
-        self.assertEqual([result["outcome"] for result in results], ["FAIL", "PASS"])
-        self.assertEqual(results[0]["step"], "original failure")
-        self.assertEqual(results[0]["last"], {"marker": 1})
-        self.assertIn("capture unavailable", results[0]["diagnostic_error"])
-        second.assert_called_once_with(run)
+                second = mock.Mock(__doc__="second scenario")
+                with mock.patch.dict(g.SCENARIOS, {"first": first, "second": second}, clear=True), \
+                        contextlib.redirect_stdout(io.StringIO()):
+                    results = g.run_scenarios(run, ["first", "second"])
+                self.assertEqual([result["outcome"] for result in results], ["FAIL", "PASS"])
+                self.assertEqual(results[0]["last"], last)
+                self.assertEqual(results[0]["step"], step)
+                self.assertIn("capture unavailable", results[0]["diagnostic_error"])
+                second.assert_called_once_with(run)
 
     def test_owned_hud_or_helper_foreground_passes(self) -> None:
         g.check_owned_windows(**WIN_OWNED)
@@ -241,7 +252,7 @@ class WindowsGuardTests(unittest.TestCase):
         native = native_input_boundary()
         injector = native.SendInput(lambda: g.check_owned_windows(**{**WIN_OWNED, "foreground_pid": 9}))
         actions = (lambda: injector.move_abs(1, 2), lambda: injector.move_relative(3, 4),
-                   lambda: injector.click(), lambda: injector.button(True), lambda: injector.key("Tab"),
+                   lambda: injector.click(), lambda: injector.click(3), lambda: injector.button(True), lambda: injector.key("Tab"),
                    lambda: injector.type_unicode("x"))
         for action in actions:
             with self.assertRaises(g.Refused):
@@ -274,6 +285,57 @@ class WindowsGuardTests(unittest.TestCase):
                 self.assertEqual(len(result["windows"]), len(rows))
                 self.assertEqual(result["matching_overlays"], 0 if case == "no-overlay" else 2 if case == "ambiguous" else 1)
 
+    def test_tray_rect_requires_documented_success_and_owned_icon(self) -> None:
+        native = native_input_boundary()
+
+        def owner(_hwnd, output):
+            output._obj.value = 4242
+            return 1
+
+        def bounds(_hwnd, output):
+            rect = output._obj
+            rect.left, rect.top, rect.right, rect.bottom = (0, 728, 1024, 768)
+            return True
+
+        native.user32.GetWindowThreadProcessId.side_effect = owner
+        native.user32.FindWindowW.return_value = 11
+        native.user32.IsWindowVisible.return_value = True
+        native.user32.GetWindowRect.side_effect = bounds
+        native.user32.WindowFromPoint.return_value = 12
+        native.user32.IsChild.return_value = True
+        tooltip = "No questions\nNo agents"
+        identity = {"name": tooltip, "control_type": "ControlType.Button",
+                    "offscreen": False, "enabled": True, "rect": [800, 728, 824, 760]}
+        with mock.patch.object(native.subprocess, "run", return_value=mock.Mock(stdout=json.dumps(identity))) as query:
+            for hresult in (-1, 1, 0):
+                def locate(_identity, output):
+                    rect = output._obj
+                    rect.left, rect.top, rect.right, rect.bottom = (800, 728, 824, 760)
+                    return hresult
+
+                native.shell32.Shell_NotifyIconGetRect.side_effect = locate
+                with self.subTest(hresult=hresult):
+                    self.assertEqual(native.tray_rect(99, 1, 4242, expected_tooltip=tooltip),
+                                     (800, 728, 824, 760) if hresult == 0 else None)
+            # S_OK and the taskbar parent also describe the overflow chevron.
+            # Only the visible, enabled button carrying our tooltip is ours.
+            for change in ({"name": "Show hidden icons"}, {"name": "another app"},
+                           {"offscreen": True}, {"enabled": False},
+                           {"control_type": "ControlType.Pane"},
+                           {"rect": [0, 0, 10, 10]}):
+                query.return_value.stdout = json.dumps({**identity, **change})
+                with self.subTest(identity=change):
+                    self.assertIsNone(native.tray_rect(99, 1, 4242, expected_tooltip=tooltip))
+            query.return_value.stdout = json.dumps({**identity, "name": "No questions\r\nNo agents"})
+            self.assertEqual(native.tray_rect(99, 1, 4242, expected_tooltip=tooltip), (800, 728, 824, 760))
+            query.side_effect = native.subprocess.TimeoutExpired("powershell.exe", 10)
+            with self.assertRaises(native.subprocess.TimeoutExpired):
+                native.tray_rect(99, 1, 4242, expected_tooltip=tooltip)
+            query.reset_mock()
+            with self.assertRaises(ValueError):
+                native.tray_rect(99, 1, 9, expected_tooltip=tooltip)
+            query.assert_not_called()
+
     def test_modes_select_only_their_scenarios_and_refuse_mismatches(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             fake = mock.Mock(home=None, log=None, display="", port=0)
@@ -291,7 +353,8 @@ class WindowsGuardTests(unittest.TestCase):
                                              "--window-mode", mode, "--out", directory]), 0)
                     selected = scenarios.call_args.args[1]
                     self.assertEqual("overlay-pointer" in selected, mode == "overlay")
-                    self.assertEqual(len(selected), 1 if mode == "overlay" else 22)
+                    self.assertEqual("tray" in selected, mode == "overlay")
+                    self.assertEqual(len(selected), 2 if mode == "overlay" else 22)
             for mode, scenario in (("fullscreen", "overlay-pointer"), ("overlay", "composer")):
                 with mock.patch.object(g, "WINDOWS", True), contextlib.redirect_stderr(io.StringIO()), \
                         self.assertRaises(SystemExit) as failure:

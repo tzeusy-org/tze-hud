@@ -1640,6 +1640,21 @@ pub fn resolve_binding_value(
     let param_val = params.get(&binding.param)?;
 
     match &binding.mapping {
+        WidgetBindingMapping::Threshold {
+            threshold,
+            below,
+            at_or_above,
+        } => match param_val {
+            WidgetParameterValue::F32(value) => Some(
+                if value >= threshold {
+                    *at_or_above
+                } else {
+                    *below
+                }
+                .to_string(),
+            ),
+            _ => None,
+        },
         WidgetBindingMapping::Linear { attr_min, attr_max } => {
             let f = match param_val {
                 WidgetParameterValue::F32(v) => *v,

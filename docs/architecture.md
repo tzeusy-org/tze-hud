@@ -108,6 +108,21 @@ admin-authorized `/admin/*` outside the five MCP tools. Installation, firewall,
 restart and signed-update semantics belong in the
 [Windows runbook](operations/windows-install.md), not in agent payloads.
 
+**Windows desktop presence.** The existing hidden top-level display-watcher
+window/thread owns the tray icon, native menu, Explorer restart recovery and
+WTS session notifications. [`displays`](../crates/tze_hud_runtime/src/windowed/displays.rs)
+routes messages; [`shell_presence`](../crates/tze_hud_runtime/src/windowed/shell_presence.rs)
+and its native owner keep shell resources off the window loop. A latest-only
+snapshot on the network runtime reads the panel's connected-or-showing agent
+set and live question state after existing work notifications. Session-registry
+membership notices also refresh the roster on connection and every cleanup path,
+without waking the renderer. The observer posts only changed tray state to its
+window. There is no tray polling timer or additional
+message thread. Native commands feed the existing panel task; Quit triggers
+the normal shutdown callback. Shutdown removes the icon and unregisters WTS
+before releasing window-owned resources. `/admin/status` observes this state;
+actual lock-aware publication lifetimes belong to the later desktop delivery.
+
 **Portal state [Observed].**
 [`PortalHandle`](../crates/tze_hud_mcp/src/server.rs) shares one hub, clock
 and per-agent input Notify registry between MCP and
@@ -128,7 +143,11 @@ A uniquely identifiable visible plain-text row anchors append, reflow and rollin
 head trim. Repeated identical lines without a unique visible anchor keep their
 pixel offset, clamped to the retained range; this does not guarantee original
 turn identity. Measured origin corrections rebase the native smoother once, so
-ordinary wheel easing never animates a reading coordinate through a new origin. Existing 16 KiB history/render limits are unchanged. Resize
+ordinary wheel easing never animates a reading coordinate through a new origin.
+The hub accepts up to 16 KiB per publish, and the renderer preserves each unit
+within the existing 16 KiB rolling output window without a smaller per-unit cap.
+Timestamps, separators and the writing caret share that window; overflow trims
+its oldest UTF-8 bytes, preserving the newest output tail. Resize
 completion broadcasts member geometry and optionally persists it after unlock.
 Detach revokes while
 scene-owned; hub tombstones and scene terminal state retain missed-lock cleanup.

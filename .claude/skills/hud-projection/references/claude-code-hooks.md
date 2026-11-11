@@ -33,6 +33,7 @@ additional context or new model calls. Local markers and SessionEnd deliberately
 omit `async`; only marker writes (and a background status child on prompt) run
 on the synchronous prompt side. SessionStart's matcher excludes compact/fork.
 
+<!-- example: partial -->
 ```json
 {
   "hooks": {

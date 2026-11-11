@@ -61,9 +61,14 @@ async fn production_config_boots_with_builtin_widget_bundles() {
     };
     let scene = scene_handle.lock().await;
 
-    // Config declares three concrete widget instances on the Main tab. If startup
+    // Config declares four concrete widget instances on the Main tab. If startup
     // fell back to defaults, these instances are absent.
-    for instance in ["main-gauge", "main-progress", "main-status"] {
+    for instance in [
+        "main-gauge",
+        "main-progress",
+        "main-status",
+        "main-countdown",
+    ] {
         assert!(
             scene.widget_registry.instances.contains_key(instance),
             "expected widget instance `{instance}` from canonical app config; startup likely fell back"
@@ -71,7 +76,22 @@ async fn production_config_boots_with_builtin_widget_bundles() {
     }
 
     // The corresponding widget types must also be loaded.
-    for widget_type in ["gauge", "progress-bar", "status-indicator"] {
+    assert_eq!(scene.widget_registry.instances.len(), 4);
+    assert!(
+        !scene
+            .widget_registry
+            .instances
+            .values()
+            .any(|i| matches!(i.widget_type_name.as_str(), "kpi" | "stepper"))
+    );
+    for widget_type in [
+        "gauge",
+        "progress-bar",
+        "status-indicator",
+        "countdown",
+        "kpi",
+        "stepper",
+    ] {
         assert!(
             scene.widget_registry.get_definition(widget_type).is_some(),
             "expected widget type `{widget_type}` from widget bundles; startup likely fell back"

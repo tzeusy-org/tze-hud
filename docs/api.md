@@ -203,6 +203,34 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   is separate work. Zone enter/exit durations use the resolved motion tokens
   unless explicitly overridden by zone policy, and Stack TTL fades use the
   exit duration/curve without extending authoritative expiry.
+  Shipped bundles also include `countdown` (`ends_in_ms`, `label<=24`,
+  `severity`), `kpi` (`value<=12`, `label<=24`, `trend=up|down|flat`,
+  `severity`), and `stepper` (`step` 0..12, `total` 1..12,
+  `state=active|blocked|done`, `label<=24`). Production config instantiates
+  only `main-countdown` from these additions; KPI and stepper are available
+  for owner configuration. Stepper dots floor fractional steps and clamp to
+  total; the current dot uses primary/caution/success for active/blocked/done.
+
+  `deadline` appears in discovery as `deadline<=24h`. Send integer relative
+  milliseconds 0..86400000 (`ends_in_ms` in the countdown bundle); gRPC uses
+  the `deadline_ms` integer oneof, never the f32 oneof. Both planes reject
+  negatives, fractions, overflow and wrong types with that bound in the hint.
+  The runtime snapshots the absolute wall deadline when content actually
+  presents, including a late delayed drain. A label-only republish under the
+  same publisher/key preserves it; explicitly resending the duration resets it.
+  Remaining time rounds up: `125 min` → `2 h 05`, `30 min` → `30 min`,
+  `90 s` → `1:30`. Only a visible published countdown schedules its next
+  display change: minute granularity above two minutes, second granularity
+  in the last two minutes. At `0:00` it retains severity and stops waking.
+  Hidden, cleared, absent and safe-mode countdowns schedule no countdown wake.
+  Safe mode freezes widget publication TTL and the owner's auto-clear allowance,
+  while the absolute countdown keeps passing; resume displays current wall time.
+  An already accepted delayed widget stays pending through safe mode, without
+  an overdue retry wake. Its whole batch presents after resume; its deadline
+  snapshot and relative TTL start at that actual presentation.
+  Hover remains runtime-local. SVG `threshold` bindings compare f32 `>= k`
+  into opacity 0/1; optional `attr_min`/`attr_max` in 0..1 select below/above
+  outputs for mutually exclusive dot branches, without an expression language.
 - Portal: the first publish to `portal:<id>` attaches (`display_name` is
   optional). Omit content for a bare attach or status-only update.
   `content` appends only the new output text; `status` labels agent activity
@@ -237,7 +265,7 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   return `SAFE_MODE_ACTIVE`, with no replay buffer. Input polling remains
   available and refreshes real activity without double-counting pause time.
   Input expiry, existing orphan grace and the maximum scene suspension continue.
-- `delay_ms` (zones, ≤ 300000) holds the content until then (invariant 1);
+- `delay_ms` (zones and widgets, ≤ 300000) holds the content until then (invariant 1);
   the expiry counts from presentation, and `ttl_ms: 0` holds a delayed
   publish until cleared just like an immediate one.
 - Returns `{"ok":true,"expires_in_ms":8000}` when a TTL is set. Portal
@@ -321,8 +349,11 @@ The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
   A finite active poll protects only its agent from idle degradation, including
   first attachment; completion/cancellation releases ownership without a future
   heartbeat. Explicit upstream loss, reclaim, holds and input TTL still apply.
-- A contended scene can return `INTERNAL` with `input state busy; retry hud_input`
-  rather than exceed that request's deadline. Repeating the same ACK is safe:
+- Acquiring the scene or portal Hub waits within the same request deadline.
+  A contended Hub waits cooperatively without blocking the async executor;
+  ordinary empty input waits remain event-driven. If contention exhausts the
+  deadline, the call can return `INTERNAL` with `input state busy; retry hud_input`.
+  Repeating the same ACK is safe:
   acknowledgements are idempotent and unacknowledged input keeps its stable id.
   The production `poc_demo` client retries only this exact typed input error,
   with one 100 ms recovery deadline and 10 ms cooperative backoff. A retried
@@ -414,7 +445,7 @@ agents until one is paired.
   `GET /admin/status`, `GET /admin/logs`, and `GET /admin/screenshot` on the
   MCP port, and `*` does not grant it. `/admin/status` includes `tailnet_inbound` (`state`: `allowed`, `blocked`, `unknown`, `not_applicable`; `reason`, `rule` and `fix` when `blocked`; `error` when `unknown`): whether Windows Firewall lets remote agents reach the tailnet bind, and `safe_mode_hotkey`, `panel_hotkey`, `pairing_hotkey` and `answer_hotkey`
   (each `chord`, `registered`, `error`; `null` when no hotkey is active; `registered: null` while pending): `registered: false`
-  means another program owns that chord; for `safe_mode_hotkey` the human pause override is then lost. The blocked
+  means another program owns that chord; for `safe_mode_hotkey`, its error names the tray icon's Pause as the independent override. The blocked
   firewall `fix` names `tze_hud.exe --allow-remote` with the same listen-port
   overrides as startup; see [the reversible Windows helper](operations/windows-install.md#remote-agents).
   This policy-derived result is cached for five seconds, not a network probe.
@@ -682,6 +713,34 @@ F1-F24, a letter or a digit, and all four must differ):
 | Ctrl+Shift+F10 | `pairing_hotkey` | Open the control panel at Connect an agent, agents running |
 | Ctrl+Shift+F9 | `answer_hotkey` | Focus the newest unanswered question with callback actions |
 
+Windows also has one notification-area **tray icon**, even when no agent
+content is showing. Click it, or select it with Win+B and Enter, to toggle
+the control panel. Its native context menu offers **Open panel** (default),
+**Pause agents** / **Resume agents**, **Hide all** / **Show all**, and **Quit**.
+Every item supports keyboard navigation. Pause opens the panel and suspends
+agents; Resume closes it and resumes them. These commands run on the network
+runtime like global chords, independently of the window event loop or agents.
+Quit uses the normal clean shutdown path, without confirmation; relaunch
+through Win+R `tze_hud` when installed, or its executable.
+
+The glyph shows paused, hidden, questions waiting, or normal, in that priority.
+Its contrast follows the Windows taskbar's light/dark setting rather than the
+HUD theme. The two-line tooltip reports question count (or Paused / Everything
+hidden) and the names of agents connected or showing something, as in the
+panel header. Long names are ellipsized within the shell's UTF-16 limit.
+Windows 11 initially places new icons in overflow; pin this one through
+**Settings > Personalization > Taskbar > Other system tray icons**.
+
+`/admin/status` reports `tray` with `registered`, `glyph`, `tooltip`,
+`all_hidden` and native test identity, plus `session_locked`. `tray` is null
+and `session_locked` false off Windows. Failed watcher creation leaves
+`registered` and `session_locked` false; a missing icon can therefore be
+distinguished from overflow. Explorer restart re-adds the icon; an unsuccessful
+registration is logged and retried at the next Explorer restart. WTS lock,
+unlock and console/remote connection events update `session_locked` without
+polling. This observation alone does **not** freeze question deadlines or hold
+new cards; that separate desktop-presence delivery remains outstanding.
+
 A global chord takes its keys from every other app while the HUD runs, so the
 defaults are F-key chords; rebind one that clashes (Ctrl+Shift+F10 is also
 JetBrains IDEs' "Run"). The pairing chord is not registered when the MCP port
@@ -744,7 +803,8 @@ is hidden, shows it all again. Hidden content is not drawn and takes no input
 or focus; agents keep their leases and publications and are not told. While
 anything is hidden and the panel is closed, a pill at the bottom right of the
 primary display says what is hidden and which chord opens the panel (the
-pause chord when Windows refused the panel chord). A restart shows everything.
+pause chord when Windows refused the panel chord, or Tray → Open panel when
+both chords are refused). A restart shows everything.
 
 The Agents card's **Questions wait for an answer** choice offers 15 s,
 30 s, 1 min, 2 min and 5 min. Its detail is "How long a question card waits
@@ -1088,6 +1148,17 @@ The budgets are enforced on model-visible tokens; the JSON-RPC envelope adds
 about 50 tokens per call that the model never sees. Both measures are
 baselined against regressions.
 
+The same artifact separately reports `client_layer.skill_bodies` (the complete
+`th-hud-publish` and `hud-projection` `SKILL.md` files, including frontmatter,
+counted with that pinned tokenizer) and `client_layer.model_turns` (one per
+executed `tools/call`; protocol `tools/list` is zero). These are report-only:
+the later skill diet arms its own ceiling. They do not alter canonical MCP
+flow bytes, fingerprints or budgets. Skill and reference JSON examples are
+checked against production MCP argument types by
+[`skill_json_examples_use_production_arguments`](../crates/tze_hud_mcp/tests/skill_examples.rs);
+the [annotation convention](../.claude/skills/th-hud-publish/references/examples.md)
+distinguishes arguments from responses and partial configuration examples.
+
 | Measure | Before T5 (wire) | Wire | Model-visible | Budget (model-visible) |
 |---|---|---|---|---|
 | `tools/list` | 4,418 | 659 | 622 | ≤ 900 |
@@ -1097,7 +1168,7 @@ baselined against regressions.
 | Four-option notification ask-and-wait (`notification_choice_wait`) | — | 129 | 77 | ≤ 90 |
 | Widget publish | ~168 | 73 | 22 | ≤ 80 |
 | Portal: attach+publish+hold, poll, ack, clear | ~575 over 5 round trips | 343 over 4 | 137 over 4 | ≤ 250 |
-| Discover (unheld `production.toml`: 6 zones, 3 built-in widgets) | n/a | n/a | 210 | ≤ 210 |
+| Discover (unheld `production.toml`: 6 zones, 4 widget instances) | n/a | 321 | 245 | ≤ 250 |
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
 
 The new `notification_choice_wait` flow uses the same four callback options,
@@ -1107,9 +1178,9 @@ returns the accepted Skip action in its only call, without polling or ACK.
 Its 77 model-visible tokens compare with 114 for the unchanged three-call flow.
 Advertising the optional argument changes `tools/list` from 590 to 622 tokens;
 all six other existing flows keep identical fingerprints, bytes and counts.
-The candidate baseline is **pending owner review** of the new bytes, the new
-90-token row and this necessary discovery exception to the signed byte-identity
-criterion. The prior PR1598 approval does not approve these changes. All existing
+The owner **accepted** the new bytes, the new 90-token row and this necessary
+discovery exception to the signed byte-identity criterion for PR1602 on
+2026-11-12 (Asia/Singapore); the prior PR1598 approval covers only the previous baseline. All existing
 ceilings, reply defaults, counting rules, tokenizer and flow versions remain.
 
 All eight measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
@@ -1117,10 +1188,17 @@ All eight measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
 changes model-visible `tools/list` from 564 to 590 tokens and default discovery
 from 113 to 126. The five other flows retain identical request/response
 fingerprints and metrics: zone 39, widget 22, error 45, complete choice 114 and
-portal 137. Production discovery is 210, down from ~232; occupancy hints and all
-model-owned values/limits remain. The seven canonical flow ceilings are unchanged; the signed production target
-is tighter than its former 250-token envelope. Numeric discovery
+portal 137. At that baseline production discovery was 210, down from ~232; occupancy hints and all
+model-owned values/limits remain. The seven canonical flow ceilings are unchanged; the countdown package uses the signed 250-token production envelope. Numeric discovery
 says `number`; admission and error hints still enforce finite f32.
+
+The countdown (`hud-ljhku.9`) adds one production instance: the actual handler
+comparison measures model-visible 754 → 882 bytes / 210 → 245 tokens and wire
+1025 → 1171 bytes / 283 → 321 tokens. All prior discovery rows compare equal;
+KPI and stepper remain bundles without production instances. The new production
+bytes were **accepted by the owner** for PR1606 on 2026-11-12 (Asia/Singapore);
+the PR1598 approval below covers only the previous baseline.
+The seven canonical flow objects and ceilings remain unchanged in the baseline.
 
 The owner **accepted these concrete new baseline bytes** for PR1598 on
 2026-11-10 (Asia/Singapore). Earlier `hud-j7kxn` approval covered the old baseline
@@ -1168,10 +1246,13 @@ the previous items and polls, so poll+ack is one round trip.
 
 `integration` `poc_acceptance` checks model-visible counts on the POC
 acceptance flows (`docs/scope.md`), run end to end against `production.toml`.
-Its fresh, unheld discovery budget is the production row above: <=210 tokens,
+Its fresh, unheld discovery budget is the production row above: <=250 tokens,
 retaining model-owned parameter names, bounds and actionable occupancy hints.
-The existing live-state POC fixtures retain their 250-token envelope when
-holdings or attached portals add state/expiry/pending-input fields. That
+The live-state POC fixture envelope is 285 tokens (previously 250): it adds
+the same measured 35-token countdown row while retaining the prior 40-token
+allowance for holdings/portal state above the actual unheld baseline.
+This fixture-only change is included in the pending byte/budget review;
+none of the seven canonical flow ceilings changes. That
 fixture envelope is not a promise for arbitrary numbers of live portals;
 required state fields are never dropped to fit the unheld baseline.
 

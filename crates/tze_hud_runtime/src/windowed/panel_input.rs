@@ -946,6 +946,34 @@ pub(super) mod panel_task_tests {
         f.send_and_wait(PanelEvent::Key(PanelKey::Escape), |f| !f.panel.is_open())
             .await;
         assert!(!f.paused(), "closing always resumes");
+
+        use crate::shell::control_panel::TrayCommand;
+        f.send_and_wait(PanelEvent::Tray(TrayCommand::OpenPanel), |f| {
+            f.panel.is_open()
+        })
+        .await;
+        f.send_and_wait(PanelEvent::Tray(TrayCommand::TogglePanel), |f| {
+            !f.panel.is_open()
+        })
+        .await;
+        // Tray Pause works from a closed panel. Resume also closes a panel
+        // regardless of which entry point originally opened it.
+        f.send_and_wait(PanelEvent::Tray(TrayCommand::Pause), |f| {
+            f.paused() && f.panel.is_open()
+        })
+        .await;
+        f.send_and_wait(PanelEvent::Tray(TrayCommand::Resume), |f| {
+            !f.paused() && !f.panel.is_open()
+        })
+        .await;
+        let shutdown = f.state.shutdown.clone();
+        f.panel.set_quit(Arc::new(move || {
+            shutdown.trigger(crate::threads::ShutdownReason::Clean)
+        }));
+        f.send_and_wait(PanelEvent::Tray(TrayCommand::Quit), |f| {
+            f.state.shutdown.is_triggered()
+        })
+        .await;
     }
 
     /// Visibility (CP-6): Alt+H hides everything, a class row shows one class
@@ -960,6 +988,18 @@ pub(super) mod panel_task_tests {
         let scene = Arc::clone(&f.state.shared_state.lock().await.scene);
         let lease_id = scene.lock().await.grant_lease("agent", 60_000);
         let hidden = || scene.try_lock().map(|s| s.owner_hidden()).ok();
+        use crate::shell::control_panel::TrayCommand;
+        // Native Hide/Show remains usable when the panel is closed and keeps
+        // the very same lease/publication state as the Alt+H path below.
+        f.send_and_wait(PanelEvent::Tray(TrayCommand::HideAll), |_| {
+            hidden() == Some(SurfaceClasses::ALL)
+        })
+        .await;
+        f.send_and_wait(PanelEvent::Tray(TrayCommand::ShowAll), |_| {
+            hidden() == Some(SurfaceClasses::NONE)
+        })
+        .await;
+        assert!(!f.panel.is_open());
         let row = |id: &str| {
             let Some(PanelBody::Sections(cards)) = f.model().map(|m| m.body) else {
                 return None;

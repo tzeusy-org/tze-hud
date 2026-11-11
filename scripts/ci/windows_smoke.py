@@ -471,7 +471,7 @@ def run_checks(smoke: Smoke) -> None:
     print(f"ok  hud_surfaces lists {len(surfaces)} surfaces")
 
     widgets = sorted(s["s"] for s in surfaces if s["s"].startswith("widget:"))
-    expected = ["widget:main-gauge", "widget:main-progress", "widget:main-status"]
+    expected = ["widget:main-countdown", "widget:main-gauge", "widget:main-progress", "widget:main-status"]
     assert widgets == expected, f"hud_surfaces widgets: expected {expected}, got {widgets}"
     gauge = smoke.ok("hud_publish", {"surface": "widget:main-gauge", "params": {"level": 0.5, "label": "CI"}})
     assert gauge.get("ok") is True, f"hud_publish widget:main-gauge: {gauge}"

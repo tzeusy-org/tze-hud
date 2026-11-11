@@ -1135,3 +1135,310 @@ async fn overlapping_widgets_stack_by_instance_name() {
         );
     }
 }
+
+/// Real shipped bundle pixels, semantic color tokens and countdown raster work.
+/// TestClock advances wall time; no host timer or synthetic SVG is the oracle.
+#[tokio::test]
+async fn countdown_kpi_and_stepper_render_their_shipped_contracts() {
+    use std::sync::Arc;
+    use tze_hud_scene::{Clock, TestClock, WidgetDeadline};
+    let require_gpu = std::env::var("TZE_HUD_REQUIRE_GPU").is_ok_and(|v| v.trim() == "1");
+    if std::env::var("TZE_HUD_SKIP_GPU_TESTS").is_ok_and(|v| v.trim() == "1") {
+        assert!(!require_gpu, "required GPU bundle proof cannot skip");
+        return;
+    }
+    let mut compositor = match crate::common::new_headless_serialized(360, 124).await {
+        Ok(compositor) => compositor,
+        Err(CompositorError::NoAdapter) if !require_gpu => return,
+        Err(error) => panic!("bundle compositor: {error}"),
+    };
+    println!("countdown_adapter={:?}", compositor.adapter_info());
+    compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut surface = HeadlessSurface::new(&compositor.device, 360, 124);
+    let clock = Arc::new(TestClock::new(1_000));
+    let mut scene = SceneGraph::new_with_clock(360.0, 124.0, clock.clone());
+    let tab = scene.create_tab("Bundles", 0).unwrap();
+    for loaded in [
+        bundle!("countdown", ["card.svg"]),
+        bundle!("kpi", ["card.svg"]),
+        bundle!("stepper", ["card.svg"]),
+    ] {
+        let BundleScanResult::Ok(bundle) = loaded else {
+            panic!("shipped bundle must load")
+        };
+        let name = bundle.definition.id.clone();
+        for (file, bytes) in bundle.svg_contents {
+            compositor
+                .widget_renderer_mut()
+                .unwrap()
+                .register_svg(&name, &file, bytes);
+        }
+        scene.widget_registry.register_instance(WidgetInstance {
+            id: SceneId::new(),
+            widget_type_name: name.clone(),
+            tab_id: tab,
+            geometry_override: Some(GeometryPolicy::Relative {
+                x_pct: 0.0,
+                y_pct: 0.0,
+                width_pct: 1.0,
+                height_pct: 1.0,
+            }),
+            contention_override: None,
+            instance_name: name,
+            current_params: bundle
+                .definition
+                .parameter_schema
+                .iter()
+                .map(|p| (p.name.clone(), p.default_value.clone()))
+                .collect(),
+            auto_clear_ms: None,
+        });
+        scene.widget_registry.register_definition(bundle.definition);
+    }
+    let publish = |scene: &mut SceneGraph, name, params| {
+        scene
+            .publish_to_widget(name, params, "agent", None, 200, None)
+            .unwrap();
+    };
+    let string = |value: &str| WidgetParameterValue::String(value.into());
+    let enumeration = |value: &str| WidgetParameterValue::Enum(value.into());
+    let color_at = |pixels: &[u8], x, y, token| {
+        let actual = widget_region(pixels, 360, (0, 0), (x, y, 1, 1))[0];
+        let expected = token_rgb(token);
+        for channel in 0..3 {
+            assert!(
+                actual[channel].abs_diff(expected[channel]) <= 4,
+                "{token} at {x},{y}: {actual:?} != {expected:?}"
+            );
+        }
+    };
+    publish(
+        &mut scene,
+        "stepper",
+        HashMap::from([
+            ("step".into(), WidgetParameterValue::F32(2.0)),
+            ("total".into(), WidgetParameterValue::F32(5.0)),
+            ("state".into(), enumeration("blocked")),
+        ]),
+    );
+    render(&mut compositor, &mut scene, &mut surface);
+    let blocked = surface.read_pixels(&compositor.device);
+    color_at(&blocked, 20, 54, "color.primary");
+    color_at(&blocked, 49, 54, "color.caution");
+    color_at(&blocked, 78, 54, "color.outline.variant");
+    for (step, filled) in [(2.6, 2), (7.0, 5)] {
+        publish(
+            &mut scene,
+            "stepper",
+            HashMap::from([("step".into(), WidgetParameterValue::F32(step))]),
+        );
+        // A numeric transition uses injected monotonic time and then stops.
+        render(&mut compositor, &mut scene, &mut surface);
+        clock.advance(201);
+        render(&mut compositor, &mut scene, &mut surface);
+        let pixels = surface.read_pixels(&compositor.device);
+        for dot in 1..=5 {
+            color_at(
+                &pixels,
+                20 + (dot - 1) * 29,
+                54,
+                if dot < filled {
+                    "color.primary"
+                } else if dot == filled {
+                    "color.caution"
+                } else {
+                    "color.outline.variant"
+                },
+            );
+        }
+        if filled == 2 {
+            assert_eq!(
+                pixels, blocked,
+                "fractional step must floor, including antialiased edges"
+            );
+        }
+    }
+    for (state, token) in [("active", "color.primary"), ("done", "color.success")] {
+        publish(
+            &mut scene,
+            "stepper",
+            HashMap::from([("state".into(), enumeration(state))]),
+        );
+        render(&mut compositor, &mut scene, &mut surface);
+        color_at(&surface.read_pixels(&compositor.device), 136, 54, token);
+    }
+    scene
+        .clear_widget_for_publisher("stepper", "agent")
+        .unwrap();
+    publish(
+        &mut scene,
+        "kpi",
+        HashMap::from([
+            ("value".into(), string("3 fail")),
+            ("label".into(), string("Tests")),
+            ("trend".into(), enumeration("down")),
+            ("severity".into(), enumeration("error")),
+        ]),
+    );
+    render(&mut compositor, &mut scene, &mut surface);
+    let failure = surface.read_pixels(&compositor.device);
+    let glyph = widget_region(&failure, 360, (0, 0), (310, 40, 20, 22));
+    let error = token_rgb("color.error");
+    assert!(
+        glyph
+            .iter()
+            .any(|pixel| (0..3).all(|c| pixel[c].abs_diff(error[c]) <= 5)),
+        "down path must use error token"
+    );
+    publish(
+        &mut scene,
+        "kpi",
+        HashMap::from([
+            ("value".into(), string("")),
+            ("trend".into(), enumeration("up")),
+        ]),
+    );
+    render(&mut compositor, &mut scene, &mut surface);
+    let changed = surface.read_pixels(&compositor.device);
+    assert_ne!(
+        widget_region(&failure, 360, (0, 0), (16, 40, 160, 24)),
+        widget_region(&changed, 360, (0, 0), (16, 40, 160, 24)),
+        "3 fail must produce text pixels"
+    );
+    assert_ne!(
+        glyph,
+        widget_region(&changed, 360, (0, 0), (310, 40, 20, 22)),
+        "down differs from up"
+    );
+    scene.clear_widget_for_publisher("kpi", "agent").unwrap();
+    render(&mut compositor, &mut scene, &mut surface);
+    let clean = surface.read_pixels(&compositor.device);
+    let clear_pixel: [u8; 4] = clean[..4].try_into().unwrap();
+    publish(
+        &mut scene,
+        "countdown",
+        HashMap::from([
+            (
+                "ends_in_ms".into(),
+                WidgetParameterValue::Deadline(WidgetDeadline::relative(300_000)),
+            ),
+            ("severity".into(), enumeration("error")),
+        ]),
+    );
+    assert!(compositor.widget_deadline_needs_render(&scene));
+    render(&mut compositor, &mut scene, &mut surface);
+    let count = |c: &Compositor| c.widget_renderer().unwrap().raster_count("countdown");
+    let first = count(&compositor);
+    let five = surface.read_pixels(&compositor.device);
+    let value = &compositor
+        .widget_renderer()
+        .unwrap()
+        .texture_entry("countdown")
+        .unwrap()
+        .last_rendered_params["ends_in_ms"];
+    assert_eq!(*value, string("5 min"));
+    assert!(
+        !compositor.has_inflight_animation(&scene),
+        "clock text must not create frame-rate animation"
+    );
+    clock.advance(59_999);
+    assert!(!compositor.widget_deadline_needs_render(&scene));
+    render(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(count(&compositor), first);
+    clock.advance(1);
+    assert!(compositor.widget_deadline_needs_render(&scene));
+    render(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(count(&compositor), first + 1);
+    assert!(!compositor.has_inflight_animation(&scene));
+    use tze_hud_scene::graph::SurfaceClasses;
+    scene.set_owner_hidden(SurfaceClasses {
+        widgets: true,
+        ..SurfaceClasses::NONE
+    });
+    clock.advance(60_000);
+    assert_eq!(compositor.next_widget_deadline_wall_us(&scene), None);
+    assert!(!compositor.widget_deadline_needs_render(&scene));
+    assert!(
+        render(&mut compositor, &mut scene, &mut surface)
+            .widget_rasterized
+            .is_empty()
+    );
+    assert_eq!(count(&compositor), first + 1);
+    scene.set_owner_hidden(SurfaceClasses::NONE);
+    assert!(compositor.widget_deadline_needs_render(&scene));
+    render(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(count(&compositor), first + 2);
+    assert_eq!(
+        compositor
+            .widget_renderer()
+            .unwrap()
+            .texture_entry("countdown")
+            .unwrap()
+            .last_rendered_params["ends_in_ms"],
+        string("3 min")
+    );
+    scene.pause_widget_ttls();
+    clock.advance(180_000);
+    assert_eq!(compositor.next_widget_deadline_wall_us(&scene), None);
+    assert!(!compositor.widget_deadline_needs_render(&scene));
+    render(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(count(&compositor), first + 2);
+    scene.resume_widget_ttls();
+    assert!(compositor.widget_deadline_needs_render(&scene));
+    render(&mut compositor, &mut scene, &mut surface);
+    let entry = compositor
+        .widget_renderer()
+        .unwrap()
+        .texture_entry("countdown")
+        .unwrap();
+    assert_eq!(entry.last_rendered_params["ends_in_ms"], string("0:00"));
+    assert_eq!(entry.last_rendered_params["severity"], enumeration("error"));
+    assert_eq!(compositor.next_widget_deadline_wall_us(&scene), None);
+    let zero = surface.read_pixels(&compositor.device);
+    assert_ne!(five, zero);
+    // Small text may have no fully opaque glyph pixel. Its brightest red
+    // pixel must still match the error token at nontrivial mask coverage,
+    // independently composited over the shipped card and clean frame.
+    let readout = widget_region(&zero, 360, (0, 0), (16, 40, 160, 24));
+    let actual = readout.iter().max_by_key(|pixel| pixel[0]).unwrap();
+    let tile = (token_rgb("color.surface.container.high"), 0.92);
+    assert!(
+        (32..=255).any(|coverage| {
+            let expected =
+                expected_badge_pixel(&[tile, (error, f64::from(coverage) / 255.0)], clear_pixel);
+            (0..3).all(|c| actual[c].abs_diff(expected[c]) <= 4)
+        }),
+        "zero retains its severity at antialiased coverage: {actual:?}"
+    );
+    publish(
+        &mut scene,
+        "countdown",
+        HashMap::from([(
+            "ends_in_ms".into(),
+            WidgetParameterValue::Deadline(WidgetDeadline::relative(90_000)),
+        )]),
+    );
+    assert!(compositor.next_widget_deadline_wall_us(&scene).is_some());
+    scene
+        .widget_registry
+        .instances
+        .get_mut("countdown")
+        .unwrap()
+        .geometry_override = Some(GeometryPolicy::Relative {
+        x_pct: 0.0,
+        y_pct: 0.0,
+        width_pct: 0.0,
+        height_pct: 1.0,
+    });
+    assert_eq!(compositor.next_widget_deadline_wall_us(&scene), None);
+    assert!(!compositor.widget_deadline_needs_render(&scene));
+    render(&mut compositor, &mut scene, &mut surface);
+    assert!(
+        compositor
+            .widget_renderer()
+            .unwrap()
+            .texture_entry("countdown")
+            .is_none()
+    );
+    assert_eq!(clock.now_us(), scene.now_wall_us());
+}

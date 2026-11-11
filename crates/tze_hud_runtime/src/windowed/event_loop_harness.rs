@@ -569,6 +569,23 @@ impl HeadlessEventLoopHarness {
         self.press_chord(tze_hud_scene::config::ChordRole::Pause);
     }
 
+    /// Feed the same explicit menu intent as the native tray callback, without
+    /// advancing the winit harness. The real panel task applies it asynchronously.
+    pub fn tray_command(&self, action: &str) {
+        use crate::shell::control_panel::{PanelEvent, TrayCommand};
+        let command = match action {
+            "toggle_panel" => TrayCommand::TogglePanel,
+            "open_panel" => TrayCommand::OpenPanel,
+            "pause" => TrayCommand::Pause,
+            "resume" => TrayCommand::Resume,
+            "hide_all" => TrayCommand::HideAll,
+            "show_all" => TrayCommand::ShowAll,
+            "quit" => TrayCommand::Quit,
+            _ => panic!("unknown tray test command"),
+        };
+        assert!(self.control_panel().send(PanelEvent::Tray(command)));
+    }
+
     /// Press one of the HUD's global chords.
     pub fn press_chord(&self, role: tze_hud_scene::config::ChordRole) {
         let panel = self
@@ -1539,6 +1556,7 @@ mod tests {
         let mut compositor = tze_hud_compositor::Compositor::new_headless(320, 200)
             .await
             .expect("software compositor for real frame builds");
+        println!("capture_runtime_adapter={:?}", compositor.adapter_info());
         compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
         let clock = Arc::new(TestClock::new(1_000));
         let mut cfg = super::super::WindowedConfig::default();
@@ -2178,6 +2196,216 @@ mod tests {
                 .unwrap();
             runtime.turn(true);
         }
+
+        // The countdown's typed value and scene version stay unchanged as wall
+        // time passes. Real capture builds may update its raster cache, but an
+        // unsuccessful ordinary submission must retain the repaint obligation.
+        runtime
+            .compositor
+            .init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+        {
+            use tze_hud_scene::{GeometryPolicy, WidgetInstance};
+            use tze_hud_widget::loader::{BundleScanResult, load_bundle_from_files};
+            let tokens =
+                tze_hud_config::tokens::resolve_tokens(&Default::default(), &Default::default());
+            let BundleScanResult::Ok(bundle) = load_bundle_from_files(
+                "countdown",
+                &[
+                    (
+                        "widget.toml",
+                        include_bytes!("../../../../assets/widget_bundles/countdown/widget.toml"),
+                    ),
+                    (
+                        "card.svg",
+                        include_bytes!("../../../../assets/widget_bundles/countdown/card.svg"),
+                    ),
+                ],
+                &tokens,
+            ) else {
+                panic!("shipped countdown")
+            };
+            for (file, bytes) in bundle.svg_contents {
+                runtime
+                    .compositor
+                    .widget_renderer_mut()
+                    .unwrap()
+                    .register_svg("countdown", &file, bytes);
+            }
+            let mut scene = runtime.events.scene();
+            scene.clear_zone("subtitle").unwrap();
+            // Retire prior test-only timed owners; only this section's 24h MCP
+            // lease should influence its countdown-only idle observations.
+            scene.leases.clear();
+            let tab = scene.active_tab.unwrap();
+            scene.widget_registry.register_instance(WidgetInstance {
+                id: SceneId::new(),
+                widget_type_name: "countdown".into(),
+                tab_id: tab,
+                instance_name: "clock".into(),
+                geometry_override: Some(GeometryPolicy::Relative {
+                    x_pct: 0.0,
+                    y_pct: 0.0,
+                    width_pct: 1.0,
+                    height_pct: 0.62,
+                }),
+                contention_override: None,
+                auto_clear_ms: None,
+                current_params: bundle
+                    .definition
+                    .parameter_schema
+                    .iter()
+                    .map(|p| (p.name.clone(), p.default_value.clone()))
+                    .collect(),
+            });
+            scene.widget_registry.register_definition(bundle.definition);
+        }
+        call(addr, "hud_publish", serde_json::json!({"surface":"widget:clock", "params":{"ends_in_ms":300000}, "delay_ms":10000, "ttl_ms":20000})).await;
+        let pending_lease = runtime.events.scene().scheduled_batches[0]
+            .batch
+            .lease_id
+            .expect("MCP publication has an explicit lease");
+        let shared = runtime.events.shared_state();
+        let chrome = Arc::clone(&runtime.events.app.state.chrome_state);
+        let portals = runtime
+            .events
+            .app
+            .state
+            .portal_projection_driver
+            .portal_handle();
+        assert!(
+            crate::shell::safe_mode::enter_safe_mode(&shared, &chrome, Some(&portals))
+                .await
+                .entered
+        );
+        clock.advance(15_000);
+        assert!(runtime.events.tick()); // Actual timed sweep while paused.
+        {
+            let scene = runtime.events.scene();
+            assert_eq!(
+                scene.scheduled_batches.len(),
+                1,
+                "accepted delayed MCP publication must remain pending during pause"
+            );
+            assert_eq!(
+                scene.scheduled_batches[0].batch.lease_id,
+                Some(pending_lease)
+            );
+            assert_eq!(scene.next_timed_content_wall_us(), None);
+            assert_eq!(scene.next_widget_deadline_wall_us(), None);
+        }
+        clock.advance(45_000);
+        assert!(
+            crate::shell::safe_mode::exit_safe_mode(&shared, &chrome, Some(&portals))
+                .await
+                .exited
+        );
+        assert!(
+            runtime
+                .events
+                .scene()
+                .widget_registry
+                .active_for_widget("clock")
+                .is_empty()
+        );
+        assert!(runtime.turn(true)); // First actual presentation is after resume.
+        {
+            let scene = runtime.events.scene();
+            let record = &scene.widget_registry.active_for_widget("clock")[0];
+            let tze_hud_scene::WidgetParameterValue::Deadline(deadline) =
+                &record.params["ends_in_ms"]
+            else {
+                panic!("deadline")
+            };
+            assert_eq!(deadline.at_wall_us, Some(clock.now_us() + 300_000_000));
+            assert_eq!(record.expires_at_wall_us, Some(clock.now_us() + 20_000_000));
+            assert_eq!(record.lease_id, Some(pending_lease));
+            assert_eq!(record.ttl_paused_us, 0, "never materialized during pause");
+            assert!(scene.scheduled_batches.is_empty());
+        }
+        call(
+            addr,
+            "hud_hold",
+            serde_json::json!({"surface":"widget:clock", "ttl_ms":0}),
+        )
+        .await;
+        runtime.turn(true);
+        assert!(!runtime.turn(true));
+        let version = runtime.events.scene().version;
+        let visible = |runtime: &CaptureRenderHarness| {
+            runtime
+                .compositor
+                .widget_renderer()
+                .unwrap()
+                .texture_entry("clock")
+                .unwrap()
+                .last_rendered_params["ends_in_ms"]
+                .clone()
+        };
+        assert_eq!(
+            visible(&runtime),
+            tze_hud_scene::WidgetParameterValue::String("5 min".into())
+        );
+        clock.advance(60_000);
+        assert_eq!(runtime.events.scene().version, version);
+        let capture = tokio::spawn({
+            let endpoint = endpoint.clone();
+            async move { endpoint.capture_frame(0).await }
+        });
+        queued.notified().await;
+        assert!(
+            runtime.turn(false),
+            "due wall text must pass idle gate despite unchanged scene version"
+        );
+        let (_, permit) = capture.await.unwrap().unwrap();
+        drop(permit);
+        assert_eq!(
+            visible(&runtime),
+            tze_hud_scene::WidgetParameterValue::String("4 min".into())
+        );
+        assert!(
+            runtime.turn(true),
+            "capture/failed primary did not acknowledge screen repaint"
+        );
+        assert!(
+            !runtime.turn(true),
+            "countdown is not an inflight animation"
+        );
+        runtime.events.scene().pause_widget_ttls();
+        clock.advance(120_000);
+        assert!(!runtime.turn(true), "pause does not retry due countdowns");
+        assert_eq!(
+            runtime
+                .compositor
+                .next_widget_deadline_wall_us(&runtime.events.scene()),
+            None
+        );
+        runtime.events.scene().resume_widget_ttls();
+        assert!(runtime.turn(true));
+        assert_eq!(
+            visible(&runtime),
+            tze_hud_scene::WidgetParameterValue::String("2 min".into())
+        );
+        clock.advance(1_000);
+        assert!(runtime.turn(true));
+        assert_eq!(
+            visible(&runtime),
+            tze_hud_scene::WidgetParameterValue::String("1:59".into())
+        );
+        assert!(!runtime.turn(true));
+        call(
+            addr,
+            "hud_clear",
+            serde_json::json!({"surface":"widget:clock"}),
+        )
+        .await;
+        assert!(runtime.turn(true));
+        assert_eq!(
+            runtime
+                .compositor
+                .next_widget_deadline_wall_us(&runtime.events.scene()),
+            None
+        );
+        assert!(!runtime.turn(true));
     }
 
     fn character(ch: &str, ts: u64) -> PendingKeyboardEvent {

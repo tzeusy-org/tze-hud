@@ -542,7 +542,7 @@ fn parse_parameter_schema(
             BundleError::InvalidManifest {
                 path: path_str.to_string(),
                 detail: format!(
-                    "parameter '{name}': unknown type '{type_str}' (must be f32, string, color, or enum)"
+                    "parameter '{name}': unknown type '{type_str}' (must be f32, string, color, enum, or deadline)"
                 ),
             }
         })?;
@@ -598,6 +598,7 @@ fn parse_parameter_schema(
 
 fn parse_param_type(s: &str) -> Option<WidgetParamType> {
     match s {
+        "deadline" => Some(WidgetParamType::Deadline),
         "f32" => Some(WidgetParamType::F32),
         "string" => Some(WidgetParamType::String),
         "color" => Some(WidgetParamType::Color),
@@ -626,6 +627,16 @@ fn parse_default_value(
     };
 
     match param_type {
+        WidgetParamType::Deadline => {
+            let ms = raw.as_integer().filter(|ms| (0..=tze_hud_scene::WidgetDeadline::MAX_MS).contains(ms))
+                .ok_or_else(|| BundleError::InvalidManifest {
+                    path: path_str.to_string(),
+                    detail: format!("parameter '{name}': default must be deadline<=24h (integer milliseconds 0..86400000)"),
+                })?;
+            Ok(WidgetParameterValue::Deadline(
+                tze_hud_scene::WidgetDeadline::relative(ms),
+            ))
+        }
         WidgetParamType::F32 => {
             let v = match raw {
                 toml::Value::Float(f) => *f as f32,
@@ -896,6 +907,22 @@ fn resolve_bindings(
         }
 
         let param_type = *param_types.get(param).unwrap(); // checked above
+        if param_type == WidgetParamType::Deadline && target_attribute != "text-content" {
+            return Err(BundleError::BindingUnresolvable {
+                path: path_str.to_string(),
+                detail: format!(
+                    "layer '{svg_file}': deadline param '{param}' must target text-content"
+                ),
+            });
+        }
+        if mapping_str == "threshold" && target_attribute != "opacity" {
+            return Err(BundleError::BindingUnresolvable {
+                path: path_str.to_string(),
+                detail: format!(
+                    "layer '{svg_file}': threshold binding '{param}' must target opacity"
+                ),
+            });
+        }
         let enum_allowed = *param_enum_values.get(param).unwrap(); // checked above
 
         // Validate and parse the mapping.
@@ -947,6 +974,31 @@ fn parse_binding_mapping(
     path_str: &str,
 ) -> Result<WidgetBindingMapping, BundleError> {
     match mapping_str {
+        "threshold" => {
+            let threshold = raw_b
+                .threshold
+                .filter(|n| n.is_finite() && n.abs() <= f64::from(f32::MAX));
+            let below = raw_b.attr_min.unwrap_or(0.0);
+            let at_or_above = raw_b.attr_max.unwrap_or(1.0);
+            if param_type != WidgetParamType::F32
+                || threshold.is_none()
+                || ![below, at_or_above]
+                    .iter()
+                    .all(|n| n.is_finite() && (0.0..=1.0).contains(n))
+            {
+                return Err(BundleError::BindingUnresolvable {
+                    path: path_str.to_string(),
+                    detail: format!(
+                        "layer '{svg_file}': threshold binding '{param}' needs an f32 param, finite threshold, and opacity outputs in 0..1"
+                    ),
+                });
+            }
+            Ok(WidgetBindingMapping::Threshold {
+                threshold: threshold.unwrap() as f32,
+                below: below as f32,
+                at_or_above: at_or_above as f32,
+            })
+        }
         "linear" => {
             if param_type != WidgetParamType::F32 {
                 return Err(BundleError::BindingUnresolvable {
@@ -961,11 +1013,14 @@ fn parse_binding_mapping(
             Ok(WidgetBindingMapping::Linear { attr_min, attr_max })
         }
         "direct" => {
-            if param_type != WidgetParamType::String && param_type != WidgetParamType::Color {
+            if !matches!(
+                param_type,
+                WidgetParamType::String | WidgetParamType::Color | WidgetParamType::Deadline
+            ) {
                 return Err(BundleError::BindingUnresolvable {
                     path: path_str.to_string(),
                     detail: format!(
-                        "layer '{svg_file}': binding param '{param}' uses 'direct' mapping but type is {param_type:?} (direct is only valid for string and color)"
+                        "layer '{svg_file}': binding param '{param}' uses 'direct' mapping but type is {param_type:?} (direct needs string, color, or deadline)"
                     ),
                 });
             }

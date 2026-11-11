@@ -395,6 +395,7 @@ fn validate_initial_params(
         // Type check.
         if coerce_toml_to_widget_value(raw_val, decl.param_type).is_none() {
             let type_name = match decl.param_type {
+                WidgetParamType::Deadline => "deadline<=24h (integer milliseconds 0..86400000)",
                 WidgetParamType::F32 => "f32 (numeric)",
                 WidgetParamType::String => "string",
                 WidgetParamType::Color => "color (array of 4 integers [r, g, b, a])",
@@ -445,6 +446,13 @@ fn coerce_toml_to_widget_value(
     param_type: WidgetParamType,
 ) -> Option<WidgetParameterValue> {
     match param_type {
+        WidgetParamType::Deadline => {
+            let ms = val.as_integer()?;
+            let deadline = tze_hud_scene::WidgetDeadline::relative(ms);
+            deadline
+                .valid()
+                .then_some(WidgetParameterValue::Deadline(deadline))
+        }
         WidgetParamType::F32 => {
             let f = match val {
                 toml::Value::Float(f) => *f as f32,
@@ -544,6 +552,9 @@ mod tests {
 
     fn make_decl(name: &str, ptype: WidgetParamType) -> WidgetParameterDeclaration {
         let default_value = match ptype {
+            WidgetParamType::Deadline => {
+                WidgetParameterValue::Deadline(tze_hud_scene::WidgetDeadline::relative(0))
+            }
             WidgetParamType::F32 => WidgetParameterValue::F32(0.0),
             WidgetParamType::String => WidgetParameterValue::String(String::new()),
             WidgetParamType::Color => {

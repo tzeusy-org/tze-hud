@@ -8,22 +8,29 @@ moves on the primary display and 120-unit wheel notches. Every injection calls
 the harness guard first. SendInput's return value is logged, never asserted:
 assertions rest on HUD state.
 
-Stdlib only (ctypes).
+Python stdlib only; read-only shell accessibility uses built-in Windows
+PowerShell and the framework UIAutomationClient assemblies.
 """
 
 from __future__ import annotations
 
 import ctypes
+import json
+import subprocess
 from ctypes import wintypes
 from typing import Callable
 
 user32 = ctypes.WinDLL("user32", use_last_error=True)
 gdi32 = ctypes.WinDLL("gdi32", use_last_error=True)
 kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+shell32 = ctypes.WinDLL("shell32", use_last_error=True)
 
 # Handles are pointer-sized; ctypes' default int restype would truncate them.
 for fn, res, args in (
     ("GetForegroundWindow", wintypes.HWND, []),
+    ("FindWindowW", wintypes.HWND, [wintypes.LPCWSTR, wintypes.LPCWSTR]),
+    ("WindowFromPoint", wintypes.HWND, [wintypes.POINT]),
+    ("IsChild", wintypes.BOOL, [wintypes.HWND, wintypes.HWND]),
     ("FindWindowExW", wintypes.HWND, [wintypes.HWND, wintypes.HWND, wintypes.LPCWSTR, wintypes.LPCWSTR]),
     ("GetWindowThreadProcessId", wintypes.DWORD, [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]),
     ("IsWindowVisible", wintypes.BOOL, [wintypes.HWND]),
@@ -88,6 +95,7 @@ class INPUT(ctypes.Structure):
 
 
 MOUSE_MOVE, LEFT_DOWN, LEFT_UP, WHEEL, ABSOLUTE = 0x1, 0x2, 0x4, 0x800, 0x8000
+RIGHT_DOWN, RIGHT_UP = 0x8, 0x10
 GWL_EXSTYLE, WS_EX_TOPMOST, WS_EX_TRANSPARENT = -20, 0x8, 0x20
 WS_EX_NOACTIVATE = 0x08000000
 KEY_UP, KEY_UNICODE = 0x2, 0x4
@@ -153,6 +161,106 @@ def foreground_pid() -> int:
     pid = wintypes.DWORD()
     user32.GetWindowThreadProcessId(user32.GetForegroundWindow(), ctypes.byref(pid))
     return pid.value
+
+
+class NOTIFYICONIDENTIFIER(ctypes.Structure):
+    _fields_ = [("cbSize", wintypes.DWORD), ("hWnd", wintypes.HWND),
+                ("uID", wintypes.UINT), ("guidItem", ctypes.c_ubyte * 16)]
+
+
+shell32.Shell_NotifyIconGetRect.restype = ctypes.c_long
+shell32.Shell_NotifyIconGetRect.argtypes = [ctypes.POINTER(NOTIFYICONIDENTIFIER), ctypes.POINTER(wintypes.RECT)]
+
+
+def _tray_point_identity(x: int, y: int) -> dict:
+    """Read the accessible control without activating it or changing pinning.
+
+    The harness requires 96 DPI, with scene and physical coordinates equal.
+    A separate process keeps UI Automation out of the HUD's own UI thread.
+    Query failures propagate: they are missing evidence, not hidden icons.
+    """
+    script = f"$pointX = {int(x)}; $pointY = {int(y)}\n" + """
+$ErrorActionPreference = 'Stop'
+[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)
+Add-Type -AssemblyName UIAutomationClient, UIAutomationTypes, WindowsBase
+$element = [System.Windows.Automation.AutomationElement]::FromPoint(
+    [System.Windows.Point]::new($pointX, $pointY))
+for ($level = 0; $level -lt 5 -and $null -ne $element; $level++) {
+    $info = $element.Current
+    if ($info.ControlType -eq [System.Windows.Automation.ControlType]::Button) { break }
+    $parent = [System.Windows.Automation.TreeWalker]::ControlViewWalker.GetParent($element)
+    # A null parent ends the current view; retain its last readable control.
+    if ($null -eq $parent) { break }
+    $element = $parent
+}
+if ($null -eq $element) { throw 'No accessible control at the initial tray point' }
+$info = $element.Current
+$bounds = $info.BoundingRectangle
+[pscustomobject]@{
+    name = $info.Name
+    automation_id = $info.AutomationId
+    control_type = $info.ControlType.ProgrammaticName
+    offscreen = $info.IsOffscreen
+    enabled = $info.IsEnabled
+    rect = @($bounds.Left, $bounds.Top, $bounds.Right, $bounds.Bottom)
+} | ConvertTo-Json -Compress
+"""
+    result = subprocess.run(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script],
+                            capture_output=True, encoding="utf-8", check=True, timeout=10,
+                            creationflags=0x08000000)  # CREATE_NO_WINDOW: no probe console/focus change
+    identity = json.loads(result.stdout)
+    if not isinstance(identity, dict):
+        raise ValueError("UI Automation returned no tray candidate identity")
+    return identity
+
+
+def tray_rect(hwnd: int, icon_id: int, owned_pid: int, *, expected_tooltip: str, diagnostics: dict | None = None) -> tuple[int, int, int, int] | None:
+    """Only the owned icon, exposed on the taskbar (not hidden overflow).
+
+    GetRect can return the overflow chevron's rectangle even with S_OK.
+    Require a visible taskbar button carrying this icon's current tooltip.
+    None explicitly means there is no safe real-input target for this proof.
+    """
+    owner = wintypes.DWORD()
+    user32.GetWindowThreadProcessId(hwnd, ctypes.byref(owner))
+    if owner.value != owned_pid:
+        raise ValueError("tray HWND does not belong to the owned HUD")
+    if not expected_tooltip.strip():
+        raise ValueError("expected tray tooltip must be nonempty")
+    identity = NOTIFYICONIDENTIFIER(cbSize=ctypes.sizeof(NOTIFYICONIDENTIFIER), hWnd=hwnd, uID=icon_id)
+    rect = wintypes.RECT()
+    hresult = shell32.Shell_NotifyIconGetRect(ctypes.byref(identity), ctypes.byref(rect))
+    if diagnostics is not None:
+        diagnostics.update(hresult=hresult, rect=[rect.left, rect.top, rect.right, rect.bottom])
+    # The documented success result is S_OK. In particular a positive HRESULT
+    # is not proof of an exposed icon suitable for real desktop input.
+    if hresult != 0:
+        return None
+    taskbar = user32.FindWindowW("Shell_TrayWnd", None)
+    bounds = wintypes.RECT()
+    if not taskbar or not user32.IsWindowVisible(taskbar) or not user32.GetWindowRect(taskbar, ctypes.byref(bounds)):
+        return None
+    x, y = (rect.left + rect.right) // 2, (rect.top + rect.bottom) // 2
+    if not (rect.left < rect.right and rect.top < rect.bottom and bounds.left <= x < bounds.right and bounds.top <= y < bounds.bottom):
+        return None
+    at_point = user32.WindowFromPoint(wintypes.POINT(x, y))
+    if diagnostics is not None:
+        class_name = ctypes.create_unicode_buffer(256)
+        user32.GetClassNameW(at_point, class_name, len(class_name))
+        diagnostics.update(point_window=at_point, point_class=class_name.value)
+    if at_point != taskbar and not user32.IsChild(taskbar, at_point):
+        return None
+    identity = _tray_point_identity(x, y)
+    left, top, right, bottom = identity["rect"]
+    qualified = (identity["control_type"] == "ControlType.Button"
+                 and identity["offscreen"] is False and identity["enabled"] is True
+                 and " ".join(identity["name"].split()) == " ".join(expected_tooltip.split())
+                 and left <= x < right and top <= y < bottom)
+    if diagnostics is not None:
+        diagnostics.update(accessible_target=identity, target_qualified=qualified)
+    if not qualified:
+        return None
+    return rect.left, rect.top, rect.right, rect.bottom
 
 
 def process_alive(pid: int) -> bool:
@@ -339,9 +447,10 @@ class SendInput:
             delta = WHEEL_DELTA if button == 4 else -WHEEL_DELTA
             self._send(f"wheel {repeat}x{delta}", [_mouse(WHEEL, data=delta) for _ in range(repeat)])
             return
-        if button != 1:
+        flags = {1: (LEFT_DOWN, LEFT_UP), 3: (RIGHT_DOWN, RIGHT_UP)}
+        if button not in flags:
             raise ValueError(f"button {button}")
-        self._send(f"click x{repeat}", [_mouse(flag) for _ in range(repeat) for flag in (LEFT_DOWN, LEFT_UP)])
+        self._send(f"click button {button} x{repeat}", [_mouse(flag) for _ in range(repeat) for flag in flags[button]])
 
     def key(self, chord: str) -> None:
         vks = chord_vks(chord)

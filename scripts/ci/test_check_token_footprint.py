@@ -357,6 +357,16 @@ class CandidatePacketTests(unittest.TestCase):
             "transaction": copy.deepcopy(self.candidate["flows"]["error"]["operations"]["hud_publish"]),
             "result_text": {"bytes": 200, "tokens": 60},
         }
+        measurement["client_layer"] = {
+            "skill_bodies": {
+                "th-hud-publish": {"bytes": 8000, "tokens": 2001},
+                "hud-projection": {"bytes": 9000, "tokens": 2501},
+            },
+            "model_turns": {
+                name: 0 if name == "tools_list" else len(flow["operations"])
+                for name, flow in measurement["flows"].items()
+            },
+        }
         with tempfile.TemporaryDirectory() as directory:
             measurement_path = pathlib.Path(directory) / "measurement.json"
             report_path = pathlib.Path(directory) / "report.json"
@@ -371,6 +381,29 @@ class CandidatePacketTests(unittest.TestCase):
                         self.assertEqual(checker.main(), exit_code)
                     actual = json.loads(report_path.read_text(encoding="utf-8"))
                     self.assertEqual(actual["status"], expected if exit_code == 0 else "failed")
+                    self.assertEqual(actual["client_layer"], {
+                        "report_only": True, **measurement["client_layer"]
+                    })
+
+            # Report-only means costs above the later 1000-token target pass;
+            # it does not permit missing or malformed measurement evidence.
+            measurement["notification_action_limit_error"]["result_text"]["tokens"] = 60
+            valid = copy.deepcopy(measurement["client_layer"])
+            for mutation in ("missing", "skill", "turn", "coverage"):
+                with self.subTest(client_layer=mutation):
+                    measurement["client_layer"] = copy.deepcopy(valid)
+                    if mutation == "missing":
+                        del measurement["client_layer"]
+                    elif mutation == "skill":
+                        measurement["client_layer"]["skill_bodies"]["hud-projection"]["tokens"] = None
+                    elif mutation == "turn":
+                        measurement["client_layer"]["model_turns"]["discover"] = True
+                    else:
+                        del measurement["client_layer"]["model_turns"]["discover"]
+                    measurement_path.write_text(json.dumps(measurement), encoding="utf-8")
+                    with mock.patch("sys.argv", args), mock.patch("sys.stdout"):
+                        self.assertEqual(checker.main(), 1)
+                    self.assertEqual(json.loads(report_path.read_text())["status"], "failed")
 
     def test_owner_approval_makes_candidate_pass(self):
         approved = copy.deepcopy(self.candidate)
