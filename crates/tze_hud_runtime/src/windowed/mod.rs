@@ -1344,7 +1344,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         // requested cfg.window.width/height.  Using the configured values
         // directly causes wgpu to configure the swapchain at a size that
         // doesn't match the surface handle's drawable area, which triggers a
-        // validation panic before `surface.configure()` can write alpha_diag.txt.
+        // validation panic in `surface.configure()`.
         //
         // `window.inner_size()` returns `PhysicalSize<u32>` — physical pixels —
         // when per-monitor DPI awareness is active (guaranteed by the embedded
