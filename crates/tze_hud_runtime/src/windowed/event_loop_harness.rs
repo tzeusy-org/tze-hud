@@ -471,6 +471,7 @@ impl HeadlessEventLoopHarness {
             appearance: Some(appearance),
             render_wake,
             main_wake: state.wake.main_work_notifier(),
+            clipboard: crate::shell::control_panel::PanelClipboard::system(),
         };
         let sections = crate::shell::control_panel::default_sections(&deps);
         state.control_panel = Some(crate::shell::control_panel::spawn_control_panel(

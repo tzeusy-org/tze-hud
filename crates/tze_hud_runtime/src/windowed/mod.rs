@@ -3180,6 +3180,7 @@ impl WindowedRuntime {
                 appearance: Some(Arc::clone(&appearance)),
                 render_wake: render_wake.clone(),
                 main_wake: wake.main_work_notifier(),
+                clipboard: crate::shell::control_panel::PanelClipboard::system(),
             };
             let sections = crate::shell::control_panel::default_sections(&deps);
             crate::shell::control_panel::spawn_control_panel(

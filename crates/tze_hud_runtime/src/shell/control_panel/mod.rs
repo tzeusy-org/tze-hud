@@ -295,6 +295,26 @@ pub(crate) struct ControlPanelDeps {
     pub render_wake: RenderWakeNotifier,
     /// Wakes only the winit loop (new geometry changes pointer capture).
     pub main_wake: RenderWakeNotifier,
+    /// Ctrl+C/X/V in the panel's text fields.
+    pub clipboard: PanelClipboard,
+}
+
+/// The clipboard the panel's text fields copy to and paste from (injected
+/// so tests can stand in for the system one).
+#[derive(Clone)]
+pub(crate) struct PanelClipboard {
+    pub read: Arc<dyn Fn() -> Result<String, String> + Send + Sync>,
+    pub write: connect::Clipboard,
+}
+
+impl PanelClipboard {
+    /// The system clipboard (Windows; elsewhere every call fails).
+    pub(crate) fn system() -> Self {
+        Self {
+            read: Arc::new(crate::clipboard::read_text),
+            write: Arc::new(crate::clipboard::write_text),
+        }
+    }
 }
 
 /// The sections every HUD shows, in display order.
@@ -531,6 +551,26 @@ impl PanelTask {
             match effect {
                 Effect::Close => self.close().await,
                 Effect::Apply { row, edit } => self.apply(&row, edit).await,
+                Effect::Copy(text) => {
+                    let write = Arc::clone(&self.deps.clipboard.write);
+                    match tokio::task::spawn_blocking(move || write(&text)).await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => tracing::warn!(%error, "control panel: copy failed"),
+                        Err(error) => tracing::warn!(%error, "control panel: copy failed"),
+                    }
+                }
+                Effect::Paste => {
+                    let read = Arc::clone(&self.deps.clipboard.read);
+                    match tokio::task::spawn_blocking(move || read()).await {
+                        Ok(Ok(text)) => {
+                            if let Some(open) = self.open.as_mut() {
+                                state::on_paste(open, &self.nav, &text);
+                            }
+                        }
+                        Ok(Err(error)) => tracing::warn!(%error, "control panel: paste failed"),
+                        Err(error) => tracing::warn!(%error, "control panel: paste failed"),
+                    }
+                }
             }
         }
         self.rebuild().await;

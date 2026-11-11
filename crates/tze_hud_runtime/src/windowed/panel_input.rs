@@ -71,6 +71,11 @@ pub(super) fn panel_key(
             match code {
                 KeyCode::Minus | KeyCode::NumpadSubtract => return Some(PanelKey::ZoomOut),
                 KeyCode::Equal | KeyCode::NumpadAdd => return Some(PanelKey::ZoomIn),
+                // Text editing, by physical position like the composer's.
+                KeyCode::KeyA => return Some(PanelKey::SelectAll),
+                KeyCode::KeyC => return Some(PanelKey::Copy),
+                KeyCode::KeyX => return Some(PanelKey::Cut),
+                KeyCode::KeyV => return Some(PanelKey::Paste),
                 _ => {}
             }
         }
@@ -81,6 +86,8 @@ pub(super) fn panel_key(
     Some(match named {
         NamedKey::ArrowUp => PanelKey::Up,
         NamedKey::ArrowDown => PanelKey::Down,
+        NamedKey::ArrowLeft if shift => PanelKey::SelectLeft,
+        NamedKey::ArrowRight if shift => PanelKey::SelectRight,
         NamedKey::ArrowLeft => PanelKey::Left,
         NamedKey::ArrowRight => PanelKey::Right,
         NamedKey::Tab if shift => PanelKey::BackTab,
@@ -90,6 +97,8 @@ pub(super) fn panel_key(
         NamedKey::Escape => PanelKey::Escape,
         NamedKey::Backspace => PanelKey::Backspace,
         NamedKey::Delete => PanelKey::Delete,
+        NamedKey::Home if shift => PanelKey::SelectHome,
+        NamedKey::End if shift => PanelKey::SelectEnd,
         NamedKey::Home => PanelKey::Home,
         NamedKey::End => PanelKey::End,
         NamedKey::PageUp => PanelKey::PageUp,
@@ -372,6 +381,25 @@ mod tests {
             Some(PanelKey::ZoomOut)
         );
         assert_eq!(key(KeyCode::KeyH, Key::Character("h".into()), none), None);
+        // Text editing: Ctrl+A/C/X/V and Shift+arrows/Home/End.
+        for (code, c, want) in [
+            (KeyCode::KeyA, "a", PanelKey::SelectAll),
+            (KeyCode::KeyC, "c", PanelKey::Copy),
+            (KeyCode::KeyX, "x", PanelKey::Cut),
+            (KeyCode::KeyV, "v", PanelKey::Paste),
+        ] {
+            let ctrl = ModifiersState::CONTROL;
+            assert_eq!(key(code, Key::Character(c.into()), ctrl), Some(want));
+        }
+        let shift = ModifiersState::SHIFT;
+        assert_eq!(
+            key(KeyCode::ArrowLeft, named(NamedKey::ArrowLeft), shift),
+            Some(PanelKey::SelectLeft)
+        );
+        assert_eq!(
+            key(KeyCode::End, named(NamedKey::End), shift),
+            Some(PanelKey::SelectEnd)
+        );
         assert_eq!(
             key(
                 KeyCode::Space,
@@ -402,8 +430,8 @@ mod tests {
 #[cfg(test)]
 mod panel_task_tests {
     use crate::shell::control_panel::{
-        ControlPanelDeps, ControlPanelHandle, PanelEvent, PanelKey, PauseControl, default_sections,
-        spawn_control_panel,
+        ControlPanelDeps, ControlPanelHandle, PanelClipboard, PanelEvent, PanelKey, PauseControl,
+        default_sections, spawn_control_panel,
     };
     use crate::windowed::WindowedRuntimeState;
     use std::sync::Arc;
@@ -429,6 +457,13 @@ mod panel_task_tests {
     fn fixture_with(
         sections: impl FnOnce(&ControlPanelDeps) -> Vec<Box<dyn crate::shell::control_panel::Section>>,
     ) -> Fixture {
+        fixture_with_clipboard(sections, PanelClipboard::system())
+    }
+
+    fn fixture_with_clipboard(
+        sections: impl FnOnce(&ControlPanelDeps) -> Vec<Box<dyn crate::shell::control_panel::Section>>,
+        clipboard: PanelClipboard,
+    ) -> Fixture {
         let state = WindowedRuntimeState::new_headless();
         let wakes = Arc::new(AtomicUsize::new(0));
         let w = Arc::clone(&wakes);
@@ -451,6 +486,7 @@ mod panel_task_tests {
             appearance: None,
             render_wake,
             main_wake: Default::default(),
+            clipboard,
         };
         let sections = sections(&deps);
         let panel = spawn_control_panel(
@@ -763,6 +799,98 @@ mod panel_task_tests {
         })
         .await;
         assert!(f.wakes.load(Ordering::SeqCst) > wakes);
+    }
+
+    /// A field row edits like a text box through the real task: a click
+    /// selects its value, Ctrl+C copies it, Ctrl+V pastes the clipboard over
+    /// it (one line), and Enter saves the pasted text.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn field_copy_paste_through_the_clipboard() {
+        use crate::shell::control_panel::row::{BoxFuture, Control, Edit, Row, Section};
+        use std::sync::Mutex;
+        use tze_hud_compositor::{PanelCaret, PanelControl};
+
+        #[derive(Clone, Default)]
+        struct Size(Arc<Mutex<Vec<Edit>>>);
+        impl Section for Size {
+            fn id(&self) -> &'static str {
+                "layout"
+            }
+            fn title(&self) -> &'static str {
+                "Layout"
+            }
+            fn rows(&self) -> BoxFuture<'_, Vec<Row>> {
+                Box::pin(async {
+                    vec![Row::new(
+                        "layout.size",
+                        "Gauge position and size",
+                        Control::Field {
+                            text: "10 20 300 400".into(),
+                            confirm: None,
+                        },
+                    )]
+                })
+            }
+            fn apply<'a>(&'a self, _: &'a str, edit: Edit) -> BoxFuture<'a, Result<(), String>> {
+                Box::pin(async move {
+                    self.0.lock().unwrap().push(edit);
+                    Ok(())
+                })
+            }
+        }
+        let size = Size::default();
+        let edits = Arc::clone(&size.0);
+        let copied = Arc::new(Mutex::new(Vec::<String>::new()));
+        let clipboard = PanelClipboard {
+            read: Arc::new(|| Ok("1 2 3 4\r\n".to_owned())),
+            write: {
+                let copied = Arc::clone(&copied);
+                Arc::new(move |text: &str| {
+                    copied.lock().unwrap().push(text.to_owned());
+                    Ok(())
+                })
+            },
+        };
+        let f = fixture_with_clipboard(move |_| vec![Box::new(size)], clipboard);
+        let control = |f: &Fixture| {
+            let PanelBody::Sections(cards) = f.model()?.body else {
+                return None;
+            };
+            cards
+                .iter()
+                .flat_map(|c| &c.items)
+                .find(|i| i.id == "layout.size")
+                .map(|i| i.control.clone())
+        };
+        f.send_and_wait(PanelEvent::Chord(ChordRole::Panel), |f| f.panel.is_open())
+            .await;
+        let row = PanelHitTarget::Row("layout.size".into(), PanelPart::Body);
+        f.send_and_wait(PanelEvent::Click(row), |f| {
+            control(f)
+                == Some(PanelControl::Field {
+                    text: "10 20 300 400".into(),
+                    caret: Some(PanelCaret {
+                        cursor: 13,
+                        anchor: 0,
+                    }),
+                })
+        })
+        .await;
+        f.send_and_wait(PanelEvent::Key(PanelKey::Copy), |_| {
+            !copied.lock().unwrap().is_empty()
+        })
+        .await;
+        assert_eq!(*copied.lock().unwrap(), ["10 20 300 400"]);
+        f.send_and_wait(
+            PanelEvent::Key(PanelKey::Paste),
+            |f| matches!(control(f), Some(PanelControl::Field { text, .. }) if text == "1 2 3 4"),
+        )
+        .await;
+        f.send_and_wait(PanelEvent::Key(PanelKey::Enter), |_| {
+            !edits.lock().unwrap().is_empty()
+        })
+        .await;
+        assert_eq!(*edits.lock().unwrap(), [Edit::Text("1 2 3 4".into())]);
     }
 
     /// A theme preview slower than the panel waits (a heavy restyle): the
@@ -1106,6 +1234,7 @@ mod panel_task_tests {
             appearance: None,
             render_wake: RenderWakeNotifier::default(),
             main_wake: RenderWakeNotifier::default(),
+            clipboard: crate::shell::control_panel::PanelClipboard::system(),
         };
         let (started, release) = (
             Arc::new(AtomicUsize::new(0)),
@@ -1245,6 +1374,7 @@ mod panel_task_tests {
             appearance: None,
             render_wake: RenderWakeNotifier::default(),
             main_wake: RenderWakeNotifier::default(),
+            clipboard: crate::shell::control_panel::PanelClipboard::system(),
         };
         let mut sections = default_sections(&deps);
         sections.push(Box::new(Broken { rows_panic: true }));

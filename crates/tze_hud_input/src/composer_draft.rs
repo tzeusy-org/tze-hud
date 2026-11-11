@@ -428,7 +428,7 @@ impl ComposerVisualLayout {
 /// - `cursor <= text.len()` and `selection_anchor <= text.len()`
 ///
 /// [`snapshot`]: ComposerDraft::snapshot
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ComposerDraft {
     text: String,
     /// Cursor position in bytes (insert/caret position).

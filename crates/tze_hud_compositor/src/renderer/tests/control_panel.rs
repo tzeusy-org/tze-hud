@@ -448,9 +448,12 @@ async fn connect_card_draws_the_prompt_well_and_its_rows() {
         item(
             "connect.name",
             "Agent name",
-            PanelControl::Value {
+            PanelControl::Field {
                 text: "claude-laptop".into(),
-                mono: true,
+                caret: Some(crate::PanelCaret {
+                    cursor: 13,
+                    anchor: 0,
+                }),
             },
         ),
         item("connect.code", "One-time code", ro("564 016", true)),

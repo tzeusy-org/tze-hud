@@ -136,6 +136,13 @@ pub enum PanelControl {
         text: String,
         mono: bool,
     },
+    /// A free-text value drawn as a text box. `caret` is set while it is
+    /// being edited: the box takes the focus ring and shows the caret and
+    /// any selection.
+    Field {
+        text: String,
+        caret: Option<PanelCaret>,
+    },
     /// A value the panel cannot change here (set elsewhere, or a fact).
     ReadOnly {
         text: String,
@@ -148,6 +155,14 @@ pub enum PanelControl {
     Stepper(String),
     /// The whole item is a button (label drawn in the action color).
     Action,
+}
+
+/// The caret and selection of a field being edited, as byte offsets into its
+/// text: the selection runs from `anchor` to `cursor` (empty when equal).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct PanelCaret {
+    pub cursor: usize,
+    pub anchor: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -356,6 +371,15 @@ fn luminance(c: Rgba) -> f32 {
 fn contrast(a: Rgba, b: Rgba) -> f32 {
     let (la, lb) = (luminance(a), luminance(b));
     (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+}
+
+/// `text` up to `byte`, snapped down to a char boundary.
+fn prefix(text: &str, byte: usize) -> &str {
+    let mut b = byte.min(text.len());
+    while !text.is_char_boundary(b) {
+        b -= 1;
+    }
+    &text[..b]
 }
 
 fn with_alpha(c: Rgba, a: f32) -> Rgba {
@@ -779,6 +803,64 @@ impl Painter<'_, '_> {
                 let w = self.width(text, ty, *mono) + 2.0;
                 self.text(text, right - w, cy, w, ty, color, *mono, Align::End, clip);
                 right - w
+            }
+            PanelControl::Field { text, caret } => {
+                let ty = s.readout;
+                let pad = s.space_s;
+                let text_w = self.width(text, ty, true) + 2.0;
+                let w = (text_w + pad * 2.0).max(s.space_xl * 3.0);
+                let h = ty.line + s.space_xs;
+                let rect = PanelRect {
+                    x: right - w,
+                    y: cy - h / 2.0,
+                    w,
+                    h,
+                };
+                let border = if caret.is_some() {
+                    (s.ring, s.primary)
+                } else {
+                    (1.0, s.outline_variant)
+                };
+                self.shape(rect, s.shape_row, s.field, Some(border), clip);
+                let text_x = rect.x + pad;
+                if let Some(caret) = caret {
+                    let mut x_at = |byte: usize| text_x + self.width(prefix(text, byte), ty, true);
+                    let (start, end) = (
+                        caret.cursor.min(caret.anchor),
+                        caret.cursor.max(caret.anchor),
+                    );
+                    let selection = (start != end).then(|| (x_at(start), x_at(end)));
+                    let at = x_at(caret.cursor).min(rect.x + w - pad);
+                    if let Some((x0, x1)) = selection {
+                        let band = PanelRect {
+                            x: x0,
+                            y: cy - ty.line / 2.0,
+                            w: (x1 - x0).max(1.0),
+                            h: ty.line,
+                        };
+                        self.shape(band, 0.0, s.primary_container, None, clip);
+                    }
+                    // A steady caret: no blink, so an idle panel draws nothing.
+                    let bar = PanelRect {
+                        x: at,
+                        y: cy - ty.size * 0.6,
+                        w: s.ring.max(1.0),
+                        h: ty.size * 1.2,
+                    };
+                    self.shape(bar, 0.0, s.primary, None, clip);
+                }
+                self.text(
+                    text,
+                    text_x,
+                    cy,
+                    text_w,
+                    ty,
+                    text_color,
+                    true,
+                    Align::Start,
+                    clip,
+                );
+                rect.x
             }
             PanelControl::Toggle(on) => {
                 let h = s.space_xl;
@@ -2430,6 +2512,74 @@ mod tests {
             g.hit(link.x + link.w / 2.0, link.y + link.h / 2.0),
             Some(reset)
         );
+    }
+
+    /// A field draws as a text box; while edited it takes the focus ring,
+    /// a caret at the cursor and a selection band, all in theme colors.
+    #[test]
+    fn an_edited_field_draws_a_box_caret_and_selection() {
+        let s = PanelStyle::resolve(&HashMap::new(), 1.0);
+        let shapes = |caret: Option<PanelCaret>| {
+            let field = item(
+                "layout.size",
+                "Size",
+                PanelControl::Field {
+                    text: "10 20".into(),
+                    caret,
+                },
+            );
+            let mut m = model(PanelBody::Sections(vec![PanelSection {
+                id: "layout".into(),
+                title: "Layout".into(),
+                key: None,
+                items: vec![field],
+            }]));
+            // Off the search, whose own caret is drawn the same way.
+            m.focus = PanelFocus::Row("layout.size".into());
+            layout(&m, 1600.0, 900.0).shapes
+        };
+        let boxed = |shapes: &[PanelShape], border: (f32, Rgba)| {
+            shapes
+                .iter()
+                .find(|sh| sh.fill == s.field && sh.border == Some(border))
+                .map(|sh| sh.rect)
+        };
+        let idle = shapes(None);
+        assert!(boxed(&idle, (1.0, s.outline_variant)).is_some(), "a box");
+        assert!(!idle.iter().any(|sh| sh.fill == s.primary_container));
+
+        let collapsed = shapes(Some(PanelCaret {
+            cursor: 2,
+            anchor: 2,
+        }));
+        let field = boxed(&collapsed, (s.ring, s.primary)).expect("a focus ring");
+        let caret = collapsed
+            .iter()
+            .find(|sh| sh.fill == s.primary && sh.border.is_none())
+            .expect("a caret")
+            .rect;
+        assert!(caret.x > field.x && caret.x < field.x + field.w);
+        let at_end = shapes(Some(PanelCaret {
+            cursor: 5,
+            anchor: 5,
+        }));
+        let end = at_end
+            .iter()
+            .find(|sh| sh.fill == s.primary && sh.border.is_none())
+            .unwrap()
+            .rect;
+        assert!(end.x > caret.x, "the caret follows the cursor");
+
+        let selected = shapes(Some(PanelCaret {
+            cursor: 5,
+            anchor: 0,
+        }));
+        let band = selected
+            .iter()
+            .find(|sh| sh.fill == s.primary_container)
+            .expect("a selection band")
+            .rect;
+        assert!(band.w > end.x - band.x - 1.0 && band.x < caret.x);
     }
 
     /// An override that makes text unreadable on the panel falls back to the

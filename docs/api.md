@@ -434,7 +434,14 @@ its default (an override that matches the theme does not) shows Reset:
 clicking it, or Delete on the row (not while typing in a field or the
 search), puts the default back live and removes the key from the config
 file. Visibility, Appearance, Advanced tokens, Input and Diagnostics rows
-offer it; ports and widget boxes take a typed value. Clicks outside the
+offer it; ports and widget boxes take a typed value. Those value fields
+are text boxes: clicking one (or typing, Ctrl+A or Ctrl+V on it) starts
+editing with the value selected, so typing replaces it. While editing, the
+box takes the focus ring and shows a caret; Left/Right/Home/End move it,
+Shift extends the selection, Backspace/Delete edit at the caret, and
+Ctrl+A/C/X/V select all, copy, cut and paste (pasted text becomes one
+line). Enter saves a changed value; Esc or moving to another row drops it.
+Ctrl+V elsewhere pastes into the search. Clicks outside the
 panel pass through to the desktop. Closing the panel always resumes
 agents. While paused, the pause tile and row turn caution-colored.
 
