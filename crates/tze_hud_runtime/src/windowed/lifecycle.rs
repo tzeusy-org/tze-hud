@@ -2680,7 +2680,15 @@ impl WinitApp {
             self.state.input_processor.chrome_feedback_cancel_pending = true;
         }
         if self.state.context_menu_press.is_some() {
+            // The context menu owns the pointer; a retained Move is moot and
+            // must not keep the deferred-work wake alive (hud-65gpz).
+            self.state.pending_pointer_move = false;
             return;
+        }
+        // A press or release hit-tests the content the earlier wheel
+        // notches scrolled to, so settle them first when the lock allows.
+        if kind != PointerEventKind::Move {
+            let _ = self.apply_retained_scroll();
         }
         // Settle the old terminal before admitting any newer drag. If the lock
         // is still busy, retain the original Up instead of retargeting it to a
@@ -3427,20 +3435,37 @@ pub(super) struct RetainedScroll {
     pub(super) delta_y: f32,
 }
 
-/// Upper bound on distinct retained wheel positions; beyond it new deltas
-/// fold into the newest entry so contention can never grow memory.
+/// Upper bound on retained wheel entries, so contention can never grow memory.
 const RETAINED_SCROLL_MAX: usize = 32;
 
+/// Whether two deltas can be summed without changing what applying them in
+/// turn does: scroll clamps per application and follow-tail flips on the
+/// sign of each delta, so only same-direction deltas per axis combine.
+fn same_direction(a: f32, b: f32) -> bool {
+    a == 0.0 || b == 0.0 || a.signum() == b.signum()
+}
+
 /// Queue `next`, summing it into the newest entry when the pointer has not
-/// moved (a notch burst) or the queue is full.
+/// moved and the direction is unchanged (a notch burst). At the bound the two
+/// oldest entries combine instead, so only very old, long-held input loses
+/// its intermediate clamping.
 fn retain_scroll(pending: &mut std::collections::VecDeque<RetainedScroll>, next: RetainedScroll) {
-    let full = pending.len() >= RETAINED_SCROLL_MAX;
     if let Some(last) = pending.back_mut()
-        && (full || (last.x == next.x && last.y == next.y))
+        && last.x == next.x
+        && last.y == next.y
+        && same_direction(last.delta_x, next.delta_x)
+        && same_direction(last.delta_y, next.delta_y)
     {
         last.delta_x += next.delta_x;
         last.delta_y += next.delta_y;
         return;
+    }
+    if pending.len() >= RETAINED_SCROLL_MAX
+        && let Some(oldest) = pending.pop_front()
+        && let Some(second) = pending.front_mut()
+    {
+        second.delta_x += oldest.delta_x;
+        second.delta_y += oldest.delta_y;
     }
     pending.push_back(next);
 }
@@ -4100,12 +4125,23 @@ mod tests {
         retain_scroll(&mut pending, at(2.0, -5.0));
         assert_eq!(pending, [at(1.0, 20.0), at(2.0, -5.0)]);
 
+        // A reversal at the same position stays separate: summing 60 down and
+        // 3 up would hide the upward notch that leaves the tail.
+        retain_scroll(&mut pending, at(2.0, 5.0));
+        assert_eq!(pending.len(), 3);
+        retain_scroll(&mut pending, at(2.0, -5.0));
+        assert_eq!(pending.len(), 4);
+
         for i in 0..200 {
             retain_scroll(&mut pending, at(10.0 + i as f32, 1.0));
         }
         assert_eq!(pending.len(), RETAINED_SCROLL_MAX);
         let total: f32 = pending.iter().map(|r| r.delta_y).sum();
-        assert_eq!(total, 20.0 - 5.0 + 200.0, "bounding never discards a delta");
+        assert_eq!(
+            total,
+            20.0 - 5.0 + 5.0 - 5.0 + 200.0,
+            "bounding never discards a delta"
+        );
     }
 
     #[test]

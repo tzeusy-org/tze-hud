@@ -558,8 +558,13 @@ class Run:
 
         The runtime retains a pointer move that finds the scene lock busy and
         replays it when the lock frees (hud-65gpz), so one jump updates hover.
+        A pointer already resting at x,y gets a one-pixel lead-in so the
+        arrival still produces motion.
         """
+        if getattr(self, "_glide_at", None) == (x, y):
+            self.inj.move_abs(x - 1, y)
         self.inj.move_abs(x, y)
+        self._glide_at = (x, y)
 
     def handled(self, target: str) -> None:
         """Prove queued input was handled: hover a pane whose hover state differs, and observe it.

@@ -6553,6 +6553,77 @@ mod tests {
         );
     }
 
+    /// A Move retained across a busy lock is dropped, not kept as deferred
+    /// work, once a context-menu press owns the pointer; otherwise the free
+    /// lock's availability wake would fire every turn while the button is
+    /// held (hud-65gpz).
+    #[test]
+    fn held_scene_lock_retained_move_yields_to_context_menu_press() {
+        let mut harness = HeadlessEventLoopHarness::new();
+        let (_tile_id, _node_id, _rx) = install_button(&mut harness, false);
+        let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
+        let held = scene_handle.blocking_lock();
+        harness.app.state.cursor_x = 50.0;
+        harness.app.state.cursor_y = 12.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Move);
+        assert!(harness.app.state.pending_pointer_move);
+        harness.app.state.context_menu_press = Some(
+            super::super::widgets::ContextMenuPress::unarmed(winit::window::WindowId::dummy()),
+        );
+        drop(held);
+
+        harness.app.settle_scene_work();
+        assert!(
+            !harness.app.state.pending_pointer_move,
+            "a moot retained Move must not stay deferred scene work"
+        );
+    }
+
+    /// Held wheel input keeps its direction changes: 60 px past the tail then
+    /// 3 px back must still scroll back, not net out to "stay at tail".
+    #[test]
+    fn held_scene_lock_retained_wheel_keeps_a_reversal_after_the_tail() {
+        let mut harness = HeadlessEventLoopHarness::new();
+        let (tile_id, _node_id, _rx) = install_button(&mut harness, false);
+        {
+            let shared = harness.app.state.shared_state.blocking_lock();
+            shared
+                .scene
+                .blocking_lock()
+                .register_tile_scroll_config(
+                    tile_id,
+                    tze_hud_scene::TileScrollConfig {
+                        content_height: Some(500.0),
+                        ..tze_hud_scene::TileScrollConfig::vertical()
+                    },
+                )
+                .unwrap();
+        }
+        harness.app.state.cursor_x = 50.0;
+        harness.app.state.cursor_y = 12.0;
+        harness.app.enqueue_scroll_event(0.0, 1.0e6);
+        let tail = 500.0;
+
+        let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
+        let held = scene_handle.blocking_lock();
+        harness.app.enqueue_scroll_event(0.0, 60.0);
+        harness.app.enqueue_scroll_event(0.0, -3.0);
+        drop(held);
+        harness.app.settle_scene_work();
+
+        let shared = harness.app.state.shared_state.blocking_lock();
+        let offset = shared
+            .scene
+            .blocking_lock()
+            .tile_scroll_offset_local(tile_id)
+            .1;
+        assert_eq!(
+            offset,
+            tail - 3.0,
+            "the clamp applies to the 60 px before the 3 px reversal"
+        );
+    }
+
     /// ArrowDown remains an abstract command binding at tile focus, but this
     /// PageUp/PageDown correction must not invent a page-sized local side
     /// effect for that distinct key.
