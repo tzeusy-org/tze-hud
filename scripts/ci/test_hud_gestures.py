@@ -480,6 +480,26 @@ class TargetTests(unittest.TestCase):
             g.set_exclude_from_capture(run, original, False)
             self.assertEqual(run.config.read_text(), original)
 
+    def test_a_failed_restore_restart_never_masks_the_scenario_failure(self) -> None:
+        run = mock.Mock()
+        run.config.read_text.return_value = "[runtime]\n"
+        run.smoke.ok.return_value = {"surfaces": [{"s": "zone:pip"}]}
+        restarts = iter([{"capture_exclusion": {"supported": True}}, RuntimeError("no replacement")])
+
+        def restart(_run):
+            outcome = next(restarts)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+        with mock.patch.object(g, "WIN") as win, mock.patch.object(g, "restart_owned", side_effect=restart), \
+                mock.patch.object(g, "prove_excluded", side_effect=g.ScenarioFailed("excluded", {})), \
+                mock.patch.object(g, "colour_pixels", return_value=5):
+            win.desktop_rgba.return_value = (1, 1, b"\0\0\0\0")
+            with self.assertRaises(g.ScenarioFailed) as failure:
+                g.scenario_capture_exclusion(run)
+        self.assertEqual(failure.exception.step, "excluded")
+        run.step.assert_any_call("restore restart failed: RuntimeError: no replacement")
+
     def test_region_crops_rows_inside_a_rect(self) -> None:
         width, height = 4, 3
         rgba = bytes(range(width * height * 4))

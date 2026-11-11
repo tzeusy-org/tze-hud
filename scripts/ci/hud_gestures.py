@@ -1710,6 +1710,34 @@ def set_exclude_from_capture(run: Run, original: str, on: bool) -> None:
     run.step(f"config exclude_from_capture = {str(on).lower()}")
 
 
+def prove_excluded(run: Run, show_colour: Callable[[], None]) -> None:
+    """With exclusion applied the desktop capture lacks the colour; /admin/screenshot keeps it."""
+    run.expect("capture exclusion applied",
+               lambda st: (st.get("capture_exclusion") or {}).get("applied") is True)
+    show_colour()
+    on_desktop = colour_pixels(WIN.desktop_rgba(), CAPTURE_RGB)
+    in_screenshot = colour_pixels(run.frame(), CAPTURE_RGB)
+    run.screen_grab("capture-exclusion.on")
+    if on_desktop:
+        raise ScenarioFailed("an excluded HUD is absent from the desktop capture",
+                             {"desktop_pixels": on_desktop})
+    if not in_screenshot:
+        raise ScenarioFailed("/admin/screenshot still shows the excluded HUD", {"frame_pixels": 0})
+    run.step(f"ok excluded: desktop 0 pixels, /admin/screenshot {in_screenshot}")
+
+
+def restore_capture_setting(run: Run, original: str) -> str | None:
+    """Restore the config and restart; the error text, logged, when that fails."""
+    try:
+        set_exclude_from_capture(run, original, False)
+        restart_owned(run)
+    except Exception as err:  # noqa: BLE001 - reported by the caller, never masks a failure
+        error = f"{type(err).__name__}: {err}"
+        run.step(f"restore restart failed: {error}")
+        return error
+    return None
+
+
 def scenario_capture_exclusion(run: Run) -> None:
     """R5.2 S1: Hide from screen capture removes the HUD from desktop captures, not /admin/screenshot."""
     pip = "zone:pip"
@@ -1735,22 +1763,14 @@ def scenario_capture_exclusion(run: Run) -> None:
         exclusion = status.get("capture_exclusion") or {}
         if exclusion.get("supported") is False or exclusion.get("reason") == "remote":
             run.step(f"limited proof: exclusion not in force here: {json.dumps(exclusion)}")
-            return
-        run.expect("capture exclusion applied",
-                   lambda st: (st.get("capture_exclusion") or {}).get("applied") is True)
-        show_colour()
-        on_desktop = colour_pixels(WIN.desktop_rgba(), CAPTURE_RGB)
-        in_screenshot = colour_pixels(run.frame(), CAPTURE_RGB)
-        run.screen_grab("capture-exclusion.on")
-        if on_desktop:
-            raise ScenarioFailed("an excluded HUD is absent from the desktop capture",
-                                 {"desktop_pixels": on_desktop})
-        if not in_screenshot:
-            raise ScenarioFailed("/admin/screenshot still shows the excluded HUD", {"frame_pixels": 0})
-        run.step(f"ok excluded: desktop 0 pixels, /admin/screenshot {in_screenshot}")
+        else:
+            prove_excluded(run, show_colour)
     finally:
-        set_exclude_from_capture(run, original, False)
-        restart_owned(run)
+        # A failed restore restart is logged, never raised here: it must not
+        # mask the ScenarioFailed that may already be propagating.
+        restore_error = restore_capture_setting(run, original)
+    if restore_error:
+        raise ScenarioFailed("the HUD restarts with the setting restored", {"error": restore_error})
     show_colour()
     if not colour_pixels(WIN.desktop_rgba(), CAPTURE_RGB):
         raise ScenarioFailed("the colour is back on the desktop once the setting is restored", {})

@@ -48,7 +48,9 @@ impl ChordControl {
             .ok_or("Chords are fixed in this build")?;
         let _changing = self.changing.lock().unwrap_or_else(|e| e.into_inner());
         let current = self.get();
-        if current.get(role) == hotkey {
+        // An unbound role still holds its default: typing it is a clash
+        // with the role that has it, not a no-op.
+        if current.is_bound(role) && current.get(role) == hotkey {
             return Ok(());
         }
         if let Some(other) = current.role_of(&hotkey) {
@@ -125,5 +127,38 @@ mod tests {
                 .rebind(ChordRole::Answer, parse("Ctrl+Shift+F7"))
                 .is_err()
         );
+    }
+
+    /// An unbound hide chord keeps its shadowed default: typing that default
+    /// is refused as the other role's chord and registers nothing; typing a
+    /// free chord binds it.
+    #[test]
+    fn typing_the_shadowed_default_into_an_unbound_role_is_refused() {
+        let calls: Arc<Mutex<Vec<String>>> = Arc::default();
+        let seen = Arc::clone(&calls);
+        let mut start = HudChords::default();
+        start.set(ChordRole::Answer, start.hide);
+        start.unbind(ChordRole::Hide);
+        let chords = ChordControl::new(
+            start,
+            Some(Arc::new(move |role, hotkey: Hotkey| {
+                seen.lock().unwrap().push(format!("{role:?} {hotkey}"));
+                Ok(())
+            })),
+        );
+        let parse = |s| Hotkey::parse(s).unwrap();
+
+        let err = chords
+            .rebind(ChordRole::Hide, parse("Ctrl+Shift+F8"))
+            .unwrap_err();
+        assert_eq!(err, "Ctrl+Shift+F8 is already the answer chord");
+        assert!(!chords.get().is_bound(ChordRole::Hide));
+        assert!(calls.lock().unwrap().is_empty(), "nothing registered");
+
+        chords
+            .rebind(ChordRole::Hide, parse("Ctrl+Shift+F7"))
+            .unwrap();
+        assert!(chords.get().is_bound(ChordRole::Hide));
+        assert_eq!(*calls.lock().unwrap(), ["Hide Ctrl+Shift+F7"]);
     }
 }

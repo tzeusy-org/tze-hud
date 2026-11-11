@@ -887,14 +887,19 @@ async fn poc_hide_chord_blurs_the_composer_and_works_while_paused() {
         .await;
     poc.hud.type_text("lost");
     poc.settle().await;
-    assert_eq!(
-        poc.hud.composer_draft(),
-        None,
-        "no keys reach a hidden composer"
-    );
     poc.hud.press_chord(ChordRole::Hide);
     poc.wait_for("everything shows", |hud| !hud.all_hidden())
         .await;
+    // Refocused, the draft is exactly what was typed before hiding: keys
+    // typed while hidden reached no composer.
+    let (x, y) = poc.hud.composer_center().expect("the composer is back");
+    poc.hud.click(x, y);
+    poc.settle().await;
+    assert_eq!(
+        poc.hud.composer_draft().as_deref(),
+        Some("draft"),
+        "no keys reach a hidden composer"
+    );
 
     poc.hud.press_safe_mode_hotkey();
     poc.wait_for("paused", |hud| hud.safe_mode_active()).await;
