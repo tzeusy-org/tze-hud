@@ -3157,6 +3157,98 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
             "final cancellation adds no heartbeat"
         );
     }
+
+    // Both Hub acquisition sites must wait within this request's deadline.
+    // Poll explicitly under the guard: no executor thread blocks on the Hub,
+    // and no sleep is needed to establish that the dispatch encountered it.
+    {
+        let (isolated, _) = self::server();
+        let (isolated, busy_hub) = hub_portal(isolated);
+        let producer = isolated.portals.as_ref().unwrap();
+        call(
+            &isolated,
+            "hud_publish",
+            json!({"surface":"portal:main", "content":"contention"}),
+        )
+        .await;
+        let first = producer
+            .submit_reply(&key, "before lock".into(), 0)
+            .unwrap()
+            .result
+            .unwrap();
+        let mut waiting = Box::pin(call(&isolated, "hud_input", json!({"wait_ms":1000})));
+        {
+            let _guard = busy_hub.lock().unwrap();
+            assert!(
+                waiting.as_mut().poll(&mut cx).is_pending(),
+                "initial lease acquisition waits for a momentarily busy Hub"
+            );
+        }
+        let found = waiting.await;
+        assert_eq!(found["items"][0]["id"], first);
+
+        // Cancelling before Hub acquisition cannot apply the portal ACK later.
+        let mut cancelled = Box::pin(call(
+            &isolated,
+            "hud_input",
+            json!({"ack":[first], "wait_ms":1000}),
+        ));
+        {
+            let _guard = busy_hub.lock().unwrap();
+            assert!(cancelled.as_mut().poll(&mut cx).is_pending());
+            drop(cancelled);
+        }
+        assert_eq!(
+            call(&isolated, "hud_input", json!({})).await["items"][0]["id"],
+            first,
+            "cancelled lock waiter neither consumes nor acknowledges input"
+        );
+        call(&isolated, "hud_input", json!({"ack":[first]})).await;
+
+        // The lease already exists here. A committed reply wakes the real
+        // readiness wait while the producer still owns the predicate lock.
+        let mut waiting = Box::pin(call(&isolated, "hud_input", json!({"wait_ms":1000})));
+        assert!(waiting.as_mut().poll(&mut cx).is_pending());
+        let second = {
+            let mut hub = busy_hub.lock().unwrap();
+            let id = hub.submit_reply(&key, "during lock".into(), 0).unwrap();
+            producer.input_notify(&key.agent).unwrap().notify_waiters();
+            assert!(
+                waiting.as_mut().poll(&mut cx).is_pending(),
+                "a resumed input predicate also waits for the busy Hub"
+            );
+            id
+        };
+        let found = waiting.await;
+        assert_eq!(found["items"][0]["id"], second);
+        assert_eq!(found["items"][0]["text"], "during lock");
+
+        // A permanently busy Hub must still obey the one absolute deadline.
+        // Only this test's holder thread blocks, with channel-drop cleanup.
+        let (locked_tx, locked_rx) = tokio::sync::oneshot::channel();
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let holder = tokio::task::spawn_blocking(move || {
+            let _guard = busy_hub.lock().unwrap();
+            let _ = locked_tx.send(());
+            let _ = release_rx.recv();
+        });
+        locked_rx.await.unwrap();
+        let err = tokio::time::timeout(
+            std::time::Duration::from_secs(1),
+            call_err(&isolated, "hud_input", json!({"wait_ms":20})),
+        )
+        .await
+        .expect("Hub contention cannot outlive the input deadline indefinitely");
+        assert_eq!(err["code"], "INTERNAL");
+        assert_eq!(err["hint"], "input state busy; retry hud_input");
+        release_tx.send(()).unwrap();
+        holder.await.unwrap();
+        assert_eq!(
+            call(&isolated, "hud_input", json!({})).await["items"][0]["id"],
+            second,
+            "deadline exhaustion leaves the unacknowledged reply intact"
+        );
+    }
 }
 
 #[tokio::test]

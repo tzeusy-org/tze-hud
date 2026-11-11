@@ -1006,6 +1006,33 @@ pub struct InputParams {
 
 static NEXT_ACTION_ID: AtomicU64 = AtomicU64::new(1);
 
+/// The runtime shares a synchronous Hub mutex. Cooperatively wait only while
+/// it is contended, without blocking an executor or leaving a detached owner
+/// after cancellation. Ordinary empty input waits still use readiness below.
+async fn with_input_hub<T>(
+    portals: &PortalHandle,
+    deadline: tokio::time::Instant,
+    apply: impl FnOnce(&mut PortalHub) -> McpResult<T>,
+) -> McpResult<T> {
+    loop {
+        match portals.hub.try_lock() {
+            Ok(mut hub) => return apply(&mut hub),
+            Err(std::sync::TryLockError::Poisoned(_)) => {
+                return Err(tool_err(
+                    "INTERNAL",
+                    "input state unavailable; retry hud_input",
+                ));
+            }
+            Err(std::sync::TryLockError::WouldBlock) => {}
+        }
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            return Err(tool_err("INTERNAL", "input state busy; retry hud_input"));
+        }
+        tokio::time::sleep_until(deadline.min(now + std::time::Duration::from_millis(1))).await;
+    }
+}
+
 /// Own one finite active poll. Drop releases ownership without inventing
 /// activity, including cancellation before the first portal attachment.
 struct InputPollLease {
@@ -1017,7 +1044,7 @@ struct InputPollLease {
 }
 
 impl InputPollLease {
-    fn start(
+    async fn start(
         ctx: &ToolCtx<'_>,
         namespace: &str,
         deadline: tokio::time::Instant,
@@ -1027,11 +1054,7 @@ impl InputPollLease {
         }
         let portals = ctx.portals.expect("enabled portal handle");
         let active = Arc::new(AtomicBool::new(true));
-        let (request, changed) = {
-            let mut hub = portals
-                .hub
-                .try_lock()
-                .map_err(|_| tool_err("INTERNAL", "input state unavailable; retry hud_input"))?;
+        let (request, changed) = with_input_hub(portals, deadline, |hub| {
             let before = hub.next_deadline();
             let remaining_us = deadline
                 .saturating_duration_since(tokio::time::Instant::now())
@@ -1048,8 +1071,9 @@ impl InputPollLease {
                     tool_err("INTERNAL", "input ownership unavailable; retry hud_input")
                 })?;
             let changed = !hub.list(namespace).is_empty() && before != hub.next_deadline();
-            (request, changed)
-        };
+            Ok((request, changed))
+        })
+        .await?;
         if changed {
             ctx.portal_wake.notify();
         }
@@ -1101,7 +1125,7 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
     let deadline = tokio::time::Instant::now() + std::time::Duration::from_millis(wait_ms);
     let max_items = p.max_items.unwrap_or(usize::MAX);
     let input_ready = ctx.input_notifiers.try_for_agent(&ns)?;
-    let _active_poll = InputPollLease::start(ctx, &ns, deadline)?;
+    let _active_poll = InputPollLease::start(ctx, &ns, deadline).await?;
     let action_ready = Arc::clone(&input_ready);
     {
         let mut scene = match ctx.scene.try_lock() {
@@ -1163,17 +1187,15 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
         };
         if portals_enabled(ctx) {
             let portals = ctx.portals.expect("enabled portal handle");
-            let (batch, changed) = {
-                let mut hub = portals.hub.try_lock().map_err(|_| {
-                    tool_err("INTERNAL", "input state unavailable; retry hud_input")
-                })?;
-                hub.poll_input_with_changes(
+            let (batch, changed) = with_input_hub(portals, deadline, |hub| {
+                Ok(hub.poll_input_with_changes(
                     &ns,
                     &std::mem::take(&mut ack),
                     Some(max_items - items.len()),
                     portals.clock.now_us(),
-                )
-            };
+                ))
+            })
+            .await?;
             if changed {
                 ctx.portal_wake.notify();
             }
