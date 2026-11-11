@@ -2670,6 +2670,12 @@ impl WinitApp {
     /// - Inside a hit-region → `set_cursor_hittest(true)` (window captures events).
     /// - Outside all hit-regions → `set_cursor_hittest(false)` (events pass through).
     pub(super) fn enqueue_pointer_event(&mut self, kind: PointerEventKind) {
+        self.handle_pointer_event(kind, true);
+    }
+
+    /// `record` is false only when replaying a retained Move (hud-65gpz): the
+    /// input ring already holds the original event.
+    fn handle_pointer_event(&mut self, kind: PointerEventKind, record: bool) {
         if kind == PointerEventKind::Down && self.state.answer_keyboard.focus.take().is_some() {
             self.state.input_processor.chrome_feedback_cancel_pending = true;
         }
@@ -2692,6 +2698,9 @@ impl WinitApp {
                 .as_ref()
                 .is_some_and(|gesture| gesture.terminal.is_some())
             {
+                if kind == PointerEventKind::Move {
+                    self.state.pending_pointer_move = true;
+                }
                 self.schedule_shared_scene_availability_wake();
                 return;
             }
@@ -2721,7 +2730,9 @@ impl WinitApp {
             timestamp_ns: nanoseconds_since_start(),
             kind: channel_kind,
         };
-        enqueue_input(&self.state.input_ring, input_event);
+        if record {
+            enqueue_input(&self.state.input_ring, input_event);
+        }
 
         // Also feed the InputProcessor for local feedback (Stage 2).
         // This happens synchronously on the main thread per spec §Stage 2.
@@ -3270,6 +3281,16 @@ impl WinitApp {
             self.deliver_notification_activation(outcome);
         }
 
+        // A busy scene lock must not lose hover/hit-test (hud-65gpz): retain the
+        // Move and replay it at the then-current cursor when the lock frees.
+        // Any processed pointer event subsumes a retained Move.
+        if pointer_processed {
+            self.state.pending_pointer_move = false;
+        } else if pointer_event.kind == PointerEventKind::Move {
+            self.state.pending_pointer_move = true;
+            self.schedule_shared_scene_availability_wake();
+        }
+
         // A press the scene lock never saw cannot arm a zone affordance.
         if !pointer_processed && pointer_event.kind == PointerEventKind::Down {
             self.state.zone_press = None;
@@ -3335,29 +3356,93 @@ impl WinitApp {
     ///
     /// Applies the offset locally (< 4ms p99 path) and, if the tile owner is
     /// subscribed, dispatches a `ScrollOffsetChangedEvent` to the agent via the
-    /// `INPUT_EVENTS` channel.
+    /// `INPUT_EVENTS` channel. A busy scene lock retains the delta instead of
+    /// dropping it (hud-65gpz); it applies, in order, on the next successful
+    /// lock via one coalesced availability wake.
     pub(super) fn enqueue_scroll_event(&mut self, delta_x: f32, delta_y: f32) {
         self.refresh_widget_hover_tracking();
         let x = self.state.cursor_x;
         let y = self.state.cursor_y;
         self.update_overlay_cursor_hittest();
 
-        if let Ok(state) = self.state.shared_state.try_lock()
-            && let Ok(mut scene) = state.scene.try_lock()
-        {
+        retain_scroll(
+            &mut self.state.pending_scroll,
+            RetainedScroll {
+                x,
+                y,
+                delta_x,
+                delta_y,
+            },
+        );
+        if self.apply_retained_scroll().is_none() {
+            self.schedule_shared_scene_availability_wake();
+        }
+    }
+
+    /// Apply every retained wheel delta under one lock acquisition.
+    /// `None` when the lock is still busy (the deltas stay queued);
+    /// otherwise whether any delta was applied.
+    fn apply_retained_scroll(&mut self) -> Option<bool> {
+        if self.state.pending_scroll.is_empty() {
+            return Some(false);
+        }
+        let state = self.state.shared_state.try_lock().ok()?;
+        let mut scene = state.scene.try_lock().ok()?;
+        for retained in self.state.pending_scroll.drain(..) {
             if let Some(ev) = self.state.input_processor.process_scroll_event(
                 &tze_hud_input::ScrollEvent {
-                    x,
-                    y,
-                    delta_x,
-                    delta_y,
+                    x: retained.x,
+                    y: retained.y,
+                    delta_x: retained.delta_x,
+                    delta_y: retained.delta_y,
                 },
                 &mut scene,
             ) {
                 dispatch_scroll_offset_event(&self.state.input_event_tx, &scene, ev);
             }
         }
+        Some(true)
     }
+
+    /// Retry pointer input a busy scene lock deferred (hud-65gpz): retained
+    /// wheel deltas first (they arrived at their own positions), then one
+    /// Move at the current cursor. True when either reached the scene.
+    pub(super) fn drain_retained_pointer_input(&mut self) -> bool {
+        let scrolled = self.apply_retained_scroll().unwrap_or(false);
+        let mut moved = false;
+        if self.state.pending_pointer_move {
+            self.handle_pointer_event(PointerEventKind::Move, false);
+            moved = !self.state.pending_pointer_move;
+        }
+        scrolled || moved
+    }
+}
+
+/// One wheel delta retained across a busy scene lock (hud-65gpz).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct RetainedScroll {
+    pub(super) x: f32,
+    pub(super) y: f32,
+    pub(super) delta_x: f32,
+    pub(super) delta_y: f32,
+}
+
+/// Upper bound on distinct retained wheel positions; beyond it new deltas
+/// fold into the newest entry so contention can never grow memory.
+const RETAINED_SCROLL_MAX: usize = 32;
+
+/// Queue `next`, summing it into the newest entry when the pointer has not
+/// moved (a notch burst) or the queue is full.
+fn retain_scroll(pending: &mut std::collections::VecDeque<RetainedScroll>, next: RetainedScroll) {
+    let full = pending.len() >= RETAINED_SCROLL_MAX;
+    if let Some(last) = pending.back_mut()
+        && (full || (last.x == next.x && last.y == next.y))
+    {
+        last.delta_x += next.delta_x;
+        last.delta_y += next.delta_y;
+        return;
+    }
+    pending.push_back(next);
 }
 
 impl WinitApp {
@@ -3997,6 +4082,31 @@ mod tests {
         scene_with_capture_tile, scene_with_drag_handle_tile,
     };
     use tze_hud_input::{FocusManager, InputProcessor, PointerEventKind};
+
+    /// Retained wheel input keeps order across positions, sums a burst at one
+    /// position, and stays bounded however long the lock is held (hud-65gpz).
+    #[test]
+    fn retained_scroll_coalesces_bursts_and_stays_bounded() {
+        use super::{RETAINED_SCROLL_MAX, RetainedScroll, retain_scroll};
+        let at = |x: f32, dy: f32| RetainedScroll {
+            x,
+            y: 0.0,
+            delta_x: 0.0,
+            delta_y: dy,
+        };
+        let mut pending = std::collections::VecDeque::new();
+        retain_scroll(&mut pending, at(1.0, 10.0));
+        retain_scroll(&mut pending, at(1.0, 10.0));
+        retain_scroll(&mut pending, at(2.0, -5.0));
+        assert_eq!(pending, [at(1.0, 20.0), at(2.0, -5.0)]);
+
+        for i in 0..200 {
+            retain_scroll(&mut pending, at(10.0 + i as f32, 1.0));
+        }
+        assert_eq!(pending.len(), RETAINED_SCROLL_MAX);
+        let total: f32 = pending.iter().map(|r| r.delta_y).sum();
+        assert_eq!(total, 20.0 - 5.0 + 200.0, "bounding never discards a delta");
+    }
 
     #[test]
     fn empty_portal_ingress_drain_does_not_create_a_compositor_generation() {

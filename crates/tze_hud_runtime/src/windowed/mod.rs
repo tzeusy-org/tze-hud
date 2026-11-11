@@ -628,6 +628,14 @@ struct WindowedRuntimeState {
     /// `pending_input_capture_commands` — bounded in practice by the number of
     /// keystrokes that arrive during a single lock-contention window.
     pending_keyboard_events: VecDeque<PendingKeyboardEvent>,
+    /// Wheel input that found the scene lock busy (hud-65gpz). Applied in
+    /// order on the next successful lock; consecutive notches at the same
+    /// pointer position coalesce, so the queue stays tiny.
+    pending_scroll: VecDeque<lifecycle::RetainedScroll>,
+    /// A pointer Move found the scene lock busy (hud-65gpz). Hover and
+    /// hit-testing follow the latest position, so one flag suffices: the
+    /// retry replays a Move at the current cursor position.
+    pending_pointer_move: bool,
     /// Cumulative count of interactive-feedback scene updates dropped because the
     /// main-thread `spin_acquire` timed out on the scene / shared-state lock
     /// during a guaranteed-feedback gesture (drag-move / live resize) — the exact
@@ -909,6 +917,8 @@ impl WinitApp {
         // was busy during dispatch (hud-2fz34).  Runs after composer flush so
         // deferred keystrokes re-enter the same path as fresh ones.
         self.drain_pending_keyboard_events();
+        // Retry pointer input that found the scene lock busy (hud-65gpz).
+        let retained_pointer_changed = self.drain_retained_pointer_input();
         // Render the portals (hud-2iup7).
         // Must run AFTER composer flush so draft state is settled before portal
         // content is refreshed.  Uses try_lock on the scene to avoid blocking
@@ -918,7 +928,8 @@ impl WinitApp {
         // scene (hud-kgu8u). Uses try_lock; silently deferred if lock is busy.
         let pruned_drag = self.prune_portal_resize_states();
         let settled_drag = self.drain_pending_drag_terminal();
-        let drag_scene_changed = pruned_drag || settled_drag || chrome_scene_changed;
+        let drag_scene_changed =
+            pruned_drag || settled_drag || chrome_scene_changed || retained_pointer_changed;
         if self.state.input_processor.chrome_feedback_cancel_pending {
             // Preserve any mutation already made by the ordinary portal turn;
             // retry chrome via the existing coalesced scene-availability wake.
@@ -1129,6 +1140,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         let has_deferred_scene_work = portal_drain.is_deferred()
             || !self.state.pending_input_capture_commands.is_empty()
             || !self.state.pending_keyboard_events.is_empty()
+            || !self.state.pending_scroll.is_empty()
+            || self.state.pending_pointer_move
             || self
                 .state
                 .primary_drag_gesture
@@ -3332,6 +3345,8 @@ impl WindowedRuntime {
             portal_projection_driver,
             capture_inbox,
             pending_keyboard_events: VecDeque::new(),
+            pending_scroll: VecDeque::new(),
+            pending_pointer_move: false,
             interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
         };
 
