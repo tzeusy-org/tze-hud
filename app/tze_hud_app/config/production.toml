@@ -102,15 +102,19 @@ height_pct = 0.0361111
 # ── Status-indicator widget instance ─────────────────────────────────────────
 # MCP widget_name: "main-status"
 # Parameters: status (enum), label (string), reason (string)
-# Position: top right, just left of the notification zone (x >= 75%) so the
-# badge never sits under a notification card; the tooltip opens down-left
-# inside the widget bounds. 320x124 -> 480x186 at 4K.
+# Position: top-right corner. The SVG draws the badge at the top-right of its
+# 320x124 bounds (x 280.5..319.5, y 0.5..39.5), so the badge's right edge lines
+# up with the notification column's (99%) and its bottom sits at ~4.7% of the
+# display height; the notification-area zone starts below it (5.5%), so cards
+# never sit under the badge. The hover tooltip opens down-left inside the
+# widget bounds and may overlap notification cards while shown.
+# 320x124 -> 240x93 at 1080p, 480x186 at 4K.
 [[tabs.widgets]]
 widget_type = "status-indicator"
 instance_id  = "main-status"
 
 [tabs.widgets.geometry]
-x_pct      = 0.62
+x_pct      = 0.865
 y_pct      = 0.02
 width_pct  = 0.125
 height_pct = 0.0861111
