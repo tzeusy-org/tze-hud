@@ -826,6 +826,32 @@ pub(crate) fn zone_geometry_in(
     }
 }
 
+/// Fails a nextest-run test that builds a GPU device outside the `gpu` test
+/// group (`.config/nextest.toml`).
+///
+/// That group is the only cross-process coordination of device construction:
+/// concurrent wgpu/llvmpipe construction across test processes can wedge, and
+/// the in-process gates do not cover separate processes. The group's filter
+/// lists GPU-reaching test modules and binaries; this check catches a new
+/// GPU-reaching test the filter misses. nextest sets `NEXTEST_TEST_GROUP` in
+/// every test process (and children inherit it); outside nextest it is unset
+/// and this is a no-op.
+fn assert_nextest_gpu_group() {
+    if let Ok(dir) = std::env::var("TZE_HUD_GPU_PROBE_DIR") {
+        use std::io::Write as _;
+        let line = format!("\t{}\n", std::env::args().collect::<Vec<_>>().join(" "));
+        let _ = std::fs::OpenOptions::new().create(true).append(true).open(format!("{dir}/{}", std::process::id())).and_then(|mut f| f.write_all(line.as_bytes()));
+    }
+    if let Ok(group) = std::env::var("NEXTEST_TEST_GROUP") {
+        assert!(
+            group == "gpu",
+            "test builds a GPU device outside the nextest `gpu` test group \
+             (NEXTEST_TEST_GROUP={group}); add it to the gpu override filter \
+             in .config/nextest.toml (see AGENTS.md, GPU tests)"
+        );
+    }
+}
+
 /// Backends the windowed compositor requests: Vulkan on Linux, D3D12 and
 /// Vulkan on Windows, Metal on macOS. Headless construction uses
 /// `Backends::all()` so software renderers (llvmpipe, WARP) still work.
@@ -852,6 +878,7 @@ impl Compositor {
     /// "When set, the wgpu adapter selection MUST request a software fallback
     /// (force_fallback_adapter = true)."
     pub async fn new_headless(width: u32, height: u32) -> Result<Self, CompositorError> {
+        assert_nextest_gpu_group();
         // Check HEADLESS_FORCE_SOFTWARE env var (spec line 409: "conventionally
         // named HEADLESS_FORCE_SOFTWARE").
         let force_software = std::env::var("HEADLESS_FORCE_SOFTWARE")
@@ -1055,6 +1082,7 @@ impl Compositor {
         force_fallback_adapter: bool,
     ) -> Result<(Self, crate::surface::WindowSurface), CompositorError> {
         use crate::surface::WindowSurface;
+        assert_nextest_gpu_group();
 
         // ── Step 1: Create instance with platform-mandated backends ──────────
         // We need the surface before adapter selection so we can pass it as
