@@ -44,9 +44,7 @@ use tze_hud_scene::types::{
 };
 use wgpu::{Device, MultisampleState, Queue};
 
-#[cfg(test)]
-use crate::fonts::ResolvedFonts;
-use crate::fonts::{FontConfig, build_font_system};
+use crate::fonts::{FontConfig, ResolvedFonts, build_font_system};
 use crate::overflow::{self, TruncationResult, TruncationViewport};
 
 /// Default line-height multiplier: `line_height_px = font_size_px × this`.
@@ -395,7 +393,6 @@ pub(crate) struct TextRasterizer {
     /// ([`TextRasterizer::take_uploaded_fonts`]).  Shared with fontdb (no copy).
     uploaded_fonts: Vec<([u8; 32], Arc<Vec<u8>>)>,
     /// Family each font role resolved to.
-    #[cfg(test)]
     resolved_fonts: ResolvedFonts,
     /// Truncation result cache for `TextOverflow::Ellipsis` items.
     ///
@@ -767,7 +764,6 @@ impl TextRasterizer {
             overlay_renderer,
             loaded_font_ids: HashSet::new(),
             uploaded_fonts: Vec::new(),
-            #[cfg(test)]
             resolved_fonts,
             truncation_cache: TruncationCache::new(),
             shape_call_count: 0,
@@ -837,7 +833,6 @@ impl TextRasterizer {
 
     /// The concrete family each font role resolved to.
     #[inline]
-    #[cfg(test)]
     pub(crate) fn resolved_fonts(&self) -> &ResolvedFonts {
         &self.resolved_fonts
     }

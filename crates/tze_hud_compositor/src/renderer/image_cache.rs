@@ -407,6 +407,13 @@ impl super::Compositor {
                 .truncation_cache
                 .set_max_truncation_input_bytes(bytes);
         }
+        // Widget SVG text follows the same fonts as zone text.
+        let font_files = crate::fonts::loaded_font_files(rasterizer.font_system_mut().db());
+        if crate::widget::set_widget_fonts(font_files, rasterizer.resolved_fonts()) {
+            if let Some(widgets) = &mut self.widget_renderer {
+                widgets.invalidate_rasters();
+            }
+        }
         self.text_rasterizer = Some(rasterizer);
         tracing::debug!(format = ?format, "text renderer initialized");
     }

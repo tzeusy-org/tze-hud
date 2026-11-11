@@ -1051,18 +1051,19 @@ impl PrimitiveText {
         })
     }
 
-    /// The direct path draws only the default regular sans face; any other
-    /// family or a non-regular weight takes the resvg mask path.
+    /// The direct path draws only the resolved regular sans face; any other
+    /// family or a non-regular weight takes the resvg mask path. The first
+    /// listed family decides: the generic sans or the resolved sans family.
     fn uses_fast_path_font_family(&self) -> bool {
         let regular = self
             .font_weight
             .as_deref()
             .is_none_or(|weight| matches!(weight.trim(), "" | "normal" | "400"));
         regular
-            && self.font_family.as_deref().is_none_or(|family| {
-                let family = family.trim().to_ascii_lowercase();
-                family.is_empty() || family.contains("sans")
-            })
+            && self
+                .font_family
+                .as_deref()
+                .is_none_or(|family| draws_with_sans(family, &widget_fonts().resolved.sans))
     }
 
     fn direct_text_mask_cache_key(
@@ -1081,6 +1082,8 @@ impl PrimitiveText {
         hasher.update(&self.font_size.to_le_bytes());
         hasher.update(self.text_anchor.as_deref().unwrap_or("").as_bytes());
         hasher.update(self.font_family.as_deref().unwrap_or("").as_bytes());
+        // The face the generic sans resolves to changes with the font roles.
+        hasher.update(widget_fonts().resolved.sans.as_bytes());
         hasher.update(&crop.view_box.min_x.to_le_bytes());
         hasher.update(&crop.view_box.min_y.to_le_bytes());
         hasher.update(&crop.view_box.width.to_le_bytes());
@@ -1786,46 +1789,159 @@ pub(crate) struct WidgetAnimationState {
 // ─── Standalone SVG rasterization (CPU-only, no GPU) ─────────────────────────
 
 fn widget_usvg_options() -> resvg::usvg::Options<'static> {
-    resvg::usvg::Options {
+    let mut options = resvg::usvg::Options {
         fontdb: shared_widget_fontdb(),
         ..Default::default()
+    };
+    options.font_resolver.select_fallback = quiet_fallback_selector();
+    options
+}
+
+/// usvg's default per-glyph fallback, minus its `warn!` per fallback.
+///
+/// A glyph the requested family lacks (the status indicator's `☾ ☕ ⚡ ☺`
+/// are not in IBM Plex Sans) is drawn from another loaded face, normally the
+/// bundled DejaVu Sans, which exists for exactly that (see `crate::fonts`).
+/// That is expected on every render, so it logs at debug, not warn.
+fn quiet_fallback_selector() -> resvg::usvg::FallbackSelectionFn<'static> {
+    Box::new(|c, exclude_fonts, fontdb| {
+        let base = fontdb.face(*exclude_fonts.first()?)?;
+        let face = fontdb.faces().find(|face| {
+            !exclude_fonts.contains(&face.id)
+                && (base.style == face.style
+                    || base.weight == face.weight
+                    || base.stretch == face.stretch)
+                && fontdb
+                    .with_face_data(face.id, |data, index| {
+                        ab_glyph::FontRef::try_from_slice_and_index(data, index)
+                            .is_ok_and(|font| font.glyph_id(c).0 != 0)
+                    })
+                    .unwrap_or(false)
+        })?;
+        tracing::debug!(
+            from = base.families.first().map_or("", |f| f.0.as_str()),
+            to = face.families.first().map_or("", |f| f.0.as_str()),
+            ch = %c,
+            "widget text glyph fallback"
+        );
+        Some(face.id)
+    })
+}
+
+/// The fonts widget SVG text renders with: the bundled faces plus whatever
+/// the zone text renderer loaded for the configured roles (fonts dir and,
+/// on Windows, system families such as Segoe UI), with the same role
+/// families. Replaced by [`set_widget_fonts`] when the font roles change.
+struct WidgetFonts {
+    /// Extra font files and resolved roles this set was built from.
+    files: Vec<std::path::PathBuf>,
+    resolved: crate::fonts::ResolvedFonts,
+    db: Arc<resvg::usvg::fontdb::Database>,
+    /// The resolved sans face, for the direct (non-resvg) text fast path.
+    sans: Option<ab_glyph::FontArc>,
+}
+
+impl WidgetFonts {
+    fn build(files: Vec<std::path::PathBuf>, resolved: crate::fonts::ResolvedFonts) -> Self {
+        // resvg links its own fontdb version, so load from bytes and paths
+        // rather than sharing glyphon's database.
+        use resvg::usvg::fontdb;
+        let mut db = fontdb::Database::new();
+        for bytes in crate::fonts::bundled_face_bytes() {
+            db.load_font_source(fontdb::Source::Binary(Arc::new(bytes)));
+        }
+        for file in &files {
+            if let Err(error) = db.load_font_file(file) {
+                tracing::warn!(file = %file.display(), %error, "widget font file unreadable; skipped");
+            }
+        }
+        db.set_sans_serif_family(resolved.sans.clone());
+        db.set_monospace_family(resolved.mono.clone());
+        db.set_serif_family(resolved.serif.clone());
+        let sans = db
+            .query(&fontdb::Query {
+                families: &[fontdb::Family::SansSerif],
+                ..Default::default()
+            })
+            .and_then(|id| {
+                db.with_face_data(id, |data, index| {
+                    ab_glyph::FontVec::try_from_vec_and_index(data.to_vec(), index)
+                        .ok()
+                        .map(ab_glyph::FontArc::new)
+                })
+                .flatten()
+            });
+        Self {
+            files,
+            resolved,
+            db: Arc::new(db),
+            sans,
+        }
     }
 }
 
-fn shared_widget_fontdb() -> Arc<resvg::usvg::fontdb::Database> {
-    static FONTDB: OnceLock<Arc<resvg::usvg::fontdb::Database>> = OnceLock::new();
-    FONTDB
-        .get_or_init(|| {
-            // Bundled faces only, same as the glyphon font system (see
-            // `crate::fonts`): deterministic and free of a system-font scan.
-            // resvg links its own fontdb version, so load from raw bytes.
-            use resvg::usvg::fontdb;
-            let mut db = fontdb::Database::new();
-            for bytes in crate::fonts::bundled_face_bytes() {
-                db.load_font_source(fontdb::Source::Binary(Arc::new(bytes)));
-            }
-            db.set_sans_serif_family(crate::fonts::DEFAULT_SANS_FAMILY);
-            db.set_monospace_family(crate::fonts::DEFAULT_MONO_FAMILY);
-            db.set_serif_family(crate::fonts::DEFAULT_SERIF_FAMILY);
-            Arc::new(db)
-        })
-        .clone()
+/// Whether a `font-family` list resolves to the sans face `sans`: its first
+/// entry is empty, a generic sans keyword, or `sans` itself.
+fn draws_with_sans(family: &str, sans: &str) -> bool {
+    let first = family
+        .split(',')
+        .next()
+        .unwrap_or("")
+        .trim()
+        .trim_matches(|c| c == '"' || c == '\'');
+    first.is_empty()
+        || first.eq_ignore_ascii_case("sans-serif")
+        || first.eq_ignore_ascii_case("system-ui")
+        || first.eq_ignore_ascii_case(sans)
 }
 
-fn shared_widget_ab_glyph_font() -> Option<&'static ab_glyph::FontArc> {
-    static FONT: OnceLock<Option<ab_glyph::FontArc>> = OnceLock::new();
-    FONT.get_or_init(|| {
-        let db = shared_widget_fontdb();
-        let id = db.query(&resvg::usvg::fontdb::Query {
-            families: &[resvg::usvg::fontdb::Family::SansSerif],
-            ..Default::default()
-        })?;
-        db.with_face_data(id, |data, _face_index| {
-            ab_glyph::FontArc::try_from_vec(data.to_vec()).ok()
-        })
-        .flatten()
-    })
-    .as_ref()
+fn widget_fonts_slot() -> &'static std::sync::RwLock<Option<Arc<WidgetFonts>>> {
+    static FONTS: std::sync::RwLock<Option<Arc<WidgetFonts>>> = std::sync::RwLock::new(None);
+    &FONTS
+}
+
+fn widget_fonts() -> Arc<WidgetFonts> {
+    if let Some(fonts) = widget_fonts_slot()
+        .read()
+        .unwrap_or_else(|e| e.into_inner())
+        .as_ref()
+    {
+        return Arc::clone(fonts);
+    }
+    let mut slot = widget_fonts_slot()
+        .write()
+        .unwrap_or_else(|e| e.into_inner());
+    Arc::clone(
+        slot.get_or_insert_with(|| Arc::new(WidgetFonts::build(Vec::new(), Default::default()))),
+    )
+}
+
+/// Make widget SVG text use the fonts the zone text renderer resolved:
+/// `files` are the non-bundled font files it loaded, `resolved` its role
+/// families. Returns true when the set changed; the caller must then
+/// re-rasterize widgets (see [`WidgetRenderer::invalidate_rasters`]).
+pub(crate) fn set_widget_fonts(
+    files: Vec<std::path::PathBuf>,
+    resolved: &crate::fonts::ResolvedFonts,
+) -> bool {
+    let current = widget_fonts();
+    if current.files == files && current.resolved == *resolved {
+        return false;
+    }
+    let fonts = Arc::new(WidgetFonts::build(files, resolved.clone()));
+    *widget_fonts_slot()
+        .write()
+        .unwrap_or_else(|e| e.into_inner()) = Some(fonts);
+    clear_widget_raster_caches();
+    true
+}
+
+fn shared_widget_fontdb() -> Arc<resvg::usvg::fontdb::Database> {
+    Arc::clone(&widget_fonts().db)
+}
+
+fn shared_widget_ab_glyph_font() -> Option<ab_glyph::FontArc> {
+    widget_fonts().sans.clone()
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -2741,6 +2857,14 @@ impl WidgetRenderer {
         );
     }
 
+    /// Re-rasterize every widget on its next sync: the widget fonts changed.
+    pub(crate) fn invalidate_rasters(&mut self) {
+        self.render_plans.clear();
+        for entry in self.textures.values_mut() {
+            entry.dirty = true;
+        }
+    }
+
     /// Mark a widget instance as dirty and start a transition animation.
     /// `now_us` is the scene's injected clock, never the wall clock.
     pub(crate) fn start_transition(
@@ -3500,6 +3624,78 @@ mod tests {
         assert_eq!(snapshot.widget_source_bytes, 4);
         assert_eq!(snapshot.aggregate_bytes, 4);
         assert_eq!(snapshot.allocation_count, 1);
+    }
+
+    fn ink(pixmap: &tiny_skia::Pixmap) -> usize {
+        pixmap.pixels().iter().filter(|p| p.alpha() > 0).count()
+    }
+
+    fn glyph_svg(family: &str, glyph: &str) -> String {
+        format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 40 40"><text x="20" y="30" text-anchor="middle" font-family="{family}" font-size="28" fill="#fff">{glyph}</text></svg>"##
+        )
+    }
+
+    /// The status indicator's friendly glyphs are not in IBM Plex Sans; they
+    /// draw from the bundled DejaVu Sans through the per-glyph fallback.
+    #[test]
+    fn glyph_missing_from_theme_font_falls_back_to_a_bundled_face() {
+        let _guard = widget_cache_test_guard();
+        for glyph in ["☾", "☕", "⚡", "☺"] {
+            let render = |family: &str| {
+                rasterize_single_svg_layer(&glyph_svg(family, glyph), 40, 40).expect("rasterizes")
+            };
+            let fallback = render("IBM Plex Sans, sans-serif");
+            assert!(ink(&fallback) > 20, "{glyph} draws a glyph");
+            assert!(
+                fallback.data() == render("DejaVu Sans").data(),
+                "{glyph} is DejaVu Sans's glyph, not Plex's missing-glyph box"
+            );
+        }
+    }
+
+    /// Widget text follows the font roles the zone text renderer resolved,
+    /// including the direct fast path. Built directly: replacing the shared
+    /// set would race other widget tests in this process.
+    #[test]
+    fn widget_fonts_follow_resolved_font_roles() {
+        let sans_family = |fonts: &WidgetFonts| {
+            let id = fonts
+                .db
+                .query(&resvg::usvg::fontdb::Query {
+                    families: &[resvg::usvg::fontdb::Family::SansSerif],
+                    ..Default::default()
+                })
+                .expect("sans face");
+            fonts.db.face(id).unwrap().families[0].0.clone()
+        };
+        let default = WidgetFonts::build(Vec::new(), Default::default());
+        assert_eq!(sans_family(&default), crate::fonts::DEFAULT_SANS_FAMILY);
+        assert_eq!(default.sans.as_ref().unwrap().glyph_id('☾').0, 0);
+        assert!(
+            !set_widget_fonts(Vec::new(), &Default::default()),
+            "the default set is already current"
+        );
+
+        let dejavu = WidgetFonts::build(
+            Vec::new(),
+            crate::fonts::ResolvedFonts {
+                sans: "DejaVu Sans".to_owned(),
+                ..Default::default()
+            },
+        );
+        assert_eq!(sans_family(&dejavu), "DejaVu Sans");
+        assert_ne!(
+            dejavu.sans.as_ref().unwrap().glyph_id('☾').0,
+            0,
+            "the fast path draws the resolved face"
+        );
+        assert!(draws_with_sans("'DejaVu Sans', sans-serif", "DejaVu Sans"));
+        assert!(draws_with_sans("sans-serif", "DejaVu Sans"));
+        assert!(
+            !draws_with_sans("IBM Plex Sans, sans-serif", "DejaVu Sans"),
+            "another family takes the resvg path"
+        );
     }
 
     fn sans_serif_font_available() -> bool {
