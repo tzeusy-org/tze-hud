@@ -785,7 +785,7 @@ async fn publish_zone<'a>(
             expires_at.map(|at| at.saturating_sub(now) / 1_000),
         )));
     };
-    let activity = InputPollLease::start(ctx, &ns, deadline)?;
+    let activity = InputPollLease::start(ctx, &ns, deadline).await?;
     let ready = ctx.input_notifiers.try_for_agent(&ns)?;
     loop {
         let mut notified = std::pin::pin!(ready.notified());
