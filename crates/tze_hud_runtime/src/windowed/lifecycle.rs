@@ -3447,8 +3447,9 @@ fn same_direction(a: f32, b: f32) -> bool {
 
 /// Queue `next`, summing it into the newest entry when the pointer has not
 /// moved and the direction is unchanged (a notch burst). At the bound the two
-/// oldest entries combine instead, so only very old, long-held input loses
-/// its intermediate clamping.
+/// oldest entries combine instead: the oldest delta then applies at the
+/// second entry's position, without its own intermediate clamping. Only
+/// input more than 32 direction or position changes old is affected.
 fn retain_scroll(pending: &mut std::collections::VecDeque<RetainedScroll>, next: RetainedScroll) {
     if let Some(last) = pending.back_mut()
         && last.x == next.x

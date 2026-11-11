@@ -6606,10 +6606,22 @@ mod tests {
 
         let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
         let held = scene_handle.blocking_lock();
+        let main_work_before = harness.app.state.wake.main_work_generation();
         harness.app.enqueue_scroll_event(0.0, 60.0);
         harness.app.enqueue_scroll_event(0.0, -3.0);
         drop(held);
+        // Retry on the release-driven wake, as the event loop does: until it
+        // fires, the availability waiter may itself hold the scene briefly.
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        while harness.app.state.wake.main_work_generation() == main_work_before {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "releasing the scene lock must wake the main loop to retry"
+            );
+            std::thread::yield_now();
+        }
         harness.app.settle_scene_work();
+        assert!(harness.app.state.pending_scroll.is_empty());
 
         let shared = harness.app.state.shared_state.blocking_lock();
         let offset = shared
