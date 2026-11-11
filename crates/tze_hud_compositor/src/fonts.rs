@@ -43,8 +43,10 @@
 //! role default.
 //!
 //! Widget SVG text (resvg, [`crate::widget`]) uses a database of the same
-//! bundled faces with the default role families; it does not follow a
-//! configured [`FontConfig`].
+//! bundled faces plus every font file the configured roles loaded (fonts dir,
+//! Windows system families), with the same role families, so widgets follow
+//! the theme's fonts. A glyph the role family lacks falls back per glyph to
+//! another loaded face (normally DejaVu Sans), as cosmic-text does.
 //!
 //! # Configuring a family
 //!
@@ -279,6 +281,23 @@ fn new_font_system(db: fontdb::Database) -> FontSystem {
 /// version (resvg's widget text).
 pub(crate) fn bundled_face_bytes() -> impl Iterator<Item = &'static [u8]> {
     BUNDLED_FACES.iter().copied()
+}
+
+/// Font files outside the bundle that `db` loaded (fonts-dir and system
+/// faces), sorted and deduplicated, for mirroring into resvg's database.
+pub(crate) fn loaded_font_files(db: &fontdb::Database) -> Vec<PathBuf> {
+    let mut files: Vec<PathBuf> = db
+        .faces()
+        .filter_map(|face| match &face.source {
+            fontdb::Source::File(path) => Some(path.clone()),
+            #[allow(unreachable_patterns)] // only with fontdb's memmap feature
+            fontdb::Source::SharedFile(path, _) => Some(path.clone()),
+            _ => None,
+        })
+        .collect();
+    files.sort();
+    files.dedup();
+    files
 }
 
 /// The family name `db` knows that equals `name` case-insensitively, if any.
@@ -695,6 +714,9 @@ mod tests {
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(resolved.sans, "DejaVu Serif");
         assert_eq!(fs.db().faces().count(), BUNDLED_FONT_FACE_COUNT + 1);
+        // Widget text mirrors exactly the non-bundled file.
+        assert_eq!(loaded_font_files(fs.db()), [dir.join("Operator.TTF")]);
+        assert!(loaded_font_files(bundled_font_system().db()).is_empty());
     }
 
     #[test]
