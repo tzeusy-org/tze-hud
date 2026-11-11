@@ -2492,6 +2492,56 @@ async fn publish_wait_reserves_only_its_exact_answer() {
     }
 }
 
+/// A revoked or expired lease that holds only the materialized question card
+/// ends its wait as cleared, not after the full `wait_ms`.
+#[tokio::test(start_paused = true)]
+async fn publish_wait_ends_cleared_when_its_lease_is_revoked_or_expires() {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+    let mut context = Context::from_waker(Waker::noop());
+    for expire in [false, true] {
+        let (server, clock) = self::server();
+        let mut ask = Box::pin(call(&server, "hud_publish", question(30000)));
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        let wakes = {
+            let mut scene = server.scene.lock().await;
+            let lease = scene
+                .zone_registry
+                .active_for_zone("notification-area")
+                .last()
+                .and_then(|record| record.lease_id)
+                .expect("materialized question is leased");
+            if expire {
+                scene.leases.get_mut(&lease).unwrap().ttl_ms = 1;
+                clock.advance(2);
+                assert_eq!(scene.expire_leases().len(), 1);
+            } else {
+                scene.revoke_lease(lease).unwrap();
+            }
+            assert!(
+                scene
+                    .zone_registry
+                    .active_for_zone("notification-area")
+                    .is_empty()
+            );
+            scene.take_notification_wait_notifiers()
+        };
+        assert!(
+            !wakes.is_empty(),
+            "expire={expire}: lease end wakes the wait"
+        );
+        for wake in wakes {
+            wake.notify();
+        }
+        let Poll::Ready(answer) = ask.as_mut().poll(&mut context) else {
+            panic!("expire={expire}: lease end completes the wait");
+        };
+        assert_eq!(answer, json!({"ok":true,"gone":"cleared"}));
+    }
+}
+
 #[tokio::test(start_paused = true)]
 async fn publish_wait_endings_deadline_delay_and_validation() {
     use std::{

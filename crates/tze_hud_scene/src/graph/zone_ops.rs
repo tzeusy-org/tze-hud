@@ -1519,8 +1519,11 @@ impl SceneGraph {
             );
         }
         let pending_changed = self.scheduled_batches.len() != pending_before;
+        let mut zone_changed = false;
         for publishes in self.zone_registry.active_publishes.values_mut() {
+            let before = publishes.len();
             publishes.retain(|r| r.lease_id != Some(lease_id));
+            zone_changed |= publishes.len() != before;
         }
         self.zone_registry
             .active_publishes
@@ -1537,7 +1540,9 @@ impl SceneGraph {
         self.widget_registry
             .active_publishes
             .retain(|_, v| !v.is_empty());
-        if pending_changed || !touched_widgets.is_empty() {
+        // Removed zone records can end a materialized question wait and
+        // leave stale placement/feedback entries; prune and re-render.
+        if pending_changed || zone_changed || !touched_widgets.is_empty() {
             for widget_name in touched_widgets {
                 self.refresh_widget_current_params(&widget_name);
             }
