@@ -26,7 +26,7 @@ tracing = { workspace = true }
 # Parse skill-example fences with CommonMark; no renderer or CLI features needed.
 pulldown-cmark = { version = "0.13", default-features = false }
 tze_hud_scene = { path = "../tze_hud_scene", version = "0.1.0", features = ["test-support"] }
-tokio = { workspace = true }
+tokio = { workspace = true, features = ["test-util"] }
 
 [lints]
 workspace = true

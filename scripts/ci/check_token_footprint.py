@@ -105,13 +105,15 @@ def _incompatibility_checks(measurement, baseline):
         reasons.append("baseline is missing budgets")
     elif set(budgets["flows"]) != set(baseline_flows):
         reasons.append("budget flow set does not match baseline flows")
-    if "notification_choice" in measured_flows:
+    for flow_name, required in (("notification_choice", 120), ("notification_choice_wait", 90)):
+        if flow_name not in measured_flows:
+            continue
         ceiling = (
-            budgets.get("flows", {}).get("notification_choice")
+            budgets.get("flows", {}).get(flow_name)
             if isinstance(budgets, dict) else None
         )
-        if ceiling != 120:
-            reasons.append("notification_choice budget must be 120 model-visible tokens")
+        if ceiling != required:
+            reasons.append(f"{flow_name} budget must be {required} model-visible tokens")
     return reasons
 
 

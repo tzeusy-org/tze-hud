@@ -69,7 +69,32 @@ In `tools/list`, only `hud_surfaces` has `readOnlyHint:true`. Only `hud_hold`
 and `hud_clear` have `idempotentHint:true`; publish/input make neither claim.
 
 
-**`hud_publish`** `{surface*, content | params, ttl_ms?, delay_ms?, key?, status?, expects_reply?, display_name?}`
+**`hud_publish`** `{surface*, content | params, ttl_ms?, delay_ms?, key?, wait_ms?, status?, expects_reply?, display_name?}`
+
+For a one-shot notification with actions, add `wait_ms` (default 0, clamped to
+30000). The card is admitted and rendering wakes before the call waits; the
+absolute wait includes admission and `delay_ms`. An answer returns in this call
+as `action:"<callback_id>"`; a human × adds `action:"dismiss",kind:"dismiss"`.
+It is consumed only after the reply is encoded and needs no ACK. A cancelled
+call releases its reservation and leaves accepted input in the ordinary FIFO,
+with the same retained id on repeated `hud_input` polls. Other card answers and
+portal replies stay queued; a concurrent `hud_input` cannot steal the reserved
+answer. Acceptance uses the scene's monotonic clock: an answer accepted before
+this deadline stays reserved even if the request resumes later; a press at or
+after the deadline goes to ordinary input. HTTPS link presses do not fabricate
+a callback answer. Post-admission scene acquisition uses the remaining wait
+window; contention at its end returns the existing bounded `INTERNAL` error
+with a `retry hud_input` hint, releasing the reservation without consuming input.
+
+An unanswered card removed during the wait returns `gone:"expired"`,
+`"replaced"` (same key), `"displaced"` (contention), or `"cleared"`. These endings
+never queue an additional displacement event. If the wait ends while the card
+is still admitted, the reply has the ordinary shape with `expires_in_ms`
+recomputed at return; a later answer uses `hud_input` and ACK normally. Passing
+`wait_ms`, including 0, for a widget, portal, or action-less notification returns
+`INVALID_ARGUMENT` without publishing. Waiting counts as finite agent activity,
+with the same cancellation and idle semantics as a `hud_input` wait.
+
 
 - Zone: `content` is a string, or a typed object for structured zones
   (`notification` with optional `title`, `body`, integer `urgency` 0–3
@@ -1171,16 +1196,29 @@ distinguishes arguments from responses and partial configuration examples.
 
 | Measure | Before T5 (wire) | Wire | Model-visible | Budget (model-visible) |
 |---|---|---|---|---|
-| `tools/list` | 4,418 | 627 | 590 | ≤ 900 |
+| `tools/list` | 4,418 | 659 | 622 | ≤ 900 |
 | Discover (default scene) | ~430 (`list_zones`) | 194 | 126 | ≤ 150 |
 | Zone publish | ~197 | 90 | 39 | ≤ 80 |
 | Four-option notification ask + returned answer + ACK | — | 273 | 114 | ≤ 120 |
+| Four-option notification ask-and-wait (`notification_choice_wait`) | — | 129 | 77 | ≤ 90 |
 | Widget publish | ~168 | 73 | 22 | ≤ 80 |
 | Portal: attach+publish+hold, poll, ack, clear | ~575 over 5 round trips | 343 over 4 | 137 over 4 | ≤ 250 |
 | Discover (unheld `production.toml`: 6 zones, 4 widget instances) | n/a | 321 | 245 | ≤ 250 |
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
 
-All seven measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
+The new `notification_choice_wait` flow uses the same four callback options,
+`wait_ms:30000` and `ttl_ms:0`; the explicit hold makes its response independent
+of elapsed wall-clock milliseconds. It exercises real shared activation and
+returns the accepted Skip action in its only call, without polling or ACK.
+Its 77 model-visible tokens compare with 114 for the unchanged three-call flow.
+Advertising the optional argument changes `tools/list` from 590 to 622 tokens;
+all six other existing flows keep identical fingerprints, bytes and counts.
+The owner **accepted** the new bytes, the new 90-token row and this necessary
+discovery exception to the signed byte-identity criterion for PR1602 on
+2026-11-12 (Asia/Singapore); the prior PR1598 approval covers only the previous baseline. All existing
+ceilings, reply defaults, counting rules, tokenizer and flow versions remain.
+
+All eight measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
 `o200k_base`. The discovery-audience change (`hud-ljhku.7`, source `177e1096`)
 changes model-visible `tools/list` from 564 to 590 tokens and default discovery
 from 113 to 126. The five other flows retain identical request/response
@@ -1226,8 +1264,9 @@ callback for the exact canonical attachment, preserving the snapshotted publish
 response. It performs no scene probes or periodic Hub work through the portal's
 1000ms poll and default-zero ACK. Only that observed portal's subsequent clear
 allows choice probes, and layout waits for the actual choice publication.
-All fixture scene work stops before choice readiness, protecting its default-zero
-answer/ACK calls too. This fixture ordering does not promise success under
+Fixture scene work stops before the old choice readiness, protecting its default-zero
+answer/ACK calls too. A second local driver barrier re-arms choice work only after
+those calls and the action-limit candidate finish, for the new in-band wait flow. This fixture ordering does not promise success under
 external scene contention or change the finite public input contract.
 
 The same calibration separately executes an over-limit notification publish.

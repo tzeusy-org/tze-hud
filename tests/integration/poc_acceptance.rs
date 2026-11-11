@@ -1229,6 +1229,42 @@ async fn poc_notification_action_reaches_hud_input() {
     assert_eq!(input_items(&repeated), items);
     let ack = poc.call("hud_input", json!({"ack":[items[0]["id"]]})).await;
     assert!(input_items(&ack).is_empty());
+    // A one-call ask crosses the same real HTTP/runtime click path without ACK.
+    let args = json!({"surface":NOTIFICATION,"wait_ms":30000,"content":{"body":"Next?","actions":[
+        {"label":"Ship","callback_id":"wa"},{"label":"Hold","callback_id":"wb"},
+        {"label":"Skip","callback_id":"wc"},{"label":"Open","callback_id":"wd"}]}});
+    let request = json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+        "params":{"name":"hud_publish","arguments":args}})
+    .to_string();
+    let mut waiting = tokio::spawn(post(poc.hud.mcp_addr(), CLAUDE_PSK, request));
+    let deadline = Instant::now() + WAIT;
+    let mut clicked = false;
+    let raw = loop {
+        poc.hud.tick();
+        if !clicked && let Some((x, y)) = poc.hud.notification_action_center("wc") {
+            poc.hud.click(x, y);
+            clicked = true;
+        }
+        tokio::select! {
+            done = &mut waiting => break done.expect("one-call HTTP task"),
+            () = tokio::task::yield_now() => {},
+        }
+        assert!(
+            Instant::now() < deadline,
+            "one-call question did not finish"
+        );
+    };
+    assert!(clicked, "response required an actual owner click");
+    let response: Value = serde_json::from_str(&raw).unwrap();
+    assert_ne!(response["result"]["isError"], true, "{raw}");
+    let text = response["result"]["content"][0]["text"].as_str().unwrap();
+    let answer: Value = serde_json::from_str(text).unwrap();
+    assert_eq!(answer["action"], "wc");
+    assert!(tokens(&format!("hud_publish{args}{text}")) <= 90);
+    assert!(
+        input_items(&poc.call("hud_input", json!({})).await).is_empty(),
+        "consumed in the encoded reply"
+    );
 }
 
 impl Poc {

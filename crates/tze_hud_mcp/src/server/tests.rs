@@ -1,6 +1,7 @@
 use super::*;
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::sync::atomic::Ordering;
 use tze_hud_portal::hub::{PortalHub, PortalKey, PortalStatus};
 use tze_hud_scene::config::hash_psk;
 use tze_hud_scene::graph::PendingActionKind;
@@ -2057,6 +2058,7 @@ async fn action_presses_are_delivered_until_acked() {
         .lock()
         .await
         .push_pending_action(PendingAction {
+            publication_id: None,
             key: None,
             publisher_namespace: AgentDirectory::unrestricted(psk())
                 .resolve(&psk(), "")
@@ -2085,6 +2087,7 @@ async fn action_presses_are_delivered_until_acked() {
         for index in 0..actions_per_agent {
             for namespace in ["a", "b"] {
                 scene.push_pending_action(PendingAction {
+                    publication_id: None,
                     key: None,
                     publisher_namespace: namespace.into(),
                     zone_name: "subtitle".into(),
@@ -2186,12 +2189,14 @@ async fn action_presses_are_delivered_until_acked() {
     {
         let mut scene = server.scene.lock().await;
         scene.push_pending_action(PendingAction {
+            publication_id: None,
             key: None,
             publisher_namespace: "a".into(),
             zone_name: "subtitle".into(),
             kind: PendingActionKind::Callback("dismiss".into()),
         });
         scene.push_pending_action(PendingAction {
+            publication_id: None,
             key: None,
             publisher_namespace: "a".into(),
             zone_name: "subtitle".into(),
@@ -2255,6 +2260,7 @@ async fn action_presses_are_delivered_until_acked() {
                 .lock()
                 .await
                 .push_pending_action(PendingAction {
+                    publication_id: None,
                     publisher_namespace: "a".into(),
                     zone_name: "notification-area".into(),
                     kind: kind.clone(),
@@ -2307,6 +2313,471 @@ async fn action_presses_are_delivered_until_acked() {
             assert_eq!(done, json!({"items":[],"remaining":0}));
         }
     }
+}
+
+/// The shared pointer/keyboard producer, with the compositor's exact live card
+/// identity. Tests inject hit geometry rather than inventing input queue items.
+async fn activate_card(server: &McpServer, id: SceneId, dismiss: bool) {
+    use tze_hud_scene::types::{Rect, ZoneHitRegion, ZoneInteractionKind};
+    let (activation, wakes) = {
+        let mut scene = server.scene.lock().await;
+        let record = scene
+            .zone_registry
+            .active_for_zone("notification-area")
+            .iter()
+            .find(|record| record.publication_id == id)
+            .unwrap()
+            .clone();
+        let region = ZoneHitRegion {
+            publication_id: id,
+            zone_name: record.zone_name,
+            published_at_wall_us: record.published_at_wall_us,
+            publisher_namespace: record.publisher_namespace,
+            bounds: Rect::new(0.0, 0.0, 100.0, 30.0),
+            kind: if dismiss {
+                ZoneInteractionKind::Dismiss
+            } else {
+                ZoneInteractionKind::Action { index: 0 }
+            },
+            interaction_id: format!("test:{id}:{dismiss}"),
+            tab_order: 0,
+        };
+        scene.overlay.zone_hit_regions.push(region.clone());
+        let activation = scene
+            .activate_notification(&region, 0)
+            .expect("accepted local control");
+        (activation, scene.take_notification_wait_notifiers())
+    };
+    for wake in wakes {
+        wake.notify();
+    }
+    match activation {
+        tze_hud_scene::graph::NotificationActivation::Callback(wake) => wake.notify(),
+        _ => panic!("callback fixture"),
+    }
+}
+
+fn question(wait_ms: u64) -> Value {
+    json!({"surface":"zone:notification-area","key":"question","ttl_ms":60000,"wait_ms":wait_ms,
+        "content":{"title":"Ship?","actions":[{"label":"Ship","callback_id":"ship"}]}})
+}
+
+async fn latest_card(server: &McpServer) -> SceneId {
+    server
+        .scene
+        .lock()
+        .await
+        .zone_registry
+        .active_for_zone("notification-area")
+        .last()
+        .unwrap()
+        .publication_id
+}
+
+#[tokio::test(start_paused = true)]
+async fn publish_wait_reserves_only_its_exact_answer() {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+    let mut context = Context::from_waker(Waker::noop());
+    for dismiss in [false, true] {
+        for cancel in [false, true] {
+            let (server, _) = self::server();
+            let (server, _) = hub_portal(server);
+            let scene = server.scene_handle();
+            let wakes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let observed_wakes = Arc::clone(&wakes);
+            let server = server.with_render_wake_notifier(RenderWakeNotifier::new(move || {
+                assert!(scene.try_lock().is_ok(), "admission wake is post-unlock");
+                observed_wakes.fetch_add(1, Ordering::SeqCst);
+            }));
+            call(&server, "hud_publish", json!({"surface":"portal:other"})).await;
+            let mut ask = Box::pin(call(&server, "hud_publish", question(30000)));
+            assert!(ask.as_mut().poll(&mut context).is_pending());
+            assert_eq!(
+                wakes.load(Ordering::SeqCst),
+                1,
+                "question wakes before waiting"
+            );
+            let id = latest_card(&server).await;
+            let mut input = Box::pin(call(&server, "hud_input", json!({"wait_ms":30000})));
+            assert!(input.as_mut().poll(&mut context).is_pending());
+            activate_card(&server, id, dismiss).await;
+            assert!(
+                input.as_mut().poll(&mut context).is_pending(),
+                "armed answer stays private"
+            );
+
+            // A portal reply and a different card both remain ordinary input.
+            server
+                .portals
+                .as_ref()
+                .unwrap()
+                .submit_reply(&PortalKey::new(psk_agent(), "other"), "elsewhere".into(), 0)
+                .unwrap();
+            let Poll::Ready(portal) = input.as_mut().poll(&mut context) else {
+                panic!("unrelated reply wakes input");
+            };
+            assert_eq!(portal["items"][0]["text"], "elsewhere");
+            assert_eq!(portal["items"].as_array().unwrap().len(), 1);
+            call(
+                &server,
+                "hud_input",
+                json!({"ack":[portal["items"][0]["id"]]}),
+            )
+            .await;
+            call(&server, "hud_publish", json!({"surface":"zone:notification-area","content":{"title":"Other","actions":[{"label":"Other","callback_id":"other"}]},"ttl_ms":0})).await;
+            let other = latest_card(&server).await;
+            assert_ne!(other, id);
+            activate_card(&server, other, false).await;
+            let unrelated = call(&server, "hud_input", json!({})).await;
+            assert_eq!(unrelated["items"].as_array().unwrap().len(), 1);
+            assert_eq!(unrelated["items"][0]["action"], "other");
+            call(
+                &server,
+                "hud_input",
+                json!({"ack":[unrelated["items"][0]["id"]]}),
+            )
+            .await;
+
+            if cancel {
+                drop(ask);
+                let accepted = call(&server, "hud_input", json!({})).await;
+                assert_eq!(
+                    accepted["items"][0]["action"],
+                    if dismiss { "dismiss" } else { "ship" }
+                );
+                assert_eq!(accepted["items"][0].get("kind").is_some(), dismiss);
+                assert_eq!(
+                    call(&server, "hud_input", json!({})).await,
+                    accepted,
+                    "cancellation preserves stable FIFO id"
+                );
+            } else {
+                let Poll::Ready(answer) = ask.as_mut().poll(&mut context) else {
+                    panic!("answer completes publish");
+                };
+                assert_eq!(answer["action"], if dismiss { "dismiss" } else { "ship" });
+                assert_eq!(answer.get("kind").is_some(), dismiss);
+                assert_eq!(
+                    call(&server, "hud_input", json!({})).await,
+                    json!({"items":[],"remaining":0}),
+                    "encoded answer consumed without ACK"
+                );
+            }
+        }
+    }
+    // Cancellation after preparing the JSON value, before dispatch encodes it.
+    // Reuse the production context factory and hold the real prepared reply.
+    {
+        let (server, _) = self::server();
+        let identity = server.config.agents.load().resolve(&psk(), "").unwrap();
+        let tool_ctx = server.tool_context(&identity, None);
+        let mut ask = Box::pin(tools::hud_publish(&tool_ctx, question(30000)));
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        activate_card(&server, latest_card(&server).await, false).await;
+        let Poll::Ready(Ok(prepared)) = ask.as_mut().poll(&mut context) else {
+            panic!("prepared answer");
+        };
+        assert_eq!(prepared.value["action"], "ship");
+        assert!(
+            server.scene.try_lock().is_err(),
+            "exact answer locked until encoding"
+        );
+        drop(prepared); // no encoded() commit
+        let input = call(&server, "hud_input", json!({})).await;
+        assert_eq!(input["items"][0]["action"], "ship");
+        assert_eq!(call(&server, "hud_input", json!({})).await, input);
+    }
+}
+
+#[tokio::test(start_paused = true)]
+async fn publish_wait_endings_deadline_delay_and_validation() {
+    use std::{
+        future::Future,
+        task::{Context, Poll, Waker},
+    };
+    let mut context = Context::from_waker(Waker::noop());
+    for (ending, delayed) in [
+        ("expired", false),
+        ("replaced", false),
+        ("displaced", false),
+        ("cleared", false),
+        ("cleared", true),
+    ] {
+        let (server, clock) = self::server();
+        let mut args = question(30000);
+        if delayed {
+            args["delay_ms"] = json!(20000);
+        }
+        if ending == "expired" {
+            args["ttl_ms"] = json!(1000); // expires inside the 30s wait
+        }
+        let mut ask = Box::pin(call(&server, "hud_publish", args));
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        match ending {
+            "expired" => {
+                clock.advance(1000);
+                tokio::time::advance(std::time::Duration::from_millis(1000)).await;
+                let wakes = {
+                    let mut scene = server.scene.lock().await;
+                    scene.drain_expired_zone_publications();
+                    scene.take_notification_wait_notifiers()
+                };
+                for wake in wakes {
+                    wake.notify();
+                }
+            }
+            "replaced" => {
+                call(&server, "hud_publish", json!({"surface":"zone:notification-area","key":"question","content":{"title":"Replacement"}})).await;
+            }
+            "displaced" => {
+                // Exercise the configured real stack's oldest-entry trim.
+                let depth = match server.scene.lock().await.zone_registry.zones["notification-area"]
+                    .contention_policy
+                {
+                    ContentionPolicy::Stack { max_depth } => max_depth,
+                    _ => panic!("production notification stack"),
+                };
+                for index in 0..depth {
+                    call(&server, "hud_publish", json!({"surface":"zone:notification-area","key":format!("peer{index}"),"content":{"title":"Peer"}})).await;
+                }
+            }
+            _ => {
+                call(
+                    &server,
+                    "hud_clear",
+                    json!({"surface":"zone:notification-area","key":"question"}),
+                )
+                .await;
+            }
+        }
+        let Poll::Ready(answer) = ask.as_mut().poll(&mut context) else {
+            panic!("immediate {ending}, delayed={delayed}");
+        };
+        assert_eq!(answer, json!({"ok":true,"gone":ending}));
+        assert_eq!(
+            call(&server, "hud_input", json!({})).await,
+            json!({"items":[],"remaining":0})
+        );
+    }
+
+    // The event's acceptance time owns the outcome, even when the request is
+    // not polled until later. Exercise early, exact-boundary and late events.
+    let mut deadline_failures = Vec::new();
+    for event in ["answer", "clear"] {
+        for event_at in [500, 1000, 1500] {
+            let (server, clock) = self::server();
+            let mut ask = Box::pin(call(&server, "hud_publish", question(1000)));
+            assert!(ask.as_mut().poll(&mut context).is_pending());
+            let id = latest_card(&server).await;
+            clock.advance(event_at);
+            tokio::time::advance(std::time::Duration::from_millis(event_at)).await;
+            if event == "answer" {
+                activate_card(&server, id, false).await;
+            } else {
+                call(
+                    &server,
+                    "hud_clear",
+                    json!({"surface":"zone:notification-area","key":"question"}),
+                )
+                .await;
+            }
+            clock.advance(1500 - event_at);
+            tokio::time::advance(std::time::Duration::from_millis(1500 - event_at)).await;
+            let early = event_at < 1000;
+            let input = call(&server, "hud_input", json!({})).await;
+            let count = usize::from(event == "answer" && !early);
+            if input["items"].as_array().unwrap().len() != count {
+                deadline_failures.push(format!(
+                    "R1 {event}@{event_at}: incorrect input ownership {input}"
+                ));
+            }
+            let Poll::Ready(answer) = ask.as_mut().poll(&mut context) else {
+                panic!("deadline or accepted event must finish");
+            };
+            let expected = if early && event == "clear" {
+                json!({"ok":true,"gone":"cleared"})
+            } else if early {
+                json!({"ok":true,"expires_in_ms":58500,"action":"ship"})
+            } else {
+                json!({"ok":true,"expires_in_ms":58500})
+            };
+            if answer != expected {
+                deadline_failures.push(format!(
+                    "R1 {event}@{event_at}: got {answer}, expected {expected}"
+                ));
+            }
+            if count == 1 && !input["items"].as_array().unwrap().is_empty() {
+                assert_eq!(
+                    call(&server, "hud_input", json!({})).await,
+                    input,
+                    "late accepted input keeps its stable id after publish ends"
+                );
+            }
+        }
+    }
+    // Scene contention cannot extend the original cap. Both an unanswered
+    // card and an already accepted answer retain ordinary input on failure.
+    for accepted_early in [false, true] {
+        let (server, clock) = self::server();
+        let mut ask = Box::pin(call_err(&server, "hud_publish", question(1000)));
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        let id = latest_card(&server).await;
+        let event_at = if accepted_early { 500 } else { 0 };
+        if accepted_early {
+            clock.advance(event_at);
+            tokio::time::advance(std::time::Duration::from_millis(event_at)).await;
+            activate_card(&server, id, false).await;
+        }
+        let held = server.scene.lock().await;
+        clock.advance(1500 - event_at);
+        tokio::time::advance(std::time::Duration::from_millis(1500 - event_at)).await;
+        match ask.as_mut().poll(&mut context) {
+            Poll::Ready(error) => assert_eq!(error["code"], "INTERNAL"),
+            Poll::Pending => deadline_failures.push(format!(
+                "R2 accepted_early={accepted_early}: held scene extends the cap"
+            )),
+        }
+        drop(ask);
+        drop(held);
+        if !accepted_early {
+            activate_card(&server, id, false).await;
+        }
+        let input = call(&server, "hud_input", json!({})).await;
+        assert_eq!(input["items"][0]["action"], "ship");
+        assert_eq!(call(&server, "hud_input", json!({})).await, input);
+    }
+    assert!(
+        deadline_failures.is_empty(),
+        "{}",
+        deadline_failures.join("\n")
+    );
+
+    // A later invalid mutation rolls back the clear AND its terminal/wake debt.
+    {
+        use tze_hud_scene::{
+            mutation::{MutationBatch, SceneMutation},
+            types::ZonePublishToken,
+        };
+        let (server, _) = self::server();
+        let mut ask = Box::pin(call(&server, "hud_publish", question(30000)));
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        let id = latest_card(&server).await;
+        {
+            let mut scene = server.scene.lock().await;
+            let lease = scene.zone_registry.active_for_zone("notification-area")[0].lease_id;
+            let batch = MutationBatch {
+                batch_id: SceneId::new(),
+                agent_namespace: psk_agent(),
+                lease_id: lease,
+                timing_hints: None,
+                mutations: vec![
+                    SceneMutation::ClearZone {
+                        zone_name: "notification-area".into(),
+                        publish_token: ZonePublishToken { token: vec![] },
+                    },
+                    SceneMutation::SwitchActiveTab {
+                        tab_id: SceneId::new(),
+                    },
+                ],
+            };
+            assert!(!scene.apply_batch(&batch).applied);
+            assert!(
+                scene.take_notification_wait_notifiers().is_empty(),
+                "rejected batch emits no terminal readiness"
+            );
+        }
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        activate_card(&server, id, false).await;
+        let Poll::Ready(answer) = ask.as_mut().poll(&mut context) else {
+            panic!("original question survives rollback");
+        };
+        assert_eq!(answer["action"], "ship");
+    }
+
+    // Internal scheduled identity survives real materialization before the wait.
+    {
+        let (server, clock) = self::server();
+        let mut args = question(30000);
+        args["delay_ms"] = json!(5000);
+        let mut ask = Box::pin(call(&server, "hud_publish", args));
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        assert!(
+            server
+                .scene
+                .lock()
+                .await
+                .zone_registry
+                .active_for_zone("notification-area")
+                .is_empty()
+        );
+        clock.advance(5000);
+        tokio::time::advance(std::time::Duration::from_millis(5000)).await;
+        assert!(server.scene.lock().await.apply_due_batches()[0].applied);
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        activate_card(&server, latest_card(&server).await, false).await;
+        let Poll::Ready(answer) = ask.as_mut().poll(&mut context) else {
+            panic!("delayed question answers in-band");
+        };
+        assert_eq!(answer["action"], "ship");
+        assert_eq!(
+            call(&server, "hud_input", json!({})).await,
+            json!({"items":[],"remaining":0})
+        );
+    }
+
+    // Delay counts from call; values above 30s clamp without a wall-clock wait.
+    for delayed in [false, true] {
+        let (server, clock) = self::server();
+        let mut args = question(90000);
+        if delayed {
+            args["delay_ms"] = json!(40000);
+        }
+        let mut ask = Box::pin(call(&server, "hud_publish", args));
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        tokio::time::advance(std::time::Duration::from_millis(29999)).await;
+        clock.advance(29999);
+        assert!(ask.as_mut().poll(&mut context).is_pending());
+        tokio::time::advance(std::time::Duration::from_millis(1)).await;
+        clock.advance(1);
+        let Poll::Ready(reply) = ask.as_mut().poll(&mut context) else {
+            panic!("clamped absolute deadline");
+        };
+        assert_eq!(
+            reply,
+            json!({"ok":true,"expires_in_ms":if delayed {70000} else {30000}})
+        );
+        if delayed {
+            clock.advance(10000);
+            assert!(server.scene.lock().await.apply_due_batches()[0].applied);
+        }
+        activate_card(&server, latest_card(&server).await, false).await;
+        let late = call(&server, "hud_input", json!({})).await;
+        assert_eq!(late["items"][0]["action"], "ship");
+        assert_eq!(call(&server, "hud_input", json!({})).await, late);
+    }
+
+    let (server, _) = self::server();
+    for args in [
+        json!({"surface":"widget:gauge","params":{"level":0.5},"wait_ms":1}),
+        json!({"surface":"portal:new","wait_ms":1}),
+        json!({"surface":"zone:notification-area","content":{"title":"No actions"},"wait_ms":0}),
+        json!({"surface":"zone:subtitle","content":"Text","wait_ms":1}),
+    ] {
+        assert_eq!(
+            call_err(&server, "hud_publish", args).await["code"],
+            "INVALID_ARGUMENT"
+        );
+    }
+    let scene = server.scene.lock().await;
+    assert!(scene.zone_registry.active_publishes.is_empty());
+    assert!(scene.widget_registry.active_publishes.is_empty());
+    assert!(
+        scene.leases.is_empty(),
+        "invalid wait does not renew or create a lease"
+    );
 }
 
 // ── Portal ───────────────────────────────────────────────────────────────────
@@ -2651,6 +3122,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
             .lock()
             .await
             .push_pending_action(PendingAction {
+                publication_id: None,
                 key: None,
                 publisher_namespace: "probe-a".into(),
                 zone_name: "subtitle".into(),
@@ -2791,6 +3263,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         .lock()
         .await
         .push_pending_action(PendingAction {
+            publication_id: None,
             key: None,
             publisher_namespace: psk_agent(),
             zone_name: "notification-area".into(),
@@ -2855,6 +3328,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         let mut waiting = Box::pin(call_as(&isolated, &a, "hud_input", json!({"wait_ms":1000})));
         assert!(waiting.as_mut().poll(&mut cx).is_pending());
         scene.push_pending_action(PendingAction {
+            publication_id: None,
             key: None,
             publisher_namespace: "a".into(),
             zone_name: "subtitle".into(),
@@ -2881,6 +3355,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
             .lock()
             .await
             .push_pending_action(PendingAction {
+                publication_id: None,
                 key: None,
                 publisher_namespace: "a".into(),
                 zone_name: "subtitle".into(),
@@ -2918,6 +3393,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         let mut waiting = Box::pin(call_as(&isolated, &a, "hud_input", json!({"wait_ms":1000})));
         assert!(waiting.as_mut().poll(&mut cx).is_pending());
         scene.push_pending_action(PendingAction {
+            publication_id: None,
             key: None,
             publisher_namespace: "a".into(),
             zone_name: "subtitle".into(),
@@ -2937,6 +3413,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
             .lock()
             .await
             .push_pending_action(PendingAction {
+                publication_id: None,
                 key: None,
                 publisher_namespace: psk_agent(),
                 zone_name: "subtitle".into(),
@@ -2962,7 +3439,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
 
     // Deterministic model time exercises a real pending call's finite lease.
     // Small fixture limits expose boundaries; production defaults are untouched.
-    {
+    for publish_wait in [false, true] {
         let (live, clock) = self::server();
         let portals = PortalHandle::new(
             PortalHub::new(tze_hud_portal::hub::PortalLimits {
@@ -2979,7 +3456,19 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         let own = PortalKey::new(psk_agent(), "late");
         let outsider = PortalKey::new("other", "late");
         let start = 1_000_000;
-        let mut waiting = Box::pin(call(&live, "hud_input", json!({"wait_ms":1000})));
+        let mut waiting = Box::pin(call(
+            &live,
+            if publish_wait {
+                "hud_publish"
+            } else {
+                "hud_input"
+            },
+            if publish_wait {
+                question(1000)
+            } else {
+                json!({"wait_ms":1000})
+            },
+        ));
         assert!(waiting.as_mut().poll(&mut cx).is_pending());
         assert!(
             live_hub.lock().unwrap().next_deadline().is_none(),
@@ -3359,6 +3848,7 @@ async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
         .lock()
         .await
         .push_pending_action(PendingAction {
+            publication_id: None,
             key: None,
             publisher_namespace: AgentDirectory::unrestricted(psk())
                 .resolve(&psk(), "")

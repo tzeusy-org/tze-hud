@@ -423,6 +423,29 @@ impl McpServer {
         }
     }
 
+    fn tool_context<'a>(
+        &'a self,
+        identity: &'a tze_hud_scene::config::AgentIdentity,
+        #[cfg(any(test, feature = "test-harness"))] input_wait_probe: Option<
+            &'a tokio::sync::watch::Sender<bool>,
+        >,
+    ) -> ToolCtx<'a> {
+        ToolCtx {
+            scene: &self.scene,
+            portals: self.portals.as_ref(),
+            input_notifiers: &self.input_notifiers,
+            #[cfg(any(test, feature = "test-harness"))]
+            input_wait_probe,
+            portal_wake: &self.portal_ingress_wake,
+            render_wake: &self.render_wake,
+            state: &self.state,
+            safe_mode: &self.safe_mode,
+            agent: identity,
+            widget_transition_ms: self.config.widget_transition_ms,
+            publication_defaults: &self.config.publication_defaults,
+        }
+    }
+
     /// Dispatch one JSON-RPC 2.0 request body. Returns the response body, or
     /// an empty string for a notification.
     pub async fn dispatch(&self, body: &str, ctx: &CallerContext) -> String {
@@ -497,25 +520,21 @@ impl McpServer {
                     }
                 }
                 #[cfg(any(test, feature = "test-harness"))]
-                let input_wait_probe = if name == "hud_input" {
+                let input_wait_probe = if matches!(name, "hud_input" | "hud_publish") {
                     self.input_notifiers
                         .claim_input_wait(&identity.agent_id, id.as_ref())
                 } else {
                     None
                 };
-                let tool_ctx = ToolCtx {
-                    scene: &self.scene,
-                    portals: self.portals.as_ref(),
-                    input_notifiers: &self.input_notifiers,
+                let tool_ctx = self.tool_context(
+                    &identity,
                     #[cfg(any(test, feature = "test-harness"))]
-                    input_wait_probe: input_wait_probe.as_ref(),
-                    portal_wake: &self.portal_ingress_wake,
-                    state: &self.state,
-                    safe_mode: &self.safe_mode,
-                    agent: &identity,
-                    widget_transition_ms: self.config.widget_transition_ms,
-                    publication_defaults: &self.config.publication_defaults,
-                };
+                    input_wait_probe.as_ref(),
+                );
+                let args_zone_target = args
+                    .get("surface")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|s| s.starts_with("zone:"));
                 let portal_target = args
                     .get("surface")
                     .and_then(serde_json::Value::as_str)
@@ -529,11 +548,19 @@ impl McpServer {
                     debug!(target: "tze_hud_mcp_phases", phase = "tool_begin", tool = name);
                 }
                 let result = match name {
-                    "hud_surfaces" => tools::hud_surfaces(&tool_ctx).await,
+                    "hud_surfaces" => tools::hud_surfaces(&tool_ctx)
+                        .await
+                        .map(crate::publish_wait::PublishReply::plain),
                     "hud_publish" => tools::hud_publish(&tool_ctx, args).await,
-                    "hud_hold" => tools::hud_hold(&tool_ctx, args).await,
-                    "hud_clear" => tools::hud_clear(&tool_ctx, args).await,
-                    _ => tools::hud_input(&tool_ctx, args).await,
+                    "hud_hold" => tools::hud_hold(&tool_ctx, args)
+                        .await
+                        .map(crate::publish_wait::PublishReply::plain),
+                    "hud_clear" => tools::hud_clear(&tool_ctx, args)
+                        .await
+                        .map(crate::publish_wait::PublishReply::plain),
+                    _ => tools::hud_input(&tool_ctx, args)
+                        .await
+                        .map(crate::publish_wait::PublishReply::plain),
                 };
                 if let Some(started) = &tool_started {
                     debug!(
@@ -547,21 +574,34 @@ impl McpServer {
                         elapsed_us = started.elapsed().as_micros()
                     );
                 }
+                if matches!(name, "hud_clear" | "hud_hold") {
+                    let wakes = self.scene.lock().await.take_notification_wait_notifiers();
+                    for wake in wakes {
+                        wake.notify();
+                    }
+                }
                 let body = match &result {
                     Ok(value) => {
                         if !portal_target
-                            && matches!(name, "hud_publish" | "hud_hold" | "hud_clear")
+                            && (matches!(name, "hud_hold" | "hud_clear")
+                                || (name == "hud_publish" && !args_zone_target))
                         {
                             self.render_wake.notify();
                         }
-                        tool_result(value)
+                        tool_result(&value.value)
                     }
                     Err(e) => {
                         debug!(tool = name, error = %e, "MCP: tool error");
                         tool_error_result(e)
                     }
                 };
-                respond(McpResponse::ok(id, body))
+                let encoded = respond(McpResponse::ok(id, body));
+                if !encoded.is_empty()
+                    && let Ok(reply) = result
+                {
+                    reply.encoded();
+                }
+                encoded
             }
             other => respond(McpResponse::err(id, JsonRpcError::method_not_found(other))),
         }

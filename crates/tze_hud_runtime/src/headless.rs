@@ -603,7 +603,11 @@ impl HeadlessRuntime {
             // error condition for a droppable state-stream present ack.
             let _ = tx.send(event);
         }
+        let question_wakes = scene_guard.take_notification_wait_notifiers();
         drop(scene_guard);
+        for wake in question_wakes {
+            wake.notify();
+        }
 
         // Build the per-stage telemetry record (outside the Stage 8 timed region)
         let mut telemetry = FrameTelemetry::new(compositor_telemetry.frame_number);

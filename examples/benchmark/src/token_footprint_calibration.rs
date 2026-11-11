@@ -4,7 +4,7 @@
 mod calibration {
     use serde::{Deserialize, Serialize};
     use std::collections::{BTreeMap, HashMap};
-    use std::io::Write;
+    use std::io::{Read, Write};
     use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::path::{Path, PathBuf};
     use std::process::{Command, Stdio};
@@ -170,7 +170,11 @@ mod calibration {
         state.scene.clone()
     }
 
-    fn run_python_driver(address: SocketAddr, choice_ready: mpsc::Receiver<()>) -> DriverOutput {
+    fn run_python_driver(
+        address: SocketAddr,
+        choice_ready: mpsc::Receiver<()>,
+        producer: FixtureProducer,
+    ) -> DriverOutput {
         let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
         let driver = root.join("examples/benchmark/token_footprint_flow.py");
         let mut child = Command::new("python3")
@@ -205,6 +209,19 @@ mod calibration {
             let output = child.wait_with_output().expect("reap failed flow driver");
             panic!("{error}: {}", String::from_utf8_lossy(&output.stderr));
         }
+        // The driver reaches this fixture-only barrier after the old poll/ACK
+        // and error flow are complete. Re-arm scene work only for the new ask.
+        let marker = b"notification-choice-wait-start\n";
+        let mut actual = vec![0; marker.len()];
+        child
+            .stdout
+            .as_mut()
+            .expect("piped driver stdout")
+            .read_exact(&mut actual)
+            .expect("read second choice barrier");
+        assert_eq!(actual, marker, "driver second choice barrier");
+        *producer.phase.lock().expect("calibration phase") = PortalPhase::ChoiceAllowed;
+        producer.changed.notify_one();
         let output = child
             .wait_with_output()
             .expect("wait for Python flow driver");
@@ -346,6 +363,13 @@ mod calibration {
                     "ask, returned answer and ACK are all counted"
                 );
             }
+            if flow_name == "notification_choice_wait" {
+                assert_eq!(operations.len(), 1, "ask and answer share one call");
+                assert!(
+                    flow_model.tokens <= 90,
+                    "one-call choice exceeds its signed ceiling"
+                );
+            }
             flows.insert(
                 flow_name,
                 FlowMeasurement {
@@ -427,6 +451,7 @@ mod calibration {
 
     // Fixture ordering only. Choice work still owns SharedState -> scene and
     // real activation; no runtime input/deadline/retention contract changes.
+    #[derive(Clone)]
     struct FixtureProducer {
         portals: PortalHandle,
         key: PortalKey,
@@ -537,8 +562,11 @@ mod calibration {
         )
         .await?;
         let (choice_ready_tx, choice_ready_rx) = mpsc::channel();
-        let mut python =
-            tokio::task::spawn_blocking(move || run_python_driver(addresses[0], choice_ready_rx));
+        let driver_producer = producer.clone();
+        let mut python = tokio::task::spawn_blocking(move || {
+            run_python_driver(addresses[0], choice_ready_rx, driver_producer)
+        });
+        let mut choice_barrier_sent = false;
         let driver_output = loop {
             let activated = producer
                 .step(async {
@@ -596,7 +624,8 @@ mod calibration {
                     }
                 })
                 .await;
-            if activated {
+            if activated && !choice_barrier_sent {
+                choice_barrier_sent = true;
                 choice_ready_tx
                     .send(())
                     .expect("notify driver after shared choice activation");

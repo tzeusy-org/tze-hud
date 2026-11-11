@@ -35,3 +35,5 @@ pub mod types;
 pub use error::McpError;
 pub use server::{CallerContext, McpConfig, McpServer, PortalHandle};
 pub use types::{McpRequest, McpResponse, McpResult};
+
+mod publish_wait;

@@ -118,6 +118,17 @@ Items have `id`, `s`, and `action` (or portal `text`); keyed notification events
 also carry `key`. A human × has `action:"dismiss", kind:"dismiss"`; a callback
 named `dismiss` has no `kind`. Timeout, silence, expiry and dismiss are not consent.
 
+On a running build that discovers `hud_publish.wait_ms`, prefer a one-call
+question: publish callback actions with `wait_ms:30000` (CLI: add
+`--wait-ms 30000` to the question publish). A returned `action`
+is already consumed and needs no ACK; human × includes `kind:"dismiss"`.
+`gone:expired|replaced|displaced|cleared` ends an unanswered card and is not
+consent. An ordinary reply without action/gone means the wait ended: continue
+with the same safely routed `hud_input` consumer. Cancellation leaves accepted
+input queued. Do not use this with a shared pairing unless the question's
+callback identity and fallback input consumer are coordinated. Earlier builds
+retain the three-call path below; discover before using the new argument.
+
 Route by surface **and** the current callback identity, handle once, then send
 `hud_input {"ack":["<handled-id>"]}`. Unacked input repeats with stable ids;
 ACKs are idempotent. Input covers every surface of the authenticated agent.

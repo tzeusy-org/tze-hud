@@ -38,6 +38,8 @@ def fake_rpc_factory(calls):
                 text = {"code": "INVALID_ARGUMENT", "hint": "notification allows at most 4 actions"}
                 result = {"content": [{"type": "text", "text": json.dumps(text)}], "isError": True}
                 return None, json.dumps({"method": method, "params": params}), "{}", {"result": result}
+            if params["name"] == "hud_publish" and "wait_ms" in params["arguments"]:
+                text = {"ok": True, "action": "c"}
             result = {"content": [{"type": "text", "text": json.dumps(text)}]}
         return None, json.dumps({"method": method, "params": params}), "{}", {"result": result}
 
@@ -86,13 +88,16 @@ class CanonicalFlowTests(unittest.TestCase):
                 ("notification_choice", "1_ask"),
                 ("notification_choice", "2_answer"),
                 ("notification_choice", "3_ack"),
+                ("notification_choice_wait", "1_ask_answer"),
             ],
         )
         # Synthetic framing fixture only; real token evidence comes from the
         # runtime-backed calibration, never this mocked response.
-        candidate = json.loads(output.getvalue())["notification_action_limit_error"]
+        marker, raw = output.getvalue().split("\n", 1)
+        self.assertEqual(marker, "notification-choice-wait-start")
+        candidate = json.loads(raw)["notification_action_limit_error"]
         self.assertEqual(candidate["flow"], "notification_action_limit_error")
-        self.assertEqual(len(calls[-1][1]["arguments"]["content"]["actions"]), 5)
+        self.assertEqual(len(calls[-2][1]["arguments"]["content"]["actions"]), 5)
 
     def test_portal_ack_uses_the_polled_id(self):
         calls = []

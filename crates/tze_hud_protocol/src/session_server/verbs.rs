@@ -219,7 +219,7 @@ pub(super) async fn handle_publish(
         Ok(s) => s,
         Err(r) => return send_result(session, tx, *r).await,
     };
-    let (result, ephemeral, persist) = {
+    let (result, ephemeral, persist, question_wakes) = {
         let mut st = state.lock().await;
         let paused = session.safe_mode_active
             || st
@@ -254,6 +254,7 @@ pub(super) async fn handle_publish(
                 (r, ephemeral, Some((ElementType::Widget, widget.clone())))
             }
         };
+        let question_wakes = scene.take_notification_wait_notifiers();
         drop(scene);
         let persist = match touched {
             Some((ty, name)) if result.ok => {
@@ -261,8 +262,11 @@ pub(super) async fn handle_publish(
             }
             _ => None,
         };
-        (result, ephemeral, persist)
+        (result, ephemeral, persist, question_wakes)
     };
+    for wake in question_wakes {
+        wake.notify();
+    }
     if result.ok {
         render_wake.notify();
     }
@@ -501,7 +505,7 @@ pub(super) async fn handle_clear(
         Ok(s) => s,
         Err(r) => return send_result(session, tx, *r).await,
     };
-    let result = {
+    let (result, question_wakes) = {
         let st = state.lock().await;
         let mut scene = st.scene.lock().await;
         let r = match &surface {
@@ -515,11 +519,15 @@ pub(super) async fn handle_clear(
             }),
             Surface::Widget(widget) => scene.clear_widget_for_publisher(widget, &session.namespace),
         };
-        match r {
+        let result = match r {
             Ok(()) => ok(seq),
             Err(e) => fail(seq, validation_error_code(&e), e.to_string()),
-        }
+        };
+        (result, scene.take_notification_wait_notifiers())
     };
+    for wake in question_wakes {
+        wake.notify();
+    }
     if result.ok {
         render_wake.notify();
     }

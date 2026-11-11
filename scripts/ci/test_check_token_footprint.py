@@ -181,31 +181,28 @@ class GateTests(unittest.TestCase):
             [{"flow": "zone_publish", "budget": 100, "measured": 101}],
         )
 
-        # Four-option ask+returned answer+ACK is one bounded canonical flow.
-        choice_baseline = fixture()
-        approve(choice_baseline, budget=100)
-        choice = copy.deepcopy(fixture(120)["flows"]["zone_publish"])
-        choice_baseline["flows"]["notification_choice"] = choice
-        choice_baseline["budgets"]["flows"]["notification_choice"] = 120
-        for tokens, expected in [(120, "passed"), (121, "failed")]:
-            with self.subTest(choice_model_visible_tokens=tokens):
-                choice_measurement = copy.deepcopy(choice_baseline)
-                flow = choice_measurement["flows"]["notification_choice"]
-                flow["operations"]["zone_publish"]["model_visible"]["tokens"] = tokens
-                flow["model_visible"]["tokens"] = tokens
-                result = checker.compare(choice_measurement, choice_baseline)
-                self.assertEqual(result["status"], expected)
-                self.assertEqual(
-                    result["budget_violations"],
-                    [] if tokens == 120 else [
-                        {"flow": "notification_choice", "budget": 120, "measured": 121}
-                    ],
-                )
-        choice_baseline["budgets"]["flows"]["notification_choice"] = 121
-        self.assertIn(
-            "notification_choice budget must be 120 model-visible tokens",
-            checker.compare(choice_measurement, choice_baseline)["incompatibilities"],
-        )
+        # Keep both complete-choice ceilings independently fixed.
+        for name, ceiling in (("notification_choice", 120), ("notification_choice_wait", 90)):
+            choice_baseline = fixture()
+            approve(choice_baseline, budget=100)
+            choice_baseline["flows"][name] = copy.deepcopy(fixture(ceiling)["flows"]["zone_publish"])
+            choice_baseline["budgets"]["flows"][name] = ceiling
+            for tokens, expected in [(ceiling, "passed"), (ceiling + 1, "failed")]:
+                with self.subTest(flow=name, choice_model_visible_tokens=tokens):
+                    choice_measurement = copy.deepcopy(choice_baseline)
+                    choice = choice_measurement["flows"][name]
+                    choice["operations"]["zone_publish"]["model_visible"]["tokens"] = tokens
+                    choice["model_visible"]["tokens"] = tokens
+                    result = checker.compare(choice_measurement, choice_baseline)
+                    self.assertEqual(result["status"], expected)
+                    self.assertEqual(result["budget_violations"], [] if tokens == ceiling else [
+                        {"flow": name, "budget": ceiling, "measured": ceiling + 1}
+                    ])
+            choice_baseline["budgets"]["flows"][name] = ceiling + 1
+            self.assertIn(
+                f"{name} budget must be {ceiling} model-visible tokens",
+                checker.compare(choice_measurement, choice_baseline)["incompatibilities"],
+            )
 
         # The action-limit candidate keeps its full request cost, while its
         # returned error shares the existing 60-token error ceiling.
@@ -340,6 +337,7 @@ class CandidatePacketTests(unittest.TestCase):
                 "portal": 250,
                 "error": 60,
                 "notification_choice": 120,
+                "notification_choice_wait": 90,
             },
         )
 

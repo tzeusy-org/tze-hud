@@ -56,7 +56,7 @@ def call_tool(
         },
         method="POST",
     )
-    # hud_input can wait 30 s; leave a response allowance beyond that wait.
+    # hud_input and question publishes can wait 30 s; leave a response allowance beyond that wait.
     with urllib.request.urlopen(req, timeout=40) as resp:
         envelope = json.loads(resp.read().decode("utf-8"))
     if "error" in envelope:
@@ -80,7 +80,7 @@ def parse_content(raw: str) -> Any:
 
 def publish_arguments(message: dict[str, Any]) -> dict[str, Any]:
     """Normalize legacy zone batches and reject misplaced fields before any POST."""
-    allowed = {"zone", "surface", "content", "params", "ttl_ms", "delay_ms", "key"}
+    allowed = {"zone", "surface", "content", "params", "ttl_ms", "delay_ms", "key", "wait_ms"}
     if set(message) - allowed:
         raise ValueError(
             "unknown publish fields: " + ", ".join(sorted(set(message) - allowed))
@@ -113,9 +113,13 @@ def publish_arguments(message: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("params must be a JSON object")
     if not widget and not isinstance(message["content"], (str, dict)):
         raise ValueError("content must be text or a JSON object")
-    for field in ("ttl_ms", "delay_ms"):
+    for field in ("ttl_ms", "delay_ms", "wait_ms"):
         if field in message and (type(message[field]) is not int or message[field] < 0):
             raise ValueError(f"{field} must be a nonnegative integer")
+    if "wait_ms" in message:
+        content = message.get("content")
+        if widget or not isinstance(content, dict) or not content.get("actions"):
+            raise ValueError("wait_ms requires a zone notification with actions")
     if message.get("delay_ms", 0) > 300000:
         raise ValueError("delay_ms must be at most 300000")
     if "key" in message and not isinstance(message["key"], str):
@@ -239,7 +243,7 @@ all receipts before retrying. No uncertain POST is automatically replayed.
         help="Handled input id to ACK with --input; repeatable",
     )
     parser.add_argument(
-        "--wait-ms", type=int, help="Input wait in milliseconds, 0..30000"
+        "--wait-ms", type=int, help="Input or question-publish wait in milliseconds, 0..30000"
     )
     parser.add_argument("--max-items", type=int, help="Input result limit (positive)")
     args = parser.parse_args(argv)
@@ -267,9 +271,11 @@ all receipts before retrying. No uncertain POST is automatically replayed.
     if args.delay_ms is not None and not inline:
         parser.error("--delay-ms requires a zone publish")
     if (
-        args.ack is not None or args.wait_ms is not None or args.max_items is not None
+        args.ack is not None or args.max_items is not None
     ) and not args.input:
-        parser.error("--ack, --wait-ms and --max-items require --input")
+        parser.error("--ack and --max-items require --input")
+    if args.wait_ms is not None and not (args.input or inline):
+        parser.error("--wait-ms requires --input or a question publish")
     if args.wait_ms is not None and not 0 <= args.wait_ms <= 30000:
         parser.error("--wait-ms must be 0..30000")
     if args.max_items is not None and args.max_items < 1:
@@ -298,6 +304,7 @@ all receipts before retrying. No uncertain POST is automatically replayed.
                         "key": args.key,
                         "ttl_ms": args.ttl_ms,
                         "delay_ms": args.delay_ms,
+                        "wait_ms": args.wait_ms,
                     }.items()
                     if v is not None
                 }

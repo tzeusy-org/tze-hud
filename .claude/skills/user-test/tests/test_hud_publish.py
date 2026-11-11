@@ -96,6 +96,11 @@ def wire(monkeypatch):
             {"surface": "widget:allocated", "ttl_ms": 10000},
         ),
         (
+            ["--zone", "notification-area", "--content", '{"body":"Ship?","actions":[{"label":"Yes","callback_id":"yes"}]}', "--wait-ms", "30000"],
+            "hud_publish",
+            {"surface":"zone:notification-area", "content":{"body":"Ship?","actions":[{"label":"Yes","callback_id":"yes"}]}, "wait_ms":30000},
+        ),
+        (
             ["--input", "--wait-ms", "30000", "--max-items", "20"],
             "hud_input",
             {"wait_ms": 30000, "max_items": 20},
@@ -205,6 +210,8 @@ def test_incompatible_flags_never_reach_network(wire, flags):
         ["--surface", "widget:allocated", "--params", '{"progress":NaN}'],
         ["--surface", "widget:allocated", "--params", "{}", "--delay-ms", "1"],
         ["--zone", "subtitle", "--params", "{}"],
+        ["--zone", "notification-area", "--content", '{"body":"No actions"}', "--wait-ms", "0"],
+        ["--surface", "widget:allocated", "--params", "{}", "--wait-ms", "0"],
     ],
 )
 def test_invalid_payload_never_reaches_network(wire, flags):
