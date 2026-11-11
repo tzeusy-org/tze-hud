@@ -1155,7 +1155,8 @@ The countdown (`hud-ljhku.9`) adds one production instance: the actual handler
 comparison measures model-visible 754 → 882 bytes / 210 → 245 tokens and wire
 1025 → 1171 bytes / 283 → 321 tokens. All prior discovery rows compare equal;
 KPI and stepper remain bundles without production instances. The new production
-bytes are **pending owner review**; the prior approval below does not cover them.
+bytes were **accepted by the owner** for PR1606 on 2026-11-12 (Asia/Singapore);
+the PR1598 approval below covers only the previous baseline.
 The seven canonical flow objects and ceilings remain unchanged in the baseline.
 
 The owner **accepted these concrete new baseline bytes** for PR1598 on

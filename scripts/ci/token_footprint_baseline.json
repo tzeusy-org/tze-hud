@@ -362,8 +362,8 @@
     }
   },
   "approval": {
-    "status": "pending_owner_review",
-    "decision_reference": "hud-ljhku.9 signed widget primitives option A (2026-11-09) authorizes one production countdown and <=250 fresh discovery; these concrete new production bytes await owner review. PR1598 approval remains historical for the previous baseline only.",
+    "status": "owner_approved",
+    "decision_reference": "hud-ljhku.9 signed widget primitives option A (2026-11-09) authorizes one production countdown and <=250 fresh discovery; the owner explicitly accepted these concrete new production bytes (model 754->882 bytes / 210->245 tokens, wire 1025->1171 / 283->321, live-state envelope 250->285) for PR1606 on 2026-11-12 (Asia/Singapore). PR1598 approval remains historical for the previous baseline only.",
     "basis": "Canonical seven flow objects, tokenizer, fingerprints, versions, ceilings and reply defaults retained. Source-bound production handler comparison at c3355f61 measures prior three-instance config model754bytes/210tokens and wire1025bytes/283tokens; four-instance config model882bytes/245tokens and wire1171bytes/321tokens. The only discovery addition is main-countdown with ends_in_ms deadline<=24h, label<=24, severity info|warning|error. All previous rows compare equal. New source requires final repeatable canonical measurements and independent review; no owner or Windows acceptance is inferred."
   },
   "previous_approval": {
@@ -398,7 +398,7 @@
     "live_fixture_envelope": {
       "old": 250,
       "new": 285,
-      "basis": "Retain the existing 40-token state allowance over measured unheld production210->245; exactly the same new35-token countdown row. Fresh production remains<=250; canonical seven flow ceilings unchanged. Pending owner review alongside production bytes."
+      "basis": "Retain the existing 40-token state allowance over measured unheld production210->245; exactly the same new35-token countdown row. Fresh production remains<=250; canonical seven flow ceilings unchanged. Owner accepted alongside production bytes for PR1606 on 2026-11-12."
     }
   }
 }
