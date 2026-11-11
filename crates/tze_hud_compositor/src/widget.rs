@@ -1082,8 +1082,6 @@ impl PrimitiveText {
         hasher.update(&self.font_size.to_le_bytes());
         hasher.update(self.text_anchor.as_deref().unwrap_or("").as_bytes());
         hasher.update(self.font_family.as_deref().unwrap_or("").as_bytes());
-        // The face the generic sans resolves to changes with the font roles.
-        hasher.update(widget_fonts().resolved.sans.as_bytes());
         hasher.update(&crop.view_box.min_x.to_le_bytes());
         hasher.update(&crop.view_box.min_y.to_le_bytes());
         hasher.update(&crop.view_box.width.to_le_bytes());
@@ -1092,6 +1090,7 @@ impl PrimitiveText {
             svg_digest: *hasher.finalize().as_bytes(),
             pixel_width,
             pixel_height: crop.pixel_height,
+            fonts: widget_fonts_id(),
         }
     }
 }
@@ -1798,7 +1797,8 @@ fn widget_usvg_options() -> resvg::usvg::Options<'static> {
     options
 }
 
-/// usvg's default per-glyph fallback, minus its `warn!` per fallback.
+/// usvg's default per-glyph fallback, minus its `warn!` per fallback and
+/// preferring a face of the same spacing (monospaced or proportional).
 ///
 /// A glyph the requested family lacks (the status indicator's `☾ ☕ ⚡ ☺`
 /// are not in IBM Plex Sans) is drawn from another loaded face, normally the
@@ -1807,7 +1807,7 @@ fn widget_usvg_options() -> resvg::usvg::Options<'static> {
 fn quiet_fallback_selector() -> resvg::usvg::FallbackSelectionFn<'static> {
     Box::new(|c, exclude_fonts, fontdb| {
         let base = fontdb.face(*exclude_fonts.first()?)?;
-        let face = fontdb.faces().find(|face| {
+        let candidate = |face: &&resvg::usvg::fontdb::FaceInfo| {
             !exclude_fonts.contains(&face.id)
                 && (base.style == face.style
                     || base.weight == face.weight
@@ -1818,7 +1818,14 @@ fn quiet_fallback_selector() -> resvg::usvg::FallbackSelectionFn<'static> {
                             .is_ok_and(|font| font.glyph_id(c).0 != 0)
                     })
                     .unwrap_or(false)
-        })?;
+        };
+        // Monospaced text keeps a monospaced fallback (DejaVu Sans Mono)
+        // when one has the glyph, so columns stay aligned.
+        let face = fontdb
+            .faces()
+            .filter(|face| face.monospaced == base.monospaced)
+            .find(candidate)
+            .or_else(|| fontdb.faces().find(candidate))?;
         tracing::debug!(
             from = base.families.first().map_or("", |f| f.0.as_str()),
             to = face.families.first().map_or("", |f| f.0.as_str()),
@@ -1834,6 +1841,9 @@ fn quiet_fallback_selector() -> resvg::usvg::FallbackSelectionFn<'static> {
 /// on Windows, system families such as Segoe UI), with the same role
 /// families. Replaced by [`set_widget_fonts`] when the font roles change.
 struct WidgetFonts {
+    /// Identity of this font set (digest of `files` and `resolved`), part of
+    /// every widget raster cache key.
+    id: u64,
     /// Extra font files and resolved roles this set was built from.
     files: Vec<std::path::PathBuf>,
     resolved: crate::fonts::ResolvedFonts,
@@ -1872,7 +1882,19 @@ impl WidgetFonts {
                 })
                 .flatten()
             });
+        let mut hasher = blake3::Hasher::new();
+        for file in &files {
+            hasher.update(file.as_os_str().as_encoded_bytes());
+            hasher.update(&[0]);
+        }
+        for family in [&resolved.sans, &resolved.mono, &resolved.serif] {
+            hasher.update(family.as_bytes());
+            hasher.update(&[0]);
+        }
+        let digest = hasher.finalize();
+        let id = u64::from_le_bytes(digest.as_bytes()[..8].try_into().expect("8 bytes"));
         Self {
+            id,
             files,
             resolved,
             db: Arc::new(db),
@@ -1896,25 +1918,42 @@ fn draws_with_sans(family: &str, sans: &str) -> bool {
         || first.eq_ignore_ascii_case(sans)
 }
 
-fn widget_fonts_slot() -> &'static std::sync::RwLock<Option<Arc<WidgetFonts>>> {
-    static FONTS: std::sync::RwLock<Option<Arc<WidgetFonts>>> = std::sync::RwLock::new(None);
-    &FONTS
+type WidgetFontsSlot = std::sync::RwLock<Option<Arc<WidgetFonts>>>;
+
+/// The current widget font set. Production has one per process: the last
+/// text renderer (re)initialized sets it. Test builds keep one per thread
+/// (libtest runs each test on its own thread) so a test that changes the
+/// font roles cannot change another test's widget glyphs.
+#[cfg(not(test))]
+fn with_widget_fonts_slot<R>(f: impl FnOnce(&WidgetFontsSlot) -> R) -> R {
+    static FONTS: WidgetFontsSlot = std::sync::RwLock::new(None);
+    f(&FONTS)
+}
+
+#[cfg(test)]
+fn with_widget_fonts_slot<R>(f: impl FnOnce(&WidgetFontsSlot) -> R) -> R {
+    thread_local! {
+        static FONTS: WidgetFontsSlot = const { std::sync::RwLock::new(None) };
+    }
+    FONTS.with(f)
 }
 
 fn widget_fonts() -> Arc<WidgetFonts> {
-    if let Some(fonts) = widget_fonts_slot()
-        .read()
-        .unwrap_or_else(|e| e.into_inner())
-        .as_ref()
-    {
-        return Arc::clone(fonts);
-    }
-    let mut slot = widget_fonts_slot()
-        .write()
-        .unwrap_or_else(|e| e.into_inner());
-    Arc::clone(
-        slot.get_or_insert_with(|| Arc::new(WidgetFonts::build(Vec::new(), Default::default()))),
-    )
+    with_widget_fonts_slot(|slot| {
+        if let Some(fonts) = slot.read().unwrap_or_else(|e| e.into_inner()).as_ref() {
+            return Arc::clone(fonts);
+        }
+        let mut slot = slot.write().unwrap_or_else(|e| e.into_inner());
+        Arc::clone(
+            slot.get_or_insert_with(|| {
+                Arc::new(WidgetFonts::build(Vec::new(), Default::default()))
+            }),
+        )
+    })
+}
+
+fn widget_fonts_id() -> u64 {
+    widget_fonts().id
 }
 
 /// Make widget SVG text use the fonts the zone text renderer resolved:
@@ -1930,10 +1969,11 @@ pub(crate) fn set_widget_fonts(
         return false;
     }
     let fonts = Arc::new(WidgetFonts::build(files, resolved.clone()));
-    *widget_fonts_slot()
-        .write()
-        .unwrap_or_else(|e| e.into_inner()) = Some(fonts);
-    clear_widget_raster_caches();
+    with_widget_fonts_slot(|slot| {
+        *slot.write().unwrap_or_else(|e| e.into_inner()) = Some(fonts);
+    });
+    // Cached rasters of the old set stay valid under their own font-set key
+    // and age out of the bounded caches.
     true
 }
 
@@ -1950,6 +1990,9 @@ struct StaticSvgLayerCacheKey {
     svg_digest: [u8; 32],
     pixel_width: u32,
     pixel_height: u32,
+    /// The widget font set the raster was drawn with ([`WidgetFonts::id`]):
+    /// the same SVG text draws different glyphs under different font roles.
+    fonts: u64,
 }
 
 const STATIC_SVG_LAYER_CACHE_MAX_ENTRIES: usize = 64;
@@ -2122,6 +2165,7 @@ fn static_svg_layer_cache_key(
         svg_digest: *blake3::hash(svg_text.as_bytes()).as_bytes(),
         pixel_width,
         pixel_height,
+        fonts: widget_fonts_id(),
     }
 }
 
@@ -2188,6 +2232,7 @@ fn cache_key_from_raster_key(key: &RasterizedLayerCacheKey) -> StaticSvgLayerCac
         svg_digest: *hasher.finalize().as_bytes(),
         pixel_width: key.pixel_width,
         pixel_height: key.pixel_height,
+        fonts: widget_fonts_id(),
     }
 }
 
@@ -2207,6 +2252,7 @@ fn primitive_non_text_segment_cache_key(
         svg_digest: *hasher.finalize().as_bytes(),
         pixel_width,
         pixel_height,
+        fonts: widget_fonts_id(),
     }
 }
 
@@ -2331,6 +2377,7 @@ fn composed_widget_cache_key(
         svg_digest: *hasher.finalize().as_bytes(),
         pixel_width,
         pixel_height,
+        fonts: widget_fonts_id(),
     }
 }
 
@@ -3687,9 +3734,30 @@ mod tests {
         }
     }
 
+    /// A glyph missing from IBM Plex Mono falls back to the bundled
+    /// monospaced DejaVu Sans Mono, not the proportional DejaVu Sans that
+    /// comes first in the database.
+    #[test]
+    fn monospaced_text_falls_back_to_a_monospaced_face() {
+        let _guard = widget_cache_test_guard();
+        let render = |family: &str| {
+            rasterize_single_svg_layer(&glyph_svg(family, "☺"), 40, 40).expect("rasterizes")
+        };
+        let fallback = render("IBM Plex Mono, monospace");
+        assert!(ink(&fallback) > 20, "draws a glyph");
+        assert!(
+            fallback.data() == render("DejaVu Sans Mono").data(),
+            "the fallback is DejaVu Sans Mono's glyph"
+        );
+        assert!(
+            fallback.data() != render("DejaVu Sans").data(),
+            "not the proportional face's glyph"
+        );
+    }
+
     /// Widget text follows the font roles the zone text renderer resolved,
-    /// including the direct fast path. Built directly: replacing the shared
-    /// set would race other widget tests in this process.
+    /// including the direct fast path. The current set is per test thread,
+    /// so this starts at the default set whatever other tests did.
     #[test]
     fn widget_fonts_follow_resolved_font_roles() {
         let sans_family = |fonts: &WidgetFonts| {
@@ -3729,6 +3797,16 @@ mod tests {
             !draws_with_sans("IBM Plex Sans, sans-serif", "DejaVu Sans"),
             "another family takes the resvg path"
         );
+
+        // Switching the current set changes every raster cache identity, so
+        // a raster drawn with the old faces is never served for the new ones.
+        let default_key = static_svg_layer_cache_key("<svg/>", 16, 16);
+        assert!(set_widget_fonts(Vec::new(), &dejavu.resolved));
+        assert_eq!(widget_fonts().id, dejavu.id);
+        assert_ne!(dejavu.id, default.id);
+        assert_ne!(static_svg_layer_cache_key("<svg/>", 16, 16), default_key);
+        assert!(set_widget_fonts(Vec::new(), &Default::default()));
+        assert_eq!(static_svg_layer_cache_key("<svg/>", 16, 16), default_key);
     }
 
     fn sans_serif_font_available() -> bool {

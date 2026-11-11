@@ -1077,7 +1077,9 @@ family lacks (symbols, box drawing, Arabic, and so on) fall back per glyph
 to the bundled DejaVu faces. With no font tokens set, only bundled fonts load,
 which is what CI and the tests use. Widget SVG text uses the same fonts and
 roles as zone text (bundled faces plus the fonts-dir and system files the
-roles loaded), with the same per-glyph fallback.
+roles loaded). A code point its family lacks falls back per glyph to the
+first loaded face that has it, preferring a face of the same spacing:
+monospaced text normally gets DejaVu Sans Mono, other text DejaVu Sans.
 
 Programmatic entry point: `Compositor::set_font_config(FontConfig { sans,
 mono, serif, fonts_dir })`. `set_token_map` calls it with
