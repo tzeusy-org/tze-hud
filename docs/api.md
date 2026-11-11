@@ -1007,8 +1007,8 @@ not be saved survives an unrelated edit. A
 table that startup would refuse (an unknown theme, a reserved or malformed
 key) or a file that is not valid TOML keeps the current tokens and is
 reported in `/admin/status` `config_reload`. Still read once at startup: the MCP widget
-transition time and widget text fonts (widgets draw with the bundled
-faces). Other config sections apply after a
+transition time. Widget text follows the live `font.*` roles like
+zone text. Other config sections apply after a
 restart (or live from the control panel). Keep config
 overrides for values specific to one deployment. The visual design
 belongs in a theme.
@@ -1106,8 +1106,11 @@ A name that resolves nowhere logs one warning with the requested name and
 the family used instead, and the role keeps its default. Code points a
 family lacks (symbols, box drawing, Arabic, and so on) fall back per glyph
 to the bundled DejaVu faces. With no font tokens set, only bundled fonts load,
-which is what CI and the tests use. Widget SVG text uses the bundled fonts
-with the default roles; it does not follow `font.*` yet.
+which is what CI and the tests use. Widget SVG text uses the same fonts and
+roles as zone text (bundled faces plus the fonts-dir and system files the
+roles loaded). A code point its family lacks falls back per glyph to the
+first loaded face that has it, preferring a face of the same spacing:
+monospaced text normally gets DejaVu Sans Mono, other text DejaVu Sans.
 
 Programmatic entry point: `Compositor::set_font_config(FontConfig { sans,
 mono, serif, fonts_dir })`. `set_token_map` calls it with

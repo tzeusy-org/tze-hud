@@ -690,3 +690,87 @@ async fn ellipsis_labels_shorter_than_a_line_render_and_update() {
         "replacing the status text must change its pixels"
     );
 }
+
+/// A live `font.sans` change re-rasterizes an already drawn widget with the
+/// new face (hud-8cg0j): no stale raster from a cache or the clean texture.
+#[tokio::test]
+async fn font_sans_change_rerasterizes_published_widget_text() {
+    let (mut compositor, mut surface) = require_gpu!(make_compositor_and_surface(256, 128).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    compositor.init_widget_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    compositor.widget_renderer_mut().unwrap().register_svg(
+        "font-probe",
+        "label.svg",
+        br##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 200 60"><text x="10" y="44" font-family="sans-serif" font-size="40" fill="#ffffff">Agag</text></svg>"##
+            .to_vec(),
+    );
+
+    let mut scene = SceneGraph::new(256.0, 128.0);
+    let tab = scene.create_tab("Main", 0).unwrap();
+    scene.widget_registry.register_definition(WidgetDefinition {
+        id: "font-probe".to_string(),
+        name: "Font probe".to_string(),
+        description: "text-only widget".to_string(),
+        parameter_schema: vec![],
+        layers: vec![WidgetSvgLayer {
+            svg_file: "label.svg".to_string(),
+            bindings: vec![],
+        }],
+        default_geometry_policy: GeometryPolicy::Relative {
+            x_pct: 0.0,
+            y_pct: 0.0,
+            width_pct: 1.0,
+            height_pct: 0.5,
+        },
+        default_rendering_policy: RenderingPolicy::default(),
+        default_contention_policy: ContentionPolicy::LatestWins,
+        max_publishers: WidgetDefinition::default_max_publishers(),
+        ephemeral: false,
+        hover_behavior: None,
+    });
+    scene.widget_registry.register_instance(WidgetInstance {
+        id: SceneId::new(),
+        widget_type_name: "font-probe".to_string(),
+        tab_id: tab,
+        geometry_override: None,
+        contention_override: None,
+        instance_name: "probe".to_string(),
+        current_params: HashMap::new(),
+        auto_clear_ms: None,
+    });
+    scene
+        .publish_to_widget("probe", HashMap::new(), "agent-a", None, 0, None)
+        .unwrap();
+
+    let draw = |c: &mut Compositor, scene: &mut SceneGraph, s: &mut HeadlessSurface| {
+        c.prime_markdown_cache(scene);
+        c.render_frame_headless(scene, s);
+        s.read_pixels(&c.device)
+    };
+    let count = |c: &Compositor| c.widget_renderer().unwrap().raster_count("probe");
+
+    let plex = draw(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(count(&compositor), 1);
+    assert!(
+        plex.chunks_exact(4).any(|p| p[0] > 128),
+        "widget text drew no light pixels"
+    );
+    // Unchanged fonts: idle, no re-raster.
+    draw(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(count(&compositor), 1);
+
+    let tokens = |sans: &str| -> HashMap<String, String> {
+        [("font.sans".to_owned(), sans.to_owned())].into()
+    };
+    compositor.set_token_map(tokens("DejaVu Serif"));
+    let serif = draw(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(count(&compositor), 2, "font change did not re-rasterize");
+    assert!(plex != serif, "widget still shows the old face");
+
+    // Back to the default: re-rasterized again, identical to the first frame
+    // (the default-set raster may come from the cache, never the serif one).
+    compositor.set_token_map(tokens("IBM Plex Sans"));
+    let back = draw(&mut compositor, &mut scene, &mut surface);
+    assert_eq!(count(&compositor), 3);
+    assert!(plex == back, "default face did not come back");
+}
