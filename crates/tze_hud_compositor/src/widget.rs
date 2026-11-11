@@ -213,7 +213,21 @@ impl PrimitiveSvgLayerPlan {
 
         while let Some(tag_start_rel) = svg_text[pos..].find('<') {
             let tag_start = pos + tag_start_rel;
-            let tag_end_rel = find_tag_end(&svg_text[tag_start..])?;
+            let rest = &svg_text[tag_start..];
+            // Comments and declarations are not tags: quote characters inside
+            // them are prose, so skip them before attribute-aware scanning.
+            if let Some(body) = rest.strip_prefix("<!--") {
+                pos = tag_start + 4 + body.find("-->")? + 3;
+                continue;
+            }
+            if let Some(body) = rest.strip_prefix("<?") {
+                pos = tag_start + 2 + body.find("?>")? + 2;
+                continue;
+            }
+            if rest.starts_with("<![CDATA[") {
+                return None;
+            }
+            let tag_end_rel = find_tag_end(rest)?;
             let tag_end = tag_start + tag_end_rel;
             let raw_tag = &svg_text[tag_start..=tag_end];
             let tag_name = match tag_name(raw_tag) {
@@ -278,7 +292,7 @@ impl PrimitiveSvgLayerPlan {
                     pos = tag_end + 1 + close + "</text>".len();
                     continue;
                 }
-                "svg" | "?xml" | "!--" => {}
+                "svg" => {}
                 _ => return None,
             }
 
@@ -4149,6 +4163,42 @@ mod tests {
         assert!(
             (rect.opacity - 0.5).abs() < f32::EPSILON,
             "visible rect should retain outer group opacity after skipped defs"
+        );
+    }
+
+    #[test]
+    fn primitive_plan_skips_comments_and_declarations_with_quote_punctuation() {
+        let svg = r##"<?xml version="1.0" encoding="UTF-8"?>
+        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+            <!-- Owner's info fill -->
+            <!-- a "lone double quote and a > inside -->
+            <rect id="box" x="0" y="0" width="16" height="16" fill="#00ff00"/>
+            <!-- trailing <rect id="ghost"/> stays commented out -->
+        </svg>"##;
+
+        let plan = PrimitiveSvgLayerPlan::parse(svg)
+            .expect("comment punctuation must not push a primitive SVG onto the resvg fallback");
+        assert_eq!(plan.items.len(), 1, "commented-out markup is not drawn");
+        let PrimitiveItem::Rect(rect) = &plan.items[0] else {
+            panic!("expected the visible rect to be parsed");
+        };
+        assert_eq!(rect.id.as_deref(), Some("box"));
+    }
+
+    #[test]
+    fn primitive_plan_falls_back_for_unterminated_comments_and_cdata() {
+        let unterminated = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+            <!-- never closed <rect id="box" x="0" y="0" width="16" height="16"/>
+        </svg>"##;
+        assert!(PrimitiveSvgLayerPlan::parse(unterminated).is_none());
+
+        let cdata = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+            <rect id="box" x="0" y="0" width="16" height="16" fill="#00ff00"/>
+            <![CDATA[ it's raw ]]>
+        </svg>"##;
+        assert!(
+            PrimitiveSvgLayerPlan::parse(cdata).is_none(),
+            "CDATA sections are outside the primitive fast path"
         );
     }
 
