@@ -884,7 +884,7 @@ impl WinitApp {
     /// and drain the portal projection into the scene. Needs no window or
     /// GPU, so the headless harness runs exactly this sequence too.
     fn settle_scene_work(&mut self) -> PortalProjectionDrain {
-        self.drain_chrome_capture_cancellation();
+        self.settle_chrome_capture();
         // Terminal pointer intent survives lock contention. Keep the ordinary
         // composer/portal turn running even if this cleanup cannot lock yet.
         let mut chrome_scene_changed = false;
@@ -2489,6 +2489,15 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 if let Some(source) = wake_source {
                     self.state.wake.mark_main_work_pending(source);
                 }
+                // Every native left edge has a capture receipt, so every
+                // application left edge must consume one, including edges the
+                // control panel takes. A skipped edge leaves a stale receipt
+                // that faults the next press and disables notification actions.
+                let chrome_edge = (button == MouseButton::Left).then(|| {
+                    // Consume pending old loss before binding a newer Down.
+                    self.drain_chrome_capture_cancellation();
+                    lifecycle::ChromeAppEdge::begin(window_id, state == ElementState::Pressed)
+                });
                 if button == MouseButton::Left
                     && self.panel_left_button(state == ElementState::Pressed, secondary.is_none())
                 {
@@ -2503,11 +2512,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 {
                     return;
                 }
-                if button == MouseButton::Left {
-                    // Consume pending old loss before binding a newer Down.
-                    self.drain_chrome_capture_cancellation();
-                    let chrome_edge =
-                        lifecycle::ChromeAppEdge::begin(window_id, state == ElementState::Pressed);
+                if let Some(chrome_edge) = &chrome_edge {
                     if !chrome_edge.retired() {
                         self.handle_left_button(
                             state == ElementState::Pressed,

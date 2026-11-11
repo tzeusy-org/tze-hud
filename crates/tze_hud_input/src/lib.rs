@@ -334,6 +334,10 @@ pub struct InputProcessor {
     /// A runtime terminal pointer event must clear chrome before the next
     /// scene turn or pointer event. Retained while the scene lock is busy.
     pub chrome_feedback_cancel_pending: bool,
+    /// Whether notification dismiss/action buttons can act. While false they
+    /// show no hover or press feedback (no dead affordances); the runtime
+    /// refreshes it before each pointer event.
+    pub notification_actions_enabled: bool,
     /// Per-device long-press drag state.
     ///
     /// Keyed by `device_id`.  Each entry is independent so multi-touch devices
@@ -378,6 +382,7 @@ impl InputProcessor {
             current_chrome_hover: None,
             current_chrome_press: None,
             chrome_feedback_cancel_pending: false,
+            notification_actions_enabled: true,
             drag_states: HashMap::new(),
             drag_config: DragConfig::default(),
             rollback_tracker: RollbackTracker::new(),
@@ -1332,12 +1337,14 @@ impl InputProcessor {
         let hit_chrome_id: Option<String> = match &hit {
             HitResult::ZoneInteraction {
                 interaction_id: iid,
-                kind:
-                    ZoneInteractionKind::DragHandle { .. }
-                    | ZoneInteractionKind::Dismiss
-                    | ZoneInteractionKind::Action { .. },
+                kind: ZoneInteractionKind::DragHandle { .. },
                 ..
             } => Some(iid.clone()),
+            HitResult::ZoneInteraction {
+                interaction_id: iid,
+                kind: ZoneInteractionKind::Dismiss | ZoneInteractionKind::Action { .. },
+                ..
+            } if self.notification_actions_enabled => Some(iid.clone()),
             _ => None,
         };
 

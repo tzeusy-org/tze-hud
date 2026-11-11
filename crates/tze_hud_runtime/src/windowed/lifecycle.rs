@@ -348,6 +348,38 @@ impl ChromeCaptureLedger {
         self.prune();
     }
 
+    /// Discard desynchronized history once no native edge is in flight.
+    ///
+    /// Callers run between event-loop turns: every native edge has completed
+    /// and winit has delivered every buffered application edge, so any receipt
+    /// still queued has lost its application edge and can never match. All
+    /// outstanding presses are cancelled (none may activate); installations
+    /// stay registered, so the next physical press is correlated afresh.
+    /// Returns true when a fault was cleared.
+    pub(super) fn recover(&mut self) -> bool {
+        if !self.faulted || !self.active.is_empty() {
+            return false;
+        }
+        for receipt in self.completed.drain(..) {
+            if let Some(token) = &receipt.token {
+                token.cancelled.set(true);
+            }
+        }
+        for install in &mut self.installs {
+            for token in install.native.iter().chain(install.app.iter()) {
+                token.cancelled.set(true);
+            }
+            install.app = None;
+            install.permit = false;
+        }
+        if let Some((_, token)) = self.app_armed.take() {
+            token.cancelled.set(true);
+        }
+        self.faulted = false;
+        self.prune();
+        true
+    }
+
     fn prune(&mut self) {
         self.installs.retain(|s| {
             s.enabled
@@ -407,7 +439,7 @@ fn chrome_native_fault() {
     });
     if first {
         tracing::error!(
-            "notification capture history unavailable; notification actions disabled until restart"
+            "notification capture history unavailable; notification actions disabled until it resynchronizes"
         );
     }
     if !wakes.is_empty() && CHROME_NATIVE_FAULT_NOTIFIED.with(|notified| !notified.replace(true)) {
@@ -440,6 +472,49 @@ fn chrome_native_update<T>(update: impl FnOnce(&mut ChromeCaptureLedger) -> T) -
             chrome_native_fault();
             None
         }
+    }
+}
+
+/// Between event-loop turns, clear a capture-history fault so notification
+/// actions return without a restart. Runs after the fault's cancellation has
+/// been delivered, so any press it disarmed stays disarmed.
+fn native_chrome_recover() {
+    #[cfg(target_os = "windows")]
+    {
+        if !CHROME_NATIVE_FAULT.with(std::cell::Cell::get) {
+            return;
+        }
+        let recovered = CHROME_NATIVE_OWNER.with(|owner| {
+            let Ok(mut owner) = owner.try_borrow_mut() else {
+                return false;
+            };
+            owner.ledger.fault();
+            if !owner.fault_delivered || !owner.ledger.recover() {
+                return false;
+            }
+            owner.fault_delivered = false;
+            true
+        });
+        if recovered {
+            CHROME_NATIVE_FAULT.with(|fault| fault.set(false));
+            CHROME_NATIVE_FAULT_NOTIFIED.with(|notified| notified.set(false));
+            tracing::info!(
+                "notification capture history resynchronized; notification actions restored"
+            );
+        }
+    }
+}
+
+/// Whether a notification button can act on a press right now. Hover and
+/// press feedback follow this, so a disabled button never looks live.
+fn native_chrome_available() -> bool {
+    #[cfg(target_os = "windows")]
+    {
+        !CHROME_NATIVE_FAULT.with(std::cell::Cell::get)
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        true
     }
 }
 
@@ -2162,6 +2237,14 @@ impl WinitApp {
         }
     }
 
+    /// Deliver any pending capture cancellation, then clear a capture-history
+    /// fault. Only for between-turn settle points, where no native edge is in
+    /// flight and every buffered winit edge has been delivered.
+    pub(super) fn settle_chrome_capture(&mut self) {
+        self.drain_chrome_capture_cancellation();
+        native_chrome_recover();
+    }
+
     pub(super) fn synthesize_left_release_if_physically_up(&mut self) -> bool {
         self.drain_chrome_capture_cancellation();
         if self.state.left_button_down
@@ -2484,6 +2567,16 @@ impl WinitApp {
                     }
                 }
 
+                // A notification button that cannot act shows no hover or
+                // press. A Down asks whether this press was armed; other
+                // events ask whether a press could be.
+                self.state.input_processor.notification_actions_enabled =
+                    self.state.window.is_none()
+                        || if pointer_event.kind == PointerEventKind::Down {
+                            native_chrome_permits(self.state.press_window)
+                        } else {
+                            native_chrome_available()
+                        };
                 let active_tab = scene.active_tab;
                 let (result, focus_transition) = if let Some(tab_id) = active_tab {
                     self.state.input_processor.process_with_focus(
@@ -3106,6 +3199,90 @@ mod tests {
     use tokio::sync::Mutex;
 
     use super::*;
+
+    /// One physical click as the native subclass sees it: each edge's receipt
+    /// is active while winit delivers it, then completes. `deliver` decides
+    /// whether the application edge consumes the receipt.
+    fn native_edge(
+        ledger: &mut ChromeCaptureLedger,
+        nonce: u64,
+        window: winit::window::WindowId,
+        down: bool,
+        deliver: bool,
+    ) -> bool {
+        let frame = ledger.begin(nonce, down);
+        let permit = deliver && ledger.consume(window, down);
+        if let Some(frame) = frame {
+            ledger.complete(frame);
+        }
+        permit
+    }
+
+    #[test]
+    fn chrome_capture_unconsumed_edges_fault_then_recover_between_turns() {
+        let window = winit::window::WindowId::from(7);
+        let mut ledger = ChromeCaptureLedger::default();
+        let nonce = ledger.install(window).unwrap();
+
+        // A click whose application edges never consume their receipts (the
+        // control panel used to swallow them) leaves stale history behind.
+        native_edge(&mut ledger, nonce, window, true, false);
+        native_edge(&mut ledger, nonce, window, false, false);
+        // The next press finds that stale receipt beside its own and faults.
+        assert!(!native_edge(&mut ledger, nonce, window, true, true));
+        assert!(ledger.faulted);
+        assert!(!native_edge(&mut ledger, nonce, window, false, true));
+        assert!(!ledger.permit(window));
+
+        // No recovery while a native edge is in flight.
+        let frame = ledger.begin(nonce, true);
+        assert!(frame.is_none(), "a faulted ledger records no new edges");
+        ledger.active.push(ChromeCaptureReceipt {
+            frame: u64::MAX,
+            nonce,
+            window,
+            down: true,
+            token: None,
+            consumed: false,
+        });
+        assert!(!ledger.recover());
+        ledger.active.clear();
+
+        // Between turns the history resynchronizes; the next click activates.
+        assert!(ledger.recover());
+        assert!(!ledger.faulted && ledger.completed.is_empty());
+        assert!(native_edge(&mut ledger, nonce, window, true, true));
+        assert!(native_edge(&mut ledger, nonce, window, false, true));
+    }
+
+    #[test]
+    fn chrome_capture_recovery_cancels_a_press_in_progress() {
+        let window = winit::window::WindowId::from(7);
+        let mut ledger = ChromeCaptureLedger::default();
+        let nonce = ledger.install(window).unwrap();
+        assert!(native_edge(&mut ledger, nonce, window, true, true));
+        ledger.fault();
+        assert!(ledger.recover());
+        // The Up of the press the fault disarmed cannot activate, and does not
+        // fault again; the press after it works.
+        assert!(!native_edge(&mut ledger, nonce, window, false, true));
+        assert!(!ledger.faulted);
+        assert!(native_edge(&mut ledger, nonce, window, true, true));
+        assert!(native_edge(&mut ledger, nonce, window, false, true));
+    }
+
+    #[test]
+    fn chrome_capture_consumed_clicks_never_fault() {
+        let window = winit::window::WindowId::from(7);
+        let mut ledger = ChromeCaptureLedger::default();
+        let nonce = ledger.install(window).unwrap();
+        for _ in 0..(ChromeCaptureLedger::MAX_RECEIPTS + 1) {
+            assert!(native_edge(&mut ledger, nonce, window, true, true));
+            assert!(native_edge(&mut ledger, nonce, window, false, true));
+        }
+        assert!(!ledger.faulted && ledger.completed.is_empty());
+        assert!(!ledger.recover(), "a healthy ledger has nothing to recover");
+    }
 
     #[test]
     fn foreground_lock_timeout_is_restored_after_focus() {

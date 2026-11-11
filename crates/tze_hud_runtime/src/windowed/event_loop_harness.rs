@@ -1526,6 +1526,31 @@ mod tests {
         assert_eq!(take_action_ids(&harness), ["approve"]);
     }
 
+    /// While notification capture history is faulted (Windows), buttons that
+    /// cannot act show neither hover nor press: no dead affordances.
+    #[test]
+    fn disabled_notification_actions_show_no_hover_or_press() {
+        let harness = approve_reject_notification_harness();
+        let (x, y) = harness.notification_action_center("approve").unwrap();
+        let mut processor = tze_hud_input::InputProcessor::new();
+        processor.notification_actions_enabled = false;
+        {
+            let shared = harness.app.state.shared_state.blocking_lock();
+            let mut scene = shared.scene.blocking_lock();
+            for kind in [PointerEventKind::Move, PointerEventKind::Down] {
+                let event = tze_hud_input::PointerEvent {
+                    x,
+                    y,
+                    kind,
+                    device_id: 0,
+                    timestamp: None,
+                };
+                processor.process(&event, &mut scene);
+            }
+        }
+        assert_eq!(chrome_state(&harness, "approve"), Default::default());
+    }
+
     fn chrome_state(
         harness: &HeadlessEventLoopHarness,
         callback_id: &str,
