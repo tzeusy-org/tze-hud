@@ -1805,6 +1805,15 @@ async fn widget_publish_hold_clear() {
             });
         }
         schema.push(WidgetParameterDeclaration {
+            name: "ends_in_ms".into(),
+            audience: Default::default(),
+            param_type: WidgetParamType::Deadline,
+            default_value: WidgetParameterValue::Deadline(tze_hud_scene::WidgetDeadline::relative(
+                0,
+            )),
+            constraints: None,
+        });
+        schema.push(WidgetParameterDeclaration {
             name: "severity".into(),
             audience: Default::default(),
             param_type: WidgetParamType::Enum,
@@ -1910,6 +1919,11 @@ async fn widget_publish_hold_clear() {
         (json!({"level": "high"}), "f32"),
         (json!({"severity": "critical"}), "info|warning|error"),
         (json!({"severity": 42}), "info|warning|error"),
+        (json!({"ends_in_ms": -1}), "deadline<=24h"),
+        (json!({"ends_in_ms": 1.5}), "deadline<=24h"),
+        (json!({"ends_in_ms": 86400001}), "deadline<=24h"),
+        (json!({"ends_in_ms": "300000"}), "deadline<=24h"),
+        (json!({"ends_in_ms": 300000.0}), "deadline<=24h"),
     ];
     for value in [
         json!({}),

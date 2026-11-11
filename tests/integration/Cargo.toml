@@ -46,6 +46,8 @@ prost = { workspace = true }
 # here, not in [dependencies]: feature unification then keeps test_scenes and
 # dev-mode out of a whole-workspace release build.
 [dev-dependencies]
+# Production-discovery before/after fixture retains the actual TOML parser.
+toml = { workspace = true }
 tze_hud_scene = { path = "../../crates/tze_hud_scene", version = "0.1.0", features = ["test-support"] }
 tze_hud_runtime = { path = "../../crates/tze_hud_runtime", version = "0.1.0", features = ["dev-mode", "test-harness"] }
 tze_hud_protocol = { path = "../../crates/tze_hud_protocol", version = "0.1.0", features = ["dev-mode"] }

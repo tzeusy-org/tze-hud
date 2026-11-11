@@ -178,6 +178,34 @@ and `hud_clear` have `idempotentHint:true`; publish/input make neither claim.
   is separate work. Zone enter/exit durations use the resolved motion tokens
   unless explicitly overridden by zone policy, and Stack TTL fades use the
   exit duration/curve without extending authoritative expiry.
+  Shipped bundles also include `countdown` (`ends_in_ms`, `label<=24`,
+  `severity`), `kpi` (`value<=12`, `label<=24`, `trend=up|down|flat`,
+  `severity`), and `stepper` (`step` 0..12, `total` 1..12,
+  `state=active|blocked|done`, `label<=24`). Production config instantiates
+  only `main-countdown` from these additions; KPI and stepper are available
+  for owner configuration. Stepper dots floor fractional steps and clamp to
+  total; the current dot uses primary/caution/success for active/blocked/done.
+
+  `deadline` appears in discovery as `deadline<=24h`. Send integer relative
+  milliseconds 0..86400000 (`ends_in_ms` in the countdown bundle); gRPC uses
+  the `deadline_ms` integer oneof, never the f32 oneof. Both planes reject
+  negatives, fractions, overflow and wrong types with that bound in the hint.
+  The runtime snapshots the absolute wall deadline when content actually
+  presents, including a late delayed drain. A label-only republish under the
+  same publisher/key preserves it; explicitly resending the duration resets it.
+  Remaining time rounds up: `125 min` → `2 h 05`, `30 min` → `30 min`,
+  `90 s` → `1:30`. Only a visible published countdown schedules its next
+  display change: minute granularity above two minutes, second granularity
+  in the last two minutes. At `0:00` it retains severity and stops waking.
+  Hidden, cleared, absent and safe-mode countdowns schedule no countdown wake.
+  Safe mode freezes widget publication TTL and the owner's auto-clear allowance,
+  while the absolute countdown keeps passing; resume displays current wall time.
+  An already accepted delayed widget stays pending through safe mode, without
+  an overdue retry wake. Its whole batch presents after resume; its deadline
+  snapshot and relative TTL start at that actual presentation.
+  Hover remains runtime-local. SVG `threshold` bindings compare f32 `>= k`
+  into opacity 0/1; optional `attr_min`/`attr_max` in 0..1 select below/above
+  outputs for mutually exclusive dot branches, without an expression language.
 - Portal: the first publish to `portal:<id>` attaches (`display_name` is
   optional). Omit content for a bare attach or status-only update.
   `content` appends only the new output text; `status` labels agent activity
@@ -212,7 +240,7 @@ and `hud_clear` have `idempotentHint:true`; publish/input make neither claim.
   return `SAFE_MODE_ACTIVE`, with no replay buffer. Input polling remains
   available and refreshes real activity without double-counting pause time.
   Input expiry, existing orphan grace and the maximum scene suspension continue.
-- `delay_ms` (zones, ≤ 300000) holds the content until then (invariant 1);
+- `delay_ms` (zones and widgets, ≤ 300000) holds the content until then (invariant 1);
   the expiry counts from presentation, and `ttl_ms: 0` holds a delayed
   publish until cleared just like an immediate one.
 - Returns `{"ok":true,"expires_in_ms":8000}` when a TTL is set. Portal
@@ -1114,7 +1142,7 @@ distinguishes arguments from responses and partial configuration examples.
 | Four-option notification ask + returned answer + ACK | — | 273 | 114 | ≤ 120 |
 | Widget publish | ~168 | 73 | 22 | ≤ 80 |
 | Portal: attach+publish+hold, poll, ack, clear | ~575 over 5 round trips | 343 over 4 | 137 over 4 | ≤ 250 |
-| Discover (unheld `production.toml`: 6 zones, 3 built-in widgets) | n/a | n/a | 210 | ≤ 210 |
+| Discover (unheld `production.toml`: 6 zones, 4 widget instances) | n/a | 321 | 245 | ≤ 250 |
 | Error | up to ~212 | 101 | 45 | ≤ 60 |
 
 All seven measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
@@ -1122,10 +1150,17 @@ All seven measurements use canonical flow version 4 and `tiktoken-rs` 0.12.0,
 changes model-visible `tools/list` from 564 to 590 tokens and default discovery
 from 113 to 126. The five other flows retain identical request/response
 fingerprints and metrics: zone 39, widget 22, error 45, complete choice 114 and
-portal 137. Production discovery is 210, down from ~232; occupancy hints and all
-model-owned values/limits remain. The seven canonical flow ceilings are unchanged; the signed production target
-is tighter than its former 250-token envelope. Numeric discovery
+portal 137. At that baseline production discovery was 210, down from ~232; occupancy hints and all
+model-owned values/limits remain. The seven canonical flow ceilings are unchanged; the countdown package uses the signed 250-token production envelope. Numeric discovery
 says `number`; admission and error hints still enforce finite f32.
+
+The countdown (`hud-ljhku.9`) adds one production instance: the actual handler
+comparison measures model-visible 754 → 882 bytes / 210 → 245 tokens and wire
+1025 → 1171 bytes / 283 → 321 tokens. All prior discovery rows compare equal;
+KPI and stepper remain bundles without production instances. The new production
+bytes were **accepted by the owner** for PR1606 on 2026-11-12 (Asia/Singapore);
+the PR1598 approval below covers only the previous baseline.
+The seven canonical flow objects and ceilings remain unchanged in the baseline.
 
 The owner **accepted these concrete new baseline bytes** for PR1598 on
 2026-11-10 (Asia/Singapore). Earlier `hud-j7kxn` approval covered the old baseline
@@ -1172,10 +1207,13 @@ the previous items and polls, so poll+ack is one round trip.
 
 `integration` `poc_acceptance` checks model-visible counts on the POC
 acceptance flows (`docs/scope.md`), run end to end against `production.toml`.
-Its fresh, unheld discovery budget is the production row above: <=210 tokens,
+Its fresh, unheld discovery budget is the production row above: <=250 tokens,
 retaining model-owned parameter names, bounds and actionable occupancy hints.
-The existing live-state POC fixtures retain their 250-token envelope when
-holdings or attached portals add state/expiry/pending-input fields. That
+The live-state POC fixture envelope is 285 tokens (previously 250): it adds
+the same measured 35-token countdown row while retaining the prior 40-token
+allowance for holdings/portal state above the actual unheld baseline.
+This fixture-only change is included in the pending byte/budget review;
+none of the seven canonical flow ceilings changes. That
 fixture envelope is not a promise for arbitrary numbers of live portals;
 required state fields are never dropped to fit the unheld baseline.
 

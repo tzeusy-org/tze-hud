@@ -1,0 +1,960 @@
+# Token-styled tonal card; runtime owns hover, model owns meaning.
+name = "stepper"
+version = "1.0.0"
+description = "Progress through up to twelve steps with current state"
+default_contention_policy = "LatestWins"
+
+[[parameter_schema]]
+name = "label"
+type = "string"
+default = ""
+
+[parameter_schema.constraints]
+string_max_bytes = 24
+
+[[parameter_schema]]
+name = "step"
+type = "f32"
+default = 0.0
+
+[parameter_schema.constraints]
+f32_min = 0.0
+f32_max = 12.0
+
+[[parameter_schema]]
+name = "total"
+type = "f32"
+default = 5.0
+
+[parameter_schema.constraints]
+f32_min = 1.0
+f32_max = 12.0
+
+[[parameter_schema]]
+name = "state"
+type = "enum"
+default = "active"
+
+[parameter_schema.constraints]
+enum_allowed_values = ["active", "blocked", "done"]
+
+[[parameter_schema]]
+name = "tooltip_visible"
+type = "f32"
+default = 0.0
+audience = "runtime"
+
+[parameter_schema.constraints]
+f32_min = 0.0
+f32_max = 1.0
+
+[hover_behavior]
+delay_ms = 180
+visibility_param = "tooltip_visible"
+hidden_value = 0.0
+visible_value = 1.0
+
+[hover_behavior.trigger_rect]
+x_pct = 0.0
+y_pct = 0.0
+width_pct = 1.0
+height_pct = 0.6129032
+
+[[layers]]
+svg_file = "card.svg"
+
+[[layers.bindings]]
+param = "label"
+target_element = "label"
+target_attribute = "text-content"
+mapping = "direct"
+
+[[layers.bindings]]
+param = "label"
+target_element = "tooltip-label"
+target_attribute = "text-content"
+mapping = "direct"
+
+[[layers.bindings]]
+param = "tooltip_visible"
+target_element = "tooltip"
+target_attribute = "opacity"
+mapping = "linear"
+attr_min = 0.0
+attr_max = 1.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "total-1"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 1.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "filled-1"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 1.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "past-step-1"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 2.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "past-total-1"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 2.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "current-step-1"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 2.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "clamped-step-1"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 2.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "clamped-total-1"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 2.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-a-1"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-b-1"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "total"
+target_element = "total-2"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 2.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "filled-2"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 2.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "past-step-2"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 3.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "past-total-2"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 3.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "current-step-2"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 3.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "clamped-step-2"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 3.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "clamped-total-2"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 3.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-a-2"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-b-2"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "total"
+target_element = "total-3"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 3.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "filled-3"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 3.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "past-step-3"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 4.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "past-total-3"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 4.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "current-step-3"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 4.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "clamped-step-3"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 4.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "clamped-total-3"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 4.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-a-3"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-b-3"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "total"
+target_element = "total-4"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 4.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "filled-4"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 4.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "past-step-4"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 5.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "past-total-4"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 5.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "current-step-4"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 5.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "clamped-step-4"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 5.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "clamped-total-4"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 5.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-a-4"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-b-4"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "total"
+target_element = "total-5"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 5.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "filled-5"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 5.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "past-step-5"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 6.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "past-total-5"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 6.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "current-step-5"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 6.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "clamped-step-5"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 6.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "clamped-total-5"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 6.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-a-5"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-b-5"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "total"
+target_element = "total-6"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 6.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "filled-6"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 6.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "past-step-6"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 7.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "past-total-6"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 7.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "current-step-6"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 7.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "clamped-step-6"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 7.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "clamped-total-6"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 7.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-a-6"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-b-6"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "total"
+target_element = "total-7"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 7.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "filled-7"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 7.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "past-step-7"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 8.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "past-total-7"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 8.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "current-step-7"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 8.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "clamped-step-7"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 8.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "clamped-total-7"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 8.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-a-7"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-b-7"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "total"
+target_element = "total-8"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 8.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "filled-8"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 8.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "past-step-8"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 9.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "past-total-8"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 9.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "current-step-8"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 9.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "clamped-step-8"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 9.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "clamped-total-8"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 9.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-a-8"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-b-8"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "total"
+target_element = "total-9"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 9.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "filled-9"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 9.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "past-step-9"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 10.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "past-total-9"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 10.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "current-step-9"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 10.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "clamped-step-9"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 10.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "clamped-total-9"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 10.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-a-9"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-b-9"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "total"
+target_element = "total-10"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 10.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "filled-10"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 10.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "past-step-10"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 11.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "past-total-10"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 11.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "current-step-10"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 11.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "clamped-step-10"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 11.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "clamped-total-10"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 11.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-a-10"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-b-10"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "total"
+target_element = "total-11"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 11.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "filled-11"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 11.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "past-step-11"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 12.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "past-total-11"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 12.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "current-step-11"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 12.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "clamped-step-11"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 12.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "clamped-total-11"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 12.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-a-11"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-b-11"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "total"
+target_element = "total-12"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 12.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "filled-12"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 12.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "past-step-12"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 13.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "past-total-12"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 13.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "current-step-12"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 13.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "step"
+target_element = "clamped-step-12"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 13.0
+
+[[layers.bindings]]
+param = "total"
+target_element = "clamped-total-12"
+target_attribute = "opacity"
+mapping = "threshold"
+threshold = 13.0
+attr_min = 1.0
+attr_max = 0.0
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-a-12"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"
+
+[[layers.bindings]]
+param = "state"
+target_element = "current-b-12"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+active = "{{token.color.primary}}"
+blocked = "{{token.color.caution}}"
+done = "{{token.color.success}}"

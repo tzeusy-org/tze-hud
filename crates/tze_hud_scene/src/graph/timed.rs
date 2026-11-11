@@ -21,6 +21,19 @@ pub struct ScheduledBatch {
     pub(crate) publication_origin: Option<SceneId>,
 }
 
+impl ScheduledBatch {
+    /// Preserve an already accepted widget publication until it can present.
+    /// A mixed batch waits as a whole so its mutations remain atomic.
+    fn waits_for_widget_resume(&self, widgets_paused: bool) -> bool {
+        widgets_paused
+            && self
+                .batch
+                .mutations
+                .iter()
+                .any(|mutation| matches!(mutation, SceneMutation::PublishToWidget { .. }))
+    }
+}
+
 impl SceneGraph {
     /// Hold `batch` until `present_at_wall_us`, then apply it on the first
     /// commit at or after that time. Validation happens at apply time.
@@ -84,6 +97,99 @@ impl SceneGraph {
         self.prune_publication_orphans();
     }
 
+    /// Cancel only this publisher's pending widget content, preserving peers
+    /// and unrelated mutations in a mixed batch.
+    pub fn cancel_scheduled_widget_publishes(&mut self, widget: &str, namespace: &str) -> usize {
+        let mut cancelled = 0;
+        for scheduled in &mut self.scheduled_batches {
+            if scheduled.batch.agent_namespace != namespace {
+                continue;
+            }
+            let before = scheduled.batch.mutations.len();
+            scheduled.batch.mutations.retain(|mutation| {
+                !matches!(mutation, SceneMutation::PublishToWidget { widget_name, .. } if widget_name == widget)
+            });
+            cancelled += before - scheduled.batch.mutations.len();
+        }
+        self.scheduled_batches
+            .retain(|s| !s.batch.mutations.is_empty());
+        self.prune_publication_orphans();
+        cancelled
+    }
+
+    /// A held pending widget starts its new TTL at actual presentation.
+    pub fn hold_scheduled_widget_publishes(
+        &mut self,
+        widget: &str,
+        namespace: &str,
+        ttl_us: Option<u64>,
+    ) -> bool {
+        let mut held = false;
+        for scheduled in &mut self.scheduled_batches {
+            if scheduled.batch.agent_namespace != namespace {
+                continue;
+            }
+            for mutation in &mut scheduled.batch.mutations {
+                if let SceneMutation::PublishToWidget {
+                    widget_name,
+                    ttl_us: pending_ttl,
+                    expires_at_wall_us,
+                    ..
+                } = mutation
+                    && widget_name == widget
+                {
+                    *pending_ttl = ttl_us;
+                    *expires_at_wall_us = None;
+                    held = true;
+                }
+            }
+        }
+        held
+    }
+
+    /// Nominal pending expiry for discovery; a late drain starts relative TTL
+    /// afresh. Owner auto-clear applies to pending and active content alike.
+    pub fn scheduled_widget_publication_expiries<'a>(
+        &'a self,
+        widget: &'a str,
+        namespace: &'a str,
+    ) -> impl Iterator<Item = Option<u64>> + 'a {
+        let auto_clear_us = self
+            .widget_registry
+            .instances
+            .get(widget)
+            .and_then(|instance| instance.auto_clear_ms)
+            .map(|ms| ms.saturating_mul(1_000));
+        self.scheduled_batches
+            .iter()
+            .filter(move |scheduled| scheduled.batch.agent_namespace == namespace)
+            .flat_map(move |scheduled| {
+                scheduled
+                    .batch
+                    .mutations
+                    .iter()
+                    .filter_map(move |mutation| match mutation {
+                        SceneMutation::PublishToWidget {
+                            widget_name,
+                            ttl_us,
+                            expires_at_wall_us,
+                            ..
+                        } if widget_name == widget => {
+                            let expiry = expires_at_wall_us.or_else(|| {
+                                ttl_us.map(|ttl| scheduled.present_at_wall_us.saturating_add(ttl))
+                            });
+                            let cap = auto_clear_us
+                                .map(|ttl| scheduled.present_at_wall_us.saturating_add(ttl));
+                            Some(match (expiry, cap) {
+                                (Some(a), Some(b)) => Some(a.min(b)),
+                                (a, b) => a.or(b),
+                            })
+                        }
+                        _ => None,
+                    })
+            })
+    }
+
     /// Retime `namespace`'s pending publishes to `zone` as a hold would an
     /// active one, except that the expiry counts from presentation
     /// (`present_at + ttl_ms`; `None` holds until cleared). Returns whether
@@ -144,16 +250,17 @@ impl SceneGraph {
         // Grace cancellation precedes materializing due content in every runtime.
         self.reap_orphaned_publications(self.clock.now_millis());
         let now_us = self.clock.now_us();
-        if !self
-            .scheduled_batches
-            .iter()
-            .any(|s| s.present_at_wall_us <= now_us)
-        {
+        let widgets_paused = self.widget_time_paused();
+        let can_present_now = |scheduled: &ScheduledBatch| {
+            scheduled.present_at_wall_us <= now_us
+                && !scheduled.waits_for_widget_resume(widgets_paused)
+        };
+        if !self.scheduled_batches.iter().any(can_present_now) {
             return Vec::new();
         }
         let (mut due, pending): (Vec<_>, Vec<_>) = std::mem::take(&mut self.scheduled_batches)
             .into_iter()
-            .partition(|s| s.present_at_wall_us <= now_us);
+            .partition(can_present_now);
         self.scheduled_batches = pending;
         due.sort_by_key(|s| s.present_at_wall_us);
         // Due payloads stay outside the scene's per-batch rollback snapshots.
@@ -207,9 +314,11 @@ impl SceneGraph {
 
     /// Earliest wall-clock deadline among scheduled batches and tile expiries.
     pub fn next_timed_content_wall_us(&self) -> Option<u64> {
+        let widgets_paused = self.widget_time_paused();
         let scheduled = self
             .scheduled_batches
             .iter()
+            .filter(|scheduled| !scheduled.waits_for_widget_resume(widgets_paused))
             .map(|s| s.present_at_wall_us)
             .min();
         let tile_expiry = self.tiles.values().filter_map(|t| t.expires_at).min();

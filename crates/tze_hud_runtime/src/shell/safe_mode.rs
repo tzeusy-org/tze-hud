@@ -90,6 +90,7 @@ pub async fn enter_safe_mode(
                 hub.suspend_liveness(now_us);
             }
             st.safe_mode_atomic.store(true, Ordering::Release);
+            scene.pause_widget_ttls();
             scene.suspend_all_leases(now_ms);
             let suspended = scene
                 .leases
@@ -163,6 +164,7 @@ pub async fn exit_safe_mode(
             .count();
         let mut hub = portals.and_then(|portals| portals.hub.lock().ok());
         scene.resume_all_leases(now_ms);
+        scene.resume_widget_ttls();
         if let Some(hub) = hub.as_mut() {
             hub.resume_liveness(now_us);
         }

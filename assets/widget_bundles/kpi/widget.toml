@@ -1,0 +1,158 @@
+# Token-styled tonal card; runtime owns hover, model owns meaning.
+name = "kpi"
+version = "1.0.0"
+description = "Compact model-formatted value with trend and severity"
+default_contention_policy = "LatestWins"
+
+[[parameter_schema]]
+name = "label"
+type = "string"
+default = ""
+
+[parameter_schema.constraints]
+string_max_bytes = 24
+
+[[parameter_schema]]
+name = "value"
+type = "string"
+default = ""
+
+[parameter_schema.constraints]
+string_max_bytes = 12
+
+[[parameter_schema]]
+name = "trend"
+type = "enum"
+default = "flat"
+
+[parameter_schema.constraints]
+enum_allowed_values = ["up", "down", "flat"]
+
+[[parameter_schema]]
+name = "severity"
+type = "enum"
+default = "info"
+
+[parameter_schema.constraints]
+enum_allowed_values = ["info", "warning", "error"]
+
+[[parameter_schema]]
+name = "tooltip_visible"
+type = "f32"
+default = 0.0
+audience = "runtime"
+
+[parameter_schema.constraints]
+f32_min = 0.0
+f32_max = 1.0
+
+[hover_behavior]
+delay_ms = 180
+visibility_param = "tooltip_visible"
+hidden_value = 0.0
+visible_value = 1.0
+
+[hover_behavior.trigger_rect]
+x_pct = 0.0
+y_pct = 0.0
+width_pct = 1.0
+height_pct = 0.6129032
+
+[[layers]]
+svg_file = "card.svg"
+
+[[layers.bindings]]
+param = "label"
+target_element = "label"
+target_attribute = "text-content"
+mapping = "direct"
+
+[[layers.bindings]]
+param = "label"
+target_element = "tooltip-label"
+target_attribute = "text-content"
+mapping = "direct"
+
+[[layers.bindings]]
+param = "tooltip_visible"
+target_element = "tooltip"
+target_attribute = "opacity"
+mapping = "linear"
+attr_min = 0.0
+attr_max = 1.0
+
+[[layers.bindings]]
+param = "value"
+target_element = "value"
+target_attribute = "text-content"
+mapping = "direct"
+
+[[layers.bindings]]
+param = "severity"
+target_element = "value"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+info = "{{token.color.primary}}"
+warning = "{{token.color.caution}}"
+error = "{{token.color.error}}"
+
+[[layers.bindings]]
+param = "trend"
+target_element = "trend-up"
+target_attribute = "opacity"
+mapping = "discrete"
+[layers.bindings.value_map]
+up = "1"
+down = "0"
+flat = "0"
+
+[[layers.bindings]]
+param = "severity"
+target_element = "glyph-up"
+target_attribute = "stroke"
+mapping = "discrete"
+[layers.bindings.value_map]
+info = "{{token.color.primary}}"
+warning = "{{token.color.caution}}"
+error = "{{token.color.error}}"
+
+[[layers.bindings]]
+param = "trend"
+target_element = "trend-down"
+target_attribute = "opacity"
+mapping = "discrete"
+[layers.bindings.value_map]
+up = "0"
+down = "1"
+flat = "0"
+
+[[layers.bindings]]
+param = "severity"
+target_element = "glyph-down"
+target_attribute = "stroke"
+mapping = "discrete"
+[layers.bindings.value_map]
+info = "{{token.color.primary}}"
+warning = "{{token.color.caution}}"
+error = "{{token.color.error}}"
+
+[[layers.bindings]]
+param = "trend"
+target_element = "trend-flat"
+target_attribute = "opacity"
+mapping = "discrete"
+[layers.bindings.value_map]
+up = "0"
+down = "0"
+flat = "1"
+
+[[layers.bindings]]
+param = "severity"
+target_element = "glyph-flat"
+target_attribute = "stroke"
+mapping = "discrete"
+[layers.bindings.value_map]
+info = "{{token.color.primary}}"
+warning = "{{token.color.caution}}"
+error = "{{token.color.error}}"

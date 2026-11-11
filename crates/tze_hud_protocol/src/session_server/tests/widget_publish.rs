@@ -29,6 +29,16 @@ async fn test_durable_widget_publish_receives_result() {
                 ),
                 constraints: None,
             });
+        def.parameter_schema
+            .push(tze_hud_scene::WidgetParameterDeclaration {
+                name: "ends_in_ms".into(),
+                audience: Default::default(),
+                param_type: tze_hud_scene::WidgetParamType::Deadline,
+                default_value: tze_hud_scene::WidgetParameterValue::Deadline(
+                    tze_hud_scene::WidgetDeadline::relative(0),
+                ),
+                constraints: None,
+            });
         for (name, audience) in [
             ("fill_color", tze_hud_scene::WidgetParamAudience::Owner),
             ("theme", tze_hud_scene::WidgetParamAudience::Owner),
@@ -104,6 +114,14 @@ async fn test_durable_widget_publish_receives_result() {
     let mut bad: Vec<_> = vec![
         ("level", Param::F32Value(-0.1), "0..1"),
         ("level", Param::F32Value(1.1), "0..1"),
+        ("ends_in_ms", Param::DeadlineMs(-1), "deadline<=24h"),
+        ("ends_in_ms", Param::DeadlineMs(86400001), "deadline<=24h"),
+        ("ends_in_ms", Param::F32Value(1.5), "deadline<=24h"),
+        (
+            "ends_in_ms",
+            Param::StringValue("300000".into()),
+            "deadline<=24h",
+        ),
         ("level", Param::F32Value(f32::NAN), "finite"),
         ("level", Param::F32Value(f32::INFINITY), "finite"),
         ("fill_color", Param::F32Value(0.5), "severity"),
@@ -134,6 +152,7 @@ async fn test_durable_widget_publish_receives_result() {
         ("theme", "owner-set"),
         ("tooltip_visible", "runtime-set"),
         ("level", "f32"),
+        ("ends_in_ms", "deadline<=24h"),
     ] {
         bad.push((name, None, hint));
     }
@@ -313,6 +332,94 @@ async fn test_durable_widget_publish_receives_result() {
             .get("gauge")
             .is_none_or(Vec::is_empty)
     );
+    // Relative countdown and TTL both begin at actual (late) presentation.
+    let delayed = Publish {
+        surface: "widget:gauge".into(),
+        present_at_us: clock.now_us() + 10_000_000,
+        ttl_ms: 20_000,
+        params: vec![crate::proto::WidgetParameterValueProto {
+            param_name: "ends_in_ms".into(),
+            value: Some(Param::DeadlineMs(86_399_999)),
+        }],
+        ..Default::default()
+    };
+    assert!(
+        request(
+            &tx,
+            &mut stream,
+            45,
+            ClientPayload::Publish(delayed.clone())
+        )
+        .await
+        .ok
+    );
+    {
+        let scene = scene_ref.lock().await;
+        assert_eq!(scene.scheduled_batches.len(), 1);
+        assert_eq!(scene.agent_holdings("widget-agent").widgets, 1);
+        assert!(scene.widget_registry.active_for_widget("gauge").is_empty());
+    }
+    {
+        let mut scene = scene_ref.lock().await;
+        assert_eq!(scene.scheduled_batches[0].batch.lease_id, None);
+        scene.pause_widget_ttls();
+        scene.suspend_all_leases(clock.now_millis());
+    }
+    clock.advance(15_000);
+    {
+        let mut scene = scene_ref.lock().await;
+        assert!(
+            scene.apply_due_batches().is_empty(),
+            "unleased gRPC widget cannot snapshot during pause"
+        );
+        assert_eq!(scene.scheduled_batches.len(), 1);
+        assert_eq!(scene.next_timed_content_wall_us(), None);
+        assert!(scene.widget_registry.active_for_widget("gauge").is_empty());
+    }
+    clock.advance(45_000);
+    {
+        let mut scene = scene_ref.lock().await;
+        scene.resume_all_leases(clock.now_millis());
+        scene.resume_widget_ttls();
+        assert!(scene.apply_due_batches()[0].applied);
+        let record = &scene.widget_registry.active_for_widget("gauge")[0];
+        let tze_hud_scene::WidgetParameterValue::Deadline(deadline) = &record.params["ends_in_ms"]
+        else {
+            panic!("deadline")
+        };
+        assert_eq!(deadline.at_wall_us, Some(clock.now_us() + 86_399_999_000));
+        assert_eq!(record.expires_at_wall_us, Some(clock.now_us() + 20_000_000));
+        assert_eq!(record.publication_origin, Some(origin));
+        assert_eq!(record.ttl_paused_us, 0);
+        assert!(scene.scheduled_batches.is_empty());
+    }
+    assert!(
+        request(
+            &tx,
+            &mut stream,
+            46,
+            ClientPayload::Publish(Publish {
+                present_at_us: clock.now_us() + 10_000_000,
+                ..delayed
+            })
+        )
+        .await
+        .ok
+    );
+    assert!(
+        request(
+            &tx,
+            &mut stream,
+            47,
+            ClientPayload::Clear(Clear {
+                surface: "widget:gauge".into(),
+                ..Default::default()
+            })
+        )
+        .await
+        .ok
+    );
+    assert!(scene_ref.lock().await.scheduled_batches.is_empty());
     drop(tx);
 }
 

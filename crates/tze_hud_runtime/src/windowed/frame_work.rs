@@ -15,6 +15,7 @@ use crate::operator::screenshot::{CaptureInbox, CaptureRequest};
 
 pub(super) struct WindowedFrameWork {
     last_rendered: (u64, u64),
+    widget_repaint_pending: bool,
     wake: WindowedWake,
     frame_ready: crate::channels::FrameReadyTx,
 }
@@ -24,6 +25,7 @@ impl WindowedFrameWork {
         // Both content and position-only mutations must render on startup.
         Self {
             last_rendered: (u64::MAX, u64::MAX),
+            widget_repaint_pending: false,
             wake,
             frame_ready,
         }
@@ -59,12 +61,16 @@ impl WindowedFrameWork {
     ) -> PreparedFrameWork {
         // Decide BEFORE capture builds: a build may step an animation's final
         // state, but must never consume the screen's corresponding repaint.
+        // Raster cache updates are not ordinary presentation acknowledgement.
+        // Keep a due countdown repaint across captures/failed submissions.
+        self.widget_repaint_pending &= scene.widgets_shown() && !scene.widget_time_paused();
+        self.widget_repaint_pending |= compositor.widget_deadline_needs_render(scene);
         let needs_render = windowed_frame_needs_render(
             scene.version != self.last_rendered.0,
             scene.geometry_epoch != self.last_rendered.1,
             compositor.has_inflight_animation(scene),
             triggers.composer,
-            triggers.surface,
+            triggers.surface || self.widget_repaint_pending,
         );
         let plan = plan(needs_render);
         let capture = inbox.next_live().map(|request| {
@@ -116,6 +122,7 @@ impl WindowedFrameWork {
         );
         if submitted {
             self.last_rendered = built_versions;
+            self.widget_repaint_pending = false;
             let _ = self.frame_ready.send(true);
             self.wake
                 .notify_main(crate::idle_efficiency::RuntimeWakeupSource::FrameReady);

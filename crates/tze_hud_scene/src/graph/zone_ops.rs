@@ -76,6 +76,17 @@ impl SceneGraph {
         let constraints = decl.constraints.as_ref().unwrap_or(&empty_constraints);
 
         match (&decl.param_type, submitted_value) {
+            (WidgetParamType::Deadline, WidgetParameterValue::Deadline(d)) if d.valid() => {
+                // A supplied runtime snapshot is never an agent-set absolute time.
+                Ok(WidgetParameterValue::Deadline(
+                    crate::WidgetDeadline::relative(d.ends_in_ms),
+                ))
+            }
+            (WidgetParamType::Deadline, _) => Err(ValidationError::WidgetParameterTypeMismatch {
+                widget: widget_name.to_string(),
+                param: param_name.to_string(),
+                expected: decl.value_hint(),
+            }),
             (WidgetParamType::F32, WidgetParameterValue::F32(v)) => {
                 Self::validate_widget_f32_value(widget_name, param_name, decl, f64::from(*v))
                     .map(WidgetParameterValue::F32)
@@ -695,7 +706,7 @@ impl SceneGraph {
         let is_ephemeral = definition.ephemeral;
 
         // Validate the whole map before recording or changing current_params.
-        let validated_params = self.validate_widget_params(widget_name, &params)?;
+        let mut validated_params = self.validate_widget_params(widget_name, &params)?;
 
         // ── Step 3: Apply contention policy and record publication ────────────
         let contention_policy = instance
@@ -705,7 +716,42 @@ impl SceneGraph {
 
         let now_us = self.clock.now_us();
 
+        // Preserve an omitted deadline only within this publication's owner/key.
+        // Store it in the record too, so later expiry/clear recomputation cannot
+        // replace a running deadline with the relative schema default.
+        let previous = self
+            .widget_registry
+            .active_publishes
+            .get(widget_name)
+            .and_then(|records| {
+                records.iter().rev().find(|r| {
+                    r.publisher_namespace == publisher_namespace
+                        && r.merge_key == merge_key
+                        && r.lease_id == lease_id
+                        && r.publication_origin == publication_origin.filter(|_| lease_id.is_none())
+                })
+            });
+        for decl in &definition.parameter_schema {
+            if decl.param_type != WidgetParamType::Deadline
+                || decl.audience != crate::WidgetParamAudience::Model
+            {
+                continue;
+            }
+            if let Some(WidgetParameterValue::Deadline(d)) = validated_params.get_mut(&decl.name) {
+                d.snapshot(now_us);
+            } else if let Some(WidgetParameterValue::Deadline(d)) =
+                previous.and_then(|r| r.params.get(&decl.name))
+            {
+                validated_params
+                    .insert(decl.name.clone(), WidgetParameterValue::Deadline(d.clone()));
+            } else if let WidgetParameterValue::Deadline(mut d) = decl.default_value.clone() {
+                d.snapshot(now_us);
+                validated_params.insert(decl.name.clone(), WidgetParameterValue::Deadline(d));
+            }
+        }
+
         let record = crate::types::WidgetPublishRecord {
+            ttl_paused_us: 0,
             widget_name: widget_name.to_string(),
             publisher_namespace: publisher_namespace.to_string(),
             params: validated_params.clone(),
@@ -791,7 +837,11 @@ impl SceneGraph {
                 param: param_name.to_string(),
             })?;
 
-        let validated = Self::validate_widget_param_value(widget_name, param_name, decl, &value)?;
+        let mut validated =
+            Self::validate_widget_param_value(widget_name, param_name, decl, &value)?;
+        if let WidgetParameterValue::Deadline(d) = &mut validated {
+            d.snapshot(self.now_wall_us());
+        }
 
         if let Some(inst) = self.widget_registry.instances.get_mut(widget_name) {
             inst.current_params
@@ -896,7 +946,8 @@ impl SceneGraph {
         publisher_namespace: &str,
         expires_at_wall_us: Option<u64>,
     ) -> bool {
-        let mut held = false;
+        let ttl_us = expires_at_wall_us.map(|at| at.saturating_sub(self.now_wall_us()));
+        let mut held = self.hold_scheduled_widget_publishes(widget, publisher_namespace, ttl_us);
         for r in self
             .widget_registry
             .active_publishes
@@ -1360,13 +1411,17 @@ impl SceneGraph {
         self.version += 1;
     }
 
-    /// Clear every zone and widget publication recorded under `lease_id`.
+    /// Clear active publications and whole scheduled batches owned by `lease_id`.
     ///
     /// Called when a lease reaches a terminal state (expired after grace,
     /// revoked) per spec §Requirement: Lease Revocation Clears Zone
     /// Publications. Publications by the same namespace under another lease
     /// (e.g. an operator session's MCP notifications) are untouched.
     pub fn clear_publications_for_lease(&mut self, lease_id: SceneId) {
+        let pending_before = self.scheduled_batches.len();
+        self.scheduled_batches
+            .retain(|scheduled| scheduled.batch.lease_id != Some(lease_id));
+        let pending_changed = self.scheduled_batches.len() != pending_before;
         for publishes in self.zone_registry.active_publishes.values_mut() {
             publishes.retain(|r| r.lease_id != Some(lease_id));
         }
@@ -1385,7 +1440,7 @@ impl SceneGraph {
         self.widget_registry
             .active_publishes
             .retain(|_, v| !v.is_empty());
-        if !touched_widgets.is_empty() {
+        if pending_changed || !touched_widgets.is_empty() {
             for widget_name in touched_widgets {
                 self.refresh_widget_current_params(&widget_name);
             }
@@ -1408,6 +1463,9 @@ impl SceneGraph {
             return Err(ValidationError::WidgetNotFound {
                 name: widget_name.to_string(),
             });
+        }
+        if self.cancel_scheduled_widget_publishes(widget_name, publisher_namespace) > 0 {
+            self.version += 1;
         }
         if let Some(publishes) = self.widget_registry.active_publishes.get_mut(widget_name) {
             let before = publishes.len();
@@ -1501,6 +1559,7 @@ impl SceneGraph {
             .active_publishes
             .values()
             .flatten()
+            .filter(|_| !self.widget_time_paused())
             .filter_map(|record| self.widget_expiry(record))
             .min();
         zone_expiry.into_iter().chain(widget_expiry).min()
@@ -1517,7 +1576,13 @@ impl SceneGraph {
             .instances
             .get(&record.widget_name)
             .and_then(|i| i.auto_clear_ms);
-        effective_expiry(record, auto_clear)
+        effective_expiry(record, auto_clear).map(|at| {
+            at.saturating_add(
+                self.overlay
+                    .widget_ttls_paused_at_wall_us
+                    .map_or(0, |start| self.now_wall_us().saturating_sub(start)),
+            )
+        })
     }
 
     /// Move or resize a widget instance (the owner's layout). `false` when
@@ -1564,6 +1629,9 @@ impl SceneGraph {
     /// Call this once per frame before rendering (Stage 4: Scene Commit),
     /// alongside `drain_expired_zone_publications`.
     pub fn drain_expired_widget_publications(&mut self) -> usize {
+        if self.widget_time_paused() {
+            return 0;
+        }
         let now_us = self.clock.now_us();
         let mut total_removed = 0usize;
         let mut touched_widgets = Vec::new();
@@ -1602,6 +1670,7 @@ fn effective_expiry(record: &WidgetPublishRecord, auto_clear_ms: Option<u64>) ->
         record
             .published_at_wall_us
             .saturating_add(ms.saturating_mul(1000))
+            .saturating_add(record.ttl_paused_us)
     });
     match (record.expires_at_wall_us, limit) {
         (Some(a), Some(b)) => Some(a.min(b)),

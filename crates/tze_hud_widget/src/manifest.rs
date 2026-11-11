@@ -80,7 +80,7 @@ pub struct RawParameterDeclaration {
     pub name: Option<String>,
     /// Writer: model (default), owner configuration, or runtime-local behavior.
     pub audience: Option<String>,
-    /// Type string: "f32", "string", "color", or "enum". Required.
+    /// Type string: "f32", "string", "color", "enum", or "deadline". Required.
     #[serde(rename = "type")]
     pub param_type: Option<String>,
     /// Default value. Required. Encoding depends on `param_type`:
@@ -127,11 +127,13 @@ pub struct RawBinding {
     pub target_element: Option<String>,
     /// SVG attribute name, or the synthetic target `"text-content"`. Required.
     pub target_attribute: Option<String>,
-    /// Mapping type string: "linear", "direct", or "discrete". Required.
+    /// Mapping type string: "linear", "direct", "discrete", or "threshold".
     pub mapping: Option<String>,
-    /// For "linear" mapping: minimum output attribute value.
+    /// For "threshold": compare an f32 value >= this number.
+    pub threshold: Option<f64>,
+    /// For "linear": minimum output. For "threshold": below output (default 0).
     pub attr_min: Option<f64>,
-    /// For "linear" mapping: maximum output attribute value.
+    /// For "linear": maximum output. For "threshold": at-or-above output (default 1).
     pub attr_max: Option<f64>,
     /// For "discrete" mapping: enum_value → attribute_value lookup table.
     /// Values may hold `{{token.key}}` placeholders, resolved at load.

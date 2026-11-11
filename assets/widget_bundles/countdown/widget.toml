@@ -1,0 +1,87 @@
+# Token-styled tonal card; runtime owns hover, model owns meaning.
+name = "countdown"
+version = "1.0.0"
+description = "Time remaining until a presentation-relative deadline"
+default_contention_policy = "LatestWins"
+
+[[parameter_schema]]
+name = "label"
+type = "string"
+default = ""
+
+[parameter_schema.constraints]
+string_max_bytes = 24
+
+[[parameter_schema]]
+name = "ends_in_ms"
+type = "deadline"
+default = 0
+
+[[parameter_schema]]
+name = "severity"
+type = "enum"
+default = "info"
+
+[parameter_schema.constraints]
+enum_allowed_values = ["info", "warning", "error"]
+
+[[parameter_schema]]
+name = "tooltip_visible"
+type = "f32"
+default = 0.0
+audience = "runtime"
+
+[parameter_schema.constraints]
+f32_min = 0.0
+f32_max = 1.0
+
+[hover_behavior]
+delay_ms = 180
+visibility_param = "tooltip_visible"
+hidden_value = 0.0
+visible_value = 1.0
+
+[hover_behavior.trigger_rect]
+x_pct = 0.0
+y_pct = 0.0
+width_pct = 1.0
+height_pct = 0.6129032
+
+[[layers]]
+svg_file = "card.svg"
+
+[[layers.bindings]]
+param = "label"
+target_element = "label"
+target_attribute = "text-content"
+mapping = "direct"
+
+[[layers.bindings]]
+param = "label"
+target_element = "tooltip-label"
+target_attribute = "text-content"
+mapping = "direct"
+
+[[layers.bindings]]
+param = "tooltip_visible"
+target_element = "tooltip"
+target_attribute = "opacity"
+mapping = "linear"
+attr_min = 0.0
+attr_max = 1.0
+
+[[layers.bindings]]
+param = "ends_in_ms"
+target_element = "value"
+target_attribute = "text-content"
+mapping = "direct"
+
+[[layers.bindings]]
+param = "severity"
+target_element = "value"
+target_attribute = "fill"
+mapping = "discrete"
+[layers.bindings.value_map]
+info = "{{token.color.primary}}"
+warning = "{{token.color.caution}}"
+error = "{{token.color.error}}"

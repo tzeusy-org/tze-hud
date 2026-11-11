@@ -7,7 +7,7 @@
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use winit::event_loop::{ControlFlow, EventLoopProxy};
 
@@ -104,16 +104,17 @@ pub(super) fn device_events_transition(
     })
 }
 
-pub(super) fn deadline_from_wall_us(
+/// Convert the scene's injected wall deadline using one paired observation.
+/// Taking another host wall sample here would invalidate TestClock epochs and
+/// could repeatedly arm an immediate wait without any content becoming due.
+pub(super) fn deadline_from_wall_us_at(
     deadline_wall_us: u64,
+    now_wall_us: u64,
+    now: Instant,
     source: RuntimeWakeupSource,
 ) -> Deadline {
-    let now_wall_us = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_micros() as u64;
     Deadline::new(
-        Instant::now() + Duration::from_micros(deadline_wall_us.saturating_sub(now_wall_us)),
+        now + Duration::from_micros(deadline_wall_us.saturating_sub(now_wall_us)),
         source,
     )
 }
@@ -567,7 +568,35 @@ mod tests {
 
     #[test]
     fn earliest_future_deadline_selects_wait_until() {
+        use tze_hud_scene::Clock;
+        let clock = tze_hud_scene::TestClock::new(1_000);
         let now = Instant::now();
+        for wall in [clock.now_us(), u64::MAX - 60_000_000] {
+            let mapped = super::deadline_from_wall_us_at(
+                wall + 60_000_000,
+                wall,
+                now,
+                RuntimeWakeupSource::TtlDeadline,
+            );
+            assert_eq!(mapped.at, now + Duration::from_secs(60));
+            assert_eq!(
+                control_flow_for_deadlines(now, [mapped]),
+                winit::event_loop::ControlFlow::WaitUntil(mapped.at)
+            );
+            for due in [0, wall] {
+                assert_eq!(
+                    super::deadline_from_wall_us_at(
+                        due,
+                        wall,
+                        now,
+                        RuntimeWakeupSource::TtlDeadline
+                    )
+                    .at,
+                    now,
+                    "due wall deadlines saturate at the paired instant"
+                );
+            }
+        }
         let later = Deadline::new(
             now + Duration::from_millis(40),
             RuntimeWakeupSource::TtlDeadline,

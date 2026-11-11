@@ -364,5 +364,7 @@ message WidgetParameterValueProto {
     string string_value = 3;
     Rgba   color_value  = 4;
     string enum_value   = 5;
+    // Relative integer milliseconds, 0..86400000; snapshotted at presentation.
+    int64 deadline_ms   = 6;
   }
 }

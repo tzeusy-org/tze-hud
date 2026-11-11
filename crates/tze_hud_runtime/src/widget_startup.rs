@@ -12,7 +12,7 @@
 //!
 //! ## Built-in bundles
 //!
-//! The three shipped bundles (gauge, progress-bar, status-indicator) are
+//! The shipped gauge, progress-bar, status-indicator, countdown, KPI and stepper bundles are
 //! embedded in the binary and always registered. `[widget_bundles].paths` is
 //! optional; an on-disk bundle with the same type name overrides the built-in.
 //!
@@ -56,13 +56,16 @@ macro_rules! builtin_bundle {
 }
 
 /// Widget bundles compiled into the executable so a lone `tze_hud.exe` exposes
-/// `gauge`, `progress-bar` and `status-indicator` with no asset files beside it.
+/// all shipped definitions with no asset files beside it.
 type BundleFiles = &'static [(&'static str, &'static [u8])];
 
 const BUILTIN_BUNDLES: &[(&str, BundleFiles)] = &[
     builtin_bundle!("gauge", ["background.svg", "fill.svg"]),
     builtin_bundle!("progress-bar", ["track.svg", "fill.svg"]),
     builtin_bundle!("status-indicator", ["indicator.svg"]),
+    builtin_bundle!("countdown", ["card.svg"]),
+    builtin_bundle!("kpi", ["card.svg"]),
+    builtin_bundle!("stepper", ["card.svg"]),
 ];
 
 // ─── Public API ───────────────────────────────────────────────────────────────
@@ -344,11 +347,18 @@ mod tests {
         v
     }
 
-    /// WHEN no [widget_bundles] section exists THEN the three built-in bundles
+    /// WHEN no [widget_bundles] section exists THEN all six built-in bundles
     /// are still registered, and a missing on-disk root does not break startup.
     #[test]
     fn builtin_bundles_register_without_any_paths() {
-        let expected = ["gauge", "progress-bar", "status-indicator"];
+        let expected = [
+            "countdown",
+            "gauge",
+            "kpi",
+            "progress-bar",
+            "status-indicator",
+            "stepper",
+        ];
         for raw in [
             RawConfig::default(),
             RawConfig {
@@ -399,7 +409,14 @@ mod tests {
 
         assert_eq!(
             registered_types(&scene),
-            ["gauge", "progress-bar", "status-indicator"]
+            [
+                "countdown",
+                "gauge",
+                "kpi",
+                "progress-bar",
+                "status-indicator",
+                "stepper"
+            ]
         );
         let gauge = scene.widget_registry.get_definition("gauge").unwrap();
         assert!(
