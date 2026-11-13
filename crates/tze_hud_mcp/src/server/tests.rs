@@ -2583,7 +2583,8 @@ async fn publish_wait_endings_deadline_delay_and_validation() {
                 call(&server, "hud_publish", json!({"surface":"zone:notification-area","key":"question","content":{"title":"Replacement"}})).await;
             }
             "displaced" => {
-                // Exercise the configured real stack's oldest-entry trim.
+                // Exercise the configured real stack's trim. Questions are
+                // spared while any other card can leave, so the peers ask too.
                 let depth = match server.scene.lock().await.zone_registry.zones["notification-area"]
                     .contention_policy
                 {
@@ -2591,7 +2592,7 @@ async fn publish_wait_endings_deadline_delay_and_validation() {
                     _ => panic!("production notification stack"),
                 };
                 for index in 0..depth {
-                    call(&server, "hud_publish", json!({"surface":"zone:notification-area","key":format!("peer{index}"),"content":{"title":"Peer"}})).await;
+                    call(&server, "hud_publish", json!({"surface":"zone:notification-area","key":format!("peer{index}"),"content":{"title":"Peer","actions":[{"label":"Ok","callback_id":format!("peer{index}")}]}})).await;
                 }
             }
             _ => {
@@ -2920,9 +2921,10 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         json!({"surface": "portal:main", "status": "degraded", "ttl_ms": 120000}),
     )
     .await;
+    // Nothing rendered, so the viewer has not reached either output unit.
     assert_eq!(
         status,
-        json!({"ok": true, "reattached": false, "pending_input": 1, "expires_in_ms": 120000})
+        json!({"ok": true, "reattached": false, "pending_input": 1, "expires_in_ms": 120000, "unread": 2})
     );
     assert_eq!(
         hub.lock().unwrap().get(&key).unwrap().hold_until_us,
@@ -2965,7 +2967,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         .clone();
     assert_eq!(
         portal,
-        json!({"s": "portal:main", "state": "active", "pending_input": 1})
+        json!({"s": "portal:main", "state": "active", "pending_input": 1, "unread": 2})
     );
 
     let v = call(&server, "hud_input", json!({"wait_ms": 1000})).await;
@@ -4454,4 +4456,167 @@ async fn user_test_zone_fixtures_and_documented_examples_match_production_parser
         assert_eq!(payload.urgency, urgency.unwrap_or(1));
         assert_eq!(record.expires_at_wall_us, Some(2_000_000));
     }
+}
+
+// ─── Outcome receipts (hud-ljhku.5) ─────────────────────────────────────────
+
+/// R5.3: a card trimmed from a full stack reaches its own publisher once, as
+/// a `displaced` input item carrying the card's key, ACKed like any item.
+#[tokio::test]
+async fn trimmed_card_reaches_only_its_publisher_as_a_displaced_item() {
+    let (server, _, a, b) = two_agents_for_zones(&["notification-area"]);
+    let (v, is_error) = call_as(
+        &server,
+        &a,
+        "hud_publish",
+        json!({"surface":"zone:notification-area","key":"build:7","content":{"body":"Building"}}),
+    )
+    .await;
+    assert!(!is_error, "{v}");
+    assert_eq!(
+        v,
+        json!({"ok":true,"expires_in_ms":60000}),
+        "no receipt fields"
+    );
+    for index in 0..5 {
+        call_as(
+            &server,
+            &b,
+            "hud_publish",
+            json!({"surface":"zone:notification-area","content":{"body":format!("status {index}")}}),
+        )
+        .await;
+    }
+    let (input, _) = call_as(&server, &a, "hud_input", json!({})).await;
+    let items = input["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "{input}");
+    let id = items[0]["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        items[0],
+        json!({"id":id,"s":"zone:notification-area","kind":"displaced","key":"build:7"})
+    );
+    assert_eq!(
+        call_as(&server, &b, "hud_input", json!({})).await.0,
+        json!({"items":[],"remaining":0}),
+        "the agent whose card caused the trim receives nothing"
+    );
+    let (redelivered, _) = call_as(&server, &a, "hud_input", json!({})).await;
+    assert_eq!(
+        redelivered["items"][0]["id"],
+        json!(id),
+        "unacked is redelivered"
+    );
+    assert_eq!(
+        call_as(&server, &a, "hud_input", json!({"ack":[id]}))
+            .await
+            .0,
+        json!({"items":[],"remaining":0})
+    );
+}
+
+/// R5.3 S3: same-key replacement, clear and expiry leave no receipt.
+#[tokio::test]
+async fn replacement_clear_and_expiry_queue_no_displaced_item() {
+    let (server, clock) = server();
+    let notify = |body: &str, key: &str, ttl: u64| json!({"surface":"zone:notification-area","key":key,"ttl_ms":ttl,"content":{"body":body}});
+    call(&server, "hud_publish", notify("v1", "k", 60000)).await;
+    call(&server, "hud_publish", notify("v2", "k", 60000)).await;
+    call(
+        &server,
+        "hud_clear",
+        json!({"surface":"zone:notification-area"}),
+    )
+    .await;
+    call(&server, "hud_publish", notify("brief", "e", 1000)).await;
+    clock.advance(2000);
+    server.scene.lock().await.drain_expired_zone_publications();
+    assert_eq!(
+        call(&server, "hud_input", json!({})).await,
+        json!({"items":[],"remaining":0})
+    );
+}
+
+/// R5.2 through MCP: a burst of status cards keeps a pending question.
+#[tokio::test]
+async fn status_burst_keeps_a_pending_question_on_screen() {
+    let (server, _) = server();
+    call(&server, "hud_publish", question(0)).await;
+    let asked = latest_card(&server).await;
+    for index in 0..5 {
+        call(
+            &server,
+            "hud_publish",
+            json!({"surface":"zone:notification-area","key":format!("s{index}"),"content":{"body":"status"}}),
+        )
+        .await;
+    }
+    let scene = server.scene.lock().await;
+    let shown = scene.zone_registry.active_for_zone("notification-area");
+    assert_eq!(shown.len(), 5);
+    assert!(shown.iter().any(|r| r.publication_id == asked));
+    assert!(!shown.iter().any(|r| r.merge_key.as_deref() == Some("s0")));
+}
+
+/// R5.4: the native unread badge count reaches hud_surfaces and the next
+/// publish reply, and disappears once the viewer reaches the OUTPUT tail.
+#[tokio::test]
+async fn portal_unread_is_reported_until_the_viewer_reaches_the_tail() {
+    let (server, _) = server();
+    let (server, hub) = hub_portal(server);
+    let key = PortalKey::new(psk_agent(), "main");
+    let first = call(
+        &server,
+        "hud_publish",
+        json!({"surface":"portal:main","content":"one"}),
+    )
+    .await;
+    assert!(first.get("unread").is_none(), "{first}");
+    for text in ["two", "three"] {
+        call(
+            &server,
+            "hud_publish",
+            json!({"surface":"portal:main","content":text}),
+        )
+        .await;
+    }
+    let surfaces = call(&server, "hud_surfaces", json!({})).await;
+    let entry = surfaces["surfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["s"] == "portal:main")
+        .unwrap()
+        .clone();
+    assert_eq!(entry["unread"], 3, "{entry}");
+    let next = call(
+        &server,
+        "hud_publish",
+        json!({"surface":"portal:main","content":"four"}),
+    )
+    .await;
+    assert_eq!(
+        next["unread"], 3,
+        "units the viewer had not reached: {next}"
+    );
+    {
+        let mut hub = hub.lock().unwrap();
+        let incarnation = hub.incarnation(&key).unwrap();
+        hub.mark_read_through(&key, incarnation, 4);
+    }
+    let surfaces = call(&server, "hud_surfaces", json!({})).await;
+    let entry = surfaces["surfaces"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["s"] == "portal:main")
+        .unwrap()
+        .clone();
+    assert!(entry.get("unread").is_none(), "{entry}");
+    let read = call(
+        &server,
+        "hud_publish",
+        json!({"surface":"portal:main","status":"active"}),
+    )
+    .await;
+    assert!(read.get("unread").is_none(), "{read}");
 }
