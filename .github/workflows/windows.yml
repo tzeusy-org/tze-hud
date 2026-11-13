@@ -135,7 +135,9 @@ jobs:
         timeout-minutes: 15
         shell: pwsh
         run: |
-          cargo test --profile release-dev --locked -p tze_hud_compositor --lib fonts::tests:: -- --nocapture
+          # Only the system-fallback tests: they are about real Microsoft faces.
+          # Other fonts:: tests pin Linux cosmic-text fallback (DejaVu) behavior.
+          cargo test --profile release-dev --locked -p tze_hud_compositor --lib -- fonts::tests::fallback fonts::tests::absent_fallback fonts::tests::installed_fallback fonts::tests::locale_ fonts::tests::japanese_locale fonts::tests::windows_system_fallback --nocapture
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Boot smoke (production config, MCP lifecycle, POC stages)
