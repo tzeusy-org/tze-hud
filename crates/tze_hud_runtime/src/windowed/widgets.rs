@@ -169,6 +169,8 @@ impl WinitApp {
                 at_capacity,
                 node_id,
                 placeholder: resolve_composer_placeholder(placeholder_cfg),
+                preedit: self.state.composer_preedit.clone(),
+                preedit_range: None,
             };
             if let Ok(mut guard) = self.state.local_composer_state.lock() {
                 *guard = Some(Some(state));
@@ -277,11 +279,50 @@ impl WinitApp {
         );
     }
 
+    /// Forward an IME composition (winit `Ime::Preedit`) to the focused
+    /// composer's echo (hud-ljhku.13). The compositor draws it underlined at
+    /// the caret; it never enters the draft (only `Ime::Commit` text does).
+    /// Empty text clears it (composition committed or cancelled). The OS
+    /// candidate window keeps the anchor it had when composition began
+    /// (`update_composer_ime_cursor_area` is not re-run here).
+    pub(super) fn set_composer_preedit(&mut self, text: String, cursor: Option<(usize, usize)>) {
+        let preedit =
+            (!text.is_empty()).then_some(tze_hud_compositor::ComposerPreedit { text, cursor });
+        if preedit == self.state.composer_preedit {
+            return;
+        }
+        self.state.composer_preedit = preedit;
+        let Some((text, cursor_byte, selection_anchor, at_capacity, node_id, placeholder_cfg)) =
+            self.state.input_processor.composer_draft_snapshot()
+        else {
+            // No composer: nothing draws it.
+            self.state.composer_preedit = None;
+            return;
+        };
+        let state = LocalComposerState {
+            text,
+            cursor_byte,
+            selection_anchor,
+            at_capacity,
+            node_id,
+            placeholder: resolve_composer_placeholder(placeholder_cfg),
+            preedit: self.state.composer_preedit.clone(),
+            preedit_range: None,
+        };
+        if let Ok(mut guard) = self.state.local_composer_state.lock() {
+            *guard = Some(Some(state));
+        }
+        if let Some(window) = &self.state.window {
+            window.request_redraw();
+        }
+    }
+
     /// Clear the local composer echo (called on blur, submit, cancel).
     ///
     /// Stores `Some(None)` (explicit deactivation) in the shared slot so the
     /// compositor clears the overlay on the next frame.
     pub(super) fn clear_local_composer_echo(&mut self) {
+        self.state.composer_preedit = None;
         if let Ok(mut guard) = self.state.local_composer_state.lock() {
             *guard = Some(None);
         }

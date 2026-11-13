@@ -586,6 +586,9 @@ struct WindowedRuntimeState {
     /// `Some(Some(state))` = new draft snapshot; `Some(None)` = deactivate.
     /// `None` = no update since last drain (compositor keeps prior state).
     local_composer_state: LocalComposerStateHandle,
+    /// IME composition in progress for the focused composer (hud-ljhku.13),
+    /// forwarded with each echo snapshot; never part of the draft.
+    composer_preedit: Option<tze_hud_compositor::ComposerPreedit>,
     /// Shared handle carrying the current keyboard-focus owner to the compositor's
     /// chrome-layer ring pass (hud-k6yvb). Written each frame in `about_to_wait`
     /// from the active tab's `FocusManager` owner; the compositor draws the ring
@@ -2627,8 +2630,21 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             // commit text is forwarded as a RawCharacterEvent so agents receive
             // CharacterEvent payloads regardless of input method.
             //
-            // Preedit events (Ime::Preedit) are v1-reserved and not forwarded.
+            // Preedit (above) is drawn locally and never forwarded to agents.
+            // ── IME preedit: composition drawn at the composer caret ─────────
+            // hud-ljhku.13: forwarded to the composer echo (underlined at the
+            // caret); only Ime::Commit text enters the draft.
+            WindowEvent::Ime(winit::event::Ime::Preedit(text, cursor)) => {
+                if let Some(source) = wake_source {
+                    self.state.wake.mark_main_work_pending(source);
+                }
+                self.set_composer_preedit(text, cursor);
+            }
+            WindowEvent::Ime(winit::event::Ime::Disabled) => {
+                self.set_composer_preedit(String::new(), None);
+            }
             WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
+                self.state.composer_preedit = None;
                 if self.panel_text(&text) {
                     return;
                 }
@@ -2686,7 +2702,10 @@ fn main_work_source_for_window_event(
         }
         | WindowEvent::MouseWheel { .. }
         | WindowEvent::KeyboardInput { .. }
-        | WindowEvent::Ime(winit::event::Ime::Commit(_)) => Some(RuntimeWakeupSource::SceneChange),
+        | WindowEvent::Ime(winit::event::Ime::Commit(_))
+        | WindowEvent::Ime(winit::event::Ime::Preedit(..)) => {
+            Some(RuntimeWakeupSource::SceneChange)
+        }
         _ => None,
     }
 }
@@ -3383,6 +3402,7 @@ impl WindowedRuntime {
             // Placeholder; replaced in resumed() with the Arc cloned from the
             // compositor.  Separate Arc so it works before compositor is created.
             local_composer_state: Arc::new(StdMutex::new(None)),
+            composer_preedit: None,
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
             surface_ui,
             // Placeholder; replaced in resumed() with the compositor's Arc (hud-wgiys).

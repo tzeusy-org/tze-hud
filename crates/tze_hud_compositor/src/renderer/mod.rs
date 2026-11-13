@@ -104,7 +104,9 @@ pub type ResizeGripHoverHandle = Arc<StdMutex<Option<SceneId>>>;
 pub type TileCloseHoverHandle = Arc<StdMutex<Option<SceneId>>>;
 use image_cache::ImageTextureEntry;
 use image_cache::apply_composer_slot;
-pub use image_cache::{ComposerVisualLayoutHandle, LocalComposerState, LocalComposerStateHandle};
+pub use image_cache::{
+    ComposerPreedit, ComposerVisualLayoutHandle, LocalComposerState, LocalComposerStateHandle,
+};
 use text::*;
 use token_colors::*;
 

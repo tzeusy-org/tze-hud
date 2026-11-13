@@ -36,6 +36,8 @@ fn local_composer_state_handle_slot_semantics() {
             at_capacity: false,
             node_id,
             placeholder: None,
+            preedit: None,
+            preedit_range: None,
         }));
     }
     apply_composer_slot(&handle, &mut local_composer);
@@ -136,6 +138,8 @@ async fn local_composer_text_item_uses_hit_region_bounds() {
         at_capacity: false,
         node_id: hit_id,
         placeholder: None,
+        preedit: None,
+        preedit_range: None,
     });
 
     let tokens = resolve_composer_overlay_tokens(&std::collections::HashMap::new());
@@ -262,6 +266,8 @@ async fn composer_placeholder_renders_only_when_draft_empty() {
         at_capacity: false,
         node_id: hit_id,
         placeholder: Some(placeholder.to_owned()),
+        preedit: None,
+        preedit_range: None,
     });
     let tile = scene.tiles.get(&tile_id).unwrap();
     let item = compositor
@@ -289,6 +295,8 @@ async fn composer_placeholder_renders_only_when_draft_empty() {
         at_capacity: false,
         node_id: hit_id,
         placeholder: Some(placeholder.to_owned()),
+        preedit: None,
+        preedit_range: None,
     });
     let tile = scene.tiles.get(&tile_id).unwrap();
     let typed = compositor
@@ -317,6 +325,8 @@ async fn composer_placeholder_renders_only_when_draft_empty() {
         at_capacity: false,
         node_id: hit_id,
         placeholder: None,
+        preedit: None,
+        preedit_range: None,
     });
     let tile = scene.tiles.get(&tile_id).unwrap();
     let no_hint = compositor
@@ -412,6 +422,8 @@ async fn composer_echo_confined_to_bottom_strip_full_tile_hitregion() {
         at_capacity: false,
         node_id: hit_id,
         placeholder: None,
+        preedit: None,
+        preedit_range: None,
     });
 
     compositor.prime_markdown_cache(&scene);
@@ -551,6 +563,8 @@ async fn composer_wrapped_draft_stays_in_short_pane_headless() {
         at_capacity: false,
         node_id: hit_id,
         placeholder: None,
+        preedit: None,
+        preedit_range: None,
     });
 
     compositor.prime_markdown_cache(&scene);
@@ -663,6 +677,8 @@ async fn composer_draft_overflow_is_clipped_to_box_headless() {
         at_capacity: false,
         node_id: hit_id,
         placeholder: None,
+        preedit: None,
+        preedit_range: None,
     });
 
     compositor.prime_markdown_cache(&scene);
@@ -826,6 +842,8 @@ async fn composer_draft_text_never_contains_caret_glyph() {
         at_capacity: false,
         node_id: hit_id,
         placeholder: None,
+        preedit: None,
+        preedit_range: None,
     });
 
     // Blink "on" phase (fresh compositor → elapsed == 0 → solid).
@@ -886,6 +904,8 @@ async fn composer_caret_quad_emitted_at_expected_position() {
         at_capacity: false,
         node_id: hit_id,
         placeholder: None,
+        preedit: None,
+        preedit_range: None,
     });
     // Pin the solid blink phase: GPU setup under load can outlast one half-period.
     compositor.composer_caret_blink_start = std::time::Instant::now();
@@ -930,6 +950,160 @@ async fn composer_caret_quad_emitted_at_expected_position() {
     );
 }
 
+/// hud-ljhku.13: splicing a preedit for drawing clamps offsets to char
+/// boundaries, defaults the caret to the composition end, suspends the
+/// selection, and leaves a state without (or with an empty) preedit as is.
+#[test]
+fn preedit_splice_clamps_and_defaults() {
+    let base = LocalComposerState {
+        text: "é!".to_owned(),
+        cursor_byte: 1, // inside 'é': snaps back to 0
+        selection_anchor: 3,
+        at_capacity: false,
+        node_id: SceneId::new(),
+        placeholder: Some("hint".into()),
+        preedit: None,
+        preedit_range: None,
+    };
+    let drawn = base.clone().with_preedit_applied();
+    assert_eq!((drawn.text.as_str(), drawn.preedit_range), ("é!", None));
+    assert_eq!(drawn.selection_anchor, 3, "no preedit: selection kept");
+    let empty = LocalComposerState {
+        preedit: Some(ComposerPreedit {
+            text: String::new(),
+            cursor: None,
+        }),
+        ..base.clone()
+    };
+    assert_eq!(empty.with_preedit_applied().preedit_range, None);
+    let composing = LocalComposerState {
+        preedit: Some(ComposerPreedit {
+            text: "日本".to_owned(),
+            cursor: Some((4, 4)), // inside '日': snaps back to 3
+        }),
+        ..base.clone()
+    };
+    let drawn = composing.with_preedit_applied();
+    assert_eq!(drawn.text, "日本é!");
+    assert_eq!(drawn.preedit_range, Some(0..6));
+    assert_eq!((drawn.cursor_byte, drawn.selection_anchor), (3, 3));
+    assert!(drawn.preedit.is_none());
+    let no_cursor = LocalComposerState {
+        cursor_byte: 3,
+        preedit: Some(ComposerPreedit {
+            text: "x".to_owned(),
+            cursor: None,
+        }),
+        ..base
+    };
+    let drawn = no_cursor.with_preedit_applied();
+    assert_eq!((drawn.text.as_str(), drawn.cursor_byte), ("é!x", 4));
+}
+
+/// hud-ljhku.13 R13.2 S1: an IME preedit forwarded through the echo slot is
+/// drawn inside the draft at the caret, underlined with
+/// `portal.composer.preedit_underline_color` (caret width thick, at the
+/// bottom of the font box); an empty preedit clears both.
+#[tokio::test]
+async fn composer_preedit_drawn_underlined_at_caret() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    compositor.set_token_map(
+        [(
+            "portal.composer.preedit_underline_color".to_owned(),
+            "#FF0000".to_owned(),
+        )]
+        .into(),
+    );
+    let (scene, tile_id, hit_id) = composer_caret_test_scene();
+    let draft = |preedit: Option<ComposerPreedit>| LocalComposerState {
+        text: "ab".to_owned(),
+        cursor_byte: 2,
+        selection_anchor: 2,
+        at_capacity: false,
+        node_id: hit_id,
+        placeholder: None,
+        preedit,
+        preedit_range: None,
+    };
+    let push = |compositor: &mut Compositor, state: LocalComposerState| {
+        *compositor.local_composer_state.lock().unwrap() = Some(Some(state));
+        compositor.drain_local_composer_state();
+        compositor.prime_composer_scroll_offset(&scene);
+    };
+    push(
+        &mut compositor,
+        draft(Some(ComposerPreedit {
+            text: "かん".to_owned(),
+            cursor: None,
+        })),
+    );
+    let tokens = resolve_composer_overlay_tokens(&compositor.token_map);
+    let tile = scene.tiles.get(&tile_id).unwrap();
+    let item = compositor
+        .collect_composer_text_item(tile, &scene, 320.0, 200.0, &tokens)
+        .expect("composer text item");
+    assert_eq!(item.text.as_ref(), "abかん", "preedit drawn at the caret");
+
+    let mut verts: Vec<crate::pipeline::RectVertex> = Vec::new();
+    compositor.append_composer_preedit_underline_vertices(&scene, &mut verts, 320.0, 200.0);
+    assert_eq!(verts.len(), 6, "one underline quad for a one-row preedit");
+    for v in &verts {
+        assert_eq!(v.color, [1.0, 0.0, 0.0, 1.0], "underline token color");
+    }
+    let px_x = |ndc: f32| (ndc + 1.0) * 0.5 * 320.0;
+    let px_y = |ndc: f32| (1.0 - ndc) * 0.5 * 200.0;
+    let left = verts
+        .iter()
+        .map(|v| px_x(v.position[0]))
+        .fold(f32::INFINITY, f32::min);
+    let right = verts
+        .iter()
+        .map(|v| px_x(v.position[0]))
+        .fold(f32::NEG_INFINITY, f32::max);
+    let top = verts
+        .iter()
+        .map(|v| px_y(v.position[1]))
+        .fold(f32::INFINITY, f32::min);
+    let bottom = verts
+        .iter()
+        .map(|v| px_y(v.position[1]))
+        .fold(f32::NEG_INFINITY, f32::max);
+    // Starts at the caret, after the shaped "ab", and spans the composition.
+    let text_x = 38.0; // region.x 32 + content_inset_px 6 (same scene as the caret test)
+    let (ab_x, width) = compositor
+        .text_rasterizer
+        .as_mut()
+        .unwrap()
+        .measure_composer_caret("abかん", 2, 16.0, crate::text::LINE_HEIGHT_MULTIPLIER);
+    assert!(ab_x > 0.0);
+    assert!(
+        (left - (text_x + ab_x)).abs() < 0.5,
+        "left {left} vs caret {}",
+        text_x + ab_x
+    );
+    assert!(
+        (right - (text_x + width)).abs() < 0.5,
+        "ends after the composition: {right} vs {}",
+        text_x + width
+    );
+    let line_height = 16.0 * crate::text::LINE_HEIGHT_MULTIPLIER;
+    let strip_y = 46.0 + (72.0 - (line_height + 12.0));
+    let want_top = strip_y + 6.0 + (line_height + 16.0) * 0.5;
+    assert!((top - want_top).abs() < 1e-2, "top {top} want {want_top}");
+    assert!((bottom - top - 1.5).abs() < 1e-3, "caret-width thickness");
+
+    // Cancelling the composition clears the drawn preedit and its underline.
+    push(&mut compositor, draft(None));
+    let item = compositor
+        .collect_composer_text_item(tile, &scene, 320.0, 200.0, &tokens)
+        .expect("composer text item");
+    assert_eq!(item.text.as_ref(), "ab");
+    verts.clear();
+    compositor.append_composer_preedit_underline_vertices(&scene, &mut verts, 320.0, 200.0);
+    assert!(verts.is_empty());
+}
+
 /// hud-hxhnt finding 2 (gate c): the selection highlight `StyledRunItem` byte
 /// range is the RAW `[min(cursor, anchor), max(cursor, anchor))` range — no
 /// +3-byte caret-glyph shift, since the caret is no longer inserted into the
@@ -953,6 +1127,8 @@ async fn composer_selection_styled_run_uses_raw_byte_offsets() {
             at_capacity: false,
             node_id: hit_id,
             placeholder: None,
+            preedit: None,
+            preedit_range: None,
         });
         let item = compositor
             .collect_composer_text_item(tile, &scene, 320.0, 200.0, &tokens)
@@ -993,6 +1169,8 @@ async fn composer_selection_styled_run_uses_raw_byte_offsets() {
         at_capacity: false,
         node_id: hit_id,
         placeholder: None,
+        preedit: None,
+        preedit_range: None,
     });
     let item = compositor
         .collect_composer_text_item(tile, &scene, 320.0, 200.0, &tokens)
@@ -1020,6 +1198,8 @@ async fn single_line_composer_publishes_visual_layout() {
         at_capacity: false,
         node_id: hit_id,
         placeholder: None,
+        preedit: None,
+        preedit_range: None,
     });
     // Default token map → max_lines defaults to > 1, so pin max_lines=1 to
     // force the single-line profile explicitly (rather than relying on the
@@ -1692,6 +1872,8 @@ async fn top_anchored_empty_caret_sits_at_pane_origin_no_teleport() {
         at_capacity: false,
         node_id: hit_id,
         placeholder: None,
+        preedit: None,
+        preedit_range: None,
     });
     compositor.prime_composer_scroll_offset(&scene);
     let empty_item = {
@@ -1719,6 +1901,8 @@ async fn top_anchored_empty_caret_sits_at_pane_origin_no_teleport() {
         at_capacity: false,
         node_id: hit_id,
         placeholder: None,
+        preedit: None,
+        preedit_range: None,
     });
     compositor.prime_composer_scroll_offset(&scene);
     let typed_item = {
@@ -2147,6 +2331,8 @@ async fn portal_resize_scales_runtime_authored_input_text_and_layout() {
         at_capacity: false,
         node_id: composer_id,
         placeholder: None,
+        preedit: None,
+        preedit_range: None,
     });
 
     let composer_tokens = resolve_composer_overlay_tokens(&compositor.token_map);
@@ -2221,6 +2407,8 @@ async fn repro_resize_first_frame_keeps_composer_chrome_aligned_with_wrapped_tex
         at_capacity: false,
         node_id: composer_id,
         placeholder: None,
+        preedit: None,
+        preedit_range: None,
     });
     compositor.prime_composer_scroll_offset(&scene);
     let old_visible_lines = compositor.composer_layout.visible_lines;

@@ -207,6 +207,7 @@ impl WindowedRuntimeState {
             keyboard_activation_nodes: HashMap::new(),
             consumed_command_keydowns: HashSet::new(),
             local_composer_state: Arc::new(StdMutex::new(None)),
+            composer_preedit: None,
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
             surface_ui: Default::default(),
             resize_grip_hover_state: Arc::new(StdMutex::new(None)),

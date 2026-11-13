@@ -106,6 +106,53 @@ pub struct LocalComposerState {
     /// `None` (or empty) renders no placeholder, so composers that opt out are
     /// unchanged.
     pub placeholder: Option<String>,
+    /// IME composition in progress at the caret (hud-ljhku.13), as the
+    /// runtime received it (`Ime::Preedit`). Never part of the draft: only
+    /// `Ime::Commit` text is drafted. `None` (or empty text) draws none.
+    pub preedit: Option<ComposerPreedit>,
+    /// Byte range of the preedit inside [`Self::text`] once
+    /// [`Self::with_preedit_applied`] spliced it in; drawn underlined. The
+    /// runtime always sends `None`.
+    pub preedit_range: Option<std::ops::Range<usize>>,
+}
+
+/// An IME composition string (winit `Ime::Preedit`), drawn at the composer
+/// caret with an underline (hud-ljhku.13).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComposerPreedit {
+    /// Composition text.
+    pub text: String,
+    /// The IME's cursor (or selected clause) as a byte range into `text`;
+    /// `None` hides the caret per winit.
+    pub cursor: Option<(usize, usize)>,
+}
+
+impl LocalComposerState {
+    /// The state the composer draws: a non-empty preedit is spliced into the
+    /// draft at the caret, the caret moves to the IME cursor inside it (its
+    /// end when the IME gave none), any selection highlight is suspended, and
+    /// [`Self::preedit_range`] marks the underlined bytes. Without a preedit
+    /// the state is unchanged.
+    pub fn with_preedit_applied(mut self) -> Self {
+        let Some(preedit) = self.preedit.take().filter(|p| !p.text.is_empty()) else {
+            self.preedit_range = None;
+            return self;
+        };
+        let mut at = self.cursor_byte.min(self.text.len());
+        while !self.text.is_char_boundary(at) {
+            at -= 1;
+        }
+        self.text.insert_str(at, &preedit.text);
+        let len = preedit.text.len();
+        let mut caret = preedit.cursor.map_or(len, |(begin, _)| begin.min(len));
+        while !preedit.text.is_char_boundary(caret) {
+            caret -= 1;
+        }
+        self.cursor_byte = at + caret;
+        self.selection_anchor = self.cursor_byte;
+        self.preedit_range = Some(at..at + len);
+        self
+    }
 }
 
 /// Shared update slot for delivering [`LocalComposerState`] from the
@@ -177,7 +224,7 @@ pub(crate) fn apply_composer_slot(
     if let Ok(mut guard) = handle.lock() {
         if let Some(update) = guard.take() {
             let is_new_draft = update.is_some();
-            *current = update;
+            *current = update.map(LocalComposerState::with_preedit_applied);
             return is_new_draft;
         }
     }

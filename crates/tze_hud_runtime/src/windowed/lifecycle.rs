@@ -4690,6 +4690,93 @@ mod tests {
         app.enqueue_pointer_event(PointerEventKind::Up);
     }
 
+    /// hud-ljhku.13 R13.2 S1: `Ime::Preedit` reaches the composer draw path
+    /// (the echo slot) without entering the draft; an empty preedit clears
+    /// it; only committed text is drafted.
+    #[test]
+    fn ime_preedit_is_drawn_not_drafted() {
+        use tze_hud_input::{FocusManager, InputProcessor};
+
+        let (scene, tab_id) = scene_with_pointer_composer();
+        let mut fm = FocusManager::new();
+        fm.add_tab(tab_id);
+        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+        app.state.cursor_x = 200.0;
+        app.state.cursor_y = 50.0;
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        app.enqueue_pointer_event(PointerEventKind::Up);
+        app.state.input_processor.route_character_to_composer("ab");
+        app.push_local_composer_echo(std::time::Instant::now());
+        let take_echo = |app: &mut WinitApp| {
+            app.state
+                .local_composer_state
+                .lock()
+                .unwrap()
+                .take()
+                .flatten()
+                .expect("composer echo")
+        };
+        take_echo(&mut app);
+
+        // "かん" with the IME cursor after its first character.
+        app.set_composer_preedit("かん".into(), Some((3, 3)));
+        let echo = take_echo(&mut app);
+        assert_eq!(echo.text, "ab", "preedit never enters the draft");
+        assert_eq!(
+            echo.preedit,
+            Some(tze_hud_compositor::ComposerPreedit {
+                text: "かん".into(),
+                cursor: Some((3, 3)),
+            })
+        );
+        let drawn = echo.with_preedit_applied();
+        assert_eq!(drawn.text, "abかん");
+        assert_eq!(drawn.preedit_range, Some(2..8));
+        assert_eq!(drawn.cursor_byte, 5, "caret at the IME cursor");
+        assert_eq!(drawn.selection_anchor, drawn.cursor_byte);
+        assert_eq!(
+            app.state
+                .input_processor
+                .composer_draft_snapshot()
+                .unwrap()
+                .0,
+            "ab"
+        );
+
+        // A repeated identical preedit is not re-sent.
+        app.set_composer_preedit("かん".into(), Some((3, 3)));
+        assert!(app.state.local_composer_state.lock().unwrap().is_none());
+
+        // Cancel: an empty preedit clears what is drawn.
+        app.set_composer_preedit(String::new(), None);
+        let echo = take_echo(&mut app);
+        assert_eq!(echo.preedit, None);
+        assert_eq!(echo.with_preedit_applied().text, "ab");
+
+        // Compose again, then commit: winit sends an empty preedit before
+        // Ime::Commit, whose text alone is drafted.
+        app.set_composer_preedit("かん".into(), None);
+        app.set_composer_preedit(String::new(), None);
+        app.dispatch_character_event(&tze_hud_input::keyboard::RawCharacterEvent {
+            character: "漢".into(),
+            timestamp_mono_us: tze_hud_scene::MonoUs(1),
+        });
+        assert_eq!(
+            app.state
+                .input_processor
+                .composer_draft_snapshot()
+                .unwrap()
+                .0,
+            "ab漢"
+        );
+        assert!(app.state.composer_preedit.is_none());
+
+        // Blur drops any composition with the echo.
+        app.set_composer_preedit("x".into(), None);
+        app.clear_local_composer_echo();
+        assert!(app.state.composer_preedit.is_none());
+    }
+
     /// Removing the tile that holds a focused composer (agent clears its
     /// portal, or the lease expires) must blur the composer and clear the
     /// local echo. Otherwise the compositor keeps a caret blinking for a
