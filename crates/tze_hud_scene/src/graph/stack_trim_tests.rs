@@ -360,8 +360,20 @@ fn a_publisher_that_never_drains_input_keeps_a_bounded_receipt_queue() {
             kind: PendingActionKind::Callback("approve".into()),
             key: None,
         });
+        let mut trimmed = Vec::new();
         for i in 0..60 {
+            let ids = |scene: &SceneGraph| -> Vec<SceneId> {
+                scene
+                    .zone_registry
+                    .active_for_zone(ZONE)
+                    .iter()
+                    .map(|r| r.publication_id)
+                    .collect()
+            };
+            let before = ids(&scene);
             publish(&mut scene, plane, "ticker", status(&format!("tick {i}")));
+            let after = ids(&scene);
+            trimmed.extend(before.into_iter().filter(|id| !after.contains(id)));
         }
         let queued = scene.take_pending_actions("ticker");
         let displaced: Vec<_> = queued
@@ -375,15 +387,14 @@ fn a_publisher_that_never_drains_input_keeps_a_bounded_receipt_queue() {
                 .any(|a| a.kind == PendingActionKind::Callback("approve".into())),
             "{plane:?}"
         );
-        // Only older receipts drop: the newest trimmed card is still reported.
-        let newest = scene
-            .zone_registry
-            .active_for_zone(ZONE)
-            .first()
-            .map(|r| r.publication_id);
-        assert_ne!(
-            displaced.last().unwrap().publication_id,
-            newest,
+        // Only older receipts drop: the kept ones are the last trims, in order.
+        let kept: Vec<_> = displaced
+            .iter()
+            .map(|a| a.publication_id.unwrap())
+            .collect();
+        assert_eq!(
+            kept,
+            trimmed[trimmed.len() - DISPLACED_RECEIPT_CAP..],
             "{plane:?}"
         );
     }

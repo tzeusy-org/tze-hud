@@ -140,7 +140,8 @@ impl SceneGraph {
         if let Some(queue) = self.pending_actions.get_mut(&victim.publisher_namespace) {
             let is_receipt = |a: &PendingAction| a.kind == PendingActionKind::Displaced;
             if key.is_some() {
-                queue.retain(|a| !(is_receipt(a) && a.key == key));
+                let zone = &victim.zone_name;
+                queue.retain(|a| !(is_receipt(a) && a.key == key && &a.zone_name == zone));
             }
             while queue.iter().filter(|a| is_receipt(a)).count() >= DISPLACED_RECEIPT_CAP {
                 let oldest = queue.iter().position(is_receipt).expect("counted above");
