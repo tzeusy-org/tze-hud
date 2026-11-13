@@ -160,7 +160,8 @@ Owner decision (2026-10-07): freeze promise removed; safe mode already pauses ag
 
 All Windows overlay HWNDs start inactive and preserve `WS_EX_NOACTIVATE` across
 cursor hit-test changes. `WM_MOUSEACTIVATE` keeps ordinary clicks local without
-activation; an accepted composer or panel text-field hit explicitly takes focus
+activation; an accepted composer or panel text-field hit, or the start of a
+portal OUTPUT selection (so Ctrl+C can copy it), explicitly takes focus
 outside scene guards. Each explicit take records one outer external foreground;
 nested primary/secondary takes preserve it. A keyboard answer or outer Esc may
 return only while an installed HUD HWND still owns the foreground and the saved

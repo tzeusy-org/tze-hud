@@ -1034,6 +1034,82 @@ def scenario_card_link(run: Run) -> None:
         raise ScenarioFailed("links create no hud_input item", {"items": items, "status": run.status()})
 
 
+def scenario_portal_reading(run: Run) -> None:
+    """hud-ljhku.2: OUTPUT links open on release, drags select, Ctrl+C copies, cursors follow."""
+    s = "portal:g-reading"
+    words = " ".join(["words"] * 4)
+    content = (f"[alpha {words}](https://a.example.invalid/)\n"
+               f"[bravo {words}](https://b.example.invalid/)\n"
+               f"Line three {words}\nLine four {words}\nLine five {words}")
+    run.publish(s, content=content, ttl_ms=0)
+    run.expect(f"{s} shows its text", on(s, lambda p: p["output"]["at_tail"]
+                                         and (p["output"]["last_visible_line"] or "").startswith("Line five")))
+    run.settle()
+    out = {k: round(v) for k, v in run.portal(s)["panes"]["output"].items()}
+    x = out["x"] + 30
+
+    def at(y: int) -> dict:
+        run.glide(x, y)
+        time.sleep(0.06)
+        return run.portal(s)
+
+    # Find each link row from the reported hint alone (no layout guessing).
+    rows: dict[str, int] = {}
+    for y in range(out["y"] + 2, out["y"] + min(out["h"], 240), 2):
+        hint = at(y)["link_hint"]
+        if hint and hint not in rows:
+            rows[hint] = y
+        if len(rows) == 2 and hint is None:
+            break
+    a, b = rows.get("a.example.invalid"), rows.get("b.example.invalid")
+    if a is None or b is None:
+        raise ScenarioFailed("hover finds both links by their host hint", {"rows": rows, "portal": run.portal(s)})
+    pitch = b - a
+    a, b = a + pitch // 2 - 1, b + pitch // 2 - 1  # row centres
+    run.glide(x, b)
+    run.expect("hand cursor and host hint over a link (R2.1 S8, R2.4 S1)",
+               on(s, lambda p: p["cursor"] == "hand" and p["link_hint"] == "b.example.invalid"))
+    text_y = b + pitch  # "Line three"
+    run.glide(x, text_y)
+    run.expect("I-beam over text, no hint", on(s, lambda p: p["cursor"] == "ibeam" and p["link_hint"] is None))
+    run.glide(out["x"] + out["w"] - 6, text_y)
+    run.expect("arrow over blank OUTPUT", on(s, lambda p: p["cursor"] == "arrow"))
+
+    launches = run.status()["link_launches"]
+    run.glide(x, a)
+    run.click()
+    run.expect("a link click launches once (R2.1 S1)", lambda st: st["link_launches"] == launches + 1)
+    time.sleep(0.7)  # past the double-click interval
+    run.glide(x, b)
+    run.inj.click(repeat=2)
+    run.expect("a link double-click launches once and selects nothing (R2.1 S3)",
+               lambda st: st["link_launches"] == launches + 2 and portal_entry(st, s)["selection_chars"] == 0)
+    time.sleep(0.7)
+    run.drag((x, a), (x + 120, a))
+    run.expect("a press-drag on a link selects (R2.1 S2)", on(s, lambda p: p["selection_chars"] > 0))
+    run.observe_for("and launches nothing", lambda st: st["link_launches"] == launches + 2, 0.3)
+    run.key("Escape")
+    run.expect("Esc clears the selection (R2.2 S4)", on(s, lambda p: p["selection_chars"] == 0))
+
+    writes = run.status()["clipboard_writes"]
+    time.sleep(0.7)
+    run.drag((x, text_y), (x + 60, text_y + 2 * pitch))
+    selected = run.expect("a three-line drag selects (R2.2 S1)",
+                          on(s, lambda p: p["selection_chars"] > len("Line three ")))
+    run.key("ctrl+c")
+    run.expect("Ctrl+C writes the clipboard once with the selection kept",
+               lambda st: st["clipboard_writes"] == writes + 1
+               and portal_entry(st, s)["selection_chars"] == portal_entry(selected, s)["selection_chars"])
+    if WINDOWS:  # tier W: the real clipboard holds the selected plain text
+        text = WIN.clipboard_text() or ""
+        if not ("\nLine four words words words words\n" in text and len(text) == portal_entry(selected, s)["selection_chars"]):
+            raise ScenarioFailed("the clipboard holds the three selected lines", {"chars": len(text)})
+    run.key("Escape")
+    run.expect("selection cleared", on(s, lambda p: p["selection_chars"] == 0))
+    if items := run.inputs():
+        raise ScenarioFailed("OUTPUT reading creates no hud_input item", {"items": items})
+
+
 def scenario_widget_hover(run: Run) -> None:
     """R14.2 S6: the declared widget target shows its tooltip after dwell and hides on leave."""
     surface = "widget:main-status"
@@ -1851,6 +1927,7 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "card-dismiss": scenario_card_dismiss,
     "card-link": scenario_card_link,
     "stack-trim": scenario_stack_trim,
+    "portal-reading": scenario_portal_reading,
     "widget-hover": scenario_widget_hover,
     "drag-alignment": scenario_drag_alignment,        # 8
     "drag-release": scenario_drag_release,            # 9
