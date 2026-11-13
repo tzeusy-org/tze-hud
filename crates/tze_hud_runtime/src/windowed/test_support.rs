@@ -313,6 +313,7 @@ pub(super) fn make_windowed_keyboard_test_app(
         static_hit_regions: Vec::new(),
         widget_hover_trackers: std::collections::HashMap::new(),
         pending_widget_svgs: Vec::new(),
+        text_fit: Default::default(),
         modifiers: winit::keyboard::ModifiersState::empty(),
         primary_monitor: None,
         secondaries: Vec::new(),

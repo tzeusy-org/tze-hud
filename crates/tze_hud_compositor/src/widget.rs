@@ -2441,6 +2441,62 @@ fn composed_widget_cache_key(
     }
 }
 
+/// String params whose bound text would run past the widget canvas,
+/// laid out by the same usvg text engine and widget font set that draw it.
+/// Only horizontal overflow counts: string params are single-line labels.
+/// Sorted by name.
+pub(crate) fn clipped_text_params(
+    svg_layers: &[(&str, &[WidgetBinding])],
+    param_constraints: &HashMap<String, (f32, f32)>,
+    params: &HashMap<String, WidgetParameterValue>,
+) -> Vec<String> {
+    /// Antialiasing slack: a glyph ending on the edge is not cut.
+    const EDGE_SLACK: f32 = 0.5;
+    let mut clipped = std::collections::BTreeSet::new();
+    for (svg, bindings) in svg_layers {
+        let measured: Vec<&WidgetBinding> = bindings
+            .iter()
+            .filter(|b| {
+                b.target_attribute == "text-content"
+                    && matches!(params.get(&b.param),
+                        Some(WidgetParameterValue::String(s)) if !s.is_empty())
+            })
+            .collect();
+        if measured.is_empty() {
+            continue;
+        }
+        let mut bound = (*svg).to_owned();
+        for binding in *bindings {
+            if let Some(value) = resolve_binding_value(binding, params, param_constraints) {
+                let value = if binding.target_attribute == "text-content" {
+                    escape_text(&value)
+                } else {
+                    value
+                };
+                bound = apply_svg_attribute(
+                    &bound,
+                    &binding.target_element,
+                    &binding.target_attribute,
+                    &value,
+                );
+            }
+        }
+        let Ok(tree) = resvg::usvg::Tree::from_str(&bound, &widget_usvg_options()) else {
+            continue;
+        };
+        let width = tree.size().width();
+        for binding in measured {
+            if let Some(resvg::usvg::Node::Text(text)) = tree.node_by_id(&binding.target_element) {
+                let bbox = text.abs_bounding_box();
+                if bbox.left() < -EDGE_SLACK || bbox.right() > width + EDGE_SLACK {
+                    clipped.insert(binding.param.clone());
+                }
+            }
+        }
+    }
+    clipped.into_iter().collect()
+}
+
 fn rasterize_single_svg_layer(
     svg_text: &str,
     pixel_width: u32,
@@ -2777,6 +2833,8 @@ pub struct WidgetRenderer {
     /// Raw SVG bytes keyed by (widget_type_id, svg_filename).
     /// Stored at widget type registration time.
     svgs: HashMap<(String, String), Vec<u8>>,
+    /// Admission-time text measurement kept in step with `svgs`.
+    text_fit: Option<std::sync::Arc<crate::renderer::TextFitMeasurer>>,
     svg_resident_allocation_ids: HashMap<(String, String), tze_hud_resource::AllocationId>,
 
     /// Per-instance texture cache keyed by instance_name.
@@ -2897,6 +2955,7 @@ impl WidgetRenderer {
             restyled_types: std::collections::HashSet::new(),
             resident_ledger: None,
             svgs: HashMap::new(),
+            text_fit: None,
             svg_resident_allocation_ids: HashMap::new(),
             textures: HashMap::new(),
             raster_counts: HashMap::new(),
@@ -2964,6 +3023,14 @@ impl WidgetRenderer {
     ///
     /// Called at startup when widget bundles are loaded, before any instances
     /// are initialized. The SVG bytes are stored keyed by (widget_type_id, svg_filename).
+    /// Keep `fit` measuring with every registered SVG, current ones first.
+    pub(crate) fn set_text_fit(&mut self, fit: std::sync::Arc<crate::renderer::TextFitMeasurer>) {
+        for ((widget_type, svg_file), svg) in &self.svgs {
+            fit.register_widget_svg(widget_type, svg_file, svg);
+        }
+        self.text_fit = Some(fit);
+    }
+
     pub fn register_svg(&mut self, widget_type_id: &str, svg_filename: &str, svg_bytes: Vec<u8>) {
         let byte_count = svg_bytes.len();
         let key = (widget_type_id.to_string(), svg_filename.to_string());
@@ -2983,6 +3050,9 @@ impl WidgetRenderer {
                 return;
             }
         };
+        if let Some(fit) = &self.text_fit {
+            fit.register_widget_svg(widget_type_id, svg_filename, &svg_bytes);
+        }
         if let Some(old) = self.svgs.insert(key.clone(), svg_bytes)
             && Some(&old) != self.svgs.get(&key)
         {
@@ -5268,5 +5338,46 @@ mod tests {
             "warning indicator should be yellow (low blue), got: b={}",
             px.blue()
         );
+    }
+}
+
+#[cfg(test)]
+mod text_fit_tests {
+    use super::*;
+
+    /// hud-ljhku.5 R5.1 S3: a bound label that runs past the canvas is cut;
+    /// one that fits, or a param bound to no text, is not.
+    #[test]
+    fn clipped_text_params_reports_labels_past_the_canvas() {
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="120" height="40" viewBox="0 0 120 40">
+<text id="label" x="8" y="26" font-family="sans-serif" font-size="16"></text>
+<text id="value" x="8" y="38" font-family="sans-serif" font-size="8"></text>
+<rect id="bar" x="0" y="0" width="10" height="4"/>
+</svg>"#;
+        let text = |param: &str, element: &str| WidgetBinding {
+            param: param.into(),
+            target_element: element.into(),
+            target_attribute: "text-content".into(),
+            mapping: WidgetBindingMapping::Direct,
+        };
+        let bindings = vec![text("label", "label"), text("value", "value")];
+        let layers = [(svg, bindings.as_slice())];
+        let string = |s: &str| WidgetParameterValue::String(s.into());
+        let params = HashMap::from([
+            (
+                "label".to_string(),
+                string("A label far too long for this card"),
+            ),
+            ("value".to_string(), string("ok")),
+        ]);
+        assert_eq!(
+            clipped_text_params(&layers, &HashMap::new(), &params),
+            ["label"]
+        );
+        let fits = HashMap::from([
+            ("label".to_string(), string("Short")),
+            ("value".to_string(), string("<ok & fine>")),
+        ]);
+        assert!(clipped_text_params(&layers, &HashMap::new(), &fits).is_empty());
     }
 }

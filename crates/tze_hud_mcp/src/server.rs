@@ -351,6 +351,9 @@ pub struct McpServer {
     state: McpState,
     /// Runtime safe-mode flag (shared with gRPC); false when standalone.
     safe_mode: Arc<AtomicBool>,
+    /// The renderer's admission-time text measurement; `None` reports no
+    /// `clipped` (no renderer, e.g. a bare test server).
+    text_fit: Option<Arc<dyn tze_hud_scene::TextFit>>,
 }
 
 impl McpServer {
@@ -371,6 +374,7 @@ impl McpServer {
             input_notifiers: InputNotifiers::default(),
             state: McpState::default(),
             safe_mode: Arc::new(AtomicBool::new(false)),
+            text_fit: None,
         }
     }
 
@@ -402,6 +406,13 @@ impl McpServer {
     /// Share the runtime's safe-mode flag so mutating verbs honor it.
     pub fn with_safe_mode(mut self, flag: Arc<AtomicBool>) -> Self {
         self.safe_mode = flag;
+        self
+    }
+
+    /// Measure published text with the renderer's shaper and tokens, so
+    /// publish replies can report `clipped`.
+    pub fn with_text_fit(mut self, fit: Arc<dyn tze_hud_scene::TextFit>) -> Self {
+        self.text_fit = Some(fit);
         self
     }
 
@@ -443,6 +454,7 @@ impl McpServer {
             agent: identity,
             widget_transition_ms: self.config.widget_transition_ms,
             publication_defaults: &self.config.publication_defaults,
+            text_fit: self.text_fit.as_deref(),
         }
     }
 

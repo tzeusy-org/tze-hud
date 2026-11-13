@@ -44,6 +44,9 @@ use crate::threads::ShutdownToken;
 /// Created internally by the windowed runtime from `WindowedConfig` fields.
 #[derive(Debug, Clone)]
 pub struct McpServerConfig {
+    /// The renderer's admission-time text measurement behind `clipped` in
+    /// publish replies; `None` reports nothing.
+    pub text_fit: Option<Arc<dyn tze_hud_scene::TextFit>>,
     /// Implicit widget duration from the same resolved startup theme as the compositor.
     pub widget_transition_ms: u32,
     /// Same live omission default as the production gRPC service.
@@ -240,6 +243,9 @@ async fn start_mcp_http_server_inner(
         .with_safe_mode(safe_mode);
     if let Some(tx) = portals {
         server_builder = server_builder.with_portals(tx);
+    }
+    if let Some(fit) = config.text_fit.clone() {
+        server_builder = server_builder.with_text_fit(fit);
     }
     let server = Arc::new(server_builder);
 
@@ -749,6 +755,7 @@ mod tests {
 
     fn make_config(port: u16, psk: &str) -> McpServerConfig {
         McpServerConfig {
+            text_fit: None,
             appearance: None,
             publication_defaults: Default::default(),
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
@@ -1410,6 +1417,7 @@ mod tests {
     async fn mcp_http_tools_list_on_every_listener() {
         let rig = crate::pairing::tests::rig();
         let config = McpServerConfig {
+            text_fit: None,
             appearance: None,
             publication_defaults: Default::default(),
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
@@ -1579,6 +1587,7 @@ mod tests {
     async fn mcp_http_only_loopback_bind_failure_is_fatal() {
         let agents = tze_hud_scene::config::AgentDirectory::unrestricted("k").shared();
         let cfg = |addrs: [&str; 2]| McpServerConfig {
+            text_fit: None,
             appearance: None,
             publication_defaults: Default::default(),
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(

@@ -4620,3 +4620,131 @@ async fn portal_unread_is_reported_until_the_viewer_reaches_the_tail() {
     .await;
     assert!(read.get("unread").is_none(), "{read}");
 }
+
+/// Reports text containing "LONG" as cut; counts every measurement.
+#[derive(Debug, Default)]
+struct MarkerFit {
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+impl tze_hud_scene::TextFit for MarkerFit {
+    fn notification(
+        &self,
+        _: &SceneGraph,
+        _: &str,
+        payload: &tze_hud_scene::types::NotificationPayload,
+    ) -> Vec<&'static str> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let mut out = Vec::new();
+        if payload.title.contains("LONG") {
+            out.push("title");
+        }
+        if payload.text.contains("LONG") {
+            out.push("body");
+        }
+        if payload.actions.iter().any(|a| a.label.contains("LONG")) {
+            out.push("actions");
+        }
+        out
+    }
+
+    fn widget(
+        &self,
+        _: &SceneGraph,
+        _: &str,
+        params: &HashMap<String, WidgetParameterValue>,
+    ) -> Vec<String> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let mut out: Vec<String> = params
+            .iter()
+            .filter(|(_, v)| matches!(v, WidgetParameterValue::String(s) if s.contains("LONG")))
+            .map(|(k, _)| k.clone())
+            .collect();
+        out.sort();
+        out
+    }
+}
+
+fn fit_server() -> (McpServer, Arc<MarkerFit>) {
+    let (server, _) = server();
+    let fit = Arc::new(MarkerFit::default());
+    (server.with_text_fit(fit.clone()), fit)
+}
+
+/// R5.1 S1/S2/S4: cut card fields are named once; a card that fits has the
+/// same reply bytes as a server with no measurement at all.
+#[tokio::test]
+async fn notification_reply_names_cut_fields_and_is_unchanged_when_it_fits() {
+    let (server, _) = fit_server();
+    let cut = call(
+        &server,
+        "hud_publish",
+        json!({"surface":"zone:notification-area","content":{"title":"LONG title","body":"LONG body","actions":[{"label":"LONG","callback_id":"x"}]}}),
+    )
+    .await;
+    assert_eq!(cut["clipped"], json!(["title", "body", "actions"]), "{cut}");
+
+    let args = json!({"surface":"zone:notification-area","content":{"title":"Build","body":"All tests passed."}});
+    let (plain, _) = self::server();
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+        "params":{"name":"hud_publish","arguments":args}})
+    .to_string();
+    assert_eq!(
+        server.dispatch(&body, &ctx()).await,
+        plain.dispatch(&body, &ctx()).await,
+        "a card that fits answers with today's bytes"
+    );
+}
+
+/// R5.1 S5: stream text and portals are never measured or reported.
+#[tokio::test]
+async fn stream_text_and_portal_publishes_never_carry_clipped() {
+    let (server, fit) = fit_server();
+    let (server, _) = hub_portal(server);
+    let subtitle = call(
+        &server,
+        "hud_publish",
+        json!({"surface":"zone:subtitle","content":"LONG LONG LONG"}),
+    )
+    .await;
+    assert!(subtitle.get("clipped").is_none(), "{subtitle}");
+    let portal = call(
+        &server,
+        "hud_publish",
+        json!({"surface":"portal:main","content":"LONG LONG LONG"}),
+    )
+    .await;
+    assert!(portal.get("clipped").is_none(), "{portal}");
+    assert_eq!(fit.calls.load(Ordering::SeqCst), 0);
+}
+
+/// R5.1 S3: a cut widget string param is named; params this call did not set
+/// are not re-reported.
+#[tokio::test]
+async fn widget_reply_names_only_this_calls_cut_params() {
+    let (server, _) = fit_server();
+    let cut = call(
+        &server,
+        "hud_publish",
+        json!({"surface":"widget:gauge","params":{"label":"LONG label","level":0.5}}),
+    )
+    .await;
+    assert_eq!(cut["clipped"], json!(["label"]), "{cut}");
+    let other = call(
+        &server,
+        "hud_publish",
+        json!({"surface":"widget:gauge","params":{"level":0.7}}),
+    )
+    .await;
+    assert!(other.get("clipped").is_none(), "{other}");
+}
+
+/// A question wait's final reply carries the admission-time report too.
+#[tokio::test(start_paused = true)]
+async fn question_wait_reply_keeps_the_clipped_report() {
+    let (server, _) = fit_server();
+    let mut args = question(1000);
+    args["content"]["title"] = json!("LONG question");
+    let reply = call(&server, "hud_publish", args).await;
+    assert_eq!(reply["clipped"], json!(["title"]), "{reply}");
+}

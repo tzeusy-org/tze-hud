@@ -26,7 +26,7 @@ pub use renderer::{
     LocalComposerState, LocalComposerStateHandle, PanelBadge, PanelBody, PanelChip, PanelConnect,
     PanelControl, PanelFocus, PanelHit, PanelHitTarget, PanelItem, PanelNotice, PanelPart,
     PanelRect, PanelSection, PanelSpan, PanelTone, ResizeGripHoverHandle, SystemCardKind,
-    SystemCardModel, TileCloseHoverHandle, estimate_control_panel_geometry,
+    SystemCardModel, TextFitMeasurer, TileCloseHoverHandle, estimate_control_panel_geometry,
 };
 pub use surface::{CompositorSurface, HeadlessSurface, SurfaceFactory, WindowSurface};
 pub use text::{TextItem, markdown_node_tail_cursor_color};

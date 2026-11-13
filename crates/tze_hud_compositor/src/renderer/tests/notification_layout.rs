@@ -566,6 +566,9 @@ async fn test_two_line_notification_title_produces_two_text_items() {
         "Held-input check: press and hold Hold here; keep holding until the title changes.";
     let template = scene.zone_registry.zones["notification-area"].clone();
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    // hud-ljhku.5: admission-time fit must agree with what this draws.
+    let fit = std::sync::Arc::new(super::super::TextFitMeasurer::new());
+    compositor.attach_text_fit(std::sync::Arc::clone(&fit));
     for scale in [1.0, 1.5] {
         compositor.set_token_map(HashMap::from([
             ("font.sans".into(), "IBM Plex Sans".into()),
@@ -673,6 +676,31 @@ async fn test_two_line_notification_title_produces_two_text_items() {
                         .expect("actual frame geometry must be primed before drawing")
                         .clone();
                     assert_eq!(result.was_truncated, truncated, "{scale}/{count}/{body}");
+                    let ZoneContent::Notification(published) = &scene
+                        .zone_registry
+                        .active_for_zone("notification-area")
+                        .last()
+                        .unwrap()
+                        .content
+                    else {
+                        unreachable!("notification fixture")
+                    };
+                    let clipped = tze_hud_scene::TextFit::notification(
+                        &*fit,
+                        &scene,
+                        "notification-area",
+                        published,
+                    );
+                    assert_eq!(
+                        clipped.contains(&"body"),
+                        truncated,
+                        "fit agrees with drawing: {scale}/{width}/{count}/{clipped:?}"
+                    );
+                    assert_eq!(
+                        clipped.contains(&"title"),
+                        title.starts_with('確'),
+                        "fit agrees with drawing: {scale}/{width}/{count}/{clipped:?}"
+                    );
                     if truncated {
                         assert!(result.text.ends_with(crate::overflow::ELLIPSIS));
                         assert!(!result.text.is_empty());

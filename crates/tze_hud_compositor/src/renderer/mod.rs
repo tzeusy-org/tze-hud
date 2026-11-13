@@ -61,9 +61,11 @@ pub mod hit_regions;
 pub(crate) mod icon;
 pub(crate) mod image_cache;
 mod notification_layout;
+mod notification_text;
 mod safe_mode_overlay;
 mod system_card;
 pub(crate) mod text;
+mod text_fit;
 pub(crate) mod tile_render;
 pub(crate) mod token_colors;
 pub(crate) mod widget_geometry;
@@ -85,6 +87,7 @@ pub use control_panel::{
 };
 pub use focus_ring::{FocusRingOwner, FocusRingOwnerHandle};
 pub use system_card::{SystemCardKind, SystemCardModel};
+pub use text_fit::TextFitMeasurer;
 
 /// Shared single-slot handle carrying the tile whose resize-grip affordance the
 /// pointer is currently over (hud-wgiys). The runtime's windowed hit-test writes
@@ -254,6 +257,9 @@ pub struct Compositor {
     /// Optional widget renderer. Absent until `init_widget_renderer` is called.
     /// When `None`, widget instances in the scene graph are not composited.
     pub(crate) widget_renderer: Option<WidgetRenderer>,
+    /// MCP admission's view of the tokens, displays and widget SVGs drawn
+    /// with (`attach_text_fit`).
+    text_fit: Option<Arc<TextFitMeasurer>>,
     /// Per-zone fade-in / fade-out animation state.
     ///
     /// Keyed by zone name. An entry is inserted on the first publish to a zone
@@ -942,6 +948,7 @@ impl Compositor {
             degradation_policy: CompositorDegradationPolicy::default(),
             text_rasterizer: None,
             widget_renderer: None,
+            text_fit: None,
             resident_ledger: None,
             zone_animation_states: HashMap::new(),
             prev_active_zones: HashMap::new(),
@@ -1286,6 +1293,7 @@ impl Compositor {
             degradation_policy: CompositorDegradationPolicy::default(),
             text_rasterizer: None,
             widget_renderer: None,
+            text_fit: None,
             resident_ledger: None,
             zone_animation_states: HashMap::new(),
             prev_active_zones: HashMap::new(),
@@ -1357,7 +1365,21 @@ impl Compositor {
     /// Install the display layout zones resolve against (see
     /// [`crate::display::DisplayLayout`]).
     pub fn set_display_layout(&mut self, layout: crate::display::DisplayLayout) {
+        if let Some(fit) = &self.text_fit {
+            fit.set_display_layout(layout.clone());
+        }
         self.display_layout = layout;
+    }
+
+    /// Keep `fit` measuring with what this compositor draws with: its token
+    /// map, display layout and widget SVGs, now and after every change.
+    pub fn attach_text_fit(&mut self, fit: Arc<TextFitMeasurer>) {
+        fit.set_display_layout(self.display_layout.clone());
+        fit.set_tokens(self.token_map.clone());
+        if let Some(renderer) = &mut self.widget_renderer {
+            renderer.set_text_fit(Arc::clone(&fit));
+        }
+        self.text_fit = Some(fit);
     }
 
     /// Resolve a zone's geometry in canvas (scene) pixels: against its
@@ -1730,6 +1752,9 @@ impl Compositor {
         self.truncation_cache_scene_instance = None;
 
         self.secondary_zone_tokens = tze_hud_config::tokens::secondary_zone_tokens(&map);
+        if let Some(fit) = &self.text_fit {
+            fit.set_tokens(map.clone());
+        }
         self.token_map = map;
         // The panel is token-styled: re-lay it out on the next frame.
         self.control_panel_layout = None;

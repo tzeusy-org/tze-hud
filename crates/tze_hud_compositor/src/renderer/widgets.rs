@@ -55,6 +55,9 @@ impl super::Compositor {
         if let Some(ledger) = &self.resident_ledger {
             renderer.set_resident_ledger(ledger.clone());
         }
+        if let Some(fit) = &self.text_fit {
+            renderer.set_text_fit(std::sync::Arc::clone(fit));
+        }
         self.widget_renderer = Some(renderer);
         tracing::debug!(format = ?format, "widget renderer initialized");
     }

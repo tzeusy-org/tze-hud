@@ -447,6 +447,9 @@ struct WindowedRuntimeState {
     /// Pending widget SVG assets to register with the compositor after
     /// `init_widget_renderer` is called. Consumed once during first `resumed()`.
     pending_widget_svgs: Vec<crate::widget_startup::WidgetSvgAsset>,
+    /// MCP admission's text measurement (`clipped`); the compositor keeps it
+    /// in step with what it draws once attached.
+    text_fit: Arc<tze_hud_compositor::TextFitMeasurer>,
     /// Tracked modifier key state for shortcut detection.
     modifiers: winit::keyboard::ModifiersState,
     /// The monitor the primary window covers (`None` before the window
@@ -1452,6 +1455,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         // looked up from the token map at render time rather than using hardcoded
         // constants. Later changes arrive through `appearance` (hud-h51u7.5).
         compositor.set_token_map(self.state.global_tokens.clone());
+        compositor.attach_text_fit(Arc::clone(&self.state.text_fit));
         tracing::debug!(
             token_count = self.state.global_tokens.len(),
             "windowed: compositor token map applied"
@@ -3002,6 +3006,12 @@ impl WindowedRuntime {
                     .notify(crate::idle_efficiency::RuntimeWakeupSource::OperatorCapture);
             })
         };
+        // Measures from startup; the compositor takes over once it exists.
+        let text_fit = Arc::new(tze_hud_compositor::TextFitMeasurer::new());
+        text_fit.set_tokens(startup_compositor_tokens.clone());
+        for (widget_type, svg_file, svg) in &pending_widget_svgs {
+            text_fit.register_widget_svg(widget_type, svg_file, svg);
+        }
         let portal_projection_driver =
             crate::portal::PortalDriver::new(tze_hud_mcp::PortalHandle::new(
                 tze_hud_portal::hub::PortalHub::default(),
@@ -3030,6 +3040,7 @@ impl WindowedRuntime {
             if let Some(ref rt) = network_rt {
                 // Same addresses as gRPC: loopback plus local Tailscale.
                 let mcp_config = McpServerConfig {
+                    text_fit: Some(Arc::clone(&text_fit) as Arc<dyn tze_hud_scene::TextFit>),
                     appearance: Some(Arc::clone(&appearance)),
                     publication_defaults: live.publication_defaults.clone(),
                     widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
@@ -3322,6 +3333,7 @@ impl WindowedRuntime {
             static_hit_regions: Vec::new(),
             widget_hover_trackers: std::collections::HashMap::new(),
             pending_widget_svgs,
+            text_fit,
             modifiers: winit::keyboard::ModifiersState::empty(),
             primary_monitor: None,
             secondaries: Vec::new(),
