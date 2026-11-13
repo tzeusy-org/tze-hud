@@ -64,6 +64,9 @@ pub(super) struct NotificationWait {
     pub ready: RenderWakeNotifier,
 }
 
+/// Displaced receipts one publisher can have waiting; older ones drop first.
+pub const DISPLACED_RECEIPT_CAP: usize = 5;
+
 impl SceneGraph {
     /// Arm under the same scene lock as admission, before any local activation.
     pub fn arm_notification_wait(
@@ -129,12 +132,27 @@ impl SceneGraph {
         {
             return;
         }
+        let key = victim.merge_key.filter(|key| !key.is_empty());
+        // Receipts are news, not accepted human events: a publisher that never
+        // drains hud_input (gRPC-only, one-shot notifiers) must not grow the
+        // queue at its publish rate. Keep the newest receipt per key and at
+        // most DISPLACED_RECEIPT_CAP in all, dropping only older receipts.
+        if let Some(queue) = self.pending_actions.get_mut(&victim.publisher_namespace) {
+            let is_receipt = |a: &PendingAction| a.kind == PendingActionKind::Displaced;
+            if key.is_some() {
+                queue.retain(|a| !(is_receipt(a) && a.key == key));
+            }
+            while queue.iter().filter(|a| is_receipt(a)).count() >= DISPLACED_RECEIPT_CAP {
+                let oldest = queue.iter().position(is_receipt).expect("counted above");
+                queue.remove(oldest);
+            }
+        }
         let wake = self.push_pending_action(PendingAction {
             publication_id: Some(id),
             publisher_namespace: victim.publisher_namespace,
             zone_name: victim.zone_name,
             kind: PendingActionKind::Displaced,
-            key: victim.merge_key.filter(|key| !key.is_empty()),
+            key,
         });
         self.pending_input_wakes.push(wake);
     }

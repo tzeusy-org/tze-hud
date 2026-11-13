@@ -347,3 +347,70 @@ fn an_expired_card_trimmed_before_its_sweep_queues_no_receipt() {
     assert!(!shown(&scene).contains(&"stale".to_string()));
     assert!(receipts(&mut scene, "a").is_empty());
 }
+
+#[test]
+fn a_publisher_that_never_drains_input_keeps_a_bounded_receipt_queue() {
+    for plane in [Plane::Mcp, Plane::Grpc] {
+        let (mut scene, _) = scene();
+        // An accepted human event is never evicted to make room for receipts.
+        let _ = scene.push_pending_action(PendingAction {
+            publication_id: None,
+            publisher_namespace: "ticker".into(),
+            zone_name: ZONE.into(),
+            kind: PendingActionKind::Callback("approve".into()),
+            key: None,
+        });
+        for i in 0..60 {
+            publish(&mut scene, plane, "ticker", status(&format!("tick {i}")));
+        }
+        let queued = scene.take_pending_actions("ticker");
+        let displaced: Vec<_> = queued
+            .iter()
+            .filter(|a| a.kind == PendingActionKind::Displaced)
+            .collect();
+        assert_eq!(displaced.len(), DISPLACED_RECEIPT_CAP, "{plane:?}");
+        assert!(
+            queued
+                .iter()
+                .any(|a| a.kind == PendingActionKind::Callback("approve".into())),
+            "{plane:?}"
+        );
+        // Only older receipts drop: the newest trimmed card is still reported.
+        let newest = scene
+            .zone_registry
+            .active_for_zone(ZONE)
+            .first()
+            .map(|r| r.publication_id);
+        assert_ne!(
+            displaced.last().unwrap().publication_id,
+            newest,
+            "{plane:?}"
+        );
+    }
+}
+
+#[test]
+fn a_newer_receipt_for_the_same_key_replaces_the_older_one() {
+    let (mut scene, _) = scene();
+    for round in 0..3 {
+        publish_keyed(
+            &mut scene,
+            Plane::Mcp,
+            "builder",
+            status("build"),
+            Some("build:1"),
+        );
+        for i in 0..5 {
+            publish(
+                &mut scene,
+                Plane::Mcp,
+                "other",
+                status(&format!("r{round} s{i}")),
+            );
+        }
+    }
+    assert_eq!(
+        receipts(&mut scene, "builder"),
+        [(Some("build:1".into()), PendingActionKind::Displaced)]
+    );
+}

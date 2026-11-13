@@ -348,6 +348,9 @@ The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
   (with `"key"` when the card was keyed) for its publisher only. Expiry,
   `hud_clear`, same-key replacement, answered or already-expired cards, and a
   card whose armed `wait_ms` call returns `gone:"displaced"` queue nothing.
+  Receipts are bounded for publishers that never poll: a newer receipt for the
+  same key replaces the older one, and at most 5 wait per publisher (the oldest
+  receipt drops first; accepted human events are never dropped for them).
 - Accepted notification events are retained in a growable per-publisher FIFO,
   with stable ids until `ack`; one publisher cannot evict or acknowledge another's
   records. Retention is in memory, with no crash/disk durability claim. Portal

@@ -69,6 +69,9 @@ question, on both admission planes; only an all-question stack drops its oldest
 question. A trimmed, unanswered, unexpired card queues exactly one `displaced`
 FIFO item for its own publisher, unless an armed wait on that exact card takes
 the displacement instead; expiry, clear and same-key replacement queue nothing.
+Receipts never grow at publish rate: one per key and at most
+`DISPLACED_RECEIPT_CAP` (5) per publisher, dropping only older receipts, never
+accepted human events.
 Scene rollback also rolls back terminal notification debt and queued receipts. Readiness callbacks
 run after scene unlock. The reserved input is consumed after successful reply
 encoding, with no intervening await; cancellation before encoding releases it

@@ -205,7 +205,7 @@ pub use tiles::validate_text_markdown_node_data;
 pub mod notification_wait;
 pub mod visibility;
 pub mod zone_ops;
-pub use notification_wait::{NotificationGone, NotificationOutcome};
+pub use notification_wait::{DISPLACED_RECEIPT_CAP, NotificationGone, NotificationOutcome};
 pub use visibility::SurfaceClasses;
 
 /// A publisher callback, a runtime-authored human close, and a stack trim
