@@ -214,21 +214,39 @@ impl PortalDocumentLayout {
         (start, end)
     }
 
-    /// Carry `[start, end)` from this layout to `new`: the same text at the
-    /// same bytes, else its nearest occurrence; `None` once it left the text.
+    /// Carry `[start, end)` from this layout to `new` by the document's byte
+    /// shift, never by searching for the text: unchanged through `end` keeps
+    /// the bytes; after a head trim the old suffix aligns with the start of
+    /// `new` and the range moves by the trimmed length. `None` once any of it
+    /// was trimmed or rewritten.
     pub fn remap_range(&self, new: &Self, (start, end): (usize, usize)) -> Option<(usize, usize)> {
-        let text = self.content.get(start..end)?;
-        if text.is_empty() {
+        let (old, new) = (self.content.as_ref(), new.content.as_ref());
+        if old.get(start..end).is_none_or(str::is_empty) {
             return None;
         }
-        if new.content.get(start..end) == Some(text) {
+        if new.get(..end) == old.get(..end) {
             return Some((start, end));
         }
-        new.content
-            .match_indices(text)
-            .map(|(i, _)| i)
-            .min_by_key(|i| i.abs_diff(start))
-            .map(|i| (i, i + text.len()))
+        // Head trim: the smallest k with old[k..end] == new[..end - k]. The
+        // candidates are where new's first line (which survived the trim)
+        // sits in old; the probe stays short of any appended tail.
+        let lead = new.len() - new.trim_start_matches('\n').len();
+        let mut probe = new[lead..]
+            .find('\n')
+            .map_or(new.len(), |i| lead + i)
+            .min(lead + 64);
+        while !new.is_char_boundary(probe) {
+            probe -= 1;
+        }
+        if probe == lead {
+            return None;
+        }
+        old.match_indices(&new[..probe])
+            .map(|(k, _)| k)
+            .filter(|&k| k > 0)
+            .take_while(|&k| k <= start)
+            .find(|&k| new.get(..end - k) == old.get(k..end))
+            .map(|k| (start - k, end - k))
     }
 
     /// Tile-local copy button for block `index` at `scroll_y`, `None` when its
@@ -381,6 +399,24 @@ mod tests {
             Some((0, 4))
         );
         assert_eq!(old.remap_range(&layout("gamma\ndelta"), sel), None);
+    }
+
+    #[test]
+    fn remap_follows_the_byte_shift_not_another_occurrence_of_the_text() {
+        // R2.2 S3 at the retention cap: every append trims the head, and the
+        // selected word repeats on other lines. It must stay on line b.
+        let old = layout("a error 1\nb error 2\nc error 3");
+        let sel = (12, 17); // "error" on line b
+        assert_eq!(&old.content[sel.0..sel.1], "error");
+        let trimmed = layout("b error 2\nc error 3\nd error 4");
+        assert_eq!(old.remap_range(&trimmed, sel), Some((2, 7)));
+        // Rewritten selected text (keyed replacement) drops the selection,
+        // even though the same word exists elsewhere.
+        let rewritten = layout("a error 1\nb warn 2\nc error 3");
+        assert_eq!(old.remap_range(&rewritten, sel), None);
+        // A change after the selection keeps the bytes.
+        let tail = layout("a error 1\nb error 2\nc error 9");
+        assert_eq!(old.remap_range(&tail, sel), Some(sel));
     }
 
     #[test]

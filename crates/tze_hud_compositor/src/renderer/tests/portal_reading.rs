@@ -142,4 +142,34 @@ async fn selection_highlight_and_link_underline_use_reading_tokens() {
         before,
         "clearing restores the frame"
     );
+
+    // Same visible text, new target (a keyed replacement): the shape
+    // signature is unchanged, but the published link must carry the new href.
+    view.visible_transcript[0].output_text =
+        "Open [the docs page](https://example.org/other) now\n\nSelect this whole line".into();
+    let rendered = render(
+        &view,
+        &PortalVisualTokens::default(),
+        Size {
+            width: tile_bounds.width,
+            height: tile_bounds.height,
+        },
+        3_000_000,
+    );
+    scene
+        .set_tile_root_tree(tile_id, rendered.root, rendered.children)
+        .unwrap();
+    compositor.prime_markdown_cache(&scene);
+    compositor.render_frame_headless(&mut scene, &surface);
+    compositor.publish_portal_document_layouts(&mut scene);
+    let replaced = &scene.overlay.portal_document_layouts[&(tile_id, PortalPartKind::Transcript)];
+    assert_eq!(replaced.signature, layout.signature, "same shaped text");
+    assert_eq!(
+        &*replaced.reading.links[0].href,
+        "https://example.org/other"
+    );
+    assert_eq!(
+        replaced.reading.links[0].host().as_deref(),
+        Some("example.org")
+    );
 }

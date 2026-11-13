@@ -3314,7 +3314,7 @@ impl WindowedRuntime {
             degradation_notices,
             compositor: None,
             window_surface: None,
-            input_processor: InputProcessor::new(),
+            input_processor: input_processor_with_system_gestures(),
             input_capture_rx,
             pending_input_capture_commands: std::collections::VecDeque::new(),
             focus_manager: FocusManager::new(),
@@ -3483,6 +3483,36 @@ impl WindowedRuntime {
         trace_shutdown_phase("runtime_return");
         Ok(())
     }
+}
+
+/// The input processor with the OS's own drag threshold and double-click
+/// time for portal OUTPUT reading (hud-ljhku.2): `SM_CXDRAG`/`SM_CYDRAG` at
+/// the system DPI and `GetDoubleClickTime` on Windows, the defaults elsewhere.
+fn input_processor_with_system_gestures() -> InputProcessor {
+    #[allow(unused_mut)]
+    let mut processor = InputProcessor::new();
+    #[cfg(windows)]
+    {
+        use windows::Win32::UI::HiDpi::{GetDpiForSystem, GetSystemMetricsForDpi};
+        use windows::Win32::UI::Input::KeyboardAndMouse::GetDoubleClickTime;
+        use windows::Win32::UI::WindowsAndMessaging::{SM_CXDRAG, SM_CYDRAG};
+        // SAFETY: read-only system queries with no pointers.
+        let (drag, double_click_ms) = unsafe {
+            let dpi = GetDpiForSystem();
+            (
+                GetSystemMetricsForDpi(SM_CXDRAG, dpi).max(GetSystemMetricsForDpi(SM_CYDRAG, dpi)),
+                GetDoubleClickTime(),
+            )
+        };
+        if drag > 0 {
+            processor.output_reading.drag_threshold_px = drag as f32;
+        }
+        if double_click_ms > 0 {
+            processor.output_reading.multi_click =
+                std::time::Duration::from_millis(double_click_ms.into());
+        }
+    }
+    processor
 }
 
 #[cfg(test)]

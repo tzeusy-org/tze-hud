@@ -27,6 +27,24 @@ fn record(text: &str) {
     }
 }
 
+/// `text` with every lone `\n` as `\r\n` (existing CRLF pairs unchanged).
+#[cfg(any(target_os = "windows", test))]
+fn crlf(text: &str) -> std::borrow::Cow<'_, str> {
+    if !text.contains('\n') {
+        return text.into();
+    }
+    let mut out = String::with_capacity(text.len() + text.len() / 16);
+    let mut prev = '\0';
+    for c in text.chars() {
+        if c == '\n' && prev != '\r' {
+            out.push('\r');
+        }
+        out.push(c);
+        prev = c;
+    }
+    out.into()
+}
+
 /// Write `text` to the Windows clipboard as CF_UNICODETEXT. No-op on empty
 /// input.
 ///
@@ -51,8 +69,9 @@ pub(crate) fn write_text(text: &str) -> Result<(), String> {
     }
     let busy = || Err("the clipboard is busy; try again".to_owned());
 
-    // UTF-16, NUL-terminated (CF_UNICODETEXT requires a wide, NUL-terminated buffer).
-    let mut wide: Vec<u16> = text.encode_utf16().collect();
+    // UTF-16, NUL-terminated (CF_UNICODETEXT requires a wide, NUL-terminated
+    // buffer), with CRLF line breaks as Windows text consumers expect.
+    let mut wide: Vec<u16> = crlf(text).encode_utf16().collect();
     wide.push(0);
 
     // SAFETY: The clipboard is opened with no owner window and closed by the
@@ -105,4 +124,13 @@ pub(crate) fn write_text(text: &str) -> Result<(), String> {
 pub(crate) fn write_text(text: &str) -> Result<(), String> {
     record(text);
     Err("there is no clipboard on this platform".to_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn windows_clipboard_text_uses_crlf_line_breaks() {
+        assert_eq!(super::crlf("one line"), "one line");
+        assert_eq!(super::crlf("a\nb\r\nc\n"), "a\r\nb\r\nc\r\n");
+    }
 }

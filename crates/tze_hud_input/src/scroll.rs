@@ -794,10 +794,6 @@ impl ScrollState {
             .unwrap_or(0.0)
     }
 
-    /// Force a tile's viewport to the tail, overriding any `ScrolledBack`
-    /// anchor.  Delegates to [`ScrollTileState::reset_to_tail`]; see that
-    /// method for the full contract.  No-op (`false`) if the tile is not
-    /// registered.
     /// See [`ScrollTileState::hold_reading`]; `false` for unknown tiles.
     pub fn hold_reading(&mut self, tile_id: SceneId) -> bool {
         self.tiles
@@ -805,6 +801,10 @@ impl ScrollState {
             .is_some_and(ScrollTileState::hold_reading)
     }
 
+    /// Force a tile's viewport to the tail, overriding any `ScrolledBack`
+    /// anchor.  Delegates to [`ScrollTileState::reset_to_tail`]; see that
+    /// method for the full contract.  No-op (`false`) if the tile is not
+    /// registered.
     pub fn reset_to_tail(&mut self, tile_id: SceneId) -> bool {
         self.tiles
             .get_mut(&tile_id)

@@ -1979,13 +1979,26 @@ fn autolink_at(chars: &[char], i: usize) -> Option<(usize, usize, usize)> {
             .position(|&c| c == '>' || c.is_whitespace() || c == '<')?;
         return (chars[i + 1 + close] == '>').then_some((i + 1, i + 1 + close, i + 2 + close));
     }
-    if chars[i] != 'h' || !scheme_at(i) || i > 0 && chars[i - 1].is_alphanumeric() {
+    // A word start: after whitespace or opening punctuation, never inside a
+    // longer token (so `x/https://…` or a `https://https://…` run is no link).
+    let word_start = i == 0
+        || chars[i - 1].is_whitespace()
+        || matches!(chars[i - 1], '(' | '[' | '{' | '"' | '\'' | '*' | '_' | '~');
+    if chars[i] != 'h' || !scheme_at(i) || !word_start {
         return None;
     }
-    let mut end = i + chars[i..]
+    // Bounded like the angle form: a run longer than any valid link is never
+    // one, so repeated `https://` runs cost linear, not quadratic, time.
+    let limit = tze_hud_scene::portal_reading::MAX_LINK_BYTES + 1;
+    let mut end = i + match chars[i..]
         .iter()
+        .take(limit)
         .position(|&c| c.is_whitespace() || c == '<')
-        .unwrap_or(chars.len() - i);
+    {
+        Some(len) => len,
+        None if chars.len() - i < limit => chars.len() - i,
+        None => return None,
+    };
     while end > i
         && matches!(
             chars[end - 1],
@@ -2914,6 +2927,16 @@ mod tests {
     }
 
     /// R2.1 S6: other schemes are plain text: no target, no link color.
+    #[test]
+    fn overlong_bare_url_runs_stay_plain_and_bounded() {
+        // hud-ljhku.2 review: a whitespace-free run of `https://` repeats is
+        // longer than any link; it renders as plain text without a quadratic scan.
+        let run = "https://".repeat(5_000);
+        let parsed = parse_markdown_subset(&run, &tokens());
+        assert!(parsed.links.is_empty());
+        assert_eq!(parsed.plain_text.len(), run.len());
+    }
+
     #[test]
     fn non_https_links_render_plain() {
         let t = MarkdownTokens {

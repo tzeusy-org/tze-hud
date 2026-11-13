@@ -1673,6 +1673,31 @@ mod tests {
         };
         let multi_click =
             OutputReading::default().multi_click + std::time::Duration::from_millis(100);
+        // Ctrl+C down and up, as a keyboard delivers it (a consumed key-down
+        // swallows characters until its release).
+        let ctrl_c = |runtime: &mut CaptureRenderHarness| {
+            let ctrl = KeyboardModifiers {
+                ctrl: true,
+                ..KeyboardModifiers::NONE
+            };
+            let timestamp_mono_us = MonoUs(super::super::nanoseconds_since_start() / 1_000);
+            runtime
+                .events
+                .app
+                .dispatch_key_down_event(&RawKeyDownEvent {
+                    key_code: "KeyC".into(),
+                    key: "c".into(),
+                    modifiers: ctrl,
+                    repeat: false,
+                    timestamp_mono_us,
+                });
+            runtime.events.app.dispatch_key_up_event(&RawKeyUpEvent {
+                key_code: "KeyC".into(),
+                key: "c".into(),
+                modifiers: ctrl,
+                timestamp_mono_us,
+            });
+        };
 
         // R2.1 S1: press and release within the threshold opens once on release.
         let alpha = link_at(&runtime, 0);
@@ -1783,19 +1808,7 @@ mod tests {
             "R2.2 S3: a selection stops following the tail"
         );
         let writes = crate::clipboard::writes();
-        runtime
-            .events
-            .app
-            .dispatch_key_down_event(&RawKeyDownEvent {
-                key_code: "KeyC".into(),
-                key: "c".into(),
-                modifiers: KeyboardModifiers {
-                    ctrl: true,
-                    ..KeyboardModifiers::NONE
-                },
-                repeat: false,
-                timestamp_mono_us: MonoUs(super::super::nanoseconds_since_start() / 1_000),
-            });
+        ctrl_c(&mut runtime);
         assert!(crate::clipboard::writes() > writes);
         assert_eq!(
             crate::clipboard::LAST_TEXT
@@ -1872,6 +1885,42 @@ mod tests {
         );
         runtime.events.press_named_key("Enter");
         assert_eq!(launches(&runtime), 3);
+
+        // A stale OUTPUT selection never takes a composer Ctrl+C (hud-hxhnt):
+        // a primary press outside OUTPUT clears it, browser-style.
+        std::thread::sleep(multi_click);
+        pointer(&mut runtime, from, PointerEventKind::Down);
+        pointer(&mut runtime, to, PointerEventKind::Move);
+        pointer(&mut runtime, to, PointerEventKind::Up);
+        assert!(reader(&runtime).0 > 0, "OUTPUT selected again");
+        runtime.events.click(x, y);
+        assert_eq!(reader(&runtime).0, 0, "a composer press clears it");
+        assert_eq!(
+            runtime
+                .events
+                .app
+                .state
+                .input_processor
+                .output_reading
+                .focus,
+            None,
+            "and leaves reading focus"
+        );
+        runtime.events.type_text("draft words");
+        runtime
+            .events
+            .app
+            .state
+            .input_processor
+            .route_pointer_selection_to_composer(6, 11);
+        ctrl_c(&mut runtime);
+        assert_eq!(
+            crate::clipboard::LAST_TEXT
+                .with(|t| t.borrow().clone())
+                .as_deref(),
+            Some("words"),
+            "the composer's selection wins"
+        );
 
         // Every activation went to the worker; nothing reached hud_input.
         for worker in runtime

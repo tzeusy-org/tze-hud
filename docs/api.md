@@ -261,15 +261,19 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   activatable. Only link text is drawn; hovering shows the target host in a
   pill and an underline, and the cursor is an I-beam over text, a hand over a
   link and an arrow elsewhere. A link opens on release when the pointer
-  moved at most 4 px, through the same browser handoff as card links, once
+  moved within the system drag threshold (`SM_CXDRAG`/`SM_CYDRAG`; 4 px off
+  Windows), through the same browser handoff as card links, once
   per 2 s per link; a double-click opens it once and selects nothing, and a
   press-drag on a link selects instead. Dragging selects text (double-click a
   word, triple-click a paragraph); the selection keeps its bytes across
-  appends and stops follow-tail until it is cleared. Ctrl+C copies the
-  selection as plain text, Esc clears it, and hovering a fenced code block
+  appends and head trims (it clears once its text is trimmed or rewritten)
+  and stops follow-tail until it is cleared. Ctrl+C copies the selection as
+  plain text (CRLF line breaks on Windows); Esc or any press outside OUTPUT
+  clears it, and hovering a fenced code block
   shows a Copy button that copies the block. Tab from a focused composer moves
   through visible links and Copy buttons (Enter/Space activates, Shift+Tab off
-  the first returns to the composer). None of this reaches the agent: no
+  the first returns to the composer); the focused stop survives new output
+  while its text and target remain. None of this reaches the agent: no
   `hud_input` item, no MCP or gRPC change.
 - Omitted zone `ttl_ms` uses 60000, except a notification with actions uses
   the owner's live `[runtime] answer_window_ms` (default 60000). An explicit
@@ -501,7 +505,9 @@ agents until one is paired.
   `unread_badge`, the largest exposed piece of each runtime control as of
   the last frame; each `{x, y, w, h}` in scene pixels or `null` when not drawn),
   `focus` (`composer`, `tile` or `none`), `hover` (`composer` or `none`),
-  `cursor` (`ibeam`, `hand` or `arrow` over OUTPUT, else `null`), `link_hint`
+  `cursor` (`ibeam` over OUTPUT text, `hand` over a link or Copy button,
+  otherwise `arrow`, including when the pointer is not over that portal's
+  OUTPUT; present for each portal whose OUTPUT is measured), `link_hint`
   (the hovered or focused link's host, or `null`), `selection_chars` (OUTPUT
   selection length, never its text),
   `output` `{first_visible_line, last_visible_line, at_tail, unread,

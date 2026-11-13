@@ -1048,22 +1048,25 @@ impl super::Compositor {
             let metrics = rasterizer.measure_scroll_document(item);
             let key = (tile_id, pane);
             live.insert(key);
-            // Reading geometry only changes with the shaped document.
-            let reading = scene
+            // Glyph geometry only changes with the shaped document, so it is
+            // reused on a signature match. Link targets are not part of the
+            // shape signature (same text, new href), so they are always fresh.
+            let (glyphs, row_glyphs) = scene
                 .overlay
                 .portal_document_layouts
                 .get(&key)
                 .filter(|old| old.signature == metrics.signature)
-                .map(|old| old.reading.clone())
+                .map(|old| (old.reading.glyphs.clone(), old.reading.row_glyphs.clone()))
                 .unwrap_or_else(|| {
                     let (glyphs, row_glyphs) = rasterizer.shaped_glyphs(item);
-                    tze_hud_scene::PortalReadingLayout {
-                        links: links.into(),
-                        code_blocks: code_blocks.into(),
-                        glyphs: glyphs.into(),
-                        row_glyphs: row_glyphs.into(),
-                    }
+                    (glyphs.into(), row_glyphs.into())
                 });
+            let reading = tze_hud_scene::PortalReadingLayout {
+                links: links.into(),
+                code_blocks: code_blocks.into(),
+                glyphs,
+                row_glyphs,
+            };
             scene.overlay.portal_document_layouts.insert(
                 key,
                 tze_hud_scene::PortalDocumentLayout {

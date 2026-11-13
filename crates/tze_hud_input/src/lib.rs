@@ -407,6 +407,10 @@ impl InputProcessor {
         now: std::time::Instant,
     ) -> portal_reading::ReadingOutcome {
         use tze_hud_scene::PortalPartKind::Transcript;
+        // Nothing to track, clear or redraw away from OUTPUT while idle.
+        if over.is_none() && self.output_reading.is_idle() {
+            return Default::default();
+        }
         let local = |t: SceneId| {
             scene
                 .tiles
@@ -429,7 +433,10 @@ impl InputProcessor {
             (PointerEventKind::Down, Some((t, l))) => self
                 .output_reading
                 .pointer_down(t, l, scroll, p, now, at_tail),
-            (PointerEventKind::Down, None) => Default::default(),
+            (PointerEventKind::Down, None) => portal_reading::ReadingOutcome {
+                cleared: self.output_reading.press_outside(),
+                ..Default::default()
+            },
             (PointerEventKind::Move, _) => {
                 self.output_reading.pointer_move(layout, scroll, p, at_tail)
             }
@@ -526,10 +533,14 @@ impl InputProcessor {
             scene.set_portal_reading(tile, Default::default());
         }
         for tile in live_ids {
-            let decor = match self.portal_output_layout(tile) {
+            let layout = self
+                .portal_layouts
+                .get(&(tile, tze_hud_scene::PortalPartKind::Transcript));
+            let decor = match layout {
                 Some(layout) => {
-                    self.output_reading
-                        .decor(tile, layout, scene.tile_scroll_offset_local(tile).1)
+                    let scroll = scene.tile_scroll_offset_local(tile).1;
+                    self.output_reading.rehover(tile, layout, scroll);
+                    self.output_reading.decor(tile, layout, scroll)
                 }
                 None => Default::default(),
             };

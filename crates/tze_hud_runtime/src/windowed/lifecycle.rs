@@ -2403,7 +2403,11 @@ impl WinitApp {
     ) {
         match effect {
             tze_hud_input::portal_reading::ReadingEffect::Open(url) => {
-                self.state.notification_link_opener.launch(url)
+                // Defense in depth: only a valid HTTPS target ever launches,
+                // whatever produced the effect.
+                if let Some(url) = tze_hud_scene::https_link_target(&url) {
+                    self.state.notification_link_opener.launch(url)
+                }
             }
             tze_hud_input::portal_reading::ReadingEffect::Copy(text) => {
                 if let Err(error) = crate::clipboard::write_text(&text) {

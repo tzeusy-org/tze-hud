@@ -448,9 +448,22 @@ impl OutputReading {
         out
     }
 
-    /// Drop a press whose window, tile or capture went away.
-    pub fn cancel_press(&mut self) {
+    /// Primary press anywhere outside OUTPUT: like a browser, it clears the
+    /// selection and leaves reading focus, so a stale selection never takes
+    /// a later Ctrl+C meant for the composer. Returns the cleared selection.
+    pub fn press_outside(&mut self) -> Option<Selection> {
+        self.focus = None;
         self.press = None;
+        self.selection.take()
+    }
+
+    /// Re-resolve hover from the pointer's stored point against the current
+    /// layout and scroll, so a reshape or scroll never leaves it naming a
+    /// different link than the one under the pointer.
+    pub fn rehover(&mut self, tile: SceneId, layout: &PortalDocumentLayout, scroll_y: f32) {
+        if let Some((t, _, p)) = self.hover.filter(|h| h.0 == tile) {
+            self.hover = target_at(layout, scroll_y, p).map(|target| (t, target, p));
+        }
     }
 
     /// Ctrl+C: the selected plain text.
@@ -544,9 +557,11 @@ impl OutputReading {
         old: &PortalDocumentLayout,
         new: &PortalDocumentLayout,
     ) -> Option<Selection> {
-        if old.content != new.content {
-            if self.focus.is_some_and(|f| f.0 == tile) {
-                self.focus = None;
+        if old.content != new.content || old.reading.links != new.reading.links {
+            // A focused link or copy button keeps focus while the same text
+            // (and href) is still there, at its shifted position.
+            if let Some((t, stop)) = self.focus.filter(|f| f.0 == tile) {
+                self.focus = Self::remap_stop(stop, old, new).map(|stop| (t, stop));
             }
             if self.copied.is_some_and(|c| c.0 == tile) {
                 self.copied = None;
@@ -563,6 +578,33 @@ impl OutputReading {
                 None
             }
             None => self.selection.take(),
+        }
+    }
+
+    fn remap_stop(
+        stop: ReadingStop,
+        old: &PortalDocumentLayout,
+        new: &PortalDocumentLayout,
+    ) -> Option<ReadingStop> {
+        match stop {
+            ReadingStop::Link(i) => {
+                let link = old.reading.links.get(i)?;
+                let (s, e) = old.remap_range(new, (link.start, link.end))?;
+                new.reading
+                    .links
+                    .iter()
+                    .position(|l| l.start == s && l.end == e && l.href == link.href)
+                    .map(ReadingStop::Link)
+            }
+            ReadingStop::CopyButton(i) => {
+                let range = *old.reading.code_blocks.get(i)?;
+                let range = old.remap_range(new, range)?;
+                new.reading
+                    .code_blocks
+                    .iter()
+                    .position(|b| *b == range)
+                    .map(ReadingStop::CopyButton)
+            }
         }
     }
 
@@ -886,6 +928,106 @@ mod tests {
             "cleared/reclaimed/hidden tile"
         );
         assert!(r.selection.is_none());
+    }
+
+    #[test]
+    fn a_press_outside_output_clears_the_selection_and_reading_focus() {
+        // A stale OUTPUT selection must not take a later composer Ctrl+C.
+        let (mut r, t, l, now) = (
+            OutputReading::default(),
+            SceneId::new(),
+            doc(),
+            Instant::now(),
+        );
+        r.pointer_down(t, &l, 0.0, (2.0, 25.0), now, true);
+        r.pointer_move(Some(&l), 0.0, (82.0, 25.0), true);
+        r.pointer_up(Some(&l), 0.0, (82.0, 25.0), now);
+        assert!(r.tab(t, &l, 0.0, false, true));
+        let cleared = r.press_outside().expect("the selection clears");
+        assert!(cleared.resume_tail, "the caller resumes the tail it held");
+        assert!(r.selection.is_none() && r.focus.is_none());
+        assert_eq!(r.copy(t, &l), None);
+        assert_eq!(r.press_outside(), None, "nothing left to clear");
+    }
+
+    #[test]
+    fn a_focused_link_keeps_focus_while_output_streams_in() {
+        let (mut r, t, l, now) = (
+            OutputReading::default(),
+            SceneId::new(),
+            doc(),
+            Instant::now(),
+        );
+        assert!(r.tab(t, &l, 0.0, false, true));
+        // Append: same bytes.
+        let mut appended = layout("see docs here\nline two\nline three\n\nls -la\nmore");
+        appended.reading.links = l.reading.links.clone();
+        appended.reading.code_blocks = l.reading.code_blocks.clone();
+        assert_eq!(r.remap(t, &l, &appended), None);
+        assert_eq!(r.focus, Some((t, ReadingStop::Link(0))));
+        // Head trim: a new link now comes first; focus follows "docs".
+        let mut trimmed = layout("x [y] z\nsee docs here\nline two");
+        trimmed.reading.links = vec![
+            PortalLink {
+                start: 3,
+                end: 4,
+                href: "https://example.com/y".into(),
+            },
+            PortalLink {
+                start: 12,
+                end: 16,
+                href: "https://example.com/a".into(),
+            },
+        ]
+        .into();
+        let mut prior = appended.clone();
+        prior.content = "q\nx [y] z\nsee docs here\nline two".into();
+        prior.reading.links = vec![
+            PortalLink {
+                start: 5,
+                end: 6,
+                href: "https://example.com/y".into(),
+            },
+            PortalLink {
+                start: 14,
+                end: 18,
+                href: "https://example.com/a".into(),
+            },
+        ]
+        .into();
+        r.focus = Some((t, ReadingStop::Link(1)));
+        assert_eq!(r.remap(t, &prior, &trimmed), None);
+        assert_eq!(r.focus, Some((t, ReadingStop::Link(1))));
+        assert_eq!(
+            r.activate(t, &trimmed, now),
+            Some(ReadingEffect::Open("https://example.com/a".into())),
+            "Enter still opens the focused link"
+        );
+        // Same text, new href: the old target is gone, so focus leaves.
+        let mut retargeted = trimmed.clone();
+        retargeted.reading.links = vec![
+            trimmed.reading.links[0].clone(),
+            PortalLink {
+                href: "https://example.com/b".into(),
+                ..trimmed.reading.links[1].clone()
+            },
+        ]
+        .into();
+        r.remap(t, &trimmed, &retargeted);
+        assert_eq!(r.focus, None);
+    }
+
+    #[test]
+    fn hover_is_re_resolved_after_a_reshape() {
+        let (mut r, t, l) = (OutputReading::default(), SceneId::new(), doc());
+        r.pointer_hover(Some(t), Some(&l), 0.0, LINK);
+        assert_eq!(r.hover(t), Some(ReadingTarget::Link(0)));
+        // The head trimmed away the link's line: the pointer is over text now.
+        let trimmed = layout("line two\nline three");
+        r.remap(t, &l, &trimmed);
+        r.rehover(t, &trimmed, 0.0);
+        assert!(matches!(r.hover(t), Some(ReadingTarget::Text(_))));
+        assert_eq!(r.link_hint(t, &trimmed), None);
     }
 
     #[test]

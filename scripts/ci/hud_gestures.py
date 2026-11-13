@@ -1101,7 +1101,7 @@ def scenario_portal_reading(run: Run) -> None:
                lambda st: st["clipboard_writes"] == writes + 1
                and portal_entry(st, s)["selection_chars"] == portal_entry(selected, s)["selection_chars"])
     if WINDOWS:  # tier W: the real clipboard holds the selected plain text
-        text = WIN.clipboard_text() or ""
+        text = (WIN.clipboard_text() or "").replace("\r\n", "\n")  # CF_UNICODETEXT is CRLF
         if not ("\nLine four words words words words\n" in text and len(text) == portal_entry(selected, s)["selection_chars"]):
             raise ScenarioFailed("the clipboard holds the three selected lines", {"chars": len(text)})
     run.key("Escape")

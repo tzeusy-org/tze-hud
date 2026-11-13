@@ -1444,9 +1444,6 @@ impl WinitApp {
         );
     }
 
-    /// Explicit Tab joins notification controls at the existing content cycle's
-    /// wrap boundary. Preserve that content owner while local card focus is
-    /// active, so Escape/activation/removal restores editing without a steal.
     /// OUTPUT reading keys; `Ok(true)` consumed, `Err` when the scene is busy.
     fn route_output_reading_key(
         &mut self,
@@ -1515,6 +1512,9 @@ impl WinitApp {
         Ok(consumed)
     }
 
+    /// Explicit Tab joins notification controls at the existing content cycle's
+    /// wrap boundary. Preserve that content owner while local card focus is
+    /// active, so Escape/activation/removal restores editing without a steal.
     fn route_notification_key(
         &mut self,
         raw: &RawKeyDownEvent,
