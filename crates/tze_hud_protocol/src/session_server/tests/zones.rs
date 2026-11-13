@@ -106,12 +106,11 @@ async fn test_zone_publish_result() {
     )
     .await;
     assert!(foreign.ok, "{foreign:?}");
+    // Seeding a full stack legitimately queues displaced receipts, so the
+    // snapshot captures queued input: a rejected publish must not add any.
     let snapshot = |scene: &SceneGraph| {
-        assert!(
-            scene.pending_actions.is_empty(),
-            "publish must not enqueue input"
-        );
         (
+            format!("{:?}", scene.pending_actions),
             serde_json::to_value(scene).unwrap(),
             scene
                 .scheduled_batches
