@@ -2550,9 +2550,7 @@ mod tests {
             .into_iter()
             .map(|action| match action.kind {
                 tze_hud_scene::graph::PendingActionKind::Callback(id) => id,
-                tze_hud_scene::graph::PendingActionKind::Dismiss => {
-                    panic!("expected a publisher callback, received a human X")
-                }
+                other => panic!("expected a publisher callback, received {other:?}"),
             })
             .collect()
     }

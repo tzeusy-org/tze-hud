@@ -57,7 +57,8 @@ fn invalid(hint: impl Into<String>) -> McpError {
 
 // ─── Per-agent MCP state ─────────────────────────────────────────────────────
 
-/// A notification action press delivered to an agent and not yet acked.
+/// A notification action press or displaced receipt delivered to an agent
+/// and not yet acked.
 /// Redelivered on every `hud_input` until acked. (Portal input is queued and
 /// redelivered by the portal hub.)
 #[derive(Clone, Debug)]
@@ -811,6 +812,9 @@ async fn publish_zone<'a>(
                         reply["action"] = json!("dismiss");
                         reply["kind"] = json!("dismiss");
                     }
+                    PendingActionKind::Displaced => {
+                        unreachable!("a claimed answer is a human action, never a trim")
+                    }
                 }
                 return Ok(PublishReply::answered(reply, scene, claim, activity));
             }
@@ -1359,6 +1363,9 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
                         }
                         PendingActionKind::Dismiss => {
                             json!({"id":a.id,"s":format!("zone:{}",a.zone),"action":"dismiss","kind":"dismiss"})
+                        }
+                        PendingActionKind::Displaced => {
+                            json!({"id":a.id,"s":format!("zone:{}",a.zone),"kind":"displaced"})
                         }
                         };
                         if let Some(key) = &a.key {

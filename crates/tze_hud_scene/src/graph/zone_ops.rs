@@ -1,3 +1,4 @@
+use super::notification_wait::is_unanswered_question;
 use super::*;
 
 impl SceneGraph {
@@ -392,6 +393,7 @@ impl SceneGraph {
             })
         });
         let replaced_id = replacement.map(|index| publishes[index].publication_id);
+        let mut trimmed = Vec::new();
         if let Some(index) = replacement {
             // Keep the visual slot, but never transfer the old activation or
             // chosen-feedback identity. This also works at publisher capacity.
@@ -407,7 +409,8 @@ impl SceneGraph {
             }
             publishes.push(record);
         } else {
-            apply_contention(
+            let choices = &self.overlay.notification_choices;
+            trimmed = apply_contention(
                 publishes,
                 record,
                 contention_policy,
@@ -416,6 +419,8 @@ impl SceneGraph {
                     zone: zone_name.to_string(),
                     max,
                 },
+                // A full notification stack spares unanswered questions.
+                |r| is_unanswered_question(r, choices, now_us),
             )?;
         }
 
@@ -439,6 +444,9 @@ impl SceneGraph {
                 };
                 self.finish_notification_wait(id, super::NotificationOutcome::Gone(reason));
             }
+        }
+        for victim in trimmed {
+            self.queue_displaced_receipt(victim, now_us);
         }
         self.prune_publication_orphans();
         self.version += 1;
@@ -843,6 +851,7 @@ impl SceneGraph {
                 widget: widget_name.to_string(),
                 max,
             },
+            |_| false,
         )?;
 
         // ── Step 4: Update current_params on the instance ─────────────────────

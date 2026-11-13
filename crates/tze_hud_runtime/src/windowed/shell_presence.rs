@@ -42,22 +42,12 @@ pub(crate) struct Inputs {
 /// Count unanswered cards once, regardless of how many callback buttons each
 /// card contains. Hidden cards still wait for an answer; URL-only cards do not.
 fn question_count(scene: &SceneGraph) -> usize {
-    let now = scene.now_wall_us();
     scene
         .zone_registry
         .active_publishes
         .values()
         .flatten()
-        .filter(|record| {
-            record.expires_at_wall_us.is_none_or(|end| end > now)
-                && !scene
-                    .overlay
-                    .notification_choices
-                    .contains_key(&record.publication_id)
-                && matches!(&record.content, ZoneContent::Notification(payload)
-                    if payload.actions.iter().any(|action|
-                        action.callback_id.is_some() && action.validate().is_ok()))
-        })
+        .filter(|record| scene.is_unanswered_question(record))
         .count()
 }
 

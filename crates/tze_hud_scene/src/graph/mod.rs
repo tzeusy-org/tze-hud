@@ -121,8 +121,8 @@ pub struct SceneGraph {
     /// Entries exist only while current content or scheduled batches own the origin.
     #[serde(skip, default)]
     publication_orphans: HashMap<SceneId, u64>,
-    /// Notification action presses waiting for their publisher to collect
-    /// them (MCP `hud_input`), FIFO within each publisher namespace.
+    /// Notification action presses and displaced receipts waiting for their
+    /// publisher to collect them (MCP `hud_input`), FIFO per namespace.
     #[serde(skip, default)]
     pub pending_actions: HashMap<String, Vec<PendingAction>>,
     /// Input readiness callbacks, invoked by the producer only after scene unlock.
@@ -130,6 +130,9 @@ pub struct SceneGraph {
     pending_action_notifiers: HashMap<String, RenderWakeNotifier>,
     #[serde(skip, default)]
     notification_waits: HashMap<SceneId, notification_wait::NotificationWait>,
+    /// Readiness owed for displaced receipts; drained with the wait debt.
+    #[serde(skip, default)]
+    pending_input_wakes: Vec<RenderWakeNotifier>,
     /// Map of ResourceIds to their scene-node reference counts.
     ///
     /// A resource is available for use in [`NodeData::StaticImage`] nodes when it
@@ -205,11 +208,13 @@ pub mod zone_ops;
 pub use notification_wait::{NotificationGone, NotificationOutcome};
 pub use visibility::SurfaceClasses;
 
-/// A publisher callback and a runtime-authored human close are distinct.
+/// A publisher callback, a runtime-authored human close, and a stack trim
+/// that removed the card unanswered are distinct.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PendingActionKind {
     Callback(String),
     Dismiss,
+    Displaced,
 }
 
 /// A transactional notification event addressed to its publishing agent.
@@ -265,6 +270,7 @@ impl SceneGraph {
             pending_actions: HashMap::new(),
             pending_action_notifiers: HashMap::new(),
             notification_waits: HashMap::new(),
+            pending_input_wakes: Vec::new(),
             registered_resources: HashMap::new(),
             overlay: RuntimeOverlayState::default(),
         }
@@ -367,6 +373,8 @@ mod tests;
 mod limits_tests;
 #[cfg(test)]
 mod spec_scenarios;
+#[cfg(test)]
+mod stack_trim_tests;
 #[cfg(test)]
 mod test_helpers;
 #[cfg(test)]
