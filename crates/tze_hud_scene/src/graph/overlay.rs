@@ -161,6 +161,10 @@ pub struct RuntimeOverlayState {
     /// Only actual shaped documents publish extents; this does not dirty pixels.
     #[serde(skip, default)]
     pub portal_document_layouts: HashMap<(SceneId, PortalPartKind), PortalDocumentLayout>,
+    /// Runtime OUTPUT reading decoration (selection, link, copy button) per
+    /// portal tile; drawn by the compositor, never serialized (hud-ljhku.2).
+    #[serde(skip, default)]
+    pub portal_reading: HashMap<SceneId, crate::portal_reading::PortalReadingDecor>,
     /// Displayed (smoothed/lagged) scroll offsets per tile, published by the
     /// compositor each frame while windowed scroll smoothing is active.
     ///

@@ -1548,6 +1548,7 @@ impl Compositor {
         let mut rects = Vec::new();
         let mut items = Vec::new();
         for tile in Self::sort_tiles_with_drag_boost(self.policy_visible_tiles(scene), scene) {
+            self.collect_portal_reading_affordances(tile, scene, &mut rects, &mut items);
             let regions = self.jump_to_latest_visible_regions(tile, scene, &tokens, &indicator);
             if regions.is_empty() {
                 continue;
@@ -2104,6 +2105,17 @@ impl Compositor {
                             }
                         }
                     }
+                    // OUTPUT selection and link underline (hud-ljhku.2).
+                    self.append_portal_reading_quads(
+                        tile,
+                        node_id,
+                        scene,
+                        scroll_y,
+                        tile_opacity,
+                        sw,
+                        sh,
+                        vertices,
+                    );
                 } else {
                     // Fallback when glyphon is unavailable: preserve the old
                     // placeholder treatment so text tiles remain visible.

@@ -62,6 +62,7 @@ pub(crate) mod icon;
 pub(crate) mod image_cache;
 mod notification_layout;
 mod notification_text;
+pub(crate) mod portal_reading;
 mod safe_mode_overlay;
 mod system_card;
 pub(crate) mod text;

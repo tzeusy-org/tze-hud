@@ -1576,6 +1576,41 @@ impl TextRasterizer {
         }
     }
 
+    /// Glyph extents of the shaped document, in row order, x relative to the
+    /// clip (viewport) left edge. Call after [`Self::measure_scroll_document`].
+    pub(crate) fn shaped_glyphs(
+        &self,
+        item: &TextItem,
+    ) -> (Vec<tze_hud_scene::PortalGlyph>, Vec<u32>) {
+        let mut glyphs = Vec::new();
+        let mut row_glyphs = Vec::new();
+        let Some(buffer) = self
+            .shape_cache
+            .get(&shape_key_for_item(item, &item.text))
+            .and_then(|b| b.first())
+        else {
+            return (glyphs, row_glyphs);
+        };
+        let mut bases = Vec::with_capacity(buffer.lines.len());
+        let mut base = 0;
+        for line in &buffer.lines {
+            bases.push(base);
+            base += line.text().len() + 1;
+        }
+        let dx = item.pixel_x - item.clip_pixel_x;
+        for run in buffer.layout_runs() {
+            row_glyphs.push(glyphs.len() as u32);
+            let base = bases[run.line_i];
+            glyphs.extend(run.glyphs.iter().map(|g| tze_hud_scene::PortalGlyph {
+                start: (base + g.start) as u32,
+                end: (base + g.end) as u32,
+                x: g.x + dx,
+                w: g.w,
+            }));
+        }
+        (glyphs, row_glyphs)
+    }
+
     /// Build and shape on a cache miss; scroll frames reuse this exact buffer.
     fn build_and_shape_buffer(&mut self, item: &TextItem, truncated: Option<&str>) -> Buffer {
         let line_height = item.font_size_px * item.line_height_multiplier;
