@@ -572,9 +572,6 @@ class CardHelperTests(unittest.TestCase):
         self.assertEqual(failure.exception.step, "missing card")
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class SafeModeWitnessTests(unittest.TestCase):
     """hud-zvu0j: the 65 s pause witness and its failure cleanup."""
@@ -633,3 +630,17 @@ class SafeModeWitnessTests(unittest.TestCase):
         self.assertEqual([r["outcome"] for r in results], ["FAIL", "PASS"])
         self.assertEqual(results[0]["step"], "portal reaped while paused", "the original failure reports")
         self.assertEqual(seen, [False])
+
+    def test_a_failure_before_the_measured_pause_also_releases_it(self) -> None:
+        safe_mode = {"on": False}
+        run = self._run(safe_mode)
+        run.smoke.call.return_value = (False, {"ok": True})  # publish wrongly accepted while paused
+        with mock.patch.object(g, "open_portal"), self.assertRaises(g.ScenarioFailed) as failure:
+            g.scenario_safe_mode(run)
+        self.assertEqual(failure.exception.args[0], "publishing while paused returns SAFE_MODE_ACTIVE")
+        self.assertFalse(safe_mode["on"])
+        run.observe_for.assert_not_called()
+
+
+if __name__ == "__main__":
+    unittest.main()
