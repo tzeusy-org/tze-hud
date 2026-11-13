@@ -2538,6 +2538,15 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             // Stage 1: Drain keyboard events into the input ring buffer.
             // Map winit keyboard events to InputEventKind::KeyPress / KeyRelease.
             WindowEvent::KeyboardInput { event, .. } => {
+                // ── IME: keys it handles are not ours (hud-ljhku.13) ────────
+                // Windows reports them with logical key `Process`, press and
+                // release; the composition reaches us as `Ime` events.
+                if matches!(
+                    event.logical_key,
+                    winit::keyboard::Key::Named(winit::keyboard::NamedKey::Process)
+                ) {
+                    return;
+                }
                 // ── Control panel: owns the keyboard while open ─────────────
                 // Chords (pause, panel, pairing) are global hotkeys and never
                 // arrive here.
@@ -2594,7 +2603,10 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         repeat: event.repeat,
                         timestamp_mono_us,
                     };
-                    self.dispatch_key_down_event(&raw);
+                    if !self.dispatch_os_key_down(&raw) {
+                        // An IME composition in the composer owns the key.
+                        return;
+                    }
                 } else if event.state == ElementState::Released {
                     let raw = RawKeyUpEvent {
                         key_code: physical_key_to_key_code_str(&event.physical_key),

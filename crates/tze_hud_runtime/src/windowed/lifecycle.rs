@@ -4777,6 +4777,58 @@ mod tests {
         assert!(app.state.composer_preedit.is_none());
     }
 
+    /// hud-ljhku.13 R13.2 S1 (review B2): while an IME composes, Backspace,
+    /// Enter and arrows edit the composition, not the draft. winit reports
+    /// them as `KeyboardInput` (logical key `Process` on Windows), so the OS
+    /// key path must not route them: Backspace must not delete "b", Enter
+    /// must not submit "ab" ahead of the commit, an arrow must not move the
+    /// caret. Once the composition ends, the same keys edit the draft again.
+    #[test]
+    fn keys_during_ime_composition_leave_the_draft_alone() {
+        use tze_hud_input::{FocusManager, InputProcessor};
+
+        let (scene, tab_id) = scene_with_pointer_composer();
+        let mut fm = FocusManager::new();
+        fm.add_tab(tab_id);
+        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+        app.state.cursor_x = 200.0;
+        app.state.cursor_y = 50.0;
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        app.enqueue_pointer_event(PointerEventKind::Up);
+        app.state.input_processor.route_character_to_composer("ab");
+        let key = |name: &str| tze_hud_input::keyboard::RawKeyDownEvent {
+            key_code: name.into(),
+            key: name.into(),
+            modifiers: tze_hud_input::KeyboardModifiers::NONE,
+            repeat: false,
+            timestamp_mono_us: tze_hud_scene::MonoUs(1),
+        };
+        let draft = |app: &WinitApp| {
+            let (text, cursor, ..) = app.state.input_processor.composer_draft_snapshot().unwrap();
+            (text, cursor)
+        };
+        assert_eq!(draft(&app), ("ab".into(), 2));
+
+        app.set_composer_preedit("かん".into(), None);
+        for name in ["Backspace", "Enter", "ArrowLeft"] {
+            assert!(!app.dispatch_os_key_down(&key(name)), "{name} is the IME's");
+            assert_eq!(draft(&app), ("ab".into(), 2), "{name} left the draft alone");
+        }
+        // The first key of a composition arrives as `Process` before any
+        // preedit: also not routed.
+        app.set_composer_preedit(String::new(), None);
+        let mut process = key("Backspace");
+        process.key = "Process".into();
+        assert!(!app.dispatch_os_key_down(&process));
+        assert_eq!(draft(&app), ("ab".into(), 2));
+
+        // Composition over: keys edit the draft again.
+        assert!(app.dispatch_os_key_down(&key("ArrowLeft")));
+        assert_eq!(draft(&app), ("ab".into(), 1));
+        assert!(app.dispatch_os_key_down(&key("Backspace")));
+        assert_eq!(draft(&app), ("b".into(), 0));
+    }
+
     /// Removing the tile that holds a focused composer (agent clears its
     /// portal, or the lease expires) must blur the composer and clear the
     /// local echo. Otherwise the compositor keeps a caret blinking for a

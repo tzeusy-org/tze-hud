@@ -285,6 +285,24 @@ impl WinitApp {
     /// Empty text clears it (composition committed or cancelled). The OS
     /// candidate window keeps the anchor it had when composition began
     /// (`update_composer_ime_cursor_area` is not re-run here).
+    /// Route an OS key press unless an IME composition owns it
+    /// (hud-ljhku.13 R13.2). winit 0.30 on Windows still reports keys the
+    /// IME handles as `KeyboardInput` with logical key `Process` (the
+    /// physical key is the real one); while a composition is drawn in the
+    /// composer, Backspace, Enter and arrows edit the composition, not the
+    /// draft. Returns whether the key was routed; when not, the caller
+    /// skips the paste and character paths for it too.
+    pub(super) fn dispatch_os_key_down(
+        &mut self,
+        raw: &tze_hud_input::keyboard::RawKeyDownEvent,
+    ) -> bool {
+        if raw.key == "Process" || self.state.composer_preedit.is_some() {
+            return false;
+        }
+        self.dispatch_key_down_event(raw);
+        true
+    }
+
     pub(super) fn set_composer_preedit(&mut self, text: String, cursor: Option<(usize, usize)>) {
         let preedit =
             (!text.is_empty()).then_some(tze_hud_compositor::ComposerPreedit { text, cursor });
