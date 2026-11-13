@@ -3,15 +3,36 @@ use std::time::Instant;
 
 use winit::event::MouseScrollDelta;
 
+use crate::os_prefs::WheelLines;
+use tze_hud_input::{WHEEL_LINE_PX, WheelStep};
+
 use crate::channels::{INPUT_EVENT_CAPACITY, InputEvent};
 use tze_hud_protocol::proto::{EventBatch, InputEnvelope};
 use tze_hud_scene::MonoUs;
 use tze_hud_scene::graph::SceneGraph;
 
-pub(super) fn normalize_mouse_wheel_delta(delta: &MouseScrollDelta) -> (f32, f32) {
-    match delta {
-        MouseScrollDelta::LineDelta(x, y) => (-x * 40.0, -y * 40.0),
-        MouseScrollDelta::PixelDelta(pos) => (-(pos.x as f32), -(pos.y as f32)),
+/// A wheel event as `(delta_x px, delta_y, unit of delta_y)`, positive
+/// scrolling down/right (hud-ljhku.13).
+///
+/// A notch (`LineDelta`) scrolls the Windows "lines per notch" setting
+/// (`setting`, read per event) in text lines, or one page for
+/// `WHEEL_PAGESCROLL`; the scroll target sizes the line or page. Off
+/// Windows a notch stays [`WHEEL_LINE_PX`]. Horizontal notches and pixel
+/// deltas (touchpads) are unchanged.
+pub(super) fn normalize_mouse_wheel_delta(
+    delta: &MouseScrollDelta,
+    setting: WheelLines,
+) -> (f32, f32, WheelStep) {
+    match *delta {
+        MouseScrollDelta::LineDelta(x, y) => {
+            let dx = -x * WHEEL_LINE_PX;
+            match setting {
+                WheelLines::Fixed => (dx, -y * WHEEL_LINE_PX, WheelStep::Pixels),
+                WheelLines::Lines(n) => (dx, -y * n as f32, WheelStep::Lines),
+                WheelLines::Page => (dx, -y, WheelStep::Pages),
+            }
+        }
+        MouseScrollDelta::PixelDelta(pos) => (-(pos.x as f32), -(pos.y as f32), WheelStep::Pixels),
     }
 }
 
@@ -801,19 +822,56 @@ mod tests {
         assert!(t2 > t1, "timestamps must be monotonically increasing");
     }
 
+    // Non-Windows (`WheelLines::Fixed`) keeps today's 40 px per notch.
     #[test]
     fn mouse_wheel_delta_positive_line_scrolls_toward_top() {
-        let (x, y) = normalize_mouse_wheel_delta(&MouseScrollDelta::LineDelta(0.0, 1.0));
+        let (x, y, step) =
+            normalize_mouse_wheel_delta(&MouseScrollDelta::LineDelta(0.0, 1.0), WheelLines::Fixed);
 
         assert_eq!(x, 0.0);
         assert_eq!(y, -40.0);
+        assert_eq!(step, WheelStep::Pixels);
     }
 
     #[test]
     fn mouse_wheel_delta_negative_line_scrolls_down_transcript() {
-        let (_, y) = normalize_mouse_wheel_delta(&MouseScrollDelta::LineDelta(0.0, -1.0));
+        let (_, y, _) =
+            normalize_mouse_wheel_delta(&MouseScrollDelta::LineDelta(0.0, -1.0), WheelLines::Fixed);
 
         assert_eq!(y, 40.0);
+    }
+
+    // hud-ljhku.13 R13.3 S1: a notch is the Windows lines-per-notch setting,
+    // in text lines the scroll target sizes; WHEEL_PAGESCROLL is one page.
+    #[test]
+    fn mouse_wheel_notch_uses_windows_lines_per_notch() {
+        let notch_down = MouseScrollDelta::LineDelta(0.0, -1.0);
+        assert_eq!(
+            normalize_mouse_wheel_delta(&notch_down, WheelLines::Lines(5)),
+            (0.0, 5.0, WheelStep::Lines)
+        );
+        // The setting is read per event: the next notch uses the new value.
+        assert_eq!(
+            normalize_mouse_wheel_delta(&notch_down, WheelLines::Lines(2)),
+            (0.0, 2.0, WheelStep::Lines)
+        );
+        assert_eq!(
+            normalize_mouse_wheel_delta(&MouseScrollDelta::LineDelta(0.0, 2.0), WheelLines::Page),
+            (0.0, -2.0, WheelStep::Pages)
+        );
+        // Horizontal notches and touchpad pixels are unchanged.
+        assert_eq!(
+            normalize_mouse_wheel_delta(
+                &MouseScrollDelta::LineDelta(1.0, 0.0),
+                WheelLines::Lines(5)
+            ),
+            (-40.0, -0.0, WheelStep::Lines)
+        );
+        let pixels = MouseScrollDelta::PixelDelta(winit::dpi::PhysicalPosition::new(0.0, -12.0));
+        assert_eq!(
+            normalize_mouse_wheel_delta(&pixels, WheelLines::Lines(5)),
+            (-0.0, 12.0, WheelStep::Pixels)
+        );
     }
 
     /// Build a minimal [`AgentDispatch`] for the given kind.
@@ -999,5 +1057,148 @@ mod tests {
             "timestamp_mono_us must be strictly increasing across consecutive dispatches \
              (ts1={ts1}, ts2={ts2})"
         );
+    }
+
+    /// hud-ljhku.13 R13.3 S1: five lines per notch scroll five OUTPUT text
+    /// rows on a portal (its shaped line height), five 40 px lines on a
+    /// surface without text, and WHEEL_PAGESCROLL one visible page.
+    #[test]
+    fn wheel_lines_follow_the_target_text_line_height() {
+        use std::sync::Arc;
+        use tze_hud_portal::hub::{PortalHub, PortalKey, Publish};
+        use tze_hud_scene::{NodeData, PortalDocumentLayout, PortalPartKind, Rect};
+
+        let clock = tze_hud_scene::TestClock::from_us(200);
+        let mut driver = crate::portal::PortalDriver::new(tze_hud_mcp::PortalHandle::new(
+            PortalHub::default(),
+            Arc::new(clock.clone()),
+        ));
+        driver
+            .hub_mut()
+            .publish(
+                &PortalKey::new("agent", "wheel"),
+                Publish {
+                    text: Some("hello".into()),
+                    ..Default::default()
+                },
+                100,
+            )
+            .expect("publish accepted");
+        let mut scene = SceneGraph::new_with_clock(1920.0, 1080.0, Arc::new(clock.clone()));
+        let tab = scene.create_tab("Main", 0).unwrap();
+        let mut processor = tze_hud_input::InputProcessor::new();
+        driver.drain(&mut scene, &mut processor, Some(tab));
+        let tile_id = *scene.tiles.keys().next().expect("portal tile");
+        let (node_id, source) = scene
+            .nodes
+            .iter()
+            .find_map(
+                |(id, node)| match (scene.portal_document_kind(tile_id, *id), &node.data) {
+                    (Some(PortalPartKind::Transcript), NodeData::TextMarkdown(t)) => {
+                        Some((*id, t.clone()))
+                    }
+                    _ => None,
+                },
+            )
+            .expect("transcript document");
+        let pane = scene
+            .portal_surface(tile_id)
+            .unwrap()
+            .parts
+            .iter()
+            .find(|p| p.kind == PortalPartKind::Transcript)
+            .unwrap()
+            .bounds;
+        let content: String = (0..100).map(|i| format!("l{i}\n")).collect();
+        let rows: Vec<(usize, f32)> = (0..100).map(|i| (i * 4, i as f32 * 22.0)).collect();
+        let tile = scene.tiles[&tile_id].bounds;
+        scene.overlay.portal_document_layouts.insert(
+            (tile_id, PortalPartKind::Transcript),
+            PortalDocumentLayout {
+                node_id,
+                signature: [3; 32],
+                source,
+                tile_size: (tile.width, tile.height),
+                font_scale: scene.tile_font_scale(tile_id),
+                content: content.into(),
+                height: 2200.0,
+                viewport: Rect::new(pane.x, pane.y, pane.width, 110.0),
+                line_height: 22.0,
+                rows: rows.into(),
+            },
+        );
+        processor.reconcile_portal_document_layouts(&mut scene);
+        let (x, y) = (tile.x + pane.x + pane.width / 2.0, tile.y + pane.y + 5.0);
+        assert_eq!(
+            scene.portal_document_at(tile_id, x, y),
+            Some(PortalPartKind::Transcript)
+        );
+        // Scrolled back to the top first so downward notches have room.
+        let top = scene.tile_scroll_offset_local(tile_id).1;
+        processor.process_scroll_event(
+            &tze_hud_input::ScrollEvent {
+                x,
+                y,
+                delta_x: 0.0,
+                delta_y: -top,
+            },
+            &mut scene,
+        );
+        let offset = |scene: &SceneGraph| scene.tile_scroll_offset_local(tile_id).1;
+        let start = offset(&scene);
+        let (_, dy, step) = normalize_mouse_wheel_delta(
+            &MouseScrollDelta::LineDelta(0.0, -1.0),
+            WheelLines::Lines(5),
+        );
+        let notch =
+            |scene: &mut SceneGraph, processor: &mut tze_hud_input::InputProcessor, dy, step| {
+                processor.process_wheel_event(
+                    &tze_hud_input::ScrollEvent {
+                        x,
+                        y,
+                        delta_x: 0.0,
+                        delta_y: dy,
+                    },
+                    step,
+                    scene,
+                );
+            };
+        notch(&mut scene, &mut processor, dy, step);
+        assert_eq!(offset(&scene) - start, 5.0 * 22.0, "five OUTPUT rows");
+        let before = offset(&scene);
+        let (_, dy, step) =
+            normalize_mouse_wheel_delta(&MouseScrollDelta::LineDelta(0.0, -1.0), WheelLines::Page);
+        notch(&mut scene, &mut processor, dy, step);
+        assert_eq!(offset(&scene) - before, 110.0, "one visible page");
+
+        // A surface without text: five 40 px lines.
+        let lease = scene.grant_lease("plain", 60_000);
+        let plain = scene
+            .create_tile(
+                tab,
+                "plain",
+                lease,
+                Rect::new(1500.0, 600.0, 300.0, 300.0),
+                50,
+            )
+            .unwrap();
+        scene
+            .register_tile_scroll_config(plain, tze_hud_scene::TileScrollConfig::vertical())
+            .unwrap();
+        let (_, dy, step) = normalize_mouse_wheel_delta(
+            &MouseScrollDelta::LineDelta(0.0, -1.0),
+            WheelLines::Lines(5),
+        );
+        processor.process_wheel_event(
+            &tze_hud_input::ScrollEvent {
+                x: 1600.0,
+                y: 700.0,
+                delta_x: 0.0,
+                delta_y: dy,
+            },
+            step,
+            &mut scene,
+        );
+        assert_eq!(scene.tile_scroll_offset_local(plain).1, 5.0 * 40.0);
     }
 }

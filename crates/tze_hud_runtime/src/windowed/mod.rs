@@ -2500,11 +2500,20 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 if let Some(source) = wake_source {
                     self.state.wake.mark_main_work_pending(source);
                 }
-                let (delta_x, delta_y) = normalize_mouse_wheel_delta(&delta);
-                if self.panel_wheel(delta_y, secondary.is_none()) {
+                let (delta_x, delta_y, step) =
+                    normalize_mouse_wheel_delta(&delta, crate::os_prefs::wheel_lines());
+                // The panel has no text line or page height of its own: a
+                // line is WHEEL_LINE_PX and a page the Windows default 3 lines.
+                let panel_dy = match step {
+                    tze_hud_input::WheelStep::Pages => {
+                        step.to_px(delta_y, 0.0, 3.0 * tze_hud_input::WHEEL_LINE_PX)
+                    }
+                    _ => step.to_px(delta_y, tze_hud_input::WHEEL_LINE_PX, 0.0),
+                };
+                if self.panel_wheel(panel_dy, secondary.is_none()) {
                     return;
                 }
-                self.enqueue_scroll_event(delta_x, delta_y);
+                self.enqueue_scroll_event(delta_x, delta_y, step);
             }
 
             // ── Modifiers ─────────────────────────────────────────────────

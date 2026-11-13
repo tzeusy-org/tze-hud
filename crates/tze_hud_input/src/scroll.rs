@@ -92,6 +92,37 @@ pub struct ScrollEvent {
     pub delta_y: f32,
 }
 
+/// Logical px a wheel "line" scrolls on a surface without a text line height
+/// (hud-ljhku.13); text surfaces use their own line height instead.
+pub const WHEEL_LINE_PX: f32 = 40.0;
+
+/// Unit of a wheel event's vertical delta (hud-ljhku.13).
+///
+/// The OS reports notches; the runtime turns each into Windows "lines per
+/// notch" (or one page) and the scroll target decides how tall a line or a
+/// page is ([`WheelStep::to_px`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub enum WheelStep {
+    /// Already pixels (touchpad pixel deltas, non-Windows notches).
+    Pixels,
+    /// Text lines: the target's text line height, else [`WHEEL_LINE_PX`].
+    Lines,
+    /// Pages: the target's visible height (Windows "one screen at a time").
+    Pages,
+}
+
+impl WheelStep {
+    /// Convert `amount` of this unit to pixels for a target whose line is
+    /// `line_px` tall and whose page is `page_px` tall.
+    pub fn to_px(self, amount: f32, line_px: f32, page_px: f32) -> f32 {
+        match self {
+            WheelStep::Pixels => amount,
+            WheelStep::Lines => amount * line_px,
+            WheelStep::Pages => amount * page_px,
+        }
+    }
+}
+
 // ─── SetScrollOffsetRequest ───────────────────────────────────────────────────
 
 /// An agent request to programmatically set the scroll offset of a tile.

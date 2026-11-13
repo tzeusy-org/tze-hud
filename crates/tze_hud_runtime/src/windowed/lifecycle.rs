@@ -3461,7 +3461,14 @@ impl WinitApp {
     /// `INPUT_EVENTS` channel. A busy scene lock retains the delta instead of
     /// dropping it (hud-65gpz); it applies, in order, on the next successful
     /// lock via one coalesced availability wake.
-    pub(super) fn enqueue_scroll_event(&mut self, delta_x: f32, delta_y: f32) {
+    /// `delta_y` is in `step` units (hud-ljhku.13); the target sizes lines
+    /// and pages when the delta applies.
+    pub(super) fn enqueue_scroll_event(
+        &mut self,
+        delta_x: f32,
+        delta_y: f32,
+        step: tze_hud_input::WheelStep,
+    ) {
         self.refresh_widget_hover_tracking();
         let x = self.state.cursor_x;
         let y = self.state.cursor_y;
@@ -3474,6 +3481,7 @@ impl WinitApp {
                 y,
                 delta_x,
                 delta_y,
+                step,
             },
         );
         if self.apply_retained_scroll().is_none() {
@@ -3491,13 +3499,14 @@ impl WinitApp {
         let state = self.state.shared_state.try_lock().ok()?;
         let mut scene = state.scene.try_lock().ok()?;
         for retained in self.state.pending_scroll.drain(..) {
-            if let Some(ev) = self.state.input_processor.process_scroll_event(
+            if let Some(ev) = self.state.input_processor.process_wheel_event(
                 &tze_hud_input::ScrollEvent {
                     x: retained.x,
                     y: retained.y,
                     delta_x: retained.delta_x,
                     delta_y: retained.delta_y,
                 },
+                retained.step,
                 &mut scene,
             ) {
                 dispatch_scroll_offset_event(&self.state.input_event_tx, &scene, ev);
@@ -3527,6 +3536,8 @@ pub(super) struct RetainedScroll {
     pub(super) y: f32,
     pub(super) delta_x: f32,
     pub(super) delta_y: f32,
+    /// Unit of `delta_y` (hud-ljhku.13); only equal units coalesce.
+    pub(super) step: tze_hud_input::WheelStep,
 }
 
 /// Upper bound on retained wheel entries, so contention can never grow memory.
@@ -3548,6 +3559,7 @@ fn retain_scroll(pending: &mut std::collections::VecDeque<RetainedScroll>, next:
     if let Some(last) = pending.back_mut()
         && last.x == next.x
         && last.y == next.y
+        && last.step == next.step
         && same_direction(last.delta_x, next.delta_x)
         && same_direction(last.delta_y, next.delta_y)
     {
@@ -4213,6 +4225,7 @@ mod tests {
             y: 0.0,
             delta_x: 0.0,
             delta_y: dy,
+            step: tze_hud_input::WheelStep::Pixels,
         };
         let mut pending = std::collections::VecDeque::new();
         retain_scroll(&mut pending, at(1.0, 10.0));
@@ -4237,6 +4250,19 @@ mod tests {
             20.0 - 5.0 + 5.0 - 5.0 + 200.0,
             "bounding never discards a delta"
         );
+
+        // Line and pixel deltas never sum: their sizes differ per target
+        // (hud-ljhku.13).
+        let mut pending = std::collections::VecDeque::new();
+        retain_scroll(&mut pending, at(1.0, 10.0));
+        retain_scroll(
+            &mut pending,
+            RetainedScroll {
+                step: tze_hud_input::WheelStep::Lines,
+                ..at(1.0, 5.0)
+            },
+        );
+        assert_eq!(pending.len(), 2);
     }
 
     #[test]
