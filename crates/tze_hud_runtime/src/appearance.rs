@@ -251,6 +251,13 @@ impl Appearance {
     /// secondary monitor.
     fn resolve(&self, table: &DesignTokenMap) -> DesignTokenMap {
         let mut resolved = resolve_config_tokens(table);
+        // The Windows animation preference is re-read on each reload
+        // (hud-ljhku.13); there is no live OS watch.
+        tze_hud_config::tokens::apply_os_motion_layer(
+            &mut resolved,
+            table,
+            crate::os_prefs::animations_enabled(),
+        );
         crate::scene_startup::resolve_font_dir(&mut resolved, self.config_parent.as_deref());
         let scales = self.scales();
         tze_hud_config::tokens::set_px_scale(&mut resolved, scales.primary);
@@ -291,6 +298,8 @@ impl Appearance {
             restyle_zones(&mut scene.zone_registry, &resolved);
             // Widget boxes are display fractions: zoom alone resizes them.
             scene.widget_registry.zoom = tze_hud_config::tokens::ui_scale(&resolved);
+            scene.widget_registry.reduce_motion =
+                tze_hud_config::tokens::os_reduce_motion(&resolved);
             for (widget_type, file, bytes) in svgs {
                 scene.enqueue_widget_svg_asset(&widget_type, &file, bytes);
             }
@@ -552,6 +561,12 @@ mod tests {
         assert_eq!(appearance.apply(blueprint.clone()).await, Ok(true));
         let map = appearance.live.if_changed(&mut seen).expect("changed");
         let mut expected = resolve_config_tokens(&blueprint);
+        // The host's animation preference is a layer too (hud-ljhku.13).
+        tze_hud_config::tokens::apply_os_motion_layer(
+            &mut expected,
+            &blueprint,
+            crate::os_prefs::animations_enabled(),
+        );
         tze_hud_config::tokens::set_px_scale(&mut expected, 1.0);
         assert_eq!(*map, expected);
         assert!(appearance.live.if_changed(&mut seen).is_none(), "once");

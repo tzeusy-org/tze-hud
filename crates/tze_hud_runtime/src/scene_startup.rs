@@ -48,6 +48,12 @@ pub fn run_scene_startup(
         .map(|dt| dt.0.clone())
         .unwrap_or_default();
     let mut global_tokens = resolve_config_tokens(&config_tokens);
+    // Theme -> Windows animation preference -> config overrides (hud-ljhku.13).
+    tze_hud_config::tokens::apply_os_motion_layer(
+        &mut global_tokens,
+        &config_tokens,
+        crate::os_prefs::animations_enabled(),
+    );
     resolve_font_dir(&mut global_tokens, config_parent);
     // Monitor scale is not known yet: `ui.scale` alone until the windows
     // report theirs (`Appearance::set_display_scales`).
@@ -68,6 +74,7 @@ pub fn run_scene_startup(
     crate::appearance::restyle_zones(&mut zone_registry, &global_tokens);
     scene.zone_registry = zone_registry;
     scene.widget_registry.zoom = tze_hud_config::tokens::ui_scale(&global_tokens);
+    scene.widget_registry.reduce_motion = tze_hud_config::tokens::os_reduce_motion(&global_tokens);
     tracing::info!(
         zone_count = scene.zone_registry.zones.len(),
         tab_count = tab_map.len(),
@@ -242,6 +249,12 @@ mod tests {
         let result = run_scene_startup(&raw, None, &mut scene);
 
         let mut expected = tze_hud_config::themes::resolve_config_tokens(&DesignTokenMap::new());
+        // The host's animation preference is a layer too (hud-ljhku.13).
+        tze_hud_config::tokens::apply_os_motion_layer(
+            &mut expected,
+            &DesignTokenMap::new(),
+            crate::os_prefs::animations_enabled(),
+        );
         tze_hud_config::tokens::set_px_scale(&mut expected, 1.0);
         assert_eq!(result.global_tokens, expected);
         assert_eq!(

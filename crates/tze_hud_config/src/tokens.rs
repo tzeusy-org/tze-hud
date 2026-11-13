@@ -1194,14 +1194,67 @@ pub(crate) fn validate_canonical_value(key: &str, value: &str) -> Result<(), Str
 /// - `runtime.fonts_dir`: absolute `<config dir>/fonts` when it exists
 ///   (`tze_hud_compositor::fonts::RUNTIME_FONTS_DIR_KEY`).
 /// - `runtime.px_scale` ([`PX_SCALE_KEY`]): physical px per logical dp.
+/// - `runtime.reduce_motion` ([`OS_REDUCE_MOTION_KEY`]): the Windows
+///   animation preference is off ([`apply_os_motion_layer`]).
 ///
 /// Every `runtime.px_scale@<zone>` key ([`ZONE_PX_SCALE_PREFIX`]) is
 /// reserved too ([`is_reserved_runtime_key`]).
-pub const RESERVED_RUNTIME_TOKEN_KEYS: &[&str] = &["runtime.fonts_dir", PX_SCALE_KEY];
+pub const RESERVED_RUNTIME_TOKEN_KEYS: &[&str] =
+    &["runtime.fonts_dir", PX_SCALE_KEY, OS_REDUCE_MOTION_KEY];
 
 /// Whether the runtime, not config, sets `key`.
 pub fn is_reserved_runtime_key(key: &str) -> bool {
     RESERVED_RUNTIME_TOKEN_KEYS.contains(&key) || key.starts_with(ZONE_PX_SCALE_PREFIX)
+}
+
+// ─── OS motion preference ─────────────────────────────────────────────────────
+
+/// Runtime-set key, `"true"` while the OS asks for no animation (Windows
+/// "Show animations" off, `SPI_GETCLIENTAREAANIMATION`). gRPC widget
+/// publishes snap their explicit `transition_ms` to 0 while it is set.
+pub const OS_REDUCE_MOTION_KEY: &str = "runtime.reduce_motion";
+
+/// The duration tokens the OS motion layer sets to 0: exactly these, and
+/// never one the owner sets in `[design_tokens]`.
+pub const OS_MOTION_ZEROED_KEYS: [&str; 5] = [
+    "motion.enter.ms",
+    "motion.exit.ms",
+    "motion.state.ms",
+    crate::portal_tokens::PORTAL_TOKEN_TRANSITION_IN_MS,
+    crate::portal_tokens::PORTAL_TOKEN_TRANSITION_OUT_MS,
+];
+
+/// Apply the OS animation preference as a token layer between the theme and
+/// the config overrides: theme → OS preference → `[design_tokens]`.
+///
+/// `resolved` is a map from [`crate::themes::resolve_config_tokens`] and
+/// `config_tokens` the `[design_tokens]` table it was resolved from. With
+/// animations enabled this only clears [`OS_REDUCE_MOTION_KEY`]. With them
+/// disabled every [`OS_MOTION_ZEROED_KEYS`] key the owner did not set becomes
+/// `"0"` and [`OS_REDUCE_MOTION_KEY`] is set. The runtime reads the OS value
+/// at startup and on each config reload; there is no live OS watch.
+pub fn apply_os_motion_layer(
+    resolved: &mut DesignTokenMap,
+    config_tokens: &DesignTokenMap,
+    animations_enabled: bool,
+) {
+    if animations_enabled {
+        resolved.remove(OS_REDUCE_MOTION_KEY);
+        return;
+    }
+    for key in OS_MOTION_ZEROED_KEYS {
+        if !config_tokens.contains_key(key) {
+            resolved.insert(key.to_owned(), "0".to_owned());
+        }
+    }
+    resolved.insert(OS_REDUCE_MOTION_KEY.to_owned(), "true".to_owned());
+}
+
+/// Whether the OS motion layer is active in `tokens` ([`apply_os_motion_layer`]).
+pub fn os_reduce_motion(tokens: &DesignTokenMap) -> bool {
+    tokens
+        .get(OS_REDUCE_MOTION_KEY)
+        .is_some_and(|v| v == "true")
 }
 
 // ─── Logical sizes ────────────────────────────────────────────────────────────
@@ -1706,6 +1759,61 @@ mod tests {
         assert_eq!(errors[0].code, ConfigErrorCode::InvalidTokenKey);
         assert_eq!(errors[0].field_path, "design_tokens.runtime.fonts_dir");
         assert!(errors[0].hint.contains("fonts"));
+    }
+
+    // hud-ljhku.13 R13.4 S1: theme -> OS preference -> config overrides.
+    #[test]
+    fn os_motion_layer_zeroes_exactly_the_five_durations() {
+        let config = DesignTokenMap::new();
+        let themed = crate::themes::resolve_config_tokens(&config);
+        let mut resolved = themed.clone();
+        apply_os_motion_layer(&mut resolved, &config, false);
+        for key in OS_MOTION_ZEROED_KEYS {
+            assert_eq!(resolved.get(key).map(String::as_str), Some("0"), "{key}");
+        }
+        assert!(os_reduce_motion(&resolved));
+        // Nothing else moves: easing curves and every other token keep the
+        // theme's value.
+        for (key, value) in &themed {
+            if !OS_MOTION_ZEROED_KEYS.contains(&key.as_str()) {
+                assert_eq!(resolved.get(key), Some(value), "{key}");
+            }
+        }
+        assert_eq!(resolved.len(), themed.len() + 3, "two portal keys + flag");
+        assert_eq!(resolve_motion_duration_ms(&resolved, "motion.state.ms"), 0);
+    }
+
+    #[test]
+    fn os_motion_layer_sits_below_config_overrides() {
+        let config: DesignTokenMap = [
+            ("motion.exit.ms".to_string(), "250".to_string()),
+            ("portal.transition.in_ms".to_string(), "90".to_string()),
+        ]
+        .into();
+        let mut resolved = crate::themes::resolve_config_tokens(&config);
+        apply_os_motion_layer(&mut resolved, &config, false);
+        assert_eq!(resolved["motion.exit.ms"], "250");
+        assert_eq!(resolved["portal.transition.in_ms"], "90");
+        assert_eq!(resolved["motion.enter.ms"], "0");
+        assert_eq!(resolved["motion.state.ms"], "0");
+        assert_eq!(resolved["portal.transition.out_ms"], "0");
+    }
+
+    #[test]
+    fn os_motion_layer_with_animations_on_is_the_theme() {
+        let config = DesignTokenMap::new();
+        let themed = crate::themes::resolve_config_tokens(&config);
+        let mut resolved = themed.clone();
+        // A reload after the owner turns animations back on clears the flag.
+        resolved.insert(OS_REDUCE_MOTION_KEY.into(), "true".into());
+        apply_os_motion_layer(&mut resolved, &config, true);
+        assert_eq!(resolved, themed);
+        assert!(!os_reduce_motion(&resolved));
+    }
+
+    #[test]
+    fn os_reduce_motion_key_is_runtime_reserved() {
+        assert!(is_reserved_runtime_key(OS_REDUCE_MOTION_KEY));
     }
 
     #[test]

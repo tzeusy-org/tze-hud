@@ -810,3 +810,49 @@ async fn test_ephemeral_widget_no_publish_result() {
 
     drop(handle);
 }
+
+/// hud-ljhku.13 R13.4 S1: while the Windows animation preference is off
+/// (`widget_registry.reduce_motion`), a gRPC publish's explicit
+/// `transition_ms` snaps to 0; with it on the value is kept.
+#[tokio::test]
+async fn grpc_transition_ms_snaps_to_zero_while_os_reduces_motion() {
+    use crate::proto::widget_parameter_value_proto::Value as Param;
+    let service = setup_widget_service().await;
+    let scene_ref = service.state.lock().await.scene.clone();
+    let (mut client, _handle) = setup_widget_test_with_service(service).await;
+    let (tx, _init, mut stream) = handshake_with_capabilities(
+        &mut client,
+        "widget-agent",
+        "test-key",
+        &["publish_widget:gauge"],
+    )
+    .await;
+    for (sequence, reduce_motion, level, expected) in
+        [(2u64, true, 0.25f32, 0u32), (3, false, 0.5, 150)]
+    {
+        scene_ref.lock().await.widget_registry.reduce_motion = reduce_motion;
+        tx.send(ClientMessage {
+            sequence,
+            timestamp_wall_us: now_wall_us(),
+            payload: Some(ClientPayload::Publish(Publish {
+                surface: "widget:gauge".into(),
+                transition_ms: 150,
+                params: vec![crate::proto::WidgetParameterValueProto {
+                    param_name: "level".into(),
+                    value: Some(Param::F32Value(level)),
+                }],
+                ..Default::default()
+            })),
+        })
+        .await
+        .unwrap();
+        let Some(ServerPayload::RequestResult(result)) = next_server_msg(&mut stream).await.payload
+        else {
+            panic!("request result")
+        };
+        assert!(result.ok, "{}", result.code);
+        let scene = scene_ref.lock().await;
+        let pubs = &scene.widget_registry.active_publishes["gauge"];
+        assert_eq!(pubs.last().unwrap().transition_ms, expected);
+    }
+}

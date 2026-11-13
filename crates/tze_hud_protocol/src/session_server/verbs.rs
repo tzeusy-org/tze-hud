@@ -422,7 +422,13 @@ fn publish_widget(
             widget_name: widget.into(),
             params,
             merge_key: (!publish.key.is_empty()).then(|| publish.key.clone()),
-            transition_ms: publish.transition_ms,
+            // Windows "Show animations" off snaps explicit transitions
+            // (hud-ljhku.13).
+            transition_ms: if scene.widget_registry.reduce_motion {
+                0
+            } else {
+                publish.transition_ms
+            },
             ttl_us: (publish.ttl_ms > 0).then(|| publish.ttl_ms.saturating_mul(1_000)),
             expires_at_wall_us: (publish.expires_at_us > 0).then_some(publish.expires_at_us),
         }],
