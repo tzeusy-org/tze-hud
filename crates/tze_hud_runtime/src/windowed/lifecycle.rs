@@ -2236,6 +2236,7 @@ impl WinitApp {
             .unwrap_or_else(|e| e.into_inner()) = crate::operator::surface_status::UiMirror {
             focus: ring_owner.as_ref().map(|o| (o.tile_id, o.node_id)),
             draft_chars,
+            reading: self.reading_ui(),
             hover_targets: self
                 .state
                 .widget_hover_trackers
@@ -2359,6 +2360,55 @@ impl WinitApp {
             tze_hud_scene::graph::NotificationActivation::Callback(wake) => wake.notify(),
             tze_hud_scene::graph::NotificationActivation::OpenUrl(url) => {
                 self.state.notification_link_opener.launch(url)
+            }
+        }
+    }
+
+    /// Admin OUTPUT reading observations per portal (hud-ljhku.2).
+    fn reading_ui(
+        &self,
+    ) -> std::collections::HashMap<tze_hud_scene::SceneId, crate::operator::surface_status::ReadingUi>
+    {
+        let ip = &self.state.input_processor;
+        let reader = &ip.output_reading;
+        let pointer_tile = reader.press_tile().or(reader.hover_tile());
+        ip.portal_output_tiles()
+            .filter_map(|tile| {
+                let layout = ip.portal_output_layout(tile)?;
+                let cursor = match (pointer_tile == Some(tile))
+                    .then_some(self.state.reading_cursor)
+                    .flatten()
+                {
+                    Some(tze_hud_input::PortalCursor::Text) => "ibeam",
+                    Some(tze_hud_input::PortalCursor::Pointer) => "hand",
+                    _ => "arrow",
+                };
+                Some((
+                    tile,
+                    crate::operator::surface_status::ReadingUi {
+                        cursor,
+                        link_hint: reader.link_hint(tile, layout),
+                        selection_chars: reader.selection_chars(tile, layout),
+                    },
+                ))
+            })
+            .collect()
+    }
+
+    /// Perform an OUTPUT reading effect once every scene/state guard dropped:
+    /// the link worker (never logs the URL) or the clipboard writer.
+    pub(super) fn perform_reading_effect(
+        &mut self,
+        effect: tze_hud_input::portal_reading::ReadingEffect,
+    ) {
+        match effect {
+            tze_hud_input::portal_reading::ReadingEffect::Open(url) => {
+                self.state.notification_link_opener.launch(url)
+            }
+            tze_hud_input::portal_reading::ReadingEffect::Copy(text) => {
+                if let Err(error) = crate::clipboard::write_text(&text) {
+                    tracing::debug!(%error, "portal output copy not written");
+                }
             }
         }
     }
@@ -2777,6 +2827,7 @@ impl WinitApp {
         // not the input processor) without a borrow conflict (hud-etrs0).
         let mut composer_selection_changed = false;
         let mut take_text_focus = false;
+        let mut reading_effect = None;
         let mut pointer_processed = false;
         // Interactive gestures require guaranteed same-frame local feedback
         // (local-feedback-first).  For those events, acquire the locks with a
@@ -3027,6 +3078,41 @@ impl WinitApp {
                 } else if pointer_event.kind == PointerEventKind::Up {
                     self.state.composer_pointer_drag_anchor = None;
                 }
+
+                // ── Portal OUTPUT reading (hud-ljhku.2) ──────────────────────
+                // Links open on a release within the drag threshold; a drag or
+                // double/triple click selects, which takes keyboard focus so
+                // Ctrl+C and Esc reach the HUD. Nothing reaches the agent.
+                let over_output = match result.hit {
+                    HitResult::NodeHit { tile_id, .. } | HitResult::TileHit { tile_id }
+                        if scene.portal_document_at(tile_id, pointer_event.x, pointer_event.y)
+                            == Some(tze_hud_scene::PortalPartKind::Transcript) =>
+                    {
+                        Some(tile_id)
+                    }
+                    _ => None,
+                };
+                let reading = self.state.input_processor.route_output_pointer(
+                    &pointer_event.kind,
+                    over_output,
+                    &mut scene,
+                    (pointer_event.x, pointer_event.y),
+                    pointer_event.timestamp.unwrap_or_else(Instant::now),
+                );
+                take_text_focus |= reading.selection_started;
+                reading_effect = reading.effect;
+                let reader = &self.state.input_processor.output_reading;
+                self.state.reading_cursor = reader
+                    .press_tile()
+                    .or(over_output)
+                    .map(|tile| reader.cursor(tile))
+                    .or_else(|| {
+                        matches!(result.hit, HitResult::NodeHit { node_id, .. }
+                            if scene.nodes.get(&node_id).is_some_and(|node|
+                                matches!(&node.data, tze_hud_scene::NodeData::HitRegion(hit)
+                                    if hit.accepts_composer_input)))
+                        .then_some(tze_hud_input::PortalCursor::Text)
+                    });
 
                 // ── Zone interaction dispatch (local feedback first) ──────────
                 // On pointer-up, check whether the hit landed on a compositor-
@@ -3288,6 +3374,9 @@ impl WinitApp {
         }
         for outcome in pending_notification_outcomes {
             self.deliver_notification_activation(outcome);
+        }
+        if let Some(effect) = reading_effect {
+            self.perform_reading_effect(effect);
         }
 
         // A busy scene lock must not lose hover/hit-test (hud-65gpz): retain the

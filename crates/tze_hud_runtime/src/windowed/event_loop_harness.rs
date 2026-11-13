@@ -199,6 +199,7 @@ impl WindowedRuntimeState {
             element_repositioned_tx: None,
             input_event_tx: None,
             composer_pointer_drag_anchor: None,
+            reading_cursor: None,
             portal_resize_states: HashMap::new(),
             consumed_portal_resize_keydowns: HashSet::new(),
             consumed_shell_shortcut_keydowns: HashSet::new(),
@@ -1539,6 +1540,365 @@ mod tests {
         assert_eq!(typed["input"]["draft_chars"], 3);
         assert_eq!(typed["output"]["first_visible_line"], first);
         assert!(body["idle_since_ms"].as_u64().is_some());
+    }
+
+    /// Portal reading (hud-ljhku.2) through the production pointer and key
+    /// paths over a really shaped OUTPUT: links open through the link worker
+    /// on release (rate limited, never on a drag or second click), drags and
+    /// multi-clicks select, Ctrl+C and the copy button write plain text, Esc
+    /// clears, Tab/Enter reach links, and the admin entry reports cursor,
+    /// hint and selection length. Nothing reaches the agent's input.
+    #[tokio::test]
+    async fn portal_output_reading_links_selection_copy_and_cursor() {
+        use tze_hud_input::KeyboardModifiers;
+        use tze_hud_input::portal_reading::{OutputReading, ReadingStop};
+        use tze_hud_portal::hub::{PortalKey, Publish};
+        use tze_hud_scene::clock::TestClock;
+
+        let _gpu = crate::test_support::lock_headless_runtime().await;
+        let mut compositor = tze_hud_compositor::Compositor::new_headless(800, 600)
+            .await
+            .expect("software compositor for real frame builds");
+        compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+        let clock = Arc::new(TestClock::new(1_000));
+        let mut cfg = super::super::WindowedConfig::default();
+        cfg.window.width = 800;
+        cfg.window.height = 600;
+        let events = HeadlessEventLoopHarness::with_network(cfg, clock.clone())
+            .await
+            .unwrap();
+        let frames = super::super::frame_work::WindowedFrameWork::new(
+            events.app.state.wake.clone(),
+            events.app.state.frame_ready_tx.as_ref().unwrap().clone(),
+        );
+        let mut runtime = CaptureRenderHarness {
+            events,
+            compositor,
+            frames,
+            pending_texture: false,
+            size: (800, 600),
+        };
+        let opened = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+        let sink = Arc::clone(&opened);
+        runtime.events.app.state.notification_link_opener.worker = Some(Arc::new(move |url| {
+            sink.lock().unwrap().push(url);
+            Ok(())
+        }));
+        let portals = runtime
+            .events
+            .app
+            .state
+            .portal_projection_driver
+            .portal_handle();
+        let key = PortalKey::new("ops", "read");
+        let text = "Docs [alpha](https://alpha.example/a) and [beta](https://beta.example/b) or [gamma](https://gamma.example/c)\n\n\
+                    Bare https://delta.example/d here and [plain](http://insecure.example)\n\n\
+                    Line three of output\nLine four of output\nLine five of output\n\n\
+                    ```sh\necho copied\n```";
+        portals
+            .hub
+            .lock()
+            .unwrap()
+            .publish(
+                &key,
+                Publish {
+                    text: Some(text.into()),
+                    ..Default::default()
+                },
+                portals.clock.now_us(),
+            )
+            .expect("publish accepted");
+        let settle = |runtime: &mut CaptureRenderHarness| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+            while runtime.turn(true) {
+                assert!(std::time::Instant::now() < deadline, "portal never settled");
+                clock.advance(16);
+                std::thread::sleep(std::time::Duration::from_millis(16));
+            }
+        };
+        settle(&mut runtime);
+        let tile = *runtime.events.scene().tiles.keys().next().unwrap();
+        let layout = runtime
+            .events
+            .app
+            .state
+            .input_processor
+            .portal_output_layout(tile)
+            .expect("shaped OUTPUT")
+            .clone();
+        let hrefs: Vec<&str> = layout.reading.links.iter().map(|l| &*l.href).collect();
+        assert_eq!(
+            hrefs,
+            [
+                "https://alpha.example/a",
+                "https://beta.example/b",
+                "https://gamma.example/c",
+                "https://delta.example/d"
+            ],
+            "R2.1 S5/S6: the bare URL links; http:// stays plain"
+        );
+        // Screen point of a plain-text byte range's first rect centre.
+        let at = |runtime: &CaptureRenderHarness, start: usize, end: usize, dx: f32| {
+            let scene = runtime.events.scene();
+            let b = scene.tiles[&tile].bounds;
+            let scroll = scene.tile_scroll_offset_local(tile).1;
+            let r = layout.range_rects(start, end)[0];
+            (
+                b.x + layout.viewport.x + r.x + r.width / 2.0 + dx,
+                b.y + layout.viewport.y + r.y + r.height / 2.0 - scroll,
+            )
+        };
+        let link_at = |runtime: &CaptureRenderHarness, i: usize| {
+            let l = &layout.reading.links[i];
+            at(runtime, l.start, l.end, 0.0)
+        };
+        let pointer =
+            |runtime: &mut CaptureRenderHarness, (x, y): (f32, f32), kind: PointerEventKind| {
+                runtime.events.app.state.cursor_x = x;
+                runtime.events.app.state.cursor_y = y;
+                runtime.events.app.enqueue_pointer_event(kind);
+            };
+        let launches = |runtime: &CaptureRenderHarness| {
+            runtime
+                .events
+                .app
+                .state
+                .notification_link_opener
+                .launches
+                .load(std::sync::atomic::Ordering::Relaxed)
+        };
+        let reader = |runtime: &CaptureRenderHarness| -> (usize, Option<String>) {
+            let r = &runtime.events.app.state.input_processor.output_reading;
+            (r.selection_chars(tile, &layout), r.link_hint(tile, &layout))
+        };
+        let multi_click =
+            OutputReading::default().multi_click + std::time::Duration::from_millis(100);
+
+        // R2.1 S1: press and release within the threshold opens once on release.
+        let alpha = link_at(&runtime, 0);
+        pointer(&mut runtime, alpha, PointerEventKind::Down);
+        assert_eq!(launches(&runtime), 0, "nothing opens on press");
+        pointer(
+            &mut runtime,
+            (alpha.0 + 3.0, alpha.1 + 3.0),
+            PointerEventKind::Move,
+        );
+        pointer(
+            &mut runtime,
+            (alpha.0 + 3.0, alpha.1 + 3.0),
+            PointerEventKind::Up,
+        );
+        assert_eq!(launches(&runtime), 1);
+        // R2.1 S4: the same href again within 2 s (not a double-click) does not launch.
+        std::thread::sleep(multi_click);
+        runtime.events.click(alpha.0, alpha.1);
+        assert_eq!(launches(&runtime), 1, "same href within 2 s is refused");
+
+        // R2.1 S3: a double-click opens once, on the first release, and selects nothing.
+        let beta = link_at(&runtime, 1);
+        runtime.events.click(beta.0, beta.1);
+        runtime.events.click(beta.0, beta.1);
+        assert_eq!(launches(&runtime), 2);
+        assert_eq!(reader(&runtime).0, 0, "a link double-click selects nothing");
+
+        // R2.1 S8 / R2.4 S1: hover a link: hand cursor, underline, host hint.
+        let gamma = link_at(&runtime, 2);
+        std::thread::sleep(multi_click);
+        pointer(&mut runtime, gamma, PointerEventKind::Move);
+        assert_eq!(
+            runtime.events.app.state.reading_cursor,
+            Some(tze_hud_input::PortalCursor::Pointer)
+        );
+        assert_eq!(
+            reader(&runtime).1.as_deref(),
+            Some("gamma.example"),
+            "text differs from href"
+        );
+        let decor = runtime.events.scene().overlay.portal_reading[&tile].clone();
+        assert_eq!(
+            decor.link,
+            Some((layout.reading.links[2].start, layout.reading.links[2].end))
+        );
+        assert_eq!(
+            decor.hint.as_ref().map(|h| h.0.as_str()),
+            Some("gamma.example")
+        );
+
+        // R2.1 S2: a press that moves past the threshold opens nothing and selects.
+        pointer(&mut runtime, gamma, PointerEventKind::Down);
+        pointer(
+            &mut runtime,
+            (gamma.0 + 40.0, gamma.1),
+            PointerEventKind::Move,
+        );
+        pointer(
+            &mut runtime,
+            (gamma.0 + 40.0, gamma.1),
+            PointerEventKind::Up,
+        );
+        assert_eq!(launches(&runtime), 2, "a drag from a link opens nothing");
+        assert!(reader(&runtime).0 > 0, "and selects text");
+
+        // R2.4 S1: I-beam over text, arrow over blank OUTPUT.
+        let three = layout.content.find("Line three").unwrap();
+        let text_point = at(&runtime, three, three + 4, 0.0);
+        pointer(&mut runtime, text_point, PointerEventKind::Move);
+        assert_eq!(
+            runtime.events.app.state.reading_cursor,
+            Some(tze_hud_input::PortalCursor::Text)
+        );
+        assert_eq!(reader(&runtime).1, None, "no hint without a hovered link");
+        let blank_x = runtime.events.scene().tiles[&tile].bounds.x
+            + layout.viewport.x
+            + layout.viewport.width
+            - 4.0;
+        pointer(
+            &mut runtime,
+            (blank_x, text_point.1),
+            PointerEventKind::Move,
+        );
+        assert_eq!(
+            runtime.events.app.state.reading_cursor,
+            Some(tze_hud_input::PortalCursor::Default)
+        );
+
+        // R2.2 S1: drag across three lines, Ctrl+C copies exactly that text.
+        std::thread::sleep(multi_click);
+        let five = layout.content.find("Line five").unwrap();
+        let from = at(
+            &runtime,
+            three,
+            three + 1,
+            -(layout.range_rects(three, three + 1)[0].width / 2.0) + 1.0,
+        );
+        let to = at(&runtime, five + 3, five + 4, -1.0);
+        pointer(&mut runtime, from, PointerEventKind::Down);
+        pointer(&mut runtime, to, PointerEventKind::Move);
+        pointer(&mut runtime, to, PointerEventKind::Up);
+        let expected = &layout.content[three..five + 3];
+        assert_eq!(reader(&runtime).0, expected.chars().count());
+        assert!(
+            !runtime.events.scene().tile_follow_tail_at_tail(tile)
+                || layout.height <= layout.viewport.height,
+            "R2.2 S3: a selection stops following the tail"
+        );
+        let writes = crate::clipboard::writes();
+        runtime
+            .events
+            .app
+            .dispatch_key_down_event(&RawKeyDownEvent {
+                key_code: "KeyC".into(),
+                key: "c".into(),
+                modifiers: KeyboardModifiers {
+                    ctrl: true,
+                    ..KeyboardModifiers::NONE
+                },
+                repeat: false,
+                timestamp_mono_us: MonoUs(super::super::nanoseconds_since_start() / 1_000),
+            });
+        assert!(crate::clipboard::writes() > writes);
+        assert_eq!(
+            crate::clipboard::LAST_TEXT
+                .with(|t| t.borrow().clone())
+                .as_deref(),
+            Some(expected),
+            "plain text of exactly the selection"
+        );
+        // R2.2 S4: Esc clears the selection.
+        runtime.events.press_named_key("Escape");
+        assert_eq!(reader(&runtime).0, 0);
+
+        // R2.2 S2: double-click selects a word, triple-click the paragraph.
+        let word = at(&runtime, three + 5, three + 6, 0.0);
+        runtime.events.click(word.0, word.1);
+        runtime.events.click(word.0, word.1);
+        assert_eq!(reader(&runtime).0, "three".len());
+        runtime.events.click(word.0, word.1);
+        let paragraph = layout.paragraph_at(three);
+        assert_eq!(
+            reader(&runtime).0,
+            layout.content[paragraph.0..paragraph.1].chars().count()
+        );
+        runtime.events.press_named_key("Escape");
+
+        // R2.3 S1: hover the block, press its copy button: verbatim copy, "Copied".
+        std::thread::sleep(multi_click);
+        let (bs, be) = layout.reading.code_blocks[0];
+        let block = at(&runtime, bs, bs + 1, 0.0);
+        pointer(&mut runtime, block, PointerEventKind::Move);
+        let button = runtime.events.scene().overlay.portal_reading[&tile]
+            .copy_button
+            .clone()
+            .expect("hovering the block shows its copy button");
+        let b = runtime.events.scene().tiles[&tile].bounds;
+        let centre = (
+            b.x + button.bounds.x + button.bounds.width / 2.0,
+            b.y + button.bounds.y + button.bounds.height / 2.0,
+        );
+        pointer(&mut runtime, centre, PointerEventKind::Move);
+        assert_eq!(
+            runtime.events.app.state.reading_cursor,
+            Some(tze_hud_input::PortalCursor::Pointer)
+        );
+        runtime.events.click(centre.0, centre.1);
+        assert_eq!(
+            crate::clipboard::LAST_TEXT
+                .with(|t| t.borrow().clone())
+                .as_deref(),
+            Some(&layout.content[bs..be])
+        );
+        assert!(
+            runtime.events.scene().overlay.portal_reading[&tile]
+                .copy_button
+                .as_ref()
+                .is_some_and(|b| b.copied)
+        );
+
+        // R2.1 S7: Tab from the composer reaches the first link; Enter opens it
+        // (alpha's 2 s window has passed, so it launches).
+        std::thread::sleep(std::time::Duration::from_millis(1_200));
+        let (x, y) = runtime.events.composer_center().expect("composer");
+        runtime.events.click(x, y);
+        runtime.events.press_named_key("Tab");
+        assert_eq!(
+            runtime
+                .events
+                .app
+                .state
+                .input_processor
+                .output_reading
+                .focus,
+            Some((tile, ReadingStop::Link(0)))
+        );
+        runtime.events.press_named_key("Enter");
+        assert_eq!(launches(&runtime), 3);
+
+        // Every activation went to the worker; nothing reached hud_input.
+        for worker in runtime
+            .events
+            .app
+            .state
+            .notification_link_opener
+            .workers
+            .drain(..)
+        {
+            worker.join().unwrap();
+        }
+        assert_eq!(
+            *opened.lock().unwrap(),
+            [
+                "https://alpha.example/a",
+                "https://beta.example/b",
+                "https://alpha.example/a"
+            ]
+        );
+        let hub = portals.hub.lock().unwrap();
+        assert_eq!(
+            hub.get(&key).unwrap().input_bytes(),
+            0,
+            "no OUTPUT interaction reaches the agent"
+        );
+        assert!(runtime.events.scene().pending_actions.is_empty());
     }
 
     /// Moves the former compositor build-only gate onto the runtime's actual

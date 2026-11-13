@@ -537,6 +537,7 @@ impl StatusSource {
             "notifications": surfaces.notifications,
             "widgets": surfaces.widgets,
             "link_launches": surfaces.link_launches,
+            "clipboard_writes": crate::clipboard::writes(),
             "cpu_pct_2s": cpu_pct_2s,
             "cpu_pct_avg": cpu_pct_avg,
             // Outcome of the last update attempt: null, or {ok, sha, error}.

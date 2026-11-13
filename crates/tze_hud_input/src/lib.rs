@@ -68,6 +68,7 @@ pub mod focus;
 pub mod focus_tree;
 pub mod jump_to_latest;
 pub mod keyboard;
+pub mod portal_reading;
 pub mod portal_resize;
 pub mod scroll_indicator;
 
@@ -328,6 +329,8 @@ pub struct InputProcessor {
     ///
     /// Spec: §4.1 — runtime-owned draft attached to focused composer regions.
     composer_draft_manager: ComposerDraftManager,
+    /// OUTPUT links, selection, copy and reading stops (hud-ljhku.2).
+    pub output_reading: portal_reading::OutputReading,
 }
 
 impl InputProcessor {
@@ -346,7 +349,193 @@ impl InputProcessor {
             portal_input_scroll_state: ScrollState::new(),
             portal_layouts: HashMap::new(),
             composer_draft_manager: ComposerDraftManager::new(),
+            output_reading: portal_reading::OutputReading::default(),
         }
+    }
+
+    /// The current shaped OUTPUT document of `tile`.
+    pub fn portal_output_layout(
+        &self,
+        tile: SceneId,
+    ) -> Option<&tze_hud_scene::PortalDocumentLayout> {
+        self.portal_layouts
+            .get(&(tile, tze_hud_scene::PortalPartKind::Transcript))
+    }
+
+    /// Tiles with a shaped OUTPUT document.
+    pub fn portal_output_tiles(&self) -> impl Iterator<Item = SceneId> + '_ {
+        self.portal_layouts
+            .keys()
+            .filter(|k| k.1 == tze_hud_scene::PortalPartKind::Transcript)
+            .map(|k| k.0)
+    }
+
+    /// Whether `tile`'s OUTPUT follows its tail.
+    pub fn output_at_tail(&self, tile: SceneId) -> bool {
+        self.scroll_state.follow_tail_anchor(tile) == crate::scroll::FollowTailAnchor::AtTail
+    }
+
+    /// While an OUTPUT selection exists the view stops following the tail
+    /// (new output counts as unread); returns whether it was following.
+    pub fn hold_output_for_selection(&mut self, tile: SceneId, scene: &mut SceneGraph) -> bool {
+        let was = self.scroll_state.hold_reading(tile);
+        if was {
+            scene.set_tile_follow_tail_at_tail(tile, false);
+        }
+        was
+    }
+
+    /// A cleared selection resumes following only if it began at the tail.
+    pub fn release_output_selection(
+        &mut self,
+        selection: portal_reading::Selection,
+        scene: &mut SceneGraph,
+    ) -> bool {
+        selection.resume_tail && self.reset_tile_scroll_to_tail(selection.tile, scene)
+    }
+
+    /// Route one primary pointer event through OUTPUT reading (hud-ljhku.2).
+    /// `over` is the portal whose OUTPUT pane is under the pointer; a held
+    /// press keeps its own tile. Holds or resumes the tail and refreshes the
+    /// drawn decoration; the caller performs the returned effect unlocked.
+    pub fn route_output_pointer(
+        &mut self,
+        kind: &PointerEventKind,
+        over: Option<SceneId>,
+        scene: &mut SceneGraph,
+        (x, y): (f32, f32),
+        now: std::time::Instant,
+    ) -> portal_reading::ReadingOutcome {
+        use tze_hud_scene::PortalPartKind::Transcript;
+        let local = |t: SceneId| {
+            scene
+                .tiles
+                .get(&t)
+                .map_or((x, y), |tile| (x - tile.bounds.x, y - tile.bounds.y))
+        };
+        let over_layout = over.and_then(|t| self.portal_layouts.get(&(t, Transcript)));
+        let over_scroll = over.map_or(0.0, |t| scene.tile_scroll_offset_local(t).1);
+        let over_p = over.map_or((x, y), local);
+        self.output_reading
+            .pointer_hover(over, over_layout, over_scroll, over_p);
+        let tile = self.output_reading.press_tile().or(over);
+        let layout = tile.and_then(|t| self.portal_layouts.get(&(t, Transcript)));
+        let scroll = tile.map_or(0.0, |t| scene.tile_scroll_offset_local(t).1);
+        let p = tile.map_or((x, y), local);
+        let at_tail = tile.is_some_and(|t| {
+            self.scroll_state.follow_tail_anchor(t) == crate::scroll::FollowTailAnchor::AtTail
+        });
+        let out = match (kind, over.zip(over_layout)) {
+            (PointerEventKind::Down, Some((t, l))) => self
+                .output_reading
+                .pointer_down(t, l, scroll, p, now, at_tail),
+            (PointerEventKind::Down, None) => Default::default(),
+            (PointerEventKind::Move, _) => {
+                self.output_reading.pointer_move(layout, scroll, p, at_tail)
+            }
+            (PointerEventKind::Up, _) => self.output_reading.pointer_up(layout, scroll, p, now),
+        };
+        if let Some(sel) = out.cleared {
+            let _ = self.release_output_selection(sel, scene);
+        }
+        if out.selection_started
+            && let Some(sel) = self.output_reading.selection
+        {
+            self.hold_output_for_selection(sel.tile, scene);
+        }
+        self.sync_output_reading(scene);
+        out
+    }
+
+    /// Ctrl+C: the OUTPUT selection's plain text.
+    pub fn output_copy(&self) -> Option<portal_reading::ReadingEffect> {
+        let sel = self.output_reading.selection?;
+        self.output_reading
+            .copy(sel.tile, self.portal_output_layout(sel.tile)?)
+    }
+
+    /// Esc on OUTPUT reading state, innermost first; `false` when nothing
+    /// cleared (the outer Esc proceeds).
+    pub fn output_escape(&mut self, scene: &mut SceneGraph) -> bool {
+        let Some(cleared) = self.output_reading.escape() else {
+            return false;
+        };
+        if let Some(sel) = cleared {
+            let _ = self.release_output_selection(sel, scene);
+        }
+        self.sync_output_reading(scene);
+        true
+    }
+
+    /// Tab / Shift+Tab among `tile`'s visible OUTPUT links and copy buttons;
+    /// `false` when traversal leaves OUTPUT.
+    pub fn output_tab(
+        &mut self,
+        tile: SceneId,
+        scene: &mut SceneGraph,
+        reverse: bool,
+        entering: bool,
+    ) -> bool {
+        let scroll = scene.tile_scroll_offset_local(tile).1;
+        let moved = match self
+            .portal_layouts
+            .get(&(tile, tze_hud_scene::PortalPartKind::Transcript))
+        {
+            Some(layout) => self
+                .output_reading
+                .tab(tile, layout, scroll, reverse, entering),
+            None => false,
+        };
+        self.sync_output_reading(scene);
+        moved
+    }
+
+    /// Enter on the focused OUTPUT stop of `tile`.
+    pub fn output_activate(
+        &mut self,
+        tile: SceneId,
+        scene: &mut SceneGraph,
+        now: std::time::Instant,
+    ) -> Option<portal_reading::ReadingEffect> {
+        let layout = self
+            .portal_layouts
+            .get(&(tile, tze_hud_scene::PortalPartKind::Transcript))?;
+        let effect = self.output_reading.activate(tile, layout, now);
+        self.sync_output_reading(scene);
+        effect
+    }
+
+    /// Reflect OUTPUT reading state into the scene decoration of every portal
+    /// tile; clears state for tiles that no longer show OUTPUT. Returns whether
+    /// a drawn decoration changed.
+    pub fn sync_output_reading(&mut self, scene: &mut SceneGraph) -> bool {
+        let before = scene.geometry_epoch;
+        let live = |id: SceneId| scene.tiles.contains_key(&id) && !scene.tile_id_hidden(id);
+        let live_ids: std::collections::HashSet<SceneId> = self
+            .portal_layouts
+            .keys()
+            .map(|k| k.0)
+            .chain(scene.overlay.portal_reading.keys().copied())
+            .filter(|id| live(*id))
+            .collect();
+        if let Some(sel) = self.output_reading.retain(|id| live_ids.contains(&id)) {
+            let _ = self.release_output_selection(sel, scene);
+        }
+        let tiles: Vec<SceneId> = scene.overlay.portal_reading.keys().copied().collect();
+        for tile in tiles.into_iter().filter(|t| !live_ids.contains(t)) {
+            scene.set_portal_reading(tile, Default::default());
+        }
+        for tile in live_ids {
+            let decor = match self.portal_output_layout(tile) {
+                Some(layout) => {
+                    self.output_reading
+                        .decor(tile, layout, scene.tile_scroll_offset_local(tile).1)
+                }
+                None => Default::default(),
+            };
+            scene.set_portal_reading(tile, decor);
+        }
+        scene.geometry_epoch != before
     }
 
     /// Clear runtime chrome feedback without synthesizing input or changing
@@ -407,7 +596,11 @@ impl InputProcessor {
             // under that identity. Geometry invalidation above paints it.
             return None;
         }
-        self.process_scroll_for_tile(tile_id, event.delta_x, event.delta_y, scene)
+        let changed = self.process_scroll_for_tile(tile_id, event.delta_x, event.delta_y, scene);
+        if changed.is_some() && !scene.overlay.portal_reading.is_empty() {
+            self.sync_output_reading(scene);
+        }
+        changed
     }
 
     /// Consume only current, actually shaped native documents. FrameReady already
@@ -492,7 +685,18 @@ impl InputProcessor {
                     state.follow_tail_anchor(tile) == crate::scroll::FollowTailAnchor::AtTail,
                 );
             }
+            if pane == PortalPartKind::Transcript
+                && let Some(old) = self.portal_layouts.get(&(tile, pane))
+                && let Some(dropped) = self.output_reading.remap(tile, old, &layout)
+            {
+                // Its text left the retained transcript.
+                let _ = self.release_output_selection(dropped, scene);
+            }
             self.portal_layouts.insert((tile, pane), layout);
+        }
+        // Copy button and hint follow the reshaped/rescrolled document.
+        if !self.output_reading.is_idle() || !scene.overlay.portal_reading.is_empty() {
+            self.sync_output_reading(scene);
         }
     }
 

@@ -543,6 +543,9 @@ struct WindowedRuntimeState {
     /// focus is lost mid-drag so a stale anchor cannot leak into the next
     /// focused composer.
     composer_pointer_drag_anchor: Option<(tze_hud_scene::SceneId, usize)>,
+    /// Cursor the last pointer event resolved over portal text, links, copy
+    /// buttons or the composer; `None` leaves the affordance cursor (hud-ljhku.2).
+    reading_cursor: Option<tze_hud_input::PortalCursor>,
     /// Per-portal resize state machines keyed by tile `SceneId`.
     ///
     /// Holds `PortalResizeState` for every portal tile that has been focused
@@ -3361,6 +3364,7 @@ impl WindowedRuntime {
             element_repositioned_tx,
             input_event_tx,
             composer_pointer_drag_anchor: None,
+            reading_cursor: None,
             portal_resize_states: std::collections::HashMap::new(),
             consumed_portal_resize_keydowns: std::collections::HashSet::new(),
             consumed_shell_shortcut_keydowns: std::collections::HashSet::new(),
