@@ -2826,8 +2826,12 @@ impl WindowedRuntime {
             // Scene startup: design tokens, config tabs, widget bundles, and
             // token-derived zone rendering policies.
             let compositor_tokens = if let Some(raw) = &raw_config_for_startup {
-                let startup_result =
-                    run_scene_startup(raw, config_parent_buf.as_deref(), &mut scene);
+                let startup_result = run_scene_startup(
+                    raw,
+                    config_parent_buf.as_deref(),
+                    &mut scene,
+                    crate::os_prefs::animations_enabled(),
+                );
                 // Stash SVG assets for compositor registration after init_widget_renderer.
                 pending_widget_svgs = startup_result.widget_svg_assets;
                 startup_result.global_tokens
@@ -2898,6 +2902,7 @@ impl WindowedRuntime {
             Arc::clone(&shared_scene),
             render_wake.clone(),
             wake.main_work_notifier(),
+            crate::os_prefs::animations_enabled,
         ));
         let cfg_agents_empty = cfg.agents.load().is_empty();
         let agent_store = Arc::new(crate::agent_store::AgentStore::open(

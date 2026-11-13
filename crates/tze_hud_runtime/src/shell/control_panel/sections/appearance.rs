@@ -579,6 +579,7 @@ mod tests {
             Arc::new(tokio::sync::Mutex::new(SceneGraph::new(800.0, 600.0))),
             None,
             Vec::new(),
+            || true,
         ));
         let saved: Saved = Arc::default();
         let save = saves.map(|outcome| {

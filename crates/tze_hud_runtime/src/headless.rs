@@ -253,7 +253,9 @@ impl HeadlessRuntime {
                             max_total_bytes: resolved.max_total_bytes,
                             max_agent_bytes: resolved.max_agent_bytes,
                         })?;
-                    let mut startup_result = run_scene_startup(&raw, None, &mut scene);
+                    // Headless runs are CI/test: pin animations on rather than read
+                    // the build host's Windows preference (hud-ljhku.13).
+                    let mut startup_result = run_scene_startup(&raw, None, &mut scene, true);
                     // Register widget SVG assets with the headless widget renderer,
                     // mirroring the windowed runtime so bundled SVG-based widgets render correctly.
                     process_pending_widget_svgs(
