@@ -3,8 +3,8 @@
 
 use serde::Serialize;
 use tze_hud_config::tokens::DesignTokenMap;
+use tze_hud_scene::SceneGraph;
 use tze_hud_scene::graph::SurfaceClasses;
-use tze_hud_scene::{SceneGraph, ZoneContent};
 
 #[cfg(target_os = "windows")]
 pub(super) mod native;
@@ -275,6 +275,7 @@ fn rasterize(svg: &str, size: u32) -> Result<resvg::tiny_skia::Pixmap, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tze_hud_scene::ZoneContent;
 
     #[test]
     fn tray_presentation_and_session_transitions() {
