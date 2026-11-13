@@ -1592,6 +1592,18 @@ def scenario_overlay_pointer(run: Run) -> None:
         run.helper_pids.remove(notepad.pid)
 
 
+def release_owned_safe_mode(run: Run) -> None:
+    """Undo this scenario's own pause after a failure so later scenarios do not
+    inherit SAFE_MODE_ACTIVE. Best effort: the original failure is what reports."""
+    try:
+        if run.status().get("safe_mode") is True:
+            run.key("ctrl+shift+F12")
+            run.expect("a failed pause witness releases its own safe mode",
+                       lambda st: st.get("safe_mode") is False)
+    except Exception as error:  # noqa: BLE001 - never mask the scenario failure
+        run.step(f"safe-mode release after failure did not complete: {error}")
+
+
 def scenario_safe_mode(run: Run) -> None:
     """12. The real pause chord preserves an unheld portal beyond idle/reap expiry, then resumes without reap."""
     s = "portal:g-safe"
@@ -1604,12 +1616,21 @@ def scenario_safe_mode(run: Run) -> None:
     run.inputs()  # exercise availability BEFORE the measured no-refresh interval
     run.snapshot("safe-mode.paused")
     paused = time.monotonic()
+    # Compare absolute monotonic instants, as observe_for does: `now - paused`
+    # can round below 65 at the exact instant `now >= paused + 65` holds.
+    reap_deadline = paused + 65.0
     intact = on(s, lambda p: p["state"] == "Active" and tail_line("m", 4)(p))
-    run.observe_for("safe mode preserves the unheld portal past the normal 30s+30s reap deadline",
-                    lambda st: st.get("safe_mode") is True and intact(st), 65.0)
-    paused_s = time.monotonic() - paused
-    if paused_s < 65:
-        raise ScenarioFailed("pause observation spans the normal reap deadline", {"paused_s": paused_s})
+    try:
+        run.observe_for("safe mode preserves the unheld portal past the normal 30s+30s reap deadline",
+                        lambda st: st.get("safe_mode") is True and intact(st), 65.0)
+        ended = time.monotonic()
+        if ended < reap_deadline:
+            raise ScenarioFailed("pause observation spans the normal reap deadline",
+                                 {"paused_s": ended - paused})
+    except BaseException:
+        release_owned_safe_mode(run)
+        raise
+    paused_s = ended - paused
     run.key("ctrl+shift+F12")
     run.expect("pressed again it resumes", lambda st: st.get("safe_mode") is False)
     # No publish/input/hold refresh before observing survival after the real exit.

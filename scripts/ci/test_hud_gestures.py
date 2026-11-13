@@ -574,3 +574,62 @@ class CardHelperTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SafeModeWitnessTests(unittest.TestCase):
+    """hud-zvu0j: the 65 s pause witness and its failure cleanup."""
+
+    # At this exact instant observe_for accepts (now >= paused + 65) while
+    # `now - paused` rounds to 64.99999999999994.
+    PAUSED, BOUNDARY = 478.39226673274817, 543.3922667327481
+
+    def _run(self, safe_mode: dict) -> mock.Mock:
+        run = mock.Mock()
+        run.status.side_effect = lambda: {"safe_mode": safe_mode["on"]}
+
+        def key(chord):
+            self.assertEqual(chord, "ctrl+shift+F12")
+            safe_mode["on"] = not safe_mode["on"]
+
+        run.key.side_effect = key
+        run.smoke.call.return_value = (True, {"code": "SAFE_MODE_ACTIVE"})
+        return run
+
+    def _scenario(self, run: mock.Mock, ended: float) -> None:
+        clock = iter([self.PAUSED, ended])
+        with mock.patch.object(g, "open_portal"), \
+                mock.patch.object(g.time, "monotonic", side_effect=lambda: next(clock)):
+            g.scenario_safe_mode(run)
+
+    def test_the_float_boundary_instant_counts_as_the_full_65_seconds(self) -> None:
+        self.assertLess(self.BOUNDARY - self.PAUSED, 65)
+        self.assertGreaterEqual(self.BOUNDARY, self.PAUSED + 65.0)
+        safe_mode = {"on": False}
+        run = self._run(safe_mode)
+        self._scenario(run, self.BOUNDARY)
+        self.assertEqual(run.key.call_count, 2, "pause, then the scenario's own resume")
+        self.assertFalse(safe_mode["on"])
+
+    def test_an_early_return_still_fails_and_releases_safe_mode(self) -> None:
+        safe_mode = {"on": False}
+        run = self._run(safe_mode)
+        with self.assertRaises(g.ScenarioFailed) as failure:
+            self._scenario(run, self.PAUSED + 64.9)
+        self.assertEqual(failure.exception.args[0], "pause observation spans the normal reap deadline")
+        self.assertFalse(safe_mode["on"], "the failed witness released its own pause")
+        self.assertEqual(run.key.call_count, 2)
+
+    def test_a_failed_witness_cannot_poison_the_next_scenario(self) -> None:
+        safe_mode = {"on": False}
+        run = self._run(safe_mode)
+        run.out = Path("unused")
+        run.clear_publications.return_value = []
+        run.observe_for.side_effect = g.ScenarioFailed("portal reaped while paused", {})
+        seen = []
+        restart = mock.Mock(__doc__="restart", side_effect=lambda _run: seen.append(safe_mode["on"]))
+        with mock.patch.dict(g.SCENARIOS, {"safe-mode": g.scenario_safe_mode, "restart": restart}, clear=True), \
+                mock.patch.object(g, "open_portal"), contextlib.redirect_stdout(io.StringIO()):
+            results = g.run_scenarios(run, ["safe-mode", "restart"])
+        self.assertEqual([r["outcome"] for r in results], ["FAIL", "PASS"])
+        self.assertEqual(results[0]["step"], "portal reaped while paused", "the original failure reports")
+        self.assertEqual(seen, [False])
