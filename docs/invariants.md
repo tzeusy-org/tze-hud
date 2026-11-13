@@ -300,9 +300,7 @@ Native unread counts accumulate new output units across render batches. Keyed
 replacements and viewer replies do not add unseen units. Reaching the measured
 OUTPUT tail acknowledges only the installed output ordinal for that attachment;
 a racing newer publish remains unread. Backscroll alone cannot restore a read
-count. Identical shaped content still reconciles a newer ordinal. MCP reports
-the same native count as `unread` (omitted at zero); it never adds a second
-counter. Reading does
+count. Identical shaped content still reconciles a newer ordinal. Reading does
 not renew agent liveness, and repeated reconciliation schedules no idle repaint.
 For a first-class portal, zero unread hides the jump badge's fill, label and hit
 target together. Scrolling through read output cannot leave an empty fill behind;

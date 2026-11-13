@@ -431,9 +431,6 @@ pub async fn hud_surfaces(ctx: &ToolCtx<'_>) -> McpResult<Value> {
             if p.pending_input > 0 {
                 o.insert("pending_input".into(), json!(p.pending_input));
             }
-            if p.unread > 0 {
-                o.insert("unread".into(), json!(p.unread));
-            }
             surfaces.push(Value::Object(o));
         }
     }
@@ -1119,9 +1116,6 @@ async fn publish_portal(ctx: &ToolCtx<'_>, pid: &str, p: PublishParams) -> McpRe
     let mut result = ok_with_expiry(p.ttl_ms.filter(|ms| *ms > 0));
     result["reattached"] = json!(outcome.reattached);
     result["pending_input"] = json!(outcome.pending_input);
-    if outcome.unread > 0 {
-        result["unread"] = json!(outcome.unread);
-    }
     Ok(result)
 }
 

@@ -48,7 +48,7 @@ milliseconds, named `*_ms`, everywhere.
   {"s":"zone:subtitle","accepts":"text","one":true},
   {"s":"zone:notification-area","accepts":"notification","max":5,"held":true,"expires_in_ms":4200},
   {"s":"widget:gauge","params":{"level":"number 0..1","label":"string<=12"}},
-  {"s":"portal:claude-main","state":"attached","pending_input":1,"unread":3}
+  {"s":"portal:claude-main","state":"attached","pending_input":1}
 ]}
 ```
 
@@ -61,9 +61,7 @@ notification stack trims its oldest card that is not an unanswered question
 (a live card with a callback action and no accepted answer; answered and
 URL-only cards are not questions). Only a stack of nothing but questions drops
 its oldest question, and an arriving non-question at such a stack is itself the
-card trimmed. The rule is the same on MCP and gRPC admission. A portal entry
-carries `unread:N` when the viewer has N output units it has not yet scrolled
-to; it is omitted at zero. Check it before re-notifying. `busy:true`
+card trimmed. The rule is the same on MCP and gRPC admission. `busy:true`
 appears only when another agent currently occupies a single-occupant zone.
 MCP accepts lists omit `static_image`: resource upload is on gRPC. Strings with
 an explicit positive byte limit appear as `string<=N`; others as `string`. Numeric discovery hints use JSON `number` with the
@@ -279,9 +277,7 @@ with the same cancellation and idle semantics as a `hud_input` wait.
 - Returns `{"ok":true,"expires_in_ms":8000}` when a TTL is set. Portal
   publishes also return `reattached` (true when this call replaces a
   runtime-reclaimed portal) and `pending_input` (queued replies). First attach,
-  live update, and attach after explicit clear report false. A portal publish
-  adds `unread:N` when N output units the viewer had not reached existed
-  before this publish; it is omitted at zero. The response
+  live update, and attach after explicit clear report false. The response
   describes the completed publish; it does not echo content.
 - `clipped` names text the renderer would cut, measured at admission with the
   drawing shaper, current design tokens and display geometry. Notifications
@@ -1274,7 +1270,7 @@ The owner **accepted these concrete new baseline bytes** for PR1598 on
 only. The canonical gate still requires two byte-identical final-source
 measurements. Reply defaults `reattached`, `pending_input` and `remaining` stay
 byte-identical, including the unchanged full portal flow. The outcome receipts
-(`hud-ljhku.5`: `clipped`, `unread`, displaced items) are omitted on every
+(`hud-ljhku.5`: `clipped` and displaced items) are omitted on every
 canonical flow, so the baseline bytes are unchanged.
 
 The `notification_choice` flow publishes Ship/Hold/Skip/Open, activates Skip through

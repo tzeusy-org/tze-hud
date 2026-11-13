@@ -402,9 +402,6 @@ pub struct Publish {
 pub struct PublishOutcome {
     pub reattached: bool,
     pub pending_input: usize,
-    /// Output units the viewer had not reached before this publish (the
-    /// native unread badge count, excluding the unit this call appended).
-    pub unread: usize,
 }
 
 /// One input item returned by [`PortalHub::poll_input`].
@@ -428,8 +425,6 @@ pub struct PortalSummary {
     pub id: String,
     pub status: PortalStatus,
     pub pending_input: usize,
-    /// The native unread badge count: output the viewer has not reached.
-    pub unread: usize,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -650,7 +645,6 @@ impl PortalHub {
             self.portals.insert(key.clone(), portal);
         }
         let portal = self.portals.get_mut(key).expect("attached above");
-        let unread = portal.unread_output_count();
         portal.touch(now_us);
         portal.dirty = true;
         if let Some(name) = p.display_name {
@@ -699,7 +693,6 @@ impl PortalHub {
         Ok(PublishOutcome {
             reattached,
             pending_input: portal.inputs.len(),
-            unread,
         })
     }
 
@@ -810,7 +803,6 @@ impl PortalHub {
                 id: key.id.clone(),
                 status: p.status,
                 pending_input: p.inputs.len(),
-                unread: p.unread_output_count(),
             })
             .collect()
     }
@@ -1159,7 +1151,6 @@ mod tests {
                 id: "main".into(),
                 status: PortalStatus::Active,
                 pending_input: 0,
-                unread: 1,
             }]
         );
         assert!(hub.list("bob").is_empty());

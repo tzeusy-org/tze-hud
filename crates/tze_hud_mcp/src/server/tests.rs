@@ -2921,10 +2921,9 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         json!({"surface": "portal:main", "status": "degraded", "ttl_ms": 120000}),
     )
     .await;
-    // Nothing rendered, so the viewer has not reached either output unit.
     assert_eq!(
         status,
-        json!({"ok": true, "reattached": false, "pending_input": 1, "expires_in_ms": 120000, "unread": 2})
+        json!({"ok": true, "reattached": false, "pending_input": 1, "expires_in_ms": 120000})
     );
     assert_eq!(
         hub.lock().unwrap().get(&key).unwrap().hold_until_us,
@@ -2967,7 +2966,7 @@ async fn portal_flow_attach_publish_poll_ack_clear() {
         .clone();
     assert_eq!(
         portal,
-        json!({"s": "portal:main", "state": "active", "pending_input": 1, "unread": 2})
+        json!({"s": "portal:main", "state": "active", "pending_input": 1})
     );
 
     let v = call(&server, "hud_input", json!({"wait_ms": 1000})).await;
@@ -4555,70 +4554,6 @@ async fn status_burst_keeps_a_pending_question_on_screen() {
     assert_eq!(shown.len(), 5);
     assert!(shown.iter().any(|r| r.publication_id == asked));
     assert!(!shown.iter().any(|r| r.merge_key.as_deref() == Some("s0")));
-}
-
-/// R5.4: the native unread badge count reaches hud_surfaces and the next
-/// publish reply, and disappears once the viewer reaches the OUTPUT tail.
-#[tokio::test]
-async fn portal_unread_is_reported_until_the_viewer_reaches_the_tail() {
-    let (server, _) = server();
-    let (server, hub) = hub_portal(server);
-    let key = PortalKey::new(psk_agent(), "main");
-    let first = call(
-        &server,
-        "hud_publish",
-        json!({"surface":"portal:main","content":"one"}),
-    )
-    .await;
-    assert!(first.get("unread").is_none(), "{first}");
-    for text in ["two", "three"] {
-        call(
-            &server,
-            "hud_publish",
-            json!({"surface":"portal:main","content":text}),
-        )
-        .await;
-    }
-    let surfaces = call(&server, "hud_surfaces", json!({})).await;
-    let entry = surfaces["surfaces"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|s| s["s"] == "portal:main")
-        .unwrap()
-        .clone();
-    assert_eq!(entry["unread"], 3, "{entry}");
-    let next = call(
-        &server,
-        "hud_publish",
-        json!({"surface":"portal:main","content":"four"}),
-    )
-    .await;
-    assert_eq!(
-        next["unread"], 3,
-        "units the viewer had not reached: {next}"
-    );
-    {
-        let mut hub = hub.lock().unwrap();
-        let incarnation = hub.incarnation(&key).unwrap();
-        hub.mark_read_through(&key, incarnation, 4);
-    }
-    let surfaces = call(&server, "hud_surfaces", json!({})).await;
-    let entry = surfaces["surfaces"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|s| s["s"] == "portal:main")
-        .unwrap()
-        .clone();
-    assert!(entry.get("unread").is_none(), "{entry}");
-    let read = call(
-        &server,
-        "hud_publish",
-        json!({"surface":"portal:main","status":"active"}),
-    )
-    .await;
-    assert!(read.get("unread").is_none(), "{read}");
 }
 
 /// Reports text containing "LONG" as cut; counts every measurement.
