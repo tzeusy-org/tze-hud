@@ -15,7 +15,8 @@
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(crate) enum WheelLines {
     /// Not Windows: a notch is a fixed number of pixels
-    /// ([`tze_hud_input::WHEEL_LINE_PX`]).
+    /// ([`tze_hud_input::WHEEL_LINE_PX`]). Only built off Windows.
+    #[cfg_attr(windows, allow(dead_code))]
     Fixed,
     /// This many text lines per notch (0 disables wheel scrolling).
     Lines(u32),
