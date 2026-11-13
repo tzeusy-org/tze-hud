@@ -48,7 +48,7 @@ milliseconds, named `*_ms`, everywhere.
   {"s":"zone:subtitle","accepts":"text","one":true},
   {"s":"zone:notification-area","accepts":"notification","max":5,"held":true,"expires_in_ms":4200},
   {"s":"widget:gauge","params":{"level":"number 0..1","label":"string<=12"}},
-  {"s":"portal:claude-main","state":"attached","pending_input":1}
+  {"s":"portal:claude-main","state":"attached","pending_input":1,"unread":3}
 ]}
 ```
 
@@ -56,7 +56,14 @@ It includes nothing the model doesn't act on: no UUIDs, geometry, or
 timestamps. Holdings are the entries with `held: true`; `held` is omitted
 otherwise. Scheduled zone publications count as held before presentation;
 `expires_in_ms`, when present, includes their presentation delay.
-Single-occupant zones carry `one:true`; stacks carry `max:N`. `busy:true`
+Single-occupant zones carry `one:true`; stacks carry `max:N`. A full
+notification stack trims its oldest card that is not an unanswered question
+(a live card with a callback action and no accepted answer; answered and
+URL-only cards are not questions). Only a stack of nothing but questions drops
+its oldest question, and an arriving non-question at such a stack is itself the
+card trimmed. The rule is the same on MCP and gRPC admission. A portal entry
+carries `unread:N` when the viewer has N output units it has not yet scrolled
+to; it is omitted at zero. Check it before re-notifying. `busy:true`
 appears only when another agent currently occupies a single-occupant zone.
 MCP accepts lists omit `static_image`: resource upload is on gRPC. Strings with
 an explicit positive byte limit appear as `string<=N`; others as `string`. Numeric discovery hints use JSON `number` with the
@@ -88,7 +95,8 @@ with a `retry hud_input` hint, releasing the reservation without consuming input
 
 An unanswered card removed during the wait returns `gone:"expired"`,
 `"replaced"` (same key), `"displaced"` (contention), or `"cleared"`. These endings
-never queue an additional displacement event. If the wait ends while the card
+never queue an additional displacement event: a trim during an armed wait
+returns `gone:"displaced"` and nothing reaches `hud_input`. If the wait ends while the card
 is still admitted, the reply has the ordinary shape with `expires_in_ms`
 recomputed at return; a later answer uses `hud_input` and ACK normally. Passing
 `wait_ms`, including 0, for a widget, portal, or action-less notification returns
@@ -271,8 +279,18 @@ with the same cancellation and idle semantics as a `hud_input` wait.
 - Returns `{"ok":true,"expires_in_ms":8000}` when a TTL is set. Portal
   publishes also return `reattached` (true when this call replaces a
   runtime-reclaimed portal) and `pending_input` (queued replies). First attach,
-  live update, and attach after explicit clear report false. The response
+  live update, and attach after explicit clear report false. A portal publish
+  adds `unread:N` when N output units the viewer had not reached existed
+  before this publish; it is omitted at zero. The response
   describes the completed publish; it does not echo content.
+- `clipped` names text the renderer would cut, measured at admission with the
+  drawing shaper, current design tokens and display geometry. Notifications
+  report any of `"title"`, `"body"` and `"actions"` (a label wider than its
+  button); widgets report the string parameters set in this call whose drawn
+  text overflows the widget. The field is omitted when everything fits, so
+  replies are unchanged byte for byte, and never appears for stream-text zones
+  or portals. It also rides on wait replies (`action`, `gone`, deadline). React
+  by shortening, or by moving detail behind a link action.
 
 For example, publish a notification whose button arrives at `hud_input` as
 `{"action":"approve","s":"zone:notification-area",...}`:
@@ -329,6 +347,11 @@ The gRPC `Hold` and `Clear` behave the same on zones. An internal scene
   or retract input already accepted into the scene FIFO, retained by MCP or
   encoded in a response; its key and ACK id remain stable.
   TTL expiry, `hud_clear` and stale/unmatched releases do not emit human-X input.
+- A card trimmed from a full notification stack before anyone answered it
+  queues one `{"id":…,"s":"zone:notification-area","kind":"displaced"}` item
+  (with `"key"` when the card was keyed) for its publisher only. Expiry,
+  `hud_clear`, same-key replacement, answered or already-expired cards, and a
+  card whose armed `wait_ms` call returns `gone:"displaced"` queue nothing.
 - Accepted notification events are retained in a growable per-publisher FIFO,
   with stable ids until `ack`; one publisher cannot evict or acknowledge another's
   records. Retention is in memory, with no crash/disk durability claim. Portal
@@ -1250,7 +1273,9 @@ The owner **accepted these concrete new baseline bytes** for PR1598 on
 2026-11-10 (Asia/Singapore). Earlier `hud-j7kxn` approval covered the old baseline
 only. The canonical gate still requires two byte-identical final-source
 measurements. Reply defaults `reattached`, `pending_input` and `remaining` stay
-byte-identical, including the unchanged full portal flow.
+byte-identical, including the unchanged full portal flow. The outcome receipts
+(`hud-ljhku.5`: `clipped`, `unread`, displaced items) are omitted on every
+canonical flow, so the baseline bytes are unchanged.
 
 The `notification_choice` flow publishes Ship/Hold/Skip/Open, activates Skip through
 `SceneGraph::activate_notification` (the shared pointer/keyboard producer), polls

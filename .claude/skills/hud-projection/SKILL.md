@@ -62,7 +62,10 @@ zones and widgets (`docs/api.md`):
 - `ttl_ms` on publish holds the portal in that same call, just like `hud_hold`
   (0 = until clear). `delay_ms` is not valid for portals.
 - Publish returns `reattached` (true after runtime reclaim) and `pending_input`
-  (queued replies); poll `hud_input` to collect them.
+  (queued replies); poll `hud_input` to collect them. It adds `unread:N` when
+  the viewer had not yet reached N output units before this publish (also on
+  the `hud_surfaces` portal entry). Check it before raising a separate
+  notification: unread output means the viewer has not caught up yet.
 - `hud_input` returns input from every surface you hold, oldest first,
   including notification action presses. Unacked items are redelivered, so
   ack each one once handled; the ack rides on your next poll.

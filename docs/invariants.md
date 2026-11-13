@@ -64,7 +64,12 @@ guarantees do not claim process-crash durability or add a gRPC action transport.
 An armed `hud_publish wait_ms` reserves only its exact admitted publication over
 that same FIFO. Accepted callback/human-X wins before local removal; replacement,
 expiry, stack trim and clear latch only the first unanswered terminal reason.
-Scene rollback also rolls back terminal notification debt. Readiness callbacks
+A full notification stack trims its oldest card that is not an unanswered
+question, on both admission planes; only an all-question stack drops its oldest
+question. A trimmed, unanswered, unexpired card queues exactly one `displaced`
+FIFO item for its own publisher, unless an armed wait on that exact card takes
+the displacement instead; expiry, clear and same-key replacement queue nothing.
+Scene rollback also rolls back terminal notification debt and queued receipts. Readiness callbacks
 run after scene unlock. The reserved input is consumed after successful reply
 encoding, with no intervening await; cancellation before encoding releases it
 for ordinary stable-id `hud_input`/ACK. Other publications and portal input keep
@@ -295,7 +300,9 @@ Native unread counts accumulate new output units across render batches. Keyed
 replacements and viewer replies do not add unseen units. Reaching the measured
 OUTPUT tail acknowledges only the installed output ordinal for that attachment;
 a racing newer publish remains unread. Backscroll alone cannot restore a read
-count. Identical shaped content still reconciles a newer ordinal. Reading does
+count. Identical shaped content still reconciles a newer ordinal. MCP reports
+the same native count as `unread` (omitted at zero); it never adds a second
+counter. Reading does
 not renew agent liveness, and repeated reconciliation schedules no idle repaint.
 For a first-class portal, zero unread hides the jump badge's fill, label and hit
 target together. Scrolling through read output cannot leave an empty fill behind;
