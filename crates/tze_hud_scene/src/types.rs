@@ -925,6 +925,11 @@ pub struct TextColorRun {
     pub color: Rgba,
 }
 
+/// Default text line height as a multiple of the font size. The compositor
+/// lays out text with it (`tze_hud_compositor::text::LINE_HEIGHT_MULTIPLIER`)
+/// and the input layer sizes wheel lines with it (hud-ljhku.13).
+pub const TEXT_LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextMarkdownNode {
     pub content: String,

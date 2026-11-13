@@ -2359,8 +2359,9 @@ fn resolve_node_meta(
 /// Line and page height in px for a wheel over `tile_id` (hud-ljhku.13).
 ///
 /// Text surfaces scroll by their text line: a native portal pane by its
-/// shaped row height, a text node (hit, or the tile root) by its font size times the compositor's
-/// default line-height multiplier (1.4, `LINE_HEIGHT_MULTIPLIER`). Anything
+/// shaped row height, a text node (hit, or the tile root) by its font size times the
+/// default line-height multiplier the compositor lays it out with
+/// ([`tze_hud_scene::TEXT_LINE_HEIGHT_MULTIPLIER`]). Anything
 /// else uses [`WHEEL_LINE_PX`]. A page is the pane viewport, else the tile.
 fn wheel_line_and_page_px(
     scene: &SceneGraph,
@@ -2388,7 +2389,10 @@ fn wheel_line_and_page_px(
         && let tze_hud_scene::NodeData::TextMarkdown(text) = &node.data
         && text.font_size_px > 0.0
     {
-        return (text.font_size_px * 1.4, tile_h);
+        return (
+            text.font_size_px * tze_hud_scene::TEXT_LINE_HEIGHT_MULTIPLIER,
+            tile_h,
+        );
     }
     (WHEEL_LINE_PX, tile_h)
 }

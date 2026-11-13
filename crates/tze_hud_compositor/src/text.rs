@@ -54,7 +54,7 @@ use crate::overflow::{self, TruncationResult, TruncationViewport};
 /// lacks a parsed `MarkdownTokens` (e.g. zone items, the legacy `TextItem`
 /// constructor). A design-token map may override it per-tile via
 /// `typography.line_height.multiplier`.
-pub(crate) const LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
+pub(crate) const LINE_HEIGHT_MULTIPLIER: f32 = tze_hud_scene::types::TEXT_LINE_HEIGHT_MULTIPLIER;
 
 // ─── TruncationCache ─────────────────────────────────────────────────────────
 

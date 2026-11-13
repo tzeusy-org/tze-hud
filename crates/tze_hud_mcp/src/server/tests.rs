@@ -1777,6 +1777,40 @@ async fn keyed_widget_publish_reports_its_own_expiry() {
     assert_eq!(publish("c", None).await, json!({"ok": true}), "durable");
 }
 
+/// hud-ljhku.13 (review N3): while the runtime records Windows "Show
+/// animations" off, an MCP widget publish snaps its configured transition to
+/// 0, as gRPC does; the flag follows config reloads.
+#[tokio::test]
+async fn widget_publish_transition_snaps_while_os_reduces_motion() {
+    let (server, _clock) = server();
+    let mut config = McpConfig::with_psk(psk());
+    config.widget_transition_ms = 200;
+    let server = server.with_config(config);
+    let publish = |level: f64| {
+        let server = &server;
+        async move {
+            call(
+                server,
+                "hud_publish",
+                json!({"surface": "widget:gauge", "params": {"level": level}}),
+            )
+            .await
+        }
+    };
+    server.scene.lock().await.widget_registry.reduce_motion = true;
+    publish(0.25).await;
+    let last = |scene: &SceneGraph| {
+        scene.widget_registry.active_publishes["gauge"]
+            .last()
+            .unwrap()
+            .transition_ms
+    };
+    assert_eq!(last(&*server.scene.lock().await), 0);
+    server.scene.lock().await.widget_registry.reduce_motion = false;
+    publish(0.5).await;
+    assert_eq!(last(&*server.scene.lock().await), 200);
+}
+
 #[tokio::test]
 async fn widget_publish_hold_clear() {
     let (server, clock) = server();

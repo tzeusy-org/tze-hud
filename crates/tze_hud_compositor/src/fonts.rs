@@ -354,7 +354,12 @@ fn locale_from(lang: Option<String>, user_default: impl FnOnce() -> Option<Strin
         .and_then(|v| {
             let v = v.replace('_', "-");
             let v = v.split('.').next().unwrap_or("").to_owned();
-            if v.is_empty() { None } else { Some(v) }
+            // `C` / `POSIX` name no language: treat them as unset.
+            if v.is_empty() || v == "C" || v == "POSIX" {
+                None
+            } else {
+                Some(v)
+            }
         })
         .or_else(user_default)
         .unwrap_or_else(|| String::from("en-US"));
@@ -543,12 +548,28 @@ pub(crate) fn script_fallback_families(script: Script, locale: &str) -> &'static
 pub(crate) fn fallback_families(missing: &str, locale: &str) -> Vec<&'static str> {
     let mut families: Vec<&'static str> = Vec::new();
     let mut any = false;
+    let mut cjk = false;
     for c in missing.chars() {
         if c.is_whitespace() || c.is_control() {
             continue;
         }
         any = true;
-        for family in script_fallback_families(c.script(), locale) {
+        let script = c.script();
+        cjk |= matches!(
+            script,
+            Script::Han | Script::Hangul | Script::Hiragana | Script::Katakana | Script::Bopomofo
+        );
+        for family in script_fallback_families(script, locale) {
+            if !families.contains(family) {
+                families.push(family);
+            }
+        }
+    }
+    // Malgun Gothic (Hangul) and Yu Gothic (kana) also cover Han: loaded
+    // alone, they would draw later Han text before the locale's Han face is
+    // ever asked for. Ask for that face with any CJK miss (review N1).
+    if cjk {
+        for family in script_fallback_families(Script::Han, locale) {
             if !families.contains(family) {
                 families.push(family);
             }
@@ -1228,6 +1249,26 @@ mod tests {
         );
         assert_eq!(fallback_families("\u{d14c}", "en-US")[0], "Malgun Gothic");
         assert_eq!(fallback_families("\u{304b}", "en-US")[0], "Yu Gothic");
+        // Review N1: a Hangul or kana miss also asks for the locale's Han
+        // face, since Malgun / Yu Gothic alone would claim later Han text.
+        assert_eq!(
+            fallback_families("\u{d14c}", "en-US"),
+            [
+                "Malgun Gothic",
+                "Microsoft YaHei UI",
+                "Segoe UI Emoji",
+                "Segoe UI Symbol"
+            ]
+        );
+        assert_eq!(
+            fallback_families("\u{304b}", "zh-TW")[..2],
+            ["Yu Gothic", "Microsoft JhengHei UI"]
+        );
+        assert_eq!(
+            fallback_families("\u{d14c}", "ko"),
+            ["Malgun Gothic", "Segoe UI Emoji", "Segoe UI Symbol"]
+        );
+        assert!(!fallback_families("\u{0915}", "en-US").contains(&"Microsoft YaHei UI"));
         assert_eq!(fallback_families("\u{0915}", "en-US")[0], "Nirmala UI");
         assert_eq!(
             fallback_families("\u{2705}", "en-US"),
@@ -1263,6 +1304,13 @@ mod tests {
         assert_eq!(locale_from(None, || Some("zh-TW".into())), "zh-TW");
         assert_eq!(locale_from(Some(String::new()), || None), "en-US");
         assert_eq!(locale_from(None, || None), "en-US");
+        // `LANG=C` / `POSIX` (common in shells) name no language.
+        assert_eq!(locale_from(Some("C".into()), || Some("ja-JP".into())), "ja");
+        assert_eq!(locale_from(Some("POSIX".into()), || None), "en-US");
+        assert_eq!(
+            locale_from(Some("C.UTF-8".into()), || Some("ko-KR".into())),
+            "ko"
+        );
     }
 
     #[test]

@@ -888,6 +888,17 @@ async fn publish_zone<'a>(
     }
 }
 
+/// The configured widget transition (`motion.state.ms`, read at startup),
+/// snapped to 0 while Windows "Show animations" is off as of the last config
+/// reload (hud-ljhku.13), matching gRPC publishes.
+fn widget_transition_ms(scene: &SceneGraph, ctx: &ToolCtx<'_>) -> u32 {
+    if scene.widget_registry.reduce_motion {
+        0
+    } else {
+        ctx.widget_transition_ms
+    }
+}
+
 async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> McpResult<Value> {
     let ns = ctx.agent.agent_id.clone();
     let delay_ms = p.delay_ms.unwrap_or(0);
@@ -952,6 +963,7 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
             (a, b) => a.or(b),
         }
         .map(|ttl| present_at.saturating_add(ttl));
+        let transition_ms = widget_transition_ms(&scene, ctx);
         scene.schedule_batch(
             present_at,
             MutationBatch {
@@ -961,7 +973,7 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
                     widget_name: widget.into(),
                     params: typed,
                     merge_key: p.key,
-                    transition_ms: ctx.widget_transition_ms,
+                    transition_ms,
                     ttl_us,
                     expires_at_wall_us: None,
                 }],
@@ -976,13 +988,14 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
     }
     let expires = ttl_us.map(|ttl| now.saturating_add(ttl));
     let key = p.key.clone();
+    let transition_ms = widget_transition_ms(&scene, ctx);
     scene
         .publish_to_widget_for_lease(
             widget,
             typed,
             &ns,
             p.key,
-            ctx.widget_transition_ms,
+            transition_ms,
             expires,
             Some(lease_id),
         )

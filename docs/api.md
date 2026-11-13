@@ -199,7 +199,7 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   Configured HUD startup resolves
   the selected theme and config overrides once; MCP publishes use its
   `motion.state.ms` duration without adding a tool parameter. gRPC publishes
-  retain their explicit `transition_ms`, except that it snaps to 0 while
+  retain their explicit `transition_ms`. Both planes snap to 0 while
   Windows "Show animations" is off (see the OS motion layer under
   [design tokens](#design-tokens-and-themes)). A positive duration eases f32 and
   color params from what is on screen; enum and string params and a widget's
@@ -1135,9 +1135,10 @@ entries sets exactly five durations to `0`: `motion.enter.ms`,
 `motion.exit.ms`, `motion.state.ms`, `portal.transition.in_ms` and
 `portal.transition.out_ms`. An explicit `[design_tokens]` value for one of
 them still wins. The runtime records the state as the reserved key
-`runtime.reduce_motion` (`[design_tokens]` rejects it), and while it is set a
-gRPC widget publish's `transition_ms` snaps to 0. No model-visible payload
-changes. Off Windows, and when the setting cannot be read, animations stay on.
+`runtime.reduce_motion` (`[design_tokens]` rejects it), and while it is set
+widget publishes on both planes snap their transition to 0. The control
+panel's Advanced tokens rows show "Windows animations off" as the source of
+the zeroed motion values. No model-visible payload changes. Off Windows, and when the setting cannot be read, animations stay on.
 
 **Live changes.** Editing `[design_tokens]` in the running HUD's config file
 (or using the control panel's Appearance and Advanced tokens cards) restyles
@@ -1150,7 +1151,10 @@ not be saved survives an unrelated edit. A
 table that startup would refuse (an unknown theme, a reserved or malformed
 key) or a file that is not valid TOML keeps the current tokens and is
 reported in `/admin/status` `config_reload`. Still read once at startup: the MCP widget
-transition time (the Windows animation preference is re-read on each reload). Widget text follows the live `font.*` roles like
+transition time (`motion.state.ms`), so changing it takes a restart. The
+Windows animation preference is re-read on each reload: once it is off, MCP
+widget publishes snap to 0 from that reload on; if the HUD started with it
+off, MCP transitions stay 0 until a restart after it is turned back on. Widget text follows the live `font.*` roles like
 zone text. Other config sections apply after a
 restart (or live from the control panel). Keep config
 overrides for values specific to one deployment. The visual design
@@ -1260,6 +1264,8 @@ Japanese, Malgun Gothic for Korean, Microsoft JhengHei UI for zh-TW,
 MingLiU_HKSCS for zh-HK, Microsoft YaHei UI otherwise. The faces load on a background thread,
 found through the same registry lookup as step 3, never on a frame; when
 they land, text re-lays out once and the HUD repaints, with no republish.
+A Hangul or kana miss also asks for the locale's Han face, since Malgun
+Gothic and Yu Gothic cover Han too and would otherwise claim later Han text.
 Each family is asked for once per run, so an absent one costs one lookup.
 Loaded faces survive font and theme changes. Startup and text the loaded
 faces cover load nothing extra. Off Windows the lookup finds nothing, so CI

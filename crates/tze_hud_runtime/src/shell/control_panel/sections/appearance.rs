@@ -9,7 +9,8 @@ use tze_hud_config::themes::{
     DEFAULT_THEME, THEME_KEY, builtin_theme, builtin_theme_names, selected_theme_name,
 };
 use tze_hud_config::tokens::{
-    CANONICAL_TOKENS, DesignTokenMap, UI_SCALE_KEY, UI_SCALE_RANGE, ui_scale,
+    CANONICAL_TOKENS, DesignTokenMap, OS_MOTION_ZEROED_KEYS, UI_SCALE_KEY, UI_SCALE_RANGE,
+    os_reduce_motion, ui_scale,
 };
 use tze_hud_config::{ConfigWriteError, TokenUpdate};
 
@@ -452,6 +453,7 @@ impl Section for TokensSection {
             let theme_name = selected_theme_name(&table);
             let theme = builtin_theme(theme_name).unwrap_or_default();
             let overrides = Self::overrides(&table);
+            let os_reduces_motion = os_reduce_motion(&resolved);
             // Always drawn, so a broken override can always be undone.
             let mut rows = vec![
                 Row::new(
@@ -476,6 +478,10 @@ impl Section for TokensSection {
                         "Override · {} · Reset for the theme's",
                         self.tokens.saved_detail()
                     )
+                } else if os_reduces_motion && OS_MOTION_ZEROED_KEYS.contains(&key) {
+                    // The value's real source (hud-ljhku.13): the theme's
+                    // duration is zeroed by the OS motion layer.
+                    "Windows animations off".to_owned()
                 } else if theme.contains_key(key) {
                     format!("From {}", theme_title(theme_name))
                 } else {
@@ -568,6 +574,13 @@ mod tests {
     type Saved = Arc<Mutex<Vec<String>>>;
 
     fn sections(saves: Option<Result<(), String>>) -> (AppearanceSection, TokensSection, Saved) {
+        sections_with(saves, || true)
+    }
+
+    fn sections_with(
+        saves: Option<Result<(), String>>,
+        animations_enabled: fn() -> bool,
+    ) -> (AppearanceSection, TokensSection, Saved) {
         let table = DesignTokenMap::new();
         let appearance = Arc::new(Appearance::new(
             Arc::new(LiveTokens::new(
@@ -579,7 +592,7 @@ mod tests {
             Arc::new(tokio::sync::Mutex::new(SceneGraph::new(800.0, 600.0))),
             None,
             Vec::new(),
-            || true,
+            animations_enabled,
         ));
         let saved: Saved = Arc::default();
         let save = saves.map(|outcome| {
@@ -598,6 +611,42 @@ mod tests {
 
     fn row<'a>(rows: &'a [Row], id: &str) -> &'a Row {
         rows.iter().find(|r| r.id == id).unwrap()
+    }
+
+    /// hud-ljhku.13 (review N2): with Windows animations off, the zeroed
+    /// motion rows name that as their source, not the theme or default; an
+    /// explicit override still reads as an override.
+    #[tokio::test]
+    async fn motion_rows_name_windows_animations_off_as_their_source() {
+        let (_, tokens, _) = sections_with(Some(Ok(())), || false);
+        let edited: DesignTokenMap = [("theme", "classic"), ("motion.exit.ms", "90")]
+            .iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect();
+        assert_eq!(tokens.tokens.appearance.apply(edited).await, Ok(true));
+        let rows = tokens.rows().await;
+        let enter = row(&rows, "tokens.motion.enter.ms");
+        assert_eq!(enter.detail.as_deref(), Some("Windows animations off"));
+        assert_eq!(
+            enter.control,
+            Control::Field {
+                text: "0".into(),
+                confirm: None
+            }
+        );
+        assert!(
+            row(&rows, "tokens.motion.exit.ms")
+                .detail
+                .as_deref()
+                .is_some_and(|d| d.starts_with("Override"))
+        );
+
+        let (_, tokens, _) = sections(Some(Ok(())));
+        let rows = tokens.rows().await;
+        assert_ne!(
+            row(&rows, "tokens.motion.enter.ms").detail.as_deref(),
+            Some("Windows animations off")
+        );
     }
 
     #[test]
