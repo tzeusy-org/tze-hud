@@ -1155,8 +1155,16 @@ mod tests {
                 .join(" ");
             let mut fallback = SystemFallback::system();
             let missing = notdef_text(&mut fs, &text);
+            // Record the one-time load cost on a real Windows system so the
+            // tier-W log carries it (R13.1 measurement).
+            let started = std::time::Instant::now();
             fallback.note_missing(&missing, locale);
             wait_and_install(&mut fallback, &mut fs);
+            println!(
+                "tier-W font fallback [{locale}]: {} faces loaded in {:.1} ms",
+                fallback.installed_face_count(),
+                started.elapsed().as_secs_f64() * 1e3
+            );
             for (sample, family) in samples {
                 let has = |fs: &FontSystem, id| {
                     fs.db().face(id).is_some_and(|face| {

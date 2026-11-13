@@ -86,6 +86,7 @@
 //! | `portal.composer.selection_color` | composer | selection highlight (RGBA hex, alpha-bearing) |
 //! | `portal.transcript.selection_color` | transcript body | OUTPUT selection highlight; defaults to the composer selection color (RGBA hex, alpha-bearing) |
 //! | `portal.composer.placeholder_color` | composer | empty-draft placeholder text (RGBA hex) |
+//! | `portal.composer.preedit_underline_color` | composer | IME composition underline (RGBA hex; default the caret color; config-only, not a theme key; hud-ljhku.13) |
 //! | `portal.focus_ring.color` | focus ring | ring stroke color (RGBA hex) |
 //! | `portal.focus_ring.width_px` | focus ring | ring stroke width in px |
 //! | `portal.window.resize_grip.color` | resize grip | grip mark color (RGBA hex) |
