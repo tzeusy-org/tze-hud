@@ -165,6 +165,7 @@ mod alert_banner;
 mod composer;
 mod control_panel;
 mod focus_chrome;
+mod font_fallback;
 mod hit_drag;
 mod idle_gate;
 mod markdown_cache;

@@ -527,6 +527,8 @@ impl HeadlessRuntime {
         // render thread entirely: render_frame_headless finds the cache already
         // populated and does no parse work.  The prime is gated internally on
         // scene.version so it is a no-op when the scene has not changed.
+        // Install landed system fallback fonts before the primes (hud-ljhku.13).
+        self.compositor.poll_font_fallback();
         let markdown_prime_start = Instant::now();
         self.compositor.prime_markdown_cache(&scene_guard);
         let markdown_prime_us = markdown_prime_start.elapsed().as_micros() as u64;

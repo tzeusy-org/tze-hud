@@ -1437,6 +1437,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             .expect("WindowSurface config lock poisoned at text renderer init")
             .format;
         compositor.init_text_renderer(surface_format);
+        // Lazily loaded system fallback fonts wake the render loop when they
+        // land, so tofu text re-lays out on an otherwise idle HUD (hud-ljhku.13).
+        compositor.set_font_fallback_wake(self.state.wake.render_notifier());
         compositor.init_widget_renderer(surface_format);
         compositor.set_resident_ledger(self.state.runtime_context.resident_ledger.clone());
         // Apply the resolved per-surface truncation-input bound so the
@@ -1858,6 +1861,13 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         // is a no-op when the scene has not changed.  The measured
                         // cost is attached to the stage4 window so it is visible in
                         // telemetry without inflating the Stage 6 render budget.
+                        // ── System fallback fonts landed (hud-ljhku.13) ──
+                        // Install faces a background load finished and drop
+                        // what was shaped without them, before the primes, so
+                        // tofu text re-lays out once this frame.
+                        // Owed like a surface repaint: kept until a frame submits.
+                        surface_repaint_pending |= compositor.poll_font_fallback();
+
                         let markdown_prime_start = Instant::now();
                         compositor.prime_markdown_cache(&scene);
                         let markdown_prime_us = markdown_prime_start.elapsed().as_micros() as u64;

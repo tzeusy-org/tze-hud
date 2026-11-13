@@ -76,6 +76,9 @@ ab_glyph = "0.2"
 
 # Unicode text utilities
 unicode-segmentation = "1"
+# Script of a character the loaded fonts cannot draw, to pick the system
+# fallback family (hud-ljhku.13). Already in the tree through cosmic-text.
+unicode-script = "0.5"
 # East-Asian Wide/Fullwidth + emoji classification for the runtime's wrapped-row
 # over-estimate (input-history tail seed, hud-kaw7z).
 

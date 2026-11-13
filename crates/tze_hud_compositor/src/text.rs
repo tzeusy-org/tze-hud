@@ -439,6 +439,9 @@ pub(crate) struct TextRasterizer {
     overlay_shape_cache: HashMap<[u8; 32], Vec<Buffer>>,
     menu_shape_cache: HashMap<[u8; 32], Vec<Buffer>>,
     affordance_shape_cache: HashMap<[u8; 32], Vec<Buffer>>,
+    /// Lazy system fallback faces for glyphs no loaded face covers
+    /// (hud-ljhku.13, [`crate::fonts::SystemFallback`]).
+    system_fallback: crate::fonts::SystemFallback,
 }
 
 /// Which glyphon renderer (and shaped-buffer cache) a prepare call targets.
@@ -785,6 +788,7 @@ impl TextRasterizer {
             overlay_shape_cache: HashMap::new(),
             menu_shape_cache: HashMap::new(),
             affordance_shape_cache: HashMap::new(),
+            system_fallback: crate::fonts::SystemFallback::system(),
         }
     }
 
@@ -1751,7 +1755,65 @@ impl TextRasterizer {
         // inputs, cache hit) performs zero re-shapes.
         self.shape_call_count += 1;
         buf.shape_until_scroll(&mut self.font_system, false);
+        self.note_glyph_misses(&buf);
         buf
+    }
+
+    /// Hand every glyph no loaded face covered (`.notdef`, glyph id 0) to the
+    /// lazy system fallback, which loads the families cosmic-text names for it
+    /// off the frame thread (hud-ljhku.13). Runs only when a buffer is
+    /// actually shaped (shaped-buffer cache miss), never per frame.
+    fn note_glyph_misses(&mut self, buf: &Buffer) {
+        let mut missing = String::new();
+        for run in buf.layout_runs() {
+            for glyph in run.glyphs.iter().filter(|g| g.glyph_id == 0) {
+                if let Some(text) = run.text.get(glyph.start..glyph.end) {
+                    missing.push_str(text);
+                }
+            }
+        }
+        if !missing.is_empty() {
+            let locale = self.font_system.locale().to_owned();
+            self.system_fallback.note_missing(&missing, &locale);
+        }
+    }
+
+    /// Install system fallback faces whose background load landed
+    /// (hud-ljhku.13). When any did, every shaped buffer and truncation
+    /// point is stale (they were shaped with tofu): both caches are dropped
+    /// so each text area re-lays out once on the next prepare. Returns
+    /// whether faces were added.
+    pub(crate) fn poll_system_fallback(&mut self) -> bool {
+        if !self.system_fallback.poll(&mut self.font_system) {
+            return false;
+        }
+        self.shape_cache.clear();
+        self.overlay_shape_cache.clear();
+        self.menu_shape_cache.clear();
+        self.affordance_shape_cache.clear();
+        self.truncation_cache.clear();
+        true
+    }
+
+    /// The lazy system fallback loader, for wiring and tests.
+    pub(crate) fn system_fallback_mut(&mut self) -> &mut crate::fonts::SystemFallback {
+        &mut self.system_fallback
+    }
+
+    /// Take the fallback loader (with its installed faces) for a rebuilt
+    /// rasterizer; see [`Self::adopt_system_fallback`].
+    pub(crate) fn take_system_fallback(&mut self) -> crate::fonts::SystemFallback {
+        std::mem::replace(
+            &mut self.system_fallback,
+            crate::fonts::SystemFallback::system(),
+        )
+    }
+
+    /// Adopt a previous rasterizer's fallback loader, replaying its installed
+    /// faces into this font system so no family loads twice.
+    pub(crate) fn adopt_system_fallback(&mut self, fallback: crate::fonts::SystemFallback) {
+        fallback.replay_into(&mut self.font_system);
+        self.system_fallback = fallback;
     }
 
     /// Record the glyphon text pass into `render_pass`.
