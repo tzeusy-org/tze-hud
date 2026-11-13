@@ -50,14 +50,16 @@ y_pct      = 0.9074074
 width_pct  = 0.15625
 height_pct = 0.0185185
 
-# Status indicator: small status circle at top-right corner.
+# Status indicator: badge in the top-right corner, as in the app's
+# production.toml (the SVG draws the badge at the top-right of its 320x124
+# bounds; the notification-area zone starts below it).
 # MCP widget_name: "main-status"
 [[tabs.widgets]]
 widget_type = "status-indicator"
 instance_id  = "main-status"
 
 [tabs.widgets.geometry]
-x      = 1860
-y      = 10
-width  = 48
-height = 56
+x_pct      = 0.865
+y_pct      = 0.02
+width_pct  = 0.125
+height_pct = 0.0861111

@@ -174,6 +174,7 @@ mod portal_animation;
 mod portal_reveal;
 mod retained_image;
 mod scroll;
+mod status_bar;
 mod surface;
 mod text_render;
 mod tile_opacity;

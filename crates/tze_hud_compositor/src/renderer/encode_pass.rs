@@ -411,10 +411,11 @@ impl super::Compositor {
                 _ => None,
             };
             let notification_cards = !is_alert_banner_zone(zone_name);
-            // A flat-backdrop zone only needs this pass for notification
-            // borders and action buttons.
+            // A flat-backdrop zone only needs this pass for card borders and
+            // notification action buttons.
             let needs_controls = publishes.iter().any(|p| match &p.content {
                 ZoneContent::Notification(n) => notification_cards || !n.actions.is_empty(),
+                ZoneContent::StatusBar(_) => true,
                 _ => false,
             });
             if sdf_radius.is_none() && !needs_controls {
@@ -527,12 +528,26 @@ impl super::Compositor {
                 | ContentionPolicy::LatestWins
                 | ContentionPolicy::Replace => {
                     let latest = &publishes[publishes.len() - 1];
+                    // The status-bar card hugs its rows (the same rect the flat
+                    // pass, text and drag handle use); no entries, no card.
+                    let zone_rect = Rect::new(x, y, w, h);
+                    let rect = match Self::status_bar_card(
+                        publishes,
+                        zone_def.contention_policy,
+                        policy,
+                        scale,
+                        zone_rect,
+                    ) {
+                        Some(card) => card.rect,
+                        None if matches!(&latest.content, ZoneContent::StatusBar(_)) => continue,
+                        None => zone_rect,
+                    };
                     self.push_zone_backdrop_cmd(
                         out,
                         zone_name,
                         policy,
                         &latest.content,
-                        Rect::new(x, y, w, h),
+                        rect,
                         sdf_radius,
                         anim_opacity.clamp(0.0, 1.0),
                     );
@@ -559,7 +574,13 @@ impl super::Compositor {
         opacity: f32,
     ) -> bool {
         let alert_banner = is_alert_banner_zone(zone_name);
-        let is_card = matches!(content, ZoneContent::Notification(_)) && !alert_banner;
+        // Notification and status-bar cards carry the `color.border.default` border.
+        let is_card = match content {
+            ZoneContent::Notification(_) => !alert_banner,
+            ZoneContent::StatusBar(_) => true,
+            _ => false,
+        };
+        let is_notification_card = is_card && matches!(content, ZoneContent::Notification(_));
         let backdrop_rgba: Option<Rgba> = match content {
             ZoneContent::SolidColor(rgba) => Some(*rgba),
             ZoneContent::StaticImage(_) => Some(STATIC_IMAGE_PLACEHOLDER_COLOR),
@@ -590,7 +611,7 @@ impl super::Compositor {
         });
         if sdf_radius.is_some() {
             // Notification cards keep their token opacity; others take the policy's.
-            if !is_card {
+            if !is_notification_card {
                 if let Some(o) = policy.backdrop_opacity {
                     rgba.a = o.clamp(0.0, 1.0);
                 }
