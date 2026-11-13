@@ -3891,6 +3891,15 @@ mod tests {
             assert_eq!(replacement.published_at_wall_us, first.published_at_wall_us);
             assert_ne!(replacement.publication_id, second.publication_id);
             assert!(replacement.expires_at_wall_us.is_none());
+            // The forced trim tells the publisher its card was displaced.
+            let receipts = scene.take_pending_actions("notif-agent");
+            assert!(
+                !receipts.is_empty()
+                    && receipts
+                        .iter()
+                        .all(|a| a.kind == tze_hud_scene::graph::PendingActionKind::Displaced),
+                "{receipts:?}"
+            );
         }
         assert!(harness.tick());
         let (x, y) = harness.notification_action_center("second").unwrap();
