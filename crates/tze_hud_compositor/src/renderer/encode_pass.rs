@@ -713,6 +713,8 @@ impl super::Compositor {
                     tile_opacity,
                     &mut cmds,
                 );
+                // OUTPUT selection / link underline (hud-ljhku.2).
+                self.collect_portal_reading_rects(tile, scene, scroll_y, tile_opacity, &mut cmds);
             }
         }
         cmds

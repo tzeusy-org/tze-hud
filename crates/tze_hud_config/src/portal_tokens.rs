@@ -84,6 +84,7 @@
 //! |-----|------|----------|
 //! | `portal.composer.caret_color` | composer | caret glyph color (RGBA hex) |
 //! | `portal.composer.selection_color` | composer | selection highlight (RGBA hex, alpha-bearing) |
+//! | `portal.transcript.selection_color` | transcript body | OUTPUT selection highlight; defaults to the composer selection color (RGBA hex, alpha-bearing) |
 //! | `portal.composer.placeholder_color` | composer | empty-draft placeholder text (RGBA hex) |
 //! | `portal.focus_ring.color` | focus ring | ring stroke color (RGBA hex) |
 //! | `portal.focus_ring.width_px` | focus ring | ring stroke width in px |
@@ -402,6 +403,10 @@ pub const PORTAL_TOKEN_COMPOSER_CARET_COLOR: &str = "portal.composer.caret_color
 /// Composer selection-highlight background color (RGBA hex, alpha-bearing). Mirrors
 /// the compositor's existing calm-blue selection tint.
 pub const PORTAL_TOKEN_COMPOSER_SELECTION_COLOR: &str = "portal.composer.selection_color";
+/// OUTPUT (transcript) selection highlight (RGBA hex, alpha-bearing). Unset, it
+/// follows `portal.composer.selection_color`, so themes keep one selection
+/// treatment (hud-ljhku.2).
+pub const PORTAL_TOKEN_TRANSCRIPT_SELECTION_COLOR: &str = "portal.transcript.selection_color";
 /// Composer empty-draft placeholder text color (RGBA hex). Dimmed relative to the
 /// live composer text so an empty prompt reads as a hint, not typed content.
 pub const PORTAL_TOKEN_COMPOSER_PLACEHOLDER_COLOR: &str = "portal.composer.placeholder_color";

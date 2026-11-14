@@ -85,6 +85,7 @@ const PORTAL_COLOR_KEYS: &[&str] = &[
     portal_tokens::PORTAL_TOKEN_SCROLL_INDICATOR_COLOR,
     portal_tokens::PORTAL_TOKEN_COMPOSER_CARET_COLOR,
     portal_tokens::PORTAL_TOKEN_COMPOSER_SELECTION_COLOR,
+    portal_tokens::PORTAL_TOKEN_TRANSCRIPT_SELECTION_COLOR,
     portal_tokens::PORTAL_TOKEN_COMPOSER_PLACEHOLDER_COLOR,
     portal_tokens::PORTAL_TOKEN_FOCUS_RING_COLOR,
     portal_tokens::PORTAL_TOKEN_WINDOW_RESIZE_GRIP_COLOR,
@@ -330,10 +331,11 @@ mod tests {
             for (name, _) in BUILTIN_THEMES {
                 let theme = builtin_theme(name).unwrap();
                 let selected = resolve_config_tokens(&tokens(&[(THEME_KEY, name)]));
-                // Every portal color but selection maps to a theme role. No theme
-                // role is a selection highlight (hover opacity is a state layer,
-                // too faint to show a selection), so it keeps the portal default.
-                assert_eq!(role_colors.len() + 1, PORTAL_COLOR_KEYS.len());
+                // Every portal color but the two selections maps to a theme role. No
+                // theme role is a selection highlight (hover opacity is a state layer,
+                // too faint to show a selection), so both keep the portal default
+                // (hud-ljhku.2 added the transcript selection, which follows the composer's).
+                assert_eq!(role_colors.len() + 2, PORTAL_COLOR_KEYS.len());
                 for (key, role) in role_colors {
                     assert_eq!(theme[key], theme[role], "{name}: {key} must use {role}");
                     assert_eq!(selected[key], theme[key], "{name} must supply {key}");
@@ -341,6 +343,10 @@ mod tests {
                 assert!(
                     !theme.contains_key(portal_tokens::PORTAL_TOKEN_COMPOSER_SELECTION_COLOR),
                     "{name} must leave composer selection to the portal default"
+                );
+                assert!(
+                    !theme.contains_key(portal_tokens::PORTAL_TOKEN_TRANSCRIPT_SELECTION_COLOR),
+                    "{name} must leave transcript selection to the portal default"
                 );
                 let part = portal_tokens::resolve_portal_tokens(&selected);
                 assert_eq!(
@@ -520,6 +526,7 @@ mod tests {
             "portal.scroll_indicator.color",
             "portal.composer.caret_color",
             "portal.composer.selection_color",
+            "portal.transcript.selection_color",
             "portal.composer.placeholder_color",
             "portal.focus_ring.color",
             "portal.window.resize_grip.color",

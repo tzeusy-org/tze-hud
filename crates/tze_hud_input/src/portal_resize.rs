@@ -247,6 +247,10 @@ pub enum PortalCursor {
     Grab,
     /// Closed hand — an active drag-to-move gesture is in progress.
     Grabbing,
+    /// I-beam — over selectable OUTPUT text or the composer (hud-ljhku.2).
+    Text,
+    /// Pointing hand — over an OUTPUT link or copy button (hud-ljhku.2).
+    Pointer,
 }
 
 impl PortalCursor {

@@ -13,6 +13,7 @@ pub mod error_codes;
 pub mod graph;
 pub mod mutation;
 pub mod perf_budget;
+pub mod portal_reading;
 pub mod publication_defaults;
 pub mod render_wake;
 pub mod svg_tokens;
@@ -52,6 +53,10 @@ pub use graph::{
 };
 pub use mutation::{
     BatchTimingHints, MAX_BATCH_SIZE, MutationBatch, MutationResult, SceneMutation,
+};
+pub use portal_reading::{
+    PortalCopyButton, PortalGlyph, PortalLink, PortalReadingDecor, PortalReadingLayout,
+    https_link_target,
 };
 pub use publication_defaults::{
     DEFAULT_ANSWER_WINDOW_MS, MAX_ANSWER_WINDOW_MS, PublicationDefaults,

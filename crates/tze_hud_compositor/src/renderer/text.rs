@@ -978,6 +978,34 @@ impl super::Compositor {
         }
     }
 
+    /// HTTPS links and fenced blocks of `node_id`'s parsed markdown, kept only
+    /// when they index the laid-out `text` (hud-ljhku.2).
+    fn document_links(
+        &self,
+        node_id: SceneId,
+        text: &str,
+    ) -> (Vec<tze_hud_scene::PortalLink>, Vec<(usize, usize)>) {
+        let cache = self.markdown_cache();
+        let Some(parsed) = self
+            .node_key_cache
+            .get(&node_id)
+            .and_then(|key| cache.get_by_key(key))
+            .filter(|p| *p.plain_text == *text)
+        else {
+            return Default::default();
+        };
+        let links = parsed
+            .links
+            .iter()
+            .map(|l| tze_hud_scene::PortalLink {
+                start: l.start_byte,
+                end: l.end_byte,
+                href: l.href.clone(),
+            })
+            .collect();
+        (links, parsed.code_blocks.clone())
+    }
+
     /// Publish actual shaped native pane extents without a new wake channel.
     /// Main consumes these on the existing FrameReady/about_to_wait path.
     pub fn publish_portal_document_layouts(&mut self, scene: &mut SceneGraph) {
@@ -1013,12 +1041,32 @@ impl super::Compositor {
             let Some(item) = items.first() else {
                 continue;
             };
+            let (links, code_blocks) = self.document_links(node_id, &item.text);
             let Some(rasterizer) = self.text_rasterizer.as_mut() else {
                 continue;
             };
             let metrics = rasterizer.measure_scroll_document(item);
             let key = (tile_id, pane);
             live.insert(key);
+            // Glyph geometry only changes with the shaped document, so it is
+            // reused on a signature match. Link targets are not part of the
+            // shape signature (same text, new href), so they are always fresh.
+            let (glyphs, row_glyphs) = scene
+                .overlay
+                .portal_document_layouts
+                .get(&key)
+                .filter(|old| old.signature == metrics.signature)
+                .map(|old| (old.reading.glyphs.clone(), old.reading.row_glyphs.clone()))
+                .unwrap_or_else(|| {
+                    let (glyphs, row_glyphs) = rasterizer.shaped_glyphs(item);
+                    (glyphs.into(), row_glyphs.into())
+                });
+            let reading = tze_hud_scene::PortalReadingLayout {
+                links: links.into(),
+                code_blocks: code_blocks.into(),
+                glyphs,
+                row_glyphs,
+            };
             scene.overlay.portal_document_layouts.insert(
                 key,
                 tze_hud_scene::PortalDocumentLayout {
@@ -1040,6 +1088,7 @@ impl super::Compositor {
                         item.clip_bounds_height,
                     ),
                     line_height: item.font_size_px * item.line_height_multiplier,
+                    reading,
                 },
             );
         }
@@ -2175,6 +2224,7 @@ mod portal_reveal_render_tests {
             color: None,
             background_color: None,
             size_scale: None,
+            href: None,
         }
     }
 
@@ -2194,6 +2244,8 @@ mod portal_reveal_render_tests {
             code_panels: vec![],
             list_items: vec![],
             thematic_breaks: vec![],
+            links: vec![],
+            code_blocks: vec![],
             line_height_multiplier: 1.4,
         };
         let node = TextMarkdownNode {

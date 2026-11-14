@@ -354,7 +354,8 @@ class WindowsGuardTests(unittest.TestCase):
                     selected = scenarios.call_args.args[1]
                     self.assertEqual("overlay-pointer" in selected, mode == "overlay")
                     self.assertEqual("tray" in selected, mode == "overlay")
-                    self.assertEqual(len(selected), 2 if mode == "overlay" else 24)
+                    # 25: hud-ljhku.5 added "stack-trim"; hud-ljhku.2 added "portal-reading".
+                    self.assertEqual(len(selected), 2 if mode == "overlay" else 25)
                     self.assertEqual(selected[-1] == "restart", mode == "fullscreen")
             for mode, scenario in (("fullscreen", "overlay-pointer"), ("overlay", "composer")):
                 with mock.patch.object(g, "WINDOWS", True), contextlib.redirect_stderr(io.StringIO()), \

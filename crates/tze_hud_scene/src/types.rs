@@ -355,6 +355,8 @@ pub struct PortalDocumentLayout {
     pub line_height: f32,
     /// Plain-text byte start and top of each actually shaped visual row.
     pub rows: std::sync::Arc<[(usize, f32)]>,
+    /// Links, glyph extents and fenced blocks for reading (hud-ljhku.2).
+    pub reading: crate::portal_reading::PortalReadingLayout,
 }
 
 impl PortalDocumentLayout {
@@ -2046,14 +2048,7 @@ impl NotificationAction {
 
     pub fn encoded_url(&self) -> Result<String, String> {
         let raw = self.url.as_deref().ok_or(ACTION_URL_HINT)?;
-        if raw.len() > 2048 {
-            return Err(ACTION_URL_HINT.into());
-        }
-        let parsed = url::Url::parse(raw).map_err(|_| ACTION_URL_HINT)?;
-        if parsed.scheme() != "https" || parsed.host_str().is_none_or(str::is_empty) {
-            return Err(ACTION_URL_HINT.into());
-        }
-        Ok(parsed.into())
+        crate::portal_reading::https_link_target(raw).ok_or_else(|| ACTION_URL_HINT.into())
     }
 }
 

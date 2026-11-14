@@ -339,6 +339,7 @@ pub(super) fn make_windowed_keyboard_test_app(
         element_repositioned_tx: None,
         input_event_tx: Some(input_event_tx),
         composer_pointer_drag_anchor: None,
+        reading_cursor: None,
         portal_resize_states: std::collections::HashMap::new(),
         consumed_portal_resize_keydowns: std::collections::HashSet::new(),
         consumed_shell_shortcut_keydowns: std::collections::HashSet::new(),

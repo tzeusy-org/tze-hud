@@ -734,6 +734,26 @@ impl WinitApp {
             Ok(false) => {}
         }
 
+        // ── Portal OUTPUT reading keys (hud-ljhku.2) ─────────────────────
+        // Ctrl+C copies the OUTPUT selection; Esc clears it (or a reading
+        // stop) before any outer exit; Tab walks visible links and copy
+        // buttons after the composer; Enter/Space activates the stop.
+        match self.route_output_reading_key(raw, tab_id) {
+            Ok(true) => {
+                self.state
+                    .notification_keydowns
+                    .insert(keyboard_key_identity(&raw.key_code, &raw.key));
+                return;
+            }
+            Err(()) => {
+                self.state
+                    .pending_keyboard_events
+                    .push_back(PendingKeyboardEvent::KeyDown(raw.clone()));
+                return;
+            }
+            Ok(false) => {}
+        }
+
         // ── Keyboard focus traversal: Tab / Shift+Tab (hud-v0cal) ─────────
         //
         // Tab advances keyboard focus to the next focusable affordance and
@@ -1422,6 +1442,74 @@ impl WinitApp {
                 ..base
             },
         );
+    }
+
+    /// OUTPUT reading keys; `Ok(true)` consumed, `Err` when the scene is busy.
+    fn route_output_reading_key(
+        &mut self,
+        raw: &RawKeyDownEvent,
+        tab_id: tze_hud_scene::SceneId,
+    ) -> Result<bool, ()> {
+        let m = &raw.modifiers;
+        let copy = m.ctrl && !m.alt && !m.meta && raw.key_code == "KeyC";
+        let escape = is_escape_key(&raw.key, &raw.key_code) && !m.ctrl && !m.alt && !m.meta;
+        let tab = is_bare_tab_chord(&raw.key, m);
+        let activate = !m.ctrl && !m.alt && !m.meta && is_activation_key(&raw.key, &raw.key_code);
+        let reader = &self.state.input_processor.output_reading;
+        let focused = reader.focus.map(|f| f.0);
+        let entry = match self.state.focus_manager.current_owner(tab_id) {
+            tze_hud_input::FocusOwner::Node { tile_id, node_id }
+                if self.state.input_processor.composer_focused_node() == Some(*node_id)
+                    && self
+                        .state
+                        .input_processor
+                        .portal_output_layout(*tile_id)
+                        .is_some() =>
+            {
+                Some(*tile_id)
+            }
+            _ => None,
+        };
+        let relevant = (copy && reader.selection.is_some())
+            || (escape && (reader.selection.is_some() || focused.is_some()))
+            || (tab && (focused.is_some() || (entry.is_some() && !m.shift)))
+            || focused.is_some();
+        if !relevant {
+            return Ok(false);
+        }
+        let mut effect = None;
+        let consumed = {
+            let state = spin_acquire(&self.state.shared_state, INTERACTION_LOCK_BUDGET).ok_or(())?;
+            let mut scene = spin_acquire(&state.scene, INTERACTION_LOCK_BUDGET).ok_or(())?;
+            let ip = &mut self.state.input_processor;
+            if copy && ip.output_reading.selection.is_some() {
+                effect = ip.output_copy();
+                true
+            } else if escape {
+                ip.output_escape(&mut scene)
+            } else if tab {
+                match focused.or(entry) {
+                    // Shift+Tab off the first stop returns to the composer.
+                    Some(tile) => {
+                        ip.output_tab(tile, &mut scene, m.shift, focused.is_none())
+                            || (m.shift && focused.is_some())
+                    }
+                    None => false,
+                }
+            } else if let (true, Some(tile)) = (activate, focused) {
+                effect = ip.output_activate(tile, &mut scene, Instant::now());
+                true
+            } else {
+                // Any other key leaves the reading stop; typing reaches the composer.
+                ip.output_reading.focus = None;
+                ip.sync_output_reading(&mut scene);
+                false
+            }
+        };
+        if let Some(effect) = effect {
+            self.perform_reading_effect(effect);
+        }
+        Ok(consumed)
     }
 
     /// Explicit Tab joins notification controls at the existing content cycle's

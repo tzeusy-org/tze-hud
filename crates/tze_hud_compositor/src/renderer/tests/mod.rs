@@ -171,6 +171,7 @@ mod markdown_cache;
 mod markdown_primer;
 mod notification_layout;
 mod portal_animation;
+mod portal_reading;
 mod portal_reveal;
 mod retained_image;
 mod scroll;

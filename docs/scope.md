@@ -448,6 +448,11 @@ source links when implementation changes the status.
   crates/tze_hud_input/src/composer_draft.rs` (one command). No source or
   tests moved outside the denominator. This is source completion of D5;
   `hud-lirh2.12` owner acceptance and `.13` final reconciliation remain open.
+  Portal links, selection and copy (`hud-ljhku.2`) add one line inside the
+  denominator (a test constructor in runtime/src/portal.rs): the reading model
+  lives in `tze_hud_input` next to scroll and jump-to-latest, and its scene,
+  compositor and runtime glue sit with their owners. The same command measured
+  14,512 after that change, within the 15,000 cap.
 
 - **T8 — diet [Observed].** The [local harness](../justfile) includes
   llvmpipe GPU recipes and Nextest; resource acceptance has a compact

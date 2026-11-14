@@ -255,6 +255,26 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   At zero unread, the portal badge background, label and click target disappear
   together, including when the viewer scrolls back through already-read output.
   The local header close reclaims that portal; a later publish reattaches it.
+  OUTPUT is readable in place (hud-ljhku.2). Markdown `[text](url)`, `<url>`
+  and bare `https://` URLs become links only when the URL is HTTPS with a host
+  and at most 2048 bytes; other links render as plain text and are never
+  activatable. Only link text is drawn; hovering shows the target host in a
+  pill and an underline, and the cursor is an I-beam over text, a hand over a
+  link and an arrow elsewhere. A link opens on release when the pointer
+  moved within the system drag threshold (`SM_CXDRAG`/`SM_CYDRAG`; 4 px off
+  Windows), through the same browser handoff as card links, once
+  per 2 s per link; a double-click opens it once and selects nothing, and a
+  press-drag on a link selects instead. Dragging selects text (double-click a
+  word, triple-click a paragraph); the selection keeps its bytes across
+  appends and head trims (it clears once its text is trimmed or rewritten)
+  and stops follow-tail until it is cleared. Ctrl+C copies the selection as
+  plain text (CRLF line breaks on Windows); Esc or any press outside OUTPUT
+  clears it, and hovering a fenced code block
+  shows a Copy button that copies the block. Tab from a focused composer moves
+  through visible links and Copy buttons (Enter/Space activates, Shift+Tab off
+  the first returns to the composer); the focused stop survives new output
+  while its text and target remain. None of this reaches the agent: no
+  `hud_input` item, no MCP or gRPC change.
 - Omitted zone `ttl_ms` uses 60000, except a notification with actions uses
   the owner's live `[runtime] answer_window_ms` (default 60000). An explicit
   `ttl_ms` always wins, including 0 (held until cleared); the owner window is
@@ -485,6 +505,11 @@ agents until one is paired.
   `unread_badge`, the largest exposed piece of each runtime control as of
   the last frame; each `{x, y, w, h}` in scene pixels or `null` when not drawn),
   `focus` (`composer`, `tile` or `none`), `hover` (`composer` or `none`),
+  `cursor` (`ibeam` over OUTPUT text, `hand` over a link or Copy button,
+  otherwise `arrow`, including when the pointer is not over that portal's
+  OUTPUT; present for each portal whose OUTPUT is measured), `link_hint`
+  (the hovered or focused link's host, or `null`), `selection_chars` (OUTPUT
+  selection length, never its text),
   `output` `{first_visible_line, last_visible_line, at_tail, unread,
   writing_caret}` (`writing_caret` observes the compositor's actual trailing
   cursor marker; `at_tail`
@@ -508,10 +533,12 @@ agents until one is paired.
   and `tooltip_visible` (the current runtime parameter is at least 0.5).
   Rects use `{x, y, w, h}` in scene pixels, and `display` indexes `displays`.
   `link_launches` monotonically counts accepted runtime browser handoffs after
-  the per-publication/action 2 s limit. A failed worker spawn does not count;
+  the per-publication/action (card) or per-link (portal OUTPUT) 2 s limit. A failed worker spawn does not count;
   a browser navigation failure does. The non-Windows no-op counts too. Scene
   contention leaves this counter readable. These diagnostics are admin-only;
   MCP/gRPC responses and their token budgets are unchanged.
+  `clipboard_writes` monotonically counts HUD clipboard writes (pairing code,
+  OUTPUT copy); the non-Windows stub counts too.
   `/admin/status` `displays` lists the overlaid monitors, primary first:
   `{name, x, y, width, height, primary, zones, window_state}` in scene pixels (the primary's
   top-left is 0,0; others may be negative) and the zones configured onto each.
@@ -794,7 +821,8 @@ whether its chord is the default, saved to config, or lasts until restart
 
 Overlay clicks on card buttons, badges and scroll panes act without taking
 Windows keyboard focus. Clicking a text editor (a portal composer or panel
-search/edit field) takes focus explicitly. The same rule applies to every
+search/edit field) or starting a portal OUTPUT selection takes focus
+explicitly, so Ctrl+C reaches the HUD. The same rule applies to every
 monitor. Publication never takes focus. When the HUD takes focus, it remembers
 the external app that was active; nested HUD focus takes preserve that origin.
 A keyboard card answer or the outer Esc returns to it only while a HUD window
@@ -813,8 +841,8 @@ a URL digit uses the same two-second per-action limit, leaves the card visible,
 and finishes the keyboard visit. A replaced or expired card cannot redirect a
 held key to a different card or the composer.
 
-Esc unwinds one layer at a time: it leaves nested card/control focus, collapses
-a composer selection, or cancels its draft before the empty editor's outer
+Esc unwinds one layer at a time: it leaves nested card/control focus, clears an
+OUTPUT selection or link/Copy focus, collapses a composer selection, or cancels its draft before the empty editor's outer
 Esc leaves the HUD. In settings it cancels an edit/section or clears search
 before closing. An answer-chord visit entered from another app uses Esc to
 leave without answering. Key repeats, text and matching releases from a card
@@ -1114,7 +1142,7 @@ layers, fades, or explicit config overrides. Surface opacity, pressed opacity
 and the other palette values remain unchanged; consumers must validate their
 actual composition.
 
-Theme files accept canonical keys and the 41 existing portal color keys
+Theme files accept canonical keys and the 42 existing portal color keys
 documented in `crates/tze_hud_config/src/portal_tokens.rs`, including
 `portal.frame.background`, `portal.transcript.background`, and
 `portal.composer.background`. These colors use `#RRGGBB` or `#RRGGBBAA`
@@ -1128,8 +1156,9 @@ roles: frame and transcript use `color.surface.container`, composer uses
 `color.surface.container.highest`, code uses the high container, and dimmed
 content uses the low container. Text uses the corresponding on-surface roles;
 status cues keep the theme's primary, success, caution and error meanings.
-Composer selection keeps the portal default, since no theme role is a
-selection highlight. These theme mappings do not change portal sizes,
+Composer selection and `portal.transcript.selection_color` (OUTPUT selection,
+defaulting to the composer selection color) keep the portal default, since no
+theme role is a selection highlight. These theme mappings do not change portal sizes,
 fonts, numeric defaults or behavior. Explicit `[design_tokens]`
 color overrides still take precedence.
 

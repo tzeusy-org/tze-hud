@@ -542,6 +542,13 @@ impl ScrollTileState {
         changed
     }
 
+    /// Stop following the tail without moving (an OUTPUT selection holds the
+    /// reading position, hud-ljhku.2). Returns whether it was following.
+    pub fn hold_reading(&mut self) -> bool {
+        std::mem::replace(&mut self.follow_tail, FollowTailAnchor::ScrolledBack)
+            == FollowTailAnchor::AtTail
+    }
+
     /// Queue an agent `SetScrollOffsetRequest`.
     ///
     /// Will be applied only if no user scroll event arrives this frame.
@@ -785,6 +792,13 @@ impl ScrollState {
             .get(&tile_id)
             .map(ScrollTileState::total_content_height_px)
             .unwrap_or(0.0)
+    }
+
+    /// See [`ScrollTileState::hold_reading`]; `false` for unknown tiles.
+    pub fn hold_reading(&mut self, tile_id: SceneId) -> bool {
+        self.tiles
+            .get_mut(&tile_id)
+            .is_some_and(ScrollTileState::hold_reading)
     }
 
     /// Force a tile's viewport to the tail, overriding any `ScrolledBack`
@@ -1048,6 +1062,36 @@ mod tests {
             elapsed_us < budget,
             "scroll local_ack_us={elapsed_us}us exceeded calibrated budget {budget}us",
         );
+    }
+
+    /// hud-ljhku.2 R2.2 S3: an OUTPUT selection holds the view (appends do
+    /// not follow the tail, so unread counts them); the release resumes
+    /// following only when the selection began at the tail.
+    #[test]
+    fn selection_hold_stops_following_until_released() {
+        let tile_id = SceneId::new();
+        let mut scroll = ScrollState::new();
+        scroll.register_tile(tile_id, ScrollConfig::vertical());
+        scroll.notify_content_appended(tile_id, 200.0, 100.0, 20.0);
+        scroll.reset_to_tail(tile_id);
+        assert_eq!(scroll.offset(tile_id).1, 100.0);
+        assert!(scroll.hold_reading(tile_id), "was following");
+        assert!(!scroll.hold_reading(tile_id), "already held");
+        scroll.notify_content_appended(tile_id, 260.0, 100.0, 20.0);
+        assert_eq!(
+            scroll.offset(tile_id).1,
+            100.0,
+            "the view stays on the selection"
+        );
+        assert_eq!(
+            scroll.follow_tail_anchor(tile_id),
+            FollowTailAnchor::ScrolledBack
+        );
+        assert!(
+            scroll.reset_to_tail(tile_id),
+            "release resumes at the new tail"
+        );
+        assert_eq!(scroll.offset(tile_id).1, 160.0);
     }
 
     // ── Spec task 3.2 — follow-tail advances by whole lines ──────────────────

@@ -21,7 +21,8 @@
 //! - Indented code blocks (4-space / tab indent)
 //! - Ordered lists (` 1. item`)
 //! - Unordered lists (`- item`, `* item`, `+ item`)
-//! - Links (rendered as styled non-navigable text; destination ignored)
+//! - Links: `[text](https://…)`, `<https://…>` and bare `https://…` keep their
+//!   validated HTTPS target (hud-ljhku.2); any other scheme renders as plain text
 //!
 //! Excluded constructs (rendered as literal source text, never silently
 //! dropped):
@@ -32,7 +33,7 @@
 //! - Footnotes
 //! - Strikethrough (`~~text~~`)
 //! - Task lists (`- [ ] item`)
-//! - Autolinks (`<https://...>`)
+//! - Non-HTTPS autolinks (`<http://...>`)
 //!
 //! # Styling
 //!
@@ -445,6 +446,8 @@ pub struct StyleAttr {
     /// renders the span at 175% of the node's base font size.  Used to
     /// apply heading-level scale from `MarkdownTokens::heading_scale`.
     pub size_scale: Option<f32>,
+    /// Validated HTTPS link target when this span is link text (hud-ljhku.2).
+    pub href: Option<Arc<str>>,
 }
 
 impl StyleAttr {
@@ -457,6 +460,7 @@ impl StyleAttr {
             color: None,
             background_color: None,
             size_scale: None,
+            href: None,
         }
     }
 }
@@ -534,6 +538,16 @@ pub struct ListItemSpan {
     pub indent_level: u8,
 }
 
+// ─── LinkSpan ────────────────────────────────────────────────────────────────
+
+/// A link in [`ParsedMarkdown::plain_text`] with its validated HTTPS target.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LinkSpan {
+    pub start_byte: usize,
+    pub end_byte: usize,
+    pub href: Arc<str>,
+}
+
 // ─── ParsedMarkdown ──────────────────────────────────────────────────────────
 
 /// The cached result of parsing a single `TextMarkdownNode` content string.
@@ -578,6 +592,11 @@ pub struct ParsedMarkdown {
     /// (`---`/`***`/`___`) is otherwise treated as ordinary text.  Sorted
     /// ascending (parse order is source order).
     pub thematic_breaks: Vec<usize>,
+    /// HTTPS links in `plain_text` byte space, sorted (hud-ljhku.2).
+    pub links: Vec<LinkSpan>,
+    /// Fenced code block contents in `plain_text` byte space, sorted, without
+    /// the final newline; the copy button copies exactly this text.
+    pub code_blocks: Vec<(usize, usize)>,
     /// Line-height multiplier resolved from the `typography.line_height.multiplier`
     /// token at parse time.
     ///
@@ -1143,7 +1162,7 @@ thread_local! {
 /// # Excluded constructs
 ///
 /// Tables, images, raw HTML, blockquotes, footnotes, strikethrough, task lists,
-/// and autolinks are **not** parsed.  Their literal source text is included in
+/// and non-HTTPS autolinks are **not** parsed.  Their literal source text is included in
 /// the output verbatim so transcript content is never silently dropped.
 pub(crate) fn parse_markdown_subset(content: &str, tokens: &MarkdownTokens) -> ParsedMarkdown {
     #[cfg(test)]
@@ -1158,6 +1177,8 @@ pub(crate) fn parse_markdown_subset(content: &str, tokens: &MarkdownTokens) -> P
     let mut list_items: Vec<ListItemSpan> = Vec::new();
     // Thematic-break divider offsets (transcript turn separators, hud-nx7yq.4).
     let mut thematic_breaks: Vec<usize> = Vec::new();
+    // Fenced code block contents (copy targets, hud-ljhku.2).
+    let mut code_blocks: Vec<(usize, usize)> = Vec::new();
 
     let mut in_fenced_block = false;
     let mut fence_char: Option<char> = None;
@@ -1214,11 +1235,15 @@ pub(crate) fn parse_markdown_subset(content: &str, tokens: &MarkdownTokens) -> P
                                 color: tokens.code_color,
                                 background_color: tokens.code_background,
                                 size_scale: None,
+                                href: None,
                             },
                         });
                     }
                     prev_was_empty = body_line.is_empty();
                     i += 1;
+                }
+                if plain.len() > panel_start {
+                    code_blocks.push((panel_start, plain.len() - 1));
                 }
                 // Emit one panel record for the entire fenced block (even if
                 // it is a multi-line block — the renderer approximates it as a
@@ -1260,6 +1285,7 @@ pub(crate) fn parse_markdown_subset(content: &str, tokens: &MarkdownTokens) -> P
                         color: tokens.code_color,
                         background_color: tokens.code_background,
                         size_scale: None,
+                        href: None,
                     },
                 });
                 if tokens.code_background.is_some() {
@@ -1322,6 +1348,7 @@ pub(crate) fn parse_markdown_subset(content: &str, tokens: &MarkdownTokens) -> P
                     } else {
                         None
                     },
+                    href: None,
                 };
                 let start = plain.len();
                 let prev_len = spans.len();
@@ -1428,12 +1455,32 @@ pub(crate) fn parse_markdown_subset(content: &str, tokens: &MarkdownTokens) -> P
         }
     }
 
+    // Links: merge adjacent spans that carry the same target.
+    let mut links: Vec<LinkSpan> = Vec::new();
+    for span in &spans {
+        let Some(href) = &span.attr.href else {
+            continue;
+        };
+        match links.last_mut() {
+            Some(last) if last.end_byte == span.start_byte && last.href == *href => {
+                last.end_byte = span.end_byte;
+            }
+            _ => links.push(LinkSpan {
+                start_byte: span.start_byte,
+                end_byte: span.end_byte,
+                href: href.clone(),
+            }),
+        }
+    }
+
     ParsedMarkdown {
         plain_text: Arc::from(plain),
         spans,
         code_panels,
         list_items,
         thematic_breaks,
+        links,
+        code_blocks,
         line_height_multiplier: tokens.line_height_multiplier,
     }
 }
@@ -1657,10 +1704,15 @@ fn process_inline_inner(
                         } else {
                             Vec::new()
                         };
+                        // Only an HTTPS target with a host is a link; any other
+                        // scheme renders its text plain (hud-ljhku.2).
+                        let dest: String = chars[bracket_close + 2..paren_close].iter().collect();
+                        let href = tze_hud_scene::https_link_target(dest.trim()).map(Arc::from);
                         let mut link_attr = base_override.cloned().unwrap_or_else(StyleAttr::plain);
-                        if tokens.link_color.is_some() {
+                        if href.is_some() && tokens.link_color.is_some() {
                             link_attr.color = tokens.link_color;
                         }
+                        link_attr.href = href.clone().or(link_attr.href);
                         process_inline_inner(
                             inner_slice,
                             out,
@@ -1674,8 +1726,18 @@ fn process_inline_inner(
                         let end = out.len();
                         // Use fill_gaps_with_base to cover unstyled gaps with the
                         // link style, keeping spans non-overlapping.
-                        if start < end {
+                        if start < end && link_attr != StyleAttr::plain() {
                             fill_gaps_with_base(&link_attr, start, end, prev_len, spans);
+                        }
+                        if let Some(href) = &href {
+                            for span in &mut spans[prev_len..] {
+                                if span.attr.href.is_none() {
+                                    span.attr.href = Some(href.clone());
+                                    if tokens.link_color.is_some() {
+                                        span.attr.color = tokens.link_color;
+                                    }
+                                }
+                            }
                         }
                         i = paren_close + 1;
                         continue;
@@ -1686,6 +1748,27 @@ fn process_inline_inner(
             out.push(ch);
             i += 1;
             continue;
+        }
+
+        // ── Autolinks `<https://…>` and bare `https://…` (hud-ljhku.2) ─────
+        if let Some((text_start, text_end, next)) = autolink_at(chars, i) {
+            let text: String = chars[text_start..text_end].iter().collect();
+            if let Some(href) = tze_hud_scene::https_link_target(&text) {
+                let start = out.len();
+                out.push_str(&text);
+                let mut attr = base_override.cloned().unwrap_or_else(StyleAttr::plain);
+                if tokens.link_color.is_some() {
+                    attr.color = tokens.link_color;
+                }
+                attr.href = Some(Arc::from(href));
+                spans.push(StyledSpan {
+                    start_byte: start,
+                    end_byte: out.len(),
+                    attr,
+                });
+                i = next;
+                continue;
+            }
         }
 
         // ── Inline code: `code` ──────────────────────────────────────────
@@ -1721,6 +1804,7 @@ fn process_inline_inner(
                                 .or_else(|| base_override.and_then(|b| b.color)),
                             background_color: tokens.code_background,
                             size_scale: base_override.and_then(|b| b.size_scale),
+                            href: None,
                         },
                     });
                 }
@@ -1757,6 +1841,7 @@ fn process_inline_inner(
                     color: base_override.and_then(|b| b.color),
                     background_color: None,
                     size_scale: base_override.and_then(|b| b.size_scale),
+                    href: None,
                 };
                 process_inline_inner(
                     &chars[open_end..close_start],
@@ -1794,6 +1879,7 @@ fn process_inline_inner(
                     color: base_override.and_then(|b| b.color),
                     background_color: None,
                     size_scale: base_override.and_then(|b| b.size_scale),
+                    href: None,
                 };
                 process_inline_inner(
                     &chars[open_end..close_start],
@@ -1837,6 +1923,7 @@ fn process_inline_inner(
                         color: base_override.and_then(|b| b.color),
                         background_color: None,
                         size_scale: base_override.and_then(|b| b.size_scale),
+                        href: None,
                     };
                     process_inline_inner(
                         &chars[open_end..close_start],
@@ -1879,6 +1966,50 @@ fn process_inline_inner(
 /// confines the scan to `spans[prev_len..]`, making the function O(new_spans)
 /// rather than O(all_spans), which is critical for span-dense adversarial
 /// content.
+/// An HTTPS autolink at `i`: `<https://…>` (angle brackets dropped) or a bare
+/// `https://…` at a word start, ending before whitespace, `<`, or trailing
+/// punctuation. Returns the URL char range and the index after the construct.
+fn autolink_at(chars: &[char], i: usize) -> Option<(usize, usize, usize)> {
+    const SCHEME: [char; 8] = ['h', 't', 't', 'p', 's', ':', '/', '/'];
+    let scheme_at = |j: usize| chars.get(j..j + SCHEME.len()) == Some(&SCHEME[..]);
+    if chars[i] == '<' && scheme_at(i + 1) {
+        let close = chars[i + 1..]
+            .iter()
+            .take(tze_hud_scene::portal_reading::MAX_LINK_BYTES + 1)
+            .position(|&c| c == '>' || c.is_whitespace() || c == '<')?;
+        return (chars[i + 1 + close] == '>').then_some((i + 1, i + 1 + close, i + 2 + close));
+    }
+    // A word start: after whitespace or opening punctuation, never inside a
+    // longer token (so `x/https://…` or a `https://https://…` run is no link).
+    let word_start = i == 0
+        || chars[i - 1].is_whitespace()
+        || matches!(chars[i - 1], '(' | '[' | '{' | '"' | '\'' | '*' | '_' | '~');
+    if chars[i] != 'h' || !scheme_at(i) || !word_start {
+        return None;
+    }
+    // Bounded like the angle form: a run longer than any valid link is never
+    // one, so repeated `https://` runs cost linear, not quadratic, time.
+    let limit = tze_hud_scene::portal_reading::MAX_LINK_BYTES + 1;
+    let mut end = i + match chars[i..]
+        .iter()
+        .take(limit)
+        .position(|&c| c.is_whitespace() || c == '<')
+    {
+        Some(len) => len,
+        None if chars.len() - i < limit => chars.len() - i,
+        None => return None,
+    };
+    while end > i
+        && matches!(
+            chars[end - 1],
+            '.' | ',' | ';' | ':' | '!' | '?' | ')' | '\'' | '"'
+        )
+    {
+        end -= 1;
+    }
+    Some((i, end, end))
+}
+
 fn fill_gaps_with_base(
     base_attr: &StyleAttr,
     block_start: usize,
@@ -2744,14 +2875,101 @@ mod tests {
         );
     }
 
-    /// Link non-navigability: link text renders, no URL in output, and the
-    /// span carries no href or navigation attribute.
+    /// hud-ljhku.2 replaces the old non-navigable contract: an HTTPS link keeps
+    /// its validated target on a [`LinkSpan`] while only its text is drawn.
     #[test]
-    fn link_not_navigable_no_url_in_output() {
-        let md = parse("[RFC 0001](https://internal.example/rfc/0001)");
-        assert_eq!(&*md.plain_text, "RFC 0001");
-        assert!(!md.plain_text.contains("http"), "URL must not appear");
-        // No span should carry a URL (StyledSpan has no href field — this is structural).
+    fn https_link_keeps_its_href_and_draws_only_text() {
+        let md = parse("see [RFC 0001](https://internal.example/rfc/0001) now");
+        assert_eq!(&*md.plain_text, "see RFC 0001 now");
+        assert_eq!(
+            md.links,
+            vec![LinkSpan {
+                start_byte: 4,
+                end_byte: 12,
+                href: "https://internal.example/rfc/0001".into(),
+            }]
+        );
+        let long = format!("[x](https://example.com/{})", "a".repeat(2048));
+        assert!(
+            parse(&long).links.is_empty(),
+            "over 2048 bytes is not a link"
+        );
+    }
+
+    /// Emphasis inside link text stays one link with the inner styling.
+    #[test]
+    fn https_link_with_emphasis_is_one_link() {
+        let md = parse("[**bold** tail](https://example.com/a)");
+        assert_eq!(&*md.plain_text, "bold tail");
+        assert_eq!(md.links.len(), 1);
+        assert_eq!((md.links[0].start_byte, md.links[0].end_byte), (0, 9));
+    }
+
+    /// R2.1 S5: bare and angle-bracket HTTPS URLs are links; trailing
+    /// punctuation stays outside.
+    #[test]
+    fn bare_and_angle_https_urls_autolink() {
+        let md = parse("go to https://example.com/x. or <https://example.org>!");
+        assert_eq!(
+            &*md.plain_text,
+            "go to https://example.com/x. or https://example.org!"
+        );
+        let hrefs: Vec<_> = md.links.iter().map(|l| &*l.href).collect();
+        assert_eq!(hrefs, ["https://example.com/x", "https://example.org/"]);
+        assert_eq!(
+            &md.plain_text[md.links[0].start_byte..md.links[0].end_byte],
+            "https://example.com/x"
+        );
+        assert!(
+            parse("xhttps://example.com").links.is_empty(),
+            "mid-word is text"
+        );
+    }
+
+    /// R2.1 S6: other schemes are plain text: no target, no link color.
+    #[test]
+    fn overlong_bare_url_runs_stay_plain_and_bounded() {
+        // hud-ljhku.2 review: a whitespace-free run of `https://` repeats is
+        // longer than any link; it renders as plain text without a quadratic scan.
+        let run = "https://".repeat(5_000);
+        let parsed = parse_markdown_subset(&run, &tokens());
+        assert!(parsed.links.is_empty());
+        assert_eq!(parsed.plain_text.len(), run.len());
+    }
+
+    #[test]
+    fn non_https_links_render_plain() {
+        let t = MarkdownTokens {
+            link_color: Some(Rgba::new(0.0, 0.5, 1.0, 1.0)),
+            ..tokens()
+        };
+        for src in [
+            "[a](http://example.com)",
+            "[a](file:///etc/passwd)",
+            "[a](javascript:alert(1))",
+            "http://example.com",
+            "ftp://example.com",
+        ] {
+            let md = parse_markdown_subset(src, &t);
+            assert!(md.links.is_empty(), "{src}");
+            assert!(
+                md.spans.iter().all(|s| s.attr.color.is_none()),
+                "{src} is plain"
+            );
+        }
+        assert_eq!(
+            &*parse("<http://example.com>").plain_text,
+            "<http://example.com>"
+        );
+    }
+
+    /// Fenced code block contents are copy targets, without the fences.
+    #[test]
+    fn fenced_blocks_record_copy_ranges() {
+        let md = parse("intro\n```sh\nls -la\necho hi\n```\nafter");
+        let (s, e) = md.code_blocks[0];
+        assert_eq!(&md.plain_text[s..e], "ls -la\necho hi");
+        assert_eq!(md.code_blocks.len(), 1);
     }
 
     // ── Task 2.5 — Zero per-frame parse cost ──────────────────────────────────

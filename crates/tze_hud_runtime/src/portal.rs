@@ -1318,6 +1318,7 @@ pub(crate) mod tests {
                     viewport: Rect::new(0.0, 0.0, 100.0, 100.0),
                     line_height: 20.0,
                     rows: Default::default(),
+                    reading: Default::default(),
                 },
             );
         }

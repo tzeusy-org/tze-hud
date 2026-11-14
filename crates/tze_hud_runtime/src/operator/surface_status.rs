@@ -46,6 +46,20 @@ pub struct UiMirror {
     pub draft_chars: usize,
     /// Actual runtime hover targets, including their configured trigger inset.
     pub hover_targets: HashMap<String, Rect>,
+    /// OUTPUT reading observations per portal tile (hud-ljhku.2); absent
+    /// tiles report `arrow`, no hint and no selection.
+    pub reading: HashMap<SceneId, ReadingUi>,
+}
+
+/// Admin-only OUTPUT reading state of one portal: no text crosses here.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ReadingUi {
+    /// `ibeam`, `hand` or `arrow`: the cursor the runtime last resolved.
+    pub cursor: &'static str,
+    /// The host the link hover hint shows.
+    pub link_hint: Option<String>,
+    /// Characters in the OUTPUT selection.
+    pub selection_chars: usize,
 }
 
 /// The main thread's [`UiMirror`], written each settle.
@@ -270,6 +284,7 @@ pub fn portals_json(scene: &SceneGraph, ui: &UiMirror, displays: &[Rect]) -> Val
                 visible_rows(l, scene.tile_scroll_offset_local(tile_id).1)
             });
         let input_y = scene.portal_input_scroll_offset(tile_id).1;
+        let reading = ui.reading.get(&tile_id).filter(|r| !r.cursor.is_empty());
         // `text-stream://portal/<agent>/<id>` is addressed as `portal:<id>`;
         // any other identity is reported as it stands.
         let session = &surface.identity.session_id;
@@ -296,6 +311,9 @@ pub fn portals_json(scene: &SceneGraph, ui: &UiMirror, displays: &[Rect]) -> Val
                 },
                 "focus": focus,
                 "hover": if hovered { "composer" } else { "none" },
+                "cursor": reading.map_or("arrow", |r| r.cursor),
+                "link_hint": reading.and_then(|r| r.link_hint.as_deref()),
+                "selection_chars": reading.map_or(0, |r| r.selection_chars),
                 "output": {
                     "first_visible_line": first,
                     "last_visible_line": last,
@@ -391,6 +409,7 @@ mod tests {
                 viewport: Rect::new(pane.x, pane.y, pane.width, 60.0),
                 line_height: 20.0,
                 rows: rows.into(),
+                reading: Default::default(),
             },
         );
         (scene, tile_id, driver, clock)

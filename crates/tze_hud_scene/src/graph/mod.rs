@@ -339,6 +339,20 @@ impl SceneGraph {
         self.geometry_epoch += 1;
     }
 
+    /// Set one portal's OUTPUT reading decoration; repaints only on change.
+    pub fn set_portal_reading(&mut self, tile: SceneId, decor: crate::PortalReadingDecor) {
+        let current = self.overlay.portal_reading.get(&tile);
+        if current.unwrap_or(&crate::PortalReadingDecor::default()) == &decor {
+            return;
+        }
+        if decor == crate::PortalReadingDecor::default() {
+            self.overlay.portal_reading.remove(&tile);
+        } else {
+            self.overlay.portal_reading.insert(tile, decor);
+        }
+        self.bump_geometry_epoch();
+    }
+
     // ─── Clock accessor ──────────────────────────────────────────────────
 
     /// Return the current time in milliseconds from the injected clock.

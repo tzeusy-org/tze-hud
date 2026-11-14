@@ -22,6 +22,8 @@ fn portal_cursor_to_winit(cursor: PortalCursor) -> CursorIcon {
         PortalCursor::NwseResize => CursorIcon::NwseResize,
         PortalCursor::Grab => CursorIcon::Grab,
         PortalCursor::Grabbing => CursorIcon::Grabbing,
+        PortalCursor::Text => CursorIcon::Text,
+        PortalCursor::Pointer => CursorIcon::Pointer,
     }
 }
 
@@ -566,6 +568,12 @@ impl WinitApp {
             desired = cursor;
         }
 
+        // Text, links and copy buttons: I-beam / hand (hud-ljhku.2).
+        if desired == PortalCursor::Default
+            && let Some(reading) = self.state.reading_cursor
+        {
+            desired = reading;
+        }
         if let Some(next) = self.state.cursor_tracker.update(desired) {
             if let Some(window) = &self.state.window {
                 window.set_cursor(portal_cursor_to_winit(next));
