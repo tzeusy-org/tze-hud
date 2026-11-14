@@ -259,7 +259,7 @@ impl NotificationLayoutCache {
         self.entries.insert(key, (inputs, layout.clone(), actual));
         layout
     }
-    #[cfg(test)]
+    /// Forget every layout (a font change alters label widths).
     pub(super) fn invalidate(&mut self) {
         self.entries.clear();
     }

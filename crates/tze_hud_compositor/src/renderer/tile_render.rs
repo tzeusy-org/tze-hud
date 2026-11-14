@@ -619,6 +619,103 @@ impl Compositor {
         Self::append_clipped_rect_vertices(tile, rect, sw, sh, caret_color, vertices);
     }
 
+    /// Underline the IME composition spliced in at the caret (hud-ljhku.13).
+    ///
+    /// The preedit is part of the drawn draft text
+    /// ([`LocalComposerState::with_preedit_applied`]), so its glyph geometry is
+    /// in the same published [`tze_hud_input::ComposerVisualLayout`] the caret
+    /// uses (both profiles publish one). One quad per visual row the preedit
+    /// spans, `caret_width_px` thick, at the bottom of the font box inside the
+    /// line box, in `portal.composer.preedit_underline_color`. Not blink-gated.
+    ///
+    /// [`LocalComposerState::with_preedit_applied`]: super::LocalComposerState::with_preedit_applied
+    pub(super) fn append_composer_preedit_underline_vertices(
+        &self,
+        scene: &SceneGraph,
+        vertices: &mut Vec<RectVertex>,
+        sw: f32,
+        sh: f32,
+    ) {
+        if scene.overlay.notification_focus.is_some() {
+            return;
+        }
+        let Some(cs) = self.local_composer.as_ref() else {
+            return;
+        };
+        let Some(range) = cs.preedit_range.clone() else {
+            return;
+        };
+        let Some(tile) = Self::sort_tiles_with_drag_boost(self.policy_visible_tiles(scene), scene)
+            .into_iter()
+            .find(|t| Self::composer_region_bounds(t, scene, cs.node_id).is_some())
+        else {
+            return;
+        };
+        let Some(region) = Self::composer_region_bounds(tile, scene, cs.node_id) else {
+            return;
+        };
+        let tokens = resolve_composer_overlay_tokens(&self.token_map);
+        let font_size_px = self.scaled_portal_font(tokens.font_size_px, tile.id, scene);
+        let line_height_multiplier =
+            crate::markdown::MarkdownTokens::default().line_height_multiplier;
+        let layout = self.composer_layout;
+        let input_box = Self::composer_input_box(
+            region,
+            font_size_px,
+            line_height_multiplier,
+            layout.visible_lines,
+            tokens.anchor,
+            tokens.content_inset_px,
+        );
+        let line_height = (font_size_px * line_height_multiplier).max(1.0);
+        let Ok(guard) = self.composer_visual_layout.lock() else {
+            return;
+        };
+        let Some(visual) = guard.as_ref() else {
+            return;
+        };
+        if visual.text_len != cs.text.len() {
+            return;
+        }
+        let thickness = tokens.caret_width_px.max(1.0);
+        // Text sits centred in its line box: the font box ends half the
+        // leading above the line's bottom.
+        let underline_top = ((line_height + font_size_px) * 0.5).min(line_height - thickness);
+        let (scroll_x, scroll_y) = if layout.wrap {
+            (0.0, layout.vscroll_px)
+        } else {
+            (layout.h_scroll_px, 0.0)
+        };
+        let [r, g, b, a] = tokens.preedit_underline_color;
+        let to_linear_u8 = |v: u8| srgb_to_linear(v as f32 / 255.0);
+        let color = self.gpu_color_raw([
+            to_linear_u8(r),
+            to_linear_u8(g),
+            to_linear_u8(b),
+            a as f32 / 255.0,
+        ]);
+        let origin_x = input_box.x + tokens.content_inset_px - scroll_x;
+        let origin_y = input_box.y + tokens.content_inset_px - scroll_y;
+        for (row_idx, row) in visual.lines.iter().enumerate() {
+            let start = range.start.max(row.start_byte);
+            let end = range.end.min(row.end_byte);
+            if start >= end {
+                continue;
+            }
+            let (x0, x1) = (row.x_at_byte(start), row.x_at_byte(end));
+            if !(x0.is_finite() && x1.is_finite()) || x1 <= x0 {
+                continue;
+            }
+            let rect = Rect::new(
+                origin_x + x0,
+                origin_y + row_idx as f32 * line_height + underline_top,
+                x1 - x0,
+                thickness,
+            );
+            Self::append_clipped_rect_vertices(tile, rect, sw, sh, color, vertices);
+        }
+    }
+
     /// Dot rects for a resize-grip affordance: a diagonal dot-grid mark in the
     /// `(left, top)` corner of `region`, occupying a `size_px` square. Portal
     /// tiles use the bottom-right corner `(false, false)`; the pip zone's grip

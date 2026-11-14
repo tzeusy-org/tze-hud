@@ -649,6 +649,7 @@ impl Compositor {
         self.append_focus_ring_vertices(scene, &mut focus_ring_vertices, sw, sh);
         // ── Composer caret quad (chrome layer, same pass, hud-hxhnt) ────────
         self.append_composer_caret_vertices(scene, &mut focus_ring_vertices, sw, sh);
+        self.append_composer_preedit_underline_vertices(scene, &mut focus_ring_vertices, sw, sh);
 
         // ── Chrome context menu (hud-zc7f) ─────────────────────────────────
         let (context_menu_vertices, context_menu_text) = self.collect_context_menu(scene, sw, sh);
@@ -1379,6 +1380,7 @@ impl Compositor {
         self.append_focus_ring_vertices(scene, &mut focus_ring_vertices, sw, sh);
         // ── Composer caret quad (chrome layer, same pass, hud-hxhnt) ────────
         self.append_composer_caret_vertices(scene, &mut focus_ring_vertices, sw, sh);
+        self.append_composer_preedit_underline_vertices(scene, &mut focus_ring_vertices, sw, sh);
         if !focus_ring_vertices.is_empty() {
             self.encode_drag_handle_pass(&mut encoder, &frame.view, &focus_ring_vertices);
         }

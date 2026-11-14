@@ -3461,7 +3461,14 @@ impl WinitApp {
     /// `INPUT_EVENTS` channel. A busy scene lock retains the delta instead of
     /// dropping it (hud-65gpz); it applies, in order, on the next successful
     /// lock via one coalesced availability wake.
-    pub(super) fn enqueue_scroll_event(&mut self, delta_x: f32, delta_y: f32) {
+    /// `delta_y` is in `step` units (hud-ljhku.13); the target sizes lines
+    /// and pages when the delta applies.
+    pub(super) fn enqueue_scroll_event(
+        &mut self,
+        delta_x: f32,
+        delta_y: f32,
+        step: tze_hud_input::WheelStep,
+    ) {
         self.refresh_widget_hover_tracking();
         let x = self.state.cursor_x;
         let y = self.state.cursor_y;
@@ -3474,6 +3481,7 @@ impl WinitApp {
                 y,
                 delta_x,
                 delta_y,
+                step,
             },
         );
         if self.apply_retained_scroll().is_none() {
@@ -3491,13 +3499,14 @@ impl WinitApp {
         let state = self.state.shared_state.try_lock().ok()?;
         let mut scene = state.scene.try_lock().ok()?;
         for retained in self.state.pending_scroll.drain(..) {
-            if let Some(ev) = self.state.input_processor.process_scroll_event(
+            if let Some(ev) = self.state.input_processor.process_wheel_event(
                 &tze_hud_input::ScrollEvent {
                     x: retained.x,
                     y: retained.y,
                     delta_x: retained.delta_x,
                     delta_y: retained.delta_y,
                 },
+                retained.step,
                 &mut scene,
             ) {
                 dispatch_scroll_offset_event(&self.state.input_event_tx, &scene, ev);
@@ -3527,6 +3536,8 @@ pub(super) struct RetainedScroll {
     pub(super) y: f32,
     pub(super) delta_x: f32,
     pub(super) delta_y: f32,
+    /// Unit of `delta_y` (hud-ljhku.13); only equal units coalesce.
+    pub(super) step: tze_hud_input::WheelStep,
 }
 
 /// Upper bound on retained wheel entries, so contention can never grow memory.
@@ -3548,6 +3559,7 @@ fn retain_scroll(pending: &mut std::collections::VecDeque<RetainedScroll>, next:
     if let Some(last) = pending.back_mut()
         && last.x == next.x
         && last.y == next.y
+        && last.step == next.step
         && same_direction(last.delta_x, next.delta_x)
         && same_direction(last.delta_y, next.delta_y)
     {
@@ -4213,6 +4225,7 @@ mod tests {
             y: 0.0,
             delta_x: 0.0,
             delta_y: dy,
+            step: tze_hud_input::WheelStep::Pixels,
         };
         let mut pending = std::collections::VecDeque::new();
         retain_scroll(&mut pending, at(1.0, 10.0));
@@ -4237,6 +4250,19 @@ mod tests {
             20.0 - 5.0 + 5.0 - 5.0 + 200.0,
             "bounding never discards a delta"
         );
+
+        // Line and pixel deltas never sum: their sizes differ per target
+        // (hud-ljhku.13).
+        let mut pending = std::collections::VecDeque::new();
+        retain_scroll(&mut pending, at(1.0, 10.0));
+        retain_scroll(
+            &mut pending,
+            RetainedScroll {
+                step: tze_hud_input::WheelStep::Lines,
+                ..at(1.0, 5.0)
+            },
+        );
+        assert_eq!(pending.len(), 2);
     }
 
     #[test]
@@ -4662,6 +4688,145 @@ mod tests {
 
         // Release the gesture.
         app.enqueue_pointer_event(PointerEventKind::Up);
+    }
+
+    /// hud-ljhku.13 R13.2 S1: `Ime::Preedit` reaches the composer draw path
+    /// (the echo slot) without entering the draft; an empty preedit clears
+    /// it; only committed text is drafted.
+    #[test]
+    fn ime_preedit_is_drawn_not_drafted() {
+        use tze_hud_input::{FocusManager, InputProcessor};
+
+        let (scene, tab_id) = scene_with_pointer_composer();
+        let mut fm = FocusManager::new();
+        fm.add_tab(tab_id);
+        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+        app.state.cursor_x = 200.0;
+        app.state.cursor_y = 50.0;
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        app.enqueue_pointer_event(PointerEventKind::Up);
+        app.state.input_processor.route_character_to_composer("ab");
+        app.push_local_composer_echo(std::time::Instant::now());
+        let take_echo = |app: &mut WinitApp| {
+            app.state
+                .local_composer_state
+                .lock()
+                .unwrap()
+                .take()
+                .flatten()
+                .expect("composer echo")
+        };
+        take_echo(&mut app);
+
+        // "かん" with the IME cursor after its first character.
+        app.set_composer_preedit("かん".into(), Some((3, 3)));
+        let echo = take_echo(&mut app);
+        assert_eq!(echo.text, "ab", "preedit never enters the draft");
+        assert_eq!(
+            echo.preedit,
+            Some(tze_hud_compositor::ComposerPreedit {
+                text: "かん".into(),
+                cursor: Some((3, 3)),
+            })
+        );
+        let drawn = echo.with_preedit_applied();
+        assert_eq!(drawn.text, "abかん");
+        assert_eq!(drawn.preedit_range, Some(2..8));
+        assert_eq!(drawn.cursor_byte, 5, "caret at the IME cursor");
+        assert_eq!(drawn.selection_anchor, drawn.cursor_byte);
+        assert_eq!(
+            app.state
+                .input_processor
+                .composer_draft_snapshot()
+                .unwrap()
+                .0,
+            "ab"
+        );
+
+        // A repeated identical preedit is not re-sent.
+        app.set_composer_preedit("かん".into(), Some((3, 3)));
+        assert!(app.state.local_composer_state.lock().unwrap().is_none());
+
+        // Cancel: an empty preedit clears what is drawn.
+        app.set_composer_preedit(String::new(), None);
+        let echo = take_echo(&mut app);
+        assert_eq!(echo.preedit, None);
+        assert_eq!(echo.with_preedit_applied().text, "ab");
+
+        // Compose again, then commit: winit sends an empty preedit before
+        // Ime::Commit, whose text alone is drafted.
+        app.set_composer_preedit("かん".into(), None);
+        app.set_composer_preedit(String::new(), None);
+        app.dispatch_character_event(&tze_hud_input::keyboard::RawCharacterEvent {
+            character: "漢".into(),
+            timestamp_mono_us: tze_hud_scene::MonoUs(1),
+        });
+        assert_eq!(
+            app.state
+                .input_processor
+                .composer_draft_snapshot()
+                .unwrap()
+                .0,
+            "ab漢"
+        );
+        assert!(app.state.composer_preedit.is_none());
+
+        // Blur drops any composition with the echo.
+        app.set_composer_preedit("x".into(), None);
+        app.clear_local_composer_echo();
+        assert!(app.state.composer_preedit.is_none());
+    }
+
+    /// hud-ljhku.13 R13.2 S1 (review B2): while an IME composes, Backspace,
+    /// Enter and arrows edit the composition, not the draft. winit reports
+    /// them as `KeyboardInput` (logical key `Process` on Windows), so the OS
+    /// key path must not route them: Backspace must not delete "b", Enter
+    /// must not submit "ab" ahead of the commit, an arrow must not move the
+    /// caret. Once the composition ends, the same keys edit the draft again.
+    #[test]
+    fn keys_during_ime_composition_leave_the_draft_alone() {
+        use tze_hud_input::{FocusManager, InputProcessor};
+
+        let (scene, tab_id) = scene_with_pointer_composer();
+        let mut fm = FocusManager::new();
+        fm.add_tab(tab_id);
+        let (mut app, _rx) = make_windowed_keyboard_test_app(scene, fm, InputProcessor::new());
+        app.state.cursor_x = 200.0;
+        app.state.cursor_y = 50.0;
+        app.enqueue_pointer_event(PointerEventKind::Down);
+        app.enqueue_pointer_event(PointerEventKind::Up);
+        app.state.input_processor.route_character_to_composer("ab");
+        let key = |name: &str| tze_hud_input::keyboard::RawKeyDownEvent {
+            key_code: name.into(),
+            key: name.into(),
+            modifiers: tze_hud_input::KeyboardModifiers::NONE,
+            repeat: false,
+            timestamp_mono_us: tze_hud_scene::MonoUs(1),
+        };
+        let draft = |app: &WinitApp| {
+            let (text, cursor, ..) = app.state.input_processor.composer_draft_snapshot().unwrap();
+            (text, cursor)
+        };
+        assert_eq!(draft(&app), ("ab".into(), 2));
+
+        app.set_composer_preedit("かん".into(), None);
+        for name in ["Backspace", "Enter", "ArrowLeft"] {
+            assert!(!app.dispatch_os_key_down(&key(name)), "{name} is the IME's");
+            assert_eq!(draft(&app), ("ab".into(), 2), "{name} left the draft alone");
+        }
+        // The first key of a composition arrives as `Process` before any
+        // preedit: also not routed.
+        app.set_composer_preedit(String::new(), None);
+        let mut process = key("Backspace");
+        process.key = "Process".into();
+        assert!(!app.dispatch_os_key_down(&process));
+        assert_eq!(draft(&app), ("ab".into(), 2));
+
+        // Composition over: keys edit the draft again.
+        assert!(app.dispatch_os_key_down(&key("ArrowLeft")));
+        assert_eq!(draft(&app), ("ab".into(), 1));
+        assert!(app.dispatch_os_key_down(&key("Backspace")));
+        assert_eq!(draft(&app), ("b".into(), 0));
     }
 
     /// Removing the tile that holds a focused composer (agent clears its

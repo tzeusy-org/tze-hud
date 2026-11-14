@@ -106,6 +106,53 @@ pub struct LocalComposerState {
     /// `None` (or empty) renders no placeholder, so composers that opt out are
     /// unchanged.
     pub placeholder: Option<String>,
+    /// IME composition in progress at the caret (hud-ljhku.13), as the
+    /// runtime received it (`Ime::Preedit`). Never part of the draft: only
+    /// `Ime::Commit` text is drafted. `None` (or empty text) draws none.
+    pub preedit: Option<ComposerPreedit>,
+    /// Byte range of the preedit inside [`Self::text`] once
+    /// [`Self::with_preedit_applied`] spliced it in; drawn underlined. The
+    /// runtime always sends `None`.
+    pub preedit_range: Option<std::ops::Range<usize>>,
+}
+
+/// An IME composition string (winit `Ime::Preedit`), drawn at the composer
+/// caret with an underline (hud-ljhku.13).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ComposerPreedit {
+    /// Composition text.
+    pub text: String,
+    /// The IME's cursor (or selected clause) as a byte range into `text`;
+    /// `None` hides the caret per winit.
+    pub cursor: Option<(usize, usize)>,
+}
+
+impl LocalComposerState {
+    /// The state the composer draws: a non-empty preedit is spliced into the
+    /// draft at the caret, the caret moves to the IME cursor inside it (its
+    /// end when the IME gave none), any selection highlight is suspended, and
+    /// [`Self::preedit_range`] marks the underlined bytes. Without a preedit
+    /// the state is unchanged.
+    pub fn with_preedit_applied(mut self) -> Self {
+        let Some(preedit) = self.preedit.take().filter(|p| !p.text.is_empty()) else {
+            self.preedit_range = None;
+            return self;
+        };
+        let mut at = self.cursor_byte.min(self.text.len());
+        while !self.text.is_char_boundary(at) {
+            at -= 1;
+        }
+        self.text.insert_str(at, &preedit.text);
+        let len = preedit.text.len();
+        let mut caret = preedit.cursor.map_or(len, |(begin, _)| begin.min(len));
+        while !preedit.text.is_char_boundary(caret) {
+            caret -= 1;
+        }
+        self.cursor_byte = at + caret;
+        self.selection_anchor = self.cursor_byte;
+        self.preedit_range = Some(at..at + len);
+        self
+    }
 }
 
 /// Shared update slot for delivering [`LocalComposerState`] from the
@@ -177,7 +224,7 @@ pub(crate) fn apply_composer_slot(
     if let Ok(mut guard) = handle.lock() {
         if let Some(update) = guard.take() {
             let is_new_draft = update.is_some();
-            *current = update;
+            *current = update.map(LocalComposerState::with_preedit_applied);
             return is_new_draft;
         }
     }
@@ -414,8 +461,46 @@ impl super::Compositor {
                 widgets.invalidate_rasters();
             }
         }
+        // System fallback faces loaded so far carry over too (each family
+        // loads once per process, hud-ljhku.13). After the widget mirror
+        // above: widget SVG text keeps the bundled and configured faces.
+        let fallback = self.text_rasterizer.as_mut().map_or_else(
+            crate::fonts::SystemFallback::system,
+            TextRasterizer::take_system_fallback,
+        );
+        let mut fallback = fallback;
+        fallback.set_wake(self.font_fallback_wake.clone());
+        rasterizer.adopt_system_fallback(fallback);
         self.text_rasterizer = Some(rasterizer);
         tracing::debug!(format = ?format, "text renderer initialized");
+    }
+
+    /// Wake the render loop when lazily loaded system fallback fonts land
+    /// (hud-ljhku.13): an idle HUD otherwise never renders the text that
+    /// was waiting on them. The runtime passes its render-wake notifier.
+    pub fn set_font_fallback_wake(&mut self, wake: tze_hud_scene::render_wake::RenderWakeNotifier) {
+        self.font_fallback_wake = wake.clone();
+        if let Some(rasterizer) = &mut self.text_rasterizer {
+            rasterizer.system_fallback_mut().set_wake(wake);
+        }
+    }
+
+    /// Install system fallback fonts whose background load has landed and
+    /// invalidate everything shaped without them, so text that showed tofu
+    /// re-lays out once with real glyphs, without the agent republishing
+    /// (hud-ljhku.13). Call before the commit-time cache primes; returns
+    /// `true` when faces were added and the frame must render.
+    pub fn poll_font_fallback(&mut self) -> bool {
+        let Some(rasterizer) = &mut self.text_rasterizer else {
+            return false;
+        };
+        if !rasterizer.poll_system_fallback() {
+            return false;
+        }
+        self.truncation_cache_scene_version = u64::MAX;
+        self.truncation_cache_scene_instance = None;
+        self.notification_layouts.borrow_mut().invalidate();
+        true
     }
 
     /// Apply the operator-configured per-surface truncation-input bound.

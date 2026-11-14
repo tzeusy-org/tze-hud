@@ -586,6 +586,9 @@ struct WindowedRuntimeState {
     /// `Some(Some(state))` = new draft snapshot; `Some(None)` = deactivate.
     /// `None` = no update since last drain (compositor keeps prior state).
     local_composer_state: LocalComposerStateHandle,
+    /// IME composition in progress for the focused composer (hud-ljhku.13),
+    /// forwarded with each echo snapshot; never part of the draft.
+    composer_preedit: Option<tze_hud_compositor::ComposerPreedit>,
     /// Shared handle carrying the current keyboard-focus owner to the compositor's
     /// chrome-layer ring pass (hud-k6yvb). Written each frame in `about_to_wait`
     /// from the active tab's `FocusManager` owner; the compositor draws the ring
@@ -1434,6 +1437,9 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             .expect("WindowSurface config lock poisoned at text renderer init")
             .format;
         compositor.init_text_renderer(surface_format);
+        // Lazily loaded system fallback fonts wake the render loop when they
+        // land, so tofu text re-lays out on an otherwise idle HUD (hud-ljhku.13).
+        compositor.set_font_fallback_wake(self.state.wake.render_notifier());
         compositor.init_widget_renderer(surface_format);
         compositor.set_resident_ledger(self.state.runtime_context.resident_ledger.clone());
         // Apply the resolved per-surface truncation-input bound so the
@@ -1855,6 +1861,13 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         // is a no-op when the scene has not changed.  The measured
                         // cost is attached to the stage4 window so it is visible in
                         // telemetry without inflating the Stage 6 render budget.
+                        // ── System fallback fonts landed (hud-ljhku.13) ──
+                        // Install faces a background load finished and drop
+                        // what was shaped without them, before the primes, so
+                        // tofu text re-lays out once this frame.
+                        // Owed like a surface repaint: kept until a frame submits.
+                        surface_repaint_pending |= compositor.poll_font_fallback();
+
                         let markdown_prime_start = Instant::now();
                         compositor.prime_markdown_cache(&scene);
                         let markdown_prime_us = markdown_prime_start.elapsed().as_micros() as u64;
@@ -2500,11 +2513,20 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 if let Some(source) = wake_source {
                     self.state.wake.mark_main_work_pending(source);
                 }
-                let (delta_x, delta_y) = normalize_mouse_wheel_delta(&delta);
-                if self.panel_wheel(delta_y, secondary.is_none()) {
+                let (delta_x, delta_y, step) =
+                    normalize_mouse_wheel_delta(&delta, crate::os_prefs::wheel_lines());
+                // The panel has no text line or page height of its own: a
+                // line is WHEEL_LINE_PX and a page the Windows default 3 lines.
+                let panel_dy = match step {
+                    tze_hud_input::WheelStep::Pages => {
+                        step.to_px(delta_y, 0.0, 3.0 * tze_hud_input::WHEEL_LINE_PX)
+                    }
+                    _ => step.to_px(delta_y, tze_hud_input::WHEEL_LINE_PX, 0.0),
+                };
+                if self.panel_wheel(panel_dy, secondary.is_none()) {
                     return;
                 }
-                self.enqueue_scroll_event(delta_x, delta_y);
+                self.enqueue_scroll_event(delta_x, delta_y, step);
             }
 
             // ── Modifiers ─────────────────────────────────────────────────
@@ -2516,6 +2538,15 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             // Stage 1: Drain keyboard events into the input ring buffer.
             // Map winit keyboard events to InputEventKind::KeyPress / KeyRelease.
             WindowEvent::KeyboardInput { event, .. } => {
+                // ── IME: keys it handles are not ours (hud-ljhku.13) ────────
+                // Windows reports them with logical key `Process`, press and
+                // release; the composition reaches us as `Ime` events.
+                if matches!(
+                    event.logical_key,
+                    winit::keyboard::Key::Named(winit::keyboard::NamedKey::Process)
+                ) {
+                    return;
+                }
                 // ── Control panel: owns the keyboard while open ─────────────
                 // Chords (pause, panel, pairing) are global hotkeys and never
                 // arrive here.
@@ -2572,7 +2603,10 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         repeat: event.repeat,
                         timestamp_mono_us,
                     };
-                    self.dispatch_key_down_event(&raw);
+                    if !self.dispatch_os_key_down(&raw) {
+                        // An IME composition in the composer owns the key.
+                        return;
+                    }
                 } else if event.state == ElementState::Released {
                     let raw = RawKeyUpEvent {
                         key_code: physical_key_to_key_code_str(&event.physical_key),
@@ -2618,8 +2652,21 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             // commit text is forwarded as a RawCharacterEvent so agents receive
             // CharacterEvent payloads regardless of input method.
             //
-            // Preedit events (Ime::Preedit) are v1-reserved and not forwarded.
+            // Preedit (above) is drawn locally and never forwarded to agents.
+            // ── IME preedit: composition drawn at the composer caret ─────────
+            // hud-ljhku.13: forwarded to the composer echo (underlined at the
+            // caret); only Ime::Commit text enters the draft.
+            WindowEvent::Ime(winit::event::Ime::Preedit(text, cursor)) => {
+                if let Some(source) = wake_source {
+                    self.state.wake.mark_main_work_pending(source);
+                }
+                self.set_composer_preedit(text, cursor);
+            }
+            WindowEvent::Ime(winit::event::Ime::Disabled) => {
+                self.set_composer_preedit(String::new(), None);
+            }
             WindowEvent::Ime(winit::event::Ime::Commit(text)) => {
+                self.state.composer_preedit = None;
                 if self.panel_text(&text) {
                     return;
                 }
@@ -2677,7 +2724,10 @@ fn main_work_source_for_window_event(
         }
         | WindowEvent::MouseWheel { .. }
         | WindowEvent::KeyboardInput { .. }
-        | WindowEvent::Ime(winit::event::Ime::Commit(_)) => Some(RuntimeWakeupSource::SceneChange),
+        | WindowEvent::Ime(winit::event::Ime::Commit(_))
+        | WindowEvent::Ime(winit::event::Ime::Preedit(..)) => {
+            Some(RuntimeWakeupSource::SceneChange)
+        }
         _ => None,
     }
 }
@@ -2788,8 +2838,12 @@ impl WindowedRuntime {
             // Scene startup: design tokens, config tabs, widget bundles, and
             // token-derived zone rendering policies.
             let compositor_tokens = if let Some(raw) = &raw_config_for_startup {
-                let startup_result =
-                    run_scene_startup(raw, config_parent_buf.as_deref(), &mut scene);
+                let startup_result = run_scene_startup(
+                    raw,
+                    config_parent_buf.as_deref(),
+                    &mut scene,
+                    crate::os_prefs::animations_enabled(),
+                );
                 // Stash SVG assets for compositor registration after init_widget_renderer.
                 pending_widget_svgs = startup_result.widget_svg_assets;
                 startup_result.global_tokens
@@ -2860,6 +2914,7 @@ impl WindowedRuntime {
             Arc::clone(&shared_scene),
             render_wake.clone(),
             wake.main_work_notifier(),
+            crate::os_prefs::animations_enabled,
         ));
         let cfg_agents_empty = cfg.agents.load().is_empty();
         let agent_store = Arc::new(crate::agent_store::AgentStore::open(
@@ -3374,6 +3429,7 @@ impl WindowedRuntime {
             // Placeholder; replaced in resumed() with the Arc cloned from the
             // compositor.  Separate Arc so it works before compositor is created.
             local_composer_state: Arc::new(StdMutex::new(None)),
+            composer_preedit: None,
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
             surface_ui,
             // Placeholder; replaced in resumed() with the compositor's Arc (hud-wgiys).

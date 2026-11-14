@@ -119,6 +119,10 @@ pub struct Appearance {
     scales: std::sync::Mutex<DisplayScales>,
     /// The latest monitor report not yet applied.
     newest_scales: std::sync::Mutex<Option<DisplayScales>>,
+    /// Reads the Windows "Show animations" preference on each restyle
+    /// (hud-ljhku.13): `os_prefs::animations_enabled` in the HUD, a pinned
+    /// value in harnesses and tests.
+    animations_enabled: fn() -> bool,
 }
 
 /// The Windows scale factor of each monitor the HUD draws on: the primary's
@@ -153,8 +157,10 @@ impl Appearance {
         scene: Arc<Mutex<SceneGraph>>,
         config_parent: Option<PathBuf>,
         bundle_roots: Vec<PathBuf>,
+        animations_enabled: fn() -> bool,
     ) -> Self {
         Self {
+            animations_enabled,
             file_table: std::sync::Mutex::new(live.table()),
             live,
             scene,
@@ -178,6 +184,7 @@ impl Appearance {
         scene: Arc<Mutex<SceneGraph>>,
         compositor_wake: RenderWakeNotifier,
         main_wake: RenderWakeNotifier,
+        animations_enabled: fn() -> bool,
     ) -> Self {
         let table = raw
             .and_then(|r| r.design_tokens.as_ref())
@@ -192,6 +199,7 @@ impl Appearance {
             scene,
             config_parent,
             bundle_roots,
+            animations_enabled,
         )
     }
 
@@ -251,6 +259,13 @@ impl Appearance {
     /// secondary monitor.
     fn resolve(&self, table: &DesignTokenMap) -> DesignTokenMap {
         let mut resolved = resolve_config_tokens(table);
+        // The Windows animation preference is re-read on each reload
+        // (hud-ljhku.13); there is no live OS watch.
+        tze_hud_config::tokens::apply_os_motion_layer(
+            &mut resolved,
+            table,
+            (self.animations_enabled)(),
+        );
         crate::scene_startup::resolve_font_dir(&mut resolved, self.config_parent.as_deref());
         let scales = self.scales();
         tze_hud_config::tokens::set_px_scale(&mut resolved, scales.primary);
@@ -291,6 +306,8 @@ impl Appearance {
             restyle_zones(&mut scene.zone_registry, &resolved);
             // Widget boxes are display fractions: zoom alone resizes them.
             scene.widget_registry.zoom = tze_hud_config::tokens::ui_scale(&resolved);
+            scene.widget_registry.reduce_motion =
+                tze_hud_config::tokens::os_reduce_motion(&resolved);
             for (widget_type, file, bytes) in svgs {
                 scene.enqueue_widget_svg_asset(&widget_type, &file, bytes);
             }
@@ -512,6 +529,7 @@ mod tests {
             Arc::new(Mutex::new(scene)),
             None,
             Vec::new(),
+            || true,
         )
     }
 
@@ -525,6 +543,43 @@ mod tests {
     /// A new theme reaches the live map once, restyles zones and queues the
     /// widget SVGs re-resolved; the same table again changes nothing; a
     /// refused table keeps the current one.
+    /// hud-ljhku.13 R13.4 S1: a reload re-reads the (here pinned) animation
+    /// preference. Off, it zeroes the five durations under the theme and
+    /// marks reduced motion; an explicit override still wins.
+    #[tokio::test]
+    async fn a_reload_with_animations_off_zeroes_motion_below_config() {
+        let empty = DesignTokenMap::new();
+        let appearance = Appearance::new(
+            Arc::new(LiveTokens::new(
+                empty.clone(),
+                resolve_config_tokens(&empty),
+                RenderWakeNotifier::default(),
+                RenderWakeNotifier::default(),
+            )),
+            Arc::new(Mutex::new(SceneGraph::new(800.0, 600.0))),
+            None,
+            Vec::new(),
+            || false,
+        );
+        let edited = table(&[("theme", "blueprint"), ("motion.exit.ms", "90")]);
+        assert_eq!(appearance.apply(edited).await, Ok(true));
+        let resolved = appearance.live.resolved();
+        for key in [
+            "motion.enter.ms",
+            "motion.state.ms",
+            "portal.transition.in_ms",
+            "portal.transition.out_ms",
+        ] {
+            assert_eq!(resolved.get(key).map(String::as_str), Some("0"), "{key}");
+        }
+        assert_eq!(
+            resolved.get("motion.exit.ms").map(String::as_str),
+            Some("90")
+        );
+        assert!(tze_hud_config::tokens::os_reduce_motion(&resolved));
+        assert!(appearance.scene.lock().await.widget_registry.reduce_motion);
+    }
+
     #[tokio::test]
     async fn a_new_table_restyles_once_and_a_refused_one_changes_nothing() {
         let mut scene = SceneGraph::new(800.0, 600.0);

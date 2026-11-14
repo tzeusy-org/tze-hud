@@ -253,7 +253,9 @@ impl HeadlessRuntime {
                             max_total_bytes: resolved.max_total_bytes,
                             max_agent_bytes: resolved.max_agent_bytes,
                         })?;
-                    let mut startup_result = run_scene_startup(&raw, None, &mut scene);
+                    // Headless runs are CI/test: pin animations on rather than read
+                    // the build host's Windows preference (hud-ljhku.13).
+                    let mut startup_result = run_scene_startup(&raw, None, &mut scene, true);
                     // Register widget SVG assets with the headless widget renderer,
                     // mirroring the windowed runtime so bundled SVG-based widgets render correctly.
                     process_pending_widget_svgs(
@@ -527,6 +529,8 @@ impl HeadlessRuntime {
         // render thread entirely: render_frame_headless finds the cache already
         // populated and does no parse work.  The prime is gated internally on
         // scene.version so it is a no-op when the scene has not changed.
+        // Install landed system fallback fonts before the primes (hud-ljhku.13).
+        self.compositor.poll_font_fallback();
         let markdown_prime_start = Instant::now();
         self.compositor.prime_markdown_cache(&scene_guard);
         let markdown_prime_us = markdown_prime_start.elapsed().as_micros() as u64;

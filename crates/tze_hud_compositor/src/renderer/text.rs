@@ -420,6 +420,11 @@ impl super::Compositor {
                     observed_at_wall_us = scene.now_wall_us(),
                     zones_shown = scene.zones_shown(),
                     normal_animation = self.degradation_policy.level < DegradationLevel::Simplified,
+                    // hud-ljhku.13: whether this zone fades in at all, and
+                    // whether the Windows animation setting zeroed it, so a
+                    // witness can tell a snap from a missed fade.
+                    fade_in_ms = policy.transition_in_ms.unwrap_or(0),
+                    os_reduce_motion = tze_hud_config::tokens::os_reduce_motion(zone_tokens),
                     opacity = anim_opacity,
                     transition_active = transition.is_some(),
                     transition_elapsed_us = transition

@@ -104,7 +104,9 @@ pub type ResizeGripHoverHandle = Arc<StdMutex<Option<SceneId>>>;
 pub type TileCloseHoverHandle = Arc<StdMutex<Option<SceneId>>>;
 use image_cache::ImageTextureEntry;
 use image_cache::apply_composer_slot;
-pub use image_cache::{ComposerVisualLayoutHandle, LocalComposerState, LocalComposerStateHandle};
+pub use image_cache::{
+    ComposerPreedit, ComposerVisualLayoutHandle, LocalComposerState, LocalComposerStateHandle,
+};
 use text::*;
 use token_colors::*;
 
@@ -519,6 +521,9 @@ pub struct Compositor {
     /// called again (surface resize / format change replaces the rasterizer,
     /// resetting its cache to the default bound).
     configured_max_truncation_input_bytes: Option<usize>,
+    /// Render wake for lazily loaded system fallback fonts (hud-ljhku.13,
+    /// [`Compositor::set_font_fallback_wake`]); unwired by default.
+    font_fallback_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
     /// Font roles the text rasterizer is built for (normalized); applied via
     /// [`Compositor::set_font_config`] and re-applied by
     /// [`Compositor::init_text_renderer`].
@@ -976,6 +981,7 @@ impl Compositor {
             truncation_cache_scene_version: u64::MAX,
             truncation_cache_scene_instance: None,
             configured_max_truncation_input_bytes: None,
+            font_fallback_wake: Default::default(),
             notification_layouts: Default::default(),
             notification_keyboard_active: false,
             configured_fonts: crate::fonts::FontConfig::default(),
@@ -1321,6 +1327,7 @@ impl Compositor {
             truncation_cache_scene_version: u64::MAX,
             truncation_cache_scene_instance: None,
             configured_max_truncation_input_bytes: None,
+            font_fallback_wake: Default::default(),
             notification_layouts: Default::default(),
             notification_keyboard_active: false,
             configured_fonts: crate::fonts::FontConfig::default(),

@@ -232,6 +232,8 @@ fn caret_test_draft() -> LocalComposerState {
         at_capacity: false,
         node_id: tze_hud_scene::types::SceneId::new(),
         placeholder: None,
+        preedit: None,
+        preedit_range: None,
     }
 }
 
@@ -610,6 +612,8 @@ async fn idle_render_gate_renders_for_composer_echo_and_caret_blink() {
             at_capacity: false,
             node_id,
             placeholder: None,
+            preedit: None,
+            preedit_range: None,
         }));
     }
     assert!(

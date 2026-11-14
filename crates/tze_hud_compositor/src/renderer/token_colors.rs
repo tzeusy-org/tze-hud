@@ -1273,6 +1273,10 @@ pub(super) struct ComposerOverlayTokens {
     /// reads as a hint distinct from live draft text. Stored in sRGB u8 to match
     /// [`TextItem::color`], the same encoding as the text pipeline's foreground.
     pub(super) placeholder_color: [u8; 4],
+    /// Underline under an IME composition at the caret (sRGB u8,
+    /// hud-ljhku.13). Sourced from `portal.composer.preedit_underline_color`;
+    /// defaults to [`Self::caret_color`]. Its thickness is the caret width.
+    pub(super) preedit_underline_color: [u8; 4],
     /// Font size in pixels.
     pub(super) font_size_px: f32,
     /// Maximum number of text lines the composer box grows to before it scrolls
@@ -1430,6 +1434,19 @@ pub(super) fn resolve_composer_overlay_tokens(
             // Default: #6B7689 @ full alpha (dimmed slate hint).
             .unwrap_or([0x6B, 0x76, 0x89, 0xFF]);
 
+    // IME preedit underline (hud-ljhku.13): defaults to the caret color.
+    let preedit_underline_color: [u8; 4] =
+        resolve_token_color(token_map, "portal.composer.preedit_underline_color")
+            .map(|c| {
+                [
+                    to_srgb_u8(c.r),
+                    to_srgb_u8(c.g),
+                    to_srgb_u8(c.b),
+                    to_alpha_u8(c.a),
+                ]
+            })
+            .unwrap_or(caret_color);
+
     // Font size (default: portal composer readable fallback)
     let font_size_px = token_map
         .get("portal.composer.font_size")
@@ -1495,6 +1512,7 @@ pub(super) fn resolve_composer_overlay_tokens(
         selection_bg,
         caret_color,
         placeholder_color,
+        preedit_underline_color,
         font_size_px,
         max_lines,
         anchor,

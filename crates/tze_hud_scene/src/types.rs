@@ -925,6 +925,11 @@ pub struct TextColorRun {
     pub color: Rgba,
 }
 
+/// Default text line height as a multiple of the font size. The compositor
+/// lays out text with it (`tze_hud_compositor::text::LINE_HEIGHT_MULTIPLIER`)
+/// and the input layer sizes wheel lines with it (hud-ljhku.13).
+pub const TEXT_LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct TextMarkdownNode {
     pub content: String,
@@ -2756,6 +2761,11 @@ pub struct WidgetRegistry {
     /// the runtime; not part of the layout.
     #[serde(skip, default = "unit_zoom")]
     pub zoom: f32,
+    /// The OS asks for no animation (Windows "Show animations" off): gRPC
+    /// publishes snap their explicit `transition_ms` to 0. Set by the
+    /// runtime at startup and config reload (hud-ljhku.13).
+    #[serde(skip)]
+    pub reduce_motion: bool,
 }
 
 fn unit_zoom() -> f32 {
@@ -2770,6 +2780,7 @@ impl WidgetRegistry {
             active_publishes: HashMap::new(),
             runtime_svg_handles: HashMap::new(),
             zoom: unit_zoom(),
+            reduce_motion: false,
         }
     }
 

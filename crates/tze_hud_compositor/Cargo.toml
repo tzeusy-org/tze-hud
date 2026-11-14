@@ -28,6 +28,7 @@ blake3 = { workspace = true }
 arc-swap = { workspace = true }
 glyphon = { workspace = true }
 unicode-segmentation = { workspace = true }
+unicode-script = { workspace = true }
 resvg = { workspace = true }
 tiny-skia = { workspace = true }
 ab_glyph = { workspace = true }

@@ -207,6 +207,7 @@ impl WindowedRuntimeState {
             keyboard_activation_nodes: HashMap::new(),
             consumed_command_keydowns: HashSet::new(),
             local_composer_state: Arc::new(StdMutex::new(None)),
+            composer_preedit: None,
             focus_ring_owner_state: Arc::new(StdMutex::new(None)),
             surface_ui: Default::default(),
             resize_grip_hover_state: Arc::new(StdMutex::new(None)),
@@ -321,7 +322,7 @@ impl HeadlessEventLoopHarness {
                     .as_deref()
                     .and_then(|p| std::path::Path::new(p).parent());
                 let startup =
-                    crate::scene_startup::run_scene_startup(raw, config_parent, &mut scene);
+                    crate::scene_startup::run_scene_startup(raw, config_parent, &mut scene, true);
                 for (widget_type, svg_file, svg) in &startup.widget_svg_assets {
                     state
                         .text_fit
@@ -443,6 +444,8 @@ impl HeadlessEventLoopHarness {
             Arc::clone(&panel_scene),
             render_wake.clone(),
             state.wake.main_work_notifier(),
+            // Harnesses never depend on the host's animation setting.
+            || true,
         ));
         state.appearance = Some(Arc::clone(&appearance));
         let clipboard: Arc<std::sync::Mutex<Vec<String>>> = Arc::default();
@@ -1471,7 +1474,10 @@ mod tests {
         };
         runtime.events.app.state.cursor_x = center(output, "x", "w");
         runtime.events.app.state.cursor_y = center(output, "y", "h");
-        runtime.events.app.enqueue_scroll_event(0.0, -400.0);
+        runtime
+            .events
+            .app
+            .enqueue_scroll_event(0.0, -400.0, tze_hud_input::WheelStep::Pixels);
         settle(&mut runtime);
         assert!(counters.idle_since_ms() < 1_000, "the scroll presented");
         let scrolled = portal();
@@ -6905,7 +6911,9 @@ mod tests {
         let (focused_tile, pointer_tile, _rx) =
             install_conflicting_focus_and_pointer_scroll_tiles(&mut harness);
 
-        harness.app.enqueue_scroll_event(0.0, 40.0);
+        harness
+            .app
+            .enqueue_scroll_event(0.0, 40.0, tze_hud_input::WheelStep::Pixels);
 
         let shared = harness.app.state.shared_state.blocking_lock();
         let scene = shared.scene.blocking_lock();
@@ -6952,8 +6960,12 @@ mod tests {
         harness.app.state.cursor_x = 50.0;
         harness.app.state.cursor_y = 12.0;
         harness.app.enqueue_pointer_event(PointerEventKind::Move);
-        harness.app.enqueue_scroll_event(0.0, 20.0);
-        harness.app.enqueue_scroll_event(0.0, 20.0);
+        harness
+            .app
+            .enqueue_scroll_event(0.0, 20.0, tze_hud_input::WheelStep::Pixels);
+        harness
+            .app
+            .enqueue_scroll_event(0.0, 20.0, tze_hud_input::WheelStep::Pixels);
         harness.app.settle_scene_work();
         std::thread::sleep(Duration::from_millis(20));
         assert_eq!(
@@ -7034,14 +7046,20 @@ mod tests {
         }
         harness.app.state.cursor_x = 50.0;
         harness.app.state.cursor_y = 12.0;
-        harness.app.enqueue_scroll_event(0.0, 1.0e6);
+        harness
+            .app
+            .enqueue_scroll_event(0.0, 1.0e6, tze_hud_input::WheelStep::Pixels);
         let tail = 500.0;
 
         let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
         let held = scene_handle.blocking_lock();
         let main_work_before = harness.app.state.wake.main_work_generation();
-        harness.app.enqueue_scroll_event(0.0, 60.0);
-        harness.app.enqueue_scroll_event(0.0, -3.0);
+        harness
+            .app
+            .enqueue_scroll_event(0.0, 60.0, tze_hud_input::WheelStep::Pixels);
+        harness
+            .app
+            .enqueue_scroll_event(0.0, -3.0, tze_hud_input::WheelStep::Pixels);
         drop(held);
         // Retry on the release-driven wake, as the event loop does: until it
         // fires, the availability waiter may itself hold the scene briefly.

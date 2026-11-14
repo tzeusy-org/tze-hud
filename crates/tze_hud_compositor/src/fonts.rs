@@ -76,6 +76,28 @@
 //! Agent-uploaded fonts are still supported via
 //! [`crate::text::TextRasterizer::load_font_bytes`].
 //!
+//! # System fallback for emoji, CJK and other scripts (hud-ljhku.13)
+//!
+//! cosmic-text 0.12.1 already falls back per cluster on Windows through a
+//! fixed table (`src/font/fallback/windows.rs`: Segoe UI Emoji / Symbol,
+//! Nirmala UI for Indic scripts, Malgun Gothic for Hangul, Yu Gothic for
+//! kana, and a locale-chosen face for Han), but it only finds faces that are
+//! in the font database. [`SystemFallback`] loads them lazily: no fallback
+//! face loads at startup; the first shaped glyph no loaded face covers
+//! (glyph id 0) names that table's families for the glyph's script plus the
+//! emoji/symbol faces ([`fallback_families`]), and a background thread loads
+//! them by name through [`system`] (never on the frame thread). Text shows
+//! tofu until the faces land; then they are added with
+//! `FontSystem::db_mut()` (which clears cosmic-text's font-match cache) and
+//! the shaped text is invalidated so it re-lays out once, without the agent
+//! republishing. Each family is requested at most once per process; an
+//! absent family is skipped with one log line. The locale passed to the
+//! font system comes from `LANG`, else (Windows) the user default locale,
+//! normalized to cosmic-text's Han keys ([`normalize_locale`]), so kanji take
+//! Japanese forms on a Japanese system. No font is bundled for this (the
+//! hud-1sycn evaluation keeps fonts system-sourced); widget SVG text keeps
+//! the bundled faces.
+//!
 //! # Licenses
 //!
 //! - IBM Plex Sans / Mono: SIL Open Font License 1.1, `fonts/ibm-plex/LICENSE.txt`.
@@ -86,9 +108,11 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, mpsc};
 
 use glyphon::{FontSystem, fontdb};
+use tze_hud_scene::render_wake::RenderWakeNotifier;
+use unicode_script::{Script, UnicodeScript};
 
 // ── Embedded font bytes ───────────────────────────────────────────────────────
 
@@ -233,6 +257,14 @@ pub fn bundled_font_system() -> FontSystem {
 /// All faces are loaded before the [`FontSystem`] is constructed because
 /// cosmic-text computes its monospace fallback table once, at construction.
 pub(crate) fn build_font_system(config: &FontConfig) -> (FontSystem, ResolvedFonts) {
+    build_font_system_with_locale(config, locale())
+}
+
+/// [`build_font_system`] with an explicit (normalized) locale.
+fn build_font_system_with_locale(
+    config: &FontConfig,
+    locale: String,
+) -> (FontSystem, ResolvedFonts) {
     let mut db = fontdb::Database::new();
     for bytes in BUNDLED_FACES.iter().copied() {
         db.load_font_source(fontdb::Source::Binary(Arc::new(bytes)));
@@ -255,15 +287,14 @@ pub(crate) fn build_font_system(config: &FontConfig) -> (FontSystem, ResolvedFon
     db.set_monospace_family(resolved.mono.clone());
     db.set_serif_family(resolved.serif.clone());
 
-    (new_font_system(db), resolved)
+    (new_font_system(db, locale), resolved)
 }
 
 /// cosmic-text caches monospace faces with a rayon `par_iter` at construction.
 /// Run it in a scoped one-thread pool: otherwise rayon spawns its global pool,
 /// one thread per logical CPU, which then idles for the life of the process.
 /// The scoped pool's thread exits when the pool drops.
-fn new_font_system(db: fontdb::Database) -> FontSystem {
-    let locale = locale();
+fn new_font_system(db: fontdb::Database, locale: String) -> FontSystem {
     match rayon::ThreadPoolBuilder::new()
         .num_threads(1)
         .thread_name(|_| "tze-font-init".to_owned())
@@ -310,17 +341,74 @@ pub(crate) fn find_family(db: &fontdb::Database, name: &str) -> Option<String> {
 
 // ── Internals ─────────────────────────────────────────────────────────────────
 
-/// Locale from `LANG` (e.g. `en_US.UTF-8` → `en-US`), else `en-US` — the same
-/// fallback cosmic-text uses, without a direct `sys-locale` dependency.
+/// The locale handed to the font system: `LANG` (e.g. `en_US.UTF-8` →
+/// `en-US`), else on Windows the user default locale
+/// (`GetUserDefaultLocaleName`), else `en-US`; then [`normalize_locale`].
 fn locale() -> String {
-    std::env::var("LANG")
-        .ok()
+    locale_from(std::env::var("LANG").ok(), user_default_locale)
+}
+
+/// [`locale`] over explicit sources, for tests.
+fn locale_from(lang: Option<String>, user_default: impl FnOnce() -> Option<String>) -> String {
+    let tag = lang
         .and_then(|v| {
             let v = v.replace('_', "-");
             let v = v.split('.').next().unwrap_or("").to_owned();
-            if v.is_empty() { None } else { Some(v) }
+            // `C` / `POSIX` name no language: treat them as unset.
+            if v.is_empty() || v == "C" || v == "POSIX" {
+                None
+            } else {
+                Some(v)
+            }
         })
-        .unwrap_or_else(|| String::from("en-US"))
+        .or_else(user_default)
+        .unwrap_or_else(|| String::from("en-US"));
+    normalize_locale(&tag)
+}
+
+/// Map a BCP 47 tag to the key cosmic-text's Windows Han table matches
+/// exactly: Japanese → `ja`, Korean → `ko`, Chinese in Hong Kong or Macau →
+/// `zh-HK`, in Taiwan (or Traditional script without a region) → `zh-TW`.
+/// Anything else is returned as given (Han then uses Microsoft YaHei UI).
+/// A raw `ja-JP` would otherwise fall through to YaHei's Chinese forms.
+pub(crate) fn normalize_locale(tag: &str) -> String {
+    let mut parts = tag.split(['-', '_']);
+    let language = parts.next().unwrap_or("").to_ascii_lowercase();
+    let mut region = None;
+    let mut script = None;
+    for part in parts {
+        if part.len() == 2 && part.chars().all(|c| c.is_ascii_alphabetic()) {
+            region = Some(part.to_ascii_uppercase());
+        } else if part.len() == 4 && part.chars().all(|c| c.is_ascii_alphabetic()) {
+            script = Some(part.to_ascii_lowercase());
+        }
+    }
+    match language.as_str() {
+        "ja" => "ja".to_owned(),
+        "ko" => "ko".to_owned(),
+        "zh" => match (region.as_deref(), script.as_deref()) {
+            (Some("HK" | "MO"), _) => "zh-HK".to_owned(),
+            (Some("TW"), _) | (None, Some("hant")) => "zh-TW".to_owned(),
+            _ => tag.to_owned(),
+        },
+        _ => tag.to_owned(),
+    }
+}
+
+/// The Windows user default locale name, e.g. `ja-JP`.
+#[cfg(windows)]
+fn user_default_locale() -> Option<String> {
+    use windows::Win32::Globalization::GetUserDefaultLocaleName;
+    // LOCALE_NAME_MAX_LENGTH is 85 UTF-16 units including the terminator.
+    let mut buf = [0u16; 85];
+    // SAFETY: the slice is live and its length is passed by the binding.
+    let len = unsafe { GetUserDefaultLocaleName(&mut buf) };
+    (len > 1).then(|| String::from_utf16_lossy(&buf[..(len - 1) as usize]))
+}
+
+#[cfg(not(windows))]
+fn user_default_locale() -> Option<String> {
+    None
 }
 
 fn is_font_file(path: &Path) -> bool {
@@ -403,6 +491,252 @@ fn warn_once(key: &str, emit: impl FnOnce()) {
         .unwrap_or(true);
     if first {
         emit();
+    }
+}
+
+// ── Lazy system fallback (hud-ljhku.13) ───────────────────────────────────────
+
+/// Families loaded on the first glyph miss whatever its script: cosmic-text's
+/// common Windows emoji and symbol faces.
+pub(crate) const COMMON_FALLBACK_FAMILIES: [&str; 2] = ["Segoe UI Emoji", "Segoe UI Symbol"];
+
+/// The families cosmic-text 0.12.1's Windows table
+/// (`src/font/fallback/windows.rs`, `script_fallback`/`han_unification`)
+/// names for `script` under the normalized `locale`. Kept in step with that
+/// table: cosmic-text only finds these faces once they are loaded.
+pub(crate) fn script_fallback_families(script: Script, locale: &str) -> &'static [&'static str] {
+    fn han(locale: &str) -> &'static [&'static str] {
+        match locale {
+            "ja" => &["Yu Gothic"],
+            "ko" => &["Malgun Gothic"],
+            "zh-HK" => &["MingLiU_HKSCS"],
+            "zh-TW" => &["Microsoft JhengHei UI"],
+            _ => &["Microsoft YaHei UI"],
+        }
+    }
+    match script {
+        Script::Adlam | Script::Ethiopic | Script::Tifinagh | Script::Vai => &["Ebrima"],
+        Script::Bengali
+        | Script::Chakma
+        | Script::Devanagari
+        | Script::Gujarati
+        | Script::Gurmukhi
+        | Script::Kannada
+        | Script::Malayalam
+        | Script::Oriya
+        | Script::Sinhala
+        | Script::Tamil
+        | Script::Telugu => &["Nirmala UI"],
+        Script::Canadian_Aboriginal | Script::Cherokee => &["Gadugi"],
+        Script::Han => han(locale),
+        Script::Hangul => han("ko"),
+        Script::Hiragana | Script::Katakana => han("ja"),
+        Script::Javanese => &["Javanese Text"],
+        Script::Khmer | Script::Lao | Script::Thai => &["Leelawadee UI"],
+        Script::Mongolian => &["Mongolian Baiti"],
+        Script::Myanmar => &["Myanmar Text"],
+        Script::Thaana => &["MV Boli"],
+        Script::Tibetan => &["Microsoft Himalaya"],
+        Script::Yi => &["Microsoft Yi Baiti"],
+        _ => &[],
+    }
+}
+
+/// Every family a glyph miss on `missing` should load: the script families
+/// of each character, then [`COMMON_FALLBACK_FAMILIES`], deduplicated in order.
+/// Whitespace and control characters never count as misses.
+pub(crate) fn fallback_families(missing: &str, locale: &str) -> Vec<&'static str> {
+    let mut families: Vec<&'static str> = Vec::new();
+    let mut any = false;
+    let mut cjk = false;
+    for c in missing.chars() {
+        if c.is_whitespace() || c.is_control() {
+            continue;
+        }
+        any = true;
+        let script = c.script();
+        cjk |= matches!(
+            script,
+            Script::Han | Script::Hangul | Script::Hiragana | Script::Katakana | Script::Bopomofo
+        );
+        for family in script_fallback_families(script, locale) {
+            if !families.contains(family) {
+                families.push(family);
+            }
+        }
+    }
+    // Malgun Gothic (Hangul) and Yu Gothic (kana) also cover Han: loaded
+    // alone, they would draw later Han text before the locale's Han face is
+    // ever asked for. Ask for that face with any CJK miss (review N1).
+    if cjk {
+        for family in script_fallback_families(Script::Han, locale) {
+            if !families.contains(family) {
+                families.push(family);
+            }
+        }
+    }
+    if any {
+        for family in COMMON_FALLBACK_FAMILIES {
+            if !families.contains(&family) {
+                families.push(family);
+            }
+        }
+    }
+    families
+}
+
+/// Loads the font files of one family name into a database, returning how
+/// many files it loaded. The default is [`system::load_family`]; tests inject
+/// open-licensed stand-ins.
+pub(crate) type FamilySource = Arc<dyn Fn(&mut fontdb::Database, &str) -> usize + Send + Sync>;
+
+/// Lazy, off-frame loader for the system fallback faces cosmic-text names
+/// (see the module docs). Owned by the text rasterizer and carried over when
+/// it is rebuilt, so each family loads at most once per process.
+pub(crate) struct SystemFallback {
+    source: FamilySource,
+    /// Every family ever scheduled (present or not).
+    requested: HashSet<&'static str>,
+    tx: mpsc::Sender<Vec<fontdb::FaceInfo>>,
+    rx: mpsc::Receiver<Vec<fontdb::FaceInfo>>,
+    /// Background loads not yet received.
+    in_flight: usize,
+    /// Faces installed so far, replayed into a rebuilt font system.
+    installed: Vec<fontdb::FaceInfo>,
+    /// Wakes the compositor when a load lands (an idle HUD renders nothing
+    /// otherwise).
+    wake: RenderWakeNotifier,
+}
+
+impl SystemFallback {
+    pub(crate) fn new(source: FamilySource) -> Self {
+        let (tx, rx) = mpsc::channel();
+        Self {
+            source,
+            requested: HashSet::new(),
+            tx,
+            rx,
+            in_flight: 0,
+            installed: Vec::new(),
+            wake: RenderWakeNotifier::default(),
+        }
+    }
+
+    /// The production loader: Windows system families by name.
+    pub(crate) fn system() -> Self {
+        Self::new(Arc::new(system::load_family))
+    }
+
+    pub(crate) fn set_wake(&mut self, wake: RenderWakeNotifier) {
+        self.wake = wake;
+    }
+
+    /// Background loads not yet installed.
+    #[cfg(test)]
+    pub(crate) fn in_flight(&self) -> usize {
+        self.in_flight
+    }
+
+    /// Faces installed so far.
+    #[cfg(test)]
+    pub(crate) fn installed_face_count(&self) -> usize {
+        self.installed.len()
+    }
+
+    /// Record that `missing` shaped to `.notdef` under `locale`, and start one
+    /// background load of every fallback family not requested before. Never
+    /// loads on the calling (frame) thread.
+    pub(crate) fn note_missing(&mut self, missing: &str, locale: &str) {
+        let families: Vec<&'static str> = fallback_families(missing, locale)
+            .into_iter()
+            .filter(|family| self.requested.insert(family))
+            .collect();
+        if families.is_empty() {
+            return;
+        }
+        let source = Arc::clone(&self.source);
+        let tx = self.tx.clone();
+        let wake = self.wake.clone();
+        let spawned = std::thread::Builder::new()
+            .name("tze-font-fallback".to_owned())
+            .spawn(move || {
+                let started = std::time::Instant::now();
+                let mut db = fontdb::Database::new();
+                let (mut present, mut absent) = (Vec::new(), Vec::new());
+                for family in &families {
+                    if source(&mut db, family) > 0 {
+                        present.push(*family);
+                    } else {
+                        absent.push(*family);
+                    }
+                }
+                share_file_data(&mut db);
+                let faces: Vec<fontdb::FaceInfo> = db.faces().cloned().collect();
+                tracing::info!(
+                    ?present,
+                    ?absent,
+                    faces = faces.len(),
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    "system fallback fonts loaded off the frame thread"
+                );
+                // The receiver only goes away with the compositor.
+                let _ = tx.send(faces);
+                wake.notify();
+            });
+        match spawned {
+            Ok(_) => self.in_flight += 1,
+            Err(e) => tracing::warn!(error = %e, "fallback font loader thread unavailable"),
+        }
+    }
+
+    /// Install every face whose background load has landed into `fs`.
+    /// Returns `true` when faces were added, so the caller re-lays out the
+    /// text shaped without them.
+    pub(crate) fn poll(&mut self, fs: &mut FontSystem) -> bool {
+        let mut added = false;
+        while let Ok(faces) = self.rx.try_recv() {
+            self.in_flight = self.in_flight.saturating_sub(1);
+            if faces.is_empty() {
+                continue;
+            }
+            // db_mut() clears cosmic-text's font-match cache, so the next
+            // shape considers the new faces.
+            let db = fs.db_mut();
+            for face in faces {
+                db.push_face_info(face.clone());
+                self.installed.push(face);
+            }
+            added = true;
+        }
+        added
+    }
+
+    /// Add every installed face to a newly built `fs`.
+    pub(crate) fn replay_into(&self, fs: &mut FontSystem) {
+        if self.installed.is_empty() {
+            return;
+        }
+        let db = fs.db_mut();
+        for face in &self.installed {
+            db.push_face_info(face.clone());
+        }
+    }
+}
+
+/// Memory-map file-backed faces now, on the loader thread, so the frame
+/// thread's first use of a face never opens or reads its file.
+fn share_file_data(db: &mut fontdb::Database) {
+    let ids: Vec<fontdb::ID> = db
+        .faces()
+        .filter(|face| matches!(face.source, fontdb::Source::File(_)))
+        .map(|face| face.id)
+        .collect();
+    for id in ids {
+        // SAFETY: maps an installed system font file read-only; Windows keeps
+        // in-use font files locked against modification.
+        unsafe {
+            db.make_shared_face_data(id);
+        }
     }
 }
 
@@ -607,6 +941,378 @@ mod tests {
             .collect()
     }
 
+    // ── Lazy system fallback (hud-ljhku.13) ──────────────────────────────
+
+    use test_standins::{STANDIN_EMOJI, all_standins, standin_source};
+
+    /// `(family, glyph id)` of every shaped glyph of `text` in the sans role.
+    fn shaped(fs: &mut FontSystem, text: &str) -> Vec<(String, u16)> {
+        let mut buf = Buffer::new(fs, Metrics::new(16.0, 22.0));
+        buf.set_size(fs, Some(2000.0), Some(200.0));
+        buf.set_text(
+            fs,
+            text,
+            Attrs::new().family(Family::SansSerif),
+            Shaping::Advanced,
+        );
+        buf.shape_until_scroll(fs, false);
+        let glyphs: Vec<_> = buf
+            .layout_runs()
+            .flat_map(|r| {
+                r.glyphs
+                    .iter()
+                    .filter(|g| !r.text[g.start..g.end].trim().is_empty())
+                    .map(|g| (g.font_id, g.glyph_id))
+                    .collect::<Vec<_>>()
+            })
+            .collect();
+        glyphs
+            .into_iter()
+            .map(|(id, glyph)| (fs.db().face(id).unwrap().families[0].0.clone(), glyph))
+            .collect()
+    }
+
+    /// The characters of `text` that shaped to `.notdef`.
+    fn notdef_text(fs: &mut FontSystem, text: &str) -> String {
+        let mut buf = Buffer::new(fs, Metrics::new(16.0, 22.0));
+        buf.set_size(fs, Some(2000.0), Some(200.0));
+        buf.set_text(
+            fs,
+            text,
+            Attrs::new().family(Family::SansSerif),
+            Shaping::Advanced,
+        );
+        buf.shape_until_scroll(fs, false);
+        let mut missing = String::new();
+        for run in buf.layout_runs() {
+            for g in run.glyphs.iter().filter(|g| g.glyph_id == 0) {
+                missing.push_str(&run.text[g.start..g.end]);
+            }
+        }
+        missing
+    }
+
+    /// Poll until a background load lands (bounded).
+    fn wait_and_install(fallback: &mut SystemFallback, fs: &mut FontSystem) -> bool {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while std::time::Instant::now() < deadline {
+            if fallback.poll(fs) {
+                return true;
+            }
+            if fallback.in_flight() == 0 {
+                return false;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(2));
+        }
+        panic!("fallback load did not land in 10 s");
+    }
+
+    /// R13.1 S1/S3/S4: nothing loads until a glyph misses; the miss loads the
+    /// families cosmic-text names on a background thread; text shaped before
+    /// the load lands is tofu, and after one install every glyph is real.
+    /// Each family is requested once.
+    #[test]
+    fn fallback_loads_lazily_off_thread_then_text_has_no_notdef() {
+        let text = "\u{2705} \u{5b8c}\u{6210} \u{d14c}\u{c2a4}\u{d2b8}";
+        let (source, log) = standin_source(&all_standins());
+        let mut fallback = SystemFallback::new(source);
+        let mut fs = bundled_font_system();
+        let wakes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let counter = Arc::clone(&wakes);
+        fallback.set_wake(RenderWakeNotifier::new(move || {
+            counter.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }));
+
+        // S3: text the bundled faces cover asks for nothing.
+        let covered = notdef_text(&mut fs, "Hello \u{2192} \u{25cf}");
+        assert!(covered.is_empty(), "{covered:?}");
+        fallback.note_missing(&covered, "en-US");
+        assert_eq!(fallback.in_flight(), 0);
+        assert!(log.lock().unwrap().is_empty(), "no fallback face loads");
+        assert_eq!(fs.db().faces().count(), BUNDLED_FONT_FACE_COUNT);
+
+        // S4: before the load lands the text is tofu.
+        let missing = notdef_text(&mut fs, text);
+        assert!(!missing.is_empty(), "the bundled faces lack these glyphs");
+        fallback.note_missing(&missing, "en-US");
+        assert_eq!(fallback.in_flight(), 1, "one background load");
+        assert!(shaped(&mut fs, text).iter().any(|(_, g)| *g == 0));
+
+        assert!(wait_and_install(&mut fallback, &mut fs));
+        assert_eq!(wakes.load(std::sync::atomic::Ordering::SeqCst), 1);
+        // S1: after the install, no shaped glyph is .notdef.
+        let after = shaped(&mut fs, text);
+        assert!(after.iter().all(|(_, g)| *g != 0), "{after:?}");
+        let families: HashSet<&str> = after.iter().map(|(f, _)| f.as_str()).collect();
+        for expected in ["TzeStandIn Zh", "TzeStandIn Ko"] {
+            assert!(families.contains(expected), "{families:?}");
+        }
+
+        // The loader never ran on this (frame) thread.
+        let calls = log.lock().unwrap().clone();
+        assert!(!calls.is_empty());
+        for (family, thread) in &calls {
+            assert_eq!(thread.as_deref(), Some("tze-font-fallback"), "{family}");
+        }
+        // en-US Han -> Microsoft YaHei UI; Hangul -> Malgun Gothic; then the
+        // common emoji/symbol faces, each asked for exactly once.
+        let asked: Vec<&str> = calls.iter().map(|(f, _)| f.as_str()).collect();
+        for family in [
+            "Microsoft YaHei UI",
+            "Malgun Gothic",
+            "Segoe UI Emoji",
+            "Segoe UI Symbol",
+        ] {
+            assert_eq!(
+                asked.iter().filter(|f| **f == family).count(),
+                1,
+                "{asked:?}"
+            );
+        }
+
+        // A repeat miss (or any later frame) starts no new load.
+        fallback.note_missing(&missing, "en-US");
+        assert_eq!(fallback.in_flight(), 0);
+        assert_eq!(log.lock().unwrap().len(), calls.len());
+        assert!(!fallback.poll(&mut fs));
+    }
+
+    /// R13.1 S5: with a Japanese user locale, kanji load and shape with the
+    /// Yu Gothic face (Japanese forms), never Microsoft YaHei UI.
+    #[test]
+    fn japanese_locale_shapes_kanji_with_yu_gothic() {
+        let locale = locale_from(None, || Some("ja-JP".to_owned()));
+        assert_eq!(locale, "ja");
+        let (source, log) = standin_source(&all_standins());
+        let mut fallback = SystemFallback::new(source);
+        let mut fs = bundled_font_system();
+        let missing = notdef_text(&mut fs, "\u{5b8c}\u{6210}");
+        fallback.note_missing(&missing, &locale);
+        assert!(wait_and_install(&mut fallback, &mut fs));
+        let used = shaped(&mut fs, "\u{5b8c}\u{6210}");
+        assert_eq!(
+            used,
+            [
+                ("TzeStandIn Ja".to_owned(), 1),
+                ("TzeStandIn Ja".to_owned(), 2)
+            ]
+        );
+        let asked: Vec<String> = log.lock().unwrap().iter().map(|(f, _)| f.clone()).collect();
+        assert!(asked.contains(&"Yu Gothic".to_owned()), "{asked:?}");
+        assert!(
+            !asked.contains(&"Microsoft YaHei UI".to_owned()),
+            "{asked:?}"
+        );
+    }
+
+    /// R13.1 S2: an absent family is skipped and the next one is used; the
+    /// miss is never retried, so nothing repeats per frame.
+    #[test]
+    fn absent_fallback_family_is_skipped_once() {
+        // Segoe UI Emoji is absent; Segoe UI Symbol (next) has the glyph.
+        let (source, log) = standin_source(&[("Segoe UI Symbol", STANDIN_EMOJI)]);
+        let mut fallback = SystemFallback::new(source);
+        let mut fs = bundled_font_system();
+        let missing = notdef_text(&mut fs, "\u{2705}");
+        assert_eq!(missing, "\u{2705}");
+        fallback.note_missing(&missing, "en-US");
+        assert!(wait_and_install(&mut fallback, &mut fs));
+        assert_eq!(
+            shaped(&mut fs, "\u{2705}"),
+            [("TzeStandIn Emoji".to_owned(), 1)]
+        );
+        let asked = log.lock().unwrap().len();
+        assert_eq!(asked, 2, "emoji (absent) then symbol");
+        for _ in 0..100 {
+            fallback.note_missing(&missing, "en-US");
+        }
+        assert_eq!(fallback.in_flight(), 0);
+        assert_eq!(log.lock().unwrap().len(), asked, "no per-frame retries");
+    }
+
+    /// A rebuilt font system (theme change) gets the installed faces back
+    /// without loading any family again.
+    #[test]
+    fn installed_fallback_faces_replay_into_a_rebuilt_font_system() {
+        let (source, log) = standin_source(&all_standins());
+        let mut fallback = SystemFallback::new(source);
+        let mut fs = bundled_font_system();
+        let missing = notdef_text(&mut fs, "\u{d14c}");
+        fallback.note_missing(&missing, "en-US");
+        assert!(wait_and_install(&mut fallback, &mut fs));
+        let installed = fallback.installed_face_count();
+        assert!(installed > 0);
+        let calls = log.lock().unwrap().len();
+
+        let mut rebuilt = bundled_font_system();
+        fallback.replay_into(&mut rebuilt);
+        assert_eq!(
+            rebuilt.db().faces().count(),
+            BUNDLED_FONT_FACE_COUNT + installed
+        );
+        assert!(notdef_text(&mut rebuilt, "\u{d14c}").is_empty());
+        assert_eq!(log.lock().unwrap().len(), calls);
+    }
+
+    /// Tier-W (windows.yml): the real Microsoft faces through the real
+    /// registry-by-name loader. Each sample must shape without `.notdef` in
+    /// the family cosmic-text's table names, for the default and a Japanese
+    /// locale (R13.1 S5); a family the runner lacks is skipped and recorded.
+    #[cfg(windows)]
+    #[test]
+    fn windows_system_fallback_draws_real_faces() {
+        for (locale, han) in [("en-US", "Microsoft YaHei UI"), ("ja", "Yu Gothic")] {
+            let (mut fs, _) =
+                build_font_system_with_locale(&FontConfig::default(), locale.to_owned());
+            let samples = [
+                ("\u{2705}", "Segoe UI Emoji"),
+                ("\u{5b8c}\u{6210}", han),
+                ("\u{d14c}\u{c2a4}\u{d2b8}", "Malgun Gothic"),
+            ];
+            let text: String = samples
+                .iter()
+                .map(|(t, _)| *t)
+                .collect::<Vec<_>>()
+                .join(" ");
+            let mut fallback = SystemFallback::system();
+            let missing = notdef_text(&mut fs, &text);
+            // Record the one-time load cost on a real Windows system so the
+            // tier-W log carries it (R13.1 measurement).
+            let started = std::time::Instant::now();
+            fallback.note_missing(&missing, locale);
+            wait_and_install(&mut fallback, &mut fs);
+            println!(
+                "tier-W font fallback [{locale}]: {} faces loaded in {:.1} ms",
+                fallback.installed_face_count(),
+                started.elapsed().as_secs_f64() * 1e3
+            );
+            for (sample, family) in samples {
+                let has = |fs: &FontSystem, id| {
+                    fs.db().face(id).is_some_and(|face| {
+                        face.families
+                            .iter()
+                            .any(|(n, _)| n.eq_ignore_ascii_case(family))
+                    })
+                };
+                let installed = fs.db().faces().any(|face| {
+                    face.families
+                        .iter()
+                        .any(|(n, _)| n.eq_ignore_ascii_case(family))
+                });
+                if !installed {
+                    println!(
+                        "tier-W font fallback [{locale}]: {family} not on this runner; skipped"
+                    );
+                    continue;
+                }
+                let mut buf = Buffer::new(&mut fs, Metrics::new(16.0, 22.0));
+                buf.set_text(
+                    &mut fs,
+                    sample,
+                    Attrs::new().family(Family::SansSerif),
+                    Shaping::Advanced,
+                );
+                buf.shape_until_scroll(&mut fs, false);
+                let glyphs: Vec<_> = buf
+                    .layout_runs()
+                    .flat_map(|r| r.glyphs.iter().map(|g| (g.font_id, g.glyph_id)))
+                    .collect();
+                assert!(!glyphs.is_empty());
+                for (id, glyph) in glyphs {
+                    assert_ne!(glyph, 0, "[{locale}] {sample:?} shaped .notdef");
+                    assert!(
+                        has(&fs, id),
+                        "[{locale}] {sample:?} not drawn with {family}"
+                    );
+                }
+                println!(
+                    "tier-W font fallback [{locale}]: {family} present; {sample} drawn with it"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn fallback_families_follow_cosmic_text_windows_table() {
+        assert_eq!(
+            fallback_families("\u{5b8c}", "ja"),
+            ["Yu Gothic", "Segoe UI Emoji", "Segoe UI Symbol"]
+        );
+        assert_eq!(
+            fallback_families("\u{5b8c}", "zh-TW")[0],
+            "Microsoft JhengHei UI"
+        );
+        assert_eq!(fallback_families("\u{5b8c}", "zh-HK")[0], "MingLiU_HKSCS");
+        assert_eq!(
+            fallback_families("\u{5b8c}", "en-US")[0],
+            "Microsoft YaHei UI"
+        );
+        assert_eq!(fallback_families("\u{d14c}", "en-US")[0], "Malgun Gothic");
+        assert_eq!(fallback_families("\u{304b}", "en-US")[0], "Yu Gothic");
+        // Review N1: a Hangul or kana miss also asks for the locale's Han
+        // face, since Malgun / Yu Gothic alone would claim later Han text.
+        assert_eq!(
+            fallback_families("\u{d14c}", "en-US"),
+            [
+                "Malgun Gothic",
+                "Microsoft YaHei UI",
+                "Segoe UI Emoji",
+                "Segoe UI Symbol"
+            ]
+        );
+        assert_eq!(
+            fallback_families("\u{304b}", "zh-TW")[..2],
+            ["Yu Gothic", "Microsoft JhengHei UI"]
+        );
+        assert_eq!(
+            fallback_families("\u{d14c}", "ko"),
+            ["Malgun Gothic", "Segoe UI Emoji", "Segoe UI Symbol"]
+        );
+        assert!(!fallback_families("\u{0915}", "en-US").contains(&"Microsoft YaHei UI"));
+        assert_eq!(fallback_families("\u{0915}", "en-US")[0], "Nirmala UI");
+        assert_eq!(
+            fallback_families("\u{2705}", "en-US"),
+            COMMON_FALLBACK_FAMILIES
+        );
+        assert!(fallback_families(" \n\t", "en-US").is_empty());
+    }
+
+    /// R13.1 S5 and the other Han keys: cosmic-text matches them exactly.
+    #[test]
+    fn locale_normalizes_to_cosmic_text_han_keys() {
+        for (tag, want) in [
+            ("ja-JP", "ja"),
+            ("ja", "ja"),
+            ("ko-KR", "ko"),
+            ("zh-TW", "zh-TW"),
+            ("zh-Hant-TW", "zh-TW"),
+            ("zh-Hant", "zh-TW"),
+            ("zh-HK", "zh-HK"),
+            ("zh-MO", "zh-HK"),
+            ("zh-Hant-HK", "zh-HK"),
+            ("zh-CN", "zh-CN"),
+            ("zh-Hans-CN", "zh-Hans-CN"),
+            ("en-US", "en-US"),
+        ] {
+            assert_eq!(normalize_locale(tag), want, "{tag}");
+        }
+        // LANG wins over the Windows user locale; either is normalized.
+        assert_eq!(
+            locale_from(Some("ja_JP.UTF-8".into()), || Some("en-US".into())),
+            "ja"
+        );
+        assert_eq!(locale_from(None, || Some("zh-TW".into())), "zh-TW");
+        assert_eq!(locale_from(Some(String::new()), || None), "en-US");
+        assert_eq!(locale_from(None, || None), "en-US");
+        // `LANG=C` / `POSIX` (common in shells) name no language.
+        assert_eq!(locale_from(Some("C".into()), || Some("ja-JP".into())), "ja");
+        assert_eq!(locale_from(Some("POSIX".into()), || None), "en-US");
+        assert_eq!(
+            locale_from(Some("C.UTF-8".into()), || Some("ko-KR".into())),
+            "ko"
+        );
+    }
+
     #[test]
     fn bundled_fonts_load_exactly_the_embedded_faces() {
         // Each embedded file is a single-face TTF; more faces would mean
@@ -777,5 +1483,56 @@ mod tests {
         let mut db = fontdb::Database::new();
         assert_eq!(system::load_family(&mut db, "Segoe UI"), 0);
         assert_eq!(db.len(), 0);
+    }
+}
+
+/// Stand-in "system" fallback faces for tests (hud-ljhku.13).
+#[cfg(test)]
+pub(crate) mod test_standins {
+    use super::FamilySource;
+    use glyphon::fontdb;
+    use std::sync::{Arc, Mutex};
+
+    /// Open-licensed (CC0) box-glyph stand-ins for the Microsoft faces,
+    /// generated by `fonts/test-standins/make_standins.py`.
+    pub(crate) static STANDIN_EMOJI: &[u8] =
+        include_bytes!("../fonts/test-standins/TzeStandInEmoji.ttf");
+    pub(crate) static STANDIN_JA: &[u8] = include_bytes!("../fonts/test-standins/TzeStandInJa.ttf");
+    pub(crate) static STANDIN_ZH: &[u8] = include_bytes!("../fonts/test-standins/TzeStandInZh.ttf");
+    pub(crate) static STANDIN_KO: &[u8] = include_bytes!("../fonts/test-standins/TzeStandInKo.ttf");
+
+    /// What the stand-in "system" source was asked for, and on which thread.
+    pub(crate) type SourceLog = Arc<Mutex<Vec<(String, Option<String>)>>>;
+
+    /// A [`FamilySource`] serving stand-ins for the named Windows families;
+    /// families missing from `present` are absent.
+    pub(crate) fn standin_source(
+        present: &[(&'static str, &'static [u8])],
+    ) -> (FamilySource, SourceLog) {
+        let present: Vec<(&'static str, &'static [u8])> = present.to_vec();
+        let log: SourceLog = Arc::default();
+        let calls = Arc::clone(&log);
+        let source: FamilySource = Arc::new(move |db: &mut fontdb::Database, family: &str| {
+            let thread = std::thread::current().name().map(str::to_owned);
+            calls.lock().unwrap().push((family.to_owned(), thread));
+            match present.iter().find(|(name, _)| *name == family) {
+                Some((_, bytes)) => {
+                    db.load_font_source(fontdb::Source::Binary(Arc::new(*bytes)));
+                    1
+                }
+                None => 0,
+            }
+        });
+        (source, log)
+    }
+
+    /// Every stand-in, under the family names cosmic-text's table uses.
+    pub(crate) fn all_standins() -> Vec<(&'static str, &'static [u8])> {
+        vec![
+            ("Segoe UI Emoji", STANDIN_EMOJI),
+            ("Yu Gothic", STANDIN_JA),
+            ("Microsoft YaHei UI", STANDIN_ZH),
+            ("Malgun Gothic", STANDIN_KO),
+        ]
     }
 }

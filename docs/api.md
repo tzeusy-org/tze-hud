@@ -199,7 +199,9 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   Configured HUD startup resolves
   the selected theme and config overrides once; MCP publishes use its
   `motion.state.ms` duration without adding a tool parameter. gRPC publishes
-  retain their explicit `transition_ms`. A positive duration eases f32 and
+  retain their explicit `transition_ms`. Both planes snap to 0 while
+  Windows "Show animations" is off (see the OS motion layer under
+  [design tokens](#design-tokens-and-themes)). A positive duration eases f32 and
   color params from what is on screen; enum and string params and a widget's
   first appearance snap. Simplified degradation snaps and stops transitions.
   The runtime wakes only until the transition lands. A zero duration cancels
@@ -819,6 +821,18 @@ working. The new chord is saved to `[runtime]`. Each chord row says
 whether its chord is the default, saved to config, or lasts until restart
 (no config file), and a changed chord has Reset.
 
+The mouse wheel follows Windows' "lines per notch" setting, read on each
+notch: a notch scrolls that many lines of the text under the pointer (the
+portal transcript's line height, else the text node's, else 40 px), and the
+"one screen at a time" setting scrolls one viewport. Touchpad pixel deltas
+pass through unchanged. Off Windows a notch stays 40 px.
+
+While an IME composes into a portal composer, the composition string draws
+inline at the caret with a token-colored underline
+(`portal.composer.preedit_underline_color`, default the caret color) and the
+caret at the IME's cursor. It never enters the draft: only the committed
+text does, and cancelling the composition leaves the draft as it was.
+
 Overlay clicks on card buttons, badges and scroll panes act without taking
 Windows keyboard focus. Clicking a text editor (a portal composer or panel
 search/edit field) or starting a portal OUTPUT selection takes focus
@@ -1114,6 +1128,18 @@ canonical defaults, then the selected theme, then the other
 does this as a pure function. An unknown theme name fails config validation
 with `UnknownTheme`, and the error lists the available themes.
 
+**OS motion layer.** On Windows the runtime reads "Show animations"
+(`SPI_GETCLIENTAREAANIMATION`) at startup and on each config reload; there is
+no live OS watch. When it is off, a layer between the theme and the config
+entries sets exactly five durations to `0`: `motion.enter.ms`,
+`motion.exit.ms`, `motion.state.ms`, `portal.transition.in_ms` and
+`portal.transition.out_ms`. An explicit `[design_tokens]` value for one of
+them still wins. The runtime records the state as the reserved key
+`runtime.reduce_motion` (`[design_tokens]` rejects it), and while it is set
+widget publishes on both planes snap their transition to 0. The control
+panel's Advanced tokens rows show "Windows animations off" as the source of
+the zeroed motion values. No model-visible payload changes. Off Windows, and when the setting cannot be read, animations stay on.
+
 **Live changes.** Editing `[design_tokens]` in the running HUD's config file
 (or using the control panel's Appearance and Advanced tokens cards) restyles
 it without a restart: zones, widgets (their SVGs re-resolve), portals and
@@ -1125,7 +1151,10 @@ not be saved survives an unrelated edit. A
 table that startup would refuse (an unknown theme, a reserved or malformed
 key) or a file that is not valid TOML keeps the current tokens and is
 reported in `/admin/status` `config_reload`. Still read once at startup: the MCP widget
-transition time. Widget text follows the live `font.*` roles like
+transition time (`motion.state.ms`), so changing it takes a restart. The
+Windows animation preference is re-read on each reload: once it is off, MCP
+widget publishes snap to 0 from that reload on; if the HUD started with it
+off, MCP transitions stay 0 until a restart after it is turned back on. Widget text follows the live `font.*` roles like
 zone text. Other config sections apply after a
 restart (or live from the control panel). Keep config
 overrides for values specific to one deployment. The visual design
@@ -1224,7 +1253,23 @@ A family name resolves to the first match, compared case-insensitively:
 A name that resolves nowhere logs one warning with the requested name and
 the family used instead, and the role keeps its default. Code points a
 family lacks (symbols, box drawing, Arabic, and so on) fall back per glyph
-to the bundled DejaVu faces. With no font tokens set, only bundled fonts load,
+to the bundled DejaVu faces.
+
+**System fallback for emoji, CJK and other scripts.** Text no loaded face
+covers first draws as tofu and asks for Windows' own fallback faces: the
+per-script families cosmic-text uses on Windows (for example Malgun Gothic
+for Hangul) plus Segoe UI Emoji and Segoe UI Symbol. Han picks its face from
+the user locale (`LANG`, else `GetUserDefaultLocaleName`): Yu Gothic for
+Japanese, Malgun Gothic for Korean, Microsoft JhengHei UI for zh-TW,
+MingLiU_HKSCS for zh-HK, Microsoft YaHei UI otherwise. The faces load on a background thread,
+found through the same registry lookup as step 3, never on a frame; when
+they land, text re-lays out once and the HUD repaints, with no republish.
+A Hangul or kana miss also asks for the locale's Han face, since Malgun
+Gothic and Yu Gothic cover Han too and would otherwise claim later Han text.
+Each family is asked for once per run, so an absent one costs one lookup.
+Loaded faces survive font and theme changes. Startup and text the loaded
+faces cover load nothing extra. Off Windows the lookup finds nothing, so CI
+keeps today's tofu. With no font tokens set, only bundled fonts load,
 which is what CI and the tests use. Widget SVG text uses the same fonts and
 roles as zone text (bundled faces plus the fonts-dir and system files the
 roles loaded). A code point its family lacks falls back per glyph to the

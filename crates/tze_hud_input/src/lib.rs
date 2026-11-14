@@ -58,7 +58,7 @@ pub use pointer::{
 };
 pub use scroll::{
     FollowTailAnchor, ScrollConfig, ScrollEvent, ScrollOffsetChangedEvent, ScrollState,
-    SetScrollOffsetRequest, follow_tail_offset,
+    SetScrollOffsetRequest, WHEEL_LINE_PX, WheelStep, follow_tail_offset,
 };
 
 pub mod command;
@@ -582,14 +582,36 @@ impl InputProcessor {
         event: &ScrollEvent,
         scene: &mut SceneGraph,
     ) -> Option<ScrollOffsetChangedEvent> {
+        self.process_wheel_event(event, WheelStep::Pixels, scene)
+    }
+
+    /// [`Self::process_scroll_event`] with `event.delta_y` measured in `step`
+    /// units (hud-ljhku.13): lines are the target's text line height (portal
+    /// output and composer rows, a text node's line) or [`WHEEL_LINE_PX`]
+    /// elsewhere; pages are its visible height. `delta_x` stays pixels.
+    pub fn process_wheel_event(
+        &mut self,
+        event: &ScrollEvent,
+        step: WheelStep,
+        scene: &mut SceneGraph,
+    ) -> Option<ScrollOffsetChangedEvent> {
         let hit = scene.hit_test(event.x, event.y);
         let tile_id = match hit {
             HitResult::NodeHit { tile_id, .. } | HitResult::TileHit { tile_id } => tile_id,
             _ => return None,
         };
-        if scene.portal_document_at(tile_id, event.x, event.y)
-            == Some(tze_hud_scene::PortalPartKind::Composer)
-        {
+        let pane = scene.portal_document_at(tile_id, event.x, event.y);
+        let delta_y = if step == WheelStep::Pixels {
+            event.delta_y
+        } else {
+            let (line_px, page_px) = wheel_line_and_page_px(scene, tile_id, &hit, pane);
+            step.to_px(event.delta_y, line_px, page_px)
+        };
+        let event = &ScrollEvent {
+            delta_y,
+            ..event.clone()
+        };
+        if pane == Some(tze_hud_scene::PortalPartKind::Composer) {
             self.portal_input_scroll_state.apply_user_scroll(
                 tile_id,
                 event.delta_x,
@@ -2334,6 +2356,46 @@ fn resolve_node_meta(
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
 
+/// Line and page height in px for a wheel over `tile_id` (hud-ljhku.13).
+///
+/// Text surfaces scroll by their text line: a native portal pane by its
+/// shaped row height, a text node (hit, or the tile root) by its font size times the
+/// default line-height multiplier the compositor lays it out with
+/// ([`tze_hud_scene::TEXT_LINE_HEIGHT_MULTIPLIER`]). Anything
+/// else uses [`WHEEL_LINE_PX`]. A page is the pane viewport, else the tile.
+fn wheel_line_and_page_px(
+    scene: &SceneGraph,
+    tile_id: SceneId,
+    hit: &HitResult,
+    pane: Option<tze_hud_scene::PortalPartKind>,
+) -> (f32, f32) {
+    let tile_h = scene.tiles.get(&tile_id).map_or(0.0, |t| t.bounds.height);
+    if let Some(layout) =
+        pane.and_then(|pane| scene.overlay.portal_document_layouts.get(&(tile_id, pane)))
+        && layout.line_height > 0.0
+    {
+        return (
+            layout.line_height,
+            layout.viewport.height.max(layout.line_height),
+        );
+    }
+    // The node under the pointer, else the tile's root (text nodes take no
+    // pointer hits of their own).
+    let node_id = match hit {
+        HitResult::NodeHit { node_id, .. } => Some(*node_id),
+        _ => scene.tiles.get(&tile_id).and_then(|t| t.root_node),
+    };
+    if let Some(node) = node_id.and_then(|id| scene.nodes.get(&id))
+        && let tze_hud_scene::NodeData::TextMarkdown(text) = &node.data
+        && text.font_size_px > 0.0
+    {
+        return (
+            text.font_size_px * tze_hud_scene::TEXT_LINE_HEIGHT_MULTIPLIER,
+            tile_h,
+        );
+    }
+    (WHEEL_LINE_PX, tile_h)
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2412,6 +2474,50 @@ mod tests {
             (offset_y - 24.0).abs() < f32::EPSILON,
             "expected local offset_y=24.0, got {offset_y}"
         );
+    }
+
+    /// hud-ljhku.13: a wheel line over a text node is its text line
+    /// (font size x 1.4); a page is the tile height.
+    #[test]
+    fn wheel_lines_over_a_text_node_use_its_line_height() {
+        let (mut scene, tile_id) = setup_scrollable_scene();
+        let root = Node {
+            layout: Default::default(),
+            id: SceneId::new(),
+            children: vec![],
+            data: NodeData::TextMarkdown(tze_hud_scene::TextMarkdownNode {
+                content: "text".into(),
+                bounds: Rect::new(0.0, 0.0, 400.0, 300.0),
+                font_size_px: 20.0,
+                font_family: tze_hud_scene::FontFamily::SystemSansSerif,
+                color: tze_hud_scene::Rgba::WHITE,
+                background: None,
+                alignment: tze_hud_scene::TextAlign::Start,
+                overflow: tze_hud_scene::TextOverflow::Clip,
+                color_runs: Box::new([]),
+            }),
+        };
+        scene.set_tile_root(tile_id, root).unwrap();
+        let mut processor = InputProcessor::new();
+        let wheel = ScrollEvent {
+            x: 150.0,
+            y: 150.0,
+            delta_x: 0.0,
+            delta_y: 3.0,
+        };
+        processor.process_wheel_event(&wheel, WheelStep::Lines, &mut scene);
+        let (_, offset_y) = scene.tile_scroll_offset_local(tile_id);
+        assert!((offset_y - 3.0 * 28.0).abs() < 1e-3, "{offset_y}");
+        processor.process_wheel_event(
+            &ScrollEvent {
+                delta_y: 1.0,
+                ..wheel
+            },
+            WheelStep::Pages,
+            &mut scene,
+        );
+        let (_, offset_y) = scene.tile_scroll_offset_local(tile_id);
+        assert!((offset_y - (84.0 + 300.0)).abs() < 1e-3, "{offset_y}");
     }
 
     #[test]
