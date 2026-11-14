@@ -651,15 +651,15 @@ async fn widget_param_update_rasterizes_only_that_instance() {
         compositor.adapter_info()
     );
     // Shipped severity fills, including return-to-info after warning/error.
-    // Fixed logical geometry makes the sampled bar interior independent of
+    // Fixed logical geometry makes sampled ring/bar interiors independent of
     // display-relative layout; all expected colors come from theme tokens.
     for (loaded, level_name, width, height, sample) in [
         (
             bundle!("gauge", ["background.svg", "fill.svg"]),
             "level",
-            72.0,
-            224.0,
-            (36, 100),
+            128.0,
+            132.0,
+            (98, 56), // Solid ring centreline at 3 o'clock, filled at level 0.75.
         ),
         (
             bundle!("progress-bar", ["track.svg", "fill.svg"]),
