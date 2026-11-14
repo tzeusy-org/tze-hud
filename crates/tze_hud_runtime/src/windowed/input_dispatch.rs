@@ -1125,6 +1125,7 @@ mod tests {
                 viewport: Rect::new(pane.x, pane.y, pane.width, 110.0),
                 line_height: 22.0,
                 rows: rows.into(),
+                reading: Default::default(),
             },
         );
         processor.reconcile_portal_document_layouts(&mut scene);
