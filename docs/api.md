@@ -1540,3 +1540,7 @@ shipped one-banner-per-publisher limit prevented a simultaneous stack from this
 single pairing. The exact severity payloads in `alert-banner-{info,caution,critical}-test.json`
 are captured separately under every theme by the existing Windows CI capture
 lane; headless tests retain distinct-publisher severity ordering coverage.
+The [evidence gallery](evidence/alert-banner/README.md) includes the nine
+branch captures with their source, fixture, token and PNG hashes. These use
+llvmpipe at 1920×1080 because the headless device rejects the owner's 4K
+dimensions; they do not establish owner hardware or visual acceptance.
