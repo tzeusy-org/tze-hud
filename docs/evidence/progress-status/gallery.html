@@ -3,7 +3,7 @@
 <title>Progress/status capture evidence</title>
 <style>body{margin:32px auto;padding:0 20px;max-width:1100px;background:#14161d;color:#e7e9ef;font:16px/1.5 system-ui}a{color:#a9c7ff}code{overflow-wrap:anywhere}section{display:grid;grid-template-columns:repeat(auto-fit,minmax(290px,1fr));gap:16px}figure{margin:0;padding:12px;border:1px solid #444957;border-radius:12px}svg{display:block;width:100%;max-width:512px}figcaption{margin-top:8px;font-size:14px}h2{margin-top:36px}</style>
 <h1>Progress/status capture evidence</h1>
-<p>Source <code>385b76a787684fa2e7b79342e1bbdd5e38ca7429</code>. <a href="README.md">Evidence and limits</a> · <a href="after.json">AFTER manifest</a> · <a href="before.json">BEFORE manifest</a>.</p>
+<p>Source <code>4dfcc620f1db631c29957443fb541f7f6e8b09b3</code>. <a href="README.md">Evidence and limits</a> · <a href="after.json">AFTER manifest</a> · <a href="before.json">BEFORE manifest</a>.</p>
 <p>AFTER previews are viewer crops from unmodified 1920×1080 originals, displayed up to twice their captured size. Full-frame links preserve context. These Linux software-GPU captures do not establish Windows owner acceptance or pixel parity with the 3840×2160 owner baseline.</p>
 <h2>Owner BEFORE</h2><p>Build 24818c39; existing theme and DPI unknown and unchanged.</p><ul>
 <li><a href="before-owner-01.png">main-progress, fixture 0: full original</a></li>
@@ -59,4 +59,5 @@
 <figure><svg viewBox="1652 14 256 52" role="img" aria-label="tonal-glass / owner-friendly / status-busy"><image href="after--tonal-glass--owner-friendly--status-busy.png" width="1920" height="1080"/></svg><figcaption>tonal-glass / owner-friendly / status-busy · <a href="after--tonal-glass--owner-friendly--status-busy.png">Full original</a></figcaption></figure>
 <figure><svg viewBox="1652 14 256 52" role="img" aria-label="tonal-glass / owner-friendly / status-offline"><image href="after--tonal-glass--owner-friendly--status-offline.png" width="1920" height="1080"/></svg><figcaption>tonal-glass / owner-friendly / status-offline · <a href="after--tonal-glass--owner-friendly--status-offline.png">Full original</a></figcaption></figure>
 </section>
+<h2>Maximum-label source regression</h2><p>Exact same valid32-byte label and50% payload. These are source captures, separate from the owner BEFORE baseline. <a href="label-overflow.json">Regression manifest</a>.</p><section><figure><svg viewBox="832 888 256 52" role="img" aria-label="Maximum label before"><image href="label-overflow-before.png" width="1920" height="1080"/></svg><figcaption>Before correction · <a href="label-overflow-before.png">Full original</a></figcaption></figure><figure><svg viewBox="832 888 256 52" role="img" aria-label="Maximum label after"><image href="label-overflow-after.png" width="1920" height="1080"/></svg><figcaption>After correction · <a href="label-overflow-after.png">Full original</a></figcaption></figure></section>
 </html>

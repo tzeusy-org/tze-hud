@@ -31,7 +31,7 @@ left unchanged. All seven originals were inspected and hashes verified;
 The [gallery](gallery.html) links all seven BEFORE originals and all 33 AFTER
 originals. Its AFTER previews crop the original frames in the viewer; PNG bytes
 are unmodified. [after.json](after.json) binds every frame to source
-`385b76a787684fa2e7b79342e1bbdd5e38ca7429`, the exact fixture message,
+`4dfcc620f1db631c29957443fb541f7f6e8b09b3`, the exact fixture message,
 resolved tokens, production configuration and PNG hash.
 
 AFTER uses the production scene startup and real windowed GPU capture path on
@@ -46,7 +46,8 @@ All 40 original PNG hashes and the shared fixture hash were verified, and the
 33 AFTER previews were visually inspected.
 
 Progress now uses a 320×50 logical card, secondary label, always-visible shaped
-monospaced percent and a 4dp track. Status uses a 40dp capsule with its selected
+monospaced percent and a 4dp track. A tokenized label clip reserves the
+percentage and right inset even at the existing maximum label length. Status uses a 40dp capsule with its selected
 marker, status name and bounded inline reason in the existing tooltip canvas.
 Owner label/reason hover behavior, four status values and agent parameter
 schemas remain unchanged.
@@ -63,3 +64,17 @@ The owner's BEFORE build/theme/DPI and resolution differ from this software-GPU
 AFTER environment. These frames prove the captured source's rendering, without
 claiming cross-environment pixel parity. Live Windows owner AFTER and visual
 acceptance remain open in **hud-h51u7.8.6**.
+
+## Maximum-label regression
+
+Independent review found that a valid 32-byte `W` label could overwrite the
+permanent percentage and escape the card. The same valid payload is captured
+through production startup and GPU rendering [before the source correction](label-overflow-before.png)
+and [after it](label-overflow-after.png). [The regression manifest](label-overflow.json)
+binds both unmodified originals to their source, exact common fixture and hashes.
+These two source regression frames are separate from the seven owner BEFORE
+frames. The existing GPU parent also checks maximum labels at 0%, 50% and 100%:
+label pixels remain visible, percentage/right-inset pixels stay unchanged, and
+no label pixels escape the card. The new assertion failed on the old source
+(controlled exit101), then passed with the tokenized clip. The label schema and
+limit are unchanged.
