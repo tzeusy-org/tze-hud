@@ -1595,8 +1595,8 @@ impl WinitApp {
         PortalProjectionDrain::Completed { scene_changed }
     }
 
-    /// Remove stale resize, history and drag state. Returns whether drag feedback
-    /// changed, so a main-only availability wake can admit its cleared frame.
+    /// Remove stale resize, history and drag state. A busy lock defers the turn;
+    /// completion reports whether drag feedback changed so its frame is admitted.
     ///
     /// Called once per `about_to_wait` iteration.  Uses a two-phase approach:
     ///
@@ -1614,15 +1614,15 @@ impl WinitApp {
     /// The eager path handles the common case (each `DeleteTile` generates
     /// exactly one removal notification).  The fallback prevents unbounded
     /// accumulation in pathological cases.
-    pub(super) fn prune_portal_resize_states(&mut self) -> bool {
+    pub(super) fn prune_portal_resize_states(&mut self) -> PortalProjectionDrain {
         let original_window_is_live = self.primary_drag_window_is_live();
         let Ok(state) = self.state.shared_state.try_lock() else {
             tracing::trace!("portal resize prune deferred: shared_state lock busy");
-            return false;
+            return PortalProjectionDrain::Deferred;
         };
         let Ok(mut scene) = state.scene.try_lock() else {
             tracing::trace!("portal resize prune deferred: scene lock busy");
-            return false;
+            return PortalProjectionDrain::Deferred;
         };
         let epoch_before = scene.geometry_epoch;
 
@@ -1667,7 +1667,9 @@ impl WinitApp {
         // (e.g. tiles removed before the drain queue existed, or during a
         // prior lock-busy deferral).
         if self.state.portal_resize_states.is_empty() {
-            return scene.geometry_epoch != epoch_before;
+            return PortalProjectionDrain::Completed {
+                scene_changed: scene.geometry_epoch != epoch_before,
+            };
         }
         let resize_before = self.state.portal_resize_states.len();
         self.state
@@ -1681,7 +1683,9 @@ impl WinitApp {
                 "portal resize: sweep-pruned stale per-tile state for removed tiles"
             );
         }
-        scene.geometry_epoch != epoch_before
+        PortalProjectionDrain::Completed {
+            scene_changed: scene.geometry_epoch != epoch_before,
+        }
     }
     /// Apply a Ctrl-gated portal resize hotkey to the focused portal tile.
     ///
@@ -5447,14 +5451,14 @@ mod tests {
             };
             // Both busy owners defer without draining removal or changing maps.
             let state_guard = shared.try_lock().unwrap();
-            assert!(!app.prune_portal_resize_states());
+            assert!(app.prune_portal_resize_states().is_deferred());
             assert_eq!(app.state.portal_resize_states.len(), 2);
             drop(state_guard);
             let scene_guard = scene_handle.try_lock().unwrap();
-            assert!(!app.prune_portal_resize_states());
+            assert!(app.prune_portal_resize_states().is_deferred());
             assert_eq!(app.state.portal_resize_states.len(), 2);
             drop(scene_guard);
-            app.prune_portal_resize_states();
+            assert!(!app.prune_portal_resize_states().is_deferred());
             for id in [live, stale] {
                 assert_eq!(app.state.portal_resize_states.contains_key(&id), id == live);
             }
@@ -5465,9 +5469,12 @@ mod tests {
                     .drain_removed_tile_ids()
                     .is_empty()
             );
-            assert!(
-                !app.prune_portal_resize_states(),
-                "second prune is harmless"
+            assert_eq!(
+                app.prune_portal_resize_states(),
+                PortalProjectionDrain::Completed {
+                    scene_changed: false
+                },
+                "second prune completes without a mutation"
             );
             assert_eq!(app.state.portal_resize_states.len(), 1);
             assert!(
