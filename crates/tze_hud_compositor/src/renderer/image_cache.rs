@@ -431,6 +431,7 @@ impl super::Compositor {
     /// Calling this multiple times replaces the existing rasterizer (e.g. on
     /// surface resize or format change).
     pub fn init_text_renderer(&mut self, format: wgpu::TextureFormat) {
+        self.subtitle_layouts.borrow_mut().invalidate();
         let mut rasterizer = TextRasterizer::with_font_config(
             &self.device,
             &self.queue,
@@ -500,6 +501,7 @@ impl super::Compositor {
         self.truncation_cache_scene_version = u64::MAX;
         self.truncation_cache_scene_instance = None;
         self.notification_layouts.borrow_mut().invalidate();
+        self.subtitle_layouts.borrow_mut().invalidate();
         true
     }
 
@@ -609,6 +611,7 @@ impl super::Compositor {
                 self.truncation_cache_scene_version = u64::MAX;
                 self.truncation_cache_scene_instance = None;
                 self.notification_layouts.borrow_mut().invalidate();
+                self.subtitle_layouts.borrow_mut().invalidate();
                 tracing::debug!(
                     resource_id = %crate::text::format_resource_id(&resource_id),
                     "load_font_bytes: new font loaded — truncation cache invalidated [hud-v2z6u]"

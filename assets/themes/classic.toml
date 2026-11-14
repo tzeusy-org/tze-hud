@@ -66,8 +66,8 @@
 "type.code.display.line_height" = "48"
 "type.code.display.weight" = "500"
 "type.caption.display.family" = "Segoe UI"
-"type.caption.display.size" = "26"
-"type.caption.display.line_height" = "34"
+"type.caption.display.size" = "28"
+"type.caption.display.line_height" = "39.2"
 "type.caption.display.weight" = "600"
 "type.headline.s.family" = "Segoe UI"
 "type.headline.s.size" = "20"
@@ -183,3 +183,12 @@
 "portal.focus_ring.color"                  = "#4A9EFF"    # color.primary
 "portal.window.resize_grip.color"          = "#6E7A91"    # color.outline
 "portal.window.resize_grip.hover_color"    = "#BFC7D5"    # color.on_surface.variant
+
+# Subtitle pill: Classic keeps its outline-only presentation.
+"opacity.subtitle" = "0"
+"space.subtitle.horizontal" = "8"
+"space.subtitle.vertical" = "10"
+"size.subtitle.max_width" = "0"
+"stroke.subtitle.text" = "2"
+"color.subtitle.outline" = "#000000"
+"space.subtitle.bottom" = "48"

@@ -309,6 +309,30 @@ impl Compositor {
                     // For MergeByKey and single-publish policies: render a single backdrop
                     // for the zone using the latest publication's content type.
                     let latest = &publishes[publishes.len() - 1];
+                    if zone_name == "subtitle"
+                        && let ZoneContent::StreamText(text) = &latest.content
+                    {
+                        let Some(pill) =
+                            self.subtitle_layout(zone_name, text, policy, Rect::new(x, y, w, h))
+                        else {
+                            continue;
+                        };
+                        if self.degradation_policy.level
+                            >= tze_hud_scene::DegradationLevel::Simplified
+                        {
+                            let mut fill = pill.style.fill;
+                            fill.a *= anim_opacity;
+                            vertices.extend_from_slice(&rect_vertices(
+                                pill.rect.x,
+                                pill.rect.y,
+                                pill.rect.width,
+                                pill.rect.height,
+                                sw,
+                                sh,
+                                self.gpu_color(fill),
+                            ));
+                        }
+                    }
                     // Status-bar content draws as a card hugging its rows; with no
                     // entries nothing is drawn at all.
                     let card = Self::status_bar_card(

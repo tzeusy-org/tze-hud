@@ -185,6 +185,25 @@ impl Compositor {
                     )
                 })
                 .map_or(zone_rect, |card| card.rect);
+            let element_bounds_zone = if zone_name == "subtitle" {
+                let Some(ZoneContent::StreamText(text)) = scene
+                    .zone_registry
+                    .active_publishes
+                    .get(zone_name)
+                    .and_then(|records| records.last())
+                    .map(|r| &r.content)
+                else {
+                    continue;
+                };
+                let Some(pill) =
+                    self.subtitle_layout(zone_name, text, &zone_def.rendering_policy, zone_rect)
+                else {
+                    continue;
+                };
+                pill.rect
+            } else {
+                element_bounds_zone
+            };
             let bounds = Self::drag_handle_bounds(element_bounds_zone, style, scale, sw, sh);
             let id_hex = Self::scene_id_hex(zone_def.id);
             entries.push(DragHandleEntry {

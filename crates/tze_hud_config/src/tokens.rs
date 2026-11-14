@@ -220,11 +220,6 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "#4A9EFF",
     },
     // Color — outline
-    CanonicalToken {
-        key: "color.outline.default",
-        description: "Default text outline/stroke color",
-        default_value: "#000000",
-    },
     // Color — border
     CanonicalToken {
         key: "color.border.default",
@@ -286,21 +281,41 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Body text weight (CSS numeric)",
         default_value: "400",
     },
-    // Typography — subtitle
     CanonicalToken {
-        key: "typography.subtitle.family",
-        description: "Subtitle font family",
-        default_value: "system-ui",
+        key: "space.subtitle.bottom",
+        description: "Bottom inset of the default subtitle zone (dp)",
+        default_value: "48",
+    },
+    // Subtitle pill roles; generic surface, scrim, corner, hairline and caption type are shared.
+    CanonicalToken {
+        key: "opacity.subtitle",
+        description: "Visibility multiplier of the themed subtitle pill (Classic: 0); fill opacity is opacity.scrim",
+        default_value: "1",
     },
     CanonicalToken {
-        key: "typography.subtitle.size",
-        description: "Subtitle text size in pixels",
-        default_value: "28",
+        key: "space.subtitle.horizontal",
+        description: "Subtitle pill horizontal padding (dp)",
+        default_value: "20",
     },
     CanonicalToken {
-        key: "typography.subtitle.weight",
-        description: "Subtitle font weight (CSS numeric)",
-        default_value: "600",
+        key: "space.subtitle.vertical",
+        description: "Subtitle pill vertical padding (dp)",
+        default_value: "10",
+    },
+    CanonicalToken {
+        key: "size.subtitle.max_width",
+        description: "Maximum subtitle pill outer width (dp), bounded by its zone; 0 uses zone width",
+        default_value: "760",
+    },
+    CanonicalToken {
+        key: "stroke.subtitle.text",
+        description: "Subtitle text outline width (dp); Classic retains its legacy outline",
+        default_value: "0",
+    },
+    CanonicalToken {
+        key: "color.subtitle.outline",
+        description: "Subtitle text outline color (Classic readability)",
+        default_value: "#000000",
     },
     // Spacing
     CanonicalToken {
@@ -329,11 +344,6 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "9",
     },
     // Stroke
-    CanonicalToken {
-        key: "stroke.outline.width",
-        description: "Text outline stroke width in pixels",
-        default_value: "2",
-    },
     CanonicalToken {
         key: "stroke.border.width",
         description: "Border/frame stroke width in pixels",

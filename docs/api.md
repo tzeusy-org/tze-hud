@@ -772,7 +772,27 @@ its content: one `key: value` row per entry in key order (keys dimmed, values
 in primary text, a long value cut with an ellipsis), as tall as its rows and
 padding on the tonal surface with a card border, growing upward to at most
 24% of the display; with no entries nothing is drawn. `subtitle` and
-`alert-banner` are bottom- and top-anchored strips.
+`alert-banner` are bottom- and top-anchored zones. The subtitle draws a centered,
+content-hugging pill within its zone: at most `size.subtitle.max_width` (760 dp
+in Tonal Glass and Blueprint), with `space.subtitle.horizontal` / `.vertical`
+padding (20 / 10 dp), `shape.l` corners, `color.surface` at `opacity.scrim`,
+and the `color.outline.variant` hairline (`stroke.border.width`).
+`type.caption.display` drives size, line height and weight; text uses
+`color.on_surface`. Caption families use the configured font roles (`font.sans`
+for named sans families; generic mono/serif keywords select those roles).
+Long text wraps at word or glyph boundaries and clips or ellipsizes within
+that same pill. Reveal frames keep the complete publication's measured bounds;
+unchanged publications reuse layout, including the drag handle's bounds.
+`space.subtitle.bottom` is the default zone's 48 dp bottom inset. All logical
+sizes follow the zone monitor scale × `ui.scale`.
+
+Classic retains its legacy 28 / 39.2 / 600 outlined caption, with a transparent
+pill (`opacity.subtitle = 0`), 8 / 10 dp padding and the existing zone-wide
+measure (`size.subtitle.max_width = 0` removes the cap). Other themes use `opacity.subtitle = 1`; this multiplier can hide the
+pill without changing the shared scrim role. `stroke.subtitle.text` and
+`color.subtitle.outline` control the optional text outline. The retired
+`typography.subtitle.*`, `color.outline.default` and `stroke.outline.width`
+keys no longer style subtitles. Owner policy overrides still win.
 
 `[runtime]` also holds the launch settings the control panel edits:
 `mcp_port` (default 9090) and `grpc_port` (50051), 0 disabling either and
@@ -1060,7 +1080,8 @@ The Appearance card picks the theme and the sans, mono and serif fonts
 (type a family name; an empty value or Reset gives the theme's), and
 Subtitle backdrop: on sets `opacity.subtitle.backdrop` to 0.9, drawing a
 `color.subtitle.backdrop` fill behind the whole subtitle zone so streamed
-subtitles stand out; off removes the override (0 draws none). Agents send
+subtitles stand out; off removes the override (0 draws none). This optional
+whole-zone fill is separate from the themed content-hugging pill. Agents send
 nothing for it. Left/Right
 on the theme, or Alt+T from anywhere in the panel, previews the next theme
 live without saving it; Enter keeps it, and Esc, moving off the row or

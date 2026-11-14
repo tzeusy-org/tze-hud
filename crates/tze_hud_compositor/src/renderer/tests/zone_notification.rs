@@ -70,61 +70,131 @@ async fn test_zone_subtitle_with_outline_text_item() {
     );
 }
 
-/// Subtitle without outline: when outline_width is None, outline fields
-/// on the TextItem should be None.
+/// Shipped caption styling, wrapping, truncation, retained work and drawn/drag
+/// geometry agree across themes and monitor/UI scales.
 #[tokio::test]
-async fn test_zone_subtitle_without_outline_text_item() {
+async fn test_zone_subtitle_pill_layout_and_streaming() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
-
-    let mut scene = SceneGraph::new(1280.0, 720.0);
-    scene.register_zone(ZoneDefinition {
-        id: SceneId::new(),
-        name: "subtitle".to_owned(),
-        description: "subtitle zone without outline".to_owned(),
-        geometry_policy: GeometryPolicy::EdgeAnchored {
-            edge: DisplayEdge::Bottom,
-            height_pct: 0.10,
-            width_pct: 0.80,
-            margin_px: 16.0,
-        },
-        accepted_media_types: vec![ZoneMediaType::StreamText],
-        rendering_policy: RenderingPolicy {
-            font_size_px: Some(22.0),
-            backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 0.7)),
-            text_color: Some(Rgba::new(1.0, 1.0, 1.0, 1.0)),
-            outline_color: None,
-            outline_width: None,
-            ..Default::default()
-        },
-        contention_policy: ContentionPolicy::LatestWins,
-        max_publishers: 1,
-        auto_clear_ms: None,
-        ephemeral: false,
-        layer_attachment: LayerAttachment::Content,
-    });
-    scene
-        .publish_to_zone(
-            "subtitle",
-            ZoneContent::StreamText("No outline subtitle".to_owned()),
-            "test",
-            None,
-            None,
-            None,
-        )
-        .unwrap();
-
-    let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
-    assert_eq!(items.len(), 1, "expected one TextItem");
-    let item = &items[0];
-    assert!(
-        item.outline_color.is_none(),
-        "outline_color should be None when policy has no outline"
-    );
-    assert!(
-        item.outline_width.is_none(),
-        "outline_width should be None when policy has no outline"
-    );
+    for theme in ["tonal-glass", "classic", "blueprint"] {
+        for scale in [1.0, 1.5] {
+            let mut tokens =
+                tze_hud_config::themes::resolve_config_tokens(&std::collections::HashMap::from([
+                    ("theme".into(), theme.into()),
+                ]));
+            tze_hud_config::tokens::set_px_scale(&mut tokens, scale);
+            compositor.set_token_map(tokens.clone());
+            let mut scene = SceneGraph::new(1280.0, 720.0);
+            scene.zone_registry = ZoneRegistry::with_defaults();
+            let zone = scene.zone_registry.zones.get_mut("subtitle").unwrap();
+            zone.rendering_policy = tze_hud_config::build_effective_policy(
+                "subtitle",
+                &RenderingPolicy::default(),
+                &tokens,
+            );
+            let policy = zone.rendering_policy.clone();
+            let zone = zone.clone();
+            let geom = scene.effective_zone_geometry(&zone);
+            let (x, y, w, h) = compositor.zone_geometry("subtitle", &geom, 1280.0, 720.0);
+            let zone_rect = Rect::new(x, y, w, h);
+            let long =
+                "FIRST paragraph with wrapping and punctuation — café. ".repeat(30) + " LAST";
+            for text in ["A short caption", long.as_str()] {
+                scene
+                    .publish_to_zone(
+                        "subtitle",
+                        ZoneContent::StreamText(text.into()),
+                        "test",
+                        None,
+                        None,
+                        None,
+                    )
+                    .unwrap();
+                compositor.prime_markdown_cache(&scene);
+                // Model the settled commit after the existing resize debounce.
+                compositor.resize_reprime_last_at = None;
+                compositor.prime_truncation_cache(&scene);
+                let pill = compositor
+                    .subtitle_layout("subtitle", text, &policy, zone_rect)
+                    .unwrap();
+                let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+                assert_eq!(items.len(), 1);
+                let item = &items[0];
+                assert_eq!(item.outline_width.is_some(), theme == "classic");
+                let physical = tze_hud_config::tokens::px_scale(&tokens);
+                assert!(
+                    (item.font_size_px
+                        - tokens["type.caption.display.size"].parse::<f32>().unwrap() * physical)
+                        .abs()
+                        < 0.001
+                );
+                assert!(
+                    (item.font_size_px * item.line_height_multiplier
+                        - tokens["type.caption.display.line_height"]
+                            .parse::<f32>()
+                            .unwrap()
+                            * physical)
+                        .abs()
+                        < 0.001
+                );
+                assert!(pill.rect.width <= zone_rect.width && pill.rect.height <= zone_rect.height);
+                assert!(item.pixel_x >= pill.rect.x && item.pixel_y >= pill.rect.y);
+                assert!(item.pixel_x + item.bounds_width <= pill.rect.x + pill.rect.width + 0.001);
+                assert!(
+                    item.pixel_y + item.bounds_height <= pill.rect.y + pill.rect.height + 0.001
+                );
+                if theme != "classic" {
+                    assert!(pill.rect.width <= 760.0 * physical);
+                }
+                let key = crate::text::effective_truncation_key(item).unwrap();
+                let truncation = compositor
+                    .text_rasterizer
+                    .as_ref()
+                    .unwrap()
+                    .truncation_cache
+                    .get_by_key(&key)
+                    .expect("priming uses the exact pill text box");
+                assert_eq!(truncation.was_truncated, text == long);
+                let commands = compositor.collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0);
+                let fills = commands.content.iter().collect::<Vec<_>>();
+                assert_eq!(fills.len(), usize::from(theme != "classic"));
+                if let Some(cmd) = fills.first() {
+                    assert_eq!(Rect::new(cmd.x, cmd.y, cmd.width, cmd.height), pill.rect);
+                    assert!(cmd.border.is_some());
+                }
+                let first = compositor.build_windowed_frame(&mut scene, 1280, 720);
+                drop(first);
+                let shapes = compositor.subtitle_layouts.borrow().shapes;
+                let second = compositor.build_windowed_frame(&mut scene, 1280, 720);
+                drop(second);
+                assert_eq!(
+                    compositor.subtitle_layouts.borrow().shapes,
+                    shapes,
+                    "unchanged frames reuse measured captions"
+                );
+                let handles = compositor.collect_drag_handle_entries(&scene, 1280.0, 720.0);
+                if let Some(handle) = handles
+                    .iter()
+                    .find(|h| h.element_id == scene.zone_registry.zones["subtitle"].id)
+                {
+                    assert_eq!(handle.element_bounds, pill.rect);
+                }
+            }
+            scene.clear_zone("subtitle").unwrap();
+            compositor.prime_subtitle_layout(&scene, 1280.0, 720.0);
+            assert!(
+                compositor
+                    .collect_text_items(&scene, 1280.0, 720.0)
+                    .is_empty()
+            );
+            assert!(
+                compositor
+                    .collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0)
+                    .content
+                    .is_empty()
+            );
+        }
+    }
 }
 
 /// Render-branch regression guard (hud-9v3t6): a portal carrying a *zero-length

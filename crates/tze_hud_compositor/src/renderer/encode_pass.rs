@@ -436,7 +436,7 @@ impl super::Compositor {
                     ZoneContent::Notification(_) | ZoneContent::StatusBar(_)
                 )
             });
-            if sdf_radius.is_none() && !needs_controls {
+            if sdf_radius.is_none() && !needs_controls && zone_name != "subtitle" {
                 continue;
             }
 
@@ -543,6 +543,18 @@ impl super::Compositor {
                 | ContentionPolicy::LatestWins
                 | ContentionPolicy::Replace => {
                     let latest = &publishes[publishes.len() - 1];
+                    if zone_name == "subtitle"
+                        && let ZoneContent::StreamText(text) = &latest.content
+                    {
+                        let Some(pill) =
+                            self.subtitle_layout(zone_name, text, policy, Rect::new(x, y, w, h))
+                        else {
+                            continue;
+                        };
+                        if !degraded && pill.style.fill.a > 0.0 {
+                            out.push(self.subtitle_backdrop_cmd(&pill, anim_opacity));
+                        }
+                    }
                     // The status-bar card hugs its rows (the same rect the flat
                     // pass, text and drag handle use); no entries, no card.
                     let zone_rect = Rect::new(x, y, w, h);

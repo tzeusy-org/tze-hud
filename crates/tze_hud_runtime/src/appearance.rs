@@ -408,6 +408,27 @@ pub(crate) fn restyle_zones(registry: &mut ZoneRegistry, tokens: &DesignTokenMap
         let on_its_monitor = tze_hud_config::tokens::for_zone(tokens, &zone);
         target.rendering_policy =
             build_effective_policy(&zone, &def.rendering_policy, &on_its_monitor);
+        if zone == "subtitle"
+            && let tze_hud_scene::types::GeometryPolicy::EdgeAnchored { margin_px, .. } =
+                &mut target.geometry_policy
+        {
+            // Registry geometry is physical px; local owner placement remains
+            // a separate SceneGraph override.
+            let bottom = on_its_monitor
+                .get("space.subtitle.bottom")
+                .and_then(|v| tze_hud_config::tokens::parse_numeric(v))
+                .filter(|v| *v >= 0.0)
+                .unwrap_or_else(|| {
+                    tze_hud_config::tokens::CANONICAL_TOKENS
+                        .iter()
+                        .find(|t| t.key == "space.subtitle.bottom")
+                        .unwrap()
+                        .default_value
+                        .parse()
+                        .unwrap()
+                });
+            *margin_px = bottom * tze_hud_config::tokens::px_scale(&on_its_monitor);
+        }
     }
 }
 
@@ -709,6 +730,18 @@ mod tests {
             2.0
         );
         assert_eq!(font(&appearance, "subtitle"), subtitle * 2.0);
+        let bottom = |a: &Appearance| {
+            let scene = a.scene.try_lock().expect("idle");
+            match scene.zone_registry.zones["subtitle"].geometry_policy {
+                tze_hud_scene::types::GeometryPolicy::EdgeAnchored { margin_px, .. } => margin_px,
+                _ => panic!("subtitle remains edge anchored"),
+            }
+        };
+        assert_eq!(
+            bottom(&appearance),
+            48.0 * 2.0,
+            "bottom inset uses its own monitor"
+        );
         assert!(
             appearance
                 .scene
@@ -729,6 +762,11 @@ mod tests {
             .unwrap();
         assert_eq!(font(&appearance, "notification-area"), notes * 1.875);
         assert_eq!(font(&appearance, "subtitle"), subtitle * 1.25);
+        assert_eq!(
+            bottom(&appearance),
+            48.0 * 1.25,
+            "bottom inset follows UI scale"
+        );
         // Widget boxes (display fractions) follow zoom, not the monitor.
         assert_eq!(appearance.scene.lock().await.widget_registry.zoom, 1.25);
     }
