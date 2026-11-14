@@ -445,6 +445,17 @@ async fn widget_param_update_rasterizes_only_that_instance() {
                 assert_eq!((work.layout, work.raster, work.upload), (0, 1, 1));
             }
             let pixels = surface.read_pixels(&compositor.device);
+            // A CSS full radius cannot be copied as an oversized SVG rx:
+            // resvg clamps the axes independently and makes an ellipse.
+            // A capsule keeps flat top/bottom edges beyond its round ends.
+            for x in [35, 285] {
+                let actual = region(&pixels, (x, 5, 1, 1))[0];
+                let expected = expected_badge_pixel(&[tile], region(&baseline, (x, 5, 1, 1))[0]);
+                assert!(
+                    (0..3).all(|c| actual[c].abs_diff(expected[c]) <= 2),
+                    "status pill must have a flat interior near both ends: {actual:?} vs {expected:?}"
+                );
+            }
             let badge = region(&pixels, badge_roi);
             if status == "online" {
                 glyphs.insert(theme, region(&pixels, (7, 10, 20, 20)));

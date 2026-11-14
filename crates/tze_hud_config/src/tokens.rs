@@ -512,6 +512,11 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "39",
     },
     CanonicalToken {
+        key: "status.pill.radius",
+        description: "Status pill circular end radius, half its inset height",
+        default_value: "19.5",
+    },
+    CanonicalToken {
         key: "status.marker.x",
         description: "Status marker centre x",
         default_value: "17",

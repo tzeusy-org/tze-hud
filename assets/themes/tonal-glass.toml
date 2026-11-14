@@ -273,6 +273,7 @@
 "status.edge.inset" = "0.5"
 "status.edge.width" = "319"
 "status.edge.height" = "39"
+"status.pill.radius" = "19.5"
 "status.marker.x" = "17"
 "status.marker.y" = "20"
 "status.marker.radius" = "5"
