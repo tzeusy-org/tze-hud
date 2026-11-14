@@ -3871,6 +3871,7 @@ dependencies = [
  "thiserror 2.0.18",
  "toml 0.8.23",
  "tracing",
+ "tze_hud_config",
  "tze_hud_resource",
  "tze_hud_scene",
 ]

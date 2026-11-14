@@ -167,8 +167,8 @@ pub struct RawHoverBehavior {
 /// Normalized rectangle in widget-local coordinates.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RawNormalizedRect {
-    pub x_pct: Option<f32>,
-    pub y_pct: Option<f32>,
-    pub width_pct: Option<f32>,
-    pub height_pct: Option<f32>,
+    pub x_pct: Option<RawNumber>,
+    pub y_pct: Option<RawNumber>,
+    pub width_pct: Option<RawNumber>,
+    pub height_pct: Option<RawNumber>,
 }

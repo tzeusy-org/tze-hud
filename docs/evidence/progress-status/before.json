@@ -1,0 +1,122 @@
+{
+  "captured_at": "2026-11-14T18:36:22.217689+00:00",
+  "source": "paired owner own-frame admin screenshot",
+  "fixture": ".claude/skills/user-test/scripts/progress-status-restyle-test.json",
+  "fixture_sha256": "90f616ee3590d063cec5bc0acf6bc9cb3e5baccbf22ced71fd309b4b77e8d807",
+  "settings_changed": false,
+  "input_read_or_acknowledged": false,
+  "cleanup": "finite TTL expiry only",
+  "theme": "existing owner selection, unchanged and not exposed by status",
+  "scale": "existing owner scale, unchanged and not exposed by status",
+  "frames": [
+    {
+      "file": "before-owner-01.png",
+      "fixture_index": 0,
+      "widget": "main-progress",
+      "sha256": "6afc2ea5265c4c862666ebebb35ed3f3a850914aedbc3783450f38db90a00a13",
+      "bytes": 169190,
+      "dimensions": [
+        3840,
+        2160
+      ],
+      "publish": {
+        "expires_in_ms": 14999,
+        "ok": true
+      }
+    },
+    {
+      "file": "before-owner-02.png",
+      "fixture_index": 1,
+      "widget": "main-progress",
+      "sha256": "edf5225e2af0a6c44cd3c3d2c48f8facd089885c4a63c0d4829ca9d2a59210c5",
+      "bytes": 176489,
+      "dimensions": [
+        3840,
+        2160
+      ],
+      "publish": {
+        "expires_in_ms": 14999,
+        "ok": true
+      }
+    },
+    {
+      "file": "before-owner-03.png",
+      "fixture_index": 2,
+      "widget": "main-progress",
+      "sha256": "327235a026318d34049ed99b9195bbeab5c7066b7b7d73d36d7fb2fa9a2bf9c1",
+      "bytes": 177802,
+      "dimensions": [
+        3840,
+        2160
+      ],
+      "publish": {
+        "expires_in_ms": 14999,
+        "ok": true
+      }
+    },
+    {
+      "file": "before-owner-04.png",
+      "fixture_index": 3,
+      "widget": "main-status",
+      "sha256": "689c83545b7ca484389035fc3ee3b6a82d24d014d7e97f0bfee557f9b76407fa",
+      "bytes": 170034,
+      "dimensions": [
+        3840,
+        2160
+      ],
+      "publish": {
+        "expires_in_ms": 14999,
+        "ok": true
+      }
+    },
+    {
+      "file": "before-owner-05.png",
+      "fixture_index": 4,
+      "widget": "main-status",
+      "sha256": "049be29d656aa596e01eab013bf0ad8efaec23ee4933e29153ddd409faf88902",
+      "bytes": 169680,
+      "dimensions": [
+        3840,
+        2160
+      ],
+      "publish": {
+        "expires_in_ms": 14999,
+        "ok": true
+      }
+    },
+    {
+      "file": "before-owner-06.png",
+      "fixture_index": 5,
+      "widget": "main-status",
+      "sha256": "2bf009c1bf9f91ed35d2a46b752b24acc1c773cd77159223629a58596323c7f9",
+      "bytes": 169758,
+      "dimensions": [
+        3840,
+        2160
+      ],
+      "publish": {
+        "expires_in_ms": 14999,
+        "ok": true
+      }
+    },
+    {
+      "file": "before-owner-07.png",
+      "fixture_index": 6,
+      "widget": "main-status",
+      "sha256": "52b4a0975d2f16f151d9a016b3e116a08413bb3d9faf07a7034728399af1515e",
+      "bytes": 169682,
+      "dimensions": [
+        3840,
+        2160
+      ],
+      "publish": {
+        "expires_in_ms": 14999,
+        "ok": true
+      }
+    }
+  ],
+  "build_sha": "24818c39c44dba4ffbe596aa1edc92d849f893d9",
+  "safe_mode": false,
+  "target_widgets_initially_rendered": [],
+  "ok": true
+}

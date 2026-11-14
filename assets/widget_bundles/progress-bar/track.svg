@@ -1,25 +1,28 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Static layer: the tonal card and the empty track. No bindings.
-
-     viewBox units are logical px (geometry scales the whole widget; the
-     production config draws it at 1.5x for a 4K panel). Card and type follow
-     the notification cards: surface.container.high at opacity.surface,
-     shape.m corners, title.m label. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 52" width="360" height="52">
+<!-- Static card and full empty track; viewBox units are logical dp. -->
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 {{token.progress.width}} {{token.progress.height}}"
+  width="{{token.progress.width}}"
+  height="{{token.progress.height}}">
   <rect
     id="card"
     data-role="backdrop"
-    x="0.5" y="0.5"
-    width="359" height="51"
-    rx="{{token.shape.m}}" ry="{{token.shape.m}}"
-    fill="{{token.color.surface.container.high}}"
+    x="{{token.progress.edge.inset}}"
+    y="{{token.progress.edge.inset}}"
+    width="{{token.progress.edge.width}}"
+    height="{{token.progress.edge.height}}"
+    rx="{{token.shape.m}}"
+    fill="{{token.color.surface.container.low}}"
     fill-opacity="{{token.opacity.surface}}"
     stroke="{{token.color.outline.variant}}"
     stroke-width="{{token.stroke.border.width}}"/>
   <rect
     id="track"
-    x="16" y="34"
-    width="328" height="6"
-    rx="3" ry="3"
+    x="{{token.progress.content.x}}"
+    y="{{token.progress.track.y}}"
+    width="{{token.progress.track.width}}"
+    height="{{token.progress.track.height}}"
+    rx="{{token.progress.track.radius}}"
     fill="{{token.color.outline.variant}}"/>
 </svg>

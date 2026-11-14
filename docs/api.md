@@ -1148,11 +1148,11 @@ records the result as `runtime.px_scale` (and `runtime.px_scale@<zone>`
 for a zone on a secondary), which config may not set.
 
 Widget bundles resolve placeholders at load in their SVG layers and in
-two `widget.toml` places: discrete `value_map` values (e.g. a status
-color) and string color defaults (`default = "{{token.color.primary}}"`;
-a literal `#RRGGBB[AA]` also works). The built-in gauge, progress-bar and
+`widget.toml`: discrete `value_map` values (e.g. a status color), string color
+defaults (`default = "{{token.color.primary}}"`; a literal `#RRGGBB[AA]` also
+works), numeric binding outputs, hover delay and normalized trigger rectangles. The built-in gauge, progress-bar and
 status-indicator draw tonal cards from the semantic roles
-(`color.surface.container.high`, `color.outline.variant`, `color.primary`,
+(`color.surface.container[.low]`, `color.outline.variant`, `color.primary`,
 status roles) and the `type.*` scale. The gauge is a 128x132 card
 (`color.surface.container`, `shape.l`) holding an 80x80 ring: a
 severity-colored arc on a `color.outline.variant` track, clockwise from
@@ -1161,6 +1161,20 @@ severity-colored arc on a `color.outline.variant` track, clockwise from
 shows `readout` in the label's place. All three bundles' SVG viewBox
 units are logical px; instance geometry sets the scale, and `production.toml`
 sizes them at 1.5x the viewBox on a 3840x2160 panel.
+
+Progress uses a 320×50 card with a `type.label.m` label and always-visible
+monospaced percentage above a 4dp track. The label is clipped to
+`progress.label.width` so a maximum-length label preserves the percent and
+right inset. Status uses a 40dp pill in its 320×124
+tooltip canvas: owner-selected marker, status name and clipped inline reason.
+`status.pill.radius` is half the pill's inner height (19.5dp by default), applied
+to both SVG radii. An owner changing pill/canvas dimensions must also keep
+`status.hover.height_pct` equal to pill height divided by canvas height so the
+hover target follows the visible pill.
+Online uses `color.success`, away/busy use `color.caution`, and offline uses
+`color.on_surface.variant`. Hover retains the owner label/reason tooltip.
+Both cards use `color.surface.container.low`; all geometry, paint, type and
+hover dwell come from tokens. Model parameters and their limits are unchanged.
 
 **A theme is a named set of token values, with no layout logic.** The
 built-in themes are `assets/themes/<name>.toml`, compiled into the exe:
@@ -1257,6 +1271,8 @@ color overrides still take precedence.
 | Notification card | `color.notification.container[.low]`, `color.notification[.caution\|.error].outline`, `color.on_notification.{variant,caution,error}`, `opacity.notification`, `shape.notification`, `space.notification`, `type.notification.{title,body}.{size,line_height,weight}` |
 | Alert banner | `color.alert.container`, `color.alert.{caution,error}.container`, `color.alert.outline`, `color.on_alert[.variant\|.error]`, `color.severity.{info,warning,critical}` (the severity mark), `opacity.alert`, `shape.alert`, `space.alert.{margin,horizontal,vertical}`, `type.alert.{title,body}.{size,line_height,weight}` |
 | Gauge ring | `gauge.{width,height,edge.*,ring.*,caption.y,hover.delay_ms}`, `type.gauge.readout.size` (centred percent; family and weight follow `type.readout`) |
+| Progress card | `progress.{width,height,edge.*,content.x,text.y,label.width,track.*,readout.*,hover.delay_ms}`, `type.label.m`, `type.readout.family` |
+| Status pill | `status.{width,height,pill.*,edge.*,marker.*,name.x,text.*,separator.*,reason.*,tooltip.*,hover.*}`, `type.body.m`, `type.label.m` |
 | Choice actions | `notification.action.link_mark` |
 | Motion | `motion.{enter,exit,state}.ms`, `motion.{enter,exit}.easing` (`linear`, `standard`, `decelerate`, `accelerate`) |
 | Shape | `shape.{xs,s,m,l,xl,full}` (corner radius) |
@@ -1542,11 +1558,13 @@ geometry: the production 128×132 logical ring replaces the bar box without a
 second DPI multiplier. `state.hidden.opacity` and `state.visible.opacity` control
 bound layer visibility.
 
-Numeric bundle binding outputs (`attr_min`/`attr_max`) and hover `delay_ms` accept
+Numeric bundle binding outputs (`attr_min`/`attr_max`), hover `delay_ms` and
+hover trigger rectangle components (`x_pct`, `y_pct`, `width_pct`, `height_pct`) accept
 numeric token placeholders as well as numbers. They resolve after TOML parsing;
 invalid/non-finite numeric tokens reject the bundle. Hover delay must be an
 integer in the u32 range. The gauge defaults to 180 ms; agents continue to use
 only the existing model parameters.
+Hover rectangles retain the normalized bounds check after token resolution.
 
 
 ## Design decisions (T5, 2026-10-02)

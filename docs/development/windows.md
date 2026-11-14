@@ -532,6 +532,15 @@ mode validates the bundle and typed parameters, then uses the existing retained
 table, with an explicit `--theme` taking precedence over its selector. Positive
 `--width`/`--height` are bounded to 8192 per axis and 16M pixels total.
 
+Fixture mode also accepts `--config FILE` to capture a local owner configuration,
+including widget `initial_params`, through production scene startup. It validates
+the file (at most 1MiB), resolves bundle paths and fonts relative to its directory,
+and starts no configured listeners or agents. Without this flag the embedded
+production config is used. Config design tokens are retained unless `--tokens`
+replaces that table; `--theme` then overrides its theme selector. The manifest
+records the source config hash as well as the resolved-token hash. Use a temporary
+copy for owner-style variants; the command does not change installed HUD settings.
+
 The batch accepts ordered zone/content or widget/params publishes, clears and
 holds. TTL, merge keys and supported delayed zone publication go through their
 existing owners; errors in response bodies fail the command. Scene mode builds
