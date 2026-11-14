@@ -3,12 +3,12 @@
        "card"  stroke <- severity (outline.variant / caution / error)
      The hairline is the card's own stroke, so fill and edge share one
      rasterizer. Ring: 80x80 box centred at (64,56), r=34, 6 wide. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 132" width="128" height="132">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {{token.gauge.width}} {{token.gauge.height}}" width="{{token.gauge.width}}" height="{{token.gauge.height}}">
   <rect
     id="card"
     data-role="backdrop"
-    x="0.5" y="0.5"
-    width="127" height="131"
+    x="{{token.gauge.edge.inset}}" y="{{token.gauge.edge.inset}}"
+    width="{{token.gauge.edge.width}}" height="{{token.gauge.edge.height}}"
     rx="{{token.shape.l}}" ry="{{token.shape.l}}"
     fill="{{token.color.surface.container}}"
     fill-opacity="{{token.opacity.surface}}"
@@ -16,8 +16,8 @@
     stroke-width="{{token.stroke.border.width}}"/>
   <circle
     id="track"
-    cx="64" cy="56" r="34"
+    cx="{{token.gauge.ring.cx}}" cy="{{token.gauge.ring.cy}}" r="{{token.gauge.ring.radius}}"
     fill="none"
     stroke="{{token.color.outline.variant}}"
-    stroke-width="6"/>
+    stroke-width="{{token.gauge.ring.stroke}}"/>
 </svg>

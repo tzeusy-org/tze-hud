@@ -328,6 +328,78 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Notification card inset in pixels: text, actions and dismiss from the card edge",
         default_value: "9",
     },
+    CanonicalToken {
+        key: "state.hidden.opacity",
+        description: "Hidden widget state",
+        default_value: "0",
+    },
+    CanonicalToken {
+        key: "state.visible.opacity",
+        description: "Visible widget state",
+        default_value: "1",
+    },
+    // Approved gauge geometry, in logical SVG units. The viewBox and all layers
+    // share these values; the widget instance supplies the final physical box.
+    CanonicalToken {
+        key: "gauge.width",
+        description: "Gauge logical card width",
+        default_value: "128",
+    },
+    CanonicalToken {
+        key: "gauge.height",
+        description: "Gauge logical card height",
+        default_value: "132",
+    },
+    CanonicalToken {
+        key: "gauge.edge.inset",
+        description: "Gauge hairline inset",
+        default_value: "0.5",
+    },
+    CanonicalToken {
+        key: "gauge.edge.width",
+        description: "Gauge inset card width",
+        default_value: "127",
+    },
+    CanonicalToken {
+        key: "gauge.edge.height",
+        description: "Gauge inset card height",
+        default_value: "131",
+    },
+    CanonicalToken {
+        key: "gauge.ring.cx",
+        description: "Gauge ring horizontal centre",
+        default_value: "64",
+    },
+    CanonicalToken {
+        key: "gauge.ring.cy",
+        description: "Gauge ring vertical centre",
+        default_value: "56",
+    },
+    CanonicalToken {
+        key: "gauge.ring.radius",
+        description: "Gauge ring centreline radius",
+        default_value: "34",
+    },
+    CanonicalToken {
+        key: "gauge.ring.stroke",
+        description: "Gauge ring stroke width",
+        default_value: "6",
+    },
+    CanonicalToken {
+        key: "gauge.ring.circumference",
+        description: "Gauge ring dash length; keep in sync with ring radius",
+        default_value: "213.63",
+    },
+    CanonicalToken {
+        key: "gauge.caption.y",
+        description: "Gauge caption baseline",
+        default_value: "112",
+    },
+    CanonicalToken {
+        key: "gauge.hover.delay_ms",
+        description: "Gauge hover dwell in milliseconds",
+        default_value: "180",
+    },
     // Stroke
     CanonicalToken {
         key: "stroke.outline.width",

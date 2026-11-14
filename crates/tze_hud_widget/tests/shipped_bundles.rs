@@ -38,6 +38,8 @@ fn shipped_tokens() -> HashMap<String, String> {
         ("color.error", "#FF8A80"),
         ("opacity.surface", "0.92"),
         ("state.hover.opacity", "0.08"),
+        ("state.hidden.opacity", "0"),
+        ("state.visible.opacity", "1"),
         ("stroke.border.width", "1"),
         ("shape.s", "8"),
         ("shape.m", "12"),
@@ -54,6 +56,18 @@ fn shipped_tokens() -> HashMap<String, String> {
         ("type.readout.size", "14"),
         ("type.readout.weight", "500"),
         ("type.gauge.readout.size", "18"),
+        ("gauge.width", "128"),
+        ("gauge.height", "132"),
+        ("gauge.edge.inset", "0.5"),
+        ("gauge.edge.width", "127"),
+        ("gauge.edge.height", "131"),
+        ("gauge.ring.cx", "64"),
+        ("gauge.ring.cy", "56"),
+        ("gauge.ring.radius", "34"),
+        ("gauge.ring.stroke", "6"),
+        ("gauge.ring.circumference", "213.63"),
+        ("gauge.caption.y", "112"),
+        ("gauge.hover.delay_ms", "180"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -348,7 +362,7 @@ fn shipped_hover_tooltips_share_the_gauge_delay() {
 /// Manifest color values name design tokens: discrete value maps and color
 /// defaults resolve against the token map at load.
 #[test]
-fn shipped_manifest_colors_resolve_from_tokens() {
+fn shipped_manifest_styling_resolves_from_tokens() {
     let tokens = shipped_tokens();
     let gauge = load_shipped("gauge").definition;
     // (target, info role): severity colors the hairline and the arc.
@@ -388,6 +402,64 @@ fn shipped_manifest_colors_resolve_from_tokens() {
             "{name}: fill_color defaults to color.primary"
         );
     }
+
+    // Numeric style fields resolve once against the same owner token map as
+    // SVG geometry, with finite/range validation before they reach rendering.
+    let mut numeric = tokens.clone();
+    numeric.insert("gauge.ring.circumference".into(), "111.25".into());
+    numeric.insert("gauge.hover.delay_ms".into(), "371".into());
+    let BundleScanResult::Ok(restyled) =
+        load_bundle_dir_with_tokens(&shipped_path("gauge"), &numeric)
+    else {
+        panic!("numeric design tokens must load");
+    };
+    assert_eq!(restyled.definition.hover_behavior.unwrap().delay_ms, 371);
+    for binding in restyled
+        .definition
+        .layers
+        .iter()
+        .flat_map(|l| &l.bindings)
+        .filter(|b| b.param == "level" && b.target_attribute == "stroke-dashoffset")
+    {
+        assert_eq!(
+            binding.mapping,
+            WidgetBindingMapping::Linear {
+                attr_min: 111.25,
+                attr_max: 0.0
+            }
+        );
+    }
+    for (key, values) in [
+        (
+            "gauge.ring.circumference",
+            &["nan", "inf", "red", "1e99"][..],
+        ),
+        (
+            "gauge.hover.delay_ms",
+            &["-1", "1.5", "4294967296", "nan"][..],
+        ),
+    ] {
+        for value in values {
+            let mut bad = tokens.clone();
+            bad.insert(key.into(), (*value).into());
+            let error = expect_err(load_bundle_dir_with_tokens(&shipped_path("gauge"), &bad));
+            assert_eq!(
+                error.wire_code(),
+                "WIDGET_BUNDLE_INVALID_MANIFEST",
+                "{key}={value}"
+            );
+        }
+    }
+    let mut missing = tokens.clone();
+    missing.remove("gauge.ring.circumference");
+    assert_eq!(
+        expect_err(load_bundle_dir_with_tokens(
+            &shipped_path("gauge"),
+            &missing
+        ))
+        .wire_code(),
+        "WIDGET_BUNDLE_UNRESOLVED_TOKEN"
+    );
 
     let mut other = tokens.clone();
     other.insert("color.primary".into(), "#00FF0080".into());

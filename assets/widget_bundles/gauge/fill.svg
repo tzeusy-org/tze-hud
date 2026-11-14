@@ -14,19 +14,19 @@
      The arc runs clockwise from 12 o'clock over the track drawn by
      background.svg (centre 64,56, r=34; circumference 213.63). The rotation
      routes this layer through resvg, which draws the dash. -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 132" width="128" height="132">
-  <g id="info-arc-group" opacity="1">
-  <circle id="arc" cx="64" cy="56" r="34" fill="none" stroke="{{token.color.primary}}" stroke-width="6" stroke-linecap="round" stroke-dasharray="213.63 213.63" stroke-dashoffset="213.63" transform="rotate(-90 64 56)"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {{token.gauge.width}} {{token.gauge.height}}" width="{{token.gauge.width}}" height="{{token.gauge.height}}">
+  <g id="info-arc-group" opacity="{{token.state.visible.opacity}}">
+  <circle id="arc" cx="{{token.gauge.ring.cx}}" cy="{{token.gauge.ring.cy}}" r="{{token.gauge.ring.radius}}" fill="none" stroke="{{token.color.primary}}" stroke-width="{{token.gauge.ring.stroke}}" stroke-linecap="round" stroke-dasharray="{{token.gauge.ring.circumference}} {{token.gauge.ring.circumference}}" stroke-dashoffset="{{token.gauge.ring.circumference}}" transform="rotate(-90 {{token.gauge.ring.cx}} {{token.gauge.ring.cy}})"/>
   </g>
 
   <!-- Severity selects one arc, including its antialiased edges. -->
-  <g id="severity-arc-group" opacity="0">
-  <circle id="severity-arc" cx="64" cy="56" r="34" fill="none" stroke="{{token.color.primary}}" stroke-width="6" stroke-linecap="round" stroke-dasharray="213.63 213.63" stroke-dashoffset="213.63" transform="rotate(-90 64 56)"/>
+  <g id="severity-arc-group" opacity="{{token.state.hidden.opacity}}">
+  <circle id="severity-arc" cx="{{token.gauge.ring.cx}}" cy="{{token.gauge.ring.cy}}" r="{{token.gauge.ring.radius}}" fill="none" stroke="{{token.color.primary}}" stroke-width="{{token.gauge.ring.stroke}}" stroke-linecap="round" stroke-dasharray="{{token.gauge.ring.circumference}} {{token.gauge.ring.circumference}}" stroke-dashoffset="{{token.gauge.ring.circumference}}" transform="rotate(-90 {{token.gauge.ring.cx}} {{token.gauge.ring.cy}})"/>
   </g>
 
   <text
     id="percent"
-    x="64" y="56"
+    x="{{token.gauge.ring.cx}}" y="{{token.gauge.ring.cy}}"
     text-anchor="middle"
     dominant-baseline="central"
     font-family="{{token.type.readout.family}}, monospace"
@@ -34,11 +34,11 @@
     font-weight="{{token.type.readout.weight}}"
     fill="{{token.color.on_surface}}"><tspan id="percent-value">0</tspan>%</text>
 
-  <g id="label-group" opacity="1">
+  <g id="label-group" opacity="{{token.state.visible.opacity}}">
   <text
     id="label-text"
     data-role="text"
-    x="64" y="112"
+    x="{{token.gauge.ring.cx}}" y="{{token.gauge.caption.y}}"
     text-anchor="middle"
     dominant-baseline="central"
     font-family="{{token.type.label.m.family}}, sans-serif"
@@ -48,18 +48,18 @@
   </g>
 
   <!-- Hover: a state layer over the card; the readout replaces the label. -->
-  <g id="tooltip-group" opacity="0">
+  <g id="tooltip-group" opacity="{{token.state.hidden.opacity}}">
     <rect
       id="hover-layer"
-      x="0.5" y="0.5"
-      width="127" height="131"
+      x="{{token.gauge.edge.inset}}" y="{{token.gauge.edge.inset}}"
+      width="{{token.gauge.edge.width}}" height="{{token.gauge.edge.height}}"
       rx="{{token.shape.l}}" ry="{{token.shape.l}}"
       fill="{{token.color.on_surface}}"
       fill-opacity="{{token.state.hover.opacity}}"/>
     <text
       id="tooltip-readout"
       data-role="text"
-      x="64" y="112"
+      x="{{token.gauge.ring.cx}}" y="{{token.gauge.caption.y}}"
       text-anchor="middle"
       dominant-baseline="central"
       font-family="{{token.type.label.m.family}}, sans-serif"

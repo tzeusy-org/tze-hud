@@ -882,6 +882,12 @@ mod contention {
     /// The arc covers the level's share of the ring, clockwise from 12
     /// o'clock (round caps add up to ~3% at each end); level 0 draws none.
     #[test]
+    fn shipped_gauge_ring_raster_contract() {
+        shipped_gauge_ring_arc_tracks_level();
+        shipped_gauge_ring_colors_by_severity();
+        shipped_gauge_ring_percent_label_and_hover_readout();
+    }
+
     fn shipped_gauge_ring_arc_tracks_level() {
         let (_, _, tokens) = shipped_ring();
         let primary = rgb(&tokens["color.primary"]);
@@ -909,7 +915,6 @@ mod contention {
     /// Info uses the owner's fill_color (default color.primary); warning and
     /// error use their roles regardless of fill_color, on the arc and on the
     /// card's hairline (info: color.outline.variant).
-    #[test]
     fn shipped_gauge_ring_colors_by_severity() {
         let (_, _, tokens) = shipped_ring();
         let orange = WidgetParameterValue::Color(Rgba::new(1.0, 165.0 / 255.0, 0.0, 1.0));
@@ -944,7 +949,6 @@ mod contention {
 
     /// The centre shows the level as a percent; the label sits below the
     /// ring, and hover swaps it for the readout over a state layer.
-    #[test]
     fn shipped_gauge_ring_percent_label_and_hover_readout() {
         let label = |s: &str| ("label", WidgetParameterValue::String(s.into()));
         let readout = (

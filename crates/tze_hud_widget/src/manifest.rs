@@ -118,6 +118,14 @@ pub struct RawLayer {
     pub bindings: Vec<RawBinding>,
 }
 
+/// A number or an owner design-token placeholder, resolved once at bundle load.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(untagged)]
+pub enum RawNumber {
+    Number(f64),
+    Token(String),
+}
+
 /// A single parameter-to-SVG-attribute binding in `[[layers.bindings]]`.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct RawBinding {
@@ -132,9 +140,9 @@ pub struct RawBinding {
     /// For "threshold": compare an f32 value >= this number.
     pub threshold: Option<f64>,
     /// For "linear": minimum output. For "threshold": below output (default 0).
-    pub attr_min: Option<f64>,
+    pub attr_min: Option<RawNumber>,
     /// For "linear": maximum output. For "threshold": at-or-above output (default 1).
-    pub attr_max: Option<f64>,
+    pub attr_max: Option<RawNumber>,
     /// For "discrete" mapping: enum_value → attribute_value lookup table.
     /// Values may hold `{{token.key}}` placeholders, resolved at load.
     #[serde(default)]
@@ -147,7 +155,7 @@ pub struct RawHoverBehavior {
     /// Widget-local trigger rectangle in normalized coordinates.
     pub trigger_rect: Option<RawNormalizedRect>,
     /// Delay before visibility param is switched to `visible_value`.
-    pub delay_ms: Option<u32>,
+    pub delay_ms: Option<RawNumber>,
     /// Parameter name to drive on hover transitions.
     pub visibility_param: Option<String>,
     /// Value written when hover is inactive.

@@ -1231,7 +1231,7 @@ color overrides still take precedence.
 | State | `state.hover.opacity`, `state.pressed.opacity`, `focus.ring.width`, `focus.ring.offset` |
 | Notification card | `color.notification.container[.low]`, `color.notification[.caution\|.error].outline`, `color.on_notification.{variant,caution,error}`, `opacity.notification`, `shape.notification`, `space.notification`, `type.notification.{title,body}.{size,line_height,weight}` |
 | Alert banner | `color.alert.container`, `color.alert.{caution,error}.container`, `color.alert.outline`, `color.on_alert[.variant\|.error]`, `color.severity.{info,warning,critical}` (the severity mark), `opacity.alert`, `shape.alert`, `space.alert.{margin,horizontal,vertical}`, `type.alert.{title,body}.{size,line_height,weight}` |
-| Gauge ring | `type.gauge.readout.size` (centred percent; family and weight follow `type.readout`) |
+| Gauge ring | `gauge.{width,height,edge.*,ring.*,caption.y,hover.delay_ms}`, `type.gauge.readout.size` (centred percent; family and weight follow `type.readout`) |
 | Choice actions | `notification.action.link_mark` |
 | Motion | `motion.{enter,exit,state}.ms`, `motion.{enter,exit}.easing` (`linear`, `standard`, `decelerate`, `accelerate`) |
 | Shape | `shape.{xs,s,m,l,xl,full}` (corner radius) |
@@ -1507,6 +1507,21 @@ severity/status enums. Styling and hover state no longer spend discovery tokens:
   warning/error always use their theme tokens.
 - `tooltip_visible` stays in the bundle schema for runtime hover after 180 ms,
   with its declared SVG bindings. Agents neither discover nor publish it.
+
+
+The gauge card takes its logical geometry from `gauge.*` tokens and its centered
+percentage size from `type.gauge.readout.size`. Keep `gauge.ring.circumference`
+consistent with `2π × gauge.ring.radius` when overriding the ring. SVG units map
+once into the configured widget box. The Layout card reads that same instance
+geometry: the production 128×132 logical ring replaces the bar box without a
+second DPI multiplier. `state.hidden.opacity` and `state.visible.opacity` control
+bound layer visibility.
+
+Numeric bundle binding outputs (`attr_min`/`attr_max`) and hover `delay_ms` accept
+numeric token placeholders as well as numbers. They resolve after TOML parsing;
+invalid/non-finite numeric tokens reject the bundle. Hover delay must be an
+integer in the u32 range. The gauge defaults to 180 ms; agents continue to use
+only the existing model parameters.
 
 
 ## Design decisions (T5, 2026-10-02)
