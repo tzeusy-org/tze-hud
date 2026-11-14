@@ -797,8 +797,9 @@ mod tests {
         assert_eq!(settled.dimensions(), first.dimensions());
         // Canonical notification area starts at (75%, 5.5%), below the
         // main-status badge, and is 30% tall (59.4..383.4 px). Tonal Glass
-        // cards with a title and actions are 120px: `space.l` (16) padding,
-        // a 24px `type.title.m` line, a 20px `type.body.m` line, a `space.m`
+        // cards with a title and actions are 120px: `space.notification` (16)
+        // padding, a 24px `type.notification.title` line, a 20px
+        // `type.notification.body` line, a `space.m`
         // (12) gap and a 32px `space.xxl` action row, `space.s` (8) apart,
         // newest at the top. These interior regions exclude borders,
         // dismiss controls and the portal grip.

@@ -75,7 +75,7 @@ impl Compositor {
     ///   backdrop color with the urgency-derived `color.severity.*` token color.
     /// - For non-alert-banner zones with `Notification` content, overrides the
     ///   backdrop color with its urgency tone from [`NotificationStyle`]
-    ///   (semantic container roles at `opacity.surface`). Its hairline border is an
+    ///   (card container roles at `opacity.notification`). Its hairline border is an
     ///   SDF command from `collect_all_rounded_rect_cmds`.
     /// - Applies the zone's current animation opacity (fade-in/fade-out).
     /// - Skips the backdrop quad when `rendering_policy.backdrop` is `None`.

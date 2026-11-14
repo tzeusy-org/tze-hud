@@ -74,7 +74,7 @@ fn overlay(base: Option<Rgba>, layer: Rgba, opacity: f32) -> Rgba {
 /// Colours of one urgency level.
 #[derive(Clone, Copy, Debug)]
 pub(super) struct NotificationTone {
-    /// Card fill, `opacity.surface` already applied.
+    /// Card fill, `opacity.notification` already applied.
     pub(super) fill: Rgba,
     /// The 1 dp hairline.
     pub(super) outline: Rgba,
