@@ -5,14 +5,7 @@ use std::collections::HashMap;
 
 use tze_hud_scene::types::{FontFamily, NotificationPayload, RenderingPolicy};
 
-use super::Compositor;
-use super::notification_layout::NotificationActionLayout;
 use super::notification_style::NotificationStyle;
-use super::token_colors::{
-    NOTIFICATION_BODY_SCALE, NOTIFICATION_ICON_GAP_PX, NOTIFICATION_ICON_SIZE_PX,
-    NOTIFICATION_INSET_DEFAULT_PX, NOTIFICATION_INTER_LINE_GAP, NOTIFICATION_TITLE_WEIGHT,
-    is_alert_banner_zone, notification_inset,
-};
 
 /// One ellipsized text line band of a card.
 pub(super) struct NotificationTextBand<'a> {
@@ -37,40 +30,23 @@ pub(super) struct NotificationTextLayout<'a> {
     pub(super) bands: Vec<NotificationTextBand<'a>>,
 }
 
-/// Lay out a card's title/body bands. `global_tokens` and `zone_tokens` are
-/// the compositor's token map and the zone's monitor-scaled copy; `icon_shown`
-/// reserves the icon column. Bands are ellipsized one-line text (body may
-/// wrap only within its band height).
-#[allow(clippy::too_many_arguments)]
+/// Lay out a card's (or alert banner's) title/body bands. `zone_tokens` is
+/// the zone's monitor-scaled token map; `agent_icon` says whether the
+/// publication's own icon is drawn. The icon column is reserved for it or for
+/// the banner's severity mark. Bands are ellipsized one-line text.
 pub(super) fn notification_text_layout<'a>(
     zone_name: &str,
-    global_tokens: &HashMap<String, String>,
     zone_tokens: &HashMap<String, String>,
     policy: &RenderingPolicy,
     payload: &'a NotificationPayload,
-    zw: f32,
-    effective_slot_h: f32,
-    actions: &NotificationActionLayout,
-    icon_shown: bool,
-    scale: f32,
+    card_w: f32,
+    agent_icon: bool,
 ) -> NotificationTextLayout<'a> {
-    if is_alert_banner_zone(zone_name) {
-        return alert_banner_text_layout(
-            global_tokens,
-            zone_tokens,
-            policy,
-            payload,
-            zw,
-            effective_slot_h,
-            actions,
-            icon_shown,
-            scale,
-        );
-    }
-    let style = NotificationStyle::resolve(zone_tokens, policy);
+    let style = NotificationStyle::for_zone(zone_name, zone_tokens, policy);
+    let icon_shown = agent_icon || style.mark(payload.urgency, agent_icon).is_some();
     let left = style.text_left(icon_shown);
     // The × sits in the title row at the right padding.
-    let width = (zw - left - style.padding_h - style.dismiss_size - style.dismiss_gap).max(1.0);
+    let width = (card_w - left - style.padding_h - style.dismiss_size - style.dismiss_gap).max(1.0);
     let band = |field, text, y, role: super::notification_style::TextRole| NotificationTextBand {
         field,
         text,
@@ -82,8 +58,9 @@ pub(super) fn notification_text_layout<'a>(
     };
     let top = style.padding_v;
     let bands = if payload.title.is_empty() {
-        // A body-only card: its one line is the message, in the body role.
-        vec![band("body", &payload.text, top, style.body)]
+        // A lone line is the message: the body role on a card, the title
+        // role on an alert banner.
+        vec![band("body", &payload.text, top, style.lone)]
     } else {
         vec![
             band("title", &payload.title, top, style.title),
@@ -99,94 +76,6 @@ pub(super) fn notification_text_layout<'a>(
         x: left,
         width,
         font_family: policy.font_family.unwrap_or(FontFamily::SystemSansSerif),
-        bands,
-    }
-}
-
-/// Pre-restyle alert-banner text bands (hud-h51u7.4.2 restyles them).
-#[allow(clippy::too_many_arguments)]
-fn alert_banner_text_layout<'a>(
-    global_tokens: &HashMap<String, String>,
-    zone_tokens: &HashMap<String, String>,
-    policy: &RenderingPolicy,
-    payload: &'a NotificationPayload,
-    zw: f32,
-    effective_slot_h: f32,
-    actions: &NotificationActionLayout,
-    icon_shown: bool,
-    scale: f32,
-) -> NotificationTextLayout<'a> {
-    let inset_h = notification_inset(policy, scale);
-    let inset_v = policy
-        .margin_vertical
-        .or(policy.margin_px)
-        .unwrap_or(NOTIFICATION_INSET_DEFAULT_PX * scale);
-    let icon_width_reserved = if icon_shown {
-        (NOTIFICATION_ICON_SIZE_PX + NOTIFICATION_ICON_GAP_PX) * scale
-    } else {
-        0.0
-    };
-    // Font size: policy explicit > typography.body.size token > 16px
-    let font_size_px = policy
-        .font_size_px
-        .unwrap_or_else(|| Compositor::resolve_body_font_size(zone_tokens));
-    let font_family = policy.font_family.unwrap_or(FontFamily::SystemSansSerif);
-    // Alert banners have no ×.
-    let width = (zw - inset_h - icon_width_reserved - inset_h).max(1.0);
-    // Text stops above the action row (hud-mskx5).
-    let text_slot_h = (effective_slot_h - actions.reserve()).max(1.0);
-    let bands = if payload.title.is_empty() {
-        // Single-line rendering (backward-compatible).
-        vec![NotificationTextBand {
-            field: "body",
-            text: &payload.text,
-            y: inset_v,
-            height: (text_slot_h - inset_v * 2.0).max(1.0),
-            font_size_px,
-            font_weight: policy.font_weight.unwrap_or(400),
-            line_multiplier: None,
-        }]
-    } else {
-        // Two-line rendering: bold title + regular body, with the same
-        // resolved typography as the slot-height calculation.
-        let body_scale = global_tokens
-            .get("typography.notification.body.scale")
-            .and_then(|v| v.parse::<f32>().ok())
-            .filter(|v| v.is_finite())
-            .unwrap_or(NOTIFICATION_BODY_SCALE)
-            .clamp(0.5, 1.0);
-        let title_weight = global_tokens
-            .get("typography.notification.title.weight")
-            .and_then(|v| v.parse::<u16>().ok())
-            .unwrap_or(NOTIFICATION_TITLE_WEIGHT);
-        let title_line_h = font_size_px * 1.4;
-        let body_y = inset_v + title_line_h + NOTIFICATION_INTER_LINE_GAP * scale;
-        vec![
-            NotificationTextBand {
-                field: "title",
-                text: &payload.title,
-                y: inset_v,
-                height: title_line_h.max(1.0),
-                font_size_px,
-                font_weight: title_weight,
-                line_multiplier: None,
-            },
-            NotificationTextBand {
-                field: "body",
-                text: &payload.text,
-                y: body_y,
-                // Remaining slot height available for body (down to inset bottom).
-                height: ((text_slot_h - inset_v) - body_y).max(1.0),
-                font_size_px: font_size_px * body_scale,
-                font_weight: 400,
-                line_multiplier: None,
-            },
-        ]
-    };
-    NotificationTextLayout {
-        x: inset_h + icon_width_reserved,
-        width,
-        font_family,
         bands,
     }
 }

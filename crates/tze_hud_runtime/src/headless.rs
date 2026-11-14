@@ -1573,7 +1573,6 @@ default_tab = true
 [design_tokens]
 "color.text.primary" = "#FF0000"
 "color.severity.warning" = "#00FF00"
-"color.backdrop.default" = "#0000FF"
 "opacity.backdrop.default" = "0.5"
 "stroke.outline.width" = "2.0"
 "color.outline.default" = "#FFFF00"

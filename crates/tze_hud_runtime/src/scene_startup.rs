@@ -400,7 +400,6 @@ default_tab = true
 
 [design_tokens]
 "color.text.primary" = "#FFFFFF"
-"color.backdrop.default" = "#000000"
 "opacity.backdrop.default" = "0.7"
 "stroke.outline.width" = "2.0"
 "color.outline.default" = "#FFFF00"

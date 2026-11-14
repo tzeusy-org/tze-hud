@@ -509,7 +509,7 @@ async fn notification_action_row_follows_a_themed_inset() {
 }
 
 async fn check_notification_action_row(margin: Option<f32>) {
-    use crate::renderer::notification_style::{DISMISS_GLYPH, NotificationStyle};
+    use crate::renderer::notification_style::DISMISS_GLYPH;
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
 
@@ -633,7 +633,10 @@ async fn check_notification_action_row(margin: Option<f32>) {
     // Zone: x = 0.6 * 1280, y = 0, w = 0.35 * 1280, h = 0.8 * 720.
     let (zx, zy, zw, zh) = (768.0_f32, 0.0_f32, 448.0_f32, 576.0_f32);
     let layout = compositor.zone_slot_layout("notification-area", &publishes, &policy, zh, zw);
-    let cards: Vec<(usize, f32, f32)> = layout.iter_visible(zy).collect();
+    let cards: Vec<(usize, f32, f32)> = layout
+        .iter_visible(Rect::new(zx, zy, zw, zh))
+        .map(|(i, c)| (i, c.y, c.height))
+        .collect();
     assert_eq!(cards.len(), 3, "all three cards are visible");
     for pair in cards.windows(2) {
         let (_, top_y, top_h) = pair[0];
@@ -921,7 +924,7 @@ async fn test_notification_with_opaque_backdrop() {
 /// color.severity.warning (amber/yellow), NOT the policy backdrop.
 /// We verify by inspecting the vertices emitted by render_zone_content.
 #[tokio::test]
-async fn test_alert_banner_urgency2_maps_to_severity_warning() {
+async fn test_alert_banner_urgency2_maps_to_alert_caution_container() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
 
     let mut scene = SceneGraph::new(1280.0, 720.0);
@@ -981,45 +984,39 @@ async fn test_alert_banner_urgency2_maps_to_severity_warning() {
         "expected backdrop vertices for alert-banner urgency=2"
     );
 
-    // Verify urgency_to_severity_color directly (no token map → fallback constants).
-    let no_tokens = HashMap::new();
-    let warning_color = urgency_to_severity_color(2, &no_tokens);
+    // The urgency-2 tone is the alert caution container (canonical: Tonal
+    // Glass's surface.container.high; the severity mark carries caution).
+    let style =
+        NotificationStyle::for_zone("alert-banner", &HashMap::new(), &RenderingPolicy::default());
+    let caution = parse_hex_color("#222833").unwrap();
+    let fill = style.tone(2).fill;
+    assert_eq!((fill.r, fill.g, fill.b), (caution.r, caution.g, caution.b));
     assert!(
-        warning_color.r > 0.9,
-        "warning severity R should be ~1.0 (amber)"
-    );
-    assert!(
-        warning_color.g > 0.5,
-        "warning severity G should be >0.5 (amber)"
-    );
-    assert!(
-        warning_color.b < 0.1,
-        "warning severity B should be ~0.0 (amber)"
+        style.mark(2, false).is_some(),
+        "urgency 2 shows the caution severity mark"
     );
 }
 
-/// Alert-banner urgency=3 maps to critical (red).
+/// Alert-banner urgency=3 fills with the alert error container.
 #[tokio::test]
-async fn test_alert_banner_urgency3_maps_to_severity_critical() {
-    let no_tokens = HashMap::new();
-    let critical = urgency_to_severity_color(3, &no_tokens);
-    assert!(critical.r > 0.9, "critical R should be ~1.0");
-    assert!(critical.g < 0.1, "critical G should be ~0.0");
-    assert!(critical.b < 0.1, "critical B should be ~0.0");
+async fn test_alert_banner_urgency3_maps_to_alert_error_container() {
+    let style =
+        NotificationStyle::for_zone("alert-banner", &HashMap::new(), &RenderingPolicy::default());
+    let error = parse_hex_color("#5C1A17").unwrap();
+    let fill = style.tone(3).fill;
+    assert_eq!((fill.r, fill.g, fill.b), (error.r, error.g, error.b));
 }
 
-/// Alert-banner urgency=0 and 1 both map to info (blue).
+/// Alert-banner urgency=0 and 1 share the info tone (fill and mark).
 #[tokio::test]
 async fn test_alert_banner_urgency_low_maps_to_info() {
-    let no_tokens = HashMap::new();
-    let info0 = urgency_to_severity_color(0, &no_tokens);
-    let info1 = urgency_to_severity_color(1, &no_tokens);
-    // Info color is blue-ish (#4A9EFF).
-    assert!(info0.b > 0.9, "info urgency=0 should be blue");
-    assert!(info1.b > 0.9, "info urgency=1 should be blue");
-    // Both should be the same color.
-    assert_eq!(info0.r, info1.r);
-    assert_eq!(info0.b, info1.b);
+    let style =
+        NotificationStyle::for_zone("alert-banner", &HashMap::new(), &RenderingPolicy::default());
+    let (info0, info1) = (style.tone(0), style.tone(1));
+    assert_eq!(info0.fill, info1.fill);
+    assert_eq!(info0.mark, info1.mark);
+    assert_eq!(severity_glyph(0), severity_glyph(1));
+    assert_ne!(severity_glyph(1), severity_glyph(2));
 }
 
 /// notification-area does NOT use urgency-to-severity mapping (color.severity.*).
@@ -1105,7 +1102,6 @@ async fn test_notification_area_does_not_use_severity_tokens() {
 /// restyles the card (sRGB hex decoded to linear) at `opacity.notification`.
 #[test]
 fn test_notification_urgency_color_tokens() {
-    use crate::renderer::notification_style::NotificationStyle;
     let policy = RenderingPolicy::default();
     let style = NotificationStyle::resolve(&HashMap::new(), &policy);
     let rgb = |c: Rgba| (c.r, c.g, c.b);
@@ -1459,11 +1455,23 @@ async fn test_rounded_card_border_follows_the_corner() {
     );
 }
 
-/// alert-banner gets no border — the card border is only for
-/// non-alert-banner notification zones.
+/// An alert banner whose `color.alert.outline` and `color.severity.*` are
+/// transparent (Classic's legacy strip) draws neither a hairline nor a
+/// severity mark: only its flat backdrop quad.
 #[tokio::test]
-async fn test_alert_banner_has_no_border() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+async fn test_alert_banner_transparent_roles_draw_no_border_or_mark() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    compositor.set_token_map(
+        [
+            "color.alert.outline",
+            "color.severity.info",
+            "color.severity.warning",
+            "color.severity.critical",
+        ]
+        .into_iter()
+        .map(|k| (k.to_owned(), "#00000000".to_owned()))
+        .collect(),
+    );
 
     let mut scene = SceneGraph::new(1280.0, 720.0);
     scene.register_zone(ZoneDefinition {
@@ -1563,44 +1571,82 @@ async fn test_notification_area_border_uses_border_default_token() {
 
 // ── Token-resolved severity color tests ───────────────────────────────────
 
-/// `color.severity.*` tokens override the fallback constants (info covers urgency
-/// 0 and 1); an invalid token value is ignored and the constant stays.
+/// The alert roles override their canonical values (info covers urgency 0
+/// and 1); an invalid value is ignored and the canonical value stays. A
+/// transparent `color.severity.*` draws no mark.
 #[test]
-fn test_severity_color_tokens_override_or_fall_back() {
+fn test_alert_role_tokens_override_or_fall_back() {
     // (urgencies, token, value, expected linear rgb within 0.1)
     let cases: [(&[u32], &str, &str, [f32; 3]); 4] = [
-        (&[2], "warning", "#00FF00", [0.0, 1.0, 0.0]),
-        (&[3], "critical", "#FF00FF", [1.0, 0.0, 1.0]),
-        (&[0, 1], "info", "#FF0000", [1.0, 0.0, 0.0]),
-        // Fallback SEVERITY_WARNING (#FFB800): linear R 1.0, G ~0.72, B 0.0.
-        (&[2], "warning", "not-a-color", [1.0, 0.72, 0.0]),
+        (
+            &[2],
+            "color.alert.caution.container",
+            "#00FF00",
+            [0.0, 1.0, 0.0],
+        ),
+        (
+            &[3],
+            "color.alert.error.container",
+            "#FF00FF",
+            [1.0, 0.0, 1.0],
+        ),
+        (&[0, 1], "color.alert.container", "#FF0000", [1.0, 0.0, 0.0]),
+        // Canonical #222833: linear ~(0.016, 0.021, 0.033).
+        (
+            &[2],
+            "color.alert.caution.container",
+            "not-a-color",
+            [0.016, 0.021, 0.033],
+        ),
     ];
-    for (urgencies, name, value, expected) in cases {
-        let tokens = HashMap::from([(format!("color.severity.{name}"), value.to_string())]);
+    for (urgencies, key, value, expected) in cases {
+        let tokens = HashMap::from([(key.to_string(), value.to_string())]);
+        let style =
+            NotificationStyle::for_zone("alert-banner", &tokens, &RenderingPolicy::default());
         for &urgency in urgencies {
-            let c = urgency_to_severity_color(urgency, &tokens);
+            let c = style.tone(urgency).fill;
             for (got, want) in [c.r, c.g, c.b].into_iter().zip(expected) {
                 assert!(
                     (got - want).abs() < 0.1,
-                    "{name}={value} urgency={urgency}: got {c:?}"
+                    "{key}={value} urgency={urgency}: got {c:?}"
                 );
             }
         }
     }
+    let hidden = HashMap::from([(
+        "color.severity.warning".to_string(),
+        "#00000000".to_string(),
+    )]);
+    let style = NotificationStyle::for_zone("alert-banner", &hidden, &RenderingPolicy::default());
+    assert!(style.mark(2, false).is_none(), "transparent tint: no mark");
+    assert!(style.mark(3, false).is_some());
+    assert!(
+        style.mark(3, true).is_none(),
+        "an agent icon takes the column"
+    );
+    // Cards never draw a mark.
+    assert!(
+        NotificationStyle::resolve(&HashMap::new(), &RenderingPolicy::default())
+            .mark(3, false)
+            .is_none()
+    );
 }
 
-/// Custom severity tokens in [design_tokens] affect alert-banner backdrop colors.
+/// Custom alert role tokens in [design_tokens] affect alert-banner backdrop colors.
 ///
 /// This is the end-to-end integration test: `set_token_map` populates the
 /// compositor, and `render_zone_content` uses the token-resolved color for the
 /// alert-banner backdrop.
 #[tokio::test]
-async fn test_custom_severity_tokens_affect_alert_banner_backdrop() {
+async fn test_custom_alert_tokens_affect_alert_banner_backdrop() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
 
     // Install a custom token map: override warning with pure green (#00FF00).
     let mut token_map = HashMap::new();
-    token_map.insert("color.severity.warning".to_string(), "#00FF00".to_string());
+    token_map.insert(
+        "color.alert.caution.container".to_string(),
+        "#00FF00".to_string(),
+    );
     compositor.set_token_map(token_map);
 
     let mut scene = SceneGraph::new(1280.0, 720.0);

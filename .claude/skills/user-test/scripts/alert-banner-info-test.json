@@ -1,0 +1,13 @@
+[
+  {
+    "zone": "alert-banner",
+    "content": {
+      "type": "notification",
+      "text": "HUD fixture \u00b7 Info: system nominal",
+      "icon": "",
+      "urgency": 1
+    },
+    "key": "alert-banner-severity-capture",
+    "ttl_ms": 15000
+  }
+]

@@ -123,6 +123,31 @@
 "type.notification.body.line_height"  = "20"
 "type.notification.body.weight"       = "400"
 
+# Alert banner roles: an inset surface card; the severity mark (a ringed
+# glyph tinted color.severity.*) carries info and caution, the error
+# container critical.
+"color.alert.container"          = "#222833"   # surface.container.high
+"color.alert.caution.container"  = "#222833"   # surface.container.high: the mark carries caution
+"color.alert.error.container"    = "#5C1A17"   # error.container
+"color.alert.outline"            = "#343B47"   # outline.variant
+"color.on_alert"                 = "#E8EBF0"   # on_surface
+"color.on_alert.variant"         = "#A9B1BE"   # on_surface.variant
+"color.on_alert.error"           = "#FFDAD6"   # on_error.container
+"color.severity.info"            = "#8AB4FF"   # primary
+"color.severity.warning"         = "#F2C14E"   # caution
+"color.severity.critical"        = "#FF8A80"   # error
+"opacity.alert"                  = "0.92"      # opacity.surface
+"shape.alert"                    = "12"        # shape.m
+"space.alert.margin"             = "16"        # space.l
+"space.alert.horizontal"         = "16"        # space.l
+"space.alert.vertical"           = "12"        # space.m
+"type.alert.title.size"          = "16"        # type.title.m
+"type.alert.title.line_height"   = "24"
+"type.alert.title.weight"        = "600"
+"type.alert.body.size"           = "14"        # type.body.m
+"type.alert.body.line_height"    = "20"
+"type.alert.body.weight"         = "400"
+
 # ── Legacy keys the current renderer reads ──────────────────────────────────
 # Mapped onto the semantic palette so today's elements pick up Tonal Glass
 # colours before they are restyled (hud-h51u7.4). Delete each mapping when
@@ -131,14 +156,6 @@
 "color.text.secondary"                = "#A9B1BE"   # on_surface.variant
 "color.text.accent"                   = "#8AB4FF"   # primary
 "color.border.default"                = "#343B47"   # outline.variant
-"color.backdrop.default"              = "#222833"   # surface.container.high
-"color.severity.info"                 = "#8AB4FF"   # primary
-"color.severity.warning"              = "#F2C14E"   # caution
-"color.severity.error"                = "#FF8A80"   # error
-"color.on_severity.info"              = "#0F1216"   # surface: dark text on the light severity fills
-"color.on_severity.warning"           = "#0F1216"
-"color.on_severity.critical"          = "#0F1216"
-"opacity.backdrop.opaque"             = "0.92"      # opacity.surface
 "border.radius.medium"                = "16"        # shape.l
 "portal.divider.color"                = "#343B47"   # outline.variant
 "system_card.background"              = "#222833EB" # surface.container.high @ 0.92
@@ -157,18 +174,15 @@
 "tile.close_button.size_px"  = "32"
 "tile.close_button.margin_px" = "8"
 
-# Status-bar and alert-banner text, about 1.3x the pre-theme production
-# config for the 4K/150% panel (notification cards read type.* roles).
+# Status-bar text, about 1.3x the pre-theme production config for the
+# 4K/150% panel (notification cards and alert banners read type.* roles).
 "typography.body.size"                 = "20"
-"typography.notification.action.font_size_px"  = "16"
 
 # Carried over unchanged from the pre-theme production config (restyled in
 # hud-h51u7.4).
 "typography.body.weight"               = "500"
 "spacing.padding.medium"               = "10"
 "spacing.notification.inset"          = "16"
-"typography.notification.body.scale"   = "0.90"
-"typography.notification.title.weight" = "700"
 
 # Portal color overrides: the existing accepted portal-key exception.
 # Same-theme roles retain neutral structure and existing status meanings.

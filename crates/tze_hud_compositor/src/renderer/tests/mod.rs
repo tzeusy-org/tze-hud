@@ -1,3 +1,4 @@
+use super::notification_style::{NotificationStyle, severity_glyph};
 use super::*;
 use crate::surface::HeadlessSurface;
 use image_cache::{

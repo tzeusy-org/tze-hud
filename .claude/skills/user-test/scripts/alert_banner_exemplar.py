@@ -14,11 +14,11 @@ Sequence:
   2. Warning  (urgency=2) — "Warning: disk space low"          + 3s pause
   3. Critical (urgency=3) — "CRITICAL: security breach detected"
 
-Expected visual after all 3 publishes:
-  - Critical (red)   at top
-  - Warning  (amber) in middle
-  - Info     (blue)  at bottom
-  All three visible simultaneously until TTL expires.
+The default zone admits one banner per publisher. This sequence replaces one
+run-specific key: observe info, caution, then critical in turn; only critical
+remains after the final publish. A severity stack requires distinct publishers
+and is covered by the headless ordering tests. Under Tonal Glass each banner
+is an inset card with a tinted severity mark; Classic uses coloured strips.
 
 Usage:
   alert_banner_exemplar.py
@@ -119,6 +119,7 @@ def publish_alert(
     text: str,
     urgency: int,
     ttl_ms: int,
+    key: str,
 ) -> dict[str, Any]:
     """Publish a single notification to the alert-banner zone."""
     content: dict[str, Any] = {
@@ -131,6 +132,7 @@ def publish_alert(
         "surface": f"zone:{ZONE_NAME}",
         "content": content,
         "ttl_ms": ttl_ms,
+        "key": key,
     }
     response = rpc_call(url, token, "hud_publish", params, req_id)
     ok = "error" not in response
@@ -159,7 +161,7 @@ def run_sequence(url: str, token: str, ttl_ms: int) -> bool:
         flush=True,
     )
     req_id = 10
-    any_failed = False
+    key = f"alert-banner-exemplar:{time.time_ns()}"
 
     for idx, (label, text, urgency) in enumerate(ALERTS):
         response = publish_alert(
@@ -170,9 +172,10 @@ def run_sequence(url: str, token: str, ttl_ms: int) -> bool:
             text=text,
             urgency=urgency,
             ttl_ms=ttl_ms,
+            key=key,
         )
         if "error" in response:
-            any_failed = True
+            return False
         req_id += 1
 
         # Pause between publishes (skip after the last one)
@@ -183,7 +186,7 @@ def run_sequence(url: str, token: str, ttl_ms: int) -> bool:
             )
             time.sleep(INTER_PUBLISH_DELAY_S)
 
-    return not any_failed
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -218,8 +221,8 @@ def parse_args() -> argparse.Namespace:
         metavar="MS",
         help=(
             f"Per-alert TTL in milliseconds (default: {DEFAULT_TTL_MS})."
-            " All three alerts are published within ~6s, so TTL should be"
-            " long enough for all to be visible simultaneously."
+            " Each publish replaces the prior banner; TTL covers the current"
+            " severity until the next publish or expiry."
         ),
     )
     return parser.parse_args()

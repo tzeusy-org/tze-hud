@@ -164,12 +164,15 @@ async fn test_alert_banner_stacks_by_severity_then_recency() {
             items.windows(2).all(|w| w[0].pixel_y < w[1].pixel_y),
             "slots must descend the screen in order"
         );
-        // The zone's heading typography reaches every TextItem: size, weight and
-        // the horizontal inset from the full-width zone's left edge (x = 0).
+        // The zone's typography reaches every TextItem: size, weight and the
+        // text's left edge in the full-width zone (x = 0): the canonical
+        // `space.alert.margin` (16) inset, the policy's 8 dp
+        // margin_horizontal, then the severity mark's `space.xl` (24) column
+        // and its `space.m` (12) gap.
         for item in &items {
             assert_eq!(item.font_size_px, 24.0, "policy font size");
             assert_eq!(item.font_weight, 700, "policy font weight");
-            assert_eq!(item.pixel_x, 8.0, "margin_horizontal inset");
+            assert_eq!(item.pixel_x, 16.0 + 8.0 + 24.0 + 12.0, "text left edge");
         }
     }
 }
@@ -246,21 +249,23 @@ async fn test_alert_banner_zone_height_grows_with_active_count() {
     }
 }
 
-/// Banner text takes the `color.on_severity.*` color for its urgency (the
-/// counterpart of its severity fill) over the policy text color, and draws no
-/// outline.
+/// Banner text takes its alert text role for its urgency (`color.on_alert`
+/// for a lone line at urgency 0-2, `color.on_alert.error` at 3) over the
+/// policy text color, draws no outline, and the severity mark draws its
+/// glyph in the severity tint.
 #[tokio::test]
-async fn test_alert_banner_text_uses_on_severity_color() {
+async fn test_alert_banner_text_uses_alert_text_roles() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    // The severity mark's glyph is a text item only with a rasterizer.
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
     compositor.set_token_map(
         [
-            ("color.on_severity.warning".to_owned(), "#000000".to_owned()),
-            (
-                "color.on_severity.critical".to_owned(),
-                "#FFFFFF".to_owned(),
-            ),
+            ("color.on_alert", "#000000"),
+            ("color.on_alert.error", "#FFFFFF"),
+            ("color.severity.warning", "#00FF00"),
         ]
         .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
         .collect(),
     );
     let mut scene = make_alert_banner_scene();
@@ -276,4 +281,103 @@ async fn test_alert_banner_text_uses_on_severity_color() {
     assert_eq!(item("Disk almost full").color[..3], [0, 0, 0]);
     assert_eq!(item("Service down").color[..3], [255, 255, 255]);
     assert!(item("Disk almost full").outline_color.is_none());
+    // The caution mark's `!` sits left of the caution text, in its tint.
+    let mark = items
+        .iter()
+        .find(|i| &*i.text == "!" && i.color[..3] == [0, 255, 0])
+        .expect("caution severity mark glyph");
+    assert!(mark.pixel_x < item("Disk almost full").pixel_x);
+}
+
+/// A Tonal Glass banner is an inset card: drawn backdrop, hit-tested card
+/// bounds and dismiss × all use the `space.alert.margin` inset, and banners
+/// stack that margin apart below a top margin.
+#[tokio::test]
+async fn test_alert_banner_is_an_inset_card_matching_its_hit_regions() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    compositor.set_token_map(HashMap::from([(
+        "space.alert.margin".to_owned(),
+        "16".to_owned(),
+    )]));
+    let mut scene = make_alert_banner_scene();
+    {
+        let zone = scene.zone_registry.zones.get_mut("alert-banner").unwrap();
+        zone.rendering_policy.backdrop_radius = Some(10.0);
+    }
+    publish_alert(&mut scene, "Disk almost full", 2, "agent-a");
+    publish_alert(&mut scene, "Service down", 3, "agent-b");
+    compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);
+    let cards: Vec<Rect> = scene
+        .overlay
+        .notification_geometry
+        .iter()
+        .map(|g| g.bounds)
+        .collect();
+    assert_eq!(cards.len(), 2);
+    for card in &cards {
+        assert_eq!((card.x, card.width), (16.0, 1280.0 - 32.0), "side inset");
+    }
+    assert_eq!(cards[0].y, 16.0, "top inset");
+    assert_eq!(cards[1].y, cards[0].y + cards[0].height + 16.0, "stack gap");
+    let backdrops: Vec<_> = compositor
+        .collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0)
+        .chrome
+        .into_iter()
+        .filter(|c| c.radius == 10.0)
+        .map(|c| Rect::new(c.x, c.y, c.width, c.height))
+        .collect();
+    assert_eq!(backdrops, cards, "drawn backdrops are the hit-tested cards");
+    for (g, region) in scene.overlay.notification_geometry.iter().zip(
+        scene
+            .overlay
+            .zone_hit_regions
+            .iter()
+            .filter(|r| r.kind == ZoneInteractionKind::Dismiss),
+    ) {
+        assert_eq!(region.bounds, g.close, "dismiss hit region is the drawn ×");
+        assert!(g.close.x + g.close.width <= g.bounds.x + g.bounds.width);
+    }
+
+    // Frame priming and inset drawing must retain the same live-font action
+    // descriptor. Include flush Classic geometry and custom outer insets.
+    for margin in [0, 16, 32] {
+        compositor.set_token_map(HashMap::from([(
+            "space.alert.margin".to_owned(),
+            margin.to_string(),
+        )]));
+        let mut scene = make_alert_banner_scene();
+        scene
+            .publish_to_zone(
+                "alert-banner",
+                ZoneContent::Notification(NotificationPayload {
+                    text: "Choose a response".into(),
+                    actions: ["Inspect the service", "Keep monitoring"]
+                        .into_iter()
+                        .map(|label| NotificationAction {
+                            label: label.into(),
+                            callback_id: Some(label.into()),
+                            url: None,
+                        })
+                        .collect(),
+                    ..Default::default()
+                }),
+                "action-agent",
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
+        let _first = compositor.build_windowed_frame(&mut scene, 1280, 720);
+        let shapes = compositor.notification_layouts.borrow().shapes;
+        assert!(shapes > 0, "the action fixture must shape labels");
+        let _second = compositor.build_windowed_frame(&mut scene, 1280, 720);
+        assert_eq!(
+            compositor.notification_layouts.borrow().shapes,
+            shapes,
+            "unchanged inset banner actions retain their primed layout: margin={margin}"
+        );
+    }
 }

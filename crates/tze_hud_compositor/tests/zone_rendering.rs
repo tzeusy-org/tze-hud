@@ -161,66 +161,140 @@ async fn notification_icon_renders_only_when_bytes_registered() {
 
 // ─── Alert banner ────────────────────────────────────────────────────────────
 
-const ALERT_INFO: [u8; 4] = [78, 160, 245, 255];
-const ALERT_WARNING: [u8; 4] = [244, 211, 26, 255];
-const ALERT_CRITICAL: [u8; 4] = [244, 15, 26, 255];
-/// The zone's own backdrop, shown for content that carries no urgency.
-const ALERT_DEFAULT: [u8; 4] = [87, 87, 109, 255];
+struct AlertThemePixels {
+    name: &'static str,
+    tones: [[u8; 4]; 3],
+    centers_y: [u32; 3],
+    inset: bool,
+}
 
-// Slot centres on a 256x256 surface (slot_h = 37.6).
-const SLOT_Y: [u32; 3] = [18, 56, 94];
+// Explicit shipped-palette expectations, composited over CLEAR by llvmpipe.
+// Centres are inside each theme's card; Tonal Glass and Blueprint leave a
+// 16 dp outer margin and gap, while Classic retains flush coloured strips.
+const ALERT_THEMES: [AlertThemePixels; 3] = [
+    AlertThemePixels {
+        name: "tonal-glass",
+        tones: [[37, 42, 55, 255], [37, 42, 55, 255], [90, 31, 34, 255]],
+        centers_y: [40, 104, 168],
+        inset: true,
+    },
+    AlertThemePixels {
+        name: "blueprint",
+        tones: [[48, 52, 61, 255], [48, 52, 61, 255], [140, 42, 47, 255]],
+        centers_y: [38, 98, 158],
+        inset: true,
+    },
+    AlertThemePixels {
+        name: "classic",
+        tones: [[73, 152, 244, 255], [244, 176, 26, 255], [244, 15, 26, 255]],
+        centers_y: [16, 50, 84],
+        inset: false,
+    },
+];
 
-/// Urgency 0-1 map to the info colour, 2 to warning, 3 to critical; non-notification
-/// content keeps the zone's default backdrop instead of a severity colour.
+/// Use the real startup token/policy resolution, rather than the registry's
+/// intentionally unresolved defaults.
+fn alert_scene(gpu: &mut Gpu, theme: &str) -> SceneGraph {
+    let tokens = tze_hud_config::themes::resolve_config_tokens(
+        &[("theme".to_owned(), theme.to_owned())].into(),
+    );
+    let mut scene = default_scene(256, 256);
+    let policy = &mut scene
+        .zone_registry
+        .zones
+        .get_mut("alert-banner")
+        .unwrap()
+        .rendering_policy;
+    tze_hud_config::policy_builder::apply_alert_banner_token_defaults(policy, &tokens);
+    gpu.compositor.set_token_map(tokens);
+    scene
+}
+
+/// Urgency 0-1 use the neutral container, 2 the caution container and >=3
+/// the error container. Classic retains blue/amber/red strips; modern themes
+/// carry info/caution severity in their marks. Stream text keeps the base fill.
 #[tokio::test]
 async fn alert_banner_urgency_maps_to_severity_color() {
     let Some(mut gpu) = Gpu::new(256, 256).await else {
         return;
     };
-    let cases = [
-        (0, ALERT_INFO),
-        (1, ALERT_INFO),
-        (2, ALERT_WARNING),
-        (3, ALERT_CRITICAL),
-    ];
-    for (urgency, expected) in cases {
-        let mut scene = default_scene(256, 256);
-        publish_notification(&mut scene, "alert-banner", urgency, String::new(), "a");
-        gpu.render(&mut scene)
-            .expect(128, SLOT_Y[0], expected, 8, &format!("urgency {urgency}"));
+    for theme in &ALERT_THEMES {
+        for (urgency, tone) in [(0, 0), (1, 0), (2, 1), (3, 2), (5, 2)] {
+            let mut scene = alert_scene(&mut gpu, theme.name);
+            publish_notification(&mut scene, "alert-banner", urgency, String::new(), "a");
+            let frame = gpu.render(&mut scene);
+            let label = format!("{} urgency {urgency}", theme.name);
+            frame.expect(128, theme.centers_y[0], theme.tones[tone], 8, &label);
+            frame.expect(
+                4,
+                theme.centers_y[0],
+                if theme.inset {
+                    CLEAR
+                } else {
+                    theme.tones[tone]
+                },
+                8,
+                &format!("{label}: outer margin"),
+            );
+        }
+        let mut scene = alert_scene(&mut gpu, theme.name);
+        // Stream text keeps the explicit policy backdrop, independently of
+        // notification tones. A sentinel colour makes that contract observable.
+        let policy = &mut scene
+            .zone_registry
+            .zones
+            .get_mut("alert-banner")
+            .unwrap()
+            .rendering_policy;
+        policy.backdrop = Some(Rgba::new(0.1, 0.1, 0.16, 0.9));
+        policy.backdrop_opacity = Some(0.9);
+        publish(
+            &mut scene,
+            "alert-banner",
+            ZoneContent::StreamText("alert".into()),
+        );
+        gpu.render(&mut scene).expect(
+            128,
+            theme.centers_y[0],
+            [87, 87, 109, 255],
+            8,
+            &format!("{} stream text policy backdrop", theme.name),
+        );
     }
-
-    let mut scene = default_scene(256, 256);
-    publish(
-        &mut scene,
-        "alert-banner",
-        ZoneContent::StreamText("alert".into()),
-    );
-    gpu.render(&mut scene).expect(
-        128,
-        SLOT_Y[0],
-        ALERT_DEFAULT,
-        20,
-        "stream text default backdrop",
-    );
 }
 
-/// Banners stack by severity (critical on top) regardless of arrival order.
+/// Severity ordering remains critical/caution/info for all themes; the modern
+/// card inset/gaps and Classic's flush edge are actual painted geometry.
 #[tokio::test]
 async fn alert_banner_stacks_by_severity() {
     let Some(mut gpu) = Gpu::new(256, 256).await else {
         return;
     };
-    let mut scene = default_scene(256, 256);
-    for (urgency, agent) in [(1, "info"), (2, "warning"), (3, "critical")] {
-        publish_notification(&mut scene, "alert-banner", urgency, String::new(), agent);
-    }
-    let frame = gpu.render(&mut scene);
-    for (slot, expected) in [ALERT_CRITICAL, ALERT_WARNING, ALERT_INFO]
-        .into_iter()
-        .enumerate()
-    {
-        frame.expect(128, SLOT_Y[slot], expected, 8, &format!("slot {slot}"));
+    for theme in &ALERT_THEMES {
+        let mut scene = alert_scene(&mut gpu, theme.name);
+        for (urgency, agent) in [(1, "info"), (2, "warning"), (3, "critical")] {
+            publish_notification(&mut scene, "alert-banner", urgency, String::new(), agent);
+        }
+        let frame = gpu.render(&mut scene);
+        for (slot, tone) in [2, 1, 0].into_iter().enumerate() {
+            let label = format!("{} slot {slot}", theme.name);
+            frame.expect(128, theme.centers_y[slot], theme.tones[tone], 8, &label);
+            frame.expect(
+                4,
+                theme.centers_y[slot],
+                if theme.inset {
+                    CLEAR
+                } else {
+                    theme.tones[tone]
+                },
+                8,
+                &format!("{label}: outer margin"),
+            );
+        }
+        if theme.inset {
+            frame.expect(128, 8, CLEAR, 2, "top margin stays clear");
+            frame.expect(128, 72, CLEAR, 2, "inter-card gap stays clear");
+        }
     }
 }
 

@@ -2,10 +2,6 @@
 //! advanced shaping as the text rasterizer; unchanged frames only
 //! look up the publication's descriptor.
 use super::notification_style::NotificationStyle;
-use super::token_colors::{
-    NOTIFICATION_ACTION_BUTTON_H_PX, NOTIFICATION_ACTION_ROW_GAP_PX, is_alert_banner_zone,
-    notification_inset, resolve_notification_action_tokens,
-};
 use std::collections::HashMap;
 use tze_hud_scene::types::*;
 
@@ -115,7 +111,7 @@ struct LayoutInputs {
     size: f32,
     weight: u16,
     minimum_height: f32,
-    line_height: Option<f32>,
+    line_height: f32,
     gap: f32,
     row_spacing: f32,
     row_gap: f32,
@@ -198,51 +194,22 @@ impl NotificationLayoutCache {
             })
             .collect();
         let font = policy.font_family.unwrap_or(FontFamily::SystemSansSerif);
-        let inputs = if is_alert_banner_zone(zone) {
-            // Pre-restyle alert-banner metrics (hud-h51u7.4.2 restyles them).
-            let action = resolve_notification_action_tokens(tokens);
-            let scale = tze_hud_config::tokens::px_scale(tokens);
-            let metric =
-                |name: &str, fallback| tze_hud_config::tokens::token_px(tokens, name, fallback);
-            let inset = notification_inset(policy, scale);
-            let gap = metric("notification.action.gap_px", NOTIFICATION_ACTION_ROW_GAP_PX);
-            LayoutInputs {
-                labels,
-                link_marks,
-                width,
-                inset,
-                inset_bottom: inset,
-                font,
-                size: action.font_size_px,
-                weight: action.font_weight,
-                minimum_height: metric(
-                    "notification.action.height_px",
-                    NOTIFICATION_ACTION_BUTTON_H_PX,
-                ),
-                line_height: None,
-                gap,
-                row_spacing: 0.0,
-                row_gap: gap + inset,
-                padding: metric("notification.action.padding_px", 2.0),
-            }
-        } else {
-            let style = NotificationStyle::resolve(tokens, policy);
-            LayoutInputs {
-                labels,
-                link_marks,
-                width,
-                inset: style.padding_h,
-                inset_bottom: style.padding_v,
-                font,
-                size: style.action_label.size,
-                weight: style.action_label.weight,
-                minimum_height: style.action_height,
-                line_height: Some(style.action_label.line_height),
-                gap: style.action_gap,
-                row_spacing: style.action_gap,
-                row_gap: style.action_row_gap,
-                padding: style.action_padding,
-            }
+        let style = NotificationStyle::for_zone(zone, tokens, policy);
+        let inputs = LayoutInputs {
+            labels,
+            link_marks,
+            width,
+            inset: style.padding_h,
+            inset_bottom: style.padding_v,
+            font,
+            size: style.action_label.size,
+            weight: style.action_label.weight,
+            minimum_height: style.action_height,
+            line_height: style.action_label.line_height,
+            gap: style.action_gap,
+            row_spacing: style.action_gap,
+            row_gap: style.action_row_gap,
+            padding: style.action_padding,
         };
         let key = (zone.to_owned(), record.publication_id);
         let actual = actual_fonts.is_some();
@@ -289,22 +256,10 @@ impl NotificationLayoutCache {
         // Labels retain the existing bounded Clip policy after row/stack
         // selection. Unbounded text must not push the fourth option away.
         self.shapes += measured;
-        // Cards size buttons from tokens and centre the label line; alert
-        // banners keep their legacy padded label box.
-        let (height, label_y, label_height) = match inputs.line_height {
-            Some(line) => {
-                let height = inputs.minimum_height.max(line);
-                (height, (height - line) * 0.5, line)
-            }
-            None => {
-                let height = (inputs.size * 1.4 + inputs.padding * 2.0).max(inputs.minimum_height);
-                (
-                    height,
-                    inputs.padding,
-                    (height - inputs.padding * 2.0).max(1.0),
-                )
-            }
-        };
+        // Buttons size from tokens and centre the label line.
+        let line = inputs.line_height;
+        let height = inputs.minimum_height.max(line);
+        let (label_y, label_height) = ((height - line) * 0.5, line);
         let heights = vec![height; inputs.labels.len()];
         let link_marks = inputs
             .link_marks
@@ -337,7 +292,7 @@ impl NotificationLayoutCache {
             padding: inputs.padding,
             label_y,
             label_height,
-            label_line_multiplier: inputs.line_height.map(|line| line / inputs.size.max(1.0)),
+            label_line_multiplier: Some(inputs.line_height / inputs.size.max(1.0)),
             hint_width,
         };
         self.entries.insert(key, (inputs, layout.clone(), actual));

@@ -1,0 +1,290 @@
+{
+  "source_head": "8ed36772798e525e067cc6730500f48a154302b7",
+  "source_tree_clean": true,
+  "source": "repository render-scene, production startup and windowed build/capture, llvmpipe",
+  "dimensions": [
+    1920,
+    1080
+  ],
+  "ui_scale": 1.0,
+  "monitor_scale": 1.0,
+  "mode": "one synthetic severity fixture per process; same payloads as owner before",
+  "limitations": [
+    "Owner BEFORE was 3840x2160 with existing theme/scale unreported; these are not pixel-equivalent environments.",
+    "3840x2160 attempt failed: admin_capture_target exceeded device max_texture_dimension_2d 2048. No renderer limits were changed.",
+    "No Windows hardware, deployment or owner visual acceptance is implied."
+  ],
+  "frames": [
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8ed36772798e525e067cc6730500f48a154302b7",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1625.266735,
+      "fixture": "alert-banner-info-test.json",
+      "fixture_sha256": "11c73cfbaed584507be693a18dcf35d7ae453702a8233012871fed4c90104606",
+      "messages_applied": 1,
+      "output": "after-1920-tonal-glass-info.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 58241,
+      "png_sha256": "5f3f53679829a176e4a40972a72d00522e1767b964fd976fda7e8e1f3798348b",
+      "resolved_tokens_sha256": "8043cfdd863fbcc64d3e99e207571b1e246bad14bd5c35673ad56562a2346e3a",
+      "theme": "tonal-glass",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "severity": "info"
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8ed36772798e525e067cc6730500f48a154302b7",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1616.578839,
+      "fixture": "alert-banner-caution-test.json",
+      "fixture_sha256": "a116b7b12772686b8a77ada3eff02d15859fe25e33a3037fd904942766205178",
+      "messages_applied": 1,
+      "output": "after-1920-tonal-glass-caution.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 58689,
+      "png_sha256": "9bf883ef186b68f7c86a16b406f5731d035d6386d551658344abb97e4e4951e6",
+      "resolved_tokens_sha256": "8043cfdd863fbcc64d3e99e207571b1e246bad14bd5c35673ad56562a2346e3a",
+      "theme": "tonal-glass",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "severity": "caution"
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8ed36772798e525e067cc6730500f48a154302b7",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1608.269137,
+      "fixture": "alert-banner-critical-test.json",
+      "fixture_sha256": "09ef931f150e7185bf177e22d1e429e2a0abbd4781fe9dd3375cc9da8267a4bc",
+      "messages_applied": 1,
+      "output": "after-1920-tonal-glass-critical.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 59875,
+      "png_sha256": "abdc850832c1af96af3368330dcbd5fffcc0a7bb6714ee9d543ad7605529fd82",
+      "resolved_tokens_sha256": "8043cfdd863fbcc64d3e99e207571b1e246bad14bd5c35673ad56562a2346e3a",
+      "theme": "tonal-glass",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "severity": "critical"
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8ed36772798e525e067cc6730500f48a154302b7",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1610.731438,
+      "fixture": "alert-banner-info-test.json",
+      "fixture_sha256": "11c73cfbaed584507be693a18dcf35d7ae453702a8233012871fed4c90104606",
+      "messages_applied": 1,
+      "output": "after-1920-classic-info.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 60574,
+      "png_sha256": "2b9205a5550ebe290e855e336caee7727ab6671019c3fd0285377b3a61d2b33a",
+      "resolved_tokens_sha256": "bc0e36bac98bb8b1d50deab2b38b1894a5a84bf1e400e115b8c9c0ffb61e1139",
+      "theme": "classic",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "severity": "info"
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8ed36772798e525e067cc6730500f48a154302b7",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1610.53563,
+      "fixture": "alert-banner-caution-test.json",
+      "fixture_sha256": "a116b7b12772686b8a77ada3eff02d15859fe25e33a3037fd904942766205178",
+      "messages_applied": 1,
+      "output": "after-1920-classic-caution.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 60815,
+      "png_sha256": "8346d55e8d2abfe6dc79afc1a26c3f44d5f0bd5453211fd12496b91bf4fb5489",
+      "resolved_tokens_sha256": "bc0e36bac98bb8b1d50deab2b38b1894a5a84bf1e400e115b8c9c0ffb61e1139",
+      "theme": "classic",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "severity": "caution"
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8ed36772798e525e067cc6730500f48a154302b7",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1610.9567060000002,
+      "fixture": "alert-banner-critical-test.json",
+      "fixture_sha256": "09ef931f150e7185bf177e22d1e429e2a0abbd4781fe9dd3375cc9da8267a4bc",
+      "messages_applied": 1,
+      "output": "after-1920-classic-critical.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 60331,
+      "png_sha256": "d3c5cd5b88e409ff38f1ab45ea94b8f4deef80e73ec46027b73bd98dd855acc1",
+      "resolved_tokens_sha256": "bc0e36bac98bb8b1d50deab2b38b1894a5a84bf1e400e115b8c9c0ffb61e1139",
+      "theme": "classic",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "severity": "critical"
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8ed36772798e525e067cc6730500f48a154302b7",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1617.212911,
+      "fixture": "alert-banner-info-test.json",
+      "fixture_sha256": "11c73cfbaed584507be693a18dcf35d7ae453702a8233012871fed4c90104606",
+      "messages_applied": 1,
+      "output": "after-1920-blueprint-info.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 57626,
+      "png_sha256": "582156fce0123f9f1512cc142a372c65ffc0036c0d7b460db12079bda977792d",
+      "resolved_tokens_sha256": "918b43ed4ee7c89784d85ffaa9cafabc7370dea972f2f5c148d0b0036e506e70",
+      "theme": "blueprint",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "severity": "info"
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8ed36772798e525e067cc6730500f48a154302b7",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1611.798042,
+      "fixture": "alert-banner-caution-test.json",
+      "fixture_sha256": "a116b7b12772686b8a77ada3eff02d15859fe25e33a3037fd904942766205178",
+      "messages_applied": 1,
+      "output": "after-1920-blueprint-caution.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 58176,
+      "png_sha256": "41c2ec87a7f29f24870dc812046977f884514ddbcdfc3c7466de32230c52e04e",
+      "resolved_tokens_sha256": "918b43ed4ee7c89784d85ffaa9cafabc7370dea972f2f5c148d0b0036e506e70",
+      "theme": "blueprint",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "severity": "caution"
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8ed36772798e525e067cc6730500f48a154302b7",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1613.479636,
+      "fixture": "alert-banner-critical-test.json",
+      "fixture_sha256": "09ef931f150e7185bf177e22d1e429e2a0abbd4781fe9dd3375cc9da8267a4bc",
+      "messages_applied": 1,
+      "output": "after-1920-blueprint-critical.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 59201,
+      "png_sha256": "ec315f18ca7c4ba14fc4b40bbfee1bc653774d6a02f26f1faa7b3587b29bb3b9",
+      "resolved_tokens_sha256": "918b43ed4ee7c89784d85ffaa9cafabc7370dea972f2f5c148d0b0036e506e70",
+      "theme": "blueprint",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "severity": "critical"
+    }
+  ],
+  "pixel_equivalence_to_prior_captures": "All nine PNG hashes exactly match the source29fa5318 captures; the action-cache width correction does not change these no-action fixtures."
+}

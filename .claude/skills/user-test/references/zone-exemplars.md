@@ -175,8 +175,9 @@ Visual checks:
 
 Use `scripts/alert_banner_exemplar.py` to exercise the alert-banner zone on a
 live HUD. The script publishes 3 alerts at increasing urgency levels with 3-second
-delays between each, validating urgency-driven visual differentiation and simultaneous
-multi-alert display.
+delays between each, reusing one run-specific notification key. The default zone
+admits one banner per publisher: observe each severity in turn. Simultaneous
+severity ordering is tested headlessly with distinct publishers.
 
 ### CLI
 
@@ -197,16 +198,11 @@ Optional: `--ttl` (ms, default 15000).
 
 ### Visual Checklist
 
-After all 3 publishes, the alert-banner zone should show all three alerts
-simultaneously:
-
-- **Critical (red)** at top — "CRITICAL: security breach detected"
-- **Warning (amber)** in middle — "Warning: disk space low"
-- **Info (blue)** at bottom — "Info: system nominal"
-
-All three remain visible until their TTL elapses. Confirm urgency-derived
-color tinting is applied correctly at each level: blue for info (urgency=1),
-amber for warning (urgency=2), red for critical (urgency=3).
+Observe info, caution and critical on successive publishes; only the critical
+banner remains after the last step. Tonal Glass and Blueprint use an inset card
+with a tinted severity mark, with an error container for critical. Classic keeps
+blue/amber/red strips. The current banner expires at its TTL. The script does
+not clear shared surfaces or consume input.
 
 ### Alert payload shape
 
