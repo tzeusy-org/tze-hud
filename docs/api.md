@@ -1208,9 +1208,35 @@ Font family values are free-form family names. A name that is not loaded
 falls back to the renderer's default face for its role (see
 [Fonts](#fonts) for how names resolve). The older keys
 (`color.text.*`, `color.backdrop.default`, `border.radius.*`,
-`typography.*`, `color.notification.urgency.*`, and so on) still work.
+`typography.*`, and so on) still work.
 `tonal-glass` maps them onto the semantic palette until each element is
 restyled to read the semantic keys directly.
+
+**Notification cards** (`notification-area`) read the semantic keys
+directly. A card is `color.surface.container.high` at `opacity.surface`
+with a `stroke.border.width` `color.outline.variant` hairline, `shape.l`
+corners and `space.l` padding; cards stack `space.s` apart. The title uses
+`type.title.m` in `color.on_surface`, the body `type.body.m` in
+`color.on_surface.variant`. Urgency 0 and 1 share that neutral tone;
+urgency 2 uses `color.caution.container`, `color.caution.outline` and
+`color.on_caution.container`; urgency 3 uses `color.error.container`,
+`color.error` and `color.on_error.container`. The dismiss × fills a
+square as tall as the title line, `space.s` from the text. Actions are
+`space.xxl` tall with `space.m` label padding, `shape.s` corners and
+`type.body.m` labels at `type.label.m` weight: the first is filled
+`color.primary.container` with `color.on_primary.container` text; the
+others are transparent with `color.primary` text on a neutral card or
+the tone's text role on caution and error cards. Hover and press add
+`state.hover.opacity` / `state.pressed.opacity` layers of
+`color.on_surface`; keyboard focus draws a `focus.ring.width` ring in
+`color.primary`. The zone's explicit margins, radius, title size and
+weight and backdrop opacity keep precedence; an explicit title size
+scales the whole card type ramp. `color.notification.urgency.*`,
+`opacity.notification.backdrop` and
+`typography.notification.dismiss.font_size_px` are retired: they are no
+longer canonical, themes do not set them, and a `[design_tokens]` entry
+for them is ignored. Alert banners keep their older
+`notification.*` metrics until they are restyled.
 
 **Adding a theme:** add `assets/themes/<name>.toml` as a flat map of
 quoted canonical keys to string values, then add it to `BUILTIN_THEMES`

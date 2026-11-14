@@ -61,6 +61,7 @@ pub mod hit_regions;
 pub(crate) mod icon;
 pub(crate) mod image_cache;
 mod notification_layout;
+mod notification_style;
 mod notification_text;
 pub(crate) mod portal_reading;
 mod safe_mode_overlay;
@@ -757,8 +758,8 @@ pub(crate) struct ZoneSlotLayout {
     pub(crate) slot_heights: Vec<f32>,
     /// Cumulative y-offsets from the zone origin, one per slot.
     /// `slot_offsets[i]` is the y-start of slot `i` relative to `zy`;
-    /// notification cards (not alert banners) are separated by
-    /// `notification_stack_gap`.
+    /// notification cards (not alert banners) are separated by the card
+    /// style's `space.s` stack gap.
     pub(crate) slot_offsets: Vec<f32>,
     /// Effective zone height in pixels.
     /// For alert-banner zones this equals `sum(slot_heights)` (dynamic growth).

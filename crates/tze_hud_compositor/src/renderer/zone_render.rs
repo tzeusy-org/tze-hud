@@ -33,11 +33,11 @@ use tze_hud_scene::types::*;
 
 use super::Compositor;
 use super::draw_cmds::TexturedDrawCmd;
+use super::notification_style::NotificationStyle;
 use super::token_colors::{
     ICON_SIZE_PX, NOTIFICATION_BODY_SCALE, NOTIFICATION_ICON_SIZE_PX, NOTIFICATION_INTER_LINE_GAP,
-    STATIC_IMAGE_PLACEHOLDER_COLOR, is_alert_banner_zone, notification_backdrop_opacity,
-    notification_inset, notification_stack_gap, sort_alert_banner_indices,
-    urgency_to_notification_color, urgency_to_severity_color, zone_opacity_ceiling,
+    STATIC_IMAGE_PLACEHOLDER_COLOR, is_alert_banner_zone, notification_inset,
+    sort_alert_banner_indices, urgency_to_severity_color, zone_opacity_ceiling,
 };
 use crate::pipeline::RectVertex;
 use crate::pipeline::rect_vertices;
@@ -74,8 +74,8 @@ impl Compositor {
     /// - For `alert-banner` zones with `Notification` content, overrides the
     ///   backdrop color with the urgency-derived `color.severity.*` token color.
     /// - For non-alert-banner zones with `Notification` content, overrides the
-    ///   backdrop color with the urgency-derived `color.notification.urgency.*`
-    ///   token color at the `opacity.notification.backdrop` opacity. Its `color.border.default` border is an
+    ///   backdrop color with its urgency tone from [`NotificationStyle`]
+    ///   (semantic container roles at `opacity.surface`). Its hairline border is an
     ///   SDF command from `collect_all_rounded_rect_cmds`.
     /// - Applies the zone's current animation opacity (fade-in/fade-out).
     /// - Skips the backdrop quad when `rendering_policy.backdrop` is `None`.
@@ -197,8 +197,8 @@ impl Compositor {
 
                         // Determine backdrop color.
                         // alert-banner: urgency → color.severity.* tokens
-                        // non-alert-banner Notification: urgency → color.notification.urgency.* tokens
-                        //   at the `opacity.notification.backdrop` opacity; its border and dismiss outline are SDF
+                        // non-alert-banner Notification: urgency → NotificationStyle tone
+                        //   (opacity included); its hairline, dismiss and actions are SDF
                         //   commands (collect_all_rounded_rect_cmds)
                         // SolidColor: always its own color
                         // StaticImage: warm-gray placeholder quad (full GPU texture deferred)
@@ -242,19 +242,16 @@ impl Compositor {
                                 }
                             }
                             ZoneContent::Notification(n) => {
-                                // Non-alert-banner notification: urgency-tinted backdrop
-                                // using color.notification.urgency.* tokens.
+                                // Non-alert-banner notification: the card style's
+                                // urgency tone (semantic container roles).
                                 // Per spec: urgency >3 clamped to 3 (critical).
                                 // Respect policy.backdrop contract: only emit a backdrop (and
                                 // border) when a backdrop is enabled; skip entirely when None.
-                                if policy.backdrop.is_some() {
-                                    let mut color =
-                                        urgency_to_notification_color(n.urgency, zone_tokens);
-                                    color.a = notification_backdrop_opacity(zone_tokens);
-                                    Some(color)
-                                } else {
-                                    None
-                                }
+                                policy.backdrop.map(|_| {
+                                    NotificationStyle::resolve(zone_tokens, policy)
+                                        .tone(n.urgency)
+                                        .fill
+                                })
                             }
                             _ => policy.backdrop,
                         };
@@ -262,7 +259,7 @@ impl Compositor {
                         if let Some(mut rgba) = backdrop_rgba {
                             // For non-notification content: apply policy backdrop_opacity.
                             // For Notification content in non-alert-banner zones: opacity is
-                            // already set from notification_backdrop_opacity above; skip policy override.
+                            // already set by the card style above; skip policy override.
                             if !is_notification_content || is_alert_banner_zone(zone_name) {
                                 if let Some(opacity) = policy.backdrop_opacity {
                                     rgba.a = opacity.clamp(0.0, 1.0);
@@ -299,26 +296,40 @@ impl Compositor {
                                 super::icon::parse_notification_icon(&payload.icon)
                             {
                                 if self.image_texture_cache.contains_key(&icon_id) {
-                                    // Inset from backdrop edge, same as text.
-                                    let inset_h = notification_inset(policy, scale);
-                                    let icon_x = x + inset_h;
-                                    // Centred on the text, above any action row.
-                                    let text_slot_h = effective_slot_h
-                                        - self
-                                            .notification_action_layout(
-                                                zone_name, record, policy, w,
-                                            )
-                                            .reserve(inset_h);
-                                    let icon_y = slot_y
-                                        + (text_slot_h - (NOTIFICATION_ICON_SIZE_PX * scale))
-                                            .max(0.0)
-                                            * 0.5;
+                                    // Alert banners keep their pre-restyle icon
+                                    // (hud-h51u7.4.2); cards put it at the padding,
+                                    // centred on the text block.
+                                    let (icon_x, icon_y, size) = if is_alert_banner_zone(zone_name)
+                                    {
+                                        let inset_h = notification_inset(policy, scale);
+                                        let text_slot_h = effective_slot_h
+                                            - self
+                                                .notification_action_layout(
+                                                    zone_name, record, policy, w,
+                                                )
+                                                .reserve();
+                                        let size = NOTIFICATION_ICON_SIZE_PX * scale;
+                                        (
+                                            x + inset_h,
+                                            slot_y + (text_slot_h - size).max(0.0) * 0.5,
+                                            size,
+                                        )
+                                    } else {
+                                        let style = NotificationStyle::resolve(zone_tokens, policy);
+                                        let text_h =
+                                            style.text_block_height(!payload.title.is_empty());
+                                        (
+                                            x + style.padding_h,
+                                            slot_y + (text_h - style.icon_size).max(0.0) * 0.5,
+                                            style.icon_size,
+                                        )
+                                    };
                                     textured_cmds.push(TexturedDrawCmd {
                                         resource_id: icon_id,
                                         x: icon_x,
                                         y: icon_y,
-                                        w: (NOTIFICATION_ICON_SIZE_PX * scale),
-                                        h: (NOTIFICATION_ICON_SIZE_PX * scale),
+                                        w: size,
+                                        h: size,
                                         uv_rect: [0.0, 0.0, 1.0, 1.0],
                                         tint: [1.0, 1.0, 1.0, combined_opacity],
                                     });
@@ -391,19 +402,16 @@ impl Compositor {
                             }
                         }
                         ZoneContent::Notification(n) => {
-                            // Non-alert-banner notification: urgency-tinted backdrop using
-                            // color.notification.urgency.* tokens.
+                            // Non-alert-banner notification: the card style's urgency
+                            // tone (semantic container roles).
                             // Per spec: urgency >3 clamped to 3 (critical).
                             // Respect policy.backdrop contract: only emit a backdrop (and
                             // border) when a backdrop is enabled; skip entirely when None.
-                            if policy.backdrop.is_some() {
-                                let mut color =
-                                    urgency_to_notification_color(n.urgency, zone_tokens);
-                                color.a = notification_backdrop_opacity(zone_tokens);
-                                Some(color)
-                            } else {
-                                None
-                            }
+                            policy.backdrop.map(|_| {
+                                NotificationStyle::resolve(zone_tokens, policy)
+                                    .tone(n.urgency)
+                                    .fill
+                            })
                         }
                         _ => {
                             // All other content: use policy.backdrop.
@@ -414,7 +422,7 @@ impl Compositor {
                     if let Some(mut rgba) = backdrop_rgba {
                         // For non-notification content: apply policy backdrop_opacity.
                         // For Notification content in non-alert-banner zones: opacity is
-                        // already set from notification_backdrop_opacity above; skip policy override.
+                        // already set by the card style above; skip policy override.
                         if !is_notification_content || is_alert_banner_zone(zone_name) {
                             if let Some(opacity) = policy.backdrop_opacity {
                                 rgba.a = opacity.clamp(0.0, 1.0);
@@ -444,15 +452,15 @@ impl Compositor {
                     if let ZoneContent::Notification(payload) = &latest.content {
                         if let Some(icon_id) = super::icon::parse_notification_icon(&payload.icon) {
                             if self.image_texture_cache.contains_key(&icon_id) {
-                                let icon_x = x + notification_inset(policy, scale);
-                                let icon_y = y + (h - (NOTIFICATION_ICON_SIZE_PX * scale)) * 0.5;
+                                let style = NotificationStyle::resolve(zone_tokens, policy);
+                                let size = style.icon_size;
                                 let eff_opacity = anim_opacity.clamp(0.0, 1.0);
                                 textured_cmds.push(TexturedDrawCmd {
                                     resource_id: icon_id,
-                                    x: icon_x,
-                                    y: icon_y,
-                                    w: (NOTIFICATION_ICON_SIZE_PX * scale),
-                                    h: (NOTIFICATION_ICON_SIZE_PX * scale),
+                                    x: x + style.padding_h,
+                                    y: y + (h - size) * 0.5,
+                                    w: size,
+                                    h: size,
                                     uv_rect: [0.0, 0.0, 1.0, 1.0],
                                     tint: [1.0, 1.0, 1.0, eff_opacity],
                                 });
@@ -851,28 +859,27 @@ impl Compositor {
             NOTIFICATION_INTER_LINE_GAP * tze_hud_config::tokens::px_scale(token_map),
             tze_hud_config::tokens::px_scale(token_map),
         );
+        let alert_banner = is_alert_banner_zone(zone_name);
+        let card_style = (!alert_banner).then(|| NotificationStyle::resolve(token_map, policy));
         for (height, record) in slot_heights.iter_mut().zip(&ordered_refs) {
-            if let ZoneContent::Notification(_) = &record.content {
-                let scale = tze_hud_config::tokens::px_scale(token_map);
-                let inset = notification_inset(policy, scale);
+            if let ZoneContent::Notification(n) = &record.content {
+                if let Some(style) = &card_style {
+                    *height = style.text_block_height(!n.title.is_empty());
+                }
                 *height += layouts
                     .borrow_mut()
                     .resolve(token_map, zone_name, record, policy, zw)
-                    .reserve(inset);
+                    .reserve();
             }
         }
         // Alert banners stack flush as one strip; notification cards are
         // separated by a token gap so consecutive cards never touch.
-        let (slot_offsets, effective_h) = if is_alert_banner_zone(zone_name) {
-            (
+        let (slot_offsets, effective_h) = match &card_style {
+            None => (
                 Self::slot_offsets(&slot_heights, 0.0),
                 slot_heights.iter().sum(),
-            )
-        } else {
-            (
-                Self::slot_offsets(&slot_heights, notification_stack_gap(token_map)),
-                zh,
-            )
+            ),
+            Some(style) => (Self::slot_offsets(&slot_heights, style.stack_gap), zh),
         };
 
         super::ZoneSlotLayout {

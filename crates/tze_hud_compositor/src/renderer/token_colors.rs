@@ -36,59 +36,6 @@ pub(super) const SEVERITY_CRITICAL: Rgba = Rgba {
     a: 1.0,
 };
 
-// ─── Notification urgency token fallback colors ───────────────────────────────
-
-/// Default notification urgency backdrop colors (linear sRGB) used when
-/// `color.notification.urgency.*` design tokens are absent.
-///
-/// Per spec §Notification Urgency Backdrop Token Schema:
-///   color.notification.urgency.low      → #000000 → (0.0, 0.0, 0.0)
-///   color.notification.urgency.normal   → #0C1426 → (0.0037, 0.007, 0.0194)
-///   color.notification.urgency.urgent   → #2A1E08 → (0.0232, 0.013, 0.0024)
-///   color.notification.urgency.critical → #450612 → (0.0595, 0.0018, 0.006)
-///
-/// These tokens are for notification-area (and non-alert-banner notification zones)
-/// only. Alert-banner continues to use `color.severity.*` tokens.
-pub(super) const NOTIFICATION_URGENCY_LOW: Rgba = Rgba {
-    r: 0.0,
-    g: 0.0,
-    b: 0.0,
-    a: 1.0,
-};
-pub(super) const NOTIFICATION_URGENCY_NORMAL: Rgba = Rgba {
-    r: 0.0037,
-    g: 0.007,
-    b: 0.0194,
-    a: 1.0,
-};
-pub(super) const NOTIFICATION_URGENCY_URGENT: Rgba = Rgba {
-    r: 0.0232,
-    g: 0.013,
-    b: 0.0024,
-    a: 1.0,
-};
-pub(super) const NOTIFICATION_URGENCY_CRITICAL: Rgba = Rgba {
-    r: 0.0595,
-    g: 0.0018,
-    b: 0.006,
-    a: 1.0,
-};
-
-/// Fallback for `opacity.notification.backdrop` (keep in sync with
-/// `tze_hud_config`'s `CANONICAL_TOKENS`).
-const NOTIFICATION_BACKDROP_OPACITY_DEFAULT: f32 = 0.8;
-
-/// Opacity of urgency-tinted notification card backdrops, from the
-/// `opacity.notification.backdrop` token. It overrides the urgency color's
-/// alpha channel.
-pub(super) fn notification_backdrop_opacity(token_map: &HashMap<String, String>) -> f32 {
-    token_map
-        .get("opacity.notification.backdrop")
-        .and_then(|v| v.parse::<f32>().ok())
-        .filter(|v| v.is_finite())
-        .map_or(NOTIFICATION_BACKDROP_OPACITY_DEFAULT, |v| v.clamp(0.0, 1.0))
-}
-
 /// Scale factor for the body line font size in two-line notification layout.
 ///
 /// When a `NotificationPayload.title` is non-empty, the body text (`text` field)
@@ -188,22 +135,6 @@ pub(super) const NOTIFICATION_ICON_GAP_PX: f32 = 6.0;
 
 /// Side length of the notification dismiss affordance (square, top-right).
 pub(super) const NOTIFICATION_DISMISS_BUTTON_SIZE_PX: f32 = 20.0;
-
-/// Horizontal breathing room between the dismiss affordance and notification text.
-pub(super) const NOTIFICATION_DISMISS_GAP_PX: f32 = 8.0;
-
-/// Font size in pixels for the dismiss ("X") button label.
-///
-/// Token override: `typography.notification.dismiss.font_size_px` (parsed as f32,
-/// strips a trailing `px` suffix if present).
-/// Fallback: 12.0 px.
-pub(super) const NOTIFICATION_DISMISS_FONT_SIZE_PX: f32 = 12.0;
-
-/// Font weight for the dismiss ("X") button label.
-///
-/// Token override: `typography.notification.dismiss.font_weight` (parsed as u16).
-/// Fallback: 700 (bold).
-pub(super) const NOTIFICATION_DISMISS_FONT_WEIGHT: u16 = 700;
 
 /// Fallback color for `color.border.default` when the token is absent.
 ///
@@ -460,39 +391,6 @@ pub(super) fn urgency_to_on_severity_color(
         _ => "color.on_severity.info",
     };
     resolve_token_color(token_map, key)
-}
-
-/// Map a `NotificationPayload.urgency` level to a notification urgency backdrop color.
-///
-/// Looks up `color.notification.urgency.{low,normal,urgent,critical}` in `token_map`
-/// first; falls back to hardcoded NOTIFICATION_URGENCY_* constants when the key is
-/// absent or cannot be parsed as a hex color.
-///
-/// Per spec §Notification Urgency Backdrop Token Schema:
-///   urgency 0     → color.notification.urgency.low      (fallback: #000000)
-///   urgency 1     → color.notification.urgency.normal   (fallback: #0C1426)
-///   urgency 2     → color.notification.urgency.urgent   (fallback: #2A1E08)
-///   urgency 3+    → color.notification.urgency.critical (fallback: #450612)
-///
-/// Urgency values greater than 3 are clamped to 3 (critical).
-///
-/// MUST NOT use `color.severity.*` tokens — those are for alert-banner only.
-pub(super) fn urgency_to_notification_color(
-    urgency: u32,
-    token_map: &HashMap<String, String>,
-) -> Rgba {
-    // Clamp urgency >3 to critical (3).
-    let level = urgency.min(3);
-    match level {
-        0 => resolve_token_color(token_map, "color.notification.urgency.low")
-            .unwrap_or(NOTIFICATION_URGENCY_LOW),
-        1 => resolve_token_color(token_map, "color.notification.urgency.normal")
-            .unwrap_or(NOTIFICATION_URGENCY_NORMAL),
-        2 => resolve_token_color(token_map, "color.notification.urgency.urgent")
-            .unwrap_or(NOTIFICATION_URGENCY_URGENT),
-        _ => resolve_token_color(token_map, "color.notification.urgency.critical")
-            .unwrap_or(NOTIFICATION_URGENCY_CRITICAL),
-    }
 }
 
 /// Resolve the `color.border.default` token from the map.
@@ -1054,21 +952,6 @@ pub(super) fn notification_inset(policy: &RenderingPolicy, scale: f32) -> f32 {
 /// Gap between a notification's text and its action-button row.
 pub(super) const NOTIFICATION_ACTION_ROW_GAP_PX: f32 = 4.0;
 
-/// Fallback gap between stacked notification cards when the
-/// `spacing.padding.medium` token is absent or invalid.
-pub(super) const NOTIFICATION_STACK_GAP_DEFAULT_PX: f32 = 8.0;
-
-/// Vertical gap between stacked notification cards, from the
-/// `spacing.padding.medium` token, so consecutive cards never touch.
-pub(super) fn notification_stack_gap(token_map: &HashMap<String, String>) -> f32 {
-    token_map
-        .get("spacing.padding.medium")
-        .and_then(|v| v.parse::<f32>().ok())
-        .filter(|v| v.is_finite() && *v >= 0.0)
-        .unwrap_or(NOTIFICATION_STACK_GAP_DEFAULT_PX)
-        * px_scale(token_map)
-}
-
 /// One display label shared by shaping and painting; uses action typography/color.
 pub(super) fn notification_action_label(
     tokens: &HashMap<String, String>,
@@ -1625,15 +1508,6 @@ mod tests {
     }
 
     // ── Widget/zone UX pass tokens ────────────────────────────────────────────
-
-    #[test]
-    fn notification_backdrop_opacity_follows_its_token() {
-        assert_eq!(notification_backdrop_opacity(&token_map(&[])), 0.8);
-        let tm = token_map(&[("opacity.notification.backdrop", "0.9")]);
-        assert_eq!(notification_backdrop_opacity(&tm), 0.9);
-        let tm = token_map(&[("opacity.notification.backdrop", "7")]);
-        assert_eq!(notification_backdrop_opacity(&tm), 1.0, "clamped");
-    }
 
     #[test]
     fn notification_inset_is_the_policy_margin_else_nine_dp() {

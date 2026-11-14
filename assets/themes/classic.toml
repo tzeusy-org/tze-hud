@@ -1,7 +1,9 @@
 # Classic — black/navy surfaces, white text and the legacy blue accent.
 # Select with `[design_tokens] theme = "classic"`.
-# The legacy notification look is retained below; semantic roles are explicit,
-# including intentionally shared grid/easing values rather than fallback.
+# Notification cards draw from the semantic roles below (navy containers,
+# caution/error containers for urgency 2/3); the legacy keys that remain feed
+# the status bar and alert banner. Semantic roles are explicit, including
+# intentionally shared grid/easing values rather than fallback.
 
 "color.text.primary"                   = "#F5F7FA"
 "color.border.default"                 = "#6E7A91"
@@ -10,10 +12,6 @@
 "typography.body.weight"               = "500"
 "spacing.padding.medium"               = "10"
 "border.radius.medium"                 = "14"
-"color.notification.urgency.low"       = "#000000"
-"color.notification.urgency.normal"    = "#0C1426"
-"color.notification.urgency.urgent"    = "#2A1E08"
-"color.notification.urgency.critical"  = "#450612"
 "typography.notification.body.scale"   = "0.90"
 "typography.notification.title.weight" = "700"
 

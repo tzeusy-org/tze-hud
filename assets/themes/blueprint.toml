@@ -122,10 +122,6 @@
 "color.on_severity.critical"      = "#111418"
 "opacity.backdrop.opaque"             = "0.96"      # opacity.surface
 "border.radius.medium"                = "4"         # shape.m
-"color.notification.urgency.low"      = "#252A31"   # surface.container
-"color.notification.urgency.normal"   = "#2F343C"   # surface.container.high
-"color.notification.urgency.urgent"   = "#77450D"   # caution.container
-"color.notification.urgency.critical" = "#8E292C"   # error.container
 "portal.divider.color"                = "#404854"   # outline.variant
 "system_card.background"              = "#2F343CF5" # surface.container.high @ 0.96
 "system_card.accent.color"            = "#4C90F0"   # primary

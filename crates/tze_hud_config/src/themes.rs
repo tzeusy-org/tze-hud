@@ -642,14 +642,6 @@ mod tests {
         for (role, legacy) in [
             ("color.on_surface", "color.text.primary"),
             ("color.outline", "color.border.default"),
-            (
-                "color.caution.container",
-                "color.notification.urgency.urgent",
-            ),
-            (
-                "color.error.container",
-                "color.notification.urgency.critical",
-            ),
             ("type.body.m.size", "typography.body.size"),
             ("type.body.m.weight", "typography.body.weight"),
         ] {

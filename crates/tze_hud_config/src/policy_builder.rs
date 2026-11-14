@@ -118,50 +118,52 @@ pub fn apply_subtitle_token_defaults(policy: &mut RenderingPolicy, tokens: &Desi
 
 /// Apply token-derived defaults for the `notification-area` zone to `policy`.
 ///
-/// Token mappings:
-/// - `text_color` ← `color.text.primary`
+/// Token mappings (Tonal Glass card, hud-h51u7.4.1; the compositor's
+/// `NotificationStyle` reads every other card metric and colour from
+/// semantic tokens directly):
+/// - `text_color` ← `color.on_surface`
 /// - `font_family` ← `typography.body.family`
-/// - `font_size_px` ← `typography.body.size`
-/// - `font_weight` ← `typography.body.weight`
-/// - `backdrop` ← `color.backdrop.default`
-/// - `backdrop_opacity` ← `opacity.backdrop.opaque`
-/// - `outline_color` ← `None` (no outline for notifications; spec says explicitly None)
-/// - `margin_horizontal`, `margin_vertical` ← `spacing.notification.inset`
-/// - `backdrop_radius` ← `border.radius.medium`
+/// - `font_size_px` / `font_weight` ← `type.title.m.size` / `.weight` (the
+///   title; the body and action roles scale with an explicit size)
+/// - `backdrop` ← `color.surface.container.high` (presence enables the card;
+///   its fill is the urgency tone)
+/// - `backdrop_opacity` ← `opacity.surface`
+/// - `outline_color` ← `None` (the card hairline is an SDF border)
+/// - `margin_horizontal`, `margin_vertical` ← `space.l`
+/// - `backdrop_radius` ← `shape.l`
 /// - `text_align` ← `Start`; transitions ← `motion.enter.ms` / `motion.exit.ms`
 pub fn apply_notification_area_token_defaults(
     policy: &mut RenderingPolicy,
     tokens: &DesignTokenMap,
 ) {
     if policy.text_color.is_none() {
-        policy.text_color = token_color(tokens, "color.text.primary");
+        policy.text_color = token_color(tokens, "color.on_surface");
     }
     if policy.font_family.is_none() {
         policy.font_family = token_font_family(tokens, "typography.body.family");
     }
     if policy.font_size_px.is_none() {
-        policy.font_size_px = token_f32(tokens, "typography.body.size");
+        policy.font_size_px = token_f32(tokens, "type.title.m.size");
     }
     if policy.font_weight.is_none() {
-        policy.font_weight = token_u16(tokens, "typography.body.weight");
+        policy.font_weight = token_u16(tokens, "type.title.m.weight");
     }
     if policy.backdrop.is_none() {
-        policy.backdrop = token_color(tokens, "color.backdrop.default");
+        policy.backdrop = token_color(tokens, "color.surface.container.high");
     }
     if policy.backdrop_opacity.is_none() {
-        policy.backdrop_opacity = token_f32(tokens, "opacity.backdrop.opaque");
+        policy.backdrop_opacity = token_f32(tokens, "opacity.surface");
     }
-    // outline_color: explicitly None for notifications — not token-driven
-    // The card inset: text, action row and × all sit this far from the edge.
-    let inset = token_f32(tokens, "spacing.notification.inset");
+    // The card padding: text, action row and × all sit this far from the edge.
+    let padding = token_f32(tokens, "space.l");
     if policy.margin_horizontal.is_none() {
-        policy.margin_horizontal = inset;
+        policy.margin_horizontal = padding;
     }
     if policy.margin_vertical.is_none() {
-        policy.margin_vertical = inset;
+        policy.margin_vertical = padding;
     }
     if policy.backdrop_radius.is_none() {
-        policy.backdrop_radius = token_f32(tokens, "border.radius.medium");
+        policy.backdrop_radius = token_f32(tokens, "shape.l");
     }
     if policy.text_align.is_none() {
         policy.text_align = Some(TextAlign::Start);
@@ -501,28 +503,31 @@ mod tests {
         let mut policy = RenderingPolicy::default();
         apply_token_defaults_for_zone("notification-area", &mut policy, &tokens);
 
-        assert!(policy.text_color.is_some());
+        // The Tonal Glass card reads semantic roles (hud-h51u7.4.1).
+        assert_eq!(policy.text_color, token_color(&tokens, "color.on_surface"));
         assert!(policy.font_family.is_some());
-        assert!(policy.font_size_px.is_some());
-        assert!(policy.backdrop.is_some());
-        assert!(policy.backdrop_opacity.is_some());
-        // No outline for notifications (spec: outline_color ← None)
+        assert_eq!(policy.font_size_px, token_f32(&tokens, "type.title.m.size"));
+        assert_eq!(
+            policy.font_weight,
+            token_u16(&tokens, "type.title.m.weight")
+        );
+        assert_eq!(
+            policy.backdrop,
+            token_color(&tokens, "color.surface.container.high")
+        );
+        assert_eq!(
+            policy.backdrop_opacity,
+            token_f32(&tokens, "opacity.surface")
+        );
+        // No text outline: the card hairline is an SDF border.
         assert!(
             policy.outline_color.is_none(),
             "notification-area must NOT have outline_color set from tokens"
         );
-        assert!(policy.margin_horizontal.is_some());
-        assert!(policy.margin_vertical.is_some());
-        // backdrop_radius should be set from border.radius.medium (canonical default: 8.0)
-        assert!(
-            policy.backdrop_radius.is_some(),
-            "notification-area must have backdrop_radius set from border.radius.medium token"
-        );
-        let radius = policy.backdrop_radius.unwrap();
-        assert!(
-            (radius - 8.0).abs() < 1e-4,
-            "border.radius.medium canonical default is 8.0, got {radius}"
-        );
+        assert_eq!(policy.margin_horizontal, token_f32(&tokens, "space.l"));
+        assert_eq!(policy.margin_vertical, token_f32(&tokens, "space.l"));
+        assert_eq!(policy.backdrop_radius, token_f32(&tokens, "shape.l"));
+        assert_eq!(policy.backdrop_radius, Some(16.0), "canonical shape.l");
         assert_eq!(policy.transition_in_ms, Some(180));
         assert_eq!(policy.transition_out_ms, Some(120));
         let overridden = resolve_tokens(

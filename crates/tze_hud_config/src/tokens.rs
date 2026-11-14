@@ -292,11 +292,6 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "0.9",
     },
     CanonicalToken {
-        key: "opacity.notification.backdrop",
-        description: "Notification card backdrop opacity (0.0–1.0)",
-        default_value: "0.8",
-    },
-    CanonicalToken {
         key: "opacity.subtitle.backdrop",
         description: "Opacity of the fill behind the whole subtitle zone (0.0–1.0); 0 draws none",
         default_value: "0",
@@ -560,11 +555,6 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         key: "typography.notification.action.font_weight",
         description: "Notification action button label font weight",
         default_value: "600",
-    },
-    CanonicalToken {
-        key: "typography.notification.dismiss.font_size_px",
-        description: "Notification dismiss x font size (px)",
-        default_value: "12",
     },
     // Runtime system card / toast (pairing code, update notices); never agent-visible.
     CanonicalToken {
@@ -1027,27 +1017,8 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Numeric readout (gauges, timers): font weight (CSS numeric)",
         default_value: "500",
     },
-    // Notification card renderer keys (defaults match the compositor fallbacks)
-    CanonicalToken {
-        key: "color.notification.urgency.low",
-        description: "Notification card backdrop, urgency low",
-        default_value: "#000000",
-    },
-    CanonicalToken {
-        key: "color.notification.urgency.normal",
-        description: "Notification card backdrop, urgency normal",
-        default_value: "#0C1426",
-    },
-    CanonicalToken {
-        key: "color.notification.urgency.urgent",
-        description: "Notification card backdrop, urgency urgent",
-        default_value: "#2A1E08",
-    },
-    CanonicalToken {
-        key: "color.notification.urgency.critical",
-        description: "Notification card backdrop, urgency critical",
-        default_value: "#450612",
-    },
+    // Alert-banner text keys (defaults match the compositor fallbacks;
+    // retired when hud-h51u7.4.2 restyles the banner)
     CanonicalToken {
         key: "typography.notification.body.scale",
         description: "Notification body line size relative to the title (0.5-1.0)",

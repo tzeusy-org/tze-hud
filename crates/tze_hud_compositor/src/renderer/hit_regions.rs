@@ -28,8 +28,8 @@ use tze_hud_scene::types::*;
 use super::Compositor;
 use super::draw_cmds::DragHandleEntry;
 use super::token_colors::{
-    notification_dismiss_bounds, notification_inset, resolve_jump_to_latest_tokens,
-    resolve_scroll_indicator_tokens, resolve_tile_close_tokens, tile_close_button_bounds,
+    resolve_jump_to_latest_tokens, resolve_scroll_indicator_tokens, resolve_tile_close_tokens,
+    tile_close_button_bounds,
 };
 use crate::pipeline::{RectVertex, rect_vertices};
 
@@ -371,7 +371,6 @@ fn populate_notification_hit_regions_in(
 
         let policy = &zone_def.rendering_policy;
         let zone_tokens = tze_hud_config::tokens::for_zone(token_map, zone_name);
-        let scale = tze_hud_config::tokens::px_scale(&zone_tokens);
         let (zx, zy, zw, zh) = super::zone_geometry_in(
             layout,
             zone_name,
@@ -398,25 +397,20 @@ fn populate_notification_hit_regions_in(
 
             // ── Dismiss (×) button ────────────────────────────────────────
             // Top-right corner of the slot; same bounds the renderer draws.
-            let dismiss_bounds = notification_dismiss_bounds(
+            let dismiss_bounds = super::notification_style::dismiss_bounds(
+                zone_name,
+                &zone_tokens,
+                policy,
                 zx,
                 slot_y,
                 zw,
                 effective_slot_h,
-                scale,
-                notification_inset(policy, scale),
             );
             let dismiss_id = notification_dismiss_interaction_id(zone_name, record);
             let action_rects = layouts
                 .borrow_mut()
                 .resolve(&zone_tokens, zone_name, record, policy, zw)
-                .bounds(
-                    zx,
-                    slot_y,
-                    zw,
-                    effective_slot_h,
-                    notification_inset(policy, scale),
-                );
+                .bounds(zx, slot_y, zw, effective_slot_h);
             let choice = scene
                 .overlay
                 .notification_choices

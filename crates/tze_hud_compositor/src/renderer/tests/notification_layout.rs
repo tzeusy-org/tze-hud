@@ -97,12 +97,14 @@ async fn test_notification_stack_adds_dismiss_label_and_reserves_text_width() {
         .expect("body text item must exist");
     let dismiss_item = items
         .iter()
-        .find(|item| &*item.text == "X")
+        .find(|item| &*item.text == crate::renderer::notification_style::DISMISS_GLYPH)
         .expect("dismiss text item must exist");
 
-    assert_eq!(body_item.pixel_x, 9.0, "body text keeps left inset");
+    // Canonical space.l padding; the × is a type.title.m line-height square
+    // plus a space.s gap: 320 - 16 - 16 - 24 - 8.
+    assert_eq!(body_item.pixel_x, 16.0, "body text keeps left inset");
     assert_eq!(
-        body_item.bounds_width, 274.0,
+        body_item.bounds_width, 256.0,
         "body width must reserve dismiss control space"
     );
     assert_eq!(
@@ -111,7 +113,7 @@ async fn test_notification_stack_adds_dismiss_label_and_reserves_text_width() {
         "dismiss label must be centered in its button bounds"
     );
     assert!(
-        dismiss_item.pixel_x >= 290.0,
+        dismiss_item.pixel_x >= 280.0,
         "dismiss label must sit near the right edge, got {}",
         dismiss_item.pixel_x
     );
@@ -162,21 +164,13 @@ async fn test_notification_stack_adds_dismiss_label_and_reserves_text_width() {
     );
 }
 
-// ── Dismiss button typography token tests [hud-y08tp] ────────────────────
+// ── Dismiss button typography token tests [hud-y08tp, hud-h51u7.4.1] ─────
 //
-// Acceptance criteria:
-//   1. No-token path: dismiss button uses NOTIFICATION_DISMISS_FONT_SIZE_PX
-//      (12.0 px) and NOTIFICATION_DISMISS_FONT_WEIGHT (700) as defaults.
-//   2. Token path: typography.notification.dismiss.font_size_px and
-//      typography.notification.dismiss.font_weight override the defaults.
+// The × glyph fills the `type.title.m` line box at its weight: canonical
+// defaults without tokens, theme/owner token values otherwise.
 
-/// Notification body and dismiss defaults stay intact; dismiss font_size_px and
-/// font_weight read from design tokens when
-/// `typography.notification.dismiss.font_size_px` and
-/// `typography.notification.dismiss.font_weight` are present.
-///
-/// The production collector covers the original body default, dismiss defaults,
-/// and token overrides with independent expected values.
+/// A body-only card uses the canonical `type.body.m` size; the dismiss ×
+/// reads `type.title.m.line_height` / `.weight` (defaults and overrides).
 #[tokio::test]
 async fn test_dismiss_button_respects_typography_tokens() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
@@ -190,15 +184,16 @@ async fn test_dismiss_button_respects_typography_tokens() {
             "agent-a",
             0.0,
             None,
-            Some((12.0_f32, 700_u16)),
+            // The × fills the canonical type.title.m line box (24 dp, 600).
+            Some((24.0_f32, 600_u16)),
         ),
         (
             "dismiss-token-override",
             "Token override dismiss test",
             "agent-b",
             0.0,
-            Some(("16px", "400")),
-            Some((16.0, 400)),
+            Some(("28", "700")),
+            Some((28.0, 700)),
         ),
     ] {
         if expected_dismiss.is_some() && !text_renderer_initialized {
@@ -207,15 +202,12 @@ async fn test_dismiss_button_respects_typography_tokens() {
         }
 
         let mut token_map = HashMap::new();
-        if let Some((size, weight)) = tokens {
+        if let Some((line_height, weight)) = tokens {
             token_map.insert(
-                "typography.notification.dismiss.font_size_px".to_string(),
-                size.to_string(),
+                "type.title.m.line_height".to_string(),
+                line_height.to_string(),
             );
-            token_map.insert(
-                "typography.notification.dismiss.font_weight".to_string(),
-                weight.to_string(),
-            );
+            token_map.insert("type.title.m.weight".to_string(), weight.to_string());
         }
         compositor.set_token_map(token_map);
 
@@ -233,7 +225,7 @@ async fn test_dismiss_button_respects_typography_tokens() {
             accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
             rendering_policy: RenderingPolicy {
                 backdrop: Some(Rgba::new(0.1, 0.1, 0.1, 0.9)),
-                // No explicit font size or body token: the independent default is 16px.
+                // No explicit font size: the body role's canonical 14 dp.
                 ..Default::default()
             },
             contention_policy: ContentionPolicy::Stack { max_depth: 5 },
@@ -267,14 +259,14 @@ async fn test_dismiss_button_respects_typography_tokens() {
             .find(|item| &*item.text == text)
             .unwrap_or_else(|| panic!("{case}: notification body text item must exist"));
         assert_eq!(
-            body_item.font_size_px, 16.0,
-            "{case}: notification body must use the independent 16px default"
+            body_item.font_size_px, 14.0,
+            "{case}: a body-only card uses the canonical type.body.m size"
         );
 
         if let Some((size, weight)) = expected_dismiss {
             let dismiss_item = items
                 .iter()
-                .find(|item| &*item.text == "X")
+                .find(|item| &*item.text == crate::renderer::notification_style::DISMISS_GLYPH)
                 .unwrap_or_else(|| panic!("{case}: dismiss text item must exist"));
             assert_eq!(
                 dismiss_item.font_size_px, size,
@@ -294,9 +286,8 @@ async fn test_dismiss_button_respects_typography_tokens() {
     }
 }
 
-/// Notification text is inset by 9px (8px padding + 1px border) from backdrop edges.
-///
-/// AC: text content area starts at (x + 9, y + 9).
+/// Notification text is inset by the card padding (`space.l`) from the
+/// backdrop edges, in its role's token line height.
 #[tokio::test]
 async fn test_notification_text_inset_from_backdrop_edges() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
@@ -347,16 +338,25 @@ async fn test_notification_text_inset_from_backdrop_edges() {
     assert_eq!(items.len(), 1, "must produce one TextItem");
 
     let item = &items[0];
-    // Zone starts at x=0, y=0. Text must be inset by 9px (1px border + 8px padding).
+    // Zone starts at x=0, y=0. Text sits the card padding (canonical
+    // space.l, 16 dp) in from the backdrop edges, in the body role's line box.
+    let style = crate::renderer::notification_style::NotificationStyle::resolve(
+        &HashMap::new(),
+        &scene.zone_registry.zones["notification-area"].rendering_policy,
+    );
+    assert_eq!(style.padding_h, 16.0);
     assert_eq!(
-        item.pixel_x, 9.0,
-        "text pixel_x must be 9.0 (1px border + 8px padding inset); got {}",
-        item.pixel_x
+        item.pixel_x, style.padding_h,
+        "text pixel_x is the card padding"
     );
     assert_eq!(
-        item.pixel_y, 9.0,
-        "text pixel_y must be 9.0 (1px border + 8px padding inset); got {}",
-        item.pixel_y
+        item.pixel_y, style.padding_v,
+        "text pixel_y is the card padding"
+    );
+    assert_eq!(item.bounds_height, style.body.line_height);
+    assert!(
+        (item.line_height_multiplier * item.font_size_px - style.body.line_height).abs() < 1e-4,
+        "the line box is type.body.m.line_height, not a fixed multiplier"
     );
     // Text is left-aligned.
     assert_eq!(
@@ -377,10 +377,9 @@ async fn test_notification_text_inset_from_backdrop_edges() {
 // Spec §Two-line notification layout:
 //   - Empty title → single-line backward-compatible path (1 TextItem)
 //   - Non-empty title → two-line path (2 TextItems: title bold, body regular)
-//   - Title font_weight = NOTIFICATION_TITLE_WEIGHT (700)
-//   - Body font_size = font_size_px * NOTIFICATION_BODY_SCALE (0.85×)
-//   - Body font_weight = 400 (regular)
-//   - Body positioned below title line + inter-line gap
+//   - Card title: type.title.m (size scaled by an explicit policy size,
+//     weight 600); body: type.body.m (14/16 of the title, weight 400)
+//   - Body positioned directly below the title's line box
 
 /// Two-line notification: empty `title` produces exactly 1 TextItem (backward compat).
 ///
@@ -524,11 +523,16 @@ async fn test_two_line_notification_title_produces_two_text_items() {
         &*title_item.text, "System Alert",
         "first item must be the title text"
     );
-    assert_eq!(
-        title_item.font_weight, NOTIFICATION_TITLE_WEIGHT,
-        "title must use bold weight ({}), got {}",
-        NOTIFICATION_TITLE_WEIGHT, title_item.font_weight
+    let style = crate::renderer::notification_style::NotificationStyle::resolve(
+        &HashMap::new(),
+        &scene.zone_registry.zones["notification-area"].rendering_policy,
     );
+    assert_eq!(
+        title_item.font_weight, style.title.weight,
+        "title must use the type.title.m weight ({}), got {}",
+        style.title.weight, title_item.font_weight
+    );
+    assert_eq!(title_item.font_weight, 600, "canonical type.title.m.weight");
     assert!(
         (title_item.font_size_px - 16.0).abs() < 0.01,
         "title must use policy font_size_px (16.0), got {}",
@@ -545,11 +549,16 @@ async fn test_two_line_notification_title_produces_two_text_items() {
         "body must use regular weight (400), got {}",
         body_item.font_weight
     );
-    let expected_body_size = 16.0 * NOTIFICATION_BODY_SCALE;
+    let expected_body_size = style.body.size;
     assert!(
-        (body_item.font_size_px - expected_body_size).abs() < 0.1,
-        "body font size must be 0.85× title size ({expected_body_size:.2}), got {}",
+        (body_item.font_size_px - 14.0).abs() < 0.1,
+        "body font size must be type.body.m ({expected_body_size:.2}), got {}",
         body_item.font_size_px
+    );
+    assert_eq!(
+        body_item.pixel_y,
+        title_item.pixel_y + style.title.line_height,
+        "the body line box follows the title's"
     );
 
     // Body must be below title.
@@ -993,8 +1002,8 @@ async fn test_two_line_notifications_stack_correctly() {
 ///
 /// Regression guard: when `backdrop_radius` is enabled, backdrop geometry comes from
 /// `collect_all_rounded_rect_cmds()` (not the flat-rect path). For two-line notifications,
-/// the rounded backdrop height must match `notification_slot_height`, otherwise body text
-/// can extend outside the card.
+/// the rounded backdrop height must match the card style's text block, otherwise body
+/// text can extend outside the card.
 #[tokio::test]
 async fn test_rounded_notification_backdrop_uses_two_line_slot_height() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
@@ -1044,17 +1053,15 @@ async fn test_rounded_notification_backdrop_uses_two_line_slot_height() {
     let rr = compositor.collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0);
     assert_eq!(
         rr.chrome.len(),
-        2,
-        "single rounded notification: one card cmd, then its dismiss outline"
+        1,
+        "single rounded notification: one card cmd (an idle × draws nothing)"
     );
 
-    let expected_h = Compositor::notification_slot_height(
-        &payload,
-        &policy,
-        NOTIFICATION_BODY_SCALE,
-        NOTIFICATION_INTER_LINE_GAP,
-        1.0,
-    );
+    // padding + title line + body line + padding, all token-derived.
+    let expected_h =
+        crate::renderer::notification_style::NotificationStyle::resolve(&HashMap::new(), &policy)
+            .text_block_height(true);
+    assert_eq!(expected_h, 76.0, "16 + 24 + 20 + 16 (canonical)");
     let actual_h = rr.chrome[0].height;
     assert!(
         (actual_h - expected_h).abs() < 0.1,
@@ -1461,28 +1468,25 @@ async fn test_stack_reflow_after_publication_pruned() {
         "must have 2 TextItems after prune (reflow)"
     );
 
-    // Newest (Gamma = agent-c) is at slot 0 (top, pixel_y = 9.0).
-    // Oldest remaining (Beta = agent-b) is at slot 1.
-    // slot_h = line_height(16*1.4) + 2*margin_v(8) + SLOT_BASELINE_GAP(4) = 42.4px.
-    // Slot 1 starts after slot 0 plus the 8 px stack gap, at y=50.4; text at
-    // y=50.4+9=59.4.
+    // Newest (Gamma = agent-c) is at slot 0, oldest remaining (Beta) at
+    // slot 1. Body-only cards (canonical tokens): slot_h = space.l + body
+    // line (20) + space.l = 52; slot 1 starts after the space.s (8) stack gap.
     let gamma_item = items_after.iter().find(|i| &*i.text == "Gamma");
     let beta_item = items_after.iter().find(|i| &*i.text == "Beta");
 
     assert!(gamma_item.is_some(), "Gamma must be in remaining TextItems");
     assert!(beta_item.is_some(), "Beta must be in remaining TextItems");
 
-    // Gamma is newest → slot 0 → pixel_y = 0 + 9 = 9.
     assert_eq!(
         gamma_item.unwrap().pixel_y,
-        9.0,
-        "Gamma (newest) must be at slot 0, pixel_y=9.0"
+        16.0,
+        "Gamma (newest) must be at slot 0, pixel_y=16"
     );
-    // Beta is oldest remaining → slot 1 → pixel_y = 42.4 + 8 + 9 = 59.4.
+    // Beta → slot 1 → pixel_y = 52 + 8 + 16 = 76.
     assert_eq!(
         beta_item.unwrap().pixel_y,
-        59.4,
-        "Beta (oldest remaining) must be at slot 1, pixel_y=59.4"
+        76.0,
+        "Beta (oldest remaining) must be at slot 1, pixel_y=76"
     );
     let mut payload = NotificationPayload {
         text: "Choose next".into(),
@@ -1592,14 +1596,15 @@ async fn test_stack_reflow_after_publication_pruned() {
         records[1].published_at_wall_us
     );
     let policy = &scene.zone_registry.zones["notification-area"].rendering_policy;
+    // The mock's 368 dp card fits four short actions in one row.
     assert!(
         !compositor
-            .notification_action_layout("notification-area", &records[0], policy, 320.0)
+            .notification_action_layout("notification-area", &records[0], policy, 368.0)
             .stacked
     );
     assert!(
         compositor
-            .notification_action_layout("notification-area", &records[1], policy, 320.0)
+            .notification_action_layout("notification-area", &records[1], policy, 368.0)
             .stacked
     );
     compositor.populate_zone_hit_regions(&mut scene, 1280.0, 720.0);

@@ -524,7 +524,20 @@ async fn idle_with_notification_renders_only_at_fade() {
     let commands = compositor
         .collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0)
         .chrome;
-    let pressed = resolve_notification_action_tokens(&compositor.token_map).background_pressed;
+    // The card's pressed state layer over the (transparent) third action.
+    let zone_policy = &scene.zone_registry.zones["notification-area"].rendering_policy;
+    let pressed = crate::renderer::notification_style::NotificationStyle::resolve(
+        compositor.zone_tokens("notification-area"),
+        zone_policy,
+    )
+    .control_fill(
+        tze_hud_scene::types::ChromeLocalState {
+            pressed: true,
+            ..Default::default()
+        },
+        None,
+    )
+    .unwrap();
     let control = commands
         .iter()
         .find(|cmd| {

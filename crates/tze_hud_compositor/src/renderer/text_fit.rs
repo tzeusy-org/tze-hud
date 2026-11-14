@@ -24,7 +24,7 @@ use tze_hud_scene::types::{
 use super::Compositor;
 use super::notification_layout::NotificationLayoutCache;
 use super::notification_text::notification_text_layout;
-use super::token_colors::{notification_inset, resolve_notification_action_tokens};
+use super::token_colors::resolve_notification_action_tokens;
 use crate::display::DisplayLayout;
 
 /// The compositor's current drawing inputs, shared with MCP admission.
@@ -165,7 +165,10 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
                 text.width,
                 band.height,
                 band.font_size_px,
-                band.font_size_px * crate::text::LINE_HEIGHT_MULTIPLIER,
+                band.font_size_px
+                    * band
+                        .line_multiplier
+                        .unwrap_or(crate::text::LINE_HEIGHT_MULTIPLIER),
                 fonts,
             )
             .was_truncated
@@ -173,21 +176,26 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
                 clipped.push(band.field);
             }
         }
-        let label = resolve_notification_action_tokens(&zone_tokens);
-        let inset = notification_inset(policy, scale);
+        let label = if super::token_colors::is_alert_banner_zone(zone) {
+            let action = resolve_notification_action_tokens(&zone_tokens);
+            (action.font_size_px, action.font_weight)
+        } else {
+            let style = super::notification_style::NotificationStyle::resolve(&zone_tokens, policy);
+            (style.action_label.size, style.action_label.weight)
+        };
         let cut_label = payload
             .actions
             .iter()
-            .zip(actions.bounds(0.0, slot_y, zw, slot_h, inset))
+            .zip(actions.bounds(0.0, slot_y, zw, slot_h))
             .enumerate()
             .any(|(index, (action, bound))| {
                 action.label.contains('\n')
                     || crate::text::single_line_width(
                         fonts,
                         &action.label,
-                        label.font_size_px,
+                        label.0,
                         text.font_family,
-                        label.font_weight,
+                        label.1,
                     ) > actions.label_width(&bound, index) + EDGE_SLACK_PX
             });
         if cut_label {
