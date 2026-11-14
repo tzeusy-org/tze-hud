@@ -280,7 +280,10 @@ dedicated paired agent with no concurrent or pending publications. The
 driver refuses existing holdings/portals and clears only tracked test
 surfaces; clears are agent-and-surface scoped, so concurrent use of that same
 pairing is unsupported. It never spawns or kills a borrowed HUD or rewrites
-its configuration. Owned startup/config/WARP, pair reopening/wrong-code,
+its configuration. It requires only the widgets it publishes to (the owned
+route still requires the exact packaged list), captures each tested zone on the
+display `/admin/status` `displays[].zones` assigns it to, and a failure prints
+the smoke's own assertion message. Owned startup/config/WARP, pair reopening/wrong-code,
 executable restart/health, local quiescent-efficiency emission, resident
 POC/orphan reclamation and theme/fixture captures are individually
 `UNEXECUTED owner-only` in URL mode, and stay in the owned CI `--exe` route. A source fixture
