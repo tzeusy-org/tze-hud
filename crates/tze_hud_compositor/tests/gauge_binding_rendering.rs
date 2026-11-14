@@ -485,7 +485,7 @@ mod contention {
     use tze_hud_scene::SceneGraph;
     use tze_hud_scene::SceneId;
     use tze_hud_scene::types::WidgetInstance;
-    use tze_hud_widget::loader::{BundleScanResult, load_bundle_dir_with_tokens};
+    use tze_hud_widget::loader::{BundleScanResult, LoadedBundle, load_bundle_dir_with_tokens};
 
     /// Path to the production exemplar gauge bundle.
     fn production_gauge_path() -> PathBuf {
@@ -507,16 +507,7 @@ mod contention {
     ///
     /// Returns `(scene, tab_id)` ready for `publish_to_widget("gauge", ...)` calls.
     fn scene_with_production_gauge() -> (SceneGraph, tze_hud_scene::types::SceneId) {
-        let path = production_gauge_path();
-        let tokens = gauge_test_tokens();
-        let result = load_bundle_dir_with_tokens(&path, &tokens);
-
-        let bundle = match result {
-            BundleScanResult::Ok(b) => b,
-            BundleScanResult::Err(e) => {
-                panic!("production gauge bundle failed to load: {e}");
-            }
-        };
+        let bundle = shipped_ring();
 
         let mut definition = bundle.definition.clone();
         definition.default_contention_policy = ContentionPolicy::LatestWins;
@@ -798,33 +789,13 @@ mod contention {
 
     /// The shipped bundle's own layers, token-resolved, as the compositor
     /// rasterizes them, with the definition's defaults as the base params.
-    fn shipped_ring() -> (
-        Vec<(String, Vec<WidgetBinding>)>,
-        HashMap<String, WidgetParameterValue>,
-        HashMap<String, String>,
-    ) {
-        let tokens = gauge_test_tokens();
-        let BundleScanResult::Ok(bundle) =
-            load_bundle_dir_with_tokens(&production_gauge_path(), &tokens)
-        else {
-            panic!("production gauge bundle failed to load");
-        };
-        let layers = bundle
-            .definition
-            .layers
-            .iter()
-            .map(|l| {
-                let svg = String::from_utf8(bundle.svg_contents[&l.svg_file].clone()).unwrap();
-                (svg, l.bindings.clone())
-            })
-            .collect();
-        let defaults = bundle
-            .definition
-            .parameter_schema
-            .iter()
-            .map(|p| (p.name.clone(), p.default_value.clone()))
-            .collect();
-        (layers, defaults, tokens)
+    fn shipped_ring() -> LoadedBundle {
+        match load_bundle_dir_with_tokens(&production_gauge_path(), &gauge_test_tokens()) {
+            BundleScanResult::Ok(bundle) => bundle,
+            BundleScanResult::Err(error) => {
+                panic!("production gauge bundle failed to load: {error}")
+            }
+        }
     }
 
     fn rgb(hex: &str) -> [u8; 3] {
@@ -834,18 +805,36 @@ mod contention {
 
     /// Rasterize the ring 1:1 (128x132 viewBox) with `overrides` on the defaults.
     fn render_ring(overrides: &[(&str, WidgetParameterValue)]) -> tiny_skia::Pixmap {
-        let (layers, mut params, _) = shipped_ring();
+        let bundle = shipped_ring();
+        let mut params: HashMap<_, _> = bundle
+            .definition
+            .parameter_schema
+            .iter()
+            .map(|p| (p.name.clone(), p.default_value.clone()))
+            .collect();
         for (name, value) in overrides {
             params.insert((*name).to_string(), value.clone());
         }
-        let refs: Vec<(&str, &[WidgetBinding])> = layers
+        let refs: Vec<(&str, &[WidgetBinding])> = bundle
+            .definition
+            .layers
             .iter()
-            .map(|(svg, b)| (svg.as_str(), b.as_slice()))
+            .map(|layer| {
+                (
+                    std::str::from_utf8(&bundle.svg_contents[&layer.svg_file]).unwrap(),
+                    layer.bindings.as_slice(),
+                )
+            })
             .collect();
-        let constraints = HashMap::from([
-            ("level".to_string(), (0.0, 1.0)),
-            ("tooltip_visible".to_string(), (0.0, 1.0)),
-        ]);
+        let constraints = bundle
+            .definition
+            .parameter_schema
+            .iter()
+            .filter_map(|p| {
+                let c = p.constraints.as_ref()?;
+                Some((p.name.clone(), (c.f32_min?, c.f32_max?)))
+            })
+            .collect();
         tze_hud_compositor::widget::rasterize_svg_layers(&refs, &constraints, &params, 128, 132)
             .expect("shipped gauge rasterizes")
     }
@@ -889,7 +878,7 @@ mod contention {
     }
 
     fn shipped_gauge_ring_arc_tracks_level() {
-        let (_, _, tokens) = shipped_ring();
+        let tokens = gauge_test_tokens();
         let primary = rgb(&tokens["color.primary"]);
         let mut last = -1.0;
         for level in [0.0f32, 0.1, 0.25, 0.5, 0.72, 0.95, 1.0] {
@@ -916,7 +905,7 @@ mod contention {
     /// error use their roles regardless of fill_color, on the arc and on the
     /// card's hairline (info: color.outline.variant).
     fn shipped_gauge_ring_colors_by_severity() {
-        let (_, _, tokens) = shipped_ring();
+        let tokens = gauge_test_tokens();
         let orange = WidgetParameterValue::Color(Rgba::new(1.0, 165.0 / 255.0, 0.0, 1.0));
         for (severity, expected, edge) in [
             ("info", [255, 165, 0], rgb(&tokens["color.outline.variant"])),
