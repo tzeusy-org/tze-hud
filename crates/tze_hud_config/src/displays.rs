@@ -1,14 +1,15 @@
-//! `[displays.<NAME>]`: place zones on a non-primary monitor.
+//! `[displays."<key>"]`: place zones on a non-primary monitor.
 //!
 //! ```toml
-//! [displays.DISPLAY6]
+//! [displays."DEL41A2-7XK2N13"]
 //! zones = ["notification-area"]
 //! ```
 //!
 //! The HUD overlays every connected monitor. Zones render on the primary
-//! unless a `[displays.<NAME>]` table lists them; `<NAME>` is the OS display
-//! name (`DISPLAY6`, with or without the `\\.\` prefix, any case). A zone
-//! assigned to a display that is not connected renders on the primary.
+//! unless a `[displays."<key>"]` table lists them. `<key>` is the monitor's
+//! EDID model+serial key that `/admin/status` and the log show, any case;
+//! two monitors with the same model+serial carry an `@<connector>` suffix. A
+//! zone whose key matches no connected monitor renders on the primary.
 
 use std::collections::{HashMap, HashSet};
 
@@ -26,6 +27,38 @@ pub fn zone_display_assignments(raw: &RawConfig) -> HashMap<String, String> {
         }
     }
     out
+}
+
+/// Canonical form of a configured or reported display key: trimmed, any
+/// `\\.\` device-namespace prefix dropped, uppercase.
+pub fn normalize_display_key(key: &str) -> String {
+    key.trim().trim_start_matches(r"\\.\").to_ascii_uppercase()
+}
+
+/// Index of the connected display a configured key names. `connected` holds
+/// each display's key and, when it has an EDID identity, its model+serial
+/// base. The key matches case-insensitively; a key without an `@<connector>`
+/// suffix also matches a base exactly one connected display has.
+pub fn match_display_key(configured: &str, connected: &[(&str, Option<&str>)]) -> Option<usize> {
+    let wanted = normalize_display_key(configured);
+    if let Some(i) = connected
+        .iter()
+        .position(|(key, _)| normalize_display_key(key) == wanted)
+    {
+        return Some(i);
+    }
+    if wanted.contains('@') {
+        return None;
+    }
+    let mut by_base = connected
+        .iter()
+        .enumerate()
+        .filter(|(_, (_, base))| base.is_some_and(|b| b.eq_ignore_ascii_case(&wanted)))
+        .map(|(i, _)| i);
+    match (by_base.next(), by_base.next()) {
+        (Some(i), None) => Some(i),
+        _ => None,
+    }
 }
 
 /// Validate `[displays]`: zones must be known zone instances and each zone may
@@ -55,7 +88,7 @@ pub fn validate_displays(raw: &RawConfig, errors: &mut Vec<ConfigError>) {
                 errors.push(ConfigError {
                     code: ConfigErrorCode::Other("CONFIG_DUPLICATE_DISPLAY_ZONE".into()),
                     field_path,
-                    expected: "each zone under at most one [displays.<NAME>]".into(),
+                    expected: "each zone under at most one [displays.<key>]".into(),
                     got: format!("{zone:?} listed twice"),
                     hint: format!("keep {zone:?} under a single display"),
                 });
@@ -84,6 +117,42 @@ mod tests {
         assert_eq!(map.get("subtitle").map(String::as_str), Some("DISPLAY6"));
         assert_eq!(map.len(), 2);
         assert!(errors_for("[displays.DISPLAY6]\nzones = [\"subtitle\"]\n").is_empty());
+
+        // Quoted connector-suffixed keys parse verbatim.
+        let key = "DEL41A2@DISPLAY/DEL41A2/5&1A2B3C&0&UID4352";
+        let raw: RawConfig =
+            toml::from_str(&format!("[displays.\"{key}\"]\nzones = [\"pip\"]\n")).unwrap();
+        assert_eq!(
+            zone_display_assignments(&raw)
+                .get("pip")
+                .map(String::as_str),
+            Some(key)
+        );
+
+        // Matching: exact key (any case), or an unsuffixed base that exactly
+        // one connected display has; otherwise unmatched.
+        let connected = [
+            ("DISPLAY1", None),
+            ("DEL41A2-7XK2N13", Some("DEL41A2-7XK2N13")),
+            ("DEL41A2@DISPLAY/DEL41A2/1&0&UID1", Some("DEL41A2")),
+            ("DEL41A2@DISPLAY/DEL41A2/1&0&UID2", Some("DEL41A2")),
+            ("GSM5B7F@DISPLAY/GSM5B7F/1&0&UID3", Some("GSM5B7F")),
+        ];
+        for (configured, want) in [
+            ("del41a2-7xk2n13", Some(1)),
+            (r"\\.\display1", Some(0)),
+            ("DEL41A2@display/del41a2/1&0&uid2", Some(3)),
+            ("GSM5B7F", Some(4)),
+            ("DEL41A2", None),
+            ("DEL41A2@DISPLAY/DEL41A2/1&0&UID9", None),
+            ("ACI27A1-NOPE", None),
+        ] {
+            assert_eq!(
+                match_display_key(configured, &connected),
+                want,
+                "{configured}"
+            );
+        }
     }
 
     #[test]

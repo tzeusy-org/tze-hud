@@ -186,16 +186,26 @@ prints redacted discovery information without launching another window.
 - **Every monitor is overlaid.** Overlay mode opens one transparent,
   click-through window per connected monitor at its native resolution, all
   showing the same scene. Zones stay on the primary monitor unless the config
-  places them elsewhere by OS display name (`/admin/status` `displays` lists
-  the names):
+  places them on another monitor by its display key. Copy the key from
+  `/admin/status` `displays[].key` (`hud_admin.py status`) or from the
+  `display <key> = DISPLAY7 3840x2160 @ (0,0) primary` lines the log writes
+  whenever the monitor layout is published:
 
   ```toml
-  [displays.DISPLAY6]
+  [displays."DEL41A2-7XK2N13"]
   zones = ["notification-area"]
   ```
 
-  A zone placed on a monitor that is not connected falls back to the primary;
-  the log warns and `/admin/status` `unplaced_zones` lists it. So does a zone on
+  The key is the monitor's EDID manufacturer, product code and serial, so it
+  survives Windows renumbering `DISPLAYn` on replug or reboot. Two monitors
+  with the same model and serial (or the same model with blank serials) both
+  get an `@<connector>` suffix from their device instance id, e.g.
+  `GSM5B7F@DISPLAY/GSM5B7F/5&1A2B3C&0&UID4352`; always quote the key. A
+  monitor with no readable EDID identity is keyed by its OS name and the log
+  warns. A key that matches no connected monitor leaves its zones on the
+  primary, never on another monitor: the log warns once per layout change with
+  the configured key and every connected key, and `/admin/status`
+  `unplaced_zones` lists the zones (`not_connected`). So does a zone on
   a monitor whose overlay surface failed 3 times in a row (reason
   `overlay_failed`; unplug and replug, or restart, to retry). A monitor that is
   asleep or occluded is retried on a backoff (100 ms doubling to 2 s), so it
