@@ -3481,6 +3481,33 @@ mod tests {
                 );
                 if held_terminal {
                     assert!(harness.app.settle_scene_work().is_deferred());
+                }
+                drop(held);
+                // Force the later prune borrow to miss after the terminal chrome
+                // cleanup succeeds. The unfinished reconciliation must retain
+                // the existing scene-availability continuation.
+                {
+                    let state = shared.blocking_lock();
+                    let mut scene = state.scene.blocking_lock();
+                    harness
+                        .app
+                        .state
+                        .input_processor
+                        .clear_chrome_feedback(&mut scene);
+                }
+                assert!(
+                    !harness
+                        .app
+                        .state
+                        .input_processor
+                        .chrome_feedback_cancel_pending
+                );
+                let held = shared.blocking_lock();
+                assert!(
+                    harness.app.prune_portal_resize_states().is_deferred(),
+                    "a missed prune borrow must retain the cancellation continuation"
+                );
+                if held_terminal {
                     harness.schedule_shared_scene_availability_wake();
                 }
                 drop(held);

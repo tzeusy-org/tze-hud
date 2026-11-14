@@ -942,14 +942,18 @@ impl WinitApp {
         // the main thread (deferred to next about_to_wait if busy).
         let portal_drain = self.drain_portal_projection();
         // Prune stale portal_resize_states entries for tiles removed from the
-        // scene (hud-kgu8u). Uses try_lock; silently deferred if lock is busy.
+        // scene (hud-kgu8u). Retain the availability wake if its lock is busy.
         let pruned_drag = self.prune_portal_resize_states();
         let settled_drag = self.drain_pending_drag_terminal();
-        let drag_scene_changed =
-            pruned_drag || settled_drag || chrome_scene_changed || retained_pointer_changed;
-        if self.state.input_processor.chrome_feedback_cancel_pending {
-            // Preserve any mutation already made by the ordinary portal turn;
-            // retry chrome via the existing coalesced scene-availability wake.
+        let drag_scene_changed = pruned_drag.scene_changed()
+            || settled_drag
+            || chrome_scene_changed
+            || retained_pointer_changed;
+        if self.state.input_processor.chrome_feedback_cancel_pending || pruned_drag.is_deferred() {
+            // Chrome cleanup can consume its pending flag before the separate
+            // drag-feedback borrow. Preserve either unfinished phase through the
+            // existing coalesced scene-availability wake, including mutations
+            // already made by the ordinary portal turn.
             if drag_scene_changed || portal_drain.scene_changed() {
                 self.state
                     .wake
