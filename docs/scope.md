@@ -522,7 +522,9 @@ source links when implementation changes the status.
   `hud-h51u7.4.1`, `hud-h51u7.4.2`); their Windows owner signoff
   (`hud-h51u7.4.6`) is outstanding. The subtitle pill also reads semantic
   caption type and shared surface/scrim/corner roles, with retained measured
-  bounds shared by text, backdrop and drag handle
+  bounds shared by text, backdrop and drag handle. Large multiline publications
+  use the existing profile-controlled head/tail viewport window before pill
+  measurement as well as truncation
   ([`subtitle.rs`](../crates/tze_hud_compositor/src/renderer/subtitle.rs),
   `hud-h51u7.4.3`); its owner signoff remains in that same open bead.
   The gauge is restyled as the Tonal Glass ring in source (`hud-h51u7.8.1`);

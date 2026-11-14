@@ -782,8 +782,12 @@ and the `color.outline.variant` hairline (`stroke.border.width`).
 `color.on_surface`. Caption families use the configured font roles (`font.sans`
 for named sans families; generic mono/serif keywords select those roles).
 Long text wraps at word or glyph boundaries and clips or ellipsizes within
-that same pill. Reveal frames keep the complete publication's measured bounds;
-unchanged publications reuse layout, including the drag handle's bounds.
+that same pill. Reveal frames keep the committed publication's measured bounds;
+unchanged publications reuse layout, including the drag handle's bounds. Above
+the profile's `max_truncation_input_bytes` threshold, pill measurement uses the
+same head- or tail-anchored whole-source-line viewport window as truncation.
+This avoids shaping invisible transcript history; it does not split a giant
+single source line or impose a strict byte cap on individual lines.
 `space.subtitle.bottom` is the default zone's 48 dp bottom inset. All logical
 sizes follow the zone monitor scale × `ui.scale`.
 

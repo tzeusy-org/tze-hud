@@ -512,14 +512,17 @@ impl super::Compositor {
     /// truncation may shape before the viewport-adjacent-window fallback engages
     /// (spec.md §324/§331).  The value is retained on the compositor so it is
     /// re-applied across any later [`Compositor::init_text_renderer`] call, and
-    /// forwarded immediately to the live truncation cache when the rasterizer is
-    /// already initialized.
+    /// forwarded immediately to the subtitle measurement and live truncation
+    /// caches when the rasterizer is already initialized.
     ///
     /// When this is never called, the truncation cache keeps its built-in
     /// default (`overflow::DEFAULT_MAX_TRUNCATION_INPUT_BYTES`, 4096), preserving
     /// historical behaviour for configs that omit the override.
     pub fn set_max_truncation_input_bytes(&mut self, bytes: usize) {
         self.configured_max_truncation_input_bytes = Some(bytes);
+        self.subtitle_layouts
+            .borrow_mut()
+            .set_max_input_bytes(bytes);
         if let Some(rasterizer) = &mut self.text_rasterizer {
             rasterizer
                 .truncation_cache

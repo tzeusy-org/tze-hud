@@ -195,6 +195,141 @@ async fn test_zone_subtitle_pill_layout_and_streaming() {
             );
         }
     }
+
+    let tokens =
+        tze_hud_config::themes::resolve_config_tokens(&std::collections::HashMap::from([(
+            "theme".into(),
+            "tonal-glass".into(),
+        )]));
+    compositor.set_token_map(tokens.clone());
+    let mut scene = SceneGraph::new(1280.0, 720.0);
+    scene.zone_registry = ZoneRegistry::with_defaults();
+    scene
+        .zone_registry
+        .zones
+        .get_mut("subtitle")
+        .unwrap()
+        .rendering_policy =
+        tze_hud_config::build_effective_policy("subtitle", &RenderingPolicy::default(), &tokens);
+
+    // Changing the profile threshold must invalidate the pill as well as the
+    // truncation cache. The long middle line is outside both visible windows.
+    let text = [
+        "H\n".repeat(12),
+        "wide middle ".repeat(100),
+        "\n".into(),
+        ["TAIL"; 12].join("\n"),
+    ]
+    .concat();
+    scene
+        .publish_to_zone(
+            "subtitle",
+            ZoneContent::StreamText(text.clone()),
+            "test",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    compositor.set_max_truncation_input_bytes(usize::MAX);
+    compositor.prime_subtitle_layout(&scene, 1280.0, 720.0);
+    let full_width = compositor.collect_text_items(&scene, 1280.0, 720.0)[0].bounds_width;
+    compositor.set_max_truncation_input_bytes(128);
+    // Recreating the actual renderer must keep the configured measurement limit.
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    compositor.prime_subtitle_layout(&scene, 1280.0, 720.0);
+    let head_width = compositor.collect_text_items(&scene, 1280.0, 720.0)[0].bounds_width;
+    assert!(head_width < full_width);
+    scene
+        .zone_registry
+        .zones
+        .get_mut("subtitle")
+        .unwrap()
+        .rendering_policy
+        .stream_tail_anchored = Some(true);
+    compositor.prime_subtitle_layout(&scene, 1280.0, 720.0);
+    let tail_width = compositor.collect_text_items(&scene, 1280.0, 720.0)[0].bounds_width;
+    assert!(
+        head_width < tail_width && tail_width < full_width,
+        "anchoring selects the measured viewport"
+    );
+    let shapes = compositor.subtitle_layouts.borrow().shapes;
+    compositor.set_max_truncation_input_bytes(128);
+    compositor.prime_subtitle_layout(&scene, 1280.0, 720.0);
+    assert_eq!(compositor.subtitle_layouts.borrow().shapes, shapes);
+
+    compositor.set_max_truncation_input_bytes(4096);
+    let line = "caption words with punctuation, cafe and line boundaries.\n";
+    let budget = std::time::Duration::from_micros(tze_hud_scene::perf_budget::test_budget(50_000));
+    for tail in [false, true] {
+        scene
+            .zone_registry
+            .zones
+            .get_mut("subtitle")
+            .unwrap()
+            .rendering_policy
+            .stream_tail_anchored = Some(tail);
+        for bytes in [65_536_usize, 262_144] {
+            for revision in 0..3 {
+                let text = format!(
+                    "HEAD revision {revision}\n{}TAIL revision {revision}",
+                    line.repeat(bytes.div_ceil(line.len()))
+                );
+                scene
+                    .publish_to_zone(
+                        "subtitle",
+                        ZoneContent::StreamText(text),
+                        "test",
+                        None,
+                        None,
+                        None,
+                    )
+                    .unwrap();
+                compositor.prime_markdown_cache(&scene);
+                compositor.resize_reprime_last_at = None;
+                let start = std::time::Instant::now();
+                compositor.prime_truncation_cache(&scene);
+                let elapsed = start.elapsed();
+                assert!(
+                    elapsed < budget,
+                    "changed {bytes}-byte subtitle (tail={tail}) prime {elapsed:?} exceeds {budget:?}"
+                );
+                let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
+                let item = &items[0];
+                let key = crate::text::effective_truncation_key(item).unwrap();
+                let result = compositor
+                    .text_rasterizer
+                    .as_ref()
+                    .unwrap()
+                    .truncation_cache
+                    .get_by_key(&key)
+                    .unwrap();
+                assert!(result.was_truncated);
+                assert!(
+                    result.text.contains(if tail {
+                        "TAIL revision"
+                    } else {
+                        "HEAD revision"
+                    }),
+                    "anchored visible text: {:?}",
+                    result.text
+                );
+                assert!(!result.text.contains(if tail {
+                    "HEAD revision"
+                } else {
+                    "TAIL revision"
+                }));
+                drop(compositor.build_windowed_frame(&mut scene, 1280, 720));
+                let shapes = compositor.subtitle_layouts.borrow().shapes;
+                drop(compositor.build_windowed_frame(&mut scene, 1280, 720));
+                assert_eq!(
+                    compositor.subtitle_layouts.borrow().shapes,
+                    shapes,
+                    "unchanged large publications reuse layout"
+                );
+            }
+        }
+    }
 }
 
 /// Render-branch regression guard (hud-9v3t6): a portal carrying a *zero-length

@@ -1,6 +1,6 @@
 //! Content-hugging subtitle geometry, shared by text, backdrop and drag bounds.
-//! Measure complete publications once with the rasterizer's fonts. Reveal frames
-//! reuse those bounds, so the pill does not breathe as words appear.
+//! Measure the committed publication's viewport once with the rasterizer's fonts.
+//! Reveal frames reuse those bounds, so the pill does not breathe as words appear.
 use crate::text::{TextItem, apply_opacity_to_color, rgba_to_srgb_u8};
 use std::sync::Arc;
 use tze_hud_config::tokens::{CANONICAL_TOKENS, DesignTokenMap, parse_numeric, px_scale};
@@ -73,6 +73,7 @@ impl SubtitleStyle {
             && self.policy.font_size_px == other.policy.font_size_px
             && self.policy.font_family == other.policy.font_family
             && self.policy.font_weight == other.policy.font_weight
+            && self.policy.stream_tail_anchored == other.policy.stream_tail_anchored
     }
     fn text_item(
         &self,
@@ -157,12 +158,27 @@ struct Inputs {
     zone: Rect,
     style: SubtitleStyle,
 }
-#[derive(Default)]
 pub(super) struct SubtitleLayoutCache {
     entry: Option<(Inputs, SubtitleLayout, bool)>,
+    max_input_bytes: usize,
     pub(super) shapes: u64,
 }
+impl Default for SubtitleLayoutCache {
+    fn default() -> Self {
+        Self {
+            entry: None,
+            max_input_bytes: crate::overflow::DEFAULT_MAX_TRUNCATION_INPUT_BYTES,
+            shapes: 0,
+        }
+    }
+}
 impl SubtitleLayoutCache {
+    pub(super) fn set_max_input_bytes(&mut self, bytes: usize) {
+        if self.max_input_bytes != bytes {
+            self.max_input_bytes = bytes;
+            self.invalidate();
+        }
+    }
     pub(super) fn invalidate(&mut self) {
         self.entry = None;
     }
@@ -195,15 +211,28 @@ impl SubtitleLayoutCache {
         let pad_v = style.padding_v.min(zone.height.max(0.0) * 0.5);
         let cap = (outer_width - pad_h * 2.0).max(f32::EPSILON);
         let item = style.text_item(text, Rect::new(0.0, 0.0, cap, zone.height), 1.0, tokens);
+        let line = style.line_height.max(f32::EPSILON);
+        let available = (zone.height - pad_v * 2.0).max(0.0);
+        // Pill measurement runs before truncation. Apply the same configured
+        // whole-source-line window before either shape, including tail anchoring.
+        // Keep at least one line for tiny/empty content boxes so invisible
+        // multiline publications do not fall back to unwindowed measurement.
+        let measured = crate::overflow::viewport_adjacent_input(
+            text,
+            available.max(line),
+            line,
+            item.viewport,
+            self.max_input_bytes,
+            crate::overflow::TRUNCATION_OVERSCAN_LINES,
+        );
         let natural = crate::text::single_line_width(
             fonts,
-            text,
+            measured,
             item.font_size_px,
             item.font_family,
             item.font_weight,
         );
         let width = natural.ceil().min(cap).max(f32::EPSILON);
-        let line = style.line_height.max(f32::EPSILON);
         let mut buffer =
             glyphon::Buffer::new(fonts, glyphon::Metrics::new(item.font_size_px, line));
         buffer.set_size(fonts, Some(width), None);
@@ -215,7 +244,7 @@ impl SubtitleLayoutCache {
         };
         buffer.set_text(
             fonts,
-            text,
+            measured,
             glyphon::Attrs::new()
                 .family(family)
                 .weight(glyphon::Weight(item.font_weight)),
@@ -223,7 +252,6 @@ impl SubtitleLayoutCache {
         );
         buffer.shape_until_scroll(fonts, false);
         self.shapes += 2;
-        let available = (zone.height - pad_v * 2.0).max(0.0);
         let height = (buffer.layout_runs().count() as f32 * line)
             .min((available / line).floor().max(1.0) * line)
             .min(available);
