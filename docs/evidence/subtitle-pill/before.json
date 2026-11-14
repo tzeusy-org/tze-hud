@@ -1,0 +1,55 @@
+{
+  "captured_at": "2026-11-14T17:15:07.338265+00:00",
+  "source": "paired owner HUD own-frame admin capture",
+  "frames": [
+    {
+      "file": "before-owner-01.png",
+      "sha256": "d1e82ccd3b021f34cb9f4ede24ca8e418759dce9550db1fb256b539502ecface",
+      "bytes": 198096,
+      "width": 3840,
+      "height": 2160,
+      "fixture_index": 0,
+      "publish": {
+        "expires_in_ms": 20000,
+        "ok": true
+      }
+    },
+    {
+      "file": "before-owner-02.png",
+      "sha256": "4db91a076324049d8c6635da403adf9223942f0e30b8f399a768a8d1799f5fb1",
+      "bytes": 383552,
+      "width": 3840,
+      "height": 2160,
+      "fixture_index": 1,
+      "publish": {
+        "expires_in_ms": 20000,
+        "ok": true
+      }
+    },
+    {
+      "file": "before-owner-03.png",
+      "sha256": "ed3f79723a0299816f2eb8e899c5c3fb22ed76162a6d8ed9552c37694a9c4889",
+      "bytes": 588202,
+      "width": 3840,
+      "height": 2160,
+      "fixture_index": 2,
+      "publish": {
+        "expires_in_ms": 20000,
+        "ok": true
+      }
+    }
+  ],
+  "settings_changed": false,
+  "input_read_or_acknowledged": false,
+  "cleanup": "finite TTL only",
+  "ttl_ms": 20000,
+  "theme": "owner existing selection, unchanged and not exposed by status",
+  "scale": "owner existing scale, unchanged and not exposed by status",
+  "build_sha": "24818c39c44dba4ffbe596aa1edc92d849f893d9",
+  "safe_mode": false,
+  "fixture_sha256": "ece3826076125f10e4bde57e3e1e69a20d7b5070c666bcf356bc43752e97c910",
+  "ok": true,
+  "capture_endpoint": "/admin/screenshot (default primary)",
+  "checkpoint": "1 second after each successful publish, followed by on-demand frame capture",
+  "display_index": "default primary; no numeric index requested"
+}
