@@ -374,12 +374,12 @@ class BorrowedSmoke(Smoke):
 
 
 def borrowed_failure(error: BaseException) -> str:
-    """Name a borrowed-smoke failure without leaking transport/response detail.
+    """Name a borrowed-smoke failure without leaking transport detail.
 
-    Assertion messages are composed by this script from sanitized request
-    labels (RequestFailure) and HUD replies, never the endpoint or PSK, so
-    they are printed. Any other exception may carry a URL or transport
-    detail, so only its class is shown.
+    Assertions carry this script's check diagnostics: private input and raw
+    operator response bodies must never be interpolated into them.
+    RequestFailure labels are sanitized at the request boundary. Other
+    exceptions may carry a URL or transport detail, so show only their class.
     """
     name = type(error).__name__
     message = str(error) if isinstance(error, AssertionError) else ""
@@ -499,7 +499,9 @@ def run_checks(smoke: Smoke) -> None:
     listed = {s["s"] for s in smoke.ok("hud_surfaces")["surfaces"]}
     assert portal in listed, f"{portal} not listed after attach: {sorted(listed)}"
     inbox = smoke.ok("hud_input", {"wait_ms": 0})
-    assert inbox.get("items") == [], f"hud_input on a fresh portal: {inbox}"
+    assert inbox.get("items") == [], (
+        "hud_input expected an empty inbox; use an idle dedicated pairing with no pending input"
+    )
     smoke.ok("hud_clear", {"surface": portal})
     print(f"ok  {portal} attach, poll, detach")
 
@@ -1438,8 +1440,10 @@ def check_screenshot(smoke: Smoke) -> None:
 def check_admin(smoke: Smoke) -> None:
     status, body = smoke.get("/admin/status")
     info = json.loads(body)
-    assert status == 200 and info["pid"] and info["sha"], f"/admin/status: {body}"
-    assert "safe_mode_hotkey" in info, f"/admin/status lacks safe_mode_hotkey: {body}"
+    assert status == 200 and info["pid"] and info["sha"], (
+        f"/admin/status: expected HTTP 200 with a running PID and build SHA (HTTP {status})"
+    )
+    assert "safe_mode_hotkey" in info, "/admin/status lacks safe_mode_hotkey"
     # run_checks and the settle wait precede this, so the HUD should be idle.
     cpu = info["cpu_pct_2s"]
     assert isinstance(cpu, (int, float)) and cpu < 5, f"idle HUD cpu_pct_2s={cpu}, expected < 5"

@@ -702,12 +702,28 @@ def test_widget_list_is_exact_when_owned_and_only_needs_used_widgets_when_borrow
 
 
 def test_borrowed_failure_names_assertions_but_not_transport_detail():
+    import json
+    from types import SimpleNamespace
+
     assert ws.borrowed_failure(AssertionError("zone:subtitle changed only 0 pixels")) == (
         "AssertionError: zone:subtitle changed only 0 pixels")
     assert ws.borrowed_failure(AssertionError()) == "AssertionError"
     failure = ws.RequestFailure("rpc id=3 method=tools/call tool=hud_surfaces: URLError after 0.1s", retryable=True)
     assert ws.borrowed_failure(failure) == "RequestFailure: " + str(failure)
     assert ws.borrowed_failure(ValueError("http://private-host/?key=secret")) == "ValueError"
+
+    # Actual operator-check failures keep their reason without echoing other
+    # private fields from an otherwise successful admin response.
+    marker = "synthetic-private-admin-context"
+    for info, reason in [
+        ({"pid": 0, "sha": "fixture", "private": marker}, "running PID and build SHA"),
+        ({"pid": 42, "sha": "fixture", "private": marker}, "lacks safe_mode_hotkey"),
+    ]:
+        smoke = SimpleNamespace(get=lambda path: (200, json.dumps(info)))
+        with pytest.raises(AssertionError) as failed:
+            ws.check_admin(smoke)
+        message = ws.borrowed_failure(failed.value)
+        assert reason in message and marker not in message
 
 
 def test_borrowed_url_routes_only_authorized_publications_and_own_cleanup(monkeypatch, capsys):
@@ -758,7 +774,8 @@ def test_borrowed_url_routes_only_authorized_publications_and_own_cleanup(monkey
                 payload = {"surfaces": [{**entry, **({"held": True} if entry["s"] in held else {})} for entry in entries]
                            + [{"s": name, "state": "attached"} for name in held if name.startswith("portal:")]}
             elif tool == "hud_input":
-                payload = {"items": []}
+                assert "ack" not in args  # Pending owner input belongs to its original consumer.
+                payload = {"items": faults.get("pending_input", [])}
             elif surface == "zone:no-such-zone":
                 return Response({"isError": True, "content": [{"text": json.dumps({"code": "ZONE_NOT_FOUND", "hint": "unknown"})}]})
             elif tool == "hud_publish":
@@ -798,6 +815,18 @@ def test_borrowed_url_routes_only_authorized_publications_and_own_cleanup(monkey
     assert ws.main(["--url", "http://paired:9090/mcp"]) == 0 and not held
     entries[:] = packaged
     capsys.readouterr()
+
+    # Replies can outlive their card/portal, leaving an apparently idle pairing.
+    # Exercise the real borrowed route and keep that reply queued and unacked.
+    marker = "synthetic-private-owner-reply"
+    pending = [{"id": "earlier-input", "s": "zone:notification-area", "text": marker}]
+    faults["pending_input"] = pending
+    trace.clear()
+    assert ws.main(["--url", "http://paired:9090/mcp"]) == 1 and not held
+    captured = capsys.readouterr()
+    assert "hud_input expected an empty inbox" in captured.err
+    assert marker not in captured.out + captured.err and faults["pending_input"] == pending
+    faults.clear()
 
     # A lost publish reply can still mean a mutation: clean its tracked surface.
     trace.clear()
