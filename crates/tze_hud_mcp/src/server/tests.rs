@@ -2583,7 +2583,8 @@ async fn publish_wait_endings_deadline_delay_and_validation() {
                 call(&server, "hud_publish", json!({"surface":"zone:notification-area","key":"question","content":{"title":"Replacement"}})).await;
             }
             "displaced" => {
-                // Exercise the configured real stack's oldest-entry trim.
+                // Exercise the configured real stack's trim. Questions are
+                // spared while any other card can leave, so the peers ask too.
                 let depth = match server.scene.lock().await.zone_registry.zones["notification-area"]
                     .contention_policy
                 {
@@ -2591,7 +2592,7 @@ async fn publish_wait_endings_deadline_delay_and_validation() {
                     _ => panic!("production notification stack"),
                 };
                 for index in 0..depth {
-                    call(&server, "hud_publish", json!({"surface":"zone:notification-area","key":format!("peer{index}"),"content":{"title":"Peer"}})).await;
+                    call(&server, "hud_publish", json!({"surface":"zone:notification-area","key":format!("peer{index}"),"content":{"title":"Peer","actions":[{"label":"Ok","callback_id":format!("peer{index}")}]}})).await;
                 }
             }
             _ => {
@@ -4454,4 +4455,231 @@ async fn user_test_zone_fixtures_and_documented_examples_match_production_parser
         assert_eq!(payload.urgency, urgency.unwrap_or(1));
         assert_eq!(record.expires_at_wall_us, Some(2_000_000));
     }
+}
+
+// ─── Outcome receipts (hud-ljhku.5) ─────────────────────────────────────────
+
+/// R5.3: a card trimmed from a full stack reaches its own publisher once, as
+/// a `displaced` input item carrying the card's key, ACKed like any item.
+#[tokio::test]
+async fn trimmed_card_reaches_only_its_publisher_as_a_displaced_item() {
+    let (server, _, a, b) = two_agents_for_zones(&["notification-area"]);
+    let (v, is_error) = call_as(
+        &server,
+        &a,
+        "hud_publish",
+        json!({"surface":"zone:notification-area","key":"build:7","content":{"body":"Building"}}),
+    )
+    .await;
+    assert!(!is_error, "{v}");
+    assert_eq!(
+        v,
+        json!({"ok":true,"expires_in_ms":60000}),
+        "no receipt fields"
+    );
+    for index in 0..5 {
+        call_as(
+            &server,
+            &b,
+            "hud_publish",
+            json!({"surface":"zone:notification-area","content":{"body":format!("status {index}")}}),
+        )
+        .await;
+    }
+    let (input, _) = call_as(&server, &a, "hud_input", json!({})).await;
+    let items = input["items"].as_array().unwrap();
+    assert_eq!(items.len(), 1, "{input}");
+    let id = items[0]["id"].as_str().unwrap().to_owned();
+    assert_eq!(
+        items[0],
+        json!({"id":id,"s":"zone:notification-area","kind":"displaced","key":"build:7"})
+    );
+    assert_eq!(
+        call_as(&server, &b, "hud_input", json!({})).await.0,
+        json!({"items":[],"remaining":0}),
+        "the agent whose card caused the trim receives nothing"
+    );
+    let (redelivered, _) = call_as(&server, &a, "hud_input", json!({})).await;
+    assert_eq!(
+        redelivered["items"][0]["id"],
+        json!(id),
+        "unacked is redelivered"
+    );
+    assert_eq!(
+        call_as(&server, &a, "hud_input", json!({"ack":[id]}))
+            .await
+            .0,
+        json!({"items":[],"remaining":0})
+    );
+}
+
+/// R5.3 S3: same-key replacement, clear and expiry leave no receipt.
+#[tokio::test]
+async fn replacement_clear_and_expiry_queue_no_displaced_item() {
+    let (server, clock) = server();
+    let notify = |body: &str, key: &str, ttl: u64| json!({"surface":"zone:notification-area","key":key,"ttl_ms":ttl,"content":{"body":body}});
+    call(&server, "hud_publish", notify("v1", "k", 60000)).await;
+    call(&server, "hud_publish", notify("v2", "k", 60000)).await;
+    call(
+        &server,
+        "hud_clear",
+        json!({"surface":"zone:notification-area"}),
+    )
+    .await;
+    call(&server, "hud_publish", notify("brief", "e", 1000)).await;
+    clock.advance(2000);
+    server.scene.lock().await.drain_expired_zone_publications();
+    assert_eq!(
+        call(&server, "hud_input", json!({})).await,
+        json!({"items":[],"remaining":0})
+    );
+}
+
+/// R5.2 through MCP: a burst of status cards keeps a pending question.
+#[tokio::test]
+async fn status_burst_keeps_a_pending_question_on_screen() {
+    let (server, _) = server();
+    call(&server, "hud_publish", question(0)).await;
+    let asked = latest_card(&server).await;
+    for index in 0..5 {
+        call(
+            &server,
+            "hud_publish",
+            json!({"surface":"zone:notification-area","key":format!("s{index}"),"content":{"body":"status"}}),
+        )
+        .await;
+    }
+    let scene = server.scene.lock().await;
+    let shown = scene.zone_registry.active_for_zone("notification-area");
+    assert_eq!(shown.len(), 5);
+    assert!(shown.iter().any(|r| r.publication_id == asked));
+    assert!(!shown.iter().any(|r| r.merge_key.as_deref() == Some("s0")));
+}
+
+/// Reports text containing "LONG" as cut; counts every measurement.
+#[derive(Debug, Default)]
+struct MarkerFit {
+    calls: std::sync::atomic::AtomicUsize,
+}
+
+impl tze_hud_scene::TextFit for MarkerFit {
+    fn notification(
+        &self,
+        _: &SceneGraph,
+        _: &str,
+        payload: &tze_hud_scene::types::NotificationPayload,
+    ) -> Vec<&'static str> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let mut out = Vec::new();
+        if payload.title.contains("LONG") {
+            out.push("title");
+        }
+        if payload.text.contains("LONG") {
+            out.push("body");
+        }
+        if payload.actions.iter().any(|a| a.label.contains("LONG")) {
+            out.push("actions");
+        }
+        out
+    }
+
+    fn widget(
+        &self,
+        _: &SceneGraph,
+        _: &str,
+        params: &HashMap<String, WidgetParameterValue>,
+    ) -> Vec<String> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let mut out: Vec<String> = params
+            .iter()
+            .filter(|(_, v)| matches!(v, WidgetParameterValue::String(s) if s.contains("LONG")))
+            .map(|(k, _)| k.clone())
+            .collect();
+        out.sort();
+        out
+    }
+}
+
+fn fit_server() -> (McpServer, Arc<MarkerFit>) {
+    let (server, _) = server();
+    let fit = Arc::new(MarkerFit::default());
+    (server.with_text_fit(fit.clone()), fit)
+}
+
+/// R5.1 S1/S2/S4: cut card fields are named once; a card that fits has the
+/// same reply bytes as a server with no measurement at all.
+#[tokio::test]
+async fn notification_reply_names_cut_fields_and_is_unchanged_when_it_fits() {
+    let (server, _) = fit_server();
+    let cut = call(
+        &server,
+        "hud_publish",
+        json!({"surface":"zone:notification-area","content":{"title":"LONG title","body":"LONG body","actions":[{"label":"LONG","callback_id":"x"}]}}),
+    )
+    .await;
+    assert_eq!(cut["clipped"], json!(["title", "body", "actions"]), "{cut}");
+
+    let args = json!({"surface":"zone:notification-area","content":{"title":"Build","body":"All tests passed."}});
+    let (plain, _) = self::server();
+    let body = json!({"jsonrpc":"2.0","id":1,"method":"tools/call",
+        "params":{"name":"hud_publish","arguments":args}})
+    .to_string();
+    assert_eq!(
+        server.dispatch(&body, &ctx()).await,
+        plain.dispatch(&body, &ctx()).await,
+        "a card that fits answers with today's bytes"
+    );
+}
+
+/// R5.1 S5: stream text and portals are never measured or reported.
+#[tokio::test]
+async fn stream_text_and_portal_publishes_never_carry_clipped() {
+    let (server, fit) = fit_server();
+    let (server, _) = hub_portal(server);
+    let subtitle = call(
+        &server,
+        "hud_publish",
+        json!({"surface":"zone:subtitle","content":"LONG LONG LONG"}),
+    )
+    .await;
+    assert!(subtitle.get("clipped").is_none(), "{subtitle}");
+    let portal = call(
+        &server,
+        "hud_publish",
+        json!({"surface":"portal:main","content":"LONG LONG LONG"}),
+    )
+    .await;
+    assert!(portal.get("clipped").is_none(), "{portal}");
+    assert_eq!(fit.calls.load(Ordering::SeqCst), 0);
+}
+
+/// R5.1 S3: a cut widget string param is named; params this call did not set
+/// are not re-reported.
+#[tokio::test]
+async fn widget_reply_names_only_this_calls_cut_params() {
+    let (server, _) = fit_server();
+    let cut = call(
+        &server,
+        "hud_publish",
+        json!({"surface":"widget:gauge","params":{"label":"LONG label","level":0.5}}),
+    )
+    .await;
+    assert_eq!(cut["clipped"], json!(["label"]), "{cut}");
+    let other = call(
+        &server,
+        "hud_publish",
+        json!({"surface":"widget:gauge","params":{"level":0.7}}),
+    )
+    .await;
+    assert!(other.get("clipped").is_none(), "{other}");
+}
+
+/// A question wait's final reply carries the admission-time report too.
+#[tokio::test(start_paused = true)]
+async fn question_wait_reply_keeps_the_clipped_report() {
+    let (server, _) = fit_server();
+    let mut args = question(1000);
+    args["content"]["title"] = json!("LONG question");
+    let reply = call(&server, "hud_publish", args).await;
+    assert_eq!(reply["clipped"], json!(["title"]), "{reply}");
 }

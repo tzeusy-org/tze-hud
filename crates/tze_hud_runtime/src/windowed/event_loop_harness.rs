@@ -171,6 +171,7 @@ impl WindowedRuntimeState {
             static_hit_regions: Vec::new(),
             widget_hover_trackers: HashMap::new(),
             pending_widget_svgs: Vec::new(),
+            text_fit: Default::default(),
             modifiers: winit::keyboard::ModifiersState::empty(),
             primary_monitor: None,
             secondaries: Vec::new(),
@@ -318,8 +319,14 @@ impl HeadlessEventLoopHarness {
                     .config_file_path
                     .as_deref()
                     .and_then(|p| std::path::Path::new(p).parent());
-                crate::scene_startup::run_scene_startup(raw, config_parent, &mut scene)
-                    .global_tokens
+                let startup =
+                    crate::scene_startup::run_scene_startup(raw, config_parent, &mut scene);
+                for (widget_type, svg_file, svg) in &startup.widget_svg_assets {
+                    state
+                        .text_fit
+                        .register_widget_svg(widget_type, svg_file, svg);
+                }
+                startup.global_tokens
             }
             None => {
                 scene.zone_registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
@@ -357,7 +364,10 @@ impl HeadlessEventLoopHarness {
             crate::launch::LiveSettings::new(cfg.target_fps, cfg.debug_zones, render_wake.clone())
                 .with_answer_window(cfg.answer_window_ms),
         );
+        // GPU-free: measure with the production tokens the compositor would use.
+        state.text_fit.set_tokens(global_tokens.clone());
         let mcp_config = crate::mcp::McpServerConfig {
+            text_fit: Some(Arc::clone(&state.text_fit) as Arc<dyn tze_hud_scene::TextFit>),
             appearance: None,
             publication_defaults: state.live.publication_defaults.clone(),
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(
@@ -2550,9 +2560,7 @@ mod tests {
             .into_iter()
             .map(|action| match action.kind {
                 tze_hud_scene::graph::PendingActionKind::Callback(id) => id,
-                tze_hud_scene::graph::PendingActionKind::Dismiss => {
-                    panic!("expected a publisher callback, received a human X")
-                }
+                other => panic!("expected a publisher callback, received {other:?}"),
             })
             .collect()
     }
@@ -3883,6 +3891,15 @@ mod tests {
             assert_eq!(replacement.published_at_wall_us, first.published_at_wall_us);
             assert_ne!(replacement.publication_id, second.publication_id);
             assert!(replacement.expires_at_wall_us.is_none());
+            // The forced trim tells the publisher its card was displaced.
+            let receipts = scene.take_pending_actions("notif-agent");
+            assert!(
+                !receipts.is_empty()
+                    && receipts
+                        .iter()
+                        .all(|a| a.kind == tze_hud_scene::graph::PendingActionKind::Displaced),
+                "{receipts:?}"
+            );
         }
         assert!(harness.tick());
         let (x, y) = harness.notification_action_center("second").unwrap();

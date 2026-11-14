@@ -969,6 +969,39 @@ def scenario_card_dismiss(run: Run) -> None:
     take_card_answer(run, key, "dismiss", dismiss=True)
 
 
+def scenario_stack_trim(run: Run) -> None:
+    """hud-ljhku.5 R5.2/R5.3: six cards, one an unanswered question; the question is kept.
+
+    The trim spares the question and removes the oldest status card, whose
+    publisher gets one displaced receipt. A full five-card stack is taller
+    than the notification zone (30% of the display), so the kept question,
+    the oldest card, can sit below the drawn cards; it is checked visible
+    and answerable once the newer status cards leave.
+    """
+    question = "gesture-trim-question"
+    open_card(run, question)
+    statuses = [f"gesture-trim-s{i}" for i in range(5)]
+    for key in statuses:
+        run.publish("zone:notification-area", key=key, ttl_ms=0,
+                    content={"body": f"Status {key[-1]}"})
+    items = run.take(1)
+    if [(i.get("kind"), i.get("key"), i.get("s")) for i in items] != \
+            [("displaced", statuses[0], "zone:notification-area")]:
+        raise ScenarioFailed("one displaced receipt, for the oldest status card",
+                             {"items": items, "status": run.status()})
+    run.expect("newest status cards drawn, trimmed one gone", lambda s: bool(
+        notification_entry(s, statuses[-1]) and notification_entry(s, statuses[0]) is None))
+    for key in statuses[1:]:
+        is_error, reply = run.smoke.call("hud_clear", {"surface": "zone:notification-area", "key": key})
+        if is_error:
+            raise ScenarioFailed(f"hud_clear {key} refused", {"code": reply.get("code")})
+    run.expect("kept question drawn", lambda s: bool(
+        (card := notification_entry(s, question)) and card["state"] != "exiting"))
+    run.settle()
+    run.click(f"zone:notification-area/{question}/0")
+    take_card_answer(run, question, f"{question}-first")
+
+
 def scenario_card_link(run: Run) -> None:
     """R14.2 S4/S5: one real link handoff; same action within 2s is refused, with no input."""
     key = "gesture-card-link"
@@ -1794,6 +1827,7 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "card-keyboard": scenario_card_keyboard,
     "card-dismiss": scenario_card_dismiss,
     "card-link": scenario_card_link,
+    "stack-trim": scenario_stack_trim,
     "widget-hover": scenario_widget_hover,
     "drag-alignment": scenario_drag_alignment,        # 8
     "drag-release": scenario_drag_release,            # 9

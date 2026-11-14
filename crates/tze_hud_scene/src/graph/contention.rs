@@ -37,10 +37,11 @@ impl ContentionRecord for WidgetPublishRecord {
 ///
 /// - `LatestWins` / `Replace` — replace all existing records with the new one.
 /// - `Stack { max_depth }` — enforce `max_publishers` per namespace, push the
-///   record, then trim oldest so the total stays within `max_depth`.
-///   `max_depth == 0` trims the stack to zero (i.e. the publish is silently
-///   discarded); callers that want to reject rather than discard should validate
-///   `max_depth` before calling.
+///   record, then trim so the total stays within `max_depth`. Each trim takes
+///   the oldest record `spare` rejects; only when `spare` keeps every record
+///   does the oldest go. `max_depth == 0` trims the stack to zero (i.e. the
+///   publish is silently discarded); callers that want to reject rather than
+///   discard should validate `max_depth` before calling.
 /// - `MergeByKey { max_keys }` — replace the same-key entry in place, or add a
 ///   new key (evicting the oldest when at capacity).
 ///
@@ -53,13 +54,20 @@ impl ContentionRecord for WidgetPublishRecord {
 /// - `make_max_publishers_err` — constructs the rejection error when the limit
 ///   is reached; called with the effective limit.  Zone callers supply
 ///   `ZoneMaxPublishersReached`; widget callers supply `WidgetMaxPublishersReached`.
+/// - `spare` — `Stack` trim preference: records it accepts leave only when
+///   every record is spared (notification zones spare unanswered questions).
+///
+/// Returns the records a `Stack` trim removed, oldest first; replacement and
+/// key eviction by the other policies are not trims.
 pub(crate) fn apply_contention<R: ContentionRecord>(
     publishes: &mut Vec<R>,
     record: R,
     contention_policy: ContentionPolicy,
     max_publishers: u32,
     make_max_publishers_err: impl Fn(u32) -> ValidationError,
-) -> Result<(), ValidationError> {
+    spare: impl Fn(&R) -> bool,
+) -> Result<Vec<R>, ValidationError> {
+    let mut trimmed = Vec::new();
     match contention_policy {
         ContentionPolicy::LatestWins => {
             *publishes = vec![record];
@@ -77,12 +85,12 @@ pub(crate) fn apply_contention<R: ContentionRecord>(
                 return Err(make_max_publishers_err(max_publishers));
             }
             publishes.push(record);
-            // Trim oldest entries so the stack stays within max_depth.
+            // Trim so the stack stays within max_depth, oldest unspared first.
             // max_depth == 0 trims to zero (the pushed record is removed).
             let max = max_depth as usize;
-            if publishes.len() > max {
-                let excess = publishes.len() - max;
-                publishes.drain(0..excess);
+            while publishes.len() > max {
+                let victim = publishes.iter().position(|r| !spare(r)).unwrap_or(0);
+                trimmed.push(publishes.remove(victim));
             }
         }
         ContentionPolicy::MergeByKey { max_keys } => {
@@ -106,5 +114,5 @@ pub(crate) fn apply_contention<R: ContentionRecord>(
             }
         }
     }
-    Ok(())
+    Ok(trimmed)
 }

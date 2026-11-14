@@ -136,6 +136,16 @@ Sessions sharing a pairing need one coordinated consumer/demultiplexer or
 separate identities. Do not auto-ACK another session's records. `wait_ms` defaults
 to 0 and caps at 30000; a CLI/network timeout does not establish a user's answer.
 
+A full notification stack keeps unanswered questions and trims the oldest
+other card. When your trimmed card was never answered, `hud_input` returns one
+`kind:"displaced"` item (with `key` if keyed) to you alone; republish only if it
+still matters, and key cards whose displacement you care about. An armed
+`wait_ms` gets `gone:"displaced"` instead.
+
+A publish reply may carry `clipped` (`title`, `body`, `actions`, or widget
+parameter names): the HUD would cut that text. Shorten it and republish the
+same key, or move the detail behind a link action. No `clipped` means it fits.
+
 Clicking an action disables its card and starts its exit locally. Replacement,
 clear and TTL never retract accepted input: validate the callback generation
 even if its old card has disappeared. Safe mode returns `SAFE_MODE_ACTIVE` for

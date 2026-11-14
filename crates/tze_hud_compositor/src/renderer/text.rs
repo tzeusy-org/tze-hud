@@ -21,13 +21,11 @@ use super::token_colors::{
     resolve_tile_close_tokens, tile_close_button_bounds,
 };
 use super::token_colors::{
-    ICON_SIZE_PX, ICON_TEXT_GAP_PX, NOTIFICATION_BODY_SCALE, NOTIFICATION_DISMISS_BUTTON_SIZE_PX,
-    NOTIFICATION_DISMISS_FONT_SIZE_PX, NOTIFICATION_DISMISS_FONT_WEIGHT,
-    NOTIFICATION_DISMISS_GAP_PX, NOTIFICATION_ICON_GAP_PX, NOTIFICATION_ICON_SIZE_PX,
-    NOTIFICATION_INTER_LINE_GAP, NOTIFICATION_TITLE_WEIGHT, is_alert_banner_zone,
-    notification_dismiss_bounds, notification_inset, resolve_composer_overlay_tokens,
-    resolve_notification_action_tokens, resolve_text_secondary_color,
-    resolve_transcript_max_measure_px, urgency_to_on_severity_color,
+    ICON_SIZE_PX, ICON_TEXT_GAP_PX, NOTIFICATION_DISMISS_FONT_SIZE_PX,
+    NOTIFICATION_DISMISS_FONT_WEIGHT, NOTIFICATION_ICON_GAP_PX, NOTIFICATION_ICON_SIZE_PX,
+    is_alert_banner_zone, notification_dismiss_bounds, notification_inset,
+    resolve_composer_overlay_tokens, resolve_notification_action_tokens,
+    resolve_text_secondary_color, resolve_transcript_max_measure_px, urgency_to_on_severity_color,
 };
 
 /// Default line-height multiplier (`font_size_px × 1.4 = line_height_px`).
@@ -452,18 +450,6 @@ impl super::Compositor {
 
                     // Resolve notification typography tokens needed for text rendering
                     // (not slot geometry — those live in zone_slot_layout).
-                    let notif_body_scale = self
-                        .token_map
-                        .get("typography.notification.body.scale")
-                        .and_then(|v| v.parse::<f32>().ok())
-                        .filter(|v| v.is_finite())
-                        .unwrap_or(NOTIFICATION_BODY_SCALE)
-                        .clamp(0.5, 1.0);
-                    let notif_title_weight = self
-                        .token_map
-                        .get("typography.notification.title.weight")
-                        .and_then(|v| v.parse::<u16>().ok())
-                        .unwrap_or(NOTIFICATION_TITLE_WEIGHT);
                     let notif_dismiss_font_size_px = self
                         .token_map
                         .get("typography.notification.dismiss.font_size_px")
@@ -525,26 +511,25 @@ impl super::Compositor {
                                 // `spacing.notification.inset`), else 9 dp. The
                                 // action row and × share the horizontal inset.
                                 let inset_h = notification_inset(policy, scale);
-                                let inset_v =
-                                    policy.margin_vertical.or(policy.margin_px).unwrap_or(
-                                        super::token_colors::NOTIFICATION_INSET_DEFAULT_PX * scale,
-                                    );
                                 // If a cached icon texture exists, inset text to the right of it.
-                                let icon_width_reserved = parse_notification_icon(&payload.icon)
-                                    .filter(|id| self.image_texture_cache.contains_key(id))
-                                    .map(|_| {
-                                        (NOTIFICATION_ICON_SIZE_PX + NOTIFICATION_ICON_GAP_PX)
-                                            * scale
-                                    })
-                                    .unwrap_or(0.0);
-                                // Font size: policy explicit > typography.body.size token > 16px
-                                let font_size_px = policy
-                                    .font_size_px
-                                    .unwrap_or_else(|| Self::resolve_body_font_size(zone_tokens));
-                                // Font family: policy explicit > SystemSansSerif default
-                                let font_family = policy
-                                    .font_family
-                                    .unwrap_or(tze_hud_scene::types::FontFamily::SystemSansSerif);
+                                let icon_shown = parse_notification_icon(&payload.icon)
+                                    .is_some_and(|id| self.image_texture_cache.contains_key(&id));
+                                let text_layout =
+                                    super::notification_text::notification_text_layout(
+                                        zone_name,
+                                        &self.token_map,
+                                        zone_tokens,
+                                        policy,
+                                        payload,
+                                        zw,
+                                        effective_slot_h,
+                                        &self.notification_action_layout(
+                                            zone_name, record, policy, zw,
+                                        ),
+                                        icon_shown,
+                                        scale,
+                                    );
+                                let font_family = text_layout.font_family;
                                 // Text color: alert-banner uses the on-severity
                                 // color for its fill; else policy explicit >
                                 // color.text.primary token > near-white.
@@ -577,93 +562,16 @@ impl super::Compositor {
                                     _ => (None, None),
                                 };
 
-                                let dismiss_reserved_w = if is_alert_banner_zone(zone_name) {
-                                    0.0
-                                } else {
-                                    // The × sits inset_h in from the right edge,
-                                    // as the text does: reserve its width and gap.
-                                    (NOTIFICATION_DISMISS_BUTTON_SIZE_PX
-                                        + NOTIFICATION_DISMISS_GAP_PX)
-                                        * scale
-                                };
-                                // Text x-offset respects icon reservation (from icon texture pipeline).
-                                let text_x = zx + inset_h + icon_width_reserved;
-                                let text_w = (zw
-                                    - inset_h
-                                    - icon_width_reserved
-                                    - inset_h
-                                    - dismiss_reserved_w)
-                                    .max(1.0);
-
-                                // Text stops above the action row (hud-mskx5).
-                                let text_slot_h = (effective_slot_h
-                                    - self
-                                        .notification_action_layout(zone_name, record, policy, zw)
-                                        .reserve(inset_h))
-                                .max(1.0);
-                                if payload.title.is_empty() {
-                                    // ── Single-line rendering (backward-compatible) ──
-                                    // Font weight: policy explicit > 400 default
-                                    let font_weight = policy.font_weight.unwrap_or(400);
+                                for band in &text_layout.bands {
                                     items.push(Self::make_zone_text_item(
-                                        Arc::from(payload.text.as_str()),
-                                        text_x,
-                                        slot_y + inset_v,
-                                        text_w,
-                                        (text_slot_h - inset_v * 2.0).max(1.0),
-                                        font_size_px,
+                                        Arc::from(band.text),
+                                        zx + text_layout.x,
+                                        slot_y + band.y,
+                                        text_layout.width,
+                                        band.height,
+                                        band.font_size_px,
                                         font_family,
-                                        font_weight,
-                                        color,
-                                        tze_hud_scene::types::TextAlign::Start,
-                                        tze_hud_scene::types::TextOverflow::Ellipsis,
-                                        oc,
-                                        ow,
-                                        effective_opacity,
-                                    ));
-                                } else {
-                                    // ── Two-line rendering: bold title + regular body ──
-                                    //
-                                    // Use pre-resolved token values (notif_title_weight,
-                                    // notif_body_scale) to keep rendering consistent with
-                                    // the slot-height calculation above.
-                                    let body_font_size = font_size_px * notif_body_scale;
-                                    let title_line_h = font_size_px * 1.4;
-                                    let content_top = slot_y + inset_v;
-
-                                    // Title line (bold)
-                                    items.push(Self::make_zone_text_item(
-                                        Arc::from(payload.title.as_str()),
-                                        text_x,
-                                        content_top,
-                                        text_w,
-                                        title_line_h.max(1.0),
-                                        font_size_px,
-                                        font_family,
-                                        notif_title_weight,
-                                        color,
-                                        tze_hud_scene::types::TextAlign::Start,
-                                        tze_hud_scene::types::TextOverflow::Ellipsis,
-                                        oc,
-                                        ow,
-                                        effective_opacity,
-                                    ));
-                                    // Body line (regular weight, 0.85× size)
-                                    let body_top = content_top
-                                        + title_line_h
-                                        + NOTIFICATION_INTER_LINE_GAP * scale;
-                                    // Remaining slot height available for body (down to inset bottom)
-                                    let body_bounds_h =
-                                        ((slot_y + text_slot_h - inset_v) - body_top).max(1.0);
-                                    items.push(Self::make_zone_text_item(
-                                        Arc::from(payload.text.as_str()),
-                                        text_x,
-                                        body_top,
-                                        text_w,
-                                        body_bounds_h,
-                                        body_font_size,
-                                        font_family,
-                                        400,
+                                        band.font_weight,
                                         color,
                                         tze_hud_scene::types::TextAlign::Start,
                                         tze_hud_scene::types::TextOverflow::Ellipsis,
@@ -722,7 +630,7 @@ impl super::Compositor {
                                             Arc::from(action.label.as_str()),
                                             b.x + action_layout.padding + hint_width,
                                             b.y + action_layout.padding,
-                                            (available - hint_width - mark_width).max(1.0),
+                                            action_layout.label_width(&b, index),
                                             (b.height - action_layout.padding * 2.0).max(1.0),
                                             notif_action_font_size_px,
                                             font_family,

@@ -57,7 +57,8 @@ fn invalid(hint: impl Into<String>) -> McpError {
 
 // ─── Per-agent MCP state ─────────────────────────────────────────────────────
 
-/// A notification action press delivered to an agent and not yet acked.
+/// A notification action press or displaced receipt delivered to an agent
+/// and not yet acked.
 /// Redelivered on every `hud_input` until acked. (Portal input is queued and
 /// redelivered by the portal hub.)
 #[derive(Clone, Debug)]
@@ -120,6 +121,8 @@ pub struct ToolCtx<'a> {
     /// Server-owned implicit widget motion; never a model-visible parameter.
     pub widget_transition_ms: u32,
     pub publication_defaults: &'a tze_hud_scene::PublicationDefaults,
+    /// Admission-time text measurement behind `clipped`; `None` reports none.
+    pub text_fit: Option<&'a dyn tze_hud_scene::TextFit>,
 }
 
 /// The one error every mutating verb returns while the human has paused agents.
@@ -535,6 +538,15 @@ fn ensure_lease(ctx: &ToolCtx<'_>, scene: &mut SceneGraph) -> McpResult<SceneId>
     Ok(id)
 }
 
+/// Name the cut fields in a publish reply; absent (identical bytes) when
+/// everything fits.
+fn with_clipped<T: serde::Serialize>(mut reply: Value, clipped: &[T]) -> Value {
+    if !clipped.is_empty() {
+        reply["clipped"] = json!(clipped);
+    }
+    reply
+}
+
 fn ok_with_expiry(expires_in_ms: Option<u64>) -> Value {
     match expires_in_ms {
         Some(ms) => json!({ "ok": true, "expires_in_ms": ms }),
@@ -679,6 +691,12 @@ async fn publish_zone<'a>(
     if matches!(&content, ZoneContent::Notification(_)) {
         SceneGraph::validate_notification_key(p.key.as_deref()).map_err(|e| scene_error(&e))?;
     }
+    // Measured at admission with the renderer's shaper and current tokens.
+    // Stream text scrolls and tail-anchors by design, so only cards report.
+    let clipped = match (&content, ctx.text_fit) {
+        (ZoneContent::Notification(payload), Some(fit)) => fit.notification(&scene, zone, payload),
+        _ => Vec::new(),
+    };
     // Read the owner default exactly once, after resolving the content. Explicit
     // zero remains held; ordinary zone content keeps its historical default.
     let ttl_ms = p.ttl_ms.unwrap_or_else(|| {
@@ -781,8 +799,9 @@ async fn publish_zone<'a>(
     // A quiescent renderer must present/schedule this question before its call waits.
     ctx.render_wake.notify();
     let Some(claim) = claim else {
-        return Ok(PublishReply::plain(ok_with_expiry(
-            expires_at.map(|at| at.saturating_sub(now) / 1_000),
+        return Ok(PublishReply::plain(with_clipped(
+            ok_with_expiry(expires_at.map(|at| at.saturating_sub(now) / 1_000)),
+            &clipped,
         )));
     };
     let activity = InputPollLease::start(ctx, &ns, deadline).await?;
@@ -811,11 +830,18 @@ async fn publish_zone<'a>(
                         reply["action"] = json!("dismiss");
                         reply["kind"] = json!("dismiss");
                     }
+                    PendingActionKind::Displaced => {
+                        unreachable!("a claimed answer is a human action, never a trim")
+                    }
                 }
+                let reply = with_clipped(reply, &clipped);
                 return Ok(PublishReply::answered(reply, scene, claim, activity));
             }
             Some(NotificationOutcome::Gone(reason)) => {
-                let reply = PublishReply::plain(json!({"ok":true,"gone":reason.as_str()}));
+                let reply = PublishReply::plain(with_clipped(
+                    json!({"ok":true,"gone":reason.as_str()}),
+                    &clipped,
+                ));
                 scene.release_notification_wait(claim.id);
                 drop(scene);
                 return Ok(reply);
@@ -845,7 +871,10 @@ async fn publish_zone<'a>(
                 })
                 .unwrap_or(expires_at);
             scene.release_notification_wait(claim.id);
-            let reply = ok_with_expiry(expiry.map(|at| at.saturating_sub(now_us(&scene)) / 1_000));
+            let reply = with_clipped(
+                ok_with_expiry(expiry.map(|at| at.saturating_sub(now_us(&scene)) / 1_000)),
+                &clipped,
+            );
             drop(scene);
             return Ok(PublishReply::plain(reply));
         }
@@ -888,6 +917,24 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
     let typed = scene
         .validate_widget_params(widget, &typed)
         .map_err(|e| scene_error(&e))?;
+    // Measure the widget as it will draw (current params under this call's),
+    // but report only params this call set.
+    let clipped: Vec<String> = ctx
+        .text_fit
+        .map(|fit| {
+            let mut drawn = scene
+                .widget_registry
+                .instances
+                .get(widget)
+                .map(|instance| instance.current_params.clone())
+                .unwrap_or_default();
+            drawn.extend(typed.clone());
+            fit.widget(&scene, widget, &drawn)
+                .into_iter()
+                .filter(|param| typed.contains_key(param))
+                .collect()
+        })
+        .unwrap_or_default();
     let lease_id = ensure_lease(ctx, &mut scene)?;
     let ttl_ms = p.ttl_ms.unwrap_or(0);
     let now = now_us(&scene);
@@ -922,7 +969,10 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
                 lease_id: Some(lease_id),
             },
         );
-        return Ok(ok_with_expiry(remaining_ms(expiry, now)));
+        return Ok(with_clipped(
+            ok_with_expiry(remaining_ms(expiry, now)),
+            &clipped,
+        ));
     }
     let expires = ttl_us.map(|ttl| now.saturating_add(ttl));
     let key = p.key.clone();
@@ -938,13 +988,16 @@ async fn publish_widget(ctx: &ToolCtx<'_>, widget: &str, p: PublishParams) -> Mc
         )
         .map_err(|e| scene_error(&e))?;
     let now = now_us(&scene);
-    Ok(ok_with_expiry(published_expires_in(
-        &scene,
-        widget,
-        &ns,
-        key.as_deref(),
-        now,
-    )))
+    Ok(with_clipped(
+        ok_with_expiry(published_expires_in(
+            &scene,
+            widget,
+            &ns,
+            key.as_deref(),
+            now,
+        )),
+        &clipped,
+    ))
 }
 
 /// Whether this agent may hold portals and the portal driver is wired, so
@@ -1359,6 +1412,9 @@ pub async fn hud_input(ctx: &ToolCtx<'_>, args: Value) -> McpResult<Value> {
                         }
                         PendingActionKind::Dismiss => {
                             json!({"id":a.id,"s":format!("zone:{}",a.zone),"action":"dismiss","kind":"dismiss"})
+                        }
+                        PendingActionKind::Displaced => {
+                            json!({"id":a.id,"s":format!("zone:{}",a.zone),"kind":"displaced"})
                         }
                         };
                         if let Some(key) = &a.key {

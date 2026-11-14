@@ -32,6 +32,20 @@ impl NotificationActionLayout {
                 self.heights[0]
             }
     }
+    /// The label's clip width inside button `bound`: the button minus its
+    /// padding, the reserved digit hint and any link mark.
+    pub(super) fn label_width(&self, bound: &Rect, index: usize) -> f32 {
+        let available = (bound.width - self.padding * 2.0).max(1.0);
+        let hint_width = self.hint_width.min(available);
+        let mark_width = self
+            .link_marks
+            .get(index)
+            .and_then(Option::as_ref)
+            .map_or(0.0, |(_, width)| {
+                (*width).min((available - hint_width).max(0.0))
+            });
+        (available - hint_width - mark_width).max(1.0)
+    }
     pub(super) fn bounds(&self, x: f32, y: f32, w: f32, h: f32, inset: f32) -> Vec<Rect> {
         let n = self.heights.len();
         if n == 0 {
@@ -84,6 +98,21 @@ pub(super) struct NotificationLayoutCache {
     pub(super) shapes: u64,
 }
 impl NotificationLayoutCache {
+    /// Shared font database for callers measuring without a rasterizer
+    /// (admission-time fit); rebuilt when the font roles change.
+    pub(super) fn fallback_fonts(
+        &mut self,
+        tokens: &HashMap<String, String>,
+    ) -> &mut glyphon::FontSystem {
+        let config = crate::fonts::FontConfig::from_token_map(tokens).normalized();
+        if self.config.as_ref() != Some(&config) {
+            self.entries.clear();
+            self.fonts = None;
+            self.config = Some(config.clone());
+        }
+        self.fonts
+            .get_or_insert_with(|| crate::fonts::build_font_system(&config).0)
+    }
     pub(super) fn resolve(
         &mut self,
         tokens: &HashMap<String, String>,

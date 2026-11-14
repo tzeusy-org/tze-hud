@@ -1050,6 +1050,62 @@ async fn poc_zone_delay_ms_appears_on_schedule() {
     assert_eq!(poc.shown(SUBTITLE), 0);
 }
 
+/// hud-ljhku.5 R5.1: publish replies name text the production renderer
+/// would cut, measured with the real shaper at production tokens, and keep
+/// today's bytes when everything fits.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn poc_publish_reports_clipped_text_only_when_cut() {
+    let mut poc = Poc::boot().await;
+    let long = "The nightly migration finished but three shards reported \
+        checksum drift that needs a manual look before tomorrow's deploy window";
+    let body = poc
+        .call(
+            "hud_publish",
+            json!({"surface":NOTIFICATION,"content":{"title":"Migration","body":long}}),
+        )
+        .await;
+    assert_eq!(body.body["clipped"], json!(["body"]), "{}", body.body);
+
+    let label = poc
+        .call(
+            "hud_publish",
+            json!({"surface":NOTIFICATION,"content":{"body":"Deploy?","actions":[
+                {"label":"Deploy the release to every production region and every staging region right now, then page on-call","callback_id":"go"},
+                {"label":"Hold","callback_id":"hold"}]}}),
+        )
+        .await;
+    assert_eq!(label.body["clipped"], json!(["actions"]), "{}", label.body);
+
+    let fits = poc
+        .call(
+            "hud_publish",
+            json!({"surface":NOTIFICATION,"content":{"title":"Build","body":"All tests passed.","urgency":1}}),
+        )
+        .await;
+    assert_eq!(fits.body, json!({"ok":true,"expires_in_ms":60000}));
+
+    let stream = poc
+        .call("hud_publish", json!({"surface":SUBTITLE,"content":long}))
+        .await;
+    assert!(stream.body.get("clipped").is_none(), "{}", stream.body);
+
+    let reason = "x".repeat(150);
+    let widget = poc
+        .call(
+            "hud_publish",
+            json!({"surface":"widget:main-status","params":{"status":"online","label":"API","reason":reason}}),
+        )
+        .await;
+    assert_eq!(widget.body["clipped"], json!(["reason"]), "{}", widget.body);
+    let short = poc
+        .call(
+            "hud_publish",
+            json!({"surface":"widget:main-status","params":{"label":"API","reason":"ok"}}),
+        )
+        .await;
+    assert!(short.body.get("clipped").is_none(), "{}", short.body);
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn poc_notification_action_reaches_hud_input() {
     let mut poc = Poc::boot().await;
