@@ -888,6 +888,12 @@ mod contention {
                 (covered - level).abs() <= 0.04,
                 "level {level}: arc covers {covered} of the ring"
             );
+            if level == 0.0 || level == 1.0 {
+                assert_eq!(
+                    covered, level,
+                    "empty/full endpoints cover exactly their share"
+                );
+            }
             assert!(covered >= last, "arc coverage must grow with level");
             last = covered;
         }

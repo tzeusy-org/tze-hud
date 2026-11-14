@@ -1087,13 +1087,16 @@ async fn overlapping_widgets_stack_by_instance_name() {
         |gauges: &[(&str, f32)]| overlapping_gauges_frame(&mut compositor, &mut surface, gauges);
     let full = frame(&[("b", 1.0)]);
     let empty = frame(&[("b", 0.0)]);
-    // The full bar's interior: pixels where a full and an empty gauge differ,
-    // as do all four neighbours (no antialiased edge). Bar and empty track
-    // are opaque there, so only the top widget decides the colour.
+    // Probe the ring's solid foreground/track interiors, with a clear
+    // reference contrast through all four neighbours. Tiny differences from
+    // antialiased percent glyphs cannot decide which widget is on top.
     let (w, h) = (512usize, 256usize);
     let differs = |x: usize, y: usize| {
         let i = (y * w + x) * 4;
-        full[i..i + 4] != empty[i..i + 4]
+        full[i..i + 3]
+            .iter()
+            .zip(&empty[i..i + 3])
+            .any(|(a, b)| a.abs_diff(*b) >= 64)
     };
     let probe: Vec<usize> = (1..h - 1)
         .flat_map(|y| (1..w - 1).map(move |x| (x, y)))
