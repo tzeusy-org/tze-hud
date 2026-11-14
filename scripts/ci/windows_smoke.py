@@ -23,7 +23,7 @@ for the 60 s observation and exits successfully. It is informational in CI
 (see windows.yml); job success alone does not qualify its artifact.
 
 `--captures DIR` restarts an isolated owned HUD per global theme and captures
-the four exact user-test fixture cells (each status-matrix update separately).
+the five exact user-test fixtures (each widget update separately).
 It compares only compatible successful-main capture artifacts. `--capture-comment`
 is a separate, process-free step after artifact upload; missing baseline or fork
 permissions never becomes a false no-change result. Both CI steps are informational.
@@ -79,7 +79,7 @@ MAX_PNG_BYTES = 8 * 1024 * 1024
 MAX_RGBA_BYTES = 64 * 1024 * 1024
 CAPTURE_FIXTURES = (
     "all-zones-test", "notification-full-gamut", "subtitle-multiline",
-    "status-indicator-status-matrix-test",
+    "status-indicator-status-matrix-test", "gauge_cycle_test",
 )
 
 
