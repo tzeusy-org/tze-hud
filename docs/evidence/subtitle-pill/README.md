@@ -19,12 +19,13 @@ input polling or ACK. These are observed streaming checkpoints, not proof that
 the old build renders every intermediate or final line correctly.
 [before.json](before.json) records original hashes, dimensions and receipts.
 
-AFTER uses clean source `ae9078105082efde2046ead8cd998a61d4521198`, the actual production startup,
+AFTER uses clean source `ba363c572acda8be5171015592835b227bb27467`, the actual production startup,
 MCP dispatch and windowed GPU capture seam (`render-scene`), Mesa llvmpipe,
 1920×1080, monitor/UI scale 1 and checkpoint 1000 ms. Each invocation replays
 one exact message from the same [fixture](../../../.claude/skills/user-test/scripts/subtitle-pill-test.json),
 so latest-wins cannot erase the earlier cells. All nine original PNGs were
-inspected and their hashes verified. [after.json](after.json) binds each frame
+inspected and their hashes verified. The refreshed corrected-source frames are
+byte-identical to the previously inspected originals for these small fixtures. [after.json](after.json) binds each frame
 to the exact fixture/cell/content hashes, clean source tree, binary and compiled
 example hashes, resolved theme tokens, renderer and dimensions. Subsequent
 commits add only evidence; the captured implementation is unchanged.
@@ -36,6 +37,17 @@ The optional Appearance → Subtitle backdrop still adds a separate whole-zone
 contrast fill below the pill. GPU tests independently cover that layer order in
 normal/Simplified rendering, including an explicitly rounded whole-zone fill,
 plus caption/scale/priming/unchanged-frame/lifecycle behavior.
+
+Large multiline publications use the profile-controlled head/tail viewport
+window before both pill measurements, matching truncation's whole-source-line
+policy. The existing GPU parent exercises changed 64/256 KiB publications,
+anchored visible text, cache reuse and profile changes. An exact public
+compositor probe measured corrected median layout at 20.55 / 23.91 ms in debug
+and 0.54 / 0.83 ms in release, versus 1750 / 6919 ms before correction in debug.
+[layout-work.json](layout-work.json) records payloads, source, baseline and
+measurements. These are llvmpipe probe results, not native Windows or frame-budget
+acceptance; no release baseline was measured. Whole-source-line windowing does
+not impose a byte cap on a giant single line.
 
 Open [gallery.html](gallery.html) for bottom-of-frame views linked to the
 unaltered full originals. CSS crops are only a viewing aid. BEFORE and AFTER
