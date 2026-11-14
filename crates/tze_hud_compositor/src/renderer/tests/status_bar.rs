@@ -271,7 +271,7 @@ async fn status_bar_draw_paths_share_the_card_rect() {
     // Rounded path: the SDF card is the hugged rect, bordered.
     let mut rounded = card_policy();
     rounded.backdrop_radius = Some(8.0);
-    let scene = scene_with_entries(rounded, &entries);
+    let mut scene = scene_with_entries(rounded, &entries);
     let sdf = compositor.collect_all_rounded_rect_cmds(&scene, SW, SH);
     assert_eq!(sdf.chrome.len(), 1);
     let cmd = &sdf.chrome[0];
@@ -295,6 +295,11 @@ async fn status_bar_draw_paths_share_the_card_rect() {
         .find(|h| h.element_kind == DragHandleElementKind::Zone)
         .expect("status-bar handle");
     assert_eq!(handle.element_bounds, card);
+    compositor.populate_drag_handle_hit_regions_from(&mut scene, handles);
+    assert_eq!(
+        scene.overlay.drag_handle_hit_regions[0].element_bounds,
+        Some(card)
+    );
 }
 
 /// Separate key/value boxes share one baseline, token gap and pill bounds.

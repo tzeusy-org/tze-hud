@@ -327,6 +327,7 @@ pub(super) fn apply_drag_handle_pointer_event(
         input_processor.drag_states.remove(&device_id);
         if let Some((interaction_id, element_id, element_kind, is_header_band)) = hit_drag_info {
             let target = DragTarget::capture(scene, element_id, element_kind);
+            let is_zone = matches!(&target, Some(DragTarget::Zone(_)));
             let region = scene.overlay.drag_handle_hit_regions.iter().find(|h| {
                 h.element_id == element_id
                     && h.element_kind == element_kind
@@ -346,6 +347,12 @@ pub(super) fn apply_drag_handle_pointer_event(
                 reconcile_drag_feedback(input_processor, scene);
                 return None;
             };
+            // Clamp what the owner sees, while retaining the maximum region
+            // that determines content layout. Freeze both for this gesture so
+            // several pointer events between frames cannot accumulate drift.
+            let drawn_bounds = region.filter(|_| is_zone).and_then(|h| h.element_bounds);
+            let zone_start_region = drawn_bounds.map(|_| element_bounds);
+            let element_bounds = drawn_bounds.unwrap_or(element_bounds);
             let outcome = input_processor.process_drag_handle_pointer(
                 pointer_event,
                 interaction_id,
@@ -358,6 +365,7 @@ pub(super) fn apply_drag_handle_pointer_event(
             );
             if let Some(state) = input_processor.drag_states.get_mut(&device_id) {
                 state.resize_grip = resize_grip;
+                state.zone_start_region = zone_start_region;
             }
             tracing::trace!(
                 element_id = %element_id,
@@ -378,10 +386,16 @@ pub(super) fn apply_drag_handle_pointer_event(
         let grip = s
             .resize_grip
             .map(|corner| (s.start_bounds, corner, s.press_x, s.press_y));
-        (s.interaction_id.clone(), s.element_id, s.element_kind, grip)
+        (
+            s.interaction_id.clone(),
+            s.element_id,
+            s.element_kind,
+            grip,
+            s.zone_start_region.map(|region| (region, s.start_bounds)),
+        )
     });
 
-    let Some((interaction_id, element_id, element_kind, grip)) = drag_info else {
+    let Some((interaction_id, element_id, element_kind, grip, zone_start)) = drag_info else {
         // No drag in progress for this device — nothing to do.
         return None;
     };
@@ -395,6 +409,7 @@ pub(super) fn apply_drag_handle_pointer_event(
         reconcile_drag_feedback(input_processor, scene);
         return None;
     };
+    let element_bounds = zone_start.map_or(element_bounds, |(_, drawn)| drawn);
 
     // The drag is already in flight for this device; its DeviceDragState already
     // carries the immediate/band flag, so the value passed here is unused on
@@ -445,13 +460,24 @@ pub(super) fn apply_drag_handle_pointer_event(
             _ => None,
         };
         if let Some((x, y)) = position {
+            let placement = zone_start.map_or(
+                Rect::new(x, y, element_bounds.width, element_bounds.height),
+                |(region, drawn)| {
+                    Rect::new(
+                        region.x + x - drawn.x,
+                        region.y + y - drawn.y,
+                        region.width,
+                        region.height,
+                    )
+                },
+            );
             scene.set_zone_placement(
                 element_id,
                 tze_hud_input::drag::final_position_to_geometry(
-                    x,
-                    y,
-                    element_bounds.width,
-                    element_bounds.height,
+                    placement.x,
+                    placement.y,
+                    placement.width,
+                    placement.height,
                     display_width,
                     display_height,
                 ),
@@ -2145,6 +2171,110 @@ mod tests {
             "removed targets cannot resume a stale drag"
         );
         assert!(!scene.is_drag_active(tile_id));
+
+        // A content-sized status pill must move inside its full-screen maximum
+        // region. Exercise both multiple pointer events before a render and
+        // compositor-updated visible bounds between events.
+        for refresh_handle in [false, true] {
+            let mut scene = SceneGraph::new(1920.0, 1080.0);
+            scene.zone_registry = tze_hud_scene::ZoneRegistry::with_defaults();
+            let id = scene.zone_registry.zones["status-bar"].id;
+            scene
+                .publish_to_zone(
+                    "status-bar",
+                    tze_hud_scene::ZoneContent::StatusBar(tze_hud_scene::StatusBarPayload {
+                        entries: std::collections::HashMap::from([(
+                            "build".into(),
+                            "passing".into(),
+                        )]),
+                    }),
+                    "owner",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+            let pill = Rect::new(1500.0, 1028.0, 404.0, 36.0);
+            let bounds = Rect::new(1690.0, 1024.0, 24.0, 8.0);
+            let interaction_id = format!("drag-handle:{id}");
+            scene
+                .overlay
+                .drag_handle_hit_regions
+                .push(tze_hud_scene::DragHandleHitRegion {
+                    element_id: id,
+                    element_kind: DragHandleElementKind::Zone,
+                    bounds,
+                    element_bounds: Some(pill),
+                    interaction_id: interaction_id.clone(),
+                    hit_region: tze_hud_scene::HitRegionNode {
+                        bounds,
+                        accepts_pointer: true,
+                        ..Default::default()
+                    },
+                    tab_order: 0,
+                    is_header_band: false,
+                    resize_grip: None,
+                });
+            let hit = HitResult::ZoneInteraction {
+                zone_name: "status-bar".into(),
+                published_at_wall_us: 0,
+                publisher_namespace: "owner".into(),
+                interaction_id,
+                kind: ZoneInteractionKind::DragHandle {
+                    element_id: id,
+                    element_kind: DragHandleElementKind::Zone,
+                    is_header_band: false,
+                },
+            };
+            let mut input = InputProcessor::new();
+            input.drag_config.snap_grid_pct = 0.0;
+            for (kind, dx, dy) in [
+                (PointerEventKind::Down, 0.0, 0.0),
+                (PointerEventKind::Move, 0.0, 0.0), // engage the mouse handle
+                (PointerEventKind::Move, -100.0, -40.0),
+                (PointerEventKind::Move, -200.0, -80.0),
+                (PointerEventKind::Move, 200.0, 40.0), // visible pill reaches the edge
+                (PointerEventKind::Up, 200.0, 40.0),
+            ] {
+                let event = PointerEvent {
+                    x: 1702.0 + dx,
+                    y: 1028.0 + dy,
+                    kind,
+                    device_id: 0,
+                    timestamp: None,
+                };
+                let released = super::apply_drag_handle_pointer_event(
+                    &mut input,
+                    &event,
+                    &hit,
+                    &mut scene,
+                    1920.0,
+                    1080.0,
+                    NO_RESIZE_MIN,
+                );
+                if dx != 0.0 {
+                    let zone = &scene.zone_registry.zones["status-bar"];
+                    let (x, y, w, h) = tze_hud_scene::resolve_zone_geometry(
+                        &scene.effective_zone_geometry(zone),
+                        1920.0,
+                        1080.0,
+                    );
+                    let (expected_x, expected_y) = if dx > 0.0 { (16.0, 16.0) } else { (dx, dy) };
+                    assert!(
+                        (x - expected_x).abs() < 0.01 && (y - expected_y).abs() < 0.01,
+                        "the visible pill follows the pointer, not a full-screen clamp: {x},{y}"
+                    );
+                    assert_eq!((w, h), (1920.0, 1080.0), "drag retains the maximum region");
+                    if refresh_handle {
+                        scene.overlay.drag_handle_hit_regions[0].element_bounds =
+                            Some(Rect::new(pill.x + x, pill.y + y, pill.width, pill.height));
+                    }
+                }
+                assert_eq!(released.is_some(), event.kind == PointerEventKind::Up);
+            }
+            assert!(input.drag_states.is_empty());
+            assert!(!scene.is_drag_active(id));
+        }
     }
 
     /// A quick tap (PointerDown immediately followed by PointerUp, no long-press)
@@ -4547,6 +4677,7 @@ mod tests {
                 element_id: frame_id,
                 element_kind: tze_hud_scene::DragHandleElementKind::Tile,
                 bounds: band,
+                element_bounds: None,
                 interaction_id: interaction_id.clone(),
                 hit_region: tze_hud_scene::HitRegionNode {
                     bounds: band,
@@ -4945,6 +5076,7 @@ mod tests {
                 element_id: id,
                 element_kind: DragHandleElementKind::Zone,
                 bounds: grip,
+                element_bounds: None,
                 interaction_id: interaction_id.clone(),
                 hit_region: tze_hud_scene::HitRegionNode {
                     bounds: grip,

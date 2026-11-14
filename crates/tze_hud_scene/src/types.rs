@@ -2248,6 +2248,9 @@ pub struct DragHandleHitRegion {
     pub element_kind: DragHandleElementKind,
     /// Display-space bounds for hit-testing and rendering.
     pub bounds: Rect,
+    /// Drawn element bounds, which may hug content inside a larger zone region.
+    #[serde(default)]
+    pub element_bounds: Option<Rect>,
     /// Interaction identifier (`drag-handle:<element_id_hex>`).
     pub interaction_id: String,
     /// Runtime-internal hit-region node contract for this handle.

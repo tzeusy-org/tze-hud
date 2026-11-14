@@ -58,6 +58,7 @@ impl Compositor {
                     element_id: entry.element_id,
                     element_kind: entry.element_kind,
                     bounds: entry.bounds,
+                    element_bounds: Some(entry.element_bounds),
                     interaction_id: entry.interaction_id,
                     hit_region,
                     tab_order,

@@ -781,7 +781,8 @@ painted text also honor the existing `max_truncation_input_bytes` profile budget
 an omitted field suffix is marked by an ellipsis. The empty bar
 draws nothing and has no drag handle. Explicit owner `key_icon_map` SVG icons
 remain supported at `size.status.icon`; unmapped keys are text only.
-Geometry and styling remain runtime-owned. `subtitle` and
+Dragging clamps the drawn pill and translates its maximum layout region with it;
+the region size remains available for later publications. Geometry and styling remain runtime-owned. `subtitle` and
 `alert-banner` are bottom- and top-anchored zones. The subtitle draws a centered,
 content-hugging pill within its zone: at most `size.subtitle.max_width` (760 dp
 in Tonal Glass and Blueprint), with `space.subtitle.horizontal` / `.vertical`
