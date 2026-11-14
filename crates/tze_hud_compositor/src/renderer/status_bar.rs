@@ -204,6 +204,7 @@ struct Inputs {
     icons: HashMap<String, String>,
     style: StatusStyle,
     zone: Rect,
+    display: Rect,
 }
 pub(super) struct StatusBarLayoutCache {
     entries: HashMap<String, (Inputs, StatusBarCard, bool)>,
@@ -248,7 +249,12 @@ impl StatusBarLayoutCache {
         let margin_y = s
             .margin
             .min((input.zone.height - target_height).max(0.0) * 0.5);
-        let width = (input.zone.width - margin * 2.0).max(0.0);
+        // Owner drag translates the maximum region, which may extend beyond
+        // the display. Preserve that capacity instead of intersecting it with
+        // the display; constrain the measured pill and its final placement.
+        let width = (input.zone.width - margin * 2.0)
+            .max(0.0)
+            .min(input.display.width);
         let padding = s.padding.min(width * 0.5);
         let cap = (width - padding * 2.0).max(0.0);
         let mut shown = Vec::new();
@@ -313,12 +319,19 @@ impl StatusBarLayoutCache {
             .height
             .max(s.line)
             .max(s.icon)
-            .min((input.zone.height - margin_y * 2.0).max(0.0));
-        let outer = used + padding * 2.0;
+            .min((input.zone.height - margin_y * 2.0).max(0.0))
+            .min(input.display.height);
+        let outer = (used + padding * 2.0).min(width);
         let card = StatusBarCard {
             rect: Rect::new(
-                input.zone.x + input.zone.width - margin - outer,
-                input.zone.y + input.zone.height - margin_y - height,
+                (input.zone.x + input.zone.width - margin - outer).clamp(
+                    input.display.x,
+                    input.display.x + input.display.width - outer,
+                ),
+                (input.zone.y + input.zone.height - margin_y - height).clamp(
+                    input.display.y,
+                    input.display.y + input.display.height - height,
+                ),
                 outer,
                 height,
             ),
@@ -331,6 +344,11 @@ impl StatusBarLayoutCache {
     }
 }
 impl super::Compositor {
+    fn status_bar_display_rect(&self, name: &str) -> Rect {
+        self.display_layout
+            .zone_display_rect(name)
+            .unwrap_or_else(|| Rect::new(0.0, 0.0, self.width as f32, self.height as f32))
+    }
     pub(crate) fn status_bar_card(
         &self,
         name: &str,
@@ -349,6 +367,7 @@ impl super::Compositor {
             icons: policy.key_icon_map.clone(),
             style: StatusStyle::resolve(tokens, policy),
             zone,
+            display: self.status_bar_display_rect(name),
         };
         if let Some((old, card, _)) = self.status_bar_layouts.borrow().entries.get(name)
             && old == &input
@@ -390,6 +409,7 @@ impl super::Compositor {
                 icons: zone.rendering_policy.key_icon_map.clone(),
                 style: StatusStyle::resolve(&tokens, &zone.rendering_policy),
                 zone: Rect::new(x, y, w, h),
+                display: self.status_bar_display_rect(name),
             };
             if let Some(rasterizer) = self.text_rasterizer.as_mut() {
                 cache.resolve(name, input, rasterizer.font_system_mut(), true);

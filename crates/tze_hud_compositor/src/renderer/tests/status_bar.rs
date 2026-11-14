@@ -79,12 +79,14 @@ fn card_for(
         .get("status-bar")
         .map(Vec::as_slice)
         .unwrap_or_default();
+    let (x, y, w, h) =
+        compositor.zone_geometry("status-bar", &scene.effective_zone_geometry(zone), SW, SH);
     compositor.status_bar_card(
         "status-bar",
         publishes,
         zone.contention_policy,
         &zone.rendering_policy,
-        zone_rect(),
+        Rect::new(x, y, w, h),
     )
 }
 
@@ -228,7 +230,7 @@ async fn status_bar_without_entries_draws_nothing() {
 /// element bounds are all exactly the hugged card rect.
 #[tokio::test]
 async fn status_bar_draw_paths_share_the_card_rect() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1920, 1080).await);
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1920, 1080).await);
     let entries = [("agent", "Claude"), ("build", "green")];
 
     // Flat path (no radius): one quad covering the card.
@@ -300,6 +302,134 @@ async fn status_bar_draw_paths_share_the_card_rect() {
         scene.overlay.drag_handle_hit_regions[0].element_bounds,
         Some(card)
     );
+
+    // Runtime drag may translate the full-display maximum region left/up.
+    // Later growth must move the final pill inward, without reducing capacity
+    // to the intersection of that region and the display. Shrinking restores
+    // the owner's short-pill position. All draw/hit paths use the same clamp.
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    for (display, dx, dy, region_width) in [
+        (Rect::new(0.0, 0.0, SW, SH), -1000.0, -80.0, 1.0),
+        (Rect::new(0.0, 0.0, SW, SH), 16.0, 16.0, 1.0),
+        (
+            Rect::new(-1280.0, -200.0, 1280.0, 720.0),
+            -500.0,
+            -80.0,
+            1.0,
+        ),
+        (Rect::new(-1280.0, -200.0, 300.0, 32.0), -200.0, -20.0, 2.0),
+    ] {
+        let secondary = display.x < 0.0;
+        let layout = crate::display::DisplayLayout::new(
+            if secondary {
+                vec![crate::display::DisplayRect {
+                    name: "DISPLAY2".into(),
+                    rect: display,
+                    primary: false,
+                }]
+            } else {
+                Vec::new()
+            },
+            &HashMap::from([("status-bar".into(), "DISPLAY2".into())]),
+        );
+        compositor.set_display_layout(layout);
+        let mut scene = scene_with_entries(RenderingPolicy::default(), &[]);
+        scene
+            .zone_registry
+            .zones
+            .get_mut("status-bar")
+            .unwrap()
+            .geometry_policy = GeometryPolicy::Relative {
+            x_pct: dx / display.width,
+            y_pct: dy / display.height,
+            width_pct: region_width,
+            height_pct: 1.0,
+        };
+        let mut short_rect = None;
+        for count in [1, 20, 1] {
+            scene
+                .publish_to_zone(
+                    "status-bar",
+                    ZoneContent::StatusBar(StatusBarPayload {
+                        entries: if count == 1 {
+                            HashMap::from([("build".into(), "ok".into())])
+                        } else {
+                            (0..count)
+                                .map(|i| {
+                                    (
+                                        format!("session{i:02}"),
+                                        "working on the current package".into(),
+                                    )
+                                })
+                                .collect()
+                        },
+                    }),
+                    "agent",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+            // A settled publication commit, outside the resize cadence.
+            compositor.resize_reprime_last_at = None;
+            compositor.prime_markdown_cache(&scene);
+            compositor.prime_truncation_cache(&scene);
+            compositor.render_frame_headless(&mut scene, &surface);
+            let card = card_for(&compositor, &scene).unwrap();
+            let rect = card.rect;
+            assert!(
+                rect.x >= display.x && rect.y >= display.y,
+                "leading edges {rect:?} / {display:?}"
+            );
+            assert!(rect.x + rect.width <= display.x + display.width + 0.01);
+            assert!(rect.y + rect.height <= display.y + display.height + 0.01);
+            if count == 1 {
+                if let Some(previous) = short_rect {
+                    assert_eq!(
+                        rect, previous,
+                        "shrink restores short-content owner placement"
+                    );
+                } else {
+                    short_rect = Some(rect);
+                }
+            } else {
+                assert!(rect.width > short_rect.unwrap().width);
+                if region_width == 1.0 {
+                    assert!(
+                        (rect.width - (display.width - 32.0)).abs() < 0.01,
+                        "full layout capacity survives drag"
+                    );
+                }
+            }
+            let sdf = compositor.collect_all_rounded_rect_cmds(&scene, SW, SH);
+            let cmd = &sdf.chrome[0];
+            assert_eq!(
+                (cmd.x, cmd.y, cmd.width, cmd.height),
+                (rect.x, rect.y, rect.width, rect.height)
+            );
+            for item in compositor.collect_text_items(&scene, SW, SH) {
+                assert!(item.pixel_x >= rect.x && item.pixel_y >= rect.y);
+                assert!(item.pixel_x + item.bounds_width <= rect.x + rect.width + 0.01);
+                assert!(item.clip_pixel_y + item.clip_bounds_height <= rect.y + rect.height + 0.01);
+            }
+            let handles = compositor.collect_drag_handle_entries(&scene, SW, SH);
+            if secondary {
+                assert!(
+                    handles.is_empty(),
+                    "secondary-display zones are not draggable"
+                );
+            } else {
+                assert_eq!(handles[0].element_bounds, rect);
+            }
+            let shapes = compositor.status_bar_layouts.borrow().shapes;
+            compositor.prime_truncation_cache(&scene);
+            assert_eq!(
+                compositor.status_bar_layouts.borrow().shapes,
+                shapes,
+                "unchanged display/layout reuses actual-font measurement"
+            );
+        }
+    }
 }
 
 /// Separate key/value boxes share one baseline, token gap and pill bounds.

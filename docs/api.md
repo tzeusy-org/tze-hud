@@ -782,7 +782,12 @@ an omitted field suffix is marked by an ellipsis. The empty bar
 draws nothing and has no drag handle. Explicit owner `key_icon_map` SVG icons
 remain supported at `size.status.icon`; unmapped keys are text only.
 Dragging clamps the drawn pill and translates its maximum layout region with it;
-the region size remains available for later publications. Geometry and styling remain runtime-owned. `subtitle` and
+the region size remains available for later publications. When content grows,
+the pill moves inward as needed to stay within its assigned display; shrinking
+restores the short-content placement. Measurement capacity is bounded by the
+display dimensions, rather than the intersection with the translated region.
+Text, dividers, icons and drag bounds share that final rectangle. Geometry and
+styling remain runtime-owned. `subtitle` and
 `alert-banner` are bottom- and top-anchored zones. The subtitle draws a centered,
 content-hugging pill within its zone: at most `size.subtitle.max_width` (760 dp
 in Tonal Glass and Blueprint), with `space.subtitle.horizontal` / `.vertical`

@@ -530,7 +530,9 @@ source links when implementation changes the status.
   The status bar is a token-styled, content-sized horizontal pill with sorted
   key/value entries, semantic dividers and shared measured text/drag bounds
   ([`status_bar.rs`](../crates/tze_hud_compositor/src/renderer/status_bar.rs),
-  `hud-h51u7.4.4`); empty bars draw nothing. Its owner signoff remains in
+  `hud-h51u7.4.4`); empty bars draw nothing. Later growth after a drag clamps
+  the shared pill rectangle to its assigned display while retaining the
+  original region's layout capacity. Its owner signoff remains in
   `hud-h51u7.4.6`.
   The gauge is restyled as the Tonal Glass ring in source (`hud-h51u7.8.1`);
   its Windows owner signoff (`hud-h51u7.8.6`) is outstanding.
