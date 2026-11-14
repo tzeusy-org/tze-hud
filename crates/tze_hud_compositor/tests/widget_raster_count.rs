@@ -743,10 +743,10 @@ async fn widget_param_update_rasterizes_only_that_instance() {
                     scene
                         .publish_to_widget(
                             &name,
-                            HashMap::from([(
-                                level_name.into(),
-                                WidgetParameterValue::F32(progress),
-                            )]),
+                            HashMap::from([
+                                (level_name.into(), WidgetParameterValue::F32(progress)),
+                                ("label".into(), WidgetParameterValue::String(String::new())),
+                            ]),
                             "model",
                             None,
                             0,
@@ -784,6 +784,38 @@ async fn widget_param_update_rasterizes_only_that_instance() {
                         );
                     }
                     previous_readout = Some(readout);
+                    // The maximum valid label must stay visible without
+                    // touching the permanent percent or escaping the card.
+                    scene
+                        .publish_to_widget(
+                            &name,
+                            HashMap::from([(
+                                "label".into(),
+                                WidgetParameterValue::String("W".repeat(32)),
+                            )]),
+                            "model",
+                            None,
+                            0,
+                            None,
+                        )
+                        .unwrap();
+                    render(&mut compositor, &mut scene, &mut surface);
+                    let long_label = surface.read_pixels(&compositor.device);
+                    assert_eq!(
+                        widget_region(&long_label, 512, (0, 0), (270, 10, 50, 16)),
+                        widget_region(&pixels, 512, (0, 0), (270, 10, 50, 16)),
+                        "maximum label must leave the {progress} percent and right inset unchanged"
+                    );
+                    assert_eq!(
+                        widget_region(&long_label, 512, (0, 0), (320, 0, 192, 50)),
+                        widget_region(&pixels, 512, (0, 0), (320, 0, 192, 50)),
+                        "maximum label must not draw beyond the card"
+                    );
+                    assert_ne!(
+                        widget_region(&long_label, 512, (0, 0), (15, 10, 220, 16)),
+                        widget_region(&pixels, 512, (0, 0), (15, 10, 220, 16)),
+                        "clipping must preserve visible label text"
+                    );
                 }
             }
             for severity in ["info", "warning", "error", "info"] {

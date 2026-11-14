@@ -219,6 +219,7 @@
 "progress.edge.height" = "49"
 "progress.content.x" = "15"
 "progress.text.y" = "23"
+"progress.label.width" = "240"
 "progress.track.y" = "35"
 "progress.track.width" = "290"
 "progress.track.height" = "4"

@@ -1163,7 +1163,9 @@ units are logical px; instance geometry sets the scale, and `production.toml`
 sizes them at 1.5x the viewBox on a 3840x2160 panel.
 
 Progress uses a 320×50 card with a `type.label.m` label and always-visible
-monospaced percentage above a 4dp track. Status uses a 40dp pill in its 320×124
+monospaced percentage above a 4dp track. The label is clipped to
+`progress.label.width` so a maximum-length label preserves the percent and
+right inset. Status uses a 40dp pill in its 320×124
 tooltip canvas: owner-selected marker, status name and clipped inline reason.
 `status.pill.radius` is half the pill's inner height (19.5dp by default), applied
 to both SVG radii. An owner changing pill/canvas dimensions must also keep
@@ -1269,7 +1271,7 @@ color overrides still take precedence.
 | Notification card | `color.notification.container[.low]`, `color.notification[.caution\|.error].outline`, `color.on_notification.{variant,caution,error}`, `opacity.notification`, `shape.notification`, `space.notification`, `type.notification.{title,body}.{size,line_height,weight}` |
 | Alert banner | `color.alert.container`, `color.alert.{caution,error}.container`, `color.alert.outline`, `color.on_alert[.variant\|.error]`, `color.severity.{info,warning,critical}` (the severity mark), `opacity.alert`, `shape.alert`, `space.alert.{margin,horizontal,vertical}`, `type.alert.{title,body}.{size,line_height,weight}` |
 | Gauge ring | `gauge.{width,height,edge.*,ring.*,caption.y,hover.delay_ms}`, `type.gauge.readout.size` (centred percent; family and weight follow `type.readout`) |
-| Progress card | `progress.{width,height,edge.*,content.x,text.y,track.*,readout.*,hover.delay_ms}`, `type.label.m`, `type.readout.family` |
+| Progress card | `progress.{width,height,edge.*,content.x,text.y,label.width,track.*,readout.*,hover.delay_ms}`, `type.label.m`, `type.readout.family` |
 | Status pill | `status.{width,height,pill.*,edge.*,marker.*,name.x,text.*,separator.*,reason.*,tooltip.*,hover.*}`, `type.body.m`, `type.label.m` |
 | Choice actions | `notification.action.link_mark` |
 | Motion | `motion.{enter,exit,state}.ms`, `motion.{enter,exit}.easing` (`linear`, `standard`, `decelerate`, `accelerate`) |

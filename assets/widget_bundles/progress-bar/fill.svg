@@ -5,6 +5,15 @@
   viewBox="0 0 {{token.progress.width}} {{token.progress.height}}"
   width="{{token.progress.width}}"
   height="{{token.progress.height}}">
+  <defs>
+    <clipPath id="label-clip">
+      <rect
+        x="{{token.progress.content.x}}"
+        y="{{token.progress.edge.inset}}"
+        width="{{token.progress.label.width}}"
+        height="{{token.progress.edge.height}}"/>
+    </clipPath>
+  </defs>
   <g id="info-fill" opacity="{{token.state.visible.opacity}}">
     <rect
       id="fill-bar"
@@ -33,6 +42,7 @@
     font-family="{{token.type.label.m.family}}, sans-serif"
     font-size="{{token.type.label.m.size}}"
     font-weight="{{token.type.label.m.weight}}"
+    clip-path="url(#label-clip)"
     fill="{{token.color.on_surface.variant}}"></text>
   <text
     id="readout"

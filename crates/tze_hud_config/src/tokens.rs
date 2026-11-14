@@ -452,6 +452,11 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "23",
     },
     CanonicalToken {
+        key: "progress.label.width",
+        description: "Progress label clip width, reserving space for the percentage",
+        default_value: "240",
+    },
+    CanonicalToken {
         key: "progress.track.y",
         description: "Progress track top",
         default_value: "35",
