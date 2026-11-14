@@ -1,5 +1,5 @@
 {
-  "source_head": "29fa53182ef739ad8a26a95717bd7abdc372a4de",
+  "source_head": "8ed36772798e525e067cc6730500f48a154302b7",
   "source_tree_clean": true,
   "source": "repository render-scene, production startup and windowed build/capture, llvmpipe",
   "dimensions": [
@@ -25,14 +25,14 @@
       },
       "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
       "capture_at_ms": 1000,
-      "checkout_head_at_invocation": "29fa53182ef739ad8a26a95717bd7abdc372a4de",
+      "checkout_head_at_invocation": "8ed36772798e525e067cc6730500f48a154302b7",
       "checkpoint": "after all ordered messages; latest-wins per surface",
       "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
       "dimensions": [
         1920,
         1080
       ],
-      "elapsed_ms": 1638.2319889999999,
+      "elapsed_ms": 1625.266735,
       "fixture": "alert-banner-info-test.json",
       "fixture_sha256": "11c73cfbaed584507be693a18dcf35d7ae453702a8233012871fed4c90104606",
       "messages_applied": 1,
@@ -55,14 +55,14 @@
       },
       "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
       "capture_at_ms": 1000,
-      "checkout_head_at_invocation": "29fa53182ef739ad8a26a95717bd7abdc372a4de",
+      "checkout_head_at_invocation": "8ed36772798e525e067cc6730500f48a154302b7",
       "checkpoint": "after all ordered messages; latest-wins per surface",
       "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
       "dimensions": [
         1920,
         1080
       ],
-      "elapsed_ms": 1638.9158350000002,
+      "elapsed_ms": 1616.578839,
       "fixture": "alert-banner-caution-test.json",
       "fixture_sha256": "a116b7b12772686b8a77ada3eff02d15859fe25e33a3037fd904942766205178",
       "messages_applied": 1,
@@ -85,14 +85,14 @@
       },
       "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
       "capture_at_ms": 1000,
-      "checkout_head_at_invocation": "29fa53182ef739ad8a26a95717bd7abdc372a4de",
+      "checkout_head_at_invocation": "8ed36772798e525e067cc6730500f48a154302b7",
       "checkpoint": "after all ordered messages; latest-wins per surface",
       "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
       "dimensions": [
         1920,
         1080
       ],
-      "elapsed_ms": 1644.24748,
+      "elapsed_ms": 1608.269137,
       "fixture": "alert-banner-critical-test.json",
       "fixture_sha256": "09ef931f150e7185bf177e22d1e429e2a0abbd4781fe9dd3375cc9da8267a4bc",
       "messages_applied": 1,
@@ -115,14 +115,14 @@
       },
       "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
       "capture_at_ms": 1000,
-      "checkout_head_at_invocation": "29fa53182ef739ad8a26a95717bd7abdc372a4de",
+      "checkout_head_at_invocation": "8ed36772798e525e067cc6730500f48a154302b7",
       "checkpoint": "after all ordered messages; latest-wins per surface",
       "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
       "dimensions": [
         1920,
         1080
       ],
-      "elapsed_ms": 1656.647406,
+      "elapsed_ms": 1610.731438,
       "fixture": "alert-banner-info-test.json",
       "fixture_sha256": "11c73cfbaed584507be693a18dcf35d7ae453702a8233012871fed4c90104606",
       "messages_applied": 1,
@@ -145,14 +145,14 @@
       },
       "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
       "capture_at_ms": 1000,
-      "checkout_head_at_invocation": "29fa53182ef739ad8a26a95717bd7abdc372a4de",
+      "checkout_head_at_invocation": "8ed36772798e525e067cc6730500f48a154302b7",
       "checkpoint": "after all ordered messages; latest-wins per surface",
       "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
       "dimensions": [
         1920,
         1080
       ],
-      "elapsed_ms": 1658.2844049999999,
+      "elapsed_ms": 1610.53563,
       "fixture": "alert-banner-caution-test.json",
       "fixture_sha256": "a116b7b12772686b8a77ada3eff02d15859fe25e33a3037fd904942766205178",
       "messages_applied": 1,
@@ -175,14 +175,14 @@
       },
       "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
       "capture_at_ms": 1000,
-      "checkout_head_at_invocation": "29fa53182ef739ad8a26a95717bd7abdc372a4de",
+      "checkout_head_at_invocation": "8ed36772798e525e067cc6730500f48a154302b7",
       "checkpoint": "after all ordered messages; latest-wins per surface",
       "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
       "dimensions": [
         1920,
         1080
       ],
-      "elapsed_ms": 1633.265224,
+      "elapsed_ms": 1610.9567060000002,
       "fixture": "alert-banner-critical-test.json",
       "fixture_sha256": "09ef931f150e7185bf177e22d1e429e2a0abbd4781fe9dd3375cc9da8267a4bc",
       "messages_applied": 1,
@@ -205,14 +205,14 @@
       },
       "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
       "capture_at_ms": 1000,
-      "checkout_head_at_invocation": "29fa53182ef739ad8a26a95717bd7abdc372a4de",
+      "checkout_head_at_invocation": "8ed36772798e525e067cc6730500f48a154302b7",
       "checkpoint": "after all ordered messages; latest-wins per surface",
       "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
       "dimensions": [
         1920,
         1080
       ],
-      "elapsed_ms": 1636.610544,
+      "elapsed_ms": 1617.212911,
       "fixture": "alert-banner-info-test.json",
       "fixture_sha256": "11c73cfbaed584507be693a18dcf35d7ae453702a8233012871fed4c90104606",
       "messages_applied": 1,
@@ -235,14 +235,14 @@
       },
       "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
       "capture_at_ms": 1000,
-      "checkout_head_at_invocation": "29fa53182ef739ad8a26a95717bd7abdc372a4de",
+      "checkout_head_at_invocation": "8ed36772798e525e067cc6730500f48a154302b7",
       "checkpoint": "after all ordered messages; latest-wins per surface",
       "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
       "dimensions": [
         1920,
         1080
       ],
-      "elapsed_ms": 1642.128712,
+      "elapsed_ms": 1611.798042,
       "fixture": "alert-banner-caution-test.json",
       "fixture_sha256": "a116b7b12772686b8a77ada3eff02d15859fe25e33a3037fd904942766205178",
       "messages_applied": 1,
@@ -265,14 +265,14 @@
       },
       "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
       "capture_at_ms": 1000,
-      "checkout_head_at_invocation": "29fa53182ef739ad8a26a95717bd7abdc372a4de",
+      "checkout_head_at_invocation": "8ed36772798e525e067cc6730500f48a154302b7",
       "checkpoint": "after all ordered messages; latest-wins per surface",
       "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
       "dimensions": [
         1920,
         1080
       ],
-      "elapsed_ms": 1634.3872350000001,
+      "elapsed_ms": 1613.479636,
       "fixture": "alert-banner-critical-test.json",
       "fixture_sha256": "09ef931f150e7185bf177e22d1e429e2a0abbd4781fe9dd3375cc9da8267a4bc",
       "messages_applied": 1,
@@ -285,5 +285,6 @@
       "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
       "severity": "critical"
     }
-  ]
+  ],
+  "pixel_equivalence_to_prior_captures": "All nine PNG hashes exactly match the source29fa5318 captures; the action-cache width correction does not change these no-action fixtures."
 }
