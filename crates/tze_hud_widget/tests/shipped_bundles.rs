@@ -24,54 +24,7 @@ fn shipped_path(name: &str) -> PathBuf {
 
 /// Every token the shipped SVGs and manifests reference (Tonal Glass values).
 fn shipped_tokens() -> HashMap<String, String> {
-    [
-        ("color.surface.container", "#1B2028"),
-        ("color.surface.container.high", "#222833"),
-        ("color.surface.container.highest", "#2A313D"),
-        ("color.on_surface", "#E8EBF0"),
-        ("color.on_surface.variant", "#A9B1BE"),
-        ("color.outline", "#5A6475"),
-        ("color.outline.variant", "#343B47"),
-        ("color.primary", "#8AB4FF"),
-        ("color.success", "#7BD88F"),
-        ("color.caution", "#F2C14E"),
-        ("color.error", "#FF8A80"),
-        ("opacity.surface", "0.92"),
-        ("state.hover.opacity", "0.08"),
-        ("state.hidden.opacity", "0"),
-        ("state.visible.opacity", "1"),
-        ("stroke.border.width", "1"),
-        ("shape.s", "8"),
-        ("shape.m", "12"),
-        ("shape.l", "16"),
-        ("type.title.m.family", "IBM Plex Sans"),
-        ("type.title.m.size", "16"),
-        ("type.title.m.weight", "600"),
-        ("type.body.m.family", "IBM Plex Sans"),
-        ("type.body.m.size", "14"),
-        ("type.label.m.family", "IBM Plex Sans"),
-        ("type.label.m.size", "12"),
-        ("type.label.m.weight", "500"),
-        ("type.readout.family", "IBM Plex Mono"),
-        ("type.readout.size", "14"),
-        ("type.readout.weight", "500"),
-        ("type.gauge.readout.size", "18"),
-        ("gauge.width", "128"),
-        ("gauge.height", "132"),
-        ("gauge.edge.inset", "0.5"),
-        ("gauge.edge.width", "127"),
-        ("gauge.edge.height", "131"),
-        ("gauge.ring.cx", "64"),
-        ("gauge.ring.cy", "56"),
-        ("gauge.ring.radius", "34"),
-        ("gauge.ring.stroke", "6"),
-        ("gauge.ring.circumference", "213.63"),
-        ("gauge.caption.y", "112"),
-        ("gauge.hover.delay_ms", "180"),
-    ]
-    .into_iter()
-    .map(|(k, v)| (k.to_string(), v.to_string()))
-    .collect()
+    tze_hud_config::themes::resolve_config_tokens(&Default::default())
 }
 
 fn load_shipped(name: &str) -> LoadedBundle {
@@ -357,6 +310,32 @@ fn shipped_hover_tooltips_share_the_gauge_delay() {
         assert_eq!(hover.delay_ms, 180, "{name}");
         assert_eq!(hover.visibility_param, "tooltip_visible", "{name}");
     }
+    let mut tokens = shipped_tokens();
+    tokens.insert("status.hover.height_pct".into(), "0.25".into());
+    let BundleScanResult::Ok(bundle) =
+        load_bundle_dir_with_tokens(&shipped_path("status-indicator"), &tokens)
+    else {
+        panic!("owner token must resolve the status hover rectangle");
+    };
+    assert_eq!(
+        bundle
+            .definition
+            .hover_behavior
+            .unwrap()
+            .trigger_rect
+            .height_pct,
+        0.25
+    );
+    for invalid in ["nan", "inf", "text", "1e99", "0", "-0.1", "1.1"] {
+        tokens.insert("status.hover.height_pct".into(), invalid.into());
+        assert!(
+            matches!(
+                load_bundle_dir_with_tokens(&shipped_path("status-indicator"), &tokens),
+                BundleScanResult::Err(_)
+            ),
+            "invalid hover rectangle {invalid}"
+        );
+    }
 }
 
 /// Manifest color values name design tokens: discrete value maps and color
@@ -494,8 +473,8 @@ fn status_indicator_status_maps_each_value_to_its_color() {
     let want: std::collections::BTreeMap<String, String> = [
         ("online", "#7BD88F"),
         ("away", "#F2C14E"),
-        ("busy", "#FF8A80"),
-        ("offline", "#5A6475"),
+        ("busy", "#F2C14E"),
+        ("offline", "#A9B1BE"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))
@@ -505,7 +484,7 @@ fn status_indicator_status_maps_each_value_to_its_color() {
 
 /// Shipped SVGs and manifests take every color from design tokens.
 #[test]
-fn shipped_bundles_have_no_hardcoded_colors_or_gauge_opacity() {
+fn shipped_bundles_have_no_hardcoded_colors_or_restyled_opacity() {
     for (bundle, files) in [
         ("gauge", &["background.svg", "fill.svg", "widget.toml"][..]),
         (
@@ -534,7 +513,9 @@ fn shipped_bundles_have_no_hardcoded_colors_or_gauge_opacity() {
                     .collect::<Vec<_>>()
                     .join("\n");
             }
-            if bundle == "gauge" && file.ends_with(".svg") {
+            if matches!(bundle, "gauge" | "progress-bar" | "status-indicator")
+                && file.ends_with(".svg")
+            {
                 for attribute in ["opacity", "fill-opacity", "stroke-opacity"] {
                     let marker = format!("{attribute}=\"");
                     for rest in text.split(&marker).skip(1) {

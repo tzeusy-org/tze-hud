@@ -39,10 +39,10 @@ widget_type = "progress-bar"
 instance_id = "main-progress"
 
 [tabs.widgets.geometry]
-x_pct = 0.421875
+x_pct      = 0.4375
 y_pct = 0.9074074
-width_pct = 0.15625
-height_pct = 0.0185185
+width_pct  = 0.125
+height_pct = 0.0347222
 
 # Top-right corner, as in production.toml: the badge's right edge meets the
 # notification column's and the notification-area zone starts below it.
@@ -53,7 +53,7 @@ instance_id = "main-status"
 [tabs.widgets.geometry]
 x_pct = 0.865
 y_pct = 0.02
-width_pct = 0.125
+width_pct  = 0.125
 height_pct = 0.0861111
 
 # Agents (the publish-load harness, the three-agent soak identities) are not

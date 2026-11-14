@@ -404,11 +404,9 @@ async fn widget_param_update_rasterizes_only_that_instance() {
             .unwrap();
     };
     // Contract literals come from the shipped SVG/TOML, not the rasterizer.
-    // Badge tile: x 280..320, y 0..40, surface.container.high at
-    // opacity.surface. The minimal dot (r=7) is centred at (300, 20); the
-    // system/friendly tonal disc (r=13, fill-opacity 0.22) is sampled above
-    // its glyph.
-    let tile = (token_rgb("color.surface.container.high"), 0.92);
+    // Full-width pill, with a minimal r=5 dot at (17,20) or a tonal r=9
+    // owner-style marker. Sample the tonal marker above its glyph.
+    let tile = (token_rgb("color.surface.container.low"), 0.92);
     let panel_roi = (24, 52, 260, 3);
     let label_roi = (32, 63, 200, 18);
     let reason_roi = (16, 92, 280, 16);
@@ -417,15 +415,15 @@ async fn widget_param_update_rasterizes_only_that_instance() {
     let fills = [
         "color.success",
         "color.caution",
-        "color.error",
-        "color.outline",
+        "color.caution",
+        "color.on_surface.variant",
     ]
     .map(token_rgb);
     let mut glyphs = HashMap::new();
     for (theme, badge_roi, fill_opacity) in [
-        ("minimal", (300, 20, 1, 1), 1.0),
-        ("system", (300, 10, 1, 1), 0.22),
-        ("friendly", (300, 10, 1, 1), 0.22),
+        ("minimal", (17, 20, 1, 1), 1.0),
+        ("system", (17, 12, 1, 1), 0.22),
+        ("friendly", (17, 12, 1, 1), 0.22),
     ] {
         let mut previous_badge = None;
         for (status, fill) in statuses.into_iter().zip(fills) {
@@ -449,7 +447,7 @@ async fn widget_param_update_rasterizes_only_that_instance() {
             let pixels = surface.read_pixels(&compositor.device);
             let badge = region(&pixels, badge_roi);
             if status == "online" {
-                glyphs.insert(theme, region(&pixels, (286, 6, 28, 28)));
+                glyphs.insert(theme, region(&pixels, (7, 10, 20, 20)));
             }
             assert_eq!(
                 status_scene.widget_registry.instances["status-matrix"].current_params["theme"],
@@ -467,13 +465,13 @@ async fn widget_param_update_rasterizes_only_that_instance() {
                     badge[0]
                 );
             }
-            if let Some(previous) = &previous_badge {
+            if let Some((previous_status, previous)) = &previous_badge {
                 assert!(
-                    badge != *previous,
+                    badge != *previous || (previous_status == &"away" && status == "busy"),
                     "status change retained stale badge pixels"
                 );
             }
-            previous_badge = Some(badge.clone());
+            previous_badge = Some((status, badge.clone()));
             for roi in [panel_roi, label_roi, reason_roi] {
                 assert!(
                     region(&pixels, roi) == region(&baseline, roi),
@@ -507,7 +505,7 @@ async fn widget_param_update_rasterizes_only_that_instance() {
         "owner friendly theme must draw a distinct glyph across model publishes"
     );
     let hidden = surface.read_pixels(&compositor.device);
-    let badge_roi = (280, 0, 40, 40);
+    let badge_roi = (0, 0, 100, 40);
     let mut tooltip_frames = Vec::new();
     for (label, reason, visible) in [
         ("READY", "ALL SYSTEMS GO", 1.0),
@@ -628,9 +626,35 @@ async fn widget_param_update_rasterizes_only_that_instance() {
         region(&tooltip_frames[1], label_roi) == region(&tooltip_frames[2], label_roi),
         "reason update changed label pixels"
     );
-    assert!(
-        tooltip_frames[3] == hidden,
+    assert_eq!(
+        region(&tooltip_frames[3], (0, 48, 320, 76)),
+        region(&baseline, (0, 48, 320, 76)),
         "hidden tooltip retained stale pixels"
+    );
+    assert_eq!(
+        region(&tooltip_frames[3], (106, 8, 200, 24)),
+        region(&tooltip_frames[2], (106, 8, 200, 24)),
+        "hiding the tooltip must retain its reason in the pill"
+    );
+    set_status(
+        &mut status_scene,
+        "friendly",
+        "offline",
+        "PAUSED",
+        &"W".repeat(160),
+        0.0,
+    );
+    render(&mut compositor, &mut status_scene, &mut surface);
+    let long_reason = surface.read_pixels(&compositor.device);
+    assert_ne!(
+        region(&long_reason, (106, 8, 200, 24)),
+        region(&tooltip_frames[3], (106, 8, 200, 24)),
+        "the long reason must actually render inside its clip"
+    );
+    assert_eq!(
+        region(&long_reason, (307, 8, 12, 24)),
+        region(&tooltip_frames[3], (307, 8, 12, 24)),
+        "a maximum-length reason must not escape into the pill's right inset"
     );
     status_scene
         .clear_widget_for_publisher("status-matrix", "agent-a")
@@ -664,8 +688,8 @@ async fn widget_param_update_rasterizes_only_that_instance() {
         (
             bundle!("progress-bar", ["track.svg", "fill.svg"]),
             "progress",
-            360.0,
-            52.0,
+            320.0,
+            50.0,
             (100, 37),
         ),
     ] {
@@ -699,6 +723,50 @@ async fn widget_param_update_rasterizes_only_that_instance() {
                 .widget_registry
                 .register_definition(bundle.definition.clone());
             scene.widget_registry.register_instance(instance);
+            if level_name == "progress" {
+                // Zero, half and full must change the actual track span while
+                // leaving both end insets intact. No hover is needed for the
+                // exact percent row to have foreground pixels.
+                for (progress, fill_to) in [(0.0, 15), (0.5, 160), (1.0, 305)] {
+                    scene
+                        .publish_to_widget(
+                            &name,
+                            HashMap::from([(
+                                level_name.into(),
+                                WidgetParameterValue::F32(progress),
+                            )]),
+                            "model",
+                            None,
+                            0,
+                            None,
+                        )
+                        .unwrap();
+                    render(&mut compositor, &mut scene, &mut surface);
+                    let pixels = surface.read_pixels(&compositor.device);
+                    let fill = if owner {
+                        [12, 210, 123]
+                    } else {
+                        token_rgb("color.primary")
+                    };
+                    for x in [18, 155, 165, 301] {
+                        let actual = widget_region(&pixels, 512, (0, 0), (x, 37, 1, 1))[0];
+                        let expected = if x < fill_to {
+                            fill
+                        } else {
+                            token_rgb("color.outline.variant")
+                        };
+                        assert!(
+                            (0..3).all(|c| actual[c].abs_diff(expected[c]) <= 2),
+                            "progress={progress}, x={x}: {actual:?} vs {expected:?}"
+                        );
+                    }
+                    let readout = widget_region(&pixels, 512, (0, 0), (270, 10, 35, 16));
+                    assert!(
+                        readout.iter().any(|p| (0..3).all(|c| p[c] > 128)),
+                        "percent foreground must remain visible without hover"
+                    );
+                }
+            }
             for severity in ["info", "warning", "error", "info"] {
                 scene
                     .publish_to_widget(

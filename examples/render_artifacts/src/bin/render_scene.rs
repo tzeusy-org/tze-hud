@@ -30,7 +30,8 @@ const MAX_INPUT: usize = 1024 * 1024;
 const DEFAULT_SCENE_CAPTURE_MS: u64 = 250;
 const LOCAL_IDENTITY: &str = "offline-render-scene-not-a-paired-credential";
 const HELP: &str = "Usage: render-scene (--fixture FILE | --widget BUNDLE --params JSON) --output PNG\n\
-    [--theme tonal-glass|classic|blueprint] [--tokens TOML] [--width PX] [--height PX]\n\
+    [--config TOML (fixture mode)] [--theme tonal-glass|classic|blueprint] [--tokens TOML]\n\
+    [--width PX] [--height PX]\n\
     [--capture-at-ms MS]\n\
 Scene defaults: 1920x1080, tonal-glass, fixture checkpoint at 250ms (explicit 0ms is the first frame).\n\
 Capture bounds: 1..8192 per axis, <=16M pixels; checkpoint <=5000ms.\n\
@@ -40,6 +41,7 @@ Output must not exist. JSON manifest is printed to stdout; compile time is separ
 struct Args {
     fixture: Option<PathBuf>,
     widget: Option<PathBuf>,
+    config: Option<PathBuf>,
     params: Value,
     theme: Option<String>,
     tokens: Option<PathBuf>,
@@ -58,6 +60,7 @@ fn parse_args(values: impl IntoIterator<Item = String>) -> Result<Option<Args>> 
     let mut args = Args {
         fixture: None,
         widget: None,
+        config: None,
         params: json!({}),
         theme: None,
         tokens: None,
@@ -80,6 +83,7 @@ fn parse_args(values: impl IntoIterator<Item = String>) -> Result<Option<Args>> 
         match flag.as_str() {
             "--fixture" => args.fixture = Some(value.into()),
             "--widget" => args.widget = Some(value.into()),
+            "--config" => args.config = Some(value.into()),
             "--params" => {
                 if value.len() > MAX_INPUT {
                     return Err(error("params exceed 1MiB"));
@@ -112,6 +116,9 @@ fn parse_args(values: impl IntoIterator<Item = String>) -> Result<Option<Args>> 
 }
 
 fn validate_args(args: &Args) -> Result<()> {
+    if args.config.is_some() && args.fixture.is_none() {
+        return Err(error("--config belongs to --fixture"));
+    }
     if args.width == 0
         || args.height == 0
         || args.width > 8192
@@ -152,16 +159,19 @@ struct TokenFile {
     design_tokens: RawDesignTokens,
 }
 
-fn raw_config(args: &Args) -> Result<RawConfig> {
-    // This is the actual canonical scene layout, not a separately styled scene.
-    let mut raw: RawConfig = toml::from_str(include_str!(
-        "../../../../app/tze_hud_app/config/production.toml"
-    ))?;
+fn raw_config(args: &Args) -> Result<(RawConfig, String)> {
+    // Capture owner settings through the same validated startup as production.
+    // The supplied file is offline input; no configured listener or agent starts.
+    let bytes = match &args.config {
+        Some(path) => bounded_read(path)?,
+        None => include_bytes!("../../../../app/tze_hud_app/config/production.toml").to_vec(),
+    };
+    let mut raw: RawConfig = toml::from_str(std::str::from_utf8(&bytes)?)?;
     let mut tokens = match &args.tokens {
         Some(path) => {
             toml::from_str::<TokenFile>(std::str::from_utf8(&bounded_read(path)?)?)?.design_tokens
         }
-        None => RawDesignTokens::default(),
+        None => raw.design_tokens.take().unwrap_or_default(),
     };
     for token in CANONICAL_TOKENS {
         if parse_color_hex(token.default_value).is_some()
@@ -192,7 +202,7 @@ fn raw_config(args: &Args) -> Result<RawConfig> {
     if !errors.is_empty() {
         return Err(error(format!("invalid config/theme/tokens: {errors:?}")));
     }
-    Ok(raw)
+    Ok((raw, hash(&bytes)))
 }
 
 #[derive(Deserialize)]
@@ -406,7 +416,8 @@ async fn render_fixture(args: &Args, raw: &RawConfig) -> Result<(CapturedFrame, 
     compositor.overlay_mode =
         raw.runtime.as_ref().and_then(|r| r.profile.as_deref()) == Some("overlay");
     let mut scene = SceneGraph::new(args.width as f32, args.height as f32);
-    let startup = run_scene_startup(raw, None, &mut scene, true);
+    let config_parent = args.config.as_deref().and_then(Path::parent);
+    let startup = run_scene_startup(raw, config_parent, &mut scene, true);
     let server = server(scene, &startup.global_tokens);
     compositor.set_token_map(startup.global_tokens);
     let renderer = compositor
@@ -569,7 +580,7 @@ fn write_png(path: &Path, bytes: &[u8]) -> Result<()> {
 async fn execute(args: &Args) -> Result<Value> {
     validate_args(args)?;
     let start = Instant::now();
-    let raw = raw_config(args)?;
+    let (raw, config_sha256) = raw_config(args)?;
     let (frame, mut manifest) = if args.fixture.is_some() {
         render_fixture(args, &raw).await?
     } else {
@@ -591,6 +602,8 @@ async fn execute(args: &Args) -> Result<Value> {
         .and_then(|o| String::from_utf8(o.stdout).ok())
         .map(|s| s.trim().to_owned());
     manifest["checkout_head_at_invocation"] = json!(git);
+    manifest["config_source"] = json!(args.config);
+    manifest["config_sha256"] = json!(config_sha256);
     manifest["compiled_example_source_sha256"] = json!(hash(include_bytes!("render_scene.rs")));
     manifest["theme"] = json!(
         raw.design_tokens
@@ -656,6 +669,7 @@ mod tests {
         let args = Args {
             fixture: None,
             widget: Some(bundle),
+            config: None,
             params: json!({"status":"online","label":"PNG","reason":"offline authoring"}),
             theme: Some("tonal-glass".into()),
             tokens: None,
@@ -750,6 +764,111 @@ mod tests {
             parse_args(["--fixture", "a", "--widget", "b", "--output", "c"].map(str::to_owned))
                 .is_err()
         );
+        assert!(
+            parse_args(["--widget", "a", "--config", "b", "--output", "c"].map(str::to_owned))
+                .is_err()
+        );
+        // Owner-only initial parameters must enter through config startup,
+        // while agent fixture publications keep their existing typed surface.
+        let config_path = dir.join("owner.toml");
+        let (mut owner_config, _) = raw_config(&args).unwrap();
+        owner_config
+            .design_tokens
+            .as_mut()
+            .unwrap()
+            .0
+            .insert("theme".into(), "blueprint".into());
+        let status = owner_config
+            .tabs
+            .iter_mut()
+            .flat_map(|tab| &mut tab.widgets)
+            .find(|widget| widget.instance_id.as_deref() == Some("main-status"))
+            .unwrap();
+        status.initial_params.insert(
+            "theme".into(),
+            tze_hud_config::raw::AnyValue("minimal".into()),
+        );
+        let owner_text = toml::to_string(&owner_config).unwrap();
+        fs::write(&config_path, &owner_text).unwrap();
+        let owner_fixture = dir.join("owner-status.json");
+        fs::write(&owner_fixture, r#"[{"widget":"main-status","params":{"status":"online","label":"PNG","reason":"owner config"}}]"#).unwrap();
+        let owner_args = Args {
+            config: Some(config_path.clone()),
+            fixture: Some(owner_fixture),
+            widget: None,
+            theme: None,
+            width: 1920,
+            height: 1080,
+            capture_at_ms: DEFAULT_SCENE_CAPTURE_MS,
+            output: dir.join("owner-minimal.png"),
+            ..args.clone()
+        };
+        let (loaded, digest) = raw_config(&owner_args).unwrap();
+        assert_eq!(digest, hash(owner_text.as_bytes()));
+        assert_eq!(
+            selected_theme_name(&loaded.design_tokens.unwrap().0),
+            "blueprint"
+        );
+        let token_override = dir.join("override.toml");
+        fs::write(&token_override, "[design_tokens]\ntheme = 'classic'\n").unwrap();
+        let override_args = Args {
+            tokens: Some(token_override),
+            ..owner_args.clone()
+        };
+        let (loaded, _) = raw_config(&override_args).unwrap();
+        assert_eq!(
+            selected_theme_name(&loaded.design_tokens.unwrap().0),
+            "classic"
+        );
+        let (loaded, _) = raw_config(&Args {
+            theme: Some("tonal-glass".into()),
+            ..override_args
+        })
+        .unwrap();
+        assert_eq!(
+            selected_theme_name(&loaded.design_tokens.unwrap().0),
+            "tonal-glass"
+        );
+        let minimal_manifest = execute(&owner_args).await.unwrap();
+        assert_eq!(minimal_manifest["config_sha256"], digest);
+        assert_eq!(minimal_manifest["theme"], "blueprint");
+        let minimal = image::open(&owner_args.output).unwrap().to_rgba8();
+        let status = owner_config
+            .tabs
+            .iter_mut()
+            .flat_map(|tab| &mut tab.widgets)
+            .find(|widget| widget.instance_id.as_deref() == Some("main-status"))
+            .unwrap();
+        status.initial_params.insert(
+            "theme".into(),
+            tze_hud_config::raw::AnyValue("system".into()),
+        );
+        fs::write(&config_path, toml::to_string(&owner_config).unwrap()).unwrap();
+        let system_args = Args {
+            output: dir.join("owner-system.png"),
+            ..owner_args.clone()
+        };
+        let system_manifest = execute(&system_args).await.unwrap();
+        assert_ne!(
+            minimal_manifest["config_sha256"],
+            system_manifest["config_sha256"]
+        );
+        let system = image::open(&system_args.output).unwrap().to_rgba8();
+        let changed = (22..51)
+            .flat_map(|y| (1660..1900).map(move |x| (x, y)))
+            .filter(|&(x, y)| minimal.get_pixel(x, y) != system.get_pixel(x, y))
+            .count();
+        assert!(
+            changed > 10,
+            "owner style must change actual status pixels through startup"
+        );
+        for invalid in [
+            "[runtime]\nprofile = 'missing'\n".to_owned(),
+            "x".repeat(MAX_INPUT + 1),
+        ] {
+            fs::write(&config_path, invalid).unwrap();
+            assert!(raw_config(&owner_args).is_err());
+        }
         // A background or portal grip cannot establish that the full-gamut
         // payloads rendered. Pin the visible cards' title/body regions at the
         // canonical 1920x1080 layout, without a font or antialiasing golden.

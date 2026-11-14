@@ -1,28 +1,10 @@
-# Production progress-bar widget bundle.
-#
-# Visual contract (shared with gauge and status-indicator):
-# - A tonal card like the notification cards: surface.container.high at
-#   opacity.surface, outline.variant edge, shape.m corners
-# - Label in type.title.m above a slim primary-colored bar
-# - Hover (runtime-driven `tooltip_visible`) lays a state layer over the card
-#   and reveals the exact percent, derived from `progress`; agents send nothing
-#   extra
-# - Every color, size and font comes from {{token.key}} placeholders, resolved
-#   at bundle load time. viewBox units are logical px; geometry sets the scale
-#
-# Registered as "progress-bar" in the WidgetRegistry when loaded from
-# assets/widget_bundles/.
-#
-# Parameters:
-#   progress        - Fill level (f32, 0.0-1.0); drives bar width and readout
-#   label           - Label above the bar (string, max 32 bytes)
-#   fill_color      - Owner info fill; warning/error use severity tokens
-#   severity        - info uses owner/default primary fill; warning/error use tokens
-#   tooltip_visible - Runtime hover visibility (f32 0..1); not for agents
+# Production progress card: token-driven 320x50 layout, label/readout row
+# above a 4dp track. Hover adds a local state layer; percent is always visible.
+# Owner fill_color and model severity keep their existing contract.
 
 name        = "progress-bar"
-version     = "2.0.0"
-description = "Horizontal progress bar with label and hover percent readout"
+version     = "3.0.0"
+description = "Horizontal progress bar with label and percent readout"
 
 [[parameter_schema]]
 name    = "progress"
@@ -66,7 +48,7 @@ default = "info"
 enum_allowed_values = ["info", "warning", "error"]
 
 [hover_behavior]
-delay_ms = 180
+delay_ms = "{{token.progress.hover.delay_ms}}"
 visibility_param = "tooltip_visible"
 hidden_value = 0.0
 visible_value = 1.0
@@ -92,7 +74,7 @@ target_element   = "fill-bar"
 target_attribute = "width"
 mapping          = "linear"
 attr_min         = 0.0
-attr_max         = 328.0
+attr_max         = "{{token.progress.track.width}}"
 
 [[layers.bindings]]
 param            = "fill_color"
@@ -111,8 +93,8 @@ param            = "tooltip_visible"
 target_element   = "tooltip-group"
 target_attribute = "opacity"
 mapping          = "linear"
-attr_min         = 0.0
-attr_max         = 1.0
+attr_min         = "{{token.state.hidden.opacity}}"
+attr_max         = "{{token.state.visible.opacity}}"
 
 # A linear binding onto text-content renders a whole number.
 [[layers.bindings]]
@@ -129,7 +111,7 @@ target_element = "severity-fill"
 target_attribute = "width"
 mapping = "linear"
 attr_min = 0.0
-attr_max = 328.0
+attr_max = "{{token.progress.track.width}}"
 
 [[layers.bindings]]
 param = "severity"
@@ -149,9 +131,9 @@ target_attribute = "opacity"
 mapping = "discrete"
 
 [layers.bindings.value_map]
-info = "0"
-warning = "1"
-error = "1"
+info = "{{token.state.hidden.opacity}}"
+warning = "{{token.state.visible.opacity}}"
+error = "{{token.state.visible.opacity}}"
 
 [[layers.bindings]]
 param = "severity"
@@ -160,6 +142,6 @@ target_attribute = "opacity"
 mapping = "discrete"
 
 [layers.bindings.value_map]
-info = "1"
-warning = "0"
-error = "0"
+info = "{{token.state.visible.opacity}}"
+warning = "{{token.state.hidden.opacity}}"
+error = "{{token.state.hidden.opacity}}"

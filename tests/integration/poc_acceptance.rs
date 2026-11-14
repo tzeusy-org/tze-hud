@@ -1878,8 +1878,20 @@ async fn poc_panel_layout_moves_widgets_and_saves_their_entry() {
         out.contains("# MCP widget_name: \"main-gauge\""),
         "comments kept"
     );
-    assert!(
-        out.contains("x_pct      = 0.4296875"),
+    let before: toml::Value = PRODUCTION_CONFIG.parse().unwrap();
+    let after: toml::Value = out.parse().unwrap();
+    let other_widgets = |config: &toml::Value| {
+        config["tabs"][0]["widgets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|widget| widget["instance_id"].as_str() != Some("main-gauge"))
+            .cloned()
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(
+        other_widgets(&before),
+        other_widgets(&after),
         "other widgets untouched"
     );
 

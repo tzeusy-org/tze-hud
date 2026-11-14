@@ -88,27 +88,23 @@ height_pct = 0.0916667
 # MCP widget_name: "main-progress"
 # Owner info fill: initial_params = { fill_color = [138, 180, 255, 255] }; severity warning/error always use tokens.
 # Parameters: progress (f32 0–1), label (string), severity (enum)
-# Position: bottom centre, above the subtitle zone. 360x52 -> 540x78 at 4K.
+# Position: bottom centre, above the subtitle zone. 320x50 -> 480x75 at 4K.
 [[tabs.widgets]]
 widget_type = "progress-bar"
 instance_id  = "main-progress"
 
 [tabs.widgets.geometry]
-x_pct      = 0.4296875
+x_pct      = 0.4375
 y_pct      = 0.83
-width_pct  = 0.140625
-height_pct = 0.0361111
+width_pct  = 0.125
+height_pct = 0.0347222
 
 # ── Status-indicator widget instance ─────────────────────────────────────────
 # MCP widget_name: "main-status"
 # Parameters: status (enum), label (string), reason (string)
-# Position: top-right corner. The SVG draws the badge at the top-right of its
-# 320x124 bounds (x 280.5..319.5, y 0.5..39.5), so the badge's right edge lines
-# up with the notification column's (99%) and its bottom sits at ~4.7% of the
-# display height; the notification-area zone starts below it (5.5%), so cards
-# never sit under the badge. The hover tooltip opens down-left inside the
-# widget bounds and may overlap notification cards while shown.
-# 320x124 -> 240x93 at 1080p, 480x186 at 4K.
+# Position: top-right 320x124 canvas; the status pill spans its full width
+# and the first 40 logical dp. The tooltip opens below within the same canvas.
+# 320x124 -> 240x93 at 1080p, 480x186 at 4K. Notifications begin below the pill.
 [[tabs.widgets]]
 widget_type = "status-indicator"
 instance_id  = "main-status"

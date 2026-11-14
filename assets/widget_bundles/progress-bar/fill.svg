@@ -1,64 +1,68 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Bound layer: fill, label, and the hover readout.
-
-     Element IDs referenced by widget.toml bindings:
-       "fill-bar"       width <- progress (linear 0..328), fill <- fill_color
-       "label-text"     text-content <- label
-       "tooltip-group"  opacity <- tooltip_visible (runtime hover)
-       "readout-value"  text-content <- progress (linear 0..100, whole number)
-
-     The bar sits on the track drawn by track.svg (x=16, y=34, 328x6). -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 360 52" width="360" height="52">
-  <g id="info-fill" opacity="1">
-  <rect
-    id="fill-bar"
-    x="16" y="34"
-    width="0" height="6"
-    rx="3" ry="3"
-    fill="{{token.color.primary}}"/>
+<!-- Bound fill and always-visible percent; runtime hover adds the state layer. -->
+<svg
+  xmlns="http://www.w3.org/2000/svg"
+  viewBox="0 0 {{token.progress.width}} {{token.progress.height}}"
+  width="{{token.progress.width}}"
+  height="{{token.progress.height}}">
+  <g id="info-fill" opacity="{{token.state.visible.opacity}}">
+    <rect
+      id="fill-bar"
+      x="{{token.progress.content.x}}"
+      y="{{token.progress.track.y}}"
+      width="0"
+      height="{{token.progress.track.height}}"
+      rx="{{token.progress.track.radius}}"
+      fill="{{token.color.primary}}"/>
   </g>
-
-  <!-- Severity selects one fill, including its antialiased edges. -->
-  <g id="severity-fill-group" opacity="0">
-  <rect id="severity-fill" x="16" y="34" width="0" height="6" rx="3" ry="3"
-    fill="{{token.color.primary}}"/>
+  <g id="severity-fill-group" opacity="{{token.state.hidden.opacity}}">
+    <rect
+      id="severity-fill"
+      x="{{token.progress.content.x}}"
+      y="{{token.progress.track.y}}"
+      width="0"
+      height="{{token.progress.track.height}}"
+      rx="{{token.progress.track.radius}}"
+      fill="{{token.color.primary}}"/>
   </g>
-
   <text
     id="label-text"
     data-role="text"
-    x="16" y="24"
-    font-family="{{token.type.title.m.family}}, sans-serif"
-    font-size="{{token.type.title.m.size}}"
-    font-weight="{{token.type.title.m.weight}}"
+    x="{{token.progress.content.x}}"
+    y="{{token.progress.text.y}}"
+    font-family="{{token.type.label.m.family}}, sans-serif"
+    font-size="{{token.type.label.m.size}}"
+    font-weight="{{token.type.label.m.weight}}"
     fill="{{token.color.on_surface}}"></text>
-
-  <!-- Hover: a state layer over the card and the exact percent. -->
-  <g id="tooltip-group" opacity="0">
+  <text
+    id="readout-value"
+    data-role="text"
+    x="{{token.progress.readout.value.x}}"
+    y="{{token.progress.text.y}}"
+    text-anchor="end"
+    font-family="{{token.type.readout.family}}, monospace"
+    font-size="{{token.type.label.m.size}}"
+    font-weight="{{token.type.label.m.weight}}"
+    fill="{{token.color.on_surface.variant}}">0</text>
+  <text
+    id="readout-unit"
+    data-role="text"
+    x="{{token.progress.readout.unit.x}}"
+    y="{{token.progress.text.y}}"
+    text-anchor="end"
+    font-family="{{token.type.readout.family}}, monospace"
+    font-size="{{token.type.label.m.size}}"
+    font-weight="{{token.type.label.m.weight}}"
+    fill="{{token.color.on_surface.variant}}">%</text>
+  <g id="tooltip-group" opacity="{{token.state.hidden.opacity}}">
     <rect
       id="hover-layer"
-      x="0.5" y="0.5"
-      width="359" height="51"
-      rx="{{token.shape.m}}" ry="{{token.shape.m}}"
+      x="{{token.progress.edge.inset}}"
+      y="{{token.progress.edge.inset}}"
+      width="{{token.progress.edge.width}}"
+      height="{{token.progress.edge.height}}"
+      rx="{{token.shape.m}}"
       fill="{{token.color.on_surface}}"
       fill-opacity="{{token.state.hover.opacity}}"/>
-    <text
-      id="readout-value"
-      data-role="text"
-      x="331" y="24"
-      text-anchor="end"
-      font-family="{{token.type.body.m.family}}, sans-serif"
-      font-size="{{token.type.body.m.size}}"
-      font-weight="{{token.type.title.m.weight}}"
-      fill="{{token.color.on_surface.variant}}">0</text>
-    <text
-      id="readout-unit"
-      data-role="text"
-      x="344" y="24"
-      text-anchor="end"
-      font-family="{{token.type.body.m.family}}, sans-serif"
-      font-size="{{token.type.body.m.size}}"
-      font-weight="{{token.type.title.m.weight}}"
-      fill="{{token.color.on_surface.variant}}">%</text>
   </g>
 </svg>

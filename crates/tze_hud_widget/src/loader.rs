@@ -727,7 +727,7 @@ fn parse_hover_behavior(
                 path: path_str.to_string(),
                 detail: "hover_behavior is missing required table 'trigger_rect'".to_string(),
             })?;
-    let trigger_rect = parse_normalized_rect(trigger_rect_raw, path_str)?;
+    let trigger_rect = parse_normalized_rect(trigger_rect_raw, tokens, path_str)?;
 
     let visibility_param = raw
         .visibility_param
@@ -785,20 +785,19 @@ fn parse_hover_behavior(
 
 fn parse_normalized_rect(
     raw: &RawNormalizedRect,
+    tokens: &HashMap<String, String>,
     path_str: &str,
 ) -> Result<WidgetNormalizedRect, BundleError> {
-    let x_pct = raw
-        .x_pct
-        .ok_or_else(|| invalid_hover_rect(path_str, "x_pct missing"))?;
-    let y_pct = raw
-        .y_pct
-        .ok_or_else(|| invalid_hover_rect(path_str, "y_pct missing"))?;
-    let width_pct = raw
-        .width_pct
-        .ok_or_else(|| invalid_hover_rect(path_str, "width_pct missing"))?;
-    let height_pct = raw
-        .height_pct
-        .ok_or_else(|| invalid_hover_rect(path_str, "height_pct missing"))?;
+    let component = |value: &Option<RawNumber>, name: &str| {
+        let value = value
+            .as_ref()
+            .ok_or_else(|| invalid_hover_rect(path_str, &format!("{name} missing")))?;
+        resolve_number(Some(value), 0.0, tokens, path_str).map(|v| v as f32)
+    };
+    let x_pct = component(&raw.x_pct, "x_pct")?;
+    let y_pct = component(&raw.y_pct, "y_pct")?;
+    let width_pct = component(&raw.width_pct, "width_pct")?;
+    let height_pct = component(&raw.height_pct, "height_pct")?;
 
     let all = [x_pct, y_pct, width_pct, height_pct];
     if all.iter().any(|v| !v.is_finite()) {

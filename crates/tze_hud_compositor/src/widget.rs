@@ -1194,6 +1194,8 @@ fn contains_unsupported_primitive_svg(svg_text: &str) -> bool {
         // tiny-skia strokes here are solid; a dashed ring (the gauge arc)
         // would draw as a full circle.
         "stroke-dash",
+        // The primitive text path has no clip stack; preserve authored bounds.
+        "clip-path",
     ]
     .iter()
     .any(|needle| svg_text.contains(needle))

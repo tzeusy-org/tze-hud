@@ -400,6 +400,237 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Gauge hover dwell in milliseconds",
         default_value: "180",
     },
+    // Approved progress card and status pill geometry, in logical SVG units.
+    CanonicalToken {
+        key: "progress.width",
+        description: "Progress logical width",
+        default_value: "320",
+    },
+    CanonicalToken {
+        key: "progress.height",
+        description: "Progress logical height",
+        default_value: "50",
+    },
+    CanonicalToken {
+        key: "progress.edge.inset",
+        description: "Progress hairline inset",
+        default_value: "0.5",
+    },
+    CanonicalToken {
+        key: "progress.edge.width",
+        description: "Progress inset card width",
+        default_value: "319",
+    },
+    CanonicalToken {
+        key: "progress.edge.height",
+        description: "Progress inset card height",
+        default_value: "49",
+    },
+    CanonicalToken {
+        key: "progress.content.x",
+        description: "Progress label and track left edge",
+        default_value: "15",
+    },
+    CanonicalToken {
+        key: "progress.text.y",
+        description: "Progress label and readout baseline",
+        default_value: "23",
+    },
+    CanonicalToken {
+        key: "progress.track.y",
+        description: "Progress track top",
+        default_value: "35",
+    },
+    CanonicalToken {
+        key: "progress.track.width",
+        description: "Progress track and full fill width",
+        default_value: "290",
+    },
+    CanonicalToken {
+        key: "progress.track.height",
+        description: "Progress track thickness",
+        default_value: "4",
+    },
+    CanonicalToken {
+        key: "progress.track.radius",
+        description: "Progress track corner radius",
+        default_value: "2",
+    },
+    CanonicalToken {
+        key: "progress.readout.value.x",
+        description: "Progress percent value right edge",
+        default_value: "292",
+    },
+    CanonicalToken {
+        key: "progress.readout.unit.x",
+        description: "Progress percent unit right edge",
+        default_value: "305",
+    },
+    CanonicalToken {
+        key: "progress.hover.delay_ms",
+        description: "Progress hover dwell in milliseconds",
+        default_value: "180",
+    },
+    CanonicalToken {
+        key: "status.width",
+        description: "Status logical canvas width",
+        default_value: "320",
+    },
+    CanonicalToken {
+        key: "status.height",
+        description: "Status logical canvas height including tooltip",
+        default_value: "124",
+    },
+    CanonicalToken {
+        key: "status.edge.inset",
+        description: "Status hairline inset",
+        default_value: "0.5",
+    },
+    CanonicalToken {
+        key: "status.edge.width",
+        description: "Status inset pill and tooltip width",
+        default_value: "319",
+    },
+    CanonicalToken {
+        key: "status.edge.height",
+        description: "Status inset pill height",
+        default_value: "39",
+    },
+    CanonicalToken {
+        key: "status.marker.x",
+        description: "Status marker centre x",
+        default_value: "17",
+    },
+    CanonicalToken {
+        key: "status.marker.y",
+        description: "Status marker centre y",
+        default_value: "20",
+    },
+    CanonicalToken {
+        key: "status.marker.radius",
+        description: "Minimal status marker radius",
+        default_value: "5",
+    },
+    CanonicalToken {
+        key: "status.marker.disc.radius",
+        description: "System and friendly marker disc radius",
+        default_value: "9",
+    },
+    CanonicalToken {
+        key: "status.marker.disc.opacity",
+        description: "System and friendly tonal marker opacity",
+        default_value: "0.22",
+    },
+    CanonicalToken {
+        key: "status.marker.glyph.y",
+        description: "Status marker glyph baseline",
+        default_value: "24",
+    },
+    CanonicalToken {
+        key: "status.marker.glyph.size",
+        description: "Status marker glyph size",
+        default_value: "12",
+    },
+    CanonicalToken {
+        key: "status.name.x",
+        description: "Status name left edge",
+        default_value: "34",
+    },
+    CanonicalToken {
+        key: "status.text.y",
+        description: "Status name and reason baseline",
+        default_value: "25",
+    },
+    CanonicalToken {
+        key: "status.separator.x",
+        description: "Status reason separator x",
+        default_value: "93",
+    },
+    CanonicalToken {
+        key: "status.separator.y",
+        description: "Status separator top",
+        default_value: "12",
+    },
+    CanonicalToken {
+        key: "status.separator.height",
+        description: "Status separator height",
+        default_value: "16",
+    },
+    CanonicalToken {
+        key: "status.reason.x",
+        description: "Status inline reason left edge",
+        default_value: "106",
+    },
+    CanonicalToken {
+        key: "status.reason.width",
+        description: "Status inline reason clip width",
+        default_value: "200",
+    },
+    CanonicalToken {
+        key: "status.text.clip.y",
+        description: "Status inline text clip top",
+        default_value: "8",
+    },
+    CanonicalToken {
+        key: "status.text.clip.height",
+        description: "Status inline text clip height",
+        default_value: "24",
+    },
+    CanonicalToken {
+        key: "status.tooltip.y",
+        description: "Status tooltip top",
+        default_value: "48.5",
+    },
+    CanonicalToken {
+        key: "status.tooltip.height",
+        description: "Status tooltip height",
+        default_value: "75",
+    },
+    CanonicalToken {
+        key: "status.tooltip.dot.x",
+        description: "Status tooltip marker x",
+        default_value: "20",
+    },
+    CanonicalToken {
+        key: "status.tooltip.dot.y",
+        description: "Status tooltip marker y",
+        default_value: "71",
+    },
+    CanonicalToken {
+        key: "status.tooltip.dot.radius",
+        description: "Status tooltip marker radius",
+        default_value: "4",
+    },
+    CanonicalToken {
+        key: "status.tooltip.label.x",
+        description: "Status tooltip label x",
+        default_value: "32",
+    },
+    CanonicalToken {
+        key: "status.tooltip.label.y",
+        description: "Status tooltip label baseline",
+        default_value: "77",
+    },
+    CanonicalToken {
+        key: "status.tooltip.reason.x",
+        description: "Status tooltip reason x",
+        default_value: "16",
+    },
+    CanonicalToken {
+        key: "status.tooltip.reason.y",
+        description: "Status tooltip reason baseline",
+        default_value: "104",
+    },
+    CanonicalToken {
+        key: "status.hover.delay_ms",
+        description: "Status hover dwell in milliseconds",
+        default_value: "180",
+    },
+    CanonicalToken {
+        key: "status.hover.height_pct",
+        description: "Status pill fraction of its tooltip canvas",
+        default_value: "0.32258065",
+    },
     // Stroke
     CanonicalToken {
         key: "stroke.outline.width",

@@ -38,21 +38,21 @@ paths = [
 #
 # IMPORTANT: the MCP surface widget:<name> refers to instance_id (not widget_type).
 
-# Progress bar: horizontal progress bar in a clearly visible lower-left position.
+# Progress bar: 320x50 progress card centred near the lower edge.
 # MCP widget_name: "main-progress"
 [[tabs.widgets]]
 widget_type = "progress-bar"
 instance_id  = "main-progress"
 
 [tabs.widgets.geometry]
-x_pct      = 0.421875
+x_pct      = 0.4375
 y_pct      = 0.9074074
-width_pct  = 0.15625
-height_pct = 0.0185185
+width_pct  = 0.125
+height_pct = 0.0347222
 
 # Status indicator: badge in the top-right corner, as in the app's
-# production.toml (the SVG draws the badge at the top-right of its 320x124
-# bounds; the notification-area zone starts below it).
+# production.toml (the SVG draws a full-width pill at the top of its 320x124
+# bounds; the notification-area zone starts below its 40dp pill).
 # MCP widget_name: "main-status"
 [[tabs.widgets]]
 widget_type = "status-indicator"
