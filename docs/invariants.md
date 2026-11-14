@@ -614,6 +614,14 @@ valid synthesized release activate once; cancelled or retired-window edges and
 late Up do not impersonate an action. Callback code borrows no scene/runtime
 owner and forwards native messages; local feedback cleanup uses the existing
 settle and lock-availability continuation, rendering only after actual mutation.
+Cancelled Zone drag feedback remains unsettled until pruning acquires the scene
+and reconciles all remaining device gestures. A busy prune borrow reports a
+deferred turn even when earlier chrome cleanup already consumed its pending flag;
+the existing scene-availability wake retries it. Other devices keep their active
+Tile feedback; cancelled late releases cannot move, persist or activate anything.
+The existing runtime `action_button_hover_and_press_are_local_and_frame_only_on_change`
+and `portal_resize_state_pruning_preserves_live_and_cleans_removed_tiles` parents
+cover the split-borrow lock miss and both busy owners.
 No new idle poll or timer is introduced. Ambiguous completed/active receipts,
 mismatched history or bounded-admission failure disable notification actions
 until a clean runtime restart. Valid reentrant histories may trigger that
