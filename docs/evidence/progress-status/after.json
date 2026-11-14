@@ -1,0 +1,1533 @@
+{
+  "source_head": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+  "source": "production scene startup and windowed GPU build/capture, Mesa llvmpipe",
+  "fixture": ".claude/skills/user-test/scripts/progress-status-restyle-test.json",
+  "fixture_sha256": "90f616ee3590d063cec5bc0acf6bc9cb3e5baccbf22ced71fd309b4b77e8d807",
+  "dimensions": [
+    1920,
+    1080
+  ],
+  "monitor_scale": 1.0,
+  "ui_scale": 1.0,
+  "capture_at_ms": 1000,
+  "source_tracked_files_unchanged_throughout": true,
+  "owner_config_source": "app/tze_hud_app/config/production.toml",
+  "owner_config_source_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+  "owner_config_variants": {
+    "minimal": {
+      "sha256": "b94191859241221904cfc600e7138ad07c05c8c28c9c4ddc4f7aaa4cc366a541",
+      "patch": {
+        "instance_id": "main-status",
+        "initial_params": {
+          "theme": "minimal"
+        }
+      }
+    },
+    "system": {
+      "sha256": "fda31b071a5318769248ab26dec16e1050d0303a3fc959f9258d4d9cb087cc42",
+      "patch": {
+        "instance_id": "main-status",
+        "initial_params": {
+          "theme": "system"
+        }
+      }
+    },
+    "friendly": {
+      "sha256": "215593befe9d982f04329a60a3616008bdfc8e592975bb9bc3cf49055ad513b0",
+      "patch": {
+        "instance_id": "main-status",
+        "initial_params": {
+          "theme": "friendly"
+        }
+      }
+    }
+  },
+  "limits": "Owner BEFORE is 3840x2160 on build24818c39 with unknown selected theme/DPI; AFTER is 1920x1080 software GPU. No cross-environment pixel parity or Windows owner acceptance claim.",
+  "frames": [
+    {
+      "file": "after--tonal-glass--progress-000.png",
+      "fixture_index": 0,
+      "message": {
+        "widget": "main-progress",
+        "params": {
+          "progress": 0.0,
+          "label": "",
+          "severity": "info"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1626.5388010000001,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--progress-000.json",
+        "fixture_sha256": "c6d618ce95b2ae465ff5054eef1bee6e844e85c44d6e60ca17283b0d25c801e6",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--progress-000.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 49107,
+        "png_sha256": "1538ac294edb2d45d9b4edb44558039675bf0ab11ebd487f1295e8ccd2797732",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--progress-050.png",
+      "fixture_index": 1,
+      "message": {
+        "widget": "main-progress",
+        "params": {
+          "progress": 0.5,
+          "label": "50/100 (50%)",
+          "severity": "info"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1625.678014,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--progress-050.json",
+        "fixture_sha256": "8645c1516fb79ea38436bbd391fb2aa943a18dbec7386ea677f1f52ec97456be",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--progress-050.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 50875,
+        "png_sha256": "514a7dfc7a3aa9500443f2dce23dbed0ee3a2f5ce1a51e319b279599970e0f7d",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--progress-100.png",
+      "fixture_index": 2,
+      "message": {
+        "widget": "main-progress",
+        "params": {
+          "progress": 1.0,
+          "label": "100/100 (100%)",
+          "severity": "info"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1623.235169,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--progress-100.json",
+        "fixture_sha256": "3dc514adf07b88dac96ddc1942792bdbd46a4fe0c1767d36e41245bddc1d5e90",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--progress-100.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51185,
+        "png_sha256": "f44a57696caa0c8772ef87d573642b508c60003951e6642b0303cd593773f3e3",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--status-online.png",
+      "fixture_index": 3,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "online",
+          "label": "Butler",
+          "reason": "Status: online"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1624.361336,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--status-online.json",
+        "fixture_sha256": "4103e307a6cd347df6fd641057cd545603167f941189bb413bbfb91cd1aacb48",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--status-online.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51615,
+        "png_sha256": "8fccd4d7617214cc89d5419ca10f2a809ae02093331242bae1189a62c4aae3e9",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--status-away.png",
+      "fixture_index": 4,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "away",
+          "label": "Butler",
+          "reason": "Status: away"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1625.494463,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--status-away.json",
+        "fixture_sha256": "a8c8ff746095f3d4385c0b69f44a49689e080832961a4bb3c1c0db053490b7a7",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--status-away.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51284,
+        "png_sha256": "1f0d08af2aee08d37e39b27514d25dfe3d204d198a96b71391290ba5f44da0ff",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--status-busy.png",
+      "fixture_index": 5,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "busy",
+          "label": "Butler",
+          "reason": "Status: busy"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1630.704072,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--status-busy.json",
+        "fixture_sha256": "8dc0ccbddef56d29f6adbba014464e62f8cabf705b4a300a6d3a6075f51d269b",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--status-busy.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51185,
+        "png_sha256": "31349748d3e7ef6f90ff68d8af9c918d6680737bec7213fb9d8cb02195101dde",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--status-offline.png",
+      "fixture_index": 6,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "offline",
+          "label": "Butler",
+          "reason": "Status: offline"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1625.97284,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--status-offline.json",
+        "fixture_sha256": "fe402c4cd3264330bb2acfdc4ee2ec1b292b7383e32251b63791be96ee3188b0",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--status-offline.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51722,
+        "png_sha256": "4295dc86f7c5a7380bba17a096cf04be39d7b641e0db5e338ebcc7023e436594",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--classic--progress-000.png",
+      "fixture_index": 0,
+      "message": {
+        "widget": "main-progress",
+        "params": {
+          "progress": 0.0,
+          "label": "",
+          "severity": "info"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1627.407427,
+        "fixture": "test_results/progress-status-capture/385b76a78768/classic--progress-000.json",
+        "fixture_sha256": "c6d618ce95b2ae465ff5054eef1bee6e844e85c44d6e60ca17283b0d25c801e6",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--classic--progress-000.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 49175,
+        "png_sha256": "b1fcfbc31cd75064782d72e9ffd52e03fc0bf3da25454ff6640b3240afb5e3b8",
+        "resolved_tokens_sha256": "d96a70c5b1760854a7ef14fd1d526386abddec1d88b45db96ed3eb430fb45dbc",
+        "theme": "classic",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--classic--progress-050.png",
+      "fixture_index": 1,
+      "message": {
+        "widget": "main-progress",
+        "params": {
+          "progress": 0.5,
+          "label": "50/100 (50%)",
+          "severity": "info"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1627.924837,
+        "fixture": "test_results/progress-status-capture/385b76a78768/classic--progress-050.json",
+        "fixture_sha256": "8645c1516fb79ea38436bbd391fb2aa943a18dbec7386ea677f1f52ec97456be",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--classic--progress-050.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 50970,
+        "png_sha256": "c31aa7417f62bbb389184aeda4f5d35e41c43edc7cb0910108f44e0b080cf773",
+        "resolved_tokens_sha256": "d96a70c5b1760854a7ef14fd1d526386abddec1d88b45db96ed3eb430fb45dbc",
+        "theme": "classic",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--classic--progress-100.png",
+      "fixture_index": 2,
+      "message": {
+        "widget": "main-progress",
+        "params": {
+          "progress": 1.0,
+          "label": "100/100 (100%)",
+          "severity": "info"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1628.399136,
+        "fixture": "test_results/progress-status-capture/385b76a78768/classic--progress-100.json",
+        "fixture_sha256": "3dc514adf07b88dac96ddc1942792bdbd46a4fe0c1767d36e41245bddc1d5e90",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--classic--progress-100.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51280,
+        "png_sha256": "cf894ebe2e04825728978307220c890bea390e4172324c8a10518a3630172c90",
+        "resolved_tokens_sha256": "d96a70c5b1760854a7ef14fd1d526386abddec1d88b45db96ed3eb430fb45dbc",
+        "theme": "classic",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--classic--status-online.png",
+      "fixture_index": 3,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "online",
+          "label": "Butler",
+          "reason": "Status: online"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1634.7755450000002,
+        "fixture": "test_results/progress-status-capture/385b76a78768/classic--status-online.json",
+        "fixture_sha256": "4103e307a6cd347df6fd641057cd545603167f941189bb413bbfb91cd1aacb48",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--classic--status-online.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 52059,
+        "png_sha256": "45cd1373ccb0fd7402fdafadb330ba2e52a01f6b6d9c61dcd96963e57f5d4056",
+        "resolved_tokens_sha256": "d96a70c5b1760854a7ef14fd1d526386abddec1d88b45db96ed3eb430fb45dbc",
+        "theme": "classic",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--classic--status-away.png",
+      "fixture_index": 4,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "away",
+          "label": "Butler",
+          "reason": "Status: away"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1635.221338,
+        "fixture": "test_results/progress-status-capture/385b76a78768/classic--status-away.json",
+        "fixture_sha256": "a8c8ff746095f3d4385c0b69f44a49689e080832961a4bb3c1c0db053490b7a7",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--classic--status-away.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51724,
+        "png_sha256": "b1f488e70acfab2c401f33f8248b64d040b26fdc32eebc1960168070470cb01c",
+        "resolved_tokens_sha256": "d96a70c5b1760854a7ef14fd1d526386abddec1d88b45db96ed3eb430fb45dbc",
+        "theme": "classic",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--classic--status-busy.png",
+      "fixture_index": 5,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "busy",
+          "label": "Butler",
+          "reason": "Status: busy"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1637.694871,
+        "fixture": "test_results/progress-status-capture/385b76a78768/classic--status-busy.json",
+        "fixture_sha256": "8dc0ccbddef56d29f6adbba014464e62f8cabf705b4a300a6d3a6075f51d269b",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--classic--status-busy.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51575,
+        "png_sha256": "59a0f1f21f1d7c0949213884e8ae63520f9f7b0a0d44c7915ef87efa78f0df26",
+        "resolved_tokens_sha256": "d96a70c5b1760854a7ef14fd1d526386abddec1d88b45db96ed3eb430fb45dbc",
+        "theme": "classic",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--classic--status-offline.png",
+      "fixture_index": 6,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "offline",
+          "label": "Butler",
+          "reason": "Status: offline"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1635.157089,
+        "fixture": "test_results/progress-status-capture/385b76a78768/classic--status-offline.json",
+        "fixture_sha256": "fe402c4cd3264330bb2acfdc4ee2ec1b292b7383e32251b63791be96ee3188b0",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--classic--status-offline.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 52243,
+        "png_sha256": "f8750d1fed32f42218e6d06c0ea624888834bbf77cbb2508ae3912b0f6d4419c",
+        "resolved_tokens_sha256": "d96a70c5b1760854a7ef14fd1d526386abddec1d88b45db96ed3eb430fb45dbc",
+        "theme": "classic",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--blueprint--progress-000.png",
+      "fixture_index": 0,
+      "message": {
+        "widget": "main-progress",
+        "params": {
+          "progress": 0.0,
+          "label": "",
+          "severity": "info"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1634.734718,
+        "fixture": "test_results/progress-status-capture/385b76a78768/blueprint--progress-000.json",
+        "fixture_sha256": "c6d618ce95b2ae465ff5054eef1bee6e844e85c44d6e60ca17283b0d25c801e6",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--blueprint--progress-000.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 49016,
+        "png_sha256": "8350ab60dd3687f51c8896ba0ca015dfe6c657f40e83a6f3655eeda59fbf2cb6",
+        "resolved_tokens_sha256": "e7ebbb70a80bef4c6d072ee286c71256df73cbe89dd37494a13c4327a27f0fa8",
+        "theme": "blueprint",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--blueprint--progress-050.png",
+      "fixture_index": 1,
+      "message": {
+        "widget": "main-progress",
+        "params": {
+          "progress": 0.5,
+          "label": "50/100 (50%)",
+          "severity": "info"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1630.1203979999998,
+        "fixture": "test_results/progress-status-capture/385b76a78768/blueprint--progress-050.json",
+        "fixture_sha256": "8645c1516fb79ea38436bbd391fb2aa943a18dbec7386ea677f1f52ec97456be",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--blueprint--progress-050.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 50656,
+        "png_sha256": "e379b1f7f6eba75d7ee66e28db37f01de7f4552a3cd0c7f0a80615b00f069dcb",
+        "resolved_tokens_sha256": "e7ebbb70a80bef4c6d072ee286c71256df73cbe89dd37494a13c4327a27f0fa8",
+        "theme": "blueprint",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--blueprint--progress-100.png",
+      "fixture_index": 2,
+      "message": {
+        "widget": "main-progress",
+        "params": {
+          "progress": 1.0,
+          "label": "100/100 (100%)",
+          "severity": "info"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1634.188376,
+        "fixture": "test_results/progress-status-capture/385b76a78768/blueprint--progress-100.json",
+        "fixture_sha256": "3dc514adf07b88dac96ddc1942792bdbd46a4fe0c1767d36e41245bddc1d5e90",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--blueprint--progress-100.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51022,
+        "png_sha256": "2496e373f909029aecd2bb8442a5734744105449298d676c52a26568502ece29",
+        "resolved_tokens_sha256": "e7ebbb70a80bef4c6d072ee286c71256df73cbe89dd37494a13c4327a27f0fa8",
+        "theme": "blueprint",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--blueprint--status-online.png",
+      "fixture_index": 3,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "online",
+          "label": "Butler",
+          "reason": "Status: online"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1646.3994340000002,
+        "fixture": "test_results/progress-status-capture/385b76a78768/blueprint--status-online.json",
+        "fixture_sha256": "4103e307a6cd347df6fd641057cd545603167f941189bb413bbfb91cd1aacb48",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--blueprint--status-online.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51547,
+        "png_sha256": "119de2a590b5aa69e37b0ac767723c114944d22cea6ee0ffda19709e52454781",
+        "resolved_tokens_sha256": "e7ebbb70a80bef4c6d072ee286c71256df73cbe89dd37494a13c4327a27f0fa8",
+        "theme": "blueprint",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--blueprint--status-away.png",
+      "fixture_index": 4,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "away",
+          "label": "Butler",
+          "reason": "Status: away"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1633.123464,
+        "fixture": "test_results/progress-status-capture/385b76a78768/blueprint--status-away.json",
+        "fixture_sha256": "a8c8ff746095f3d4385c0b69f44a49689e080832961a4bb3c1c0db053490b7a7",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--blueprint--status-away.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51204,
+        "png_sha256": "f7a73b912ed464542c38c3b81277036ed4af59e202b9935eaf599db96317dc53",
+        "resolved_tokens_sha256": "e7ebbb70a80bef4c6d072ee286c71256df73cbe89dd37494a13c4327a27f0fa8",
+        "theme": "blueprint",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--blueprint--status-busy.png",
+      "fixture_index": 5,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "busy",
+          "label": "Butler",
+          "reason": "Status: busy"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1636.531158,
+        "fixture": "test_results/progress-status-capture/385b76a78768/blueprint--status-busy.json",
+        "fixture_sha256": "8dc0ccbddef56d29f6adbba014464e62f8cabf705b4a300a6d3a6075f51d269b",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--blueprint--status-busy.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51138,
+        "png_sha256": "8c47827a5cacb7cb6de8a60de27bdd68c81d4afb934f941e250b1ff760f1f674",
+        "resolved_tokens_sha256": "e7ebbb70a80bef4c6d072ee286c71256df73cbe89dd37494a13c4327a27f0fa8",
+        "theme": "blueprint",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--blueprint--status-offline.png",
+      "fixture_index": 6,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "offline",
+          "label": "Butler",
+          "reason": "Status: offline"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "default system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "d51490e47d3325506a31c16a7dc67b1d533b4bb8e3c842f8e501bed5e3d2aa40",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1644.639881,
+        "fixture": "test_results/progress-status-capture/385b76a78768/blueprint--status-offline.json",
+        "fixture_sha256": "fe402c4cd3264330bb2acfdc4ee2ec1b292b7383e32251b63791be96ee3188b0",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--blueprint--status-offline.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51609,
+        "png_sha256": "b0fffa34d5a8d8fdb5ae9dce015eca779841d1eeb7c8e43be508c375968af399",
+        "resolved_tokens_sha256": "e7ebbb70a80bef4c6d072ee286c71256df73cbe89dd37494a13c4327a27f0fa8",
+        "theme": "blueprint",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--owner-minimal--status-online.png",
+      "fixture_index": 3,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "online",
+          "label": "Butler",
+          "reason": "Status: online"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "minimal",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "b94191859241221904cfc600e7138ad07c05c8c28c9c4ddc4f7aaa4cc366a541",
+        "config_source": "test_results/progress-status-capture/385b76a78768/owner-minimal.toml",
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1641.235176,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--owner-minimal--status-online.json",
+        "fixture_sha256": "4103e307a6cd347df6fd641057cd545603167f941189bb413bbfb91cd1aacb48",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--owner-minimal--status-online.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51426,
+        "png_sha256": "bbb2cd470304c2ce2a50aeb1e3c9e18200a2858fdfe1b5346d1fc190df91f98a",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--owner-minimal--status-away.png",
+      "fixture_index": 4,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "away",
+          "label": "Butler",
+          "reason": "Status: away"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "minimal",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "b94191859241221904cfc600e7138ad07c05c8c28c9c4ddc4f7aaa4cc366a541",
+        "config_source": "test_results/progress-status-capture/385b76a78768/owner-minimal.toml",
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1638.0163840000002,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--owner-minimal--status-away.json",
+        "fixture_sha256": "a8c8ff746095f3d4385c0b69f44a49689e080832961a4bb3c1c0db053490b7a7",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--owner-minimal--status-away.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51166,
+        "png_sha256": "14f5c58d4cc14d927d311829c11eae70b81b4c14596d41d0a671011025951711",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--owner-minimal--status-busy.png",
+      "fixture_index": 5,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "busy",
+          "label": "Butler",
+          "reason": "Status: busy"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "minimal",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "b94191859241221904cfc600e7138ad07c05c8c28c9c4ddc4f7aaa4cc366a541",
+        "config_source": "test_results/progress-status-capture/385b76a78768/owner-minimal.toml",
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1632.0863889999998,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--owner-minimal--status-busy.json",
+        "fixture_sha256": "8dc0ccbddef56d29f6adbba014464e62f8cabf705b4a300a6d3a6075f51d269b",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--owner-minimal--status-busy.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51049,
+        "png_sha256": "54a5e10ae807cd2817bba2fb3b758eb48b3bcdd4795097ababc9c586ebf7d6d7",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--owner-minimal--status-offline.png",
+      "fixture_index": 6,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "offline",
+          "label": "Butler",
+          "reason": "Status: offline"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "minimal",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "b94191859241221904cfc600e7138ad07c05c8c28c9c4ddc4f7aaa4cc366a541",
+        "config_source": "test_results/progress-status-capture/385b76a78768/owner-minimal.toml",
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1624.6405459999999,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--owner-minimal--status-offline.json",
+        "fixture_sha256": "fe402c4cd3264330bb2acfdc4ee2ec1b292b7383e32251b63791be96ee3188b0",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--owner-minimal--status-offline.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51571,
+        "png_sha256": "d78bb1d8281a6e3dccf54d37d2e59809d3a62f60c73c21f311e903cf3718d842",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--owner-system--status-online.png",
+      "fixture_index": 3,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "online",
+          "label": "Butler",
+          "reason": "Status: online"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "fda31b071a5318769248ab26dec16e1050d0303a3fc959f9258d4d9cb087cc42",
+        "config_source": "test_results/progress-status-capture/385b76a78768/owner-system.toml",
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1633.738386,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--owner-system--status-online.json",
+        "fixture_sha256": "4103e307a6cd347df6fd641057cd545603167f941189bb413bbfb91cd1aacb48",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--owner-system--status-online.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51615,
+        "png_sha256": "8fccd4d7617214cc89d5419ca10f2a809ae02093331242bae1189a62c4aae3e9",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--owner-system--status-away.png",
+      "fixture_index": 4,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "away",
+          "label": "Butler",
+          "reason": "Status: away"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "fda31b071a5318769248ab26dec16e1050d0303a3fc959f9258d4d9cb087cc42",
+        "config_source": "test_results/progress-status-capture/385b76a78768/owner-system.toml",
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1632.7907019999998,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--owner-system--status-away.json",
+        "fixture_sha256": "a8c8ff746095f3d4385c0b69f44a49689e080832961a4bb3c1c0db053490b7a7",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--owner-system--status-away.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51284,
+        "png_sha256": "1f0d08af2aee08d37e39b27514d25dfe3d204d198a96b71391290ba5f44da0ff",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--owner-system--status-busy.png",
+      "fixture_index": 5,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "busy",
+          "label": "Butler",
+          "reason": "Status: busy"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "fda31b071a5318769248ab26dec16e1050d0303a3fc959f9258d4d9cb087cc42",
+        "config_source": "test_results/progress-status-capture/385b76a78768/owner-system.toml",
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1632.050922,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--owner-system--status-busy.json",
+        "fixture_sha256": "8dc0ccbddef56d29f6adbba014464e62f8cabf705b4a300a6d3a6075f51d269b",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--owner-system--status-busy.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51185,
+        "png_sha256": "31349748d3e7ef6f90ff68d8af9c918d6680737bec7213fb9d8cb02195101dde",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--owner-system--status-offline.png",
+      "fixture_index": 6,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "offline",
+          "label": "Butler",
+          "reason": "Status: offline"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "system",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "fda31b071a5318769248ab26dec16e1050d0303a3fc959f9258d4d9cb087cc42",
+        "config_source": "test_results/progress-status-capture/385b76a78768/owner-system.toml",
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1627.830376,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--owner-system--status-offline.json",
+        "fixture_sha256": "fe402c4cd3264330bb2acfdc4ee2ec1b292b7383e32251b63791be96ee3188b0",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--owner-system--status-offline.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51722,
+        "png_sha256": "4295dc86f7c5a7380bba17a096cf04be39d7b641e0db5e338ebcc7023e436594",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--owner-friendly--status-online.png",
+      "fixture_index": 3,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "online",
+          "label": "Butler",
+          "reason": "Status: online"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "friendly",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "215593befe9d982f04329a60a3616008bdfc8e592975bb9bc3cf49055ad513b0",
+        "config_source": "test_results/progress-status-capture/385b76a78768/owner-friendly.toml",
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1630.041047,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--owner-friendly--status-online.json",
+        "fixture_sha256": "4103e307a6cd347df6fd641057cd545603167f941189bb413bbfb91cd1aacb48",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--owner-friendly--status-online.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51731,
+        "png_sha256": "03e6f3c5e2ee9ddd539cd7a2a19784ae901318f380c1e3736b84714a2f3d3b53",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--owner-friendly--status-away.png",
+      "fixture_index": 4,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "away",
+          "label": "Butler",
+          "reason": "Status: away"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "friendly",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "215593befe9d982f04329a60a3616008bdfc8e592975bb9bc3cf49055ad513b0",
+        "config_source": "test_results/progress-status-capture/385b76a78768/owner-friendly.toml",
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1629.894808,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--owner-friendly--status-away.json",
+        "fixture_sha256": "a8c8ff746095f3d4385c0b69f44a49689e080832961a4bb3c1c0db053490b7a7",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--owner-friendly--status-away.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51324,
+        "png_sha256": "4e525637f896c2827e57dcce09e4196fd74023971f2a5cc153e2998ed57de351",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--owner-friendly--status-busy.png",
+      "fixture_index": 5,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "busy",
+          "label": "Butler",
+          "reason": "Status: busy"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "friendly",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "215593befe9d982f04329a60a3616008bdfc8e592975bb9bc3cf49055ad513b0",
+        "config_source": "test_results/progress-status-capture/385b76a78768/owner-friendly.toml",
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1625.6079969999998,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--owner-friendly--status-busy.json",
+        "fixture_sha256": "8dc0ccbddef56d29f6adbba014464e62f8cabf705b4a300a6d3a6075f51d269b",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--owner-friendly--status-busy.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51204,
+        "png_sha256": "a19e258c202f4a62b5858c03c6faa81006fa63fe4c8cdb84863f02b8880940ec",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--owner-friendly--status-offline.png",
+      "fixture_index": 6,
+      "message": {
+        "widget": "main-status",
+        "params": {
+          "status": "offline",
+          "label": "Butler",
+          "reason": "Status: offline"
+        },
+        "ttl_ms": 15000
+      },
+      "owner_style": "friendly",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "385b76a787684fa2e7b79342e1bbdd5e38ca7429",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "5d2b5612b72d30360da83a0e6d49a8a804f274a6cd07a2677fc8e507f7a0f725",
+        "config_sha256": "215593befe9d982f04329a60a3616008bdfc8e592975bb9bc3cf49055ad513b0",
+        "config_source": "test_results/progress-status-capture/385b76a78768/owner-friendly.toml",
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1632.5602030000002,
+        "fixture": "test_results/progress-status-capture/385b76a78768/tonal-glass--owner-friendly--status-offline.json",
+        "fixture_sha256": "fe402c4cd3264330bb2acfdc4ee2ec1b292b7383e32251b63791be96ee3188b0",
+        "messages_applied": 1,
+        "output": "docs/evidence/progress-status/after--tonal-glass--owner-friendly--status-offline.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 51738,
+        "png_sha256": "fa132c3f06554ed65812668fbb7f2b0aff327f5a882c28c13069ccb51ef336da",
+        "resolved_tokens_sha256": "121f0aebc2b961b5471a3c43ca3def6e4c388212cb32e53afd2a579eccd95826",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    }
+  ]
+}

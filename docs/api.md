@@ -1148,9 +1148,9 @@ records the result as `runtime.px_scale` (and `runtime.px_scale@<zone>`
 for a zone on a secondary), which config may not set.
 
 Widget bundles resolve placeholders at load in their SVG layers and in
-two `widget.toml` places: discrete `value_map` values (e.g. a status
-color) and string color defaults (`default = "{{token.color.primary}}"`;
-a literal `#RRGGBB[AA]` also works). The built-in gauge, progress-bar and
+`widget.toml`: discrete `value_map` values (e.g. a status color), string color
+defaults (`default = "{{token.color.primary}}"`; a literal `#RRGGBB[AA]` also
+works), numeric binding outputs, hover delay and normalized trigger rectangles. The built-in gauge, progress-bar and
 status-indicator draw tonal cards from the semantic roles
 (`color.surface.container[.low]`, `color.outline.variant`, `color.primary`,
 status roles) and the `type.*` scale. The gauge is a 128x132 card
@@ -1165,6 +1165,10 @@ sizes them at 1.5x the viewBox on a 3840x2160 panel.
 Progress uses a 320×50 card with a `type.label.m` label and always-visible
 monospaced percentage above a 4dp track. Status uses a 40dp pill in its 320×124
 tooltip canvas: owner-selected marker, status name and clipped inline reason.
+`status.pill.radius` is half the pill's inner height (19.5dp by default), applied
+to both SVG radii. An owner changing pill/canvas dimensions must also keep
+`status.hover.height_pct` equal to pill height divided by canvas height so the
+hover target follows the visible pill.
 Online uses `color.success`, away/busy use `color.caution`, and offline uses
 `color.on_surface.variant`. Hover retains the owner label/reason tooltip.
 Both cards use `color.surface.container.low`; all geometry, paint, type and
@@ -1266,7 +1270,7 @@ color overrides still take precedence.
 | Alert banner | `color.alert.container`, `color.alert.{caution,error}.container`, `color.alert.outline`, `color.on_alert[.variant\|.error]`, `color.severity.{info,warning,critical}` (the severity mark), `opacity.alert`, `shape.alert`, `space.alert.{margin,horizontal,vertical}`, `type.alert.{title,body}.{size,line_height,weight}` |
 | Gauge ring | `gauge.{width,height,edge.*,ring.*,caption.y,hover.delay_ms}`, `type.gauge.readout.size` (centred percent; family and weight follow `type.readout`) |
 | Progress card | `progress.{width,height,edge.*,content.x,text.y,track.*,readout.*,hover.delay_ms}`, `type.label.m`, `type.readout.family` |
-| Status pill | `status.{width,height,edge.*,marker.*,name.x,text.*,separator.*,reason.*,tooltip.*,hover.*}`, `type.body.m`, `type.label.m` |
+| Status pill | `status.{width,height,pill.*,edge.*,marker.*,name.x,text.*,separator.*,reason.*,tooltip.*,hover.*}`, `type.body.m`, `type.label.m` |
 | Choice actions | `notification.action.link_mark` |
 | Motion | `motion.{enter,exit,state}.ms`, `motion.{enter,exit}.easing` (`linear`, `standard`, `decelerate`, `accelerate`) |
 | Shape | `shape.{xs,s,m,l,xl,full}` (corner radius) |
