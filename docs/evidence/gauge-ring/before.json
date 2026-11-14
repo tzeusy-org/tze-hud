@@ -1,0 +1,300 @@
+{
+  "schema": 1,
+  "workflow": "windows.yml",
+  "repo": "tzeusy-org/tze-hud",
+  "event": "workflow_dispatch",
+  "head": "8c8390a43fbdb7d7f982f02b19e92d8e93866261",
+  "run_id": "43582366817",
+  "rgb_tolerance": 6,
+  "alpha_tolerance": 0,
+  "scope": "HUD own frame only; no desktop/DPI/multi-monitor/owner signoff",
+  "cells": {
+    "blueprint--gauge_cycle_test--01": {
+      "theme": "blueprint",
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "9e76b1a0b545e305d3b57906bcb1aadc4b77354dc2584fa0d29a723c7689b1c8",
+      "checkpoint": 1,
+      "width": 1024,
+      "height": 768,
+      "renderer": {
+        "backend": "Dx12",
+        "device_name": "Microsoft Basic Render Driver",
+        "vendor": 5140
+      },
+      "window_mode": "fullscreen",
+      "build_profile": "release-dev",
+      "settle_s": 1,
+      "capture_s": 0.016000000000076398,
+      "decode_s": 0.21800000000007458,
+      "comparison": {
+        "status": "unavailable",
+        "reason": "no compatible main baseline"
+      },
+      "png_sha256": "35b0e2ef7cc6cbad16d9edb36a3196f0cedabbcd78e22ffd2b3dcc4c1c2033dd"
+    },
+    "blueprint--gauge_cycle_test--02": {
+      "theme": "blueprint",
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "9e76b1a0b545e305d3b57906bcb1aadc4b77354dc2584fa0d29a723c7689b1c8",
+      "checkpoint": 2,
+      "width": 1024,
+      "height": 768,
+      "renderer": {
+        "backend": "Dx12",
+        "device_name": "Microsoft Basic Render Driver",
+        "vendor": 5140
+      },
+      "window_mode": "fullscreen",
+      "build_profile": "release-dev",
+      "settle_s": 1,
+      "capture_s": 0.016000000000076398,
+      "decode_s": 0.21800000000007458,
+      "comparison": {
+        "status": "unavailable",
+        "reason": "no compatible main baseline"
+      },
+      "png_sha256": "776fa11dc736632e23e1c3f92155a1e11089301679370d9ac6b0ded5e8966fce"
+    },
+    "blueprint--gauge_cycle_test--03": {
+      "theme": "blueprint",
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "9e76b1a0b545e305d3b57906bcb1aadc4b77354dc2584fa0d29a723c7689b1c8",
+      "checkpoint": 3,
+      "width": 1024,
+      "height": 768,
+      "renderer": {
+        "backend": "Dx12",
+        "device_name": "Microsoft Basic Render Driver",
+        "vendor": 5140
+      },
+      "window_mode": "fullscreen",
+      "build_profile": "release-dev",
+      "settle_s": 1,
+      "capture_s": 0.0,
+      "decode_s": 0.21900000000005093,
+      "comparison": {
+        "status": "unavailable",
+        "reason": "no compatible main baseline"
+      },
+      "png_sha256": "4da280a24a2584e0ddc93fc867e4a888af04aa6e296f332fa27c7c4a01634adf"
+    },
+    "blueprint--gauge_cycle_test--04": {
+      "theme": "blueprint",
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "9e76b1a0b545e305d3b57906bcb1aadc4b77354dc2584fa0d29a723c7689b1c8",
+      "checkpoint": 4,
+      "width": 1024,
+      "height": 768,
+      "renderer": {
+        "backend": "Dx12",
+        "device_name": "Microsoft Basic Render Driver",
+        "vendor": 5140
+      },
+      "window_mode": "fullscreen",
+      "build_profile": "release-dev",
+      "settle_s": 1,
+      "capture_s": 0.03199999999992542,
+      "decode_s": 0.20299999999997453,
+      "comparison": {
+        "status": "unavailable",
+        "reason": "no compatible main baseline"
+      },
+      "png_sha256": "6bc5896e1d87e0d0002aacd25d0212497c303d8ec78aa424d37a417ab92ef3e3"
+    },
+    "classic--gauge_cycle_test--01": {
+      "theme": "classic",
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "9e76b1a0b545e305d3b57906bcb1aadc4b77354dc2584fa0d29a723c7689b1c8",
+      "checkpoint": 1,
+      "width": 1024,
+      "height": 768,
+      "renderer": {
+        "backend": "Dx12",
+        "device_name": "Microsoft Basic Render Driver",
+        "vendor": 5140
+      },
+      "window_mode": "fullscreen",
+      "build_profile": "release-dev",
+      "settle_s": 1,
+      "capture_s": 0.03099999999994907,
+      "decode_s": 0.2030000000002019,
+      "comparison": {
+        "status": "unavailable",
+        "reason": "no compatible main baseline"
+      },
+      "png_sha256": "e037d86254276b7d063c7cd33dd480eb3f6f2a7308d1f34b47305e95a46ba95d"
+    },
+    "classic--gauge_cycle_test--02": {
+      "theme": "classic",
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "9e76b1a0b545e305d3b57906bcb1aadc4b77354dc2584fa0d29a723c7689b1c8",
+      "checkpoint": 2,
+      "width": 1024,
+      "height": 768,
+      "renderer": {
+        "backend": "Dx12",
+        "device_name": "Microsoft Basic Render Driver",
+        "vendor": 5140
+      },
+      "window_mode": "fullscreen",
+      "build_profile": "release-dev",
+      "settle_s": 1,
+      "capture_s": 0.015999999999849024,
+      "decode_s": 0.2030000000002019,
+      "comparison": {
+        "status": "unavailable",
+        "reason": "no compatible main baseline"
+      },
+      "png_sha256": "0fe11aed9b062faa2269ecca06a8378b8c81a88a4d12227d70401963209042e5"
+    },
+    "classic--gauge_cycle_test--03": {
+      "theme": "classic",
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "9e76b1a0b545e305d3b57906bcb1aadc4b77354dc2584fa0d29a723c7689b1c8",
+      "checkpoint": 3,
+      "width": 1024,
+      "height": 768,
+      "renderer": {
+        "backend": "Dx12",
+        "device_name": "Microsoft Basic Render Driver",
+        "vendor": 5140
+      },
+      "window_mode": "fullscreen",
+      "build_profile": "release-dev",
+      "settle_s": 1,
+      "capture_s": 0.015000000000100044,
+      "decode_s": 0.21900000000005093,
+      "comparison": {
+        "status": "unavailable",
+        "reason": "no compatible main baseline"
+      },
+      "png_sha256": "78302a044b70c37c289dadb342916e0d7f8ec5cd8d15b44123f3abfd619c37c2"
+    },
+    "classic--gauge_cycle_test--04": {
+      "theme": "classic",
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "9e76b1a0b545e305d3b57906bcb1aadc4b77354dc2584fa0d29a723c7689b1c8",
+      "checkpoint": 4,
+      "width": 1024,
+      "height": 768,
+      "renderer": {
+        "backend": "Dx12",
+        "device_name": "Microsoft Basic Render Driver",
+        "vendor": 5140
+      },
+      "window_mode": "fullscreen",
+      "build_profile": "release-dev",
+      "settle_s": 1,
+      "capture_s": 0.015000000000100044,
+      "decode_s": 0.21900000000005093,
+      "comparison": {
+        "status": "unavailable",
+        "reason": "no compatible main baseline"
+      },
+      "png_sha256": "0e52d020dbebe6f381cc064fa839ec108696ff7980768603d43a100ac460de1f"
+    },
+    "tonal-glass--gauge_cycle_test--01": {
+      "theme": "tonal-glass",
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "9e76b1a0b545e305d3b57906bcb1aadc4b77354dc2584fa0d29a723c7689b1c8",
+      "checkpoint": 1,
+      "width": 1024,
+      "height": 768,
+      "renderer": {
+        "backend": "Dx12",
+        "device_name": "Microsoft Basic Render Driver",
+        "vendor": 5140
+      },
+      "window_mode": "fullscreen",
+      "build_profile": "release-dev",
+      "settle_s": 1,
+      "capture_s": 0.015999999999849024,
+      "decode_s": 0.21900000000005093,
+      "comparison": {
+        "status": "unavailable",
+        "reason": "no compatible main baseline"
+      },
+      "png_sha256": "6342e89a987aa7069418a7129e3da1d0135dfb62cb839d72a65b2542ab1740ba"
+    },
+    "tonal-glass--gauge_cycle_test--02": {
+      "theme": "tonal-glass",
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "9e76b1a0b545e305d3b57906bcb1aadc4b77354dc2584fa0d29a723c7689b1c8",
+      "checkpoint": 2,
+      "width": 1024,
+      "height": 768,
+      "renderer": {
+        "backend": "Dx12",
+        "device_name": "Microsoft Basic Render Driver",
+        "vendor": 5140
+      },
+      "window_mode": "fullscreen",
+      "build_profile": "release-dev",
+      "settle_s": 1,
+      "capture_s": 0.015999999999849024,
+      "decode_s": 0.21900000000005093,
+      "comparison": {
+        "status": "unavailable",
+        "reason": "no compatible main baseline"
+      },
+      "png_sha256": "e130213ada55ffa8b9069eac6009a10c48a01942b2733c84895c121f9165071a"
+    },
+    "tonal-glass--gauge_cycle_test--03": {
+      "theme": "tonal-glass",
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "9e76b1a0b545e305d3b57906bcb1aadc4b77354dc2584fa0d29a723c7689b1c8",
+      "checkpoint": 3,
+      "width": 1024,
+      "height": 768,
+      "renderer": {
+        "backend": "Dx12",
+        "device_name": "Microsoft Basic Render Driver",
+        "vendor": 5140
+      },
+      "window_mode": "fullscreen",
+      "build_profile": "release-dev",
+      "settle_s": 1,
+      "capture_s": 0.015000000000100044,
+      "decode_s": 0.20299999999997453,
+      "comparison": {
+        "status": "unavailable",
+        "reason": "no compatible main baseline"
+      },
+      "png_sha256": "96a097f7da8c24fe79921583b98e58c68b48399ff1b7afefc57545b9ef4d8402"
+    },
+    "tonal-glass--gauge_cycle_test--04": {
+      "theme": "tonal-glass",
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "9e76b1a0b545e305d3b57906bcb1aadc4b77354dc2584fa0d29a723c7689b1c8",
+      "checkpoint": 4,
+      "width": 1024,
+      "height": 768,
+      "renderer": {
+        "backend": "Dx12",
+        "device_name": "Microsoft Basic Render Driver",
+        "vendor": 5140
+      },
+      "window_mode": "fullscreen",
+      "build_profile": "release-dev",
+      "settle_s": 1,
+      "capture_s": 0.016000000000076398,
+      "decode_s": 0.21800000000007458,
+      "comparison": {
+        "status": "unavailable",
+        "reason": "no compatible main baseline"
+      },
+      "png_sha256": "c43c5f3693e10ca6cf4a0c15e8e04650729f592e700edcfc8030c9d889d42a04"
+    }
+  },
+  "capture_complete": true,
+  "baseline_status": "available",
+  "baseline": {
+    "run_id": "43559271637",
+    "head": "518715d36cfe6d6edf3b7fdec09e32d0462c4c63",
+    "workflow": "windows.yml",
+    "baseline_artifact_id": 14100440073
+  },
+  "fixture_line_endings": "Windows CRLF; git LF fixture is byte-identical after line-ending normalization",
+  "gauge_bundle_blobs_equal_main_at": "04ac25fee05f04cc0c70959e630f99ae9e1fb92d",
+  "run_url": "https://github.com/tzeusy-org/tze-hud/actions/runs/43582366817"
+}
