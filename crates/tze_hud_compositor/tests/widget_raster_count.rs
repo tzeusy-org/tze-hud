@@ -651,15 +651,15 @@ async fn widget_param_update_rasterizes_only_that_instance() {
         compositor.adapter_info()
     );
     // Shipped severity fills, including return-to-info after warning/error.
-    // Fixed logical geometry makes the sampled bar interior independent of
+    // Fixed logical geometry makes sampled ring/bar interiors independent of
     // display-relative layout; all expected colors come from theme tokens.
     for (loaded, level_name, width, height, sample) in [
         (
             bundle!("gauge", ["background.svg", "fill.svg"]),
             "level",
-            72.0,
-            224.0,
-            (36, 100),
+            128.0,
+            132.0,
+            (98, 56), // Solid ring centreline at 3 o'clock, filled at level 0.75.
         ),
         (
             bundle!("progress-bar", ["track.svg", "fill.svg"]),
@@ -1087,13 +1087,16 @@ async fn overlapping_widgets_stack_by_instance_name() {
         |gauges: &[(&str, f32)]| overlapping_gauges_frame(&mut compositor, &mut surface, gauges);
     let full = frame(&[("b", 1.0)]);
     let empty = frame(&[("b", 0.0)]);
-    // The full bar's interior: pixels where a full and an empty gauge differ,
-    // as do all four neighbours (no antialiased edge). Bar and empty track
-    // are opaque there, so only the top widget decides the colour.
+    // Probe the ring's solid foreground/track interiors, with a clear
+    // reference contrast through all four neighbours. Tiny differences from
+    // antialiased percent glyphs cannot decide which widget is on top.
     let (w, h) = (512usize, 256usize);
     let differs = |x: usize, y: usize| {
         let i = (y * w + x) * 4;
-        full[i..i + 4] != empty[i..i + 4]
+        full[i..i + 3]
+            .iter()
+            .zip(&empty[i..i + 3])
+            .any(|(a, b)| a.abs_diff(*b) >= 64)
     };
     let probe: Vec<usize> = (1..h - 1)
         .flat_map(|y| (1..w - 1).map(move |x| (x, y)))

@@ -1111,19 +1111,25 @@ def scenario_portal_reading(run: Run) -> None:
 
 
 def scenario_widget_hover(run: Run) -> None:
-    """R14.2 S6: the declared widget target shows its tooltip after dwell and hides on leave."""
-    surface = "widget:main-status"
-    run.publish(surface, ttl_ms=0, params={"status": "online", "reason": "Owned hover check"})
-    run.expect("widget rendered", lambda s: widget_entry(s, surface) is not None)
-    # Move to a reported non-hover part of the same quad, not a guessed screen point.
-    widget = widget_entry(run.status(), surface)
-    rect = widget["rect"]
-    run.glide(round(rect["x"] + 1), round(rect["y"] + rect["h"] - 1))
-    run.expect("widget tooltip initially hidden", lambda s: not widget_entry(s, surface)["tooltip_visible"])
-    run.point(f"{surface}/hover")
-    run.expect("widget tooltip after 180ms dwell", lambda s: widget_entry(s, surface)["tooltip_visible"])
-    run.glide(round(rect["x"] + 1), round(rect["y"] + rect["h"] - 1))
-    run.expect("widget tooltip hidden on leave", lambda s: not widget_entry(s, surface)["tooltip_visible"])
+    """R14.2 S6: status and gauge declared targets reveal after dwell and hide on leave."""
+    for surface, params in [
+        ("widget:main-status", {"status": "online", "reason": "Owned hover check"}),
+        ("widget:main-gauge", {"level": 0.25, "label": "CPU", "readout": "25/100 (25%)", "severity": "info"}),
+    ]:
+        run.publish(surface, ttl_ms=0, params=params)
+        run.expect(f"{surface} rendered", lambda s: widget_entry(s, surface) is not None)
+        rect = widget_entry(run.status(), surface)["rect"]
+        # Status has a non-hover caption in its quad. The gauge's trigger is
+        # the whole card, so leave its reported box instead of guessing pixels.
+        outside = (round(rect["x"] + 1), round(rect["y"] + rect["h"] - 1))
+        if surface == "widget:main-gauge":
+            outside = (round(rect["x"] - 4), round(rect["y"] + rect["h"] + 4))
+        run.glide(*outside)
+        run.expect(f"{surface} tooltip initially hidden", lambda s: not widget_entry(s, surface)["tooltip_visible"])
+        run.point(f"{surface}/hover")
+        run.expect(f"{surface} tooltip after 180ms dwell", lambda s: widget_entry(s, surface)["tooltip_visible"])
+        run.glide(*outside)
+        run.expect(f"{surface} tooltip hidden on leave", lambda s: not widget_entry(s, surface)["tooltip_visible"])
 
 
 def shrink(run: Run, s: str, times: int = 4) -> dict:

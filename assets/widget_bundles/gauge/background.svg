@@ -1,19 +1,23 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Static layer: the tonal card and the empty vertical track. No bindings.
-     The card's edge is drawn by fill.svg's severity-bound "indicator". -->
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 72 224" width="72" height="224">
+<!-- Card layer: the tonal card and the empty ring track. One binding:
+       "card"  stroke <- severity (outline.variant / caution / error)
+     The hairline is the card's own stroke, so fill and edge share one
+     rasterizer. Ring: 80x80 box centred at (64,56), r=34, 6 wide. -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 {{token.gauge.width}} {{token.gauge.height}}" width="{{token.gauge.width}}" height="{{token.gauge.height}}">
   <rect
     id="card"
     data-role="backdrop"
-    x="0.75" y="0.75"
-    width="70.5" height="222.5"
-    rx="{{token.shape.m}}" ry="{{token.shape.m}}"
-    fill="{{token.color.surface.container.high}}"
-    fill-opacity="{{token.opacity.surface}}"/>
-  <rect
+    x="{{token.gauge.edge.inset}}" y="{{token.gauge.edge.inset}}"
+    width="{{token.gauge.edge.width}}" height="{{token.gauge.edge.height}}"
+    rx="{{token.shape.l}}" ry="{{token.shape.l}}"
+    fill="{{token.color.surface.container}}"
+    fill-opacity="{{token.opacity.surface}}"
+    stroke="{{token.color.outline.variant}}"
+    stroke-width="{{token.stroke.border.width}}"/>
+  <circle
     id="track"
-    x="28" y="16"
-    width="16" height="168"
-    rx="{{token.shape.s}}" ry="{{token.shape.s}}"
-    fill="{{token.color.outline.variant}}"/>
+    cx="{{token.gauge.ring.cx}}" cy="{{token.gauge.ring.cy}}" r="{{token.gauge.ring.radius}}"
+    fill="none"
+    stroke="{{token.color.outline.variant}}"
+    stroke-width="{{token.gauge.ring.stroke}}"/>
 </svg>
