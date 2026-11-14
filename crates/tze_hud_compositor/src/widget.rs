@@ -1191,6 +1191,9 @@ fn contains_unsupported_primitive_svg(svg_text: &str) -> bool {
         "<pattern",
         " style=",
         " transform=",
+        // tiny-skia strokes here are solid; a dashed ring (the gauge arc)
+        // would draw as a full circle.
+        " stroke-dash",
     ]
     .iter()
     .any(|needle| svg_text.contains(needle))
@@ -4346,7 +4349,7 @@ mod tests {
     }
 
     #[test]
-    fn primitive_plan_falls_back_for_style_attributes() {
+    fn primitive_plan_falls_back_for_style_and_dash_attributes() {
         let styled = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
             <rect id="box" x="0" y="0" width="16" height="16" style="fill:#00ff00"/>
         </svg>"##;
@@ -4354,6 +4357,14 @@ mod tests {
         assert!(
             PrimitiveSvgLayerPlan::parse(styled).is_none(),
             "style attributes are outside the primitive fast path and must use resvg fallback"
+        );
+
+        let dashed = r##"<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16">
+            <circle id="arc" cx="8" cy="8" r="6" fill="none" stroke="#00ff00" stroke-dasharray="9 38"/>
+        </svg>"##;
+        assert!(
+            PrimitiveSvgLayerPlan::parse(dashed).is_none(),
+            "primitive strokes are solid, so a dashed arc must use resvg fallback"
         );
     }
 

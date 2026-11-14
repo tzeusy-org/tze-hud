@@ -25,6 +25,7 @@ fn shipped_path(name: &str) -> PathBuf {
 /// Every token the shipped SVGs and manifests reference (Tonal Glass values).
 fn shipped_tokens() -> HashMap<String, String> {
     [
+        ("color.surface.container", "#1B2028"),
         ("color.surface.container.high", "#222833"),
         ("color.surface.container.highest", "#2A313D"),
         ("color.on_surface", "#E8EBF0"),
@@ -40,11 +41,15 @@ fn shipped_tokens() -> HashMap<String, String> {
         ("stroke.border.width", "1"),
         ("shape.s", "8"),
         ("shape.m", "12"),
+        ("shape.l", "16"),
         ("type.title.m.family", "IBM Plex Sans"),
         ("type.title.m.size", "16"),
         ("type.title.m.weight", "600"),
         ("type.body.m.family", "IBM Plex Sans"),
         ("type.body.m.size", "14"),
+        ("type.label.m.family", "IBM Plex Sans"),
+        ("type.label.m.size", "12"),
+        ("type.label.m.weight", "500"),
         ("type.readout.family", "IBM Plex Mono"),
         ("type.readout.size", "14"),
         ("type.readout.weight", "500"),
@@ -197,10 +202,13 @@ fn shipped_bundles_load_and_bind() {
             ],
             &["background.svg", "fill.svg"],
             &[
-                ("level", "bar", "height"),
-                ("fill_color", "bar", "fill"),
+                ("level", "arc", "stroke-dashoffset"),
+                ("level", "percent-value", "text-content"),
+                ("fill_color", "arc", "stroke"),
                 ("label", "label-text", "text-content"),
-                ("severity", "indicator", "stroke"),
+                ("severity", "severity-arc", "stroke"),
+                ("severity", "card", "stroke"),
+                ("tooltip_visible", "label-group", "opacity"),
                 ("tooltip_visible", "tooltip-group", "opacity"),
                 ("readout", "tooltip-readout", "text-content"),
             ],
@@ -342,18 +350,24 @@ fn shipped_hover_tooltips_share_the_gauge_delay() {
 fn shipped_manifest_colors_resolve_from_tokens() {
     let tokens = shipped_tokens();
     let gauge = load_shipped("gauge").definition;
-    let severity = gauge
-        .layers
-        .iter()
-        .flat_map(|l| &l.bindings)
-        .find(|b| b.param == "severity")
-        .unwrap();
-    let WidgetBindingMapping::Discrete { value_map } = &severity.mapping else {
-        panic!("severity must be a discrete binding");
-    };
-    assert_eq!(value_map["info"], tokens["color.outline.variant"]);
-    assert_eq!(value_map["warning"], tokens["color.caution"]);
-    assert_eq!(value_map["error"], tokens["color.error"]);
+    // (target, info role): severity colors the hairline and the arc.
+    for (target, info) in [
+        ("card", "color.outline.variant"),
+        ("severity-arc", "color.primary"),
+    ] {
+        let severity = gauge
+            .layers
+            .iter()
+            .flat_map(|l| &l.bindings)
+            .find(|b| b.param == "severity" && b.target_element == target)
+            .unwrap();
+        let WidgetBindingMapping::Discrete { value_map } = &severity.mapping else {
+            panic!("severity must be a discrete binding");
+        };
+        assert_eq!(value_map["info"], tokens[info], "{target}");
+        assert_eq!(value_map["warning"], tokens["color.caution"], "{target}");
+        assert_eq!(value_map["error"], tokens["color.error"], "{target}");
+    }
 
     for name in ["gauge", "progress-bar"] {
         let fill = load_shipped(name)

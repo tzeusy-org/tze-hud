@@ -1,12 +1,16 @@
 # Production gauge widget bundle.
 #
-# Visual contract (shared with progress-bar and status-indicator):
-# - A tonal card like the notification cards: surface.container.high at
-#   opacity.surface, shape.m corners; a vertical primary-colored bar on an
-#   outline.variant track, label in type.title.m below
-# - Severity colors the card edge: outline.variant (info), caution, error
-# - Hover (runtime-driven `tooltip_visible`) lays a state layer over the card
-#   and shows the `readout` chip
+# Visual contract (Tonal Glass ring, shared roles with progress-bar and
+# status-indicator):
+# - A tonal card like the notification cards: surface.container at
+#   opacity.surface, shape.l corners and a stroke.border.width hairline
+# - An 80x80 ring: a primary arc on an outline.variant track, clockwise
+#   from 12 o'clock, with the level as a whole percent centred in
+#   type.readout; the label below in type.label.m
+# - Severity colors the arc and the hairline: info uses fill_color
+#   (default color.primary), warning color.caution, error color.error
+# - Hover (runtime-driven `tooltip_visible`) lays a state layer over the
+#   card and shows the `readout` text in place of the label
 # - Every color, size and font comes from {{token.key}} placeholders (in the
 #   SVGs and in this manifest), resolved at bundle load time. viewBox units
 #   are logical px; geometry sets the scale
@@ -17,16 +21,16 @@
 # which is the unit-test fixture (hardcoded colors, 100x220 viewBox).
 #
 # Parameters:
-#   level      - Fill level (f32, 0.0-1.0); drives bar height via linear mapping
-#   label      - Label below the bar (string)
+#   level      - Fill level (f32, 0.0-1.0); drives the arc and the percent
+#   label      - Label below the ring (string)
 #   fill_color - Owner info fill; warning/error use severity tokens
-#   severity   - info / warning / error; colors the card edge (enum)
-#   tooltip_visible - Runtime hover visibility toggle for the tooltip (f32 0..1)
-#   readout    - Tooltip readout text (e.g. "42/100 (42%)")
+#   severity   - info / warning / error; colors the arc and hairline (enum)
+#   tooltip_visible - Runtime hover visibility toggle for the readout (f32 0..1)
+#   readout    - Hover readout text (e.g. "42/100 (42%)")
 
 name        = "gauge"
-version     = "2.0.0"
-description = "Vertical fill gauge card with severity edge, label and hover readout"
+version     = "3.0.0"
+description = "Ring gauge card with centred percent, severity color, label and hover readout"
 
 [[parameter_schema]]
 name    = "level"
@@ -86,36 +90,90 @@ y_pct = 0.0
 width_pct = 1.0
 height_pct = 1.0
 
-# Background layer: static card and empty track. Zero bindings.
+# Background layer: card (severity-colored hairline) and empty ring track.
 # Must appear first (painter's model) so fill layer renders on top.
 [[layers]]
 svg_file = "background.svg"
 
-# Fill layer: severity edge, bar, label and hover readout.
+[[layers.bindings]]
+param            = "severity"
+target_element   = "card"
+target_attribute = "stroke"
+mapping          = "discrete"
+
+[layers.bindings.value_map]
+info    = "{{token.color.outline.variant}}"
+warning = "{{token.color.caution}}"
+error   = "{{token.color.error}}"
+
+# Fill layer: arc, percent, label and hover readout.
+# The arc's dash runs from offset 213.63 (the ring's circumference: empty)
+# to 0 (full).
 [[layers]]
 svg_file = "fill.svg"
 
 [[layers.bindings]]
 param            = "level"
-target_element   = "bar"
-target_attribute = "height"
+target_element   = "arc"
+target_attribute = "stroke-dashoffset"
 mapping          = "linear"
-attr_min         = 0.0
-attr_max         = 168.0
-
-[[layers.bindings]]
-param            = "level"
-target_element   = "bar"
-target_attribute = "y"
-mapping          = "linear"
-attr_min         = 184.0
-attr_max         = 16.0
+attr_min         = 213.63
+attr_max         = 0.0
 
 [[layers.bindings]]
 param            = "fill_color"
-target_element   = "bar"
-target_attribute = "fill"
+target_element   = "arc"
+target_attribute = "stroke"
 mapping          = "direct"
+
+[[layers.bindings]]
+param            = "level"
+target_element   = "severity-arc"
+target_attribute = "stroke-dashoffset"
+mapping          = "linear"
+attr_min         = 213.63
+attr_max         = 0.0
+
+[[layers.bindings]]
+param            = "severity"
+target_element   = "severity-arc"
+target_attribute = "stroke"
+mapping          = "discrete"
+
+[layers.bindings.value_map]
+info    = "{{token.color.primary}}"
+warning = "{{token.color.caution}}"
+error   = "{{token.color.error}}"
+
+[[layers.bindings]]
+param            = "severity"
+target_element   = "severity-arc-group"
+target_attribute = "opacity"
+mapping          = "discrete"
+
+[layers.bindings.value_map]
+info    = "0"
+warning = "1"
+error   = "1"
+
+[[layers.bindings]]
+param            = "severity"
+target_element   = "info-arc-group"
+target_attribute = "opacity"
+mapping          = "discrete"
+
+[layers.bindings.value_map]
+info    = "1"
+warning = "0"
+error   = "0"
+
+[[layers.bindings]]
+param            = "level"
+target_element   = "percent-value"
+target_attribute = "text-content"
+mapping          = "linear"
+attr_min         = 0.0
+attr_max         = 100.0
 
 [[layers.bindings]]
 param            = "label"
@@ -124,15 +182,12 @@ target_attribute = "text-content"
 mapping          = "direct"
 
 [[layers.bindings]]
-param            = "severity"
-target_element   = "indicator"
-target_attribute = "stroke"
-mapping          = "discrete"
-
-[layers.bindings.value_map]
-info    = "{{token.color.outline.variant}}"
-warning = "{{token.color.caution}}"
-error   = "{{token.color.error}}"
+param            = "tooltip_visible"
+target_element   = "label-group"
+target_attribute = "opacity"
+mapping          = "linear"
+attr_min         = 1.0
+attr_max         = 0.0
 
 [[layers.bindings]]
 param            = "tooltip_visible"
@@ -147,52 +202,3 @@ param            = "readout"
 target_element   = "tooltip-readout"
 target_attribute = "text-content"
 mapping          = "direct"
-
-[[layers.bindings]]
-param = "level"
-target_element = "severity-fill"
-target_attribute = "height"
-mapping = "linear"
-attr_min = 0.0
-attr_max = 168.0
-
-[[layers.bindings]]
-param = "level"
-target_element = "severity-fill"
-target_attribute = "y"
-mapping = "linear"
-attr_min = 184.0
-attr_max = 16.0
-
-[[layers.bindings]]
-param = "severity"
-target_element = "severity-fill"
-target_attribute = "fill"
-mapping = "discrete"
-
-[layers.bindings.value_map]
-info = "{{token.color.primary}}"
-warning = "{{token.color.caution}}"
-error = "{{token.color.error}}"
-
-[[layers.bindings]]
-param = "severity"
-target_element = "severity-fill-group"
-target_attribute = "opacity"
-mapping = "discrete"
-
-[layers.bindings.value_map]
-info = "0"
-warning = "1"
-error = "1"
-
-[[layers.bindings]]
-param = "severity"
-target_element = "info-fill"
-target_attribute = "opacity"
-mapping = "discrete"
-
-[layers.bindings.value_map]
-info = "1"
-warning = "0"
-error = "0"

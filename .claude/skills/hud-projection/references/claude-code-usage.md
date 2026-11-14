@@ -27,8 +27,8 @@ instance_id = "usage"
 [tabs.widgets.geometry]
 x_pct = 0.05
 y_pct = 0.42
-width_pct = 0.028125
-height_pct = 0.1555556
+width_pct = 0.05
+height_pct = 0.0916667
 ```
 
 Use a trusted Linux/WSL status-line host with Bash, `setsid` (util-linux), and
@@ -74,7 +74,7 @@ For 41.2%, the level is 0.412, label `5h usage`, and hover readout
 `41% · resets HH:MM`. Reset time uses the **status-line host's local time zone**,
 not the Windows display host's. 41.9% in the same window makes no request;
 42.0% makes one. Severity is `info` below 80%, `warning` at 80% and above,
-using the gauge's existing caution edge and local hover behavior. A different
+using the gauge's caution-colored ring and local hover behavior. A different
 `resets_at` identifies a new window even at the same whole percent. There is
 no helper reset timer: Claude's native reset event or the next genuine
 invocation supplies the clear/update. Acknowledged publications are durable

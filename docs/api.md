@@ -184,7 +184,8 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   model publishes, clear and expiry. `tooltip_visible` is runtime-only; config
   overrides and agent writes reject it. Gauge/progress `severity` is
   `info|warning|error`: info uses the owner fill or `color.primary`, warning
-  uses `color.caution`, error uses `color.error`. The gauge severity edge stays.
+  uses `color.caution`, error uses `color.error`; the gauge colors its ring
+  arc and card hairline by severity.
   Unknown audience values reject the bundle with its name, parameter and
   allowed audiences. Hidden parameter errors name owner-set/runtime-set;
   `fill_color` errors direct agents to severity. Enum errors list allowed values;
@@ -1127,8 +1128,12 @@ color) and string color defaults (`default = "{{token.color.primary}}"`;
 a literal `#RRGGBB[AA]` also works). The built-in gauge, progress-bar and
 status-indicator draw tonal cards from the semantic roles
 (`color.surface.container.high`, `color.outline.variant`, `color.primary`,
-status roles) and the `type.*` scale. Their SVG viewBox units are
-logical px; instance geometry sets the scale, and `production.toml`
+status roles) and the `type.*` scale. The gauge is a 128x132 card
+(`color.surface.container`, `shape.l`) holding an 80x80 ring: a
+severity-colored arc on a `color.outline.variant` track, clockwise from
+12 o'clock, with `level` as a whole percent centred in `type.readout` and
+`label` below in `type.label.m`; hover shows `readout` in the label's
+place. All three bundles' SVG viewBox units are logical px; instance geometry sets the scale, and `production.toml`
 sizes them at 1.5x the viewBox on a 3840x2160 panel.
 
 **A theme is a named set of token values, with no layout logic.** The

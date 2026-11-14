@@ -96,7 +96,7 @@ For the production `tze_hud_app` deployment (see `app/tze_hud_app/config/product
 
 | `widget` | Widget type | What it shows |
 |---|---|---|
-| `main-gauge` | `gauge` | Vertical fill gauge (level, label, severity) |
+| `main-gauge` | `gauge` | Ring gauge (level, label, severity, hover readout) |
 | `main-progress` | `progress-bar` | Horizontal progress bar (progress, label) |
 | `main-status` | `status-indicator` | Status circle with label (online/away/busy/offline) |
 
