@@ -343,21 +343,49 @@ async fn subtitle_backdrop_follows_policy() {
     let Some(mut gpu) = Gpu::new(256, 256).await else {
         return;
     };
+    // The center adds color.surface (#0F1216) at opacity.scrim (0.72)
+    // over the whole-zone fill. Outside the content-hugging pill, the
+    // original whole-zone contrast control keeps its exact result.
     let cases = [
-        ("black token default", Some(Rgba::BLACK), [39, 39, 56, 255]),
+        (
+            "black token default",
+            Some(Rgba::BLACK),
+            [39, 39, 56, 255],
+            [24, 26, 35, 255],
+        ),
         (
             "red token override",
             Some(Rgba::new(1.0, 0.0, 0.0, 1.0)),
             [206, 39, 56, 255],
+            [116, 26, 35, 255],
         ),
-        ("no backdrop", None, CLEAR),
+        ("no whole-zone backdrop", None, CLEAR, [36, 37, 52, 255]),
     ];
-    for (what, backdrop, expected) in cases {
-        let mut scene = subtitle_scene(256, subtitle_policy(backdrop));
-        let frame = gpu.render(&mut scene);
-        frame.expect(128, SUBTITLE_Y, expected, 10, what);
-        // Anchored to the bottom: the row above the zone is untouched.
-        frame.expect(128, 170, CLEAR, 10, &format!("{what}: above zone"));
+    for pill in [true, false] {
+        gpu.compositor
+            .set_token_map(std::collections::HashMap::from([(
+                "opacity.subtitle".into(),
+                if pill { "1" } else { "0" }.into(),
+            )]));
+        for (what, backdrop, outside, inside) in cases {
+            let mut scene = subtitle_scene(256, subtitle_policy(backdrop));
+            let frame = gpu.render(&mut scene);
+            frame.expect(
+                28,
+                SUBTITLE_Y,
+                outside,
+                10,
+                &format!("{what}: whole zone outside pill"),
+            );
+            frame.expect(
+                128,
+                SUBTITLE_Y,
+                if pill { inside } else { outside },
+                10,
+                &format!("{what}: themed pill={pill}"),
+            );
+            frame.expect(128, 170, CLEAR, 10, &format!("{what}: above zone"));
+        }
     }
 }
 
