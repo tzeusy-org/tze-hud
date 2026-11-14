@@ -184,7 +184,8 @@ with the same cancellation and idle semantics as a `hud_input` wait.
   model publishes, clear and expiry. `tooltip_visible` is runtime-only; config
   overrides and agent writes reject it. Gauge/progress `severity` is
   `info|warning|error`: info uses the owner fill or `color.primary`, warning
-  uses `color.caution`, error uses `color.error`. The gauge severity edge stays.
+  uses `color.caution`, error uses `color.error`; the gauge colors its ring
+  arc and card hairline by severity.
   Unknown audience values reject the bundle with its name, parameter and
   allowed audiences. Hidden parameter errors name owner-set/runtime-set;
   `fill_color` errors direct agents to severity. Enum errors list allowed values;
@@ -1127,8 +1128,13 @@ color) and string color defaults (`default = "{{token.color.primary}}"`;
 a literal `#RRGGBB[AA]` also works). The built-in gauge, progress-bar and
 status-indicator draw tonal cards from the semantic roles
 (`color.surface.container.high`, `color.outline.variant`, `color.primary`,
-status roles) and the `type.*` scale. Their SVG viewBox units are
-logical px; instance geometry sets the scale, and `production.toml`
+status roles) and the `type.*` scale. The gauge is a 128x132 card
+(`color.surface.container`, `shape.l`) holding an 80x80 ring: a
+severity-colored arc on a `color.outline.variant` track, clockwise from
+12 o'clock, with `level` as a whole percent centred in `type.readout` at
+`type.gauge.readout.size`, and `label` below in `type.label.m`; hover
+shows `readout` in the label's place. All three bundles' SVG viewBox
+units are logical px; instance geometry sets the scale, and `production.toml`
 sizes them at 1.5x the viewBox on a 3840x2160 panel.
 
 **A theme is a named set of token values, with no layout logic.** The
@@ -1225,6 +1231,7 @@ color overrides still take precedence.
 | State | `state.hover.opacity`, `state.pressed.opacity`, `focus.ring.width`, `focus.ring.offset` |
 | Notification card | `color.notification.container[.low]`, `color.notification[.caution\|.error].outline`, `color.on_notification.{variant,caution,error}`, `opacity.notification`, `shape.notification`, `space.notification`, `type.notification.{title,body}.{size,line_height,weight}` |
 | Alert banner | `color.alert.container`, `color.alert.{caution,error}.container`, `color.alert.outline`, `color.on_alert[.variant\|.error]`, `color.severity.{info,warning,critical}` (the severity mark), `opacity.alert`, `shape.alert`, `space.alert.{margin,horizontal,vertical}`, `type.alert.{title,body}.{size,line_height,weight}` |
+| Gauge ring | `gauge.{width,height,edge.*,ring.*,caption.y,hover.delay_ms}`, `type.gauge.readout.size` (centred percent; family and weight follow `type.readout`) |
 | Choice actions | `notification.action.link_mark` |
 | Motion | `motion.{enter,exit,state}.ms`, `motion.{enter,exit}.easing` (`linear`, `standard`, `decelerate`, `accelerate`) |
 | Shape | `shape.{xs,s,m,l,xl,full}` (corner radius) |
@@ -1498,8 +1505,23 @@ severity/status enums. Styling and hover state no longer spend discovery tokens:
   `initial_params`, independent of `[design_tokens].theme`.
 - Gauge/progress-bar `fill_color` is an owner info-color override. Severity
   warning/error always use their theme tokens.
-- `tooltip_visible` stays in the bundle schema for runtime hover after 180 ms,
+- `tooltip_visible` stays in the bundle schema for runtime hover (180 ms by default),
   with its declared SVG bindings. Agents neither discover nor publish it.
+
+
+The gauge card takes its logical geometry from `gauge.*` tokens and its centered
+percentage size from `type.gauge.readout.size`. Keep `gauge.ring.circumference`
+consistent with `2π × gauge.ring.radius` when overriding the ring. SVG units map
+once into the configured widget box. The Layout card reads that same instance
+geometry: the production 128×132 logical ring replaces the bar box without a
+second DPI multiplier. `state.hidden.opacity` and `state.visible.opacity` control
+bound layer visibility.
+
+Numeric bundle binding outputs (`attr_min`/`attr_max`) and hover `delay_ms` accept
+numeric token placeholders as well as numbers. They resolve after TOML parsing;
+invalid/non-finite numeric tokens reject the bundle. Hover delay must be an
+integer in the u32 range. The gauge defaults to 180 ms; agents continue to use
+only the existing model parameters.
 
 
 ## Design decisions (T5, 2026-10-02)

@@ -31,8 +31,8 @@ instance_id = "main-gauge"
 [tabs.widgets.geometry]
 x = 40
 y = 420
-width = 100
-height = 240
+width = 128
+height = 132
 
 [[tabs.widgets]]
 widget_type = "progress-bar"

@@ -1,0 +1,1691 @@
+{
+  "source": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+  "base": "04ac25fee05f04cc0c70959e630f99ae9e1fb92d",
+  "pipeline": "real production startup / windowed build and GPU capture, llvmpipe",
+  "dimensions": [
+    1920,
+    1080
+  ],
+  "ui_scale": 1.0,
+  "capture_at_ms": 1000,
+  "note": "Each cell replays one message. Replaying the whole latest-wins cycle produces only its final state. Windows BEFORE1024x768/WARP and this AFTER1920x1080/llvmpipe are separate observations, not pixel-compatible comparisons. Native same-fixture Windows AFTER is also required.",
+  "cells": [
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1636.717283,
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "2098c337be30b69fc2a2b4e3f0eab44513670b38edeba720cd3197c4f3487bc3",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--tonal-glass--gauge_cycle_test--01.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 53067,
+      "png_sha256": "5587fd9760c26656a0e75a018dd5fb20a473667151e7cc606692fb5b32d377e9",
+      "resolved_tokens_sha256": "6c35bf549753006bf32d5ddec8dc15f84829088daebb52408434e94d5283198b",
+      "theme": "tonal-glass",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--tonal-glass--gauge_cycle_test--01",
+      "checkpoint_in_original_fixture": 1,
+      "original_fixture_sha256_lf": "4c48c48548eeacaf57280a7fcdf29513aa9ea8fa40766dc3571122ed682ae45c",
+      "cell_payload_sha256": "2098c337be30b69fc2a2b4e3f0eab44513670b38edeba720cd3197c4f3487bc3",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.25,
+          "label": "Low",
+          "readout": "25/100 (25%)",
+          "severity": "info"
+        },
+        "ttl_ms": 10000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1642.107929,
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "5f9641747fa1661bfb7fccb0e5b0dac63d6fbfaa9c8afedab3020e06680e3a52",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--tonal-glass--gauge_cycle_test--02.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54128,
+      "png_sha256": "c606d54e895cfff702fb00522ef950ac41f149d5c244024a562a4f0cb55229f2",
+      "resolved_tokens_sha256": "6c35bf549753006bf32d5ddec8dc15f84829088daebb52408434e94d5283198b",
+      "theme": "tonal-glass",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--tonal-glass--gauge_cycle_test--02",
+      "checkpoint_in_original_fixture": 2,
+      "original_fixture_sha256_lf": "4c48c48548eeacaf57280a7fcdf29513aa9ea8fa40766dc3571122ed682ae45c",
+      "cell_payload_sha256": "5f9641747fa1661bfb7fccb0e5b0dac63d6fbfaa9c8afedab3020e06680e3a52",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.5,
+          "label": "Medium",
+          "readout": "50/100 (50%)",
+          "severity": "warning"
+        },
+        "ttl_ms": 10000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1640.3184560000002,
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "cb2e5771bd742a8903476614395fa790994ed3e28bce7a7ff15d6ba8c719fc28",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--tonal-glass--gauge_cycle_test--03.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54426,
+      "png_sha256": "a3c74fb3edb766647e5b04dce991b79e298837412a70f01153589cdbe66ada17",
+      "resolved_tokens_sha256": "6c35bf549753006bf32d5ddec8dc15f84829088daebb52408434e94d5283198b",
+      "theme": "tonal-glass",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--tonal-glass--gauge_cycle_test--03",
+      "checkpoint_in_original_fixture": 3,
+      "original_fixture_sha256_lf": "4c48c48548eeacaf57280a7fcdf29513aa9ea8fa40766dc3571122ed682ae45c",
+      "cell_payload_sha256": "cb2e5771bd742a8903476614395fa790994ed3e28bce7a7ff15d6ba8c719fc28",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.95,
+          "label": "Critical!",
+          "readout": "95/100 (95%)",
+          "severity": "error"
+        },
+        "ttl_ms": 10000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1627.7612219999999,
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "084e47ee9ce4fd5028dd2a75a80e582c1ab47d8e36cff48fad4047fa3728f1d9",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--tonal-glass--gauge_cycle_test--04.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 53591,
+      "png_sha256": "33b5fec9cdf102309703cc416dc925675769a226c62d547bcf2e5f9824413074",
+      "resolved_tokens_sha256": "6c35bf549753006bf32d5ddec8dc15f84829088daebb52408434e94d5283198b",
+      "theme": "tonal-glass",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--tonal-glass--gauge_cycle_test--04",
+      "checkpoint_in_original_fixture": 4,
+      "original_fixture_sha256_lf": "4c48c48548eeacaf57280a7fcdf29513aa9ea8fa40766dc3571122ed682ae45c",
+      "cell_payload_sha256": "084e47ee9ce4fd5028dd2a75a80e582c1ab47d8e36cff48fad4047fa3728f1d9",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.42,
+          "label": "Normal",
+          "readout": "42/100 (42%)",
+          "severity": "info"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1624.7944949999999,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "8c2bccad4400416d27bd9692145a29a43e4944f56d0195b3abc92a69d3c76ba7",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--tonal-glass--gauge-ring-matrix-test--01.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 53521,
+      "png_sha256": "69f662af21ab1168713968a304202e4bacdf8ed9afbea19bbc88a4490070ed90",
+      "resolved_tokens_sha256": "6c35bf549753006bf32d5ddec8dc15f84829088daebb52408434e94d5283198b",
+      "theme": "tonal-glass",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--tonal-glass--gauge-ring-matrix-test--01",
+      "checkpoint_in_original_fixture": 1,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "8c2bccad4400416d27bd9692145a29a43e4944f56d0195b3abc92a69d3c76ba7",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.25,
+          "label": "Info Low",
+          "readout": "25/100 (25%)",
+          "severity": "info"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1626.0121490000001,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "2798b53294cf990a39c619eb35cc2f29c15c889c46f53f16a5600a0ee30bcc39",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--tonal-glass--gauge-ring-matrix-test--02.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 53905,
+      "png_sha256": "8a029703fa290f0d1b6b48ca1331debf881a0212a7a079420ee540382b4d8414",
+      "resolved_tokens_sha256": "6c35bf549753006bf32d5ddec8dc15f84829088daebb52408434e94d5283198b",
+      "theme": "tonal-glass",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--tonal-glass--gauge-ring-matrix-test--02",
+      "checkpoint_in_original_fixture": 2,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "2798b53294cf990a39c619eb35cc2f29c15c889c46f53f16a5600a0ee30bcc39",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.5,
+          "label": "Info Mid",
+          "readout": "50/100 (50%)",
+          "severity": "info"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1622.213143,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "f56da9e04d80745dfb5846be7d8f8c466c3a1aecb744c3091ca24558c4f5c3be",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--tonal-glass--gauge-ring-matrix-test--03.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54304,
+      "png_sha256": "eaa4a7fa1f26ec8aa585667c35ed1ca05a197d202ec8c4f477ef9b55dec3fe76",
+      "resolved_tokens_sha256": "6c35bf549753006bf32d5ddec8dc15f84829088daebb52408434e94d5283198b",
+      "theme": "tonal-glass",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--tonal-glass--gauge-ring-matrix-test--03",
+      "checkpoint_in_original_fixture": 3,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "f56da9e04d80745dfb5846be7d8f8c466c3a1aecb744c3091ca24558c4f5c3be",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.95,
+          "label": "Info High",
+          "readout": "95/100 (95%)",
+          "severity": "info"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1623.271156,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "10ac2d9e3f9f5fa32f1f3fefa6ce1a5bffa6e679d9753502c8c0212bef0527d7",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--tonal-glass--gauge-ring-matrix-test--04.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54382,
+      "png_sha256": "385fb10e79101c0b84a74bd15018e2233c6b5d5aa3796d6701d635cca175f487",
+      "resolved_tokens_sha256": "6c35bf549753006bf32d5ddec8dc15f84829088daebb52408434e94d5283198b",
+      "theme": "tonal-glass",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--tonal-glass--gauge-ring-matrix-test--04",
+      "checkpoint_in_original_fixture": 4,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "10ac2d9e3f9f5fa32f1f3fefa6ce1a5bffa6e679d9753502c8c0212bef0527d7",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.25,
+          "label": "Warning Low",
+          "readout": "25/100 (25%)",
+          "severity": "warning"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1619.697676,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "d3923a1d8dc16036da7bf588aa4effb77d6fc4437c4be75f78369193e2c89cc5",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--tonal-glass--gauge-ring-matrix-test--05.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54653,
+      "png_sha256": "a6573c63ce5f24aa52e88952698b10cd2de9f11e7e66428cc3985f12f05fdeed",
+      "resolved_tokens_sha256": "6c35bf549753006bf32d5ddec8dc15f84829088daebb52408434e94d5283198b",
+      "theme": "tonal-glass",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--tonal-glass--gauge-ring-matrix-test--05",
+      "checkpoint_in_original_fixture": 5,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "d3923a1d8dc16036da7bf588aa4effb77d6fc4437c4be75f78369193e2c89cc5",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.5,
+          "label": "Warning Mid",
+          "readout": "50/100 (50%)",
+          "severity": "warning"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1624.005701,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "5243d500ef6b3a4ba0e48540e11408b225f7daa1aca653ff4e6f5103d26e6004",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--tonal-glass--gauge-ring-matrix-test--06.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 55038,
+      "png_sha256": "25cc9cea7fcfad12a77534a5570fcc06d43ec600c6b9f8af84b870b60a3c3b23",
+      "resolved_tokens_sha256": "6c35bf549753006bf32d5ddec8dc15f84829088daebb52408434e94d5283198b",
+      "theme": "tonal-glass",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--tonal-glass--gauge-ring-matrix-test--06",
+      "checkpoint_in_original_fixture": 6,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "5243d500ef6b3a4ba0e48540e11408b225f7daa1aca653ff4e6f5103d26e6004",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.95,
+          "label": "Warning High",
+          "readout": "95/100 (95%)",
+          "severity": "warning"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1628.401937,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "84a91304708a9c8a08da271e1ed5cdf82dbd65537b80fd139dc4c01402ba62eb",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--tonal-glass--gauge-ring-matrix-test--07.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 53926,
+      "png_sha256": "efca66078de89fd8d2438ee91121fdda4b3b5731a43fc65c4c302b5220ca02aa",
+      "resolved_tokens_sha256": "6c35bf549753006bf32d5ddec8dc15f84829088daebb52408434e94d5283198b",
+      "theme": "tonal-glass",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--tonal-glass--gauge-ring-matrix-test--07",
+      "checkpoint_in_original_fixture": 7,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "84a91304708a9c8a08da271e1ed5cdf82dbd65537b80fd139dc4c01402ba62eb",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.25,
+          "label": "Error Low",
+          "readout": "25/100 (25%)",
+          "severity": "error"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1621.6453390000001,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "301d274110810c85dc7cd67ace3d8c49996eadfc7328099bd2630b339a487f45",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--tonal-glass--gauge-ring-matrix-test--08.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54283,
+      "png_sha256": "82574075cb13ecb3ce23056a55249f4fada171ec3e99caa1911016c880fd3c20",
+      "resolved_tokens_sha256": "6c35bf549753006bf32d5ddec8dc15f84829088daebb52408434e94d5283198b",
+      "theme": "tonal-glass",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--tonal-glass--gauge-ring-matrix-test--08",
+      "checkpoint_in_original_fixture": 8,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "301d274110810c85dc7cd67ace3d8c49996eadfc7328099bd2630b339a487f45",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.5,
+          "label": "Error Mid",
+          "readout": "50/100 (50%)",
+          "severity": "error"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1622.423135,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "48b824f17a30d399673e171cabba30edda4bed37ab659e5f9cd0e17bbbbb2c3c",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--tonal-glass--gauge-ring-matrix-test--09.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54671,
+      "png_sha256": "3d2cb4fb7adc791bea3e395a391f0aa7055fd5654a518ce3333cad48955c8d37",
+      "resolved_tokens_sha256": "6c35bf549753006bf32d5ddec8dc15f84829088daebb52408434e94d5283198b",
+      "theme": "tonal-glass",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--tonal-glass--gauge-ring-matrix-test--09",
+      "checkpoint_in_original_fixture": 9,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "48b824f17a30d399673e171cabba30edda4bed37ab659e5f9cd0e17bbbbb2c3c",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.95,
+          "label": "Error High",
+          "readout": "95/100 (95%)",
+          "severity": "error"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1629.476354,
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "2098c337be30b69fc2a2b4e3f0eab44513670b38edeba720cd3197c4f3487bc3",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--classic--gauge_cycle_test--01.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 53325,
+      "png_sha256": "e1207d0f935de7de4783651d90423a1b45e619d1dcd1577485ff2d6bada7cde1",
+      "resolved_tokens_sha256": "e4a47dab2febd96bc6cca4b1525d5ccfe5da9fda409064ac3080ae809bcee981",
+      "theme": "classic",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--classic--gauge_cycle_test--01",
+      "checkpoint_in_original_fixture": 1,
+      "original_fixture_sha256_lf": "4c48c48548eeacaf57280a7fcdf29513aa9ea8fa40766dc3571122ed682ae45c",
+      "cell_payload_sha256": "2098c337be30b69fc2a2b4e3f0eab44513670b38edeba720cd3197c4f3487bc3",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.25,
+          "label": "Low",
+          "readout": "25/100 (25%)",
+          "severity": "info"
+        },
+        "ttl_ms": 10000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1673.9610950000001,
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "5f9641747fa1661bfb7fccb0e5b0dac63d6fbfaa9c8afedab3020e06680e3a52",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--classic--gauge_cycle_test--02.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54352,
+      "png_sha256": "ad064989125e436afe00f62fabd6ddd3d6818daf43f8520127901075ae9d727f",
+      "resolved_tokens_sha256": "e4a47dab2febd96bc6cca4b1525d5ccfe5da9fda409064ac3080ae809bcee981",
+      "theme": "classic",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--classic--gauge_cycle_test--02",
+      "checkpoint_in_original_fixture": 2,
+      "original_fixture_sha256_lf": "4c48c48548eeacaf57280a7fcdf29513aa9ea8fa40766dc3571122ed682ae45c",
+      "cell_payload_sha256": "5f9641747fa1661bfb7fccb0e5b0dac63d6fbfaa9c8afedab3020e06680e3a52",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.5,
+          "label": "Medium",
+          "readout": "50/100 (50%)",
+          "severity": "warning"
+        },
+        "ttl_ms": 10000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1626.1201110000002,
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "cb2e5771bd742a8903476614395fa790994ed3e28bce7a7ff15d6ba8c719fc28",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--classic--gauge_cycle_test--03.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54501,
+      "png_sha256": "47cf35e1e5becbc37cd468cf8322738722d6dfd5335a8c58d43c3f17e7630c42",
+      "resolved_tokens_sha256": "e4a47dab2febd96bc6cca4b1525d5ccfe5da9fda409064ac3080ae809bcee981",
+      "theme": "classic",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--classic--gauge_cycle_test--03",
+      "checkpoint_in_original_fixture": 3,
+      "original_fixture_sha256_lf": "4c48c48548eeacaf57280a7fcdf29513aa9ea8fa40766dc3571122ed682ae45c",
+      "cell_payload_sha256": "cb2e5771bd742a8903476614395fa790994ed3e28bce7a7ff15d6ba8c719fc28",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.95,
+          "label": "Critical!",
+          "readout": "95/100 (95%)",
+          "severity": "error"
+        },
+        "ttl_ms": 10000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1624.471285,
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "084e47ee9ce4fd5028dd2a75a80e582c1ab47d8e36cff48fad4047fa3728f1d9",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--classic--gauge_cycle_test--04.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 53768,
+      "png_sha256": "09d58ae63e1069bbb5e5ba606cfc212f38eb343befd417d67e24d802e1e0930f",
+      "resolved_tokens_sha256": "e4a47dab2febd96bc6cca4b1525d5ccfe5da9fda409064ac3080ae809bcee981",
+      "theme": "classic",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--classic--gauge_cycle_test--04",
+      "checkpoint_in_original_fixture": 4,
+      "original_fixture_sha256_lf": "4c48c48548eeacaf57280a7fcdf29513aa9ea8fa40766dc3571122ed682ae45c",
+      "cell_payload_sha256": "084e47ee9ce4fd5028dd2a75a80e582c1ab47d8e36cff48fad4047fa3728f1d9",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.42,
+          "label": "Normal",
+          "readout": "42/100 (42%)",
+          "severity": "info"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1633.338563,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "8c2bccad4400416d27bd9692145a29a43e4944f56d0195b3abc92a69d3c76ba7",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--classic--gauge-ring-matrix-test--01.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 53789,
+      "png_sha256": "f57a555579fe83c74721560dfcb706ea27726a604f01e7f766ef7fb188dc82a8",
+      "resolved_tokens_sha256": "e4a47dab2febd96bc6cca4b1525d5ccfe5da9fda409064ac3080ae809bcee981",
+      "theme": "classic",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--classic--gauge-ring-matrix-test--01",
+      "checkpoint_in_original_fixture": 1,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "8c2bccad4400416d27bd9692145a29a43e4944f56d0195b3abc92a69d3c76ba7",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.25,
+          "label": "Info Low",
+          "readout": "25/100 (25%)",
+          "severity": "info"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1626.963784,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "2798b53294cf990a39c619eb35cc2f29c15c889c46f53f16a5600a0ee30bcc39",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--classic--gauge-ring-matrix-test--02.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54053,
+      "png_sha256": "3e16035126b9e7e45a96ea8f1dd73cc948520a64064d9f909a86670f9fa25c3f",
+      "resolved_tokens_sha256": "e4a47dab2febd96bc6cca4b1525d5ccfe5da9fda409064ac3080ae809bcee981",
+      "theme": "classic",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--classic--gauge-ring-matrix-test--02",
+      "checkpoint_in_original_fixture": 2,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "2798b53294cf990a39c619eb35cc2f29c15c889c46f53f16a5600a0ee30bcc39",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.5,
+          "label": "Info Mid",
+          "readout": "50/100 (50%)",
+          "severity": "info"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1634.42866,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "f56da9e04d80745dfb5846be7d8f8c466c3a1aecb744c3091ca24558c4f5c3be",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--classic--gauge-ring-matrix-test--03.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54244,
+      "png_sha256": "f44ecc70dbe476e7768b89199118a3e75a1a57011ea76610b6652c47f114b2a1",
+      "resolved_tokens_sha256": "e4a47dab2febd96bc6cca4b1525d5ccfe5da9fda409064ac3080ae809bcee981",
+      "theme": "classic",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--classic--gauge-ring-matrix-test--03",
+      "checkpoint_in_original_fixture": 3,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "f56da9e04d80745dfb5846be7d8f8c466c3a1aecb744c3091ca24558c4f5c3be",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.95,
+          "label": "Info High",
+          "readout": "95/100 (95%)",
+          "severity": "info"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1629.364916,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "10ac2d9e3f9f5fa32f1f3fefa6ce1a5bffa6e679d9753502c8c0212bef0527d7",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--classic--gauge-ring-matrix-test--04.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54689,
+      "png_sha256": "ec5a0fe5d0b9fe6eeab1e5c66dcd4d36309c0fcff1f3d133a4d997e2bd93241e",
+      "resolved_tokens_sha256": "e4a47dab2febd96bc6cca4b1525d5ccfe5da9fda409064ac3080ae809bcee981",
+      "theme": "classic",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--classic--gauge-ring-matrix-test--04",
+      "checkpoint_in_original_fixture": 4,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "10ac2d9e3f9f5fa32f1f3fefa6ce1a5bffa6e679d9753502c8c0212bef0527d7",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.25,
+          "label": "Warning Low",
+          "readout": "25/100 (25%)",
+          "severity": "warning"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1629.3849229999998,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "d3923a1d8dc16036da7bf588aa4effb77d6fc4437c4be75f78369193e2c89cc5",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--classic--gauge-ring-matrix-test--05.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54888,
+      "png_sha256": "3893f3007bbd34cd242b7aaee272c115e9517580f630097c6c82dc7048777b12",
+      "resolved_tokens_sha256": "e4a47dab2febd96bc6cca4b1525d5ccfe5da9fda409064ac3080ae809bcee981",
+      "theme": "classic",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--classic--gauge-ring-matrix-test--05",
+      "checkpoint_in_original_fixture": 5,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "d3923a1d8dc16036da7bf588aa4effb77d6fc4437c4be75f78369193e2c89cc5",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.5,
+          "label": "Warning Mid",
+          "readout": "50/100 (50%)",
+          "severity": "warning"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1637.920275,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "5243d500ef6b3a4ba0e48540e11408b225f7daa1aca653ff4e6f5103d26e6004",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--classic--gauge-ring-matrix-test--06.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 55159,
+      "png_sha256": "7d1730d9ee1fca18e41c65ed9e3b6de9089afc823d6dac744062172473c2bae8",
+      "resolved_tokens_sha256": "e4a47dab2febd96bc6cca4b1525d5ccfe5da9fda409064ac3080ae809bcee981",
+      "theme": "classic",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--classic--gauge-ring-matrix-test--06",
+      "checkpoint_in_original_fixture": 6,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "5243d500ef6b3a4ba0e48540e11408b225f7daa1aca653ff4e6f5103d26e6004",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.95,
+          "label": "Warning High",
+          "readout": "95/100 (95%)",
+          "severity": "warning"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1637.224684,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "84a91304708a9c8a08da271e1ed5cdf82dbd65537b80fd139dc4c01402ba62eb",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--classic--gauge-ring-matrix-test--07.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54244,
+      "png_sha256": "ca8bf52b08c3873313df6dc0775a358536ff94a8220d0a8f9d68a235ab6e2694",
+      "resolved_tokens_sha256": "e4a47dab2febd96bc6cca4b1525d5ccfe5da9fda409064ac3080ae809bcee981",
+      "theme": "classic",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--classic--gauge-ring-matrix-test--07",
+      "checkpoint_in_original_fixture": 7,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "84a91304708a9c8a08da271e1ed5cdf82dbd65537b80fd139dc4c01402ba62eb",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.25,
+          "label": "Error Low",
+          "readout": "25/100 (25%)",
+          "severity": "error"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1628.94544,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "301d274110810c85dc7cd67ace3d8c49996eadfc7328099bd2630b339a487f45",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--classic--gauge-ring-matrix-test--08.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54516,
+      "png_sha256": "a0d60cdcf71f23674956f651bbddf059f6fcaab6d5414ca0365bee68e178bb14",
+      "resolved_tokens_sha256": "e4a47dab2febd96bc6cca4b1525d5ccfe5da9fda409064ac3080ae809bcee981",
+      "theme": "classic",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--classic--gauge-ring-matrix-test--08",
+      "checkpoint_in_original_fixture": 8,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "301d274110810c85dc7cd67ace3d8c49996eadfc7328099bd2630b339a487f45",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.5,
+          "label": "Error Mid",
+          "readout": "50/100 (50%)",
+          "severity": "error"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1637.3999179999998,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "48b824f17a30d399673e171cabba30edda4bed37ab659e5f9cd0e17bbbbb2c3c",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--classic--gauge-ring-matrix-test--09.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54754,
+      "png_sha256": "1fd19927dfa1c1218b0079bff5bb794aec28ca53b30e558739e445a34c1738f4",
+      "resolved_tokens_sha256": "e4a47dab2febd96bc6cca4b1525d5ccfe5da9fda409064ac3080ae809bcee981",
+      "theme": "classic",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--classic--gauge-ring-matrix-test--09",
+      "checkpoint_in_original_fixture": 9,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "48b824f17a30d399673e171cabba30edda4bed37ab659e5f9cd0e17bbbbb2c3c",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.95,
+          "label": "Error High",
+          "readout": "95/100 (95%)",
+          "severity": "error"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1628.5253719999998,
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "2098c337be30b69fc2a2b4e3f0eab44513670b38edeba720cd3197c4f3487bc3",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--blueprint--gauge_cycle_test--01.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 52567,
+      "png_sha256": "27ef5869c41779bc8df42b97c7e4028e1e8741cb240df8f30db3210d7d06f9b3",
+      "resolved_tokens_sha256": "ee95b1d4e64a9be9e891859b1cdec42784d0e2410b5ceb7f23733ceec9cad128",
+      "theme": "blueprint",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--blueprint--gauge_cycle_test--01",
+      "checkpoint_in_original_fixture": 1,
+      "original_fixture_sha256_lf": "4c48c48548eeacaf57280a7fcdf29513aa9ea8fa40766dc3571122ed682ae45c",
+      "cell_payload_sha256": "2098c337be30b69fc2a2b4e3f0eab44513670b38edeba720cd3197c4f3487bc3",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.25,
+          "label": "Low",
+          "readout": "25/100 (25%)",
+          "severity": "info"
+        },
+        "ttl_ms": 10000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1629.772216,
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "5f9641747fa1661bfb7fccb0e5b0dac63d6fbfaa9c8afedab3020e06680e3a52",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--blueprint--gauge_cycle_test--02.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 53736,
+      "png_sha256": "9d3bdf88a170fbceaf5148cb7f1c6cea26d8ae43f0325456607ef641f0f447cd",
+      "resolved_tokens_sha256": "ee95b1d4e64a9be9e891859b1cdec42784d0e2410b5ceb7f23733ceec9cad128",
+      "theme": "blueprint",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--blueprint--gauge_cycle_test--02",
+      "checkpoint_in_original_fixture": 2,
+      "original_fixture_sha256_lf": "4c48c48548eeacaf57280a7fcdf29513aa9ea8fa40766dc3571122ed682ae45c",
+      "cell_payload_sha256": "5f9641747fa1661bfb7fccb0e5b0dac63d6fbfaa9c8afedab3020e06680e3a52",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.5,
+          "label": "Medium",
+          "readout": "50/100 (50%)",
+          "severity": "warning"
+        },
+        "ttl_ms": 10000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1627.905388,
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "cb2e5771bd742a8903476614395fa790994ed3e28bce7a7ff15d6ba8c719fc28",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--blueprint--gauge_cycle_test--03.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54153,
+      "png_sha256": "f4d302368526bd2fe55443f8617a294d40d58d47f312a503fa45fe82b5f04308",
+      "resolved_tokens_sha256": "ee95b1d4e64a9be9e891859b1cdec42784d0e2410b5ceb7f23733ceec9cad128",
+      "theme": "blueprint",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--blueprint--gauge_cycle_test--03",
+      "checkpoint_in_original_fixture": 3,
+      "original_fixture_sha256_lf": "4c48c48548eeacaf57280a7fcdf29513aa9ea8fa40766dc3571122ed682ae45c",
+      "cell_payload_sha256": "cb2e5771bd742a8903476614395fa790994ed3e28bce7a7ff15d6ba8c719fc28",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.95,
+          "label": "Critical!",
+          "readout": "95/100 (95%)",
+          "severity": "error"
+        },
+        "ttl_ms": 10000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1633.5683549999999,
+      "fixture": "gauge_cycle_test",
+      "fixture_sha256": "084e47ee9ce4fd5028dd2a75a80e582c1ab47d8e36cff48fad4047fa3728f1d9",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--blueprint--gauge_cycle_test--04.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 52970,
+      "png_sha256": "14671d07da4db8dfccdbd078538753b19d216a6a78907bf893f428c53fc7a962",
+      "resolved_tokens_sha256": "ee95b1d4e64a9be9e891859b1cdec42784d0e2410b5ceb7f23733ceec9cad128",
+      "theme": "blueprint",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--blueprint--gauge_cycle_test--04",
+      "checkpoint_in_original_fixture": 4,
+      "original_fixture_sha256_lf": "4c48c48548eeacaf57280a7fcdf29513aa9ea8fa40766dc3571122ed682ae45c",
+      "cell_payload_sha256": "084e47ee9ce4fd5028dd2a75a80e582c1ab47d8e36cff48fad4047fa3728f1d9",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.42,
+          "label": "Normal",
+          "readout": "42/100 (42%)",
+          "severity": "info"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1628.40717,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "8c2bccad4400416d27bd9692145a29a43e4944f56d0195b3abc92a69d3c76ba7",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--blueprint--gauge-ring-matrix-test--01.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 53000,
+      "png_sha256": "5556671c4797272157715b93f58239c8d3d8b33230c513654e576a540dc616c6",
+      "resolved_tokens_sha256": "ee95b1d4e64a9be9e891859b1cdec42784d0e2410b5ceb7f23733ceec9cad128",
+      "theme": "blueprint",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--blueprint--gauge-ring-matrix-test--01",
+      "checkpoint_in_original_fixture": 1,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "8c2bccad4400416d27bd9692145a29a43e4944f56d0195b3abc92a69d3c76ba7",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.25,
+          "label": "Info Low",
+          "readout": "25/100 (25%)",
+          "severity": "info"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1624.3966460000001,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "2798b53294cf990a39c619eb35cc2f29c15c889c46f53f16a5600a0ee30bcc39",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--blueprint--gauge-ring-matrix-test--02.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 53262,
+      "png_sha256": "835de90936be449982ebc47ef0025b3f8a059e4de5bca92f0ca6c5ef49850017",
+      "resolved_tokens_sha256": "ee95b1d4e64a9be9e891859b1cdec42784d0e2410b5ceb7f23733ceec9cad128",
+      "theme": "blueprint",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--blueprint--gauge-ring-matrix-test--02",
+      "checkpoint_in_original_fixture": 2,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "2798b53294cf990a39c619eb35cc2f29c15c889c46f53f16a5600a0ee30bcc39",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.5,
+          "label": "Info Mid",
+          "readout": "50/100 (50%)",
+          "severity": "info"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1629.707959,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "f56da9e04d80745dfb5846be7d8f8c466c3a1aecb744c3091ca24558c4f5c3be",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--blueprint--gauge-ring-matrix-test--03.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 53516,
+      "png_sha256": "3819a1ec9f22cc996e3b4ecfe0a1aefb5a9ef18cef117e3fb2ef0326e2f2af64",
+      "resolved_tokens_sha256": "ee95b1d4e64a9be9e891859b1cdec42784d0e2410b5ceb7f23733ceec9cad128",
+      "theme": "blueprint",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--blueprint--gauge-ring-matrix-test--03",
+      "checkpoint_in_original_fixture": 3,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "f56da9e04d80745dfb5846be7d8f8c466c3a1aecb744c3091ca24558c4f5c3be",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.95,
+          "label": "Info High",
+          "readout": "95/100 (95%)",
+          "severity": "info"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1627.400443,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "10ac2d9e3f9f5fa32f1f3fefa6ce1a5bffa6e679d9753502c8c0212bef0527d7",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--blueprint--gauge-ring-matrix-test--04.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 53980,
+      "png_sha256": "ffd6369f5bf264076e3fa2154fa86b16f387d3feb9fe8c1dad5ea9e3ec7e330f",
+      "resolved_tokens_sha256": "ee95b1d4e64a9be9e891859b1cdec42784d0e2410b5ceb7f23733ceec9cad128",
+      "theme": "blueprint",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--blueprint--gauge-ring-matrix-test--04",
+      "checkpoint_in_original_fixture": 4,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "10ac2d9e3f9f5fa32f1f3fefa6ce1a5bffa6e679d9753502c8c0212bef0527d7",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.25,
+          "label": "Warning Low",
+          "readout": "25/100 (25%)",
+          "severity": "warning"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1626.138055,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "d3923a1d8dc16036da7bf588aa4effb77d6fc4437c4be75f78369193e2c89cc5",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--blueprint--gauge-ring-matrix-test--05.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54216,
+      "png_sha256": "37b02be8a8e10c2312e22109a91e8f26ab7b7f1dffcc332422c15f084387ffeb",
+      "resolved_tokens_sha256": "ee95b1d4e64a9be9e891859b1cdec42784d0e2410b5ceb7f23733ceec9cad128",
+      "theme": "blueprint",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--blueprint--gauge-ring-matrix-test--05",
+      "checkpoint_in_original_fixture": 5,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "d3923a1d8dc16036da7bf588aa4effb77d6fc4437c4be75f78369193e2c89cc5",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.5,
+          "label": "Warning Mid",
+          "readout": "50/100 (50%)",
+          "severity": "warning"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1627.256067,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "5243d500ef6b3a4ba0e48540e11408b225f7daa1aca653ff4e6f5103d26e6004",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--blueprint--gauge-ring-matrix-test--06.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54566,
+      "png_sha256": "3aaf9dc219447384c3e19ea3c322b2bcea09f320def51407b48a178b30533aa4",
+      "resolved_tokens_sha256": "ee95b1d4e64a9be9e891859b1cdec42784d0e2410b5ceb7f23733ceec9cad128",
+      "theme": "blueprint",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--blueprint--gauge-ring-matrix-test--06",
+      "checkpoint_in_original_fixture": 6,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "5243d500ef6b3a4ba0e48540e11408b225f7daa1aca653ff4e6f5103d26e6004",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.95,
+          "label": "Warning High",
+          "readout": "95/100 (95%)",
+          "severity": "warning"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1625.914796,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "84a91304708a9c8a08da271e1ed5cdf82dbd65537b80fd139dc4c01402ba62eb",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--blueprint--gauge-ring-matrix-test--07.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 53707,
+      "png_sha256": "80199959ee8f9ff1d0a44b48a9577cab1678da0880d195538d77a3437d942aa8",
+      "resolved_tokens_sha256": "ee95b1d4e64a9be9e891859b1cdec42784d0e2410b5ceb7f23733ceec9cad128",
+      "theme": "blueprint",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--blueprint--gauge-ring-matrix-test--07",
+      "checkpoint_in_original_fixture": 7,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "84a91304708a9c8a08da271e1ed5cdf82dbd65537b80fd139dc4c01402ba62eb",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.25,
+          "label": "Error Low",
+          "readout": "25/100 (25%)",
+          "severity": "error"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1629.65636,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "301d274110810c85dc7cd67ace3d8c49996eadfc7328099bd2630b339a487f45",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--blueprint--gauge-ring-matrix-test--08.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 53959,
+      "png_sha256": "50338fd82894fa27661fca2106f4af73bb3b97f134e7d45ab54f4fe14dbba03c",
+      "resolved_tokens_sha256": "ee95b1d4e64a9be9e891859b1cdec42784d0e2410b5ceb7f23733ceec9cad128",
+      "theme": "blueprint",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--blueprint--gauge-ring-matrix-test--08",
+      "checkpoint_in_original_fixture": 8,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "301d274110810c85dc7cd67ace3d8c49996eadfc7328099bd2630b339a487f45",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.5,
+          "label": "Error Mid",
+          "readout": "50/100 (50%)",
+          "severity": "error"
+        },
+        "ttl_ms": 60000
+      }
+    },
+    {
+      "adapter": {
+        "backend": "Vulkan",
+        "device_type": "Cpu",
+        "driver": "llvmpipe",
+        "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+        "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+      },
+      "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+      "capture_at_ms": 1000,
+      "checkout_head_at_invocation": "8e0cd1249c93efc9ffb9b2e40ed6c5ec92968a9f",
+      "checkpoint": "after all ordered messages; latest-wins per surface",
+      "compiled_example_source_sha256": "3dbe36d7cdb832327eb476474f865f6ee6337817c16402ae65f44f33d5dad246",
+      "dimensions": [
+        1920,
+        1080
+      ],
+      "elapsed_ms": 1630.8885979999998,
+      "fixture": "gauge-ring-matrix-test",
+      "fixture_sha256": "48b824f17a30d399673e171cabba30edda4bed37ab659e5f9cd0e17bbbbb2c3c",
+      "messages_applied": 1,
+      "output": "docs/evidence/gauge-ring/after--blueprint--gauge-ring-matrix-test--09.png",
+      "pipeline": "windowed build/capture",
+      "png_bytes": 54348,
+      "png_sha256": "9783655a8dd13449b386b699fcca340d8ff65a73d807f384e287d36d4d03452d",
+      "resolved_tokens_sha256": "ee95b1d4e64a9be9e891859b1cdec42784d0e2410b5ceb7f23733ceec9cad128",
+      "theme": "blueprint",
+      "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation",
+      "name": "after--blueprint--gauge-ring-matrix-test--09",
+      "checkpoint_in_original_fixture": 9,
+      "original_fixture_sha256_lf": "1b8b6a7c62262ff483489df8c1a70f10f160f761bd2f016e6f71c3eb8f310e57",
+      "cell_payload_sha256": "48b824f17a30d399673e171cabba30edda4bed37ab659e5f9cd0e17bbbbb2c3c",
+      "message": {
+        "widget": "main-gauge",
+        "params": {
+          "level": 0.95,
+          "label": "Error High",
+          "readout": "95/100 (95%)",
+          "severity": "error"
+        },
+        "ttl_ms": 60000
+      }
+    }
+  ]
+}

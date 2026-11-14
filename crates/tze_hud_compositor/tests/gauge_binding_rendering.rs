@@ -27,7 +27,7 @@
 //! - widget-system/spec.md §Requirement: SVG Layer Parameter Bindings
 //! - widget-system/spec.md §Requirement: Widget Parameter Interpolation
 //! - openspec/changes/exemplar-gauge-widget/tasks.md §6, §8
-//! - assets/widget_bundles/gauge/ (production bundle)
+//! - assets/widget_bundles/gauge/ (shipped ring: `contention::shipped_gauge_ring_*`)
 
 use std::collections::HashMap;
 
@@ -37,25 +37,16 @@ use tze_hud_scene::types::{
     WidgetParameterValue,
 };
 
-// ─── Production fill.svg (after token resolution) ────────────────────────────
+// ─── Generic bar fixture ──────────────────────────────────────────────────────
 //
-// This is the token-resolved form of assets/widget_bundles/gauge/fill.svg.
-// Token placeholders are substituted with canonical values so the SVG parses
-// cleanly in resvg and the element attributes are in their initial "default"
-// state before any parameter bindings are applied.
+// A frozen vertical-bar SVG for the generic binding tests in this file. It is
+// NOT the shipped gauge (assets/widget_bundles/gauge/, a ring since v3); the
+// shipped bundle is rasterized in `contention::shipped_gauge_ring_*`.
 //
-// Bar starts at y=210, height=0 (empty track). The `clip-path` on the bar
-// constrains visible area to x=30, y=10, w=40, h=200. For the bar to fill
-// upward we must set BOTH `height` (the binding result) AND `y = 210 - height`
-// so the bar bottom stays fixed at y=210 while the top rises.
-//
-// Canonical token substitutions applied here:
-//   {{token.color.text.accent}}   → #4A9EFF   (default bar fill / info blue)
-//   {{token.color.text.primary}}  → #FFFFFF
-//   {{token.color.outline.default}}→ #000000
-//   {{token.stroke.outline.width}}→ 1
-//   {{token.color.severity.info}} → #4A9EFF
-const PRODUCTION_FILL_SVG: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
+// Bar starts at y=210, height=0 (empty track). For the bar to fill upward we
+// must set BOTH `height` (the binding result) AND `y = 210 - height` so the
+// bar bottom stays fixed at y=210 while the top rises.
+const BAR_FIXTURE_SVG: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 240" width="100" height="240">
   <defs>
     <clipPath id="track-clip">
@@ -89,10 +80,10 @@ const PRODUCTION_FILL_SVG: &str = r##"<?xml version="1.0" encoding="UTF-8"?>
     fill="#4A9EFF"/>
 </svg>"##;
 
-// ─── Production gauge binding definitions ─────────────────────────────────────
+// ─── Bar fixture binding definitions ──────────────────────────────────────────
 //
-// Mirror the bindings declared in assets/widget_bundles/gauge/widget.toml so tests
-// can call resolve_binding_value without loading the bundle from disk.
+// Generic bindings over the bar fixture, so tests can call
+// resolve_binding_value without loading a bundle from disk.
 
 fn level_height_binding() -> WidgetBinding {
     WidgetBinding {
@@ -210,7 +201,7 @@ fn gauge_bar_fills_upward_at_level_half() {
     let height_str = "100";
     let expected_y: i64 = 210 - 100;
 
-    let modified = apply_svg_attribute(PRODUCTION_FILL_SVG, "bar", "height", height_str);
+    let modified = apply_svg_attribute(BAR_FIXTURE_SVG, "bar", "height", height_str);
     let modified = apply_svg_attribute(&modified, "bar", "y", &expected_y.to_string());
 
     assert!(
@@ -234,7 +225,7 @@ fn gauge_bar_fills_upward_at_level_full() {
     let height_str = "200";
     let expected_y = 210 - 200_i64;
 
-    let modified = apply_svg_attribute(PRODUCTION_FILL_SVG, "bar", "height", height_str);
+    let modified = apply_svg_attribute(BAR_FIXTURE_SVG, "bar", "height", height_str);
     let modified = apply_svg_attribute(&modified, "bar", "y", &expected_y.to_string());
 
     assert!(
@@ -253,7 +244,7 @@ fn gauge_bar_upward_at_level_zero_stays_at_bottom() {
     let height_str = "0";
     let expected_y = 210;
 
-    let modified = apply_svg_attribute(PRODUCTION_FILL_SVG, "bar", "height", height_str);
+    let modified = apply_svg_attribute(BAR_FIXTURE_SVG, "bar", "height", height_str);
     let modified = apply_svg_attribute(&modified, "bar", "y", &expected_y.to_string());
 
     // height=0 and y=210 are both the same as the production default, so the
@@ -336,7 +327,7 @@ fn gauge_direct_color_binding_blue_produces_hex_0000ff() {
 /// value on the `bar` element.
 #[test]
 fn gauge_direct_color_binding_mutates_bar_fill_in_svg() {
-    let modified = apply_svg_attribute(PRODUCTION_FILL_SVG, "bar", "fill", "#ff0000");
+    let modified = apply_svg_attribute(BAR_FIXTURE_SVG, "bar", "fill", "#ff0000");
     assert!(
         modified.contains("fill=\"#ff0000\""),
         "SVG bar fill should be updated to #ff0000: {modified}"
@@ -368,7 +359,7 @@ fn gauge_text_content_binding_label_cpu_load() {
     );
 
     // Verify SVG mutation sets the text content.
-    let modified = apply_svg_attribute(PRODUCTION_FILL_SVG, "label-text", "text-content", &val);
+    let modified = apply_svg_attribute(BAR_FIXTURE_SVG, "label-text", "text-content", &val);
     assert!(
         modified.contains(">CPU Load<"),
         "SVG label-text element should contain 'CPU Load' as text content: {modified}"
@@ -389,7 +380,7 @@ fn gauge_text_content_binding_empty_label() {
         "empty label should resolve to empty string, got: {val}"
     );
 
-    let modified = apply_svg_attribute(PRODUCTION_FILL_SVG, "label-text", "text-content", &val);
+    let modified = apply_svg_attribute(BAR_FIXTURE_SVG, "label-text", "text-content", &val);
     // text element must be present (not removed), content is empty
     assert!(
         modified.contains("id=\"label-text\""),
@@ -412,7 +403,7 @@ fn gauge_text_content_binding_long_label() {
         "long label should be preserved verbatim, got: {val}"
     );
 
-    let modified = apply_svg_attribute(PRODUCTION_FILL_SVG, "label-text", "text-content", &val);
+    let modified = apply_svg_attribute(BAR_FIXTURE_SVG, "label-text", "text-content", &val);
     assert!(
         modified.contains(">Memory Usage 87%<"),
         "SVG label-text must contain the full long label: {modified}"
@@ -474,7 +465,7 @@ fn gauge_discrete_binding_severity_error_produces_ff4444() {
 /// 6.4d: SVG mutation — indicator fill attribute is updated in the SVG.
 #[test]
 fn gauge_discrete_binding_mutates_indicator_fill_in_svg() {
-    let modified = apply_svg_attribute(PRODUCTION_FILL_SVG, "indicator", "fill", "#FFB800");
+    let modified = apply_svg_attribute(BAR_FIXTURE_SVG, "indicator", "fill", "#FFB800");
     assert!(
         modified.contains("fill=\"#FFB800\""),
         "SVG indicator fill should be updated to #FFB800 (warning): {modified}"
@@ -494,7 +485,7 @@ mod contention {
     use tze_hud_scene::SceneGraph;
     use tze_hud_scene::SceneId;
     use tze_hud_scene::types::WidgetInstance;
-    use tze_hud_widget::loader::{BundleScanResult, load_bundle_dir_with_tokens};
+    use tze_hud_widget::loader::{BundleScanResult, LoadedBundle, load_bundle_dir_with_tokens};
 
     /// Path to the production exemplar gauge bundle.
     fn production_gauge_path() -> PathBuf {
@@ -516,16 +507,7 @@ mod contention {
     ///
     /// Returns `(scene, tab_id)` ready for `publish_to_widget("gauge", ...)` calls.
     fn scene_with_production_gauge() -> (SceneGraph, tze_hud_scene::types::SceneId) {
-        let path = production_gauge_path();
-        let tokens = gauge_test_tokens();
-        let result = load_bundle_dir_with_tokens(&path, &tokens);
-
-        let bundle = match result {
-            BundleScanResult::Ok(b) => b,
-            BundleScanResult::Err(e) => {
-                panic!("production gauge bundle failed to load: {e}");
-            }
-        };
+        let bundle = shipped_ring();
 
         let mut definition = bundle.definition.clone();
         definition.default_contention_policy = ContentionPolicy::LatestWins;
@@ -803,91 +785,217 @@ mod contention {
         }
     }
 
-    // ── All-four-params SVG attribute mutation in a single pass ───────────────
+    // ── Shipped ring: rasterized level, severity, percent and hover ──────────
 
-    /// Verify that resolving all four bindings and applying them to the production
-    /// fill.svg yields the expected attributes in a single render pass.
-    ///
-    /// This tests the `resolve_binding_value` + `apply_svg_attribute` pipeline
-    /// end-to-end using the production binding definitions.
+    /// The shipped bundle's own layers, token-resolved, as the compositor
+    /// rasterizes them, with the definition's defaults as the base params.
+    fn shipped_ring() -> LoadedBundle {
+        match load_bundle_dir_with_tokens(&production_gauge_path(), &gauge_test_tokens()) {
+            BundleScanResult::Ok(bundle) => bundle,
+            BundleScanResult::Err(error) => {
+                panic!("production gauge bundle failed to load: {error}")
+            }
+        }
+    }
+
+    fn rgb(hex: &str) -> [u8; 3] {
+        let v = u32::from_str_radix(&hex[1..7], 16).unwrap();
+        [(v >> 16) as u8, (v >> 8) as u8, v as u8]
+    }
+
+    /// Rasterize the ring 1:1 (128x132 viewBox) with `overrides` on the defaults.
+    fn render_ring(overrides: &[(&str, WidgetParameterValue)]) -> tiny_skia::Pixmap {
+        let bundle = shipped_ring();
+        let mut params: HashMap<_, _> = bundle
+            .definition
+            .parameter_schema
+            .iter()
+            .map(|p| (p.name.clone(), p.default_value.clone()))
+            .collect();
+        for (name, value) in overrides {
+            params.insert((*name).to_string(), value.clone());
+        }
+        let refs: Vec<(&str, &[WidgetBinding])> = bundle
+            .definition
+            .layers
+            .iter()
+            .map(|layer| {
+                (
+                    std::str::from_utf8(&bundle.svg_contents[&layer.svg_file]).unwrap(),
+                    layer.bindings.as_slice(),
+                )
+            })
+            .collect();
+        let constraints = bundle
+            .definition
+            .parameter_schema
+            .iter()
+            .filter_map(|p| {
+                let c = p.constraints.as_ref()?;
+                Some((p.name.clone(), (c.f32_min?, c.f32_max?)))
+            })
+            .collect();
+        tze_hud_compositor::widget::rasterize_svg_layers(&refs, &constraints, &params, 128, 132)
+            .expect("shipped gauge rasterizes")
+    }
+
+    /// Fraction of the ring, sampled clockwise from 12 o'clock at the stroke's
+    /// centre line, drawn in `color` (within 8 per channel).
+    fn arc_coverage(pixmap: &tiny_skia::Pixmap, color: [u8; 3]) -> f32 {
+        const SAMPLES: usize = 360;
+        let hits = (0..SAMPLES)
+            .filter(|i| {
+                let a = (*i as f32 + 0.5) / SAMPLES as f32 * std::f32::consts::TAU;
+                let (x, y) = (64.0 + 34.0 * a.sin(), 56.0 - 34.0 * a.cos());
+                let p = pixmap.pixel(x as u32, y as u32).unwrap().demultiply();
+                [p.red(), p.green(), p.blue()]
+                    .iter()
+                    .zip(color)
+                    .all(|(a, b)| a.abs_diff(b) <= 8)
+            })
+            .count();
+        hits as f32 / SAMPLES as f32
+    }
+
+    fn region_differs(
+        a: &tiny_skia::Pixmap,
+        b: &tiny_skia::Pixmap,
+        x: u32,
+        y: u32,
+        w: u32,
+        h: u32,
+    ) -> bool {
+        (y..y + h).any(|py| (x..x + w).any(|px| a.pixel(px, py) != b.pixel(px, py)))
+    }
+
+    /// The arc covers the level's share of the ring, clockwise from 12
+    /// o'clock (round caps add up to ~3% at each end); level 0 draws none.
     #[test]
-    fn gauge_all_four_params_produce_correct_svg_attributes() {
-        let level = 0.65f32;
-        let params = HashMap::from([
-            ("level".to_string(), WidgetParameterValue::F32(level)),
+    fn shipped_gauge_ring_raster_contract() {
+        shipped_gauge_ring_arc_tracks_level();
+        shipped_gauge_ring_colors_by_severity();
+        shipped_gauge_ring_percent_label_and_hover_readout();
+    }
+
+    fn shipped_gauge_ring_arc_tracks_level() {
+        let tokens = gauge_test_tokens();
+        let primary = rgb(&tokens["color.primary"]);
+        let mut last = -1.0;
+        for level in [0.0f32, 0.1, 0.25, 0.5, 0.72, 0.95, 1.0] {
+            let pixmap = render_ring(&[("level", WidgetParameterValue::F32(level))]);
+            let covered = arc_coverage(&pixmap, primary);
+            assert!(
+                (covered - level).abs() <= 0.04,
+                "level {level}: arc covers {covered} of the ring"
+            );
+            if level == 0.0 || level == 1.0 {
+                assert_eq!(
+                    covered, level,
+                    "empty/full endpoints cover exactly their share"
+                );
+            }
+            assert!(covered >= last, "arc coverage must grow with level");
+            last = covered;
+        }
+        // Clockwise from 12 o'clock: a quarter fills the top-right, not the top-left.
+        let quarter = render_ring(&[("level", WidgetParameterValue::F32(0.25))]);
+        let at = |x: u32, y: u32| {
+            let p = quarter.pixel(x, y).unwrap().demultiply();
+            [p.red(), p.green(), p.blue()]
+        };
+        assert_eq!(at(88, 32), primary, "top-right of the ring is filled");
+        assert_ne!(at(40, 32), primary, "top-left of the ring is empty");
+    }
+
+    /// Info uses the owner's fill_color (default color.primary); warning and
+    /// error use their roles regardless of fill_color, on the arc and on the
+    /// card's hairline (info: color.outline.variant).
+    fn shipped_gauge_ring_colors_by_severity() {
+        let tokens = gauge_test_tokens();
+        let orange = WidgetParameterValue::Color(Rgba::new(1.0, 165.0 / 255.0, 0.0, 1.0));
+        for (severity, expected, edge) in [
+            ("info", [255, 165, 0], rgb(&tokens["color.outline.variant"])),
             (
-                "label".to_string(),
-                WidgetParameterValue::String("System".to_string()),
+                "warning",
+                rgb(&tokens["color.caution"]),
+                rgb(&tokens["color.caution"]),
             ),
             (
-                "fill_color".to_string(),
-                WidgetParameterValue::Color(Rgba::new(1.0, 165.0 / 255.0, 0.0, 1.0)),
+                "error",
+                rgb(&tokens["color.error"]),
+                rgb(&tokens["color.error"]),
             ),
-            (
-                "severity".to_string(),
-                WidgetParameterValue::Enum("warning".to_string()),
-            ),
-        ]);
-        let constraints = level_param_constraints();
+        ] {
+            let pixmap = render_ring(&[
+                ("level", WidgetParameterValue::F32(0.5)),
+                ("fill_color", orange.clone()),
+                ("severity", WidgetParameterValue::Enum(severity.into())),
+            ]);
+            let covered = arc_coverage(&pixmap, expected);
+            assert!(
+                (covered - 0.5).abs() <= 0.04,
+                "{severity}: arc in {expected:?} covers {covered}"
+            );
+            // The card's top hairline (y 0.5, 1 wide) carries the severity too.
+            let p = pixmap.pixel(64, 0).unwrap().demultiply();
+            assert_eq!([p.red(), p.green(), p.blue()], edge, "{severity}: hairline");
+        }
+    }
 
-        // Resolve each binding.
-        let height_val =
-            resolve_binding_value(&level_height_binding(), &params, &constraints).unwrap();
-        let fill_val =
-            resolve_binding_value(&fill_color_binding(), &params, &HashMap::new()).unwrap();
-        let label_val = resolve_binding_value(&label_binding(), &params, &HashMap::new()).unwrap();
-        let sev_val = resolve_binding_value(&severity_binding(), &params, &HashMap::new()).unwrap();
+    /// The centre shows the level as a percent; the label sits below the
+    /// ring, and hover swaps it for the readout over a state layer.
+    fn shipped_gauge_ring_percent_label_and_hover_readout() {
+        let label = |s: &str| ("label", WidgetParameterValue::String(s.into()));
+        let readout = (
+            "readout",
+            WidgetParameterValue::String("42/100 (42%)".into()),
+        );
+        let level = |v: f32| ("level", WidgetParameterValue::F32(v));
+        let hover = |v: f32| ("tooltip_visible", WidgetParameterValue::F32(v));
 
-        // level=0.65 → height = 0.65 * 200 = 130.
-        assert_eq!(
-            height_val, "130",
-            "level=0.65 should produce height=130, got: {height_val}"
-        );
-        // fill_color=orange → hex color (no alpha)
-        assert_eq!(
-            fill_val, "#ffa500",
-            "orange fill should be #ffa500, got: {fill_val}"
-        );
-        // label="System"
-        assert_eq!(
-            label_val, "System",
-            "label should be 'System', got: {label_val}"
-        );
-        // severity=warning → canonical warning color
-        assert_eq!(
-            sev_val, "#FFB800",
-            "warning severity should be #FFB800, got: {sev_val}"
+        // Percent: inside the ring (x 36..92, y 46..66) only.
+        let a = render_ring(&[level(0.0), label("Build")]);
+        let b = render_ring(&[level(0.0), label("Build"), readout.clone()]);
+        let c = render_ring(&[level(0.72), label("Build")]);
+        assert!(region_differs(
+            &a,
+            &render_ring(&[level(0.07), label("Build")]),
+            36,
+            46,
+            56,
+            20
+        ));
+        assert!(
+            !region_differs(&a, &c, 0, 104, 128, 16),
+            "level leaves the caption alone"
         );
 
-        // Apply all four bindings to the production SVG.
-        let y_val = (210.0 - height_val.parse::<f32>().unwrap()) as i64;
-        let mut svg = PRODUCTION_FILL_SVG.to_string();
-        svg = apply_svg_attribute(&svg, "bar", "height", &height_val);
-        svg = apply_svg_attribute(&svg, "bar", "y", &y_val.to_string());
-        svg = apply_svg_attribute(&svg, "bar", "fill", &fill_val);
-        svg = apply_svg_attribute(&svg, "label-text", "text-content", &label_val);
-        svg = apply_svg_attribute(&svg, "indicator", "fill", &sev_val);
+        // Label in the caption row; the readout is hidden until hover.
+        assert!(region_differs(
+            &a,
+            &render_ring(&[level(0.0)]),
+            8,
+            104,
+            112,
+            16
+        ));
+        assert!(
+            !region_differs(&a, &b, 0, 0, 128, 132),
+            "readout is hover-only"
+        );
 
-        // Verify all four mutations in the resulting SVG.
+        // Hover: the readout replaces the label and the card lifts.
+        let hovered = render_ring(&[level(0.0), label("Build"), readout, hover(1.0)]);
+        assert!(region_differs(&b, &hovered, 8, 104, 112, 16));
         assert!(
-            svg.contains("height=\"130\""),
-            "SVG must contain height=130: {svg}"
+            region_differs(&b, &hovered, 4, 4, 8, 8),
+            "state layer covers the card"
         );
+        let hover_label_only = render_ring(&[level(0.0), label("Build"), hover(1.0)]);
+        let hover_nothing = render_ring(&[level(0.0), hover(1.0)]);
         assert!(
-            svg.contains("y=\"80\""),
-            "SVG must contain y=80 (210-130) for upward fill: {svg}"
-        );
-        assert!(
-            svg.contains("fill=\"#ffa500\""),
-            "SVG must contain bar fill=#ffa500: {svg}"
-        );
-        assert!(
-            svg.contains(">System<"),
-            "SVG must contain label-text content='System': {svg}"
-        );
-        assert!(
-            svg.contains("fill=\"#FFB800\""),
-            "SVG must contain indicator fill=#FFB800 (warning): {svg}"
+            !region_differs(&hover_label_only, &hover_nothing, 0, 104, 128, 16),
+            "hover hides the label"
         );
     }
 }

@@ -29,7 +29,8 @@ use tze_hud_scene::types::{
 
 use crate::error::BundleError;
 use crate::manifest::{
-    RawBinding, RawHoverBehavior, RawManifest, RawNormalizedRect, RawParameterDeclaration,
+    RawBinding, RawHoverBehavior, RawManifest, RawNormalizedRect, RawNumber,
+    RawParameterDeclaration,
 };
 use crate::svg_ids::collect_svg_element_ids;
 
@@ -325,8 +326,12 @@ fn load_bundle_inner(
     };
 
     // Step 5: Parse optional runtime hover behavior.
-    let hover_behavior =
-        parse_hover_behavior(raw.hover_behavior.as_ref(), &parameter_schema, path_str)?;
+    let hover_behavior = parse_hover_behavior(
+        raw.hover_behavior.as_ref(),
+        &parameter_schema,
+        tokens,
+        path_str,
+    )?;
 
     // Step 6: Load SVG files and resolve bindings.
     let mut svg_contents: HashMap<String, Vec<u8>> = HashMap::new();
@@ -708,6 +713,7 @@ fn parse_default_value(
 fn parse_hover_behavior(
     raw: Option<&RawHoverBehavior>,
     parameter_schema: &[WidgetParameterDeclaration],
+    tokens: &HashMap<String, String>,
     path_str: &str,
 ) -> Result<Option<WidgetHoverBehavior>, BundleError> {
     let Some(raw) = raw else {
@@ -751,7 +757,14 @@ fn parse_hover_behavior(
         });
     }
 
-    let delay_ms = raw.delay_ms.unwrap_or(3_000);
+    let delay = resolve_number(raw.delay_ms.as_ref(), 3_000.0, tokens, path_str)?;
+    if !(0.0..=f64::from(u32::MAX)).contains(&delay) || delay.fract() != 0.0 {
+        return Err(BundleError::InvalidManifest {
+            path: path_str.to_string(),
+            detail: "hover_behavior.delay_ms must be a nonnegative u32".to_string(),
+        });
+    }
+    let delay_ms = delay as u32;
     let hidden_value = raw.hidden_value.unwrap_or(0.0);
     let visible_value = raw.visible_value.unwrap_or(1.0);
     if !hidden_value.is_finite() || !visible_value.is_finite() {
@@ -837,8 +850,8 @@ fn resolve_bindings(
     let BindingValidationContext {
         param_names,
         param_types,
-        param_enum_values,
         tokens,
+        ..
     } = context;
     let mut bindings = Vec::new();
 
@@ -923,18 +936,10 @@ fn resolve_bindings(
                 ),
             });
         }
-        let enum_allowed = *param_enum_values.get(param).unwrap(); // checked above
 
         // Validate and parse the mapping.
-        let mut mapping = parse_binding_mapping(
-            mapping_str,
-            raw_b,
-            param,
-            param_type,
-            enum_allowed,
-            svg_file,
-            path_str,
-        )?;
+        let mut mapping =
+            parse_binding_mapping(mapping_str, raw_b, param, svg_file, path_str, context)?;
         // Discrete values may name design tokens (e.g. a status color),
         // resolved once here, like SVG placeholders.
         if let WidgetBindingMapping::Discrete { value_map } = &mut mapping {
@@ -968,18 +973,20 @@ fn parse_binding_mapping(
     mapping_str: &str,
     raw_b: &RawBinding,
     param: &str,
-    param_type: WidgetParamType,
-    enum_allowed: &[String],
     svg_file: &str,
     path_str: &str,
+    context: &BindingValidationContext<'_>,
 ) -> Result<WidgetBindingMapping, BundleError> {
+    let param_type = context.param_types[param];
+    let enum_allowed = context.param_enum_values[param];
+    let tokens = context.tokens;
     match mapping_str {
         "threshold" => {
             let threshold = raw_b
                 .threshold
                 .filter(|n| n.is_finite() && n.abs() <= f64::from(f32::MAX));
-            let below = raw_b.attr_min.unwrap_or(0.0);
-            let at_or_above = raw_b.attr_max.unwrap_or(1.0);
+            let below = resolve_number(raw_b.attr_min.as_ref(), 0.0, tokens, path_str)?;
+            let at_or_above = resolve_number(raw_b.attr_max.as_ref(), 1.0, tokens, path_str)?;
             if param_type != WidgetParamType::F32
                 || threshold.is_none()
                 || ![below, at_or_above]
@@ -1008,8 +1015,8 @@ fn parse_binding_mapping(
                     ),
                 });
             }
-            let attr_min = raw_b.attr_min.unwrap_or(0.0) as f32;
-            let attr_max = raw_b.attr_max.unwrap_or(1.0) as f32;
+            let attr_min = resolve_number(raw_b.attr_min.as_ref(), 0.0, tokens, path_str)? as f32;
+            let attr_max = resolve_number(raw_b.attr_max.as_ref(), 1.0, tokens, path_str)? as f32;
             Ok(WidgetBindingMapping::Linear { attr_min, attr_max })
         }
         "direct" => {
@@ -1081,6 +1088,34 @@ fn parse_binding_mapping(
 }
 
 /// Resolve `{{token.key}}` placeholders in a `widget.toml` value.
+/// Numeric manifest fields keep their existing numeric form and also accept
+/// token placeholders. Resolve after TOML parsing so token values cannot inject
+/// manifest syntax; reject non-finite or nonnumeric results before rendering.
+fn resolve_number(
+    raw: Option<&RawNumber>,
+    default: f64,
+    tokens: &HashMap<String, String>,
+    path_str: &str,
+) -> Result<f64, BundleError> {
+    let value = match raw {
+        None => Some(default),
+        Some(RawNumber::Number(number)) => Some(*number),
+        Some(RawNumber::Token(text)) if text.contains("{{") => {
+            resolve_manifest_tokens(text, tokens, path_str)?
+                .parse::<f64>()
+                .ok()
+        }
+        Some(RawNumber::Token(_)) => None,
+    };
+    value
+        .filter(|n| n.is_finite() && n.abs() <= f64::from(f32::MAX))
+        .ok_or_else(|| BundleError::InvalidManifest {
+            path: path_str.to_string(),
+            detail: "numeric binding/hover field needs a finite number or numeric token"
+                .to_string(),
+        })
+}
+
 fn resolve_manifest_tokens(
     text: &str,
     tokens: &HashMap<String, String>,

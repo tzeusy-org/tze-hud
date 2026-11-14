@@ -520,7 +520,9 @@ source links when implementation changes the status.
   legacy looks) in source
   ([`notification_style.rs`](../crates/tze_hud_compositor/src/renderer/notification_style.rs),
   `hud-h51u7.4.1`, `hud-h51u7.4.2`); their Windows owner signoff
-  (`hud-h51u7.4.6`) is outstanding. The remaining restyle/owner-signoff work
+  (`hud-h51u7.4.6`) is outstanding. The gauge is restyled as the Tonal Glass
+  ring in source (`hud-h51u7.8.1`); its Windows owner signoff
+  (`hud-h51u7.8.6`) is outstanding. The remaining restyle/owner-signoff work
   in `hud-h51u7` is outstanding. The Windows workflow captures theme fixtures and reports
   pixel differences; that evidence is not an owner visual signoff.
 

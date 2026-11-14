@@ -1843,7 +1843,7 @@ async fn poc_panel_layout_moves_widgets_and_saves_their_entry() {
 
     poc.wait_for("the gauge's box shows", |hud| {
         hud.control_panel_row(row).is_some_and(|item| {
-            matches!(item.control, PanelControl::Value { ref text, .. } if text == "1.25%, 42.22% · 2.81×15.56%")
+            matches!(item.control, PanelControl::Value { ref text, .. } if text == "1.25%, 45.42% · 5×9.17%")
         })
     })
     .await;

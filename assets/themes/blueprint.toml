@@ -126,6 +126,7 @@
 "type.notification.body.size"         = "14"
 "type.notification.body.line_height"  = "18"
 "type.notification.body.weight"       = "400"
+"type.gauge.readout.size"             = "16"
 
 # Alert banner roles (as the notification card's, inset at the top edge).
 "color.alert.container"          = "#2F343C"   # surface.container.high
@@ -204,3 +205,20 @@
 "portal.focus_ring.color"                  = "#4C90F0"    # color.primary
 "portal.window.resize_grip.color"          = "#5F6B7C"    # color.outline
 "portal.window.resize_grip.hover_color"    = "#ABB3BF"    # color.on_surface.variant
+
+# Approved ring geometry and bound visibility; logical SVG units map once
+# into the configured widget box. Keep radius and circumference consistent.
+"state.hidden.opacity" = "0"
+"state.visible.opacity" = "1"
+"gauge.width" = "128"
+"gauge.height" = "132"
+"gauge.edge.inset" = "0.5"
+"gauge.edge.width" = "127"
+"gauge.edge.height" = "131"
+"gauge.ring.cx" = "64"
+"gauge.ring.cy" = "56"
+"gauge.ring.radius" = "34"
+"gauge.ring.stroke" = "6"
+"gauge.ring.circumference" = "213.63"
+"gauge.caption.y" = "112"
+"gauge.hover.delay_ms" = "180"
