@@ -1196,6 +1196,8 @@ fn contains_unsupported_primitive_svg(svg_text: &str) -> bool {
         "stroke-dash",
         // The primitive text path has no clip stack; preserve authored bounds.
         "clip-path",
+        // Nested text runs need resvg's shaping and anchor positioning.
+        "<tspan",
     ]
     .iter()
     .any(|needle| svg_text.contains(needle))

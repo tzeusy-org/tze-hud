@@ -33,27 +33,17 @@
     font-family="{{token.type.label.m.family}}, sans-serif"
     font-size="{{token.type.label.m.size}}"
     font-weight="{{token.type.label.m.weight}}"
-    fill="{{token.color.on_surface}}"></text>
+    fill="{{token.color.on_surface.variant}}"></text>
   <text
-    id="readout-value"
+    id="readout"
     data-role="text"
-    x="{{token.progress.readout.value.x}}"
+    x="{{token.progress.readout.x}}"
     y="{{token.progress.text.y}}"
     text-anchor="end"
     font-family="{{token.type.readout.family}}, monospace"
     font-size="{{token.type.label.m.size}}"
     font-weight="{{token.type.label.m.weight}}"
-    fill="{{token.color.on_surface.variant}}">0</text>
-  <text
-    id="readout-unit"
-    data-role="text"
-    x="{{token.progress.readout.unit.x}}"
-    y="{{token.progress.text.y}}"
-    text-anchor="end"
-    font-family="{{token.type.readout.family}}, monospace"
-    font-size="{{token.type.label.m.size}}"
-    font-weight="{{token.type.label.m.weight}}"
-    fill="{{token.color.on_surface.variant}}">%</text>
+    fill="{{token.color.on_surface}}"><tspan id="readout-value">0</tspan>%</text>
   <g id="tooltip-group" opacity="{{token.state.hidden.opacity}}">
     <rect
       id="hover-layer"

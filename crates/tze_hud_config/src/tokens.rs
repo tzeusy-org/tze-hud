@@ -472,13 +472,8 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "2",
     },
     CanonicalToken {
-        key: "progress.readout.value.x",
-        description: "Progress percent value right edge",
-        default_value: "292",
-    },
-    CanonicalToken {
-        key: "progress.readout.unit.x",
-        description: "Progress percent unit right edge",
+        key: "progress.readout.x",
+        description: "Progress percentage right edge",
         default_value: "305",
     },
     CanonicalToken {

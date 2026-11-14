@@ -738,6 +738,7 @@ async fn widget_param_update_rasterizes_only_that_instance() {
                 // Zero, half and full must change the actual track span while
                 // leaving both end insets intact. No hover is needed for the
                 // exact percent row to have foreground pixels.
+                let mut previous_readout = None;
                 for (progress, fill_to) in [(0.0, 15), (0.5, 160), (1.0, 305)] {
                     scene
                         .publish_to_widget(
@@ -776,6 +777,13 @@ async fn widget_param_update_rasterizes_only_that_instance() {
                         readout.iter().any(|p| (0..3).all(|c| p[c] > 128)),
                         "percent foreground must remain visible without hover"
                     );
+                    if let Some(previous) = &previous_readout {
+                        assert_ne!(
+                            &readout, previous,
+                            "percentage must update as a shaped text run"
+                        );
+                    }
+                    previous_readout = Some(readout);
                 }
             }
             for severity in ["info", "warning", "error", "info"] {
