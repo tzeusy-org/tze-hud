@@ -1,19 +1,16 @@
 # Classic — black/navy surfaces, white text and the legacy blue accent.
 # Select with `[design_tokens] theme = "classic"`.
-# The legacy notification look is retained by the notification card roles
-# at the end of the semantic block; the legacy keys that remain feed the
-# status bar and alert banner. Semantic roles are explicit, including
+# The legacy notification and alert-banner looks are retained by their
+# roles at the end of the semantic block; the legacy keys that remain feed
+# the status bar. Semantic roles are explicit, including
 # intentionally shared grid/easing values rather than fallback.
 
 "color.text.primary"                   = "#F5F7FA"
 "color.border.default"                 = "#6E7A91"
-"opacity.backdrop.opaque"              = "0.80"
 "typography.body.size"                 = "15"
 "typography.body.weight"               = "500"
 "spacing.padding.medium"               = "10"
 "border.radius.medium"                 = "14"
-"typography.notification.body.scale"   = "0.90"
-"typography.notification.title.weight" = "700"
 
 # Semantic surfaces and text; tonal levels carry structure. Blue denotes
 # interaction, green success, amber caution and red error. Existing labels
@@ -26,9 +23,6 @@
 "opacity.surface" = "0.96"
 "opacity.scrim" = "0.75"
 "color.on_surface" = "#F5F7FA"
-"color.on_severity.info" = "#000000"
-"color.on_severity.warning" = "#000000"
-"color.on_severity.critical" = "#000000"
 "color.on_surface.variant" = "#BFC7D5"
 "color.outline" = "#6E7A91"
 "color.outline.variant" = "#3E4A62"
@@ -120,6 +114,32 @@
 "type.notification.body.size" = "13.5"
 "type.notification.body.line_height" = "18.9"
 "type.notification.body.weight" = "400"
+
+# Alert banner roles: the legacy Classic banner (a full-width flush strip
+# filled with the old severity colours #4A9EFF / #FFB800 / #FF0000 at 0.90,
+# black text, no hairline or severity mark, 8 dp side padding, a 24/700
+# title over a 21.6/400 body, line boxes 1.4 x size).
+"color.alert.container" = "#4A9EFF"
+"color.alert.caution.container" = "#FFB800"
+"color.alert.error.container" = "#FF0000"
+"color.alert.outline" = "#00000000"
+"color.on_alert" = "#000000"
+"color.on_alert.variant" = "#000000"
+"color.on_alert.error" = "#000000"
+"color.severity.info" = "#00000000"
+"color.severity.warning" = "#00000000"
+"color.severity.critical" = "#00000000"
+"opacity.alert" = "0.90"
+"shape.alert" = "0"
+"space.alert.margin" = "0"
+"space.alert.horizontal" = "8"
+"space.alert.vertical" = "0"
+"type.alert.title.size" = "24"
+"type.alert.title.line_height" = "33.6"
+"type.alert.title.weight" = "700"
+"type.alert.body.size" = "21.6"
+"type.alert.body.line_height" = "30.24"
+"type.alert.body.weight" = "400"
 
 # Portal color overrides: the existing accepted portal-key exception.
 # Same-theme roles retain neutral structure and existing status meanings.

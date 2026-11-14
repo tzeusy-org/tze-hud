@@ -825,55 +825,30 @@ async fn test_two_line_notification_title_produces_two_text_items() {
     }
 }
 
-/// Two-line slot height: `notification_slot_height` returns a larger height for
-/// two-line notifications than for single-line notifications.
-///
-/// AC: two_line_slot_h > single_line_slot_h for the same RenderingPolicy.
+/// Two-line height: a card's or banner's text block is taller with a title
+/// than with a lone line; a lone line takes the body role on a card and the
+/// title role on an alert banner.
 #[test]
-fn test_notification_slot_height_two_line_exceeds_single_line() {
-    let policy = RenderingPolicy {
-        font_size_px: Some(16.0),
-        ..Default::default()
-    };
-
-    let single_line = NotificationPayload {
-        text: "body".to_owned(),
-        title: String::new(),
-        ..Default::default()
-    };
-
-    let two_line = NotificationPayload {
-        title: "Title".to_owned(),
-        text: "body".to_owned(),
-        ..Default::default()
-    };
-
-    let h_single = Compositor::notification_slot_height(
-        &single_line,
-        &policy,
-        NOTIFICATION_BODY_SCALE,
-        NOTIFICATION_INTER_LINE_GAP,
-        1.0,
-    );
-    let h_two_line = Compositor::notification_slot_height(
-        &two_line,
-        &policy,
-        NOTIFICATION_BODY_SCALE,
-        NOTIFICATION_INTER_LINE_GAP,
-        1.0,
-    );
-
-    assert!(
-        h_two_line > h_single,
-        "two-line slot height ({h_two_line:.2}) must exceed single-line ({h_single:.2})"
-    );
-
-    // Single-line == stack_slot_height
-    let h_stack = Compositor::stack_slot_height(&policy, 1.0);
-    assert!(
-        (h_single - h_stack).abs() < 0.01,
-        "single-line notification_slot_height ({h_single:.2}) must equal stack_slot_height ({h_stack:.2})"
-    );
+fn test_notification_text_block_two_line_exceeds_single_line() {
+    let policy = RenderingPolicy::default();
+    let tokens = HashMap::new();
+    for zone in ["notification-area", "alert-banner"] {
+        let style = NotificationStyle::for_zone(zone, &tokens, &policy);
+        let (single, two) = (
+            style.text_block_height(false),
+            style.text_block_height(true),
+        );
+        assert!(two > single, "{zone}: two-line {two} must exceed {single}");
+        assert_eq!(
+            single,
+            2.0 * style.padding_v + style.lone.line_height,
+            "{zone}"
+        );
+    }
+    let card = NotificationStyle::for_zone("notification-area", &tokens, &policy);
+    let banner = NotificationStyle::for_zone("alert-banner", &tokens, &policy);
+    assert_eq!(card.lone, card.body);
+    assert_eq!(banner.lone, banner.title);
 }
 
 /// Two-line notification stacking: two two-line notifications stack correctly,

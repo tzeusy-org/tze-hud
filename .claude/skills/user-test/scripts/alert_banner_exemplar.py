@@ -14,10 +14,12 @@ Sequence:
   2. Warning  (urgency=2) — "Warning: disk space low"          + 3s pause
   3. Critical (urgency=3) — "CRITICAL: security breach detected"
 
-Expected visual after all 3 publishes:
-  - Critical (red)   at top
-  - Warning  (amber) in middle
-  - Info     (blue)  at bottom
+Expected visual after all 3 publishes (severity order; under Tonal Glass
+each is an inset card with a tinted severity mark, critical on the error
+container; under Classic, red/amber/blue strips):
+  - Critical at top
+  - Warning  in middle
+  - Info     at bottom
   All three visible simultaneously until TTL expires.
 
 Usage:

@@ -2064,11 +2064,11 @@ impl NotificationAction {
 /// - When `title` is empty (or absent), the notification renders as a single
 ///   line using the `text` field (existing behavior, fully backward compatible).
 /// - When `title` is non-empty, the notification renders as two lines:
-///   - Line 1: `title` — bold weight (`typography.notification.title.weight`,
-///     default 700), `font_size_px` from `RenderingPolicy` / design tokens.
-///   - Line 2: `text` — regular weight (400), 0.85× the title font size.
+///   - Line 1: `title`, in the zone's title type role
+///     (`type.notification.title.*` or `type.alert.title.*`).
+///   - Line 2: `text`, in the matching body role.
 ///
-///   The slot height is expanded to fit both lines plus inter-line spacing.
+///   The slot height is expanded to fit both lines.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct NotificationPayload {
     /// Body text.  For single-line notifications this is the only displayed
@@ -3316,68 +3316,32 @@ impl ZoneRegistry {
 
         // 6. alert-banner: edge-anchored top, Stack-by-severity, Chrome layer.
         //
-        // Heading typography per spec §Alert-Banner Heading Typography:
-        //   font_size_px = 24px (typography.heading.size)
-        //   font_family  = SystemSansSerif (typography.heading.family)
-        //   font_weight  = 700/bold (typography.heading.weight)
-        //   text_color   = #FFFFFF white (color.text.primary) — max contrast vs severity backdrops
-        //   margin_horizontal = 8px inset from backdrop edges
+        // Styling (fill, text, type, padding, corners, inset) comes from the
+        // alert banner design-token roles (`color.alert.*`, `type.alert.*`,
+        // `space.alert.*`, ...) through the config policy builder and the
+        // compositor; the zone default carries none (hud-h51u7.4.2).
         //
-        // Chrome-layer positioning per spec §Alert-Banner Chrome-Layer Positioning:
-        //   layer_attachment = Chrome — renders above all agent content
-        //   width_pct = 1.0 — full display width
-        //   height_pct = 0.06 — nominal single-slot height for edge anchoring and debug geometry.
-        //   Runtime slot height is derived from RenderingPolicy (stack_slot_height); total stack
-        //   height = active_count × slot_h, not height_pct × screen_height.
-        //   Zero-height when inactive: compositor skips backdrop/text for empty zones;
-        //   no visible pixels are emitted when no alerts are active.
+        // Chrome-layer positioning: renders above all agent content, full
+        // display width. height_pct is the nominal geometry for edge anchoring
+        // and debug tints; the runtime sizes the stack to its banners (zero
+        // height, no pixels, when none are active).
         //
-        // Multiple banners stack vertically ordered by severity (critical at top,
-        // warning below, info at bottom).  Within the same severity level, newer
-        // banners appear above older ones.  Zone height grows dynamically:
-        // slot_height × active_count; zero height when no banners are active.
-        //
-        // backdrop + backdrop_opacity provide the dark fallback color for non-severity
-        // content (e.g. StreamText) and are overridden by severity token colors for
-        // NotificationPayload in render_zone_content.
+        // Multiple banners stack vertically ordered by severity (critical at
+        // top), newer above older within the same severity.
         registry.register(ZoneDefinition {
             id: SceneId::new(),
             name: "alert-banner".to_string(),
-            description: "Alert banner — top edge, severity-stacked multi-occupant, chrome layer, heading typography".to_string(),
+            description: "Alert banner — top edge, severity-stacked multi-occupant, chrome layer"
+                .to_string(),
             geometry_policy: GeometryPolicy::EdgeAnchored {
                 edge: DisplayEdge::Top,
-                // 6% of display height: at 720p this gives 43.2px, comfortably above the 24px heading.
+                // Nominal 6% of display height; the stack sizes itself to its banners.
                 height_pct: 0.06,
                 width_pct: 1.0,
                 margin_px: 0.0,
             },
             accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon, ZoneMediaType::StreamText],
-            rendering_policy: RenderingPolicy {
-                // Heading typography — §Alert-Banner Heading Typography
-                font_size_px: Some(24.0),
-                font_family: Some(FontFamily::SystemSansSerif),
-                font_weight: Some(700),
-                // White text (#FFFFFF) — max contrast against severity backdrops
-                text_color: Some(Rgba {
-                    r: 1.0,
-                    g: 1.0,
-                    b: 1.0,
-                    a: 1.0,
-                }),
-                // Dark backdrop fallback (used for non-Notification content + default)
-                backdrop: Some(Rgba {
-                    r: 0.1,
-                    g: 0.1,
-                    b: 0.16,
-                    a: 0.9,
-                }),
-                backdrop_opacity: Some(0.9),
-                // Horizontal inset from backdrop edges
-                margin_horizontal: Some(8.0),
-                // Flush to anchored edge — no vertical margin
-                margin_vertical: Some(0.0),
-                ..RenderingPolicy::default()
-            },
+            rendering_policy: RenderingPolicy::default(),
             contention_policy: ContentionPolicy::Stack { max_depth: 8 },
             // max_publishers is enforced per publisher_namespace (one active banner
             // per agent).  max_depth=8 allows up to 8 simultaneous banners from

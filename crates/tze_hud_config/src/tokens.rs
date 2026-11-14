@@ -219,12 +219,6 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Accent/highlight text color",
         default_value: "#4A9EFF",
     },
-    // Color — backdrop
-    CanonicalToken {
-        key: "color.backdrop.default",
-        description: "Default backdrop fill color",
-        default_value: "#000000",
-    },
     // Color — outline
     CanonicalToken {
         key: "color.outline.default",
@@ -242,54 +236,29 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Fill behind the whole subtitle zone, drawn when opacity.subtitle.backdrop > 0",
         default_value: "#000000",
     },
-    // Color — severity
+    // Color — severity: the alert banner's severity mark (a ringed glyph
+    // before its text); a transparent value draws no mark. Defaults are
+    // Tonal Glass's primary, caution and error roles.
     CanonicalToken {
         key: "color.severity.info",
-        description: "Info severity indicator color",
-        default_value: "#4A9EFF",
+        description: "Alert banner severity mark at urgency 0-1",
+        default_value: "#8AB4FF",
     },
     CanonicalToken {
         key: "color.severity.warning",
-        description: "Warning severity indicator color",
-        default_value: "#FFB800",
-    },
-    CanonicalToken {
-        key: "color.severity.error",
-        description: "Error severity indicator color",
-        default_value: "#FF4444",
+        description: "Alert banner severity mark at urgency 2",
+        default_value: "#F2C14E",
     },
     CanonicalToken {
         key: "color.severity.critical",
-        description: "Critical severity indicator color",
-        default_value: "#FF0000",
-    },
-    // Color — text on a severity fill (alert-banner text, which draws no
-    // outline, so these must contrast with the matching color.severity.*)
-    CanonicalToken {
-        key: "color.on_severity.info",
-        description: "Text color on an info severity fill",
-        default_value: "#111111",
-    },
-    CanonicalToken {
-        key: "color.on_severity.warning",
-        description: "Text color on a warning severity fill",
-        default_value: "#111111",
-    },
-    CanonicalToken {
-        key: "color.on_severity.critical",
-        description: "Text color on a critical severity fill",
-        default_value: "#111111",
+        description: "Alert banner severity mark at urgency 3",
+        default_value: "#FF8A80",
     },
     // Opacity
     CanonicalToken {
         key: "opacity.backdrop.default",
         description: "Default backdrop opacity (0.0–1.0)",
         default_value: "0.6",
-    },
-    CanonicalToken {
-        key: "opacity.backdrop.opaque",
-        description: "Opaque backdrop opacity threshold (0.0–1.0)",
-        default_value: "0.9",
     },
     CanonicalToken {
         key: "opacity.subtitle.backdrop",
@@ -316,22 +285,6 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         key: "typography.body.weight",
         description: "Body text weight (CSS numeric)",
         default_value: "400",
-    },
-    // Typography — heading
-    CanonicalToken {
-        key: "typography.heading.family",
-        description: "Heading font family",
-        default_value: "system-ui",
-    },
-    CanonicalToken {
-        key: "typography.heading.size",
-        description: "Heading text size in pixels",
-        default_value: "24",
-    },
-    CanonicalToken {
-        key: "typography.heading.weight",
-        description: "Heading font weight (CSS numeric)",
-        default_value: "700",
     },
     // Typography — subtitle
     CanonicalToken {
@@ -515,46 +468,6 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         key: "notification.action.link_mark",
         description: "Trailing mark on a notification HTTPS link button",
         default_value: "↗",
-    },
-    CanonicalToken {
-        key: "notification.action.height_px",
-        description: "Notification action height in dp",
-        default_value: "22",
-    },
-    CanonicalToken {
-        key: "notification.action.gap_px",
-        description: "Notification action gap in dp",
-        default_value: "4",
-    },
-    CanonicalToken {
-        key: "notification.action.padding_px",
-        description: "Notification action padding in dp",
-        default_value: "2",
-    },
-    CanonicalToken {
-        key: "notification.action.background",
-        description: "Fill of notification action buttons (RGBA hex)",
-        default_value: "#FFFFFF26",
-    },
-    CanonicalToken {
-        key: "notification.action.background_hover",
-        description: "Fill of a hovered notification action or dismiss button (RGBA hex)",
-        default_value: "#FFFFFF4D",
-    },
-    CanonicalToken {
-        key: "notification.action.background_pressed",
-        description: "Fill of a pressed notification action or dismiss button (RGBA hex)",
-        default_value: "#FFFFFF80",
-    },
-    CanonicalToken {
-        key: "typography.notification.action.font_size_px",
-        description: "Notification action button label font size (px)",
-        default_value: "12",
-    },
-    CanonicalToken {
-        key: "typography.notification.action.font_weight",
-        description: "Notification action button label font weight",
-        default_value: "600",
     },
     // Runtime system card / toast (pairing code, update notices); never agent-visible.
     CanonicalToken {
@@ -1106,17 +1019,99 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Notification card body: font weight (CSS numeric)",
         default_value: "400",
     },
-    // Alert-banner text keys (defaults match the compositor fallbacks;
-    // retired when hud-h51u7.4.2 restyles the banner)
+    // Alert banner roles (hud-h51u7.4.2): the banner's own fill, hairline,
+    // text, opacity, corner, margin, padding and type, so a theme can style
+    // banners apart from notification cards and the generic roles. Defaults
+    // are Tonal Glass's generic values.
     CanonicalToken {
-        key: "typography.notification.body.scale",
-        description: "Notification body line size relative to the title (0.5-1.0)",
-        default_value: "0.85",
+        key: "color.alert.container",
+        description: "Alert banner fill at urgency 0-1",
+        default_value: "#222833",
     },
     CanonicalToken {
-        key: "typography.notification.title.weight",
-        description: "Notification title font weight (CSS numeric)",
-        default_value: "700",
+        key: "color.alert.caution.container",
+        description: "Alert banner fill at urgency 2",
+        default_value: "#222833",
+    },
+    CanonicalToken {
+        key: "color.alert.error.container",
+        description: "Alert banner fill at urgency 3",
+        default_value: "#5C1A17",
+    },
+    CanonicalToken {
+        key: "color.alert.outline",
+        description: "Alert banner hairline (transparent: none)",
+        default_value: "#343B47",
+    },
+    CanonicalToken {
+        key: "color.on_alert",
+        description: "Alert banner title (and a lone message line) at urgency 0-2",
+        default_value: "#E8EBF0",
+    },
+    CanonicalToken {
+        key: "color.on_alert.variant",
+        description: "Alert banner body under a title at urgency 0-2",
+        default_value: "#A9B1BE",
+    },
+    CanonicalToken {
+        key: "color.on_alert.error",
+        description: "Alert banner text at urgency 3",
+        default_value: "#FFDAD6",
+    },
+    CanonicalToken {
+        key: "opacity.alert",
+        description: "Alert banner fill opacity (0.0-1.0)",
+        default_value: "0.92",
+    },
+    CanonicalToken {
+        key: "shape.alert",
+        description: "Alert banner corner radius (dp)",
+        default_value: "12",
+    },
+    CanonicalToken {
+        key: "space.alert.margin",
+        description: "Alert banner inset from the zone's sides and top, and between banners (dp)",
+        default_value: "16",
+    },
+    CanonicalToken {
+        key: "space.alert.horizontal",
+        description: "Alert banner horizontal padding (dp)",
+        default_value: "16",
+    },
+    CanonicalToken {
+        key: "space.alert.vertical",
+        description: "Alert banner vertical padding (dp)",
+        default_value: "12",
+    },
+    CanonicalToken {
+        key: "type.alert.title.size",
+        description: "Alert banner title (and a lone message line): font size (dp)",
+        default_value: "16",
+    },
+    CanonicalToken {
+        key: "type.alert.title.line_height",
+        description: "Alert banner title: line height (dp)",
+        default_value: "24",
+    },
+    CanonicalToken {
+        key: "type.alert.title.weight",
+        description: "Alert banner title: font weight (CSS numeric)",
+        default_value: "600",
+    },
+    CanonicalToken {
+        key: "type.alert.body.size",
+        description: "Alert banner body under a title: font size (dp)",
+        default_value: "14",
+    },
+    CanonicalToken {
+        key: "type.alert.body.line_height",
+        description: "Alert banner body: line height (dp)",
+        default_value: "20",
+    },
+    CanonicalToken {
+        key: "type.alert.body.weight",
+        description: "Alert banner body: font weight (CSS numeric)",
+        default_value: "400",
     },
 ];
 

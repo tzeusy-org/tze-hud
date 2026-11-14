@@ -294,8 +294,8 @@ impl Compositor {
 ///
 /// For each notification slot (heights from `Compositor::zone_slot_layout_with_tokens`, the same layout the renderer uses):
 ///
-/// - **Dismiss button**: a square in the top-right corner of the slot.
-///   See `notification_dismiss_bounds`.
+/// - **Dismiss button**: a square in the slot's title row at the padding.
+///   See `notification_style::dismiss_bounds`.
 ///
 /// - **Action buttons**: a horizontal row at the bottom of the slot.
 ///   See `NotificationActionLayout::bounds` (shared with the renderer);
@@ -388,7 +388,7 @@ fn populate_notification_hit_regions_in(
             layouts,
         );
 
-        for (pub_idx, slot_y, effective_slot_h) in layout.iter_visible(zy) {
+        for (pub_idx, card) in layout.iter_visible(Rect::new(zx, zy, zw, zh)) {
             let record = &publishes[pub_idx];
             let n_payload = match &record.content {
                 ZoneContent::Notification(n) => n,
@@ -397,20 +397,13 @@ fn populate_notification_hit_regions_in(
 
             // ── Dismiss (×) button ────────────────────────────────────────
             // Top-right corner of the slot; same bounds the renderer draws.
-            let dismiss_bounds = super::notification_style::dismiss_bounds(
-                zone_name,
-                &zone_tokens,
-                policy,
-                zx,
-                slot_y,
-                zw,
-                effective_slot_h,
-            );
+            let dismiss_bounds =
+                super::notification_style::dismiss_bounds(zone_name, &zone_tokens, policy, card);
             let dismiss_id = notification_dismiss_interaction_id(zone_name, record);
             let action_rects = layouts
                 .borrow_mut()
-                .resolve(&zone_tokens, zone_name, record, policy, zw)
-                .bounds(zx, slot_y, zw, effective_slot_h);
+                .resolve(&zone_tokens, zone_name, record, policy, card.width)
+                .bounds(card.x, card.y, card.width, card.height);
             let choice = scene
                 .overlay
                 .notification_choices
@@ -439,7 +432,7 @@ fn populate_notification_hit_regions_in(
                 .push(NotificationGeometry {
                     zone_name: zone_name.clone(),
                     publication_id: record.publication_id,
-                    bounds: Rect::new(zx, slot_y, zw, effective_slot_h),
+                    bounds: card,
                     actions: action_rects.clone(),
                     close: dismiss_bounds,
                     focus,

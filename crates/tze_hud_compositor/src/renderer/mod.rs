@@ -758,27 +758,35 @@ pub(crate) struct ZoneSlotLayout {
     pub(crate) slot_heights: Vec<f32>,
     /// Cumulative y-offsets from the zone origin, one per slot.
     /// `slot_offsets[i]` is the y-start of slot `i` relative to `zy`;
-    /// notification cards (not alert banners) are separated by the card
-    /// style's `space.s` stack gap.
+    /// notification cards are separated by the card style's `space.s` stack
+    /// gap, alert banners start and are separated by `space.alert.margin`.
     pub(crate) slot_offsets: Vec<f32>,
+    /// Inset of every slot from the zone's left and right edges (alert
+    /// banners' `space.alert.margin`; 0 for cards).
+    pub(crate) inset: f32,
     /// Effective zone height in pixels.
-    /// For alert-banner zones this equals `sum(slot_heights)` (dynamic growth).
-    /// For all other Stack zones this equals the configured zone height `zh`.
+    /// For alert-banner zones this is the bottom of the last banner (dynamic
+    /// growth). For all other Stack zones this equals the configured zone
+    /// height `zh`.
     pub(crate) effective_h: f32,
 }
 
 impl ZoneSlotLayout {
-    /// Iterate `(pub_idx, slot_offset, slot_h)` triples for the slots that
-    /// fit inside the zone, in stack order.  The iterator stops at the first
-    /// slot whose bottom edge would pass `zy + effective_h`: a card is shown
-    /// whole or not at all, so its buttons and dismiss control are never cut
-    /// off (its publication stays active and appears once space frees up).
-    /// Only the first slot may be clamped, when it alone is taller than the
-    /// zone, so the newest publication is never hidden.
-    pub(crate) fn iter_visible(&self, zy: f32) -> impl Iterator<Item = (usize, f32, f32)> + '_ {
+    /// Iterate `(pub_idx, slot rect)` for the slots that fit inside `zone`,
+    /// in stack order. The rect is the card itself: the single geometry its
+    /// backdrop, text, controls and hit regions use. The iterator stops at
+    /// the first slot whose bottom edge would pass `zone.y + effective_h`: a
+    /// card is shown whole or not at all, so its buttons and dismiss control
+    /// are never cut off (its publication stays active and appears once space
+    /// frees up). Only the first slot may be clamped, when it alone is taller
+    /// than the zone, so the newest publication is never hidden.
+    pub(crate) fn iter_visible(&self, zone: Rect) -> impl Iterator<Item = (usize, Rect)> + '_ {
         /// Float slack so a slot ending exactly at the zone bottom still fits.
         const FIT_EPSILON_PX: f32 = 0.01;
+        let zy = zone.y;
         let zone_bottom = zy + self.effective_h;
+        let x = zone.x + self.inset;
+        let w = (zone.width - 2.0 * self.inset).max(1.0);
         self.ordered_indices
             .iter()
             .copied()
@@ -797,7 +805,7 @@ impl ZoneSlotLayout {
             .map(move |(pub_idx, (offset, slot_h))| {
                 let slot_y = zy + offset;
                 let effective_slot_h = slot_h.min(zone_bottom - slot_y);
-                (pub_idx, slot_y, effective_slot_h)
+                (pub_idx, Rect::new(x, slot_y, w, effective_slot_h))
             })
     }
 }

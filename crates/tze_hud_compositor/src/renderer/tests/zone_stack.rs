@@ -553,11 +553,18 @@ fn test_zone_slot_layout_iter_visible_clips_and_clamps() {
         ordered_indices: vec![0, 1, 2],
         slot_heights: vec![30.0, 30.0, 30.0],
         slot_offsets: vec![0.0, 30.0, 60.0],
+        inset: 0.0,
         effective_h: 70.0,
     };
 
-    let zy = 10.0_f32;
-    let visible: Vec<(usize, f32, f32)> = layout.iter_visible(zy).collect();
+    let zone = |zy: f32| Rect::new(0.0, zy, 100.0, 1000.0);
+    let rows = |layout: &ZoneSlotLayout, zy: f32| -> Vec<(usize, f32, f32)> {
+        layout
+            .iter_visible(zone(zy))
+            .map(|(i, c)| (i, c.y, c.height))
+            .collect()
+    };
+    let visible = rows(&layout, 10.0);
 
     assert_eq!(
         visible,
@@ -570,19 +577,21 @@ fn test_zone_slot_layout_iter_visible_clips_and_clamps() {
         ordered_indices: vec![0, 1],
         slot_heights: vec![30.0, 40.0],
         slot_offsets: vec![0.0, 30.0],
+        inset: 0.0,
         effective_h: 70.0,
     };
-    assert_eq!(exact.iter_visible(10.0).count(), 2, "flush slot fits");
+    assert_eq!(rows(&exact, 10.0).len(), 2, "flush slot fits");
 
     // A first slot taller than the zone is clamped, never hidden.
     let tall = ZoneSlotLayout {
         ordered_indices: vec![0, 1],
         slot_heights: vec![100.0, 10.0],
         slot_offsets: vec![0.0, 100.0],
+        inset: 0.0,
         effective_h: 70.0,
     };
     assert_eq!(
-        tall.iter_visible(10.0).collect::<Vec<_>>(),
+        rows(&tall, 10.0),
         vec![(0, 10.0, 70.0)],
         "an oversized newest card is clamped to the zone"
     );
@@ -592,9 +601,10 @@ fn test_zone_slot_layout_iter_visible_clips_and_clamps() {
         ordered_indices: vec![0, 1],
         slot_heights: vec![30.0, 30.0],
         slot_offsets: vec![0.0, 30.0],
+        inset: 0.0,
         effective_h: 30.0, // zone_bottom = zy + 30 = 40
     };
-    let tight: Vec<(usize, f32, f32)> = layout_tight.iter_visible(10.0).collect();
+    let tight = rows(&layout_tight, 10.0);
     // slot 0: slot_y = 10 < 40 → emitted; slot 1: slot_y = 40 ≥ 40 → excluded
     assert_eq!(
         tight.len(),
@@ -602,6 +612,20 @@ fn test_zone_slot_layout_iter_visible_clips_and_clamps() {
         "slot starting at zone_bottom must be excluded"
     );
     assert_eq!(tight[0].0, 0, "only slot 0 is emitted");
+
+    // An inset (alert banners) narrows every slot by it on both sides.
+    let inset = ZoneSlotLayout {
+        inset: 16.0,
+        ..layout_tight
+    };
+    assert_eq!(
+        inset
+            .iter_visible(zone(10.0))
+            .next()
+            .map(|(_, c)| (c.x, c.width)),
+        Some((16.0, 68.0)),
+        "inset slots keep clear of the zone sides"
+    );
 }
 
 /// MergeByKey zone: every StatusBar publication's entries are merged, one

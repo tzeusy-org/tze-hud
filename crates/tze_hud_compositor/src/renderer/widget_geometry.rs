@@ -274,8 +274,8 @@ impl Compositor {
                             bounds.height,
                             bounds.width,
                         );
-                        let (_, y, h) = slots.iter_visible(bounds.y).last()?;
-                        bounds.height = y + h - bounds.y;
+                        let (_, card) = slots.iter_visible(bounds).last()?;
+                        bounds.height = card.y + card.height - bounds.y;
                     }
                 }
                 Some(self.border_only_cmd(

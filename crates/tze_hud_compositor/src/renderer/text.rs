@@ -16,15 +16,14 @@ use tze_hud_scene::types::*;
 use crate::text::TextItem;
 
 use super::icon::parse_notification_icon;
-use super::notification_style::{DISMISS_GLYPH, NotificationStyle, dismiss_bounds};
+use super::notification_style::{DISMISS_GLYPH, NotificationStyle, dismiss_bounds, severity_glyph};
 use super::token_colors::{
     DISCONNECT_BADGE_LABEL, TILE_CLOSE_GLYPH, resolve_disconnect_badge_tokens,
     resolve_tile_close_tokens, tile_close_button_bounds,
 };
 use super::token_colors::{
-    ICON_SIZE_PX, ICON_TEXT_GAP_PX, is_alert_banner_zone, resolve_composer_overlay_tokens,
-    resolve_notification_action_tokens, resolve_text_secondary_color,
-    resolve_transcript_max_measure_px, urgency_to_on_severity_color,
+    ICON_SIZE_PX, ICON_TEXT_GAP_PX, resolve_composer_overlay_tokens, resolve_text_secondary_color,
+    resolve_transcript_max_measure_px,
 };
 
 /// Default line-height multiplier (`font_size_px × 1.4 = line_height_px`).
@@ -312,14 +311,14 @@ impl super::Compositor {
             match zone_def.contention_policy {
                 ContentionPolicy::Stack { .. } => {
                     let layout = self.zone_slot_layout(zone_name, publishes, policy, zh, zw);
-                    for (pub_idx, slot_y, effective_slot_h) in layout.iter_visible(zy) {
+                    for (pub_idx, card) in layout.iter_visible(Rect::new(zx, zy, zw, zh)) {
                         if let ZoneContent::StreamText(text) = &publishes[pub_idx].content {
                             items.push(Self::zone_stream_text_item(
                                 text,
-                                zx,
-                                slot_y,
-                                zw,
-                                effective_slot_h,
+                                card.x,
+                                card.y,
+                                card.width,
+                                card.height,
                                 policy,
                                 1.0,
                                 scale,
@@ -451,14 +450,11 @@ impl super::Compositor {
                     // Slot geometry is computed once by zone_slot_layout and shared
                     // with render_zone_content / collect_all_rounded_rect_cmds (hud-qlerb).
                     let layout = self.zone_slot_layout(zone_name, publishes, policy, zh, zw);
+                    // Cards and alert banners take every size and colour from
+                    // their `NotificationStyle` (hud-h51u7.4.1, hud-h51u7.4.2).
+                    let style = NotificationStyle::for_zone(zone_name, zone_tokens, policy);
 
-                    // Resolve notification typography tokens needed for text rendering
-                    // (not slot geometry — those live in zone_slot_layout).
-                    let action_tokens = resolve_notification_action_tokens(zone_tokens);
-                    let (notif_action_font_size_px, notif_action_font_weight) =
-                        (action_tokens.font_size_px, action_tokens.font_weight);
-
-                    for (pub_idx, slot_y, effective_slot_h) in layout.iter_visible(zy) {
+                    for (pub_idx, card) in layout.iter_visible(Rect::new(zx, zy, zw, zh)) {
                         let record = &publishes[pub_idx];
                         if notifications_only
                             && !matches!(&record.content, ZoneContent::Notification(_))
@@ -475,62 +471,32 @@ impl super::Compositor {
                             ZoneContent::StreamText(text) => {
                                 items.push(Self::zone_stream_text_item(
                                     text,
-                                    zx,
-                                    slot_y,
-                                    zw,
-                                    effective_slot_h,
+                                    card.x,
+                                    card.y,
+                                    card.width,
+                                    card.height,
                                     policy,
                                     effective_opacity,
                                     scale,
                                 ));
                             }
                             ZoneContent::Notification(payload) => {
-                                // Notification cards take every size and colour
-                                // from `NotificationStyle` (hud-h51u7.4.1); alert
-                                // banners keep their policy/severity text until
-                                // hud-h51u7.4.2. Bands come from the shared
+                                // Bands come from the shared
                                 // `notification_text_layout`, which admission-time
                                 // fit measurement also uses.
-                                // If a cached icon texture exists, inset text to the right of it.
-                                let icon_shown = parse_notification_icon(&payload.icon)
+                                let agent_icon = parse_notification_icon(&payload.icon)
                                     .is_some_and(|id| self.image_texture_cache.contains_key(&id));
                                 let text_layout =
                                     super::notification_text::notification_text_layout(
                                         zone_name,
-                                        &self.token_map,
                                         zone_tokens,
                                         policy,
                                         payload,
-                                        zw,
-                                        effective_slot_h,
-                                        &self.notification_action_layout(
-                                            zone_name, record, policy, zw,
-                                        ),
-                                        icon_shown,
-                                        scale,
+                                        card.width,
+                                        agent_icon,
                                     );
                                 let font_family = text_layout.font_family;
-                                // Text color: alert-banner uses the on-severity
-                                // color for its fill; else policy explicit >
-                                // color.text.primary token > near-white.
-                                let on_severity = is_alert_banner_zone(zone_name)
-                                    .then(|| {
-                                        urgency_to_on_severity_color(payload.urgency, zone_tokens)
-                                    })
-                                    .flatten();
-                                let base_color = on_severity
-                                    .or(policy.text_color)
-                                    .map(crate::text::rgba_to_srgb_u8)
-                                    .unwrap_or_else(|| {
-                                        Self::resolve_text_primary_color(zone_tokens)
-                                    });
-                                let color = crate::text::apply_opacity_to_color(
-                                    base_color,
-                                    effective_opacity,
-                                );
-                                // Outline: use policy outline if set, otherwise
-                                // derive from policy (ensures legibility on
-                                // light-colored backdrops like warning/amber).
+                                // Outline: only when the policy sets one.
                                 let (oc, ow) = match (policy.outline_color, policy.outline_width) {
                                     (Some(oc), Some(ow)) if ow > 0.0 => {
                                         let oc_srgb = crate::text::apply_opacity_to_color(
@@ -542,12 +508,10 @@ impl super::Compositor {
                                     _ => (None, None),
                                 };
 
-                                // Cards colour each band by its urgency tone:
-                                // a lone body line is the message (title role
-                                // colour), under a title it is the variant.
-                                let card_style = (!is_alert_banner_zone(zone_name))
-                                    .then(|| NotificationStyle::resolve(zone_tokens, policy));
-                                let tone = card_style.as_ref().map(|s| s.tone(payload.urgency));
+                                // Each band takes its urgency tone: a lone body
+                                // line is the message (title role colour), under
+                                // a title it is the variant.
+                                let tone = style.tone(payload.urgency);
                                 let tone_color = |c: Rgba| {
                                     crate::text::apply_opacity_to_color(
                                         crate::text::rgba_to_srgb_u8(c),
@@ -555,20 +519,16 @@ impl super::Compositor {
                                     )
                                 };
                                 for band in &text_layout.bands {
-                                    let band_color = match tone {
-                                        Some(t)
-                                            if band.field == "body"
-                                                && !payload.title.is_empty() =>
-                                        {
-                                            tone_color(t.body)
-                                        }
-                                        Some(t) => tone_color(t.title),
-                                        None => color,
-                                    };
+                                    let band_color =
+                                        if band.field == "body" && !payload.title.is_empty() {
+                                            tone_color(tone.body)
+                                        } else {
+                                            tone_color(tone.title)
+                                        };
                                     let mut item = Self::make_zone_text_item(
                                         Arc::from(band.text),
-                                        zx + text_layout.x,
-                                        slot_y + band.y,
+                                        card.x + text_layout.x,
+                                        card.y + band.y,
                                         text_layout.width,
                                         band.height,
                                         band.font_size_px,
@@ -587,113 +547,28 @@ impl super::Compositor {
                                     items.push(item);
                                 }
 
-                                if self.text_rasterizer.is_some() {
-                                    let action_layout = self
-                                        .notification_action_layout(zone_name, record, policy, zw);
-                                    let (label_size, label_weight) = match &card_style {
-                                        Some(s) => (s.action_label.size, s.action_label.weight),
-                                        None => {
-                                            (notif_action_font_size_px, notif_action_font_weight)
-                                        }
-                                    };
-                                    for (index, (action, b)) in payload
-                                        .actions
-                                        .iter()
-                                        .zip(action_layout.bounds(zx, slot_y, zw, effective_slot_h))
-                                        .enumerate()
-                                    {
-                                        let label_color = card_style.as_ref().map_or(color, |s| {
-                                            tone_color(s.action_label_color(index, payload.urgency))
-                                        });
-                                        let available =
-                                            (b.width - action_layout.padding * 2.0).max(1.0);
-                                        let hint_width = action_layout.hint_width.min(available);
-                                        let mark = action_layout
-                                            .link_marks
-                                            .get(index)
-                                            .and_then(Option::as_ref);
-                                        let mark_width = mark.map_or(0.0, |(_, width)| {
-                                            (*width).min((available - hint_width).max(0.0))
-                                        });
-                                        let label_y = b.y + action_layout.label_y;
-                                        let label_h = action_layout.label_height.max(1.0);
-                                        let label = |text: Arc<str>, x: f32, width: f32, align| {
-                                            let mut item = Self::make_zone_text_item(
-                                                text,
-                                                x,
-                                                label_y,
-                                                width,
-                                                label_h,
-                                                label_size,
-                                                font_family,
-                                                label_weight,
-                                                label_color,
-                                                align,
-                                                tze_hud_scene::types::TextOverflow::Clip,
-                                                None,
-                                                None,
-                                                effective_opacity,
-                                            );
-                                            if let Some(m) = action_layout.label_line_multiplier {
-                                                item.line_height_multiplier = m;
-                                            }
-                                            item
-                                        };
-                                        if scene.overlay.notification_answer
-                                            == Some(record.publication_id)
-                                        {
-                                            items.push(label(
-                                                Arc::from((index + 1).to_string()),
-                                                b.x + action_layout.padding,
-                                                hint_width,
-                                                tze_hud_scene::types::TextAlign::Start,
-                                            ));
-                                        }
-                                        items.push(label(
-                                            Arc::from(action.label.as_str()),
-                                            b.x + action_layout.padding + hint_width,
-                                            action_layout.label_width(&b, index),
-                                            tze_hud_scene::types::TextAlign::Center,
-                                        ));
-                                        if let Some((mark, _)) = mark {
-                                            items.push(label(
-                                                Arc::from(mark.as_str()),
-                                                b.x + b.width - action_layout.padding - mark_width,
-                                                mark_width,
-                                                tze_hud_scene::types::TextAlign::Start,
-                                            ));
-                                        }
-                                    }
+                                if self.text_rasterizer.is_none() {
+                                    continue;
                                 }
-
-                                if let Some(style) = &card_style
-                                    && self.text_rasterizer.is_some()
-                                {
-                                    let dismiss = dismiss_bounds(
-                                        zone_name,
-                                        zone_tokens,
-                                        policy,
-                                        zx,
-                                        slot_y,
-                                        zw,
-                                        effective_slot_h,
+                                // Alert banner severity mark: its glyph, in the
+                                // ring `collect_all_rounded_rect_cmds` draws.
+                                if let Some(mark) = style.mark(payload.urgency, agent_icon) {
+                                    let icon = style.icon_bounds(
+                                        card.x,
+                                        card.y,
+                                        !payload.title.is_empty(),
                                     );
-                                    let tone = style.tone(payload.urgency);
-                                    let glyph = style.dismiss_glyph;
-                                    static DISMISS_LABEL: std::sync::OnceLock<Arc<str>> =
-                                        std::sync::OnceLock::new();
+                                    let glyph = style.title;
                                     let mut item = Self::make_zone_text_item(
-                                        Arc::clone(
-                                            DISMISS_LABEL.get_or_init(|| Arc::from(DISMISS_GLYPH)),
-                                        ),
-                                        dismiss.x,
-                                        dismiss.y + (dismiss.height - glyph.line_height) * 0.5,
-                                        dismiss.width.max(1.0),
+                                        Arc::from(severity_glyph(payload.urgency)),
+                                        icon.x,
+                                        icon.y + (icon.height - glyph.line_height) * 0.5,
+                                        icon.width.max(1.0),
                                         glyph.line_height.max(1.0),
                                         glyph.size,
                                         font_family,
                                         glyph.weight,
-                                        tone_color(tone.body),
+                                        tone_color(mark),
                                         tze_hud_scene::types::TextAlign::Center,
                                         tze_hud_scene::types::TextOverflow::Clip,
                                         None,
@@ -703,6 +578,110 @@ impl super::Compositor {
                                     item.line_height_multiplier = glyph.multiplier();
                                     items.push(item);
                                 }
+
+                                let action_layout = self.notification_action_layout(
+                                    zone_name, record, policy, card.width,
+                                );
+                                let (label_size, label_weight) =
+                                    (style.action_label.size, style.action_label.weight);
+                                for (index, (action, b)) in payload
+                                    .actions
+                                    .iter()
+                                    .zip(action_layout.bounds(
+                                        card.x,
+                                        card.y,
+                                        card.width,
+                                        card.height,
+                                    ))
+                                    .enumerate()
+                                {
+                                    let label_color = tone_color(
+                                        style.action_label_color(index, payload.urgency),
+                                    );
+                                    let available =
+                                        (b.width - action_layout.padding * 2.0).max(1.0);
+                                    let hint_width = action_layout.hint_width.min(available);
+                                    let mark = action_layout
+                                        .link_marks
+                                        .get(index)
+                                        .and_then(Option::as_ref);
+                                    let mark_width = mark.map_or(0.0, |(_, width)| {
+                                        (*width).min((available - hint_width).max(0.0))
+                                    });
+                                    let label_y = b.y + action_layout.label_y;
+                                    let label_h = action_layout.label_height.max(1.0);
+                                    let label = |text: Arc<str>, x: f32, width: f32, align| {
+                                        let mut item = Self::make_zone_text_item(
+                                            text,
+                                            x,
+                                            label_y,
+                                            width,
+                                            label_h,
+                                            label_size,
+                                            font_family,
+                                            label_weight,
+                                            label_color,
+                                            align,
+                                            tze_hud_scene::types::TextOverflow::Clip,
+                                            None,
+                                            None,
+                                            effective_opacity,
+                                        );
+                                        if let Some(m) = action_layout.label_line_multiplier {
+                                            item.line_height_multiplier = m;
+                                        }
+                                        item
+                                    };
+                                    if scene.overlay.notification_answer
+                                        == Some(record.publication_id)
+                                    {
+                                        items.push(label(
+                                            Arc::from((index + 1).to_string()),
+                                            b.x + action_layout.padding,
+                                            hint_width,
+                                            tze_hud_scene::types::TextAlign::Start,
+                                        ));
+                                    }
+                                    items.push(label(
+                                        Arc::from(action.label.as_str()),
+                                        b.x + action_layout.padding + hint_width,
+                                        action_layout.label_width(&b, index),
+                                        tze_hud_scene::types::TextAlign::Center,
+                                    ));
+                                    if let Some((mark, _)) = mark {
+                                        items.push(label(
+                                            Arc::from(mark.as_str()),
+                                            b.x + b.width - action_layout.padding - mark_width,
+                                            mark_width,
+                                            tze_hud_scene::types::TextAlign::Start,
+                                        ));
+                                    }
+                                }
+
+                                let dismiss = dismiss_bounds(zone_name, zone_tokens, policy, card);
+                                let glyph = style.dismiss_glyph;
+                                static DISMISS_LABEL: std::sync::OnceLock<Arc<str>> =
+                                    std::sync::OnceLock::new();
+                                let mut item = Self::make_zone_text_item(
+                                    Arc::clone(
+                                        DISMISS_LABEL.get_or_init(|| Arc::from(DISMISS_GLYPH)),
+                                    ),
+                                    dismiss.x,
+                                    dismiss.y + (dismiss.height - glyph.line_height) * 0.5,
+                                    dismiss.width.max(1.0),
+                                    glyph.line_height.max(1.0),
+                                    glyph.size,
+                                    font_family,
+                                    glyph.weight,
+                                    tone_color(tone.body),
+                                    tze_hud_scene::types::TextAlign::Center,
+                                    tze_hud_scene::types::TextOverflow::Clip,
+                                    None,
+                                    None,
+                                    effective_opacity,
+                                );
+                                item.line_height_multiplier = glyph.multiplier();
+                                items.push(item);
                             }
                             _ => {}
                         }

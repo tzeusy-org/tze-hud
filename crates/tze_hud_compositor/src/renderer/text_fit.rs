@@ -24,7 +24,6 @@ use tze_hud_scene::types::{
 use super::Compositor;
 use super::notification_layout::NotificationLayoutCache;
 use super::notification_text::notification_text_layout;
-use super::token_colors::resolve_notification_action_tokens;
 use crate::display::DisplayLayout;
 
 /// The compositor's current drawing inputs, shared with MCP admission.
@@ -102,9 +101,8 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
             return Vec::new();
         }
         let zone_tokens = tze_hud_config::tokens::for_zone(tokens, zone);
-        let scale = tze_hud_config::tokens::px_scale(&zone_tokens);
         let policy = &zone_def.rendering_policy;
-        let (_, zy, zw, zh) = super::zone_geometry_in(
+        let (zx, zy, zw, zh) = super::zone_geometry_in(
             &state.layout,
             zone,
             &scene.effective_zone_geometry(zone_def),
@@ -134,25 +132,18 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
             zw,
             &state.cards,
         );
-        let Some((_, slot_y, slot_h)) = slots.iter_visible(zy).next() else {
+        let Some((_, card)) = slots
+            .iter_visible(tze_hud_scene::types::Rect::new(zx, zy, zw, zh))
+            .next()
+        else {
             return Vec::new();
         };
         let mut cards = state.cards.borrow_mut();
-        let actions = cards.resolve(&zone_tokens, zone, &record, policy, zw);
-        let icon_shown = super::icon::parse_notification_icon(&payload.icon)
+        let actions = cards.resolve(&zone_tokens, zone, &record, policy, card.width);
+        let agent_icon = super::icon::parse_notification_icon(&payload.icon)
             .is_some_and(|id| scene.registered_resources.contains_key(&id));
-        let text = notification_text_layout(
-            zone,
-            tokens,
-            &zone_tokens,
-            policy,
-            payload,
-            zw,
-            slot_h,
-            &actions,
-            icon_shown,
-            scale,
-        );
+        let text =
+            notification_text_layout(zone, &zone_tokens, policy, payload, card.width, agent_icon);
         let fonts = cards.fallback_fonts(&zone_tokens);
         let mut clipped = Vec::new();
         for band in &text.bands {
@@ -176,17 +167,13 @@ impl tze_hud_scene::TextFit for TextFitMeasurer {
                 clipped.push(band.field);
             }
         }
-        let label = if super::token_colors::is_alert_banner_zone(zone) {
-            let action = resolve_notification_action_tokens(&zone_tokens);
-            (action.font_size_px, action.font_weight)
-        } else {
-            let style = super::notification_style::NotificationStyle::resolve(&zone_tokens, policy);
-            (style.action_label.size, style.action_label.weight)
-        };
+        let style =
+            super::notification_style::NotificationStyle::for_zone(zone, &zone_tokens, policy);
+        let label = (style.action_label.size, style.action_label.weight);
         let cut_label = payload
             .actions
             .iter()
-            .zip(actions.bounds(0.0, slot_y, zw, slot_h))
+            .zip(actions.bounds(card.x, card.y, card.width, card.height))
             .enumerate()
             .any(|(index, (action, bound))| {
                 action.label.contains('\n')

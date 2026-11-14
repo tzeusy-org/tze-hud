@@ -1,4 +1,4 @@
-//! Severity / urgency / tile-background color constants and free color helpers.
+//! Tile-background color constants, zone ordering and free color helpers.
 //!
 //! Moved from `renderer.rs` banners 1–3 by Step R-1 of the renderer module split
 //! (hud-fgryk).  No logic was changed; only visibility modifiers were added where
@@ -8,48 +8,6 @@ use std::collections::HashMap;
 use tze_hud_config::tokens::px_scale;
 
 use tze_hud_scene::types::*;
-
-// ─── Severity token fallback colors ─────────────────────────────────────────
-
-/// Default severity colors (linear sRGB) used when design tokens are absent.
-///
-/// Per spec §Canonical Token Schema:
-///   color.severity.info     → #4A9EFF → (0.078, 0.384, 1.0)
-///   color.severity.warning  → #FFB800 → (1.0, 0.722, 0.0)
-///   color.severity.critical → #FF0000 → (1.0, 0.0, 0.0)
-pub(super) const SEVERITY_INFO: Rgba = Rgba {
-    r: 0.078,
-    g: 0.384,
-    b: 1.0,
-    a: 1.0,
-};
-pub(super) const SEVERITY_WARNING: Rgba = Rgba {
-    r: 1.0,
-    g: 0.722,
-    b: 0.0,
-    a: 1.0,
-};
-pub(super) const SEVERITY_CRITICAL: Rgba = Rgba {
-    r: 1.0,
-    g: 0.0,
-    b: 0.0,
-    a: 1.0,
-};
-
-/// Scale factor for the body line font size in two-line notification layout.
-///
-/// When a `NotificationPayload.title` is non-empty, the body text (`text` field)
-/// is rendered at `title_font_size * NOTIFICATION_BODY_SCALE`.
-///
-/// Token override path: `typography.notification.body.scale` (parsed as f32).
-/// Fallback: 0.85.
-pub(super) const NOTIFICATION_BODY_SCALE: f32 = 0.85;
-
-/// Bold font weight used for the title line in two-line notification layout.
-///
-/// Token override: `typography.notification.title.weight` (parsed as u16).
-/// Fallback: 700 (bold).
-pub(super) const NOTIFICATION_TITLE_WEIGHT: u16 = 700;
 
 /// Adaptive mid-drag re-truncation cadence thresholds (hud-3to8i).
 ///
@@ -109,9 +67,6 @@ pub(crate) fn adaptive_reprime_interval_ms(total_content_bytes: usize) -> u64 {
     }
 }
 
-/// Vertical gap (px) between the title line and the body line in two-line layout.
-pub(super) const NOTIFICATION_INTER_LINE_GAP: f32 = 2.0;
-
 /// Warm-gray placeholder color rendered for `ZoneContent::StaticImage` zones.
 ///
 /// Full GPU texture upload (wgpu sampler pipeline) is deferred to a follow-up
@@ -123,18 +78,6 @@ pub(super) const STATIC_IMAGE_PLACEHOLDER_COLOR: Rgba = Rgba {
     b: 0.3,
     a: 1.0,
 };
-
-/// Size of a notification icon in pixels (square, 24×24).
-///
-/// Icons are rendered left-aligned within the notification backdrop, at the
-/// same horizontal inset as the text, and vertically centred in the slot.
-pub(super) const NOTIFICATION_ICON_SIZE_PX: f32 = 24.0;
-
-/// Horizontal gap between the icon and the notification text (pixels).
-pub(super) const NOTIFICATION_ICON_GAP_PX: f32 = 6.0;
-
-/// Side length of the notification dismiss affordance (square, top-right).
-pub(super) const NOTIFICATION_DISMISS_BUTTON_SIZE_PX: f32 = 20.0;
 
 /// Fallback color for `color.border.default` when the token is absent.
 ///
@@ -236,8 +179,8 @@ pub(super) fn srgb_to_linear(c: f32) -> f32 {
 /// Returns `true` if the zone name is an alert-banner zone.
 ///
 /// Per spec §V1 Component Type Definitions: the alert-banner zone name is
-/// `"alert-banner"`.  notification-area uses urgency-tinted notification
-/// backdrop tokens, not severity tokens.
+/// `"alert-banner"`. It sorts by severity, grows to its banners and reads the
+/// alert roles (`NotificationStyle::for_zone`).
 #[inline]
 pub(super) fn is_alert_banner_zone(zone_name: &str) -> bool {
     zone_name == "alert-banner"
@@ -322,44 +265,6 @@ pub(super) fn resolve_token_color(token_map: &HashMap<String, String>, key: &str
     token_map.get(key).and_then(|v| parse_hex_color(v))
 }
 
-/// Look up a severity token key in the resolved token map and parse it as a
-/// color.  Returns `None` if the key is absent or the value is not a valid
-/// hex color.
-#[inline]
-pub(super) fn resolve_severity_token(
-    token_map: &HashMap<String, String>,
-    key: &str,
-) -> Option<Rgba> {
-    resolve_token_color(token_map, key)
-}
-
-/// Map a `NotificationPayload.urgency` level to a severity backdrop color.
-///
-/// Looks up `color.severity.{info,warning,critical}` in `token_map` first;
-/// falls back to hardcoded SEVERITY_* constants when the key is absent or
-/// cannot be parsed as a hex color.
-///
-/// Per spec §Notification Urgency-to-Severity Token Mapping:
-///   urgency 0, 1 → color.severity.info   (fallback: #4A9EFF)
-///   urgency 2    → color.severity.warning (fallback: #FFB800)
-///   urgency 3    → color.severity.critical (fallback: #FF0000)
-///
-/// The returned `Rgba` alpha is 1.0 (unless the token itself carries an alpha
-/// via `#RRGGBBAA`); `backdrop_opacity` from the policy is applied by the
-/// caller after this lookup.
-///
-/// MUST NOT be used for notification-area zones. Only for alert-banner zones.
-pub(super) fn urgency_to_severity_color(urgency: u32, token_map: &HashMap<String, String>) -> Rgba {
-    match urgency {
-        3 => resolve_severity_token(token_map, "color.severity.critical")
-            .unwrap_or(SEVERITY_CRITICAL),
-        2 => {
-            resolve_severity_token(token_map, "color.severity.warning").unwrap_or(SEVERITY_WARNING)
-        }
-        _ => resolve_severity_token(token_map, "color.severity.info").unwrap_or(SEVERITY_INFO),
-    }
-}
-
 /// Fallback for `opacity.ambient.max` (keep in sync with `tze_hud_config`'s
 /// `CANONICAL_TOKENS`).
 const AMBIENT_OPACITY_MAX_DEFAULT: f32 = 0.9;
@@ -376,21 +281,6 @@ pub(super) fn zone_opacity_ceiling(zone_name: &str, token_map: &HashMap<String, 
         .and_then(|v| v.parse::<f32>().ok())
         .filter(|v| v.is_finite())
         .map_or(AMBIENT_OPACITY_MAX_DEFAULT, |v| v.clamp(0.0, 1.0))
-}
-
-/// Text color for an alert-banner publication: `color.on_severity.*` for its
-/// urgency, the counterpart of [`urgency_to_severity_color`]. `None` when the
-/// token is absent or invalid (the caller keeps the policy text color).
-pub(super) fn urgency_to_on_severity_color(
-    urgency: u32,
-    token_map: &HashMap<String, String>,
-) -> Option<Rgba> {
-    let key = match urgency {
-        3.. => "color.on_severity.critical",
-        2 => "color.on_severity.warning",
-        _ => "color.on_severity.info",
-    };
-    resolve_token_color(token_map, key)
 }
 
 /// Resolve the `color.border.default` token from the map.
@@ -423,17 +313,6 @@ pub(super) fn resolve_tile_bg_token(
     fallback: Rgba,
 ) -> Rgba {
     resolve_token_color(token_map, key).unwrap_or(fallback)
-}
-
-#[inline]
-pub(super) fn resolve_notification_control_color(
-    policy: &RenderingPolicy,
-    token_map: &HashMap<String, String>,
-) -> Rgba {
-    policy.text_color.unwrap_or_else(|| {
-        resolve_token_color(token_map, "color.text.primary")
-            .unwrap_or(Rgba::new(1.0, 1.0, 1.0, 0.875))
-    })
 }
 
 /// Resolve `ScrollIndicatorTokens` from the compositor token map.
@@ -904,53 +783,9 @@ pub(super) fn resolve_section_gap_px(token_map: &HashMap<String, String>) -> f32
         * px_scale(token_map)
 }
 
-/// Bounds of a notification's dismiss ×: top-right, `inset` (see
-/// [`notification_inset`]) from the card's top and right edges so the
-/// rounded corner never clips it. The single geometry source for both
-/// drawing and the hit region.
-#[inline]
-pub(super) fn notification_dismiss_bounds(
-    x: f32,
-    slot_y: f32,
-    w: f32,
-    effective_slot_h: f32,
-    scale: f32,
-    inset: f32,
-) -> Rect {
-    let size = NOTIFICATION_DISMISS_BUTTON_SIZE_PX * scale;
-    let top = inset.min((effective_slot_h - 1.0).max(0.0));
-    Rect::new(
-        x + w - inset - size,
-        slot_y + top,
-        size,
-        size.min(effective_slot_h - top).max(1.0),
-    )
-}
-
 /// Width of the notification card border and the dismiss-control outline,
 /// drawn by the SDF pipeline (`RoundedRectBorder`).
 pub(super) const NOTIFICATION_BORDER_WIDTH_PX: f32 = 1.0;
-
-/// Height of the notification action-button row (bottom strip of the slot).
-pub(super) const NOTIFICATION_ACTION_BUTTON_H_PX: f32 = 22.0;
-
-/// Card inset (dp) when the zone policy sets no margin: the border plus 8 dp
-/// of padding.
-pub(super) const NOTIFICATION_INSET_DEFAULT_PX: f32 = 9.0;
-
-/// The card inset in physical px: text, the action-button row and the
-/// dismiss × all sit this far from the card edge, so the rounded backdrop
-/// fully contains them. It is the zone policy's horizontal margin (from the
-/// `spacing.notification.inset` token for notification-area).
-pub(super) fn notification_inset(policy: &RenderingPolicy, scale: f32) -> f32 {
-    policy
-        .margin_horizontal
-        .or(policy.margin_px)
-        .unwrap_or(NOTIFICATION_INSET_DEFAULT_PX * scale)
-}
-
-/// Gap between a notification's text and its action-button row.
-pub(super) const NOTIFICATION_ACTION_ROW_GAP_PX: f32 = 4.0;
 
 /// One display label shared by shaping and painting; uses action typography/color.
 pub(super) fn notification_action_label(
@@ -968,79 +803,6 @@ pub(super) fn notification_action_label(
         )
     } else {
         action.label.clone()
-    }
-}
-
-/// Resolved tokens for notification action buttons.
-#[derive(Clone, Debug)]
-pub(super) struct NotificationActionTokens {
-    /// Button fill (linear-light RGBA, as `parse_hex_color` returns).
-    pub(super) background: Rgba,
-    /// Fill of a hovered action or dismiss button.
-    pub(super) background_hover: Rgba,
-    /// Fill of a pressed action or dismiss button.
-    pub(super) background_pressed: Rgba,
-    pub(super) font_size_px: f32,
-    pub(super) font_weight: u16,
-}
-
-impl NotificationActionTokens {
-    /// Fill for a control in `state`: pressed wins over hovered. `None` for
-    /// an idle dismiss button, which draws only its outline.
-    pub(super) fn state_fill(&self, state: ChromeLocalState, idle: Option<Rgba>) -> Option<Rgba> {
-        if state.pressed {
-            Some(self.background_pressed)
-        } else if state.hovered {
-            Some(self.background_hover)
-        } else {
-            idle
-        }
-    }
-}
-
-// Fallbacks MUST stay in sync with `tze_hud_config`'s `CANONICAL_TOKENS`
-// entries `notification.action.background*` and
-// `typography.notification.action.*` (the crates are intentionally unlinked).
-const NOTIFICATION_ACTION_DEFAULT_BACKGROUND_HEX: &str = "#FFFFFF26";
-const NOTIFICATION_ACTION_DEFAULT_BACKGROUND_HOVER_HEX: &str = "#FFFFFF4D";
-const NOTIFICATION_ACTION_DEFAULT_BACKGROUND_PRESSED_HEX: &str = "#FFFFFF80";
-const NOTIFICATION_ACTION_DEFAULT_FONT_SIZE_PX: f32 = 12.0;
-const NOTIFICATION_ACTION_DEFAULT_FONT_WEIGHT: u16 = 600;
-
-pub(super) fn resolve_notification_action_tokens(
-    token_map: &HashMap<String, String>,
-) -> NotificationActionTokens {
-    let color = |key: &str, default_hex: &str| {
-        resolve_token_color(token_map, key)
-            .or_else(|| parse_hex_color(default_hex))
-            .unwrap_or(Rgba::WHITE)
-    };
-    let font_size_px = token_map
-        .get("typography.notification.action.font_size_px")
-        .and_then(|v| v.trim_end_matches("px").parse::<f32>().ok())
-        .filter(|v| v.is_finite())
-        .unwrap_or(NOTIFICATION_ACTION_DEFAULT_FONT_SIZE_PX)
-        .clamp(6.0, 200.0)
-        * px_scale(token_map);
-    let font_weight = token_map
-        .get("typography.notification.action.font_weight")
-        .and_then(|v| v.parse::<u16>().ok())
-        .unwrap_or(NOTIFICATION_ACTION_DEFAULT_FONT_WEIGHT);
-    NotificationActionTokens {
-        background: color(
-            "notification.action.background",
-            NOTIFICATION_ACTION_DEFAULT_BACKGROUND_HEX,
-        ),
-        background_hover: color(
-            "notification.action.background_hover",
-            NOTIFICATION_ACTION_DEFAULT_BACKGROUND_HOVER_HEX,
-        ),
-        background_pressed: color(
-            "notification.action.background_pressed",
-            NOTIFICATION_ACTION_DEFAULT_BACKGROUND_PRESSED_HEX,
-        ),
-        font_size_px,
-        font_weight,
     }
 }
 
@@ -1510,30 +1272,11 @@ mod tests {
     // ── Widget/zone UX pass tokens ────────────────────────────────────────────
 
     #[test]
-    fn notification_inset_is_the_policy_margin_else_nine_dp() {
-        let mut policy = RenderingPolicy::default();
-        assert_eq!(notification_inset(&policy, 2.0), 18.0);
-        policy.margin_horizontal = Some(24.0);
-        assert_eq!(notification_inset(&policy, 2.0), 24.0);
-    }
-
-    #[test]
     fn only_ambient_background_has_an_opacity_ceiling() {
         let tm = token_map(&[]);
         assert_eq!(zone_opacity_ceiling("ambient-background", &tm), 0.9);
         assert_eq!(zone_opacity_ceiling("pip", &tm), 1.0);
         let tm = token_map(&[("opacity.ambient.max", "0.5")]);
         assert_eq!(zone_opacity_ceiling("ambient-background", &tm), 0.5);
-    }
-
-    #[test]
-    fn banner_text_uses_the_on_severity_token_for_its_urgency() {
-        let tm = token_map(&[
-            ("color.on_severity.info", "#000000"),
-            ("color.on_severity.warning", "#FFFFFF"),
-        ]);
-        assert_eq!(urgency_to_on_severity_color(1, &tm).map(|c| c.r), Some(0.0));
-        assert_eq!(urgency_to_on_severity_color(2, &tm).map(|c| c.r), Some(1.0));
-        assert_eq!(urgency_to_on_severity_color(3, &tm), None, "absent token");
     }
 }

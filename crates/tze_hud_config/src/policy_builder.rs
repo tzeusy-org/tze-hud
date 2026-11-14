@@ -228,41 +228,50 @@ pub fn apply_status_bar_token_defaults(policy: &mut RenderingPolicy, tokens: &De
 
 /// Apply token-derived defaults for the `alert-banner` zone to `policy`.
 ///
-/// Token mappings:
-/// - `text_color` ← `color.text.primary` (the compositor draws banner text in
-///   `color.on_severity.*` for the publication's urgency instead)
-/// - `font_family` ← `typography.heading.family`
-/// - `font_size_px` ← `typography.heading.size`
-/// - `font_weight` ← `typography.heading.weight`
-/// - `backdrop` ← `color.backdrop.default`
-/// - `backdrop_opacity` ← `opacity.backdrop.opaque`
+/// Token mappings (the alert banner roles, hud-h51u7.4.2; the compositor's
+/// `NotificationStyle` reads every other banner metric and colour from
+/// tokens directly):
+/// - `text_color` ← `color.on_alert` (non-notification stream text)
+/// - `font_family` ← `typography.body.family`
+/// - `font_size_px` / `font_weight` ← `type.alert.title.size` / `.weight`
+/// - `backdrop` ← `color.alert.container` (presence enables the banner; its
+///   fill is the urgency tone)
+/// - `backdrop_opacity` ← `opacity.alert`
+/// - `margin_horizontal` / `margin_vertical` ← `space.alert.horizontal` /
+///   `.vertical`
+/// - `backdrop_radius` ← `shape.alert`
+/// - `text_align` ← `Start`. No text outline: banner text is drawn in a role
+///   that contrasts with its fill.
 pub fn apply_alert_banner_token_defaults(policy: &mut RenderingPolicy, tokens: &DesignTokenMap) {
     if policy.text_color.is_none() {
-        policy.text_color = token_color(tokens, "color.text.primary");
+        policy.text_color = token_color(tokens, "color.on_alert");
     }
     if policy.font_family.is_none() {
-        policy.font_family = token_font_family(tokens, "typography.heading.family");
+        policy.font_family = token_font_family(tokens, "typography.body.family");
     }
     if policy.font_size_px.is_none() {
-        policy.font_size_px = token_f32(tokens, "typography.heading.size");
+        policy.font_size_px = token_f32(tokens, "type.alert.title.size");
     }
     if policy.font_weight.is_none() {
-        policy.font_weight = token_u16(tokens, "typography.heading.weight");
+        policy.font_weight = token_u16(tokens, "type.alert.title.weight");
     }
     if policy.backdrop.is_none() {
-        policy.backdrop = token_color(tokens, "color.backdrop.default");
+        policy.backdrop = token_color(tokens, "color.alert.container");
     }
     if policy.backdrop_opacity.is_none() {
-        policy.backdrop_opacity = token_f32(tokens, "opacity.backdrop.opaque");
-    }
-    // No text outline: the compositor draws banner text in the
-    // `color.on_severity.*` color that contrasts with its severity fill.
-    // Generous vertical padding for banner readability.
-    if policy.margin_vertical.is_none() {
-        policy.margin_vertical = Some(12.0);
+        policy.backdrop_opacity = token_f32(tokens, "opacity.alert");
     }
     if policy.margin_horizontal.is_none() {
-        policy.margin_horizontal = Some(12.0);
+        policy.margin_horizontal = token_f32(tokens, "space.alert.horizontal");
+    }
+    if policy.margin_vertical.is_none() {
+        policy.margin_vertical = token_f32(tokens, "space.alert.vertical");
+    }
+    if policy.backdrop_radius.is_none() {
+        policy.backdrop_radius = token_f32(tokens, "shape.alert");
+    }
+    if policy.text_align.is_none() {
+        policy.text_align = Some(TextAlign::Start);
     }
 }
 
@@ -657,6 +666,24 @@ mod tests {
         assert!(policy.font_weight.is_some());
         assert!(policy.backdrop.is_some());
         assert!(policy.backdrop_opacity.is_some());
+        // Seeded from the alert banner roles.
+        assert_eq!(
+            policy.font_size_px,
+            token_f32(&tokens, "type.alert.title.size")
+        );
+        assert_eq!(
+            policy.backdrop,
+            token_color(&tokens, "color.alert.container")
+        );
+        assert_eq!(policy.backdrop_opacity, token_f32(&tokens, "opacity.alert"));
+        assert_eq!(policy.backdrop_radius, token_f32(&tokens, "shape.alert"));
+        assert_eq!(
+            (policy.margin_horizontal, policy.margin_vertical),
+            (
+                token_f32(&tokens, "space.alert.horizontal"),
+                token_f32(&tokens, "space.alert.vertical")
+            )
+        );
     }
 
     #[test]

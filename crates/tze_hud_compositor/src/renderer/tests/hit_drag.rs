@@ -1227,7 +1227,7 @@ async fn drag_visual_feedback_applied_during_active_drag() {
             compositor.prime_markdown_cache(&scene);
             compositor.prime_truncation_cache(&scene);
             let zone = &scene.zone_registry.zones["notif"];
-            let (_, zy, zw, zh) = Compositor::resolve_zone_geometry(
+            let (zx, zy, zw, zh) = Compositor::resolve_zone_geometry(
                 &scene.effective_zone_geometry(zone),
                 1920.0,
                 1080.0,
@@ -1239,8 +1239,8 @@ async fn drag_visual_feedback_applied_during_active_drag() {
                 zh,
                 zw,
             );
-            let admitted: Vec<_> = slots.iter_visible(zy).collect();
-            let bottom = admitted.last().map(|(_, y, h)| y + h).unwrap();
+            let admitted: Vec<_> = slots.iter_visible(Rect::new(zx, zy, zw, zh)).collect();
+            let bottom = admitted.last().map(|(_, c)| c.y + c.height).unwrap();
             assert!(bottom - zy < zh, "fixture has unused zone capacity");
             scene.set_drag_active(zone_id);
             let handles = compositor.collect_drag_handle_entries(&scene, 1920.0, 1080.0);
@@ -1279,9 +1279,10 @@ async fn drag_visual_feedback_applied_during_active_drag() {
             handle.element_bounds.height,
             handle.element_bounds.width,
         );
-        let admitted: Vec<_> = slots.iter_visible(handle.element_bounds.y).collect();
+        let admitted: Vec<_> = slots.iter_visible(handle.element_bounds).collect();
         assert!(admitted.len() < 3, "fixture excludes overflowing cards");
-        let (_, y, h) = admitted.last().unwrap();
+        let (_, card) = admitted.last().unwrap();
+        let (y, h) = (card.y, card.height);
         let feedback = compositor.drag_highlight_cmds(&scene, std::slice::from_ref(handle));
         assert_eq!(
             (feedback[0].x, feedback[0].y),

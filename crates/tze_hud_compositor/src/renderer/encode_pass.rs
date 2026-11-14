@@ -24,7 +24,6 @@
 //! - `collect_tile_rounded_rect_cmds_from_node` — recursive per-node helper
 //! - `encode_rounded_rect_pass` — GPU pass for SDF rounded-rectangle rendering
 
-use std::collections::HashMap;
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::*;
 use wgpu::util::DeviceExt;
@@ -39,10 +38,8 @@ use super::draw_cmds::TexturedDrawCmd;
 use super::hit_regions::{notification_action_interaction_id, notification_dismiss_interaction_id};
 use super::notification_style::{NotificationStyle, dismiss_bounds};
 use super::token_colors::{
-    NOTIFICATION_BORDER_WIDTH_PX, STATIC_IMAGE_PLACEHOLDER_COLOR, is_alert_banner_zone,
-    linear_to_srgb, resolve_border_default_color, resolve_notification_action_tokens,
-    resolve_notification_control_color, srgb_to_linear, urgency_to_severity_color,
-    zone_opacity_ceiling,
+    NOTIFICATION_BORDER_WIDTH_PX, STATIC_IMAGE_PLACEHOLDER_COLOR, linear_to_srgb,
+    resolve_border_default_color, srgb_to_linear, zone_opacity_ceiling,
 };
 
 #[inline]
@@ -381,38 +378,16 @@ impl super::Compositor {
         })
     }
 
-    fn notification_control_cmd(
-        &self,
-        bounds: Rect,
-        state: ChromeLocalState,
-        fill: Option<Rgba>,
-        mut outline: Rgba,
-        opacity: f32,
-        tokens: &HashMap<String, String>,
-    ) -> crate::pipeline::RoundedRectDrawCmd {
-        if state.focused {
-            outline = super::token_colors::resolve_token_color(tokens, "color.primary")
-                .unwrap_or(outline);
-            outline.a *= opacity;
-        }
-        let mut command = self.control_cmd(bounds, fill, outline, opacity);
-        if state.focused
-            && let Some(border) = command.border.as_mut()
-        {
-            border.width = tze_hud_config::tokens::token_px(tokens, "focus.ring.width", 2.0);
-        }
-        command
-    }
-
     /// Collect all zone draw commands for the SDF pipeline in a single pass,
     /// partitioned by layer.
     ///
     /// - Zones with `backdrop_radius` (when not degraded) draw their backdrop
     ///   here instead of in the flat-rect pass (`render_zone_content`).
-    /// - Non-alert-banner notification cards always get their border here, and
-    ///   the dismiss control its outline: on the rounded backdrop itself, or as
-    ///   a border-only shape over the flat backdrop (no radius, or
-    ///   `Simplified` degradation, which draws backdrops square).
+    /// - Notification cards and alert banners always get their hairline here:
+    ///   on the rounded backdrop itself, or as a border-only shape over the
+    ///   flat backdrop (no radius, or `Simplified` degradation, which draws
+    ///   backdrops square). An alert banner's severity mark ring draws here
+    ///   too (its glyph is text).
     /// - Notification action buttons (every Stack zone) draw here, after their
     ///   backdrop, as filled and outlined controls. Action and dismiss buttons
     ///   take the hover/pressed fill from `scene.overlay.chrome_states`
@@ -447,20 +422,19 @@ impl super::Compositor {
             };
             let zone_tokens = self.zone_tokens(zone_name);
             let scale = tze_hud_config::tokens::px_scale(zone_tokens);
-            let action_tokens = resolve_notification_action_tokens(zone_tokens);
             let policy = &zone_def.rendering_policy;
             // Backdrop drawn by the SDF pass (else by the flat pass, square).
             let sdf_radius = match policy.backdrop_radius {
                 Some(r) if r > 0.0 && !degraded => Some(r),
                 _ => None,
             };
-            let notification_cards = !is_alert_banner_zone(zone_name);
-            // A flat-backdrop zone only needs this pass for card borders and
-            // notification action buttons.
-            let needs_controls = publishes.iter().any(|p| match &p.content {
-                ZoneContent::Notification(n) => notification_cards || !n.actions.is_empty(),
-                ZoneContent::StatusBar(_) => true,
-                _ => false,
+            // A flat-backdrop zone only needs this pass for card borders,
+            // marks and notification controls.
+            let needs_controls = publishes.iter().any(|p| {
+                matches!(
+                    &p.content,
+                    ZoneContent::Notification(_) | ZoneContent::StatusBar(_)
+                )
             });
             if sdf_radius.is_none() && !needs_controls {
                 continue;
@@ -488,13 +462,11 @@ impl super::Compositor {
                     // Slot geometry is computed once by zone_slot_layout and shared
                     // with collect_text_items / render_zone_content (hud-qlerb).
                     let layout = self.zone_slot_layout(zone_name, publishes, policy, h, w);
-                    let card_style =
-                        notification_cards.then(|| NotificationStyle::resolve(zone_tokens, policy));
-                    for (pub_idx, slot_y, effective_slot_h) in layout.iter_visible(y) {
+                    let style = NotificationStyle::for_zone(zone_name, zone_tokens, policy);
+                    for (pub_idx, slot) in layout.iter_visible(Rect::new(x, y, w, h)) {
                         let record = &publishes[pub_idx];
                         let opacity = (anim_opacity * self.pub_opacity_at(zone_name, record, now))
                             .clamp(0.0, 1.0);
-                        let slot = Rect::new(x, slot_y, w, effective_slot_h);
                         let pushed = self.push_zone_backdrop_cmd(
                             out,
                             zone_name,
@@ -516,43 +488,24 @@ impl super::Compositor {
                                 .unwrap_or_default()
                         };
                         let action_layout =
-                            self.notification_action_layout(zone_name, record, policy, w);
-                        let Some(style) = &card_style else {
-                            // Alert-banner actions keep their pre-restyle
-                            // outlined buttons (hud-h51u7.4.2).
-                            let mut outline =
-                                resolve_notification_control_color(policy, zone_tokens);
-                            outline.a *= opacity;
-                            for (index, b) in action_layout
-                                .bounds(x, slot_y, w, effective_slot_h)
-                                .into_iter()
-                                .enumerate()
-                            {
-                                let state = chrome_state(notification_action_interaction_id(
-                                    zone_name, record, index,
-                                ));
-                                out.push(self.notification_control_cmd(
-                                    b,
-                                    state,
-                                    action_tokens.state_fill(state, Some(action_tokens.background)),
-                                    outline,
-                                    opacity,
-                                    zone_tokens,
-                                ));
-                            }
-                            continue;
-                        };
+                            self.notification_action_layout(zone_name, record, policy, slot.width);
+                        // Alert banner severity mark: a hairline ring in the
+                        // icon column (its glyph is text).
+                        let agent_icon = super::icon::parse_notification_icon(&payload.icon)
+                            .is_some_and(|id| self.image_texture_cache.contains_key(&id));
+                        if let Some(mut mark) = style.mark(payload.urgency, agent_icon) {
+                            mark.a *= opacity;
+                            let icon = style.icon_bounds(slot.x, slot.y, !payload.title.is_empty());
+                            out.push(self.border_only_cmd(
+                                icon,
+                                icon.width * 0.5,
+                                style.hairline,
+                                mark,
+                            ));
+                        }
                         // Dismiss: a borderless × that takes a state layer.
                         if pushed {
-                            let b = dismiss_bounds(
-                                zone_name,
-                                zone_tokens,
-                                policy,
-                                x,
-                                slot_y,
-                                w,
-                                effective_slot_h,
-                            );
+                            let b = dismiss_bounds(zone_name, zone_tokens, policy, slot);
                             let state = chrome_state(notification_dismiss_interaction_id(
                                 zone_name, record,
                             ));
@@ -560,7 +513,7 @@ impl super::Compositor {
                                 b,
                                 state,
                                 style.control_fill(state, None),
-                                style,
+                                &style,
                                 opacity,
                             ));
                         }
@@ -570,7 +523,7 @@ impl super::Compositor {
                         for (index, (_action, b)) in payload
                             .actions
                             .iter()
-                            .zip(action_layout.bounds(x, slot_y, w, effective_slot_h))
+                            .zip(action_layout.bounds(slot.x, slot.y, slot.width, slot.height))
                             .enumerate()
                         {
                             let state = chrome_state(notification_action_interaction_id(
@@ -580,7 +533,7 @@ impl super::Compositor {
                                 b,
                                 state,
                                 style.control_fill(state, style.action_fill(index)),
-                                style,
+                                &style,
                                 opacity,
                             ));
                         }
@@ -635,24 +588,19 @@ impl super::Compositor {
         sdf_radius: Option<f32>,
         opacity: f32,
     ) -> bool {
-        let alert_banner = is_alert_banner_zone(zone_name);
-        // Notification and status-bar cards carry a hairline border: the
-        // urgency tone's for notification cards, `color.border.default` for
-        // the status bar.
-        let is_card = match content {
-            ZoneContent::Notification(_) => !alert_banner,
-            ZoneContent::StatusBar(_) => true,
-            _ => false,
-        };
+        // Notification cards, alert banners and the status-bar card carry a
+        // hairline border: the urgency tone's for notifications,
+        // `color.border.default` for the status bar.
+        let is_card = matches!(
+            content,
+            ZoneContent::Notification(_) | ZoneContent::StatusBar(_)
+        );
         let is_notification_card = is_card && matches!(content, ZoneContent::Notification(_));
         let backdrop_rgba: Option<Rgba> = match content {
             ZoneContent::SolidColor(rgba) => Some(*rgba),
             ZoneContent::StaticImage(_) => Some(STATIC_IMAGE_PLACEHOLDER_COLOR),
-            ZoneContent::Notification(n) if alert_banner => policy
-                .backdrop
-                .map(|_| urgency_to_severity_color(n.urgency, &self.token_map)),
             ZoneContent::Notification(n) => policy.backdrop.map(|_| {
-                NotificationStyle::resolve(self.zone_tokens(zone_name), policy)
+                NotificationStyle::for_zone(zone_name, self.zone_tokens(zone_name), policy)
                     .tone(n.urgency)
                     .fill
             }),
@@ -670,7 +618,8 @@ impl super::Compositor {
         let border = is_card.then(|| {
             let (mut color, width) = match content {
                 ZoneContent::Notification(n) => {
-                    let style = NotificationStyle::resolve(self.zone_tokens(zone_name), policy);
+                    let style =
+                        NotificationStyle::for_zone(zone_name, self.zone_tokens(zone_name), policy);
                     (style.tone(n.urgency).outline, style.hairline)
                 }
                 _ => (
@@ -717,24 +666,6 @@ impl super::Compositor {
             });
         }
         true
-    }
-
-    /// A notification control (dismiss or action button): `fill` (if any)
-    /// under a 1 px `outline`, both already resolved from tokens; `opacity`
-    /// is the slot fade, applied to the fill here (the outline carries it).
-    fn control_cmd(
-        &self,
-        bounds: Rect,
-        fill: Option<Rgba>,
-        outline: Rgba,
-        opacity: f32,
-    ) -> RoundedRectDrawCmd {
-        let mut cmd = self.border_only_cmd(bounds, 0.0, NOTIFICATION_BORDER_WIDTH_PX, outline);
-        if let Some(mut fill) = fill {
-            fill.a *= opacity;
-            cmd.color = self.gpu_color(fill);
-        }
-        cmd
     }
 
     /// A transparent shape with only an inside border of `width` px.

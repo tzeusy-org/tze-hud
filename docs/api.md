@@ -1224,7 +1224,8 @@ color overrides still take precedence.
 | Roles | `color.on_surface[.variant]`, `color.outline[.variant]`, `color.primary`, `color.on_primary`, `color.[on_]primary.container`, `color.success`, `color.caution`, `color.error`, `color.[on_]caution.container`, `color.[on_]error.container` |
 | State | `state.hover.opacity`, `state.pressed.opacity`, `focus.ring.width`, `focus.ring.offset` |
 | Notification card | `color.notification.container[.low]`, `color.notification[.caution\|.error].outline`, `color.on_notification.{variant,caution,error}`, `opacity.notification`, `shape.notification`, `space.notification`, `type.notification.{title,body}.{size,line_height,weight}` |
-| Choice actions | `notification.action.link_mark`, `notification.action.{height,gap,padding}_px`, `notification.action.background{,_hover,_pressed}`, `typography.notification.action.{font_size_px,font_weight}` |
+| Alert banner | `color.alert.container`, `color.alert.{caution,error}.container`, `color.alert.outline`, `color.on_alert[.variant\|.error]`, `color.severity.{info,warning,critical}` (the severity mark), `opacity.alert`, `shape.alert`, `space.alert.{margin,horizontal,vertical}`, `type.alert.{title,body}.{size,line_height,weight}` |
+| Choice actions | `notification.action.link_mark` |
 | Motion | `motion.{enter,exit,state}.ms`, `motion.{enter,exit}.easing` (`linear`, `standard`, `decelerate`, `accelerate`) |
 | Shape | `shape.{xs,s,m,l,xl,full}` (corner radius) |
 | Spacing | `space.{xs,s,m,l,xl,xxl}` (4 px grid) |
@@ -1233,8 +1234,8 @@ color overrides still take precedence.
 Font family values are free-form family names. A name that is not loaded
 falls back to the renderer's default face for its role (see
 [Fonts](#fonts) for how names resolve). The older keys
-(`color.text.*`, `color.backdrop.default`, `border.radius.*`,
-`typography.*`, and so on) still work.
+(`color.text.*`, `border.radius.*`, `typography.*`, and so on) still
+work.
 `tonal-glass` maps them onto the semantic palette until each element is
 restyled to read the semantic keys directly.
 
@@ -1269,8 +1270,37 @@ explicit title size scales the whole card type ramp.
 `color.notification.urgency.*`, `opacity.notification.backdrop`,
 `typography.notification.dismiss.font_size_px` and
 `typography.notification.dismiss.font_weight` are retired: themes do not
-set them and a `[design_tokens]` entry for them is ignored. Alert banners
-keep their older `notification.*` metrics until they are restyled.
+set them and a `[design_tokens]` entry for them is ignored.
+
+**Alert banners** (`alert-banner`) are the same card drawn from their own
+roles. A banner is inset `space.alert.margin` from the zone's sides and
+top, and banners stack that far apart (severity first, then newest); the
+zone grows to its last banner. Urgency 0-1 fill with
+`color.alert.container`, urgency 2 with `color.alert.caution.container`
+and urgency 3 with `color.alert.error.container`, at `opacity.alert`,
+under a `stroke.border.width` `color.alert.outline` hairline, with
+`shape.alert` corners and `space.alert.horizontal` /
+`space.alert.vertical` padding. The title uses `type.alert.title.*` in
+`color.on_alert`, the body under it `type.alert.body.*` in
+`color.on_alert.variant`; a banner without a title shows its message in
+the title role. Urgency 3 text is `color.on_alert.error`. Severity shows
+as a mark in the icon column: a `space.xl` hairline ring with an `i`
+(urgency 0-1) or `!` (2-3) in the title role, tinted
+`color.severity.info`, `.warning` or `.critical`; a transparent tint draws
+no mark and the text keeps the full width, and an agent icon takes the
+column instead. The dismiss ×, actions and states are the card's. Tonal
+Glass and Blueprint set an inset `surface.container.high` card (the error
+container at urgency 3) with on-surface text and primary, caution and
+error marks; Classic sets its legacy banner (a flush, square strip filled
+#4A9EFF, #FFB800 or #FF0000 at 0.90, black text, no hairline or mark,
+8 dp side padding, a 24/700 title over a 21.6/400 body). The alert
+banner's older keys are retired and ignored like the card's:
+`color.on_severity.*`, `color.severity.error`, `color.backdrop.default`,
+`opacity.backdrop.opaque`, `typography.heading.{family,size,weight}`,
+`typography.notification.{body.scale,title.weight}`,
+`notification.action.{height,gap,padding}_px`,
+`notification.action.background{,_hover,_pressed}` and
+`typography.notification.action.{font_size_px,font_weight}`.
 
 **Adding a theme:** add `assets/themes/<name>.toml` as a flat map of
 quoted canonical keys to string values, then add it to `BUILTIN_THEMES`

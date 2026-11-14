@@ -14,8 +14,13 @@
 //! and hit testing cannot drift. The only literals are the canonical defaults
 //! in `tze_hud_config`, used when a token is absent.
 //!
-//! Alert banners (`alert-banner`) keep their own pre-restyle metrics until
-//! hud-h51u7.4.2.
+//! Alert banners (`alert-banner`, hud-h51u7.4.2) are the same card drawn
+//! from their own roles (`color.alert.*`, `color.on_alert.*`,
+//! `opacity.alert`, `space.alert.*`, `type.alert.*`, corners from
+//! `shape.alert` via the policy) and add an outer inset
+//! (`space.alert.margin`) and a severity mark: a ring with an `i` or `!`
+//! glyph tinted `color.severity.*` (a transparent tint draws none). A lone
+//! message line takes the title role in a banner, the body role in a card.
 
 use std::collections::HashMap;
 
@@ -26,6 +31,12 @@ use super::token_colors::parse_hex_color;
 
 /// The × glyph, drawn as text so its diagonals are antialiased.
 pub(super) const DISMISS_GLYPH: &str = "\u{d7}";
+
+/// The alert banner severity mark's glyph: `i` for info, `!` for caution
+/// and critical.
+pub(super) fn severity_glyph(urgency: u32) -> &'static str {
+    if urgency >= 2 { "!" } else { "i" }
+}
 
 fn canonical(key: &str) -> &'static str {
     CANONICAL_TOKENS
@@ -80,6 +91,8 @@ pub(super) struct NotificationTone {
     pub(super) outline: Rgba,
     pub(super) title: Rgba,
     pub(super) body: Rgba,
+    /// The severity mark's tint (alert banners); `None` draws no mark.
+    pub(super) mark: Option<Rgba>,
 }
 
 /// One text line role (title, body or action label).
@@ -101,6 +114,16 @@ const BODY: RoleKeys = [
     "type.notification.body.size",
     "type.notification.body.line_height",
     "type.notification.body.weight",
+];
+const ALERT_TITLE: RoleKeys = [
+    "type.alert.title.size",
+    "type.alert.title.line_height",
+    "type.alert.title.weight",
+];
+const ALERT_BODY: RoleKeys = [
+    "type.alert.body.size",
+    "type.alert.body.line_height",
+    "type.alert.body.weight",
 ];
 const ACTION: RoleKeys = [
     "type.body.m.size",
@@ -130,9 +153,105 @@ impl TextRole {
     }
 }
 
+/// The token keys one kind of notification surface reads; each array is
+/// indexed by urgency 0-3.
+struct Roles {
+    fills: [&'static str; 4],
+    outlines: [&'static str; 4],
+    titles: [&'static str; 4],
+    bodies: [&'static str; 4],
+    /// Severity mark tints (alert banners only).
+    marks: Option<[&'static str; 4]>,
+    opacity: &'static str,
+    padding_h: &'static str,
+    padding_v: &'static str,
+    /// Outer inset from the zone's sides and top, and between stacked
+    /// surfaces; `None`: flush, stacked `space.s` apart.
+    margin: Option<&'static str>,
+    title: RoleKeys,
+    body: RoleKeys,
+    icon: &'static str,
+    /// A lone message line takes the title role (else the body role).
+    lone_title: bool,
+}
+
+const CARD: Roles = Roles {
+    fills: [
+        "color.notification.container.low",
+        "color.notification.container",
+        "color.caution.container",
+        "color.error.container",
+    ],
+    outlines: [
+        "color.notification.outline",
+        "color.notification.outline",
+        "color.notification.caution.outline",
+        "color.notification.error.outline",
+    ],
+    titles: [
+        "color.on_surface",
+        "color.on_surface",
+        "color.on_notification.caution",
+        "color.on_notification.error",
+    ],
+    bodies: [
+        "color.on_notification.variant",
+        "color.on_notification.variant",
+        "color.on_notification.caution",
+        "color.on_notification.error",
+    ],
+    marks: None,
+    opacity: "opacity.notification",
+    padding_h: "space.notification",
+    padding_v: "space.notification",
+    margin: None,
+    title: TITLE,
+    body: BODY,
+    icon: "space.xxl",
+    lone_title: false,
+};
+
+const ALERT: Roles = Roles {
+    fills: [
+        "color.alert.container",
+        "color.alert.container",
+        "color.alert.caution.container",
+        "color.alert.error.container",
+    ],
+    outlines: ["color.alert.outline"; 4],
+    titles: [
+        "color.on_alert",
+        "color.on_alert",
+        "color.on_alert",
+        "color.on_alert.error",
+    ],
+    bodies: [
+        "color.on_alert.variant",
+        "color.on_alert.variant",
+        "color.on_alert.variant",
+        "color.on_alert.error",
+    ],
+    marks: Some([
+        "color.severity.info",
+        "color.severity.info",
+        "color.severity.warning",
+        "color.severity.critical",
+    ]),
+    opacity: "opacity.alert",
+    padding_h: "space.alert.horizontal",
+    padding_v: "space.alert.vertical",
+    margin: Some("space.alert.margin"),
+    title: ALERT_TITLE,
+    body: ALERT_BODY,
+    icon: "space.xl",
+    lone_title: true,
+};
+
 /// Resolved notification-card style, all sizes in physical px.
 #[derive(Clone, Debug)]
 pub(super) struct NotificationStyle {
+    /// Inset from the zone's sides and top (alert banners; cards are flush).
+    pub(super) margin: f32,
     pub(super) padding_h: f32,
     pub(super) padding_v: f32,
     pub(super) hairline: f32,
@@ -142,6 +261,9 @@ pub(super) struct NotificationStyle {
     pub(super) icon_gap: f32,
     pub(super) title: TextRole,
     pub(super) body: TextRole,
+    /// A lone message line (no title): the body role on a card, the title
+    /// role on a banner.
+    pub(super) lone: TextRole,
     /// The dismiss button: a square as tall as the title line.
     pub(super) dismiss_size: f32,
     pub(super) dismiss_gap: f32,
@@ -166,69 +288,84 @@ pub(super) struct NotificationStyle {
 }
 
 impl NotificationStyle {
+    /// The notification-card style (`notification-area` and any other zone
+    /// but `alert-banner`).
+    pub(super) fn resolve(tokens: &HashMap<String, String>, policy: &RenderingPolicy) -> Self {
+        Self::resolve_roles(&CARD, tokens, policy)
+    }
+
+    /// The style of `zone_name`'s notifications: alert banners read the
+    /// alert roles, every other zone the card roles.
+    pub(super) fn for_zone(
+        zone_name: &str,
+        tokens: &HashMap<String, String>,
+        policy: &RenderingPolicy,
+    ) -> Self {
+        if super::token_colors::is_alert_banner_zone(zone_name) {
+            Self::resolve_roles(&ALERT, tokens, policy)
+        } else {
+            Self::resolve(tokens, policy)
+        }
+    }
+
     /// Resolve from the zone's (monitor-scaled) token map. Zone policy
     /// sizes keep precedence (margins, radius, title size and weight, fill
     /// opacity); colours are token roles, restyled through
     /// `[design_tokens]`. Whether a card has a backdrop at all stays the
     /// policy's `backdrop` switch, checked by the callers.
-    pub(super) fn resolve(tokens: &HashMap<String, String>, policy: &RenderingPolicy) -> Self {
-        let title_token = dp(tokens, TITLE[0]);
+    fn resolve_roles(
+        roles: &Roles,
+        tokens: &HashMap<String, String>,
+        policy: &RenderingPolicy,
+    ) -> Self {
+        let title_token = dp(tokens, roles.title[0]);
         // An explicit title size scales the whole type ramp with it.
         let factor = policy
             .font_size_px
             .filter(|s| s.is_finite() && *s > 0.0 && title_token > 0.0)
             .map_or(1.0, |s| s / title_token);
-        let mut title = TextRole::resolve(tokens, TITLE, factor);
+        let mut title = TextRole::resolve(tokens, roles.title, factor);
         if let Some(weight) = policy.font_weight {
             title.weight = weight;
         }
-        let body = TextRole::resolve(tokens, BODY, factor);
+        let body = TextRole::resolve(tokens, roles.body, factor);
         let action_label = TextRole::resolve(tokens, ACTION, factor);
-        let padding = dp(tokens, "space.notification");
         let opacity = policy
             .backdrop_opacity
-            .unwrap_or_else(|| number(tokens, "opacity.notification"))
+            .unwrap_or_else(|| number(tokens, roles.opacity))
             .clamp(0.0, 1.0);
-        let with_opacity = |mut c: Rgba| {
-            c.a *= opacity;
-            c
-        };
-        let neutral = |fill: &str| NotificationTone {
-            fill: with_opacity(color(tokens, fill)),
-            outline: color(tokens, "color.notification.outline"),
-            title: color(tokens, "color.on_surface"),
-            body: color(tokens, "color.on_notification.variant"),
-        };
-        let caution_text = color(tokens, "color.on_notification.caution");
-        let error_text = color(tokens, "color.on_notification.error");
-        let tones = [
-            neutral("color.notification.container.low"),
-            neutral("color.notification.container"),
+        let tones = std::array::from_fn(|i| {
+            let mut fill = color(tokens, roles.fills[i]);
+            fill.a *= opacity;
             NotificationTone {
-                fill: with_opacity(color(tokens, "color.caution.container")),
-                outline: color(tokens, "color.notification.caution.outline"),
-                title: caution_text,
-                body: caution_text,
-            },
-            NotificationTone {
-                fill: with_opacity(color(tokens, "color.error.container")),
-                outline: color(tokens, "color.notification.error.outline"),
-                title: error_text,
-                body: error_text,
-            },
-        ];
+                fill,
+                outline: color(tokens, roles.outlines[i]),
+                title: color(tokens, roles.titles[i]),
+                body: color(tokens, roles.bodies[i]),
+                mark: roles
+                    .marks
+                    .map(|marks| color(tokens, marks[i]))
+                    .filter(|c| c.a > 0.0),
+            }
+        });
+        let margin = roles.margin.map_or(0.0, |key| dp(tokens, key));
         Self {
+            margin,
             padding_h: policy
                 .margin_horizontal
                 .or(policy.margin_px)
-                .unwrap_or(padding),
+                .unwrap_or_else(|| dp(tokens, roles.padding_h)),
             padding_v: policy
                 .margin_vertical
                 .or(policy.margin_px)
-                .unwrap_or(padding),
+                .unwrap_or_else(|| dp(tokens, roles.padding_v)),
             hairline: dp(tokens, "stroke.border.width"),
-            stack_gap: dp(tokens, "space.s"),
-            icon_size: dp(tokens, "space.xxl"),
+            stack_gap: if roles.margin.is_some() {
+                margin
+            } else {
+                dp(tokens, "space.s")
+            },
+            icon_size: dp(tokens, roles.icon),
             icon_gap: dp(tokens, "space.m"),
             dismiss_size: title.line_height,
             dismiss_gap: dp(tokens, "space.s"),
@@ -238,6 +375,7 @@ impl NotificationStyle {
                 size: title.line_height,
                 ..title
             },
+            lone: if roles.lone_title { title } else { body },
             title,
             body,
             action_height: dp(tokens, "space.xxl"),
@@ -277,12 +415,34 @@ impl NotificationStyle {
     /// Height of the text block alone (padding, title and body lines).
     pub(super) fn text_block_height(&self, has_title: bool) -> f32 {
         2.0 * self.padding_v
-            + self.body.line_height
             + if has_title {
-                self.title.line_height
+                self.title.line_height + self.body.line_height
             } else {
-                0.0
+                self.lone.line_height
             }
+    }
+
+    /// The severity mark of a publication at `urgency` (alert banners), when
+    /// no agent icon takes the icon column.
+    pub(super) fn mark(&self, urgency: u32, agent_icon: bool) -> Option<Rgba> {
+        (!agent_icon).then(|| self.tone(urgency).mark).flatten()
+    }
+
+    /// Bounds of the icon column's square (agent icon or severity mark) in a
+    /// card at (`x`, `slot_y`): at the padding, centred on the text block.
+    pub(super) fn icon_bounds(
+        &self,
+        x: f32,
+        slot_y: f32,
+        has_title: bool,
+    ) -> tze_hud_scene::types::Rect {
+        let text_h = self.text_block_height(has_title);
+        tze_hud_scene::types::Rect::new(
+            x + self.padding_h,
+            slot_y + (text_h - self.icon_size).max(0.0) * 0.5,
+            self.icon_size,
+            self.icon_size,
+        )
     }
 
     /// Fill of a control in `state` over its idle fill: pressed wins over
@@ -323,36 +483,20 @@ impl NotificationStyle {
 }
 
 /// Bounds of a notification's dismiss ×: the single geometry source for
-/// drawing and the hit region. A card's sits in its title row at the
-/// padding; an alert banner keeps its pre-restyle square (hud-h51u7.4.2).
-#[allow(clippy::too_many_arguments)]
+/// drawing and the hit region. It sits in the title row at the padding.
 pub(super) fn dismiss_bounds(
     zone_name: &str,
     tokens: &HashMap<String, String>,
     policy: &RenderingPolicy,
-    x: f32,
-    slot_y: f32,
-    w: f32,
-    slot_h: f32,
+    card: tze_hud_scene::types::Rect,
 ) -> tze_hud_scene::types::Rect {
-    let scale = px_scale(tokens);
-    if super::token_colors::is_alert_banner_zone(zone_name) {
-        return super::token_colors::notification_dismiss_bounds(
-            x,
-            slot_y,
-            w,
-            slot_h,
-            scale,
-            super::token_colors::notification_inset(policy, scale),
-        );
-    }
-    let style = NotificationStyle::resolve(tokens, policy);
+    let style = NotificationStyle::for_zone(zone_name, tokens, policy);
     let size = style.dismiss_size;
-    let top = style.padding_v.min((slot_h - 1.0).max(0.0));
+    let top = style.padding_v.min((card.height - 1.0).max(0.0));
     tze_hud_scene::types::Rect::new(
-        x + w - style.padding_h - size,
-        slot_y + top,
+        card.x + card.width - style.padding_h - size,
+        card.y + top,
         size,
-        size.min(slot_h - top).max(1.0),
+        size.min(card.height - top).max(1.0),
     )
 }

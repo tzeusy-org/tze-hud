@@ -1923,7 +1923,7 @@ async fn poc_panel_appearance_restyles_live_and_saves() {
     })
     .await;
     let theme = |name: &str| resolve_config_tokens(&[("theme".to_owned(), name.to_owned())].into());
-    let key = "color.backdrop.default";
+    let key = "color.alert.container";
     assert_ne!(theme("tonal-glass")[key], theme("classic")[key]);
 
     // A key previews the next theme (tonal-glass → classic) without

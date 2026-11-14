@@ -620,6 +620,9 @@ mod tests {
             "opacity.scrim",
             "color.notification",
             "opacity.notification",
+            "color.alert",
+            "color.severity",
+            "opacity.alert",
             "state.",
             "focus.",
             "motion.",
@@ -648,37 +651,82 @@ mod tests {
             ("type.body.m.weight", "typography.body.weight"),
             // The notification card keeps Classic's legacy card look.
             ("color.notification.outline", "color.border.default"),
-            ("opacity.notification", "opacity.backdrop.opaque"),
             ("shape.notification", "border.radius.medium"),
             ("type.notification.title.size", "typography.body.size"),
-            (
-                "type.notification.title.weight",
-                "typography.notification.title.weight",
-            ),
         ] {
             assert_eq!(
                 classic[role], classic[legacy],
                 "Classic {role} lost its legacy meaning"
             );
         }
-        // Classic's derived legacy card metrics: the body at the title size
-        // times the body scale, line boxes at 1.4 x size, the 9 dp inset.
+        // Values whose legacy keys or literals are retired: Classic's
+        // `opacity.backdrop.opaque` (0.80), `typography.notification.title
+        // .weight` (700) and `.body.scale` (0.90); for the alert banner the
+        // canonical `color.severity.*` fills, Classic's black
+        // `color.on_severity.*`, the scene default's 0.90 fill opacity, 8 dp
+        // side and 0 dp top padding, and the canonical `typography.heading
+        // .size` (24).
+        for (role, legacy) in [
+            ("opacity.notification", "0.80"),
+            ("type.notification.title.weight", "700"),
+            ("color.alert.container", "#4A9EFF"),
+            ("color.alert.caution.container", "#FFB800"),
+            ("color.alert.error.container", "#FF0000"),
+            ("color.on_alert", "#000000"),
+            ("color.on_alert.variant", "#000000"),
+            ("color.on_alert.error", "#000000"),
+            ("opacity.alert", "0.90"),
+            ("space.alert.horizontal", "8"),
+            ("space.alert.vertical", "0"),
+            ("type.alert.title.size", "24"),
+            ("type.alert.title.weight", "700"),
+            ("type.alert.body.weight", "400"),
+        ] {
+            assert_eq!(
+                classic[role], legacy,
+                "Classic {role} lost its legacy value"
+            );
+        }
+        // The legacy banner is a flush, square, unoutlined strip with no
+        // severity mark.
+        for role in [
+            "color.alert.outline",
+            "color.severity.info",
+            "color.severity.warning",
+            "color.severity.critical",
+        ] {
+            assert_eq!(
+                crate::tokens::parse_color_hex(&classic[role]).unwrap().a,
+                0.0,
+                "Classic {role} must draw nothing"
+            );
+        }
         let num = |key: &str| classic[key].parse::<f32>().unwrap();
-        assert_eq!(
-            num("type.notification.body.size"),
-            num("typography.body.size") * num("typography.notification.body.scale")
-        );
-        assert!(
-            (num("type.notification.title.line_height")
-                - 1.4 * num("type.notification.title.size"))
-            .abs()
-                < 1e-4
-        );
-        assert!(
-            (num("type.notification.body.line_height") - 1.4 * num("type.notification.body.size"))
-                .abs()
-                < 1e-4
-        );
+        assert_eq!(num("space.alert.margin"), 0.0, "Classic's flush banner");
+        assert_eq!(num("shape.alert"), 0.0, "Classic's square banner");
+        // Classic's derived legacy metrics: bodies at the title size times
+        // the 0.90 body scale, line boxes at 1.4 x size, the 9 dp card inset.
+        for (body, title) in [
+            (
+                "type.notification.body.size",
+                "type.notification.title.size",
+            ),
+            ("type.alert.body.size", "type.alert.title.size"),
+        ] {
+            assert!((num(body) - num(title) * 0.90).abs() < 1e-4, "{body}");
+        }
+        for role in [
+            "type.notification.title",
+            "type.notification.body",
+            "type.alert.title",
+            "type.alert.body",
+        ] {
+            assert!(
+                (num(&format!("{role}.line_height")) - 1.4 * num(&format!("{role}.size"))).abs()
+                    < 1e-4,
+                "{role} line box"
+            );
+        }
         assert_eq!(
             num("space.notification"),
             9.0,
