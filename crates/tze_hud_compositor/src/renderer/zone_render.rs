@@ -309,6 +309,18 @@ impl Compositor {
                     // For MergeByKey and single-publish policies: render a single backdrop
                     // for the zone using the latest publication's content type.
                     let latest = &publishes[publishes.len() - 1];
+                    let subtitle_pill = if zone_name == "subtitle"
+                        && let ZoneContent::StreamText(text) = &latest.content
+                    {
+                        let Some(pill) =
+                            self.subtitle_layout(zone_name, text, policy, Rect::new(x, y, w, h))
+                        else {
+                            continue;
+                        };
+                        Some(pill)
+                    } else {
+                        None
+                    };
                     // Status-bar content draws as a card hugging its rows; with no
                     // entries nothing is drawn at all.
                     let card = Self::status_bar_card(
@@ -392,6 +404,27 @@ impl Compositor {
                                 self.gpu_color(rgba),
                             ));
                         }
+                    }
+
+                    // Match the normal SDF composition: optional whole-zone
+                    // contrast first, content-hugging pill on top. Simplified
+                    // rendering drops corners/hairline and makes fills opaque,
+                    // while preserving the layer order.
+                    if self.degradation_policy.level >= tze_hud_scene::DegradationLevel::Simplified
+                        && let Some(pill) = subtitle_pill
+                        && pill.style.fill.a > 0.0
+                    {
+                        let mut fill = pill.style.fill;
+                        fill.a *= anim_opacity;
+                        vertices.extend_from_slice(&rect_vertices(
+                            pill.rect.x,
+                            pill.rect.y,
+                            pill.rect.width,
+                            pill.rect.height,
+                            sw,
+                            sh,
+                            self.gpu_color(fill),
+                        ));
                     }
 
                     // Notification icon for LatestWins/MergeByKey/Replace zones.

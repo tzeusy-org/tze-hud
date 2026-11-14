@@ -3262,7 +3262,8 @@ impl ZoneRegistry {
                 edge: DisplayEdge::Bottom,
                 height_pct: 0.10,
                 width_pct: 0.80,
-                margin_px: 48.0,
+                // The config/runtime layer applies space.subtitle.bottom.
+                margin_px: 0.0,
             },
             accepted_media_types: vec![ZoneMediaType::StreamText],
             rendering_policy: RenderingPolicy::default(),

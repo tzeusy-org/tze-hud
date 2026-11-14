@@ -1571,14 +1571,14 @@ name = "Main"
 default_tab = true
 
 [design_tokens]
-"color.text.primary" = "#FF0000"
+"color.on_surface" = "#FF0000"
 "color.severity.warning" = "#00FF00"
 "opacity.backdrop.default" = "0.5"
-"stroke.outline.width" = "2.0"
-"color.outline.default" = "#FFFF00"
-"typography.subtitle.size" = "18"
-"typography.subtitle.weight" = "600"
-"typography.subtitle.family" = "system-ui"
+"stroke.subtitle.text" = "2.0"
+"color.subtitle.outline" = "#FFFF00"
+"type.caption.display.size" = "18"
+"type.caption.display.weight" = "600"
+"type.caption.display.family" = "system-ui"
 "typography.body.size" = "14"
 "typography.body.weight" = "400"
 "typography.body.family" = "system-ui"
@@ -1613,15 +1613,15 @@ default_tab = true
         let runtime = HeadlessRuntime::new(config).await.expect("runtime init");
 
         // The compositor's token_map must contain the tokens from config_toml.
-        // color.text.primary was set to "#FF0000" in the config.
+        // color.on_surface was set to "#FF0000" in the config.
         assert_eq!(
             runtime
                 .compositor
                 .token_map
-                .get("color.text.primary")
+                .get("color.on_surface")
                 .map(String::as_str),
             Some("#FF0000"),
-            "compositor token_map should contain color.text.primary from config_toml"
+            "compositor token_map should contain color.on_surface from config_toml"
         );
         // color.severity.warning was set to "#00FF00".
         assert_eq!(
@@ -1635,7 +1635,7 @@ default_tab = true
         );
 
         // The scene's zone_registry must contain token-derived rendering policies.
-        // Verify that the subtitle zone got a text_color derived from color.text.primary (#FF0000).
+        // Verify that the subtitle zone got a text_color derived from color.on_surface (#FF0000).
         let state = runtime.state.lock().await;
         let scene = state.scene.lock().await;
         let subtitle_zone = scene

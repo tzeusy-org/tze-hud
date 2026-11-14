@@ -298,7 +298,7 @@ mod tests {
     fn subtitle_zone_gets_token_derived_text_color() {
         let mut raw = RawConfig::default();
         let mut dt_map = HashMap::new();
-        dt_map.insert("color.text.primary".to_string(), "#AABBCC".to_string());
+        dt_map.insert("color.on_surface".to_string(), "#AABBCC".to_string());
         raw.design_tokens = Some(RawDesignTokens(dt_map));
 
         let mut scene = make_scene();
@@ -399,13 +399,13 @@ name = "Main"
 default_tab = true
 
 [design_tokens]
-"color.text.primary" = "#FFFFFF"
+"color.on_surface" = "#FFFFFF"
 "opacity.backdrop.default" = "0.7"
-"stroke.outline.width" = "2.0"
-"color.outline.default" = "#FFFF00"
-"typography.subtitle.size" = "18"
-"typography.subtitle.weight" = "600"
-"typography.subtitle.family" = "system-ui"
+"stroke.subtitle.text" = "2.0"
+"color.subtitle.outline" = "#FFFF00"
+"type.caption.display.size" = "18"
+"type.caption.display.weight" = "600"
+"type.caption.display.family" = "system-ui"
 "typography.body.size" = "14"
 "typography.body.weight" = "400"
 "typography.body.family" = "system-ui"
@@ -437,7 +437,7 @@ default_tab = true
         assert_eq!(
             result
                 .global_tokens
-                .get("color.text.primary")
+                .get("color.on_surface")
                 .map(|s| s.as_str()),
             Some("#FFFFFF")
         );

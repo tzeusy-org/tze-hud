@@ -635,8 +635,7 @@ mod tests {
             let theme = builtin_theme(name).unwrap();
             let resolved = resolve_config_tokens(&tokens(&[(THEME_KEY, name)]));
             for t in CANONICAL_TOKENS {
-                if t.key != "color.outline.default" && semantic.iter().any(|p| t.key.starts_with(p))
-                {
+                if semantic.iter().any(|p| t.key.starts_with(p)) {
                     assert!(theme.contains_key(t.key), "{name} misses {}", t.key);
                     assert_eq!(resolved[t.key], theme[t.key], "{name}: {} fell back", t.key);
                 }

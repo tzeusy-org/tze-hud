@@ -204,6 +204,7 @@ impl Compositor {
         let animation_now = std::time::Instant::now();
         self.notification_keyboard_active = scene.overlay.notification_focus.is_some();
         self.prime_notification_layouts(scene, sw, sh);
+        self.prime_subtitle_layout(scene, sw, sh);
         // Collect visible tiles, re-sorted with drag-z-order boost applied.
         let tiles = Self::sort_tiles_with_drag_boost(self.policy_visible_tiles(scene), scene);
         telemetry.tile_count = tiles.len() as u32;
