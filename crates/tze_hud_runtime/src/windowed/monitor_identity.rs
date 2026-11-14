@@ -1,14 +1,14 @@
-//! Per-monitor EDID identity, keyed by GDI display name (`\\.\DISPLAYn`).
+//! Per-monitor EDID identity, keyed by GDI display name (`\\.\DISPLAYn`), and
+//! the `[displays."<key>"]` config key derived from it.
 //!
-//! Retrieval only (hud-avr7s.1): key derivation and matching live elsewhere.
 //! Windows uses DisplayConfig for the GDI-name join, EDID ids, friendly name and
-//! connector, then SetupAPI + the device registry key for raw EDID bytes (the
-//! serial is not exposed by DisplayConfig). Other platforms return an empty
-//! list. Call on topology sync only, never per frame.
+//! connector, then SetupAPI for the monitor's device instance id and, from its
+//! device registry key, the raw EDID bytes (the serial is not exposed by
+//! DisplayConfig). Other platforms return an empty list. Call on topology sync
+//! only, never per frame. [`display_keys`] is pure.
 
-// Fields are consumed by the key-derivation sibling bead; non-Windows builds
-// never construct them.
-#![allow(dead_code)]
+// Non-Windows builds only construct identities in tests.
+#![cfg_attr(not(target_os = "windows"), allow(dead_code))]
 
 /// Stable-across-reboot connector facts. The adapter LUID is deliberately
 /// absent: it is regenerated every boot.
@@ -20,6 +20,10 @@ pub(crate) struct Connector {
     pub output_technology: i32,
     /// Instance segment of the monitor device path (e.g. `UID4352`).
     pub path_instance: String,
+    /// Full PnP device instance id of the monitor
+    /// (`DISPLAY\DEL41A2\5&1A2B3C&0&UID4352`): unique on the system and
+    /// persistent across restarts. `None` when SetupAPI cannot report it.
+    pub device_instance_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -105,6 +109,113 @@ fn path_instance(device_path: &str) -> String {
         .to_string()
 }
 
+/// One connected monitor's `[displays."<key>"]` key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct DisplayKey {
+    /// What the config names this monitor by, uppercase.
+    pub key: String,
+    /// Model+serial key without a connector suffix, when the monitor has a
+    /// usable EDID identity (even if `key` had to fall back to the OS name).
+    pub base: Option<String>,
+    /// False when `key` is the OS display name because no stable identity is
+    /// available; the runtime warns.
+    pub stable: bool,
+}
+
+/// `<MFG><PRODUCT as 4 hex>[-<SERIAL>]`, or `None` without a valid PNP id.
+fn base_key(id: &MonitorIdentity) -> Option<String> {
+    let mfg = &id.manufacturer;
+    if mfg.len() != 3 || !mfg.bytes().all(|b| b.is_ascii_uppercase()) {
+        return None;
+    }
+    let serial: String = id
+        .serial
+        .trim()
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-') {
+                c.to_ascii_uppercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    let mut key = format!("{mfg}{:04X}", id.product);
+    if !serial.is_empty() {
+        key.push('-');
+        key.push_str(&serial);
+    }
+    Some(key)
+}
+
+/// Connector suffix from the PnP device instance id, injective and readable
+/// in a quoted TOML key: `\` becomes `/`, `A-Z 0-9 . _ & -` stay, every
+/// other byte is `%XX`. Instance ids are case-insensitive, so it is uppercase.
+fn connector_suffix(device_instance_id: &str) -> String {
+    let mut out = String::new();
+    for b in device_instance_id.trim().to_ascii_uppercase().bytes() {
+        match b {
+            b'\\' => out.push('/'),
+            b'A'..=b'Z' | b'0'..=b'9' | b'.' | b'_' | b'&' | b'-' => out.push(char::from(b)),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// Config key of each monitor, in input order. Each entry is the monitor's
+/// normalized OS name and its EDID identity, if one joined uniquely.
+///
+/// A unique model+serial is the key. Monitors sharing one (identical
+/// model+serial, or same model with blank serials) all get
+/// `@<connector>` from their device instance id. A monitor without usable
+/// identity, or in a shared set without an instance id, keys by its OS name.
+pub(crate) fn display_keys(monitors: &[(&str, Option<&MonitorIdentity>)]) -> Vec<DisplayKey> {
+    let bases: Vec<Option<String>> = monitors
+        .iter()
+        .map(|(_, id)| id.and_then(base_key))
+        .collect();
+    let mut keys: Vec<DisplayKey> = monitors
+        .iter()
+        .zip(&bases)
+        .map(|((name, id), base)| {
+            let fallback = || DisplayKey {
+                key: name.to_ascii_uppercase(),
+                base: base.clone(),
+                stable: false,
+            };
+            let Some(b) = base else {
+                return fallback();
+            };
+            if bases.iter().filter(|o| o.as_ref() == Some(b)).count() == 1 {
+                return DisplayKey {
+                    key: b.clone(),
+                    base: Some(b.clone()),
+                    stable: true,
+                };
+            }
+            match id.and_then(|i| i.connector.device_instance_id.as_deref()) {
+                Some(instance) if !instance.trim().is_empty() => DisplayKey {
+                    key: format!("{b}@{}", connector_suffix(instance)),
+                    base: Some(b.clone()),
+                    stable: true,
+                },
+                _ => fallback(),
+            }
+        })
+        .collect();
+    // Two monitors must never share a key (e.g. one instance id reported
+    // twice): those fall back to their distinct OS names.
+    let snapshot: Vec<String> = keys.iter().map(|k| k.key.clone()).collect();
+    for (i, k) in keys.iter_mut().enumerate() {
+        if k.stable && snapshot.iter().filter(|o| **o == k.key).count() > 1 {
+            k.key = monitors[i].0.to_ascii_uppercase();
+            k.stable = false;
+        }
+    }
+    keys
+}
+
 /// Identities of all active monitors. Empty off Windows or on API failure.
 pub(crate) fn monitor_identities() -> Vec<MonitorIdentity> {
     #[cfg(target_os = "windows")]
@@ -143,36 +254,14 @@ pub(crate) fn read_growing(mut read: impl FnMut(&mut [u8]) -> RegRead) -> Option
     None
 }
 
-/// Log one debug line per monitor identity. Safe to call anywhere off the
-/// frame path.
-pub(crate) fn log_monitor_identities() {
-    // No FFI work unless someone will read the line.
-    if !tracing::enabled!(tracing::Level::DEBUG) {
-        return;
-    }
-    for id in monitor_identities() {
-        tracing::debug!(
-            gdi = %id.gdi_name,
-            manufacturer = %id.manufacturer,
-            product = format_args!("{:#06x}", id.product),
-            serial = %id.serial,
-            friendly = %id.friendly_name,
-            target_id = id.connector.target_id,
-            output_technology = id.connector.output_technology,
-            path_instance = %id.connector.path_instance,
-            "monitor EDID identity"
-        );
-    }
-}
-
 #[cfg(target_os = "windows")]
 mod win {
     use super::{Connector, MonitorIdentity, RegRead, parse_edid, path_instance, read_growing};
     use windows::Win32::Devices::DeviceAndDriverInstallation::{
         DICS_FLAG_GLOBAL, DIGCF_DEVICEINTERFACE, DIGCF_PRESENT, DIREG_DEV, HDEVINFO,
-        SP_DEVICE_INTERFACE_DATA, SP_DEVINFO_DATA, SetupDiDestroyDeviceInfoList,
-        SetupDiGetClassDevsW, SetupDiGetDeviceInterfaceDetailW, SetupDiOpenDevRegKey,
-        SetupDiOpenDeviceInterfaceW,
+        MAX_DEVICE_ID_LEN, SP_DEVICE_INTERFACE_DATA, SP_DEVINFO_DATA, SetupDiDestroyDeviceInfoList,
+        SetupDiGetClassDevsW, SetupDiGetDeviceInstanceIdW, SetupDiGetDeviceInterfaceDetailW,
+        SetupDiOpenDevRegKey, SetupDiOpenDeviceInterfaceW,
     };
     use windows::Win32::Devices::Display::{
         DISPLAYCONFIG_DEVICE_INFO_GET_SOURCE_NAME, DISPLAYCONFIG_DEVICE_INFO_GET_TARGET_NAME,
@@ -285,11 +374,11 @@ mod win {
             }
 
             let mut serial = String::new();
-            if let Some(edid) = set
+            let device = set
                 .as_ref()
-                .and_then(|s| read_edid(s.0, &device_path))
-                .and_then(|b| parse_edid(&b).ok())
-            {
+                .map(|s| read_device(s.0, &device_path))
+                .unwrap_or_default();
+            if let Some(edid) = device.edid.and_then(|b| parse_edid(&b).ok()) {
                 manufacturer = edid.manufacturer;
                 product = edid.product;
                 serial = edid.serial;
@@ -305,14 +394,33 @@ mod win {
                     target_id: path.targetInfo.id,
                     output_technology: tgt.outputTechnology.0,
                     path_instance: path_instance(&device_path),
+                    device_instance_id: device.instance_id,
                 },
             });
         }
         out
     }
 
-    /// Raw EDID bytes from the monitor's device registry key.
-    fn read_edid(set: HDEVINFO, device_path: &str) -> Option<Vec<u8>> {
+    /// What SetupAPI reports for one monitor device; each part fails alone.
+    #[derive(Default)]
+    struct DeviceFacts {
+        instance_id: Option<String>,
+        edid: Option<Vec<u8>>,
+    }
+
+    /// The monitor's device instance id and raw EDID bytes (from its device
+    /// registry key), both found through its interface path.
+    fn read_device(set: HDEVINFO, device_path: &str) -> DeviceFacts {
+        let Some(info) = device_info(set, device_path) else {
+            return DeviceFacts::default();
+        };
+        DeviceFacts {
+            instance_id: instance_id(set, &info),
+            edid: read_edid(set, &info),
+        }
+    }
+
+    fn device_info(set: HDEVINFO, device_path: &str) -> Option<SP_DEVINFO_DATA> {
         let wpath: Vec<u16> = device_path.encode_utf16().chain([0]).collect();
         let mut iface = SP_DEVICE_INTERFACE_DATA {
             cbSize: size_of::<SP_DEVICE_INTERFACE_DATA>() as u32,
@@ -332,12 +440,28 @@ mod win {
         unsafe {
             let _ = SetupDiGetDeviceInterfaceDetailW(set, &iface, None, 0, None, Some(&mut info));
         }
-        if info.DevInst == 0 {
+        (info.DevInst != 0).then_some(info)
+    }
+
+    /// Full PnP device instance id; `None` on failure or a malformed reply.
+    fn instance_id(set: HDEVINFO, info: &SP_DEVINFO_DATA) -> Option<String> {
+        let mut buf = [0u16; MAX_DEVICE_ID_LEN as usize];
+        let mut required = 0u32;
+        // SAFETY: info was filled by device_info; buf/required are live locals.
+        unsafe { SetupDiGetDeviceInstanceIdW(set, info, Some(&mut buf), Some(&mut required)) }
+            .ok()?;
+        let end = buf.iter().position(|c| *c == 0)?;
+        if end == 0 || required as usize > buf.len() {
             return None;
         }
-        // SAFETY: info was filled above.
+        String::from_utf16(&buf[..end]).ok()
+    }
+
+    /// Raw EDID bytes from the monitor's device registry key.
+    fn read_edid(set: HDEVINFO, info: &SP_DEVINFO_DATA) -> Option<Vec<u8>> {
+        // SAFETY: info was filled by device_info.
         let key: HKEY = unsafe {
-            SetupDiOpenDevRegKey(set, &info, DICS_FLAG_GLOBAL.0, 0, DIREG_DEV, KEY_READ.0).ok()?
+            SetupDiOpenDevRegKey(set, info, DICS_FLAG_GLOBAL.0, 0, DIREG_DEV, KEY_READ.0).ok()?
         };
         let value = read_growing(|buf| {
             let mut len = buf.len() as u32;
@@ -368,9 +492,147 @@ mod win {
     }
 }
 
+/// A monitor identity for tests: `gdi` is the GDI name, `instance` the
+/// device instance id.
+#[cfg(test)]
+pub(crate) fn test_identity(
+    gdi: &str,
+    manufacturer: &str,
+    product: u16,
+    serial: &str,
+    instance: Option<&str>,
+) -> MonitorIdentity {
+    MonitorIdentity {
+        gdi_name: gdi.into(),
+        manufacturer: manufacturer.into(),
+        product,
+        serial: serial.into(),
+        friendly_name: String::new(),
+        connector: Connector {
+            target_id: 0,
+            output_technology: 0,
+            path_instance: String::new(),
+            device_instance_id: instance.map(Into::into),
+        },
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One table for every key case: unique monitors, blank serial,
+    /// identical model+serial pair, blank-serial pair, sanitization,
+    /// unavailable identity, and a shared key without an instance id.
+    #[test]
+    fn display_keys_cover_every_identity_case() {
+        let id = test_identity;
+        let pair_a = id(
+            "A",
+            "DEL",
+            0x41A2,
+            "CN0ABC",
+            Some(r"DISPLAY\DEL41A2\5&1a2b&0&UID4352"),
+        );
+        let pair_b = id(
+            "B",
+            "DEL",
+            0x41A2,
+            "CN0ABC",
+            Some(r"DISPLAY\DEL41A2\5&1a2b&0&UID4353"),
+        );
+        let blank_a = id("A", "GSM", 0x5B7F, "", Some(r"DISPLAY\GSM5B7F\1&0&UID1"));
+        let blank_b = id("B", "GSM", 0x5B7F, " ", Some(r"DISPLAY\GSM5B7F\1&0 UID2"));
+        let no_instance = id("B", "DEL", 0x41A2, "CN0ABC", None);
+        let unique = id("A", "DEL", 0x41A2, "CN0ABC", None);
+        let other = id("B", "ACI", 0x27A1, "M1LMQS0", None);
+        let blank = id("A", "SAM", 0x0F00, "", None);
+        let messy = id("A", "DEL", 0x41A2, "ab/c d\"é", None);
+        let bad_mfg = id("A", "", 0, "", None);
+        let stable = |key: &str, base: &str| DisplayKey {
+            key: key.into(),
+            base: Some(base.into()),
+            stable: true,
+        };
+        let os = |key: &str, base: Option<&str>| DisplayKey {
+            key: key.into(),
+            base: base.map(Into::into),
+            stable: false,
+        };
+        type Monitors<'a> = Vec<(&'a str, Option<&'a MonitorIdentity>)>;
+        let cases: Vec<(&str, Monitors, Vec<DisplayKey>)> = vec![
+            (
+                "unique monitors",
+                vec![("DISPLAY1", Some(&unique)), ("DISPLAY2", Some(&other))],
+                vec![
+                    stable("DEL41A2-CN0ABC", "DEL41A2-CN0ABC"),
+                    stable("ACI27A1-M1LMQS0", "ACI27A1-M1LMQS0"),
+                ],
+            ),
+            (
+                "blank serial",
+                vec![("DISPLAY1", Some(&blank))],
+                vec![stable("SAM0F00", "SAM0F00")],
+            ),
+            (
+                "identical model+serial pair",
+                vec![("DISPLAY1", Some(&pair_a)), ("DISPLAY2", Some(&pair_b))],
+                vec![
+                    stable(
+                        "DEL41A2-CN0ABC@DISPLAY/DEL41A2/5&1A2B&0&UID4352",
+                        "DEL41A2-CN0ABC",
+                    ),
+                    stable(
+                        "DEL41A2-CN0ABC@DISPLAY/DEL41A2/5&1A2B&0&UID4353",
+                        "DEL41A2-CN0ABC",
+                    ),
+                ],
+            ),
+            (
+                "blank-serial pair; other bytes are %XX",
+                vec![("DISPLAY1", Some(&blank_a)), ("DISPLAY2", Some(&blank_b))],
+                vec![
+                    stable("GSM5B7F@DISPLAY/GSM5B7F/1&0&UID1", "GSM5B7F"),
+                    stable("GSM5B7F@DISPLAY/GSM5B7F/1&0%20UID2", "GSM5B7F"),
+                ],
+            ),
+            (
+                "serial sanitized to a bare key",
+                vec![("DISPLAY1", Some(&messy))],
+                vec![stable("DEL41A2-AB_C_D__", "DEL41A2-AB_C_D__")],
+            ),
+            (
+                "unavailable identity keys by OS name",
+                vec![("DISPLAY1", None), ("display2", Some(&bad_mfg))],
+                vec![os("DISPLAY1", None), os("DISPLAY2", None)],
+            ),
+            (
+                "a shared key without an instance id falls back; its base stays ambiguous",
+                vec![
+                    ("DISPLAY1", Some(&pair_a)),
+                    ("DISPLAY2", Some(&no_instance)),
+                ],
+                vec![
+                    stable(
+                        "DEL41A2-CN0ABC@DISPLAY/DEL41A2/5&1A2B&0&UID4352",
+                        "DEL41A2-CN0ABC",
+                    ),
+                    os("DISPLAY2", Some("DEL41A2-CN0ABC")),
+                ],
+            ),
+            (
+                "one instance id reported twice: both fall back",
+                vec![("DISPLAY1", Some(&pair_a)), ("DISPLAY2", Some(&pair_a))],
+                vec![
+                    os("DISPLAY1", Some("DEL41A2-CN0ABC")),
+                    os("DISPLAY2", Some("DEL41A2-CN0ABC")),
+                ],
+            ),
+        ];
+        for (case, monitors, want) in cases {
+            assert_eq!(display_keys(&monitors), want, "{case}");
+        }
+    }
 
     /// Build a valid 128-byte EDID block with a fixed-up checksum.
     fn edid(serial_u32: u32, descriptor_serial: Option<&[u8]>) -> Vec<u8> {

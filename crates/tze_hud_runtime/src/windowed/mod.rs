@@ -463,8 +463,14 @@ struct WindowedRuntimeState {
     displays_dirty: displays::DisplaysDirty,
     /// Creates secondary surfaces on the compositor's device.
     surface_factory: Option<tze_hud_compositor::SurfaceFactory>,
-    /// `[displays.<NAME>] zones` from the config: zone name -> display name.
+    /// `[displays."<key>"] zones` from the config: zone name -> configured key.
     zone_displays: std::collections::HashMap<String, String>,
+    /// Every connected monitor's config key, primary first, from the last
+    /// published topology sync.
+    display_keys: Vec<displays::KeyedMonitor>,
+    /// `zone_displays` resolved against `display_keys`: zone -> OS name.
+    /// Zones whose key matched nothing are absent (they stay on the primary).
+    zone_targets: std::collections::HashMap<String, String>,
     /// The window the cursor was last reported in; `CursorMoved` positions
     /// are relative to it.
     cursor_window: Option<WindowId>,
@@ -2774,7 +2780,6 @@ impl WindowedRuntime {
 
         let event_loop = EventLoop::<RuntimeWakeEvent>::with_user_event().build()?;
         event_loop.set_control_flow(ControlFlow::Wait);
-        monitor_identity::log_monitor_identities();
         let wake = WindowedWake::new(event_loop.create_proxy());
         // Main-thread focus/draft mirror read by the `/admin/status` probe.
         let surface_ui = crate::operator::surface_status::UiHandle::default();
@@ -3399,6 +3404,8 @@ impl WindowedRuntime {
             displays_dirty: Default::default(),
             surface_factory: None,
             zone_displays,
+            display_keys: Vec::new(),
+            zone_targets: Default::default(),
             cursor_window: None,
             secondary_recreates: Default::default(),
             overlay_refits: Default::default(),

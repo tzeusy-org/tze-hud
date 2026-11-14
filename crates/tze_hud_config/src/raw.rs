@@ -218,15 +218,16 @@ pub struct RawConfig {
     /// Optional design token overrides.
     #[serde(default)]
     pub design_tokens: Option<RawDesignTokens>,
-    /// Optional `[displays.<NAME>]` tables placing zones on a non-primary
-    /// monitor, keyed by OS display name (e.g. `DISPLAY6`).
+    /// Optional `[displays."<key>"]` tables placing zones on a non-primary
+    /// monitor, keyed by the monitor's EDID key (e.g. `DEL41A2-7XK2N13`; see
+    /// [`crate::displays`]).
     #[serde(default)]
     pub displays: Option<HashMap<String, RawDisplay>>,
 }
 
-// ─── [displays.<NAME>] ───────────────────────────────────────────────────────
+// ─── [displays."<key>"] ──────────────────────────────────────────────────────
 
-/// `[displays.<NAME>]` table: which zones render on that monitor instead of
+/// `[displays."<key>"]` table: which zones render on that monitor instead of
 /// the primary.
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct RawDisplay {

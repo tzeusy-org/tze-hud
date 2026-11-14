@@ -242,8 +242,10 @@ startup profile limits. Themes resolve defaults → selected theme → explicit
 overrides ([`themes`](../crates/tze_hud_config/src/themes.rs)); font and theme
 choices currently take effect at startup. Per-monitor overlays share a scene
 in physical desktop coordinates
-([`displays`](../crates/tze_hud_runtime/src/windowed/displays.rs)). Do not infer
-live theme switching, EDID-based config keys or full logical-DPI scaling from
+([`displays`](../crates/tze_hud_runtime/src/windowed/displays.rs)); `[displays]`
+keys come from EDID identity in
+[`monitor_identity`](../crates/tze_hud_runtime/src/windowed/monitor_identity.rs). Do not infer
+live theme switching or full logical-DPI scaling from
 the presence of helper modules; their status is recorded in [scope.md](scope.md).
 
 ## Verification and navigation
