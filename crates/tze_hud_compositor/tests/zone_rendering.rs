@@ -361,30 +361,60 @@ async fn subtitle_backdrop_follows_policy() {
         ),
         ("no whole-zone backdrop", None, CLEAR, [36, 37, 52, 255]),
     ];
-    for pill in [true, false] {
+    for level in [
+        tze_hud_scene::DegradationLevel::Nominal,
+        tze_hud_scene::DegradationLevel::Simplified,
+    ] {
         gpu.compositor
-            .set_token_map(std::collections::HashMap::from([(
-                "opacity.subtitle".into(),
-                if pill { "1" } else { "0" }.into(),
-            )]));
-        for (what, backdrop, outside, inside) in cases {
-            let mut scene = subtitle_scene(256, subtitle_policy(backdrop));
-            let frame = gpu.render(&mut scene);
-            frame.expect(
-                28,
-                SUBTITLE_Y,
-                outside,
-                10,
-                &format!("{what}: whole zone outside pill"),
-            );
-            frame.expect(
-                128,
-                SUBTITLE_Y,
-                if pill { inside } else { outside },
-                10,
-                &format!("{what}: themed pill={pill}"),
-            );
-            frame.expect(128, 170, CLEAR, 10, &format!("{what}: above zone"));
+            .set_degradation_policy(tze_hud_compositor::CompositorDegradationPolicy {
+                level,
+                ..Default::default()
+            });
+        for radius in [None, Some(6.0)] {
+            for pill in [true, false] {
+                gpu.compositor
+                    .set_token_map(std::collections::HashMap::from([(
+                        "opacity.subtitle".into(),
+                        if pill { "1" } else { "0" }.into(),
+                    )]));
+                for (what, backdrop, outside, inside) in cases {
+                    let mut policy = subtitle_policy(backdrop);
+                    policy.backdrop_radius = radius;
+                    let mut scene = subtitle_scene(256, policy);
+                    // Simplified's existing flat-alpha policy makes visible fills
+                    // opaque; the pill still sits above the optional zone fill.
+                    let (outside, inside) = if level >= tze_hud_scene::DegradationLevel::Simplified
+                    {
+                        let outside = backdrop.map_or(CLEAR, |c| {
+                            [
+                                (c.r * 255.0) as u8,
+                                (c.g * 255.0) as u8,
+                                (c.b * 255.0) as u8,
+                                255,
+                            ]
+                        });
+                        (outside, [15, 18, 22, 255])
+                    } else {
+                        (outside, inside)
+                    };
+                    let frame = gpu.render(&mut scene);
+                    frame.expect(
+                        28,
+                        SUBTITLE_Y,
+                        outside,
+                        10,
+                        &format!("{what}: whole zone outside pill"),
+                    );
+                    frame.expect(
+                        128,
+                        SUBTITLE_Y,
+                        if pill { inside } else { outside },
+                        10,
+                        &format!("{what}: themed pill={pill}"),
+                    );
+                    frame.expect(128, 170, CLEAR, 10, &format!("{what}: above zone"));
+                }
+            }
         }
     }
 }

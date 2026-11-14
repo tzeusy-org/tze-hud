@@ -543,7 +543,7 @@ impl super::Compositor {
                 | ContentionPolicy::LatestWins
                 | ContentionPolicy::Replace => {
                     let latest = &publishes[publishes.len() - 1];
-                    if zone_name == "subtitle"
+                    let subtitle_pill = if zone_name == "subtitle"
                         && let ZoneContent::StreamText(text) = &latest.content
                     {
                         let Some(pill) =
@@ -551,10 +551,10 @@ impl super::Compositor {
                         else {
                             continue;
                         };
-                        if !degraded && pill.style.fill.a > 0.0 {
-                            out.push(self.subtitle_backdrop_cmd(&pill, anim_opacity));
-                        }
-                    }
+                        Some(pill)
+                    } else {
+                        None
+                    };
                     // The status-bar card hugs its rows (the same rect the flat
                     // pass, text and drag handle use); no entries, no card.
                     let zone_rect = Rect::new(x, y, w, h);
@@ -578,6 +578,13 @@ impl super::Compositor {
                         sdf_radius,
                         anim_opacity.clamp(0.0, 1.0),
                     );
+                    // Also follow an explicitly rounded whole-zone backdrop.
+                    if !degraded
+                        && let Some(pill) = subtitle_pill
+                        && pill.style.fill.a > 0.0
+                    {
+                        out.push(self.subtitle_backdrop_cmd(&pill, anim_opacity));
+                    }
                 }
             }
         }
