@@ -80,6 +80,7 @@ MAX_RGBA_BYTES = 64 * 1024 * 1024
 CAPTURE_FIXTURES = (
     "all-zones-test", "notification-full-gamut", "subtitle-multiline",
     "status-indicator-status-matrix-test",
+    "alert-banner-info-test", "alert-banner-caution-test", "alert-banner-critical-test",
 )
 
 

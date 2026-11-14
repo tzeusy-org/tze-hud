@@ -1531,3 +1531,12 @@ mismatched history or bounded-admission failure disable notification actions
 until a clean runtime restart. Valid reentrant histories may trigger that
 availability limit; its frequency has not been measured. Unrelated pointer input
 continues, and this source model does not replace held-press/release owner proof.
+
+Alert-banner restyle evidence: `docs/evidence/alert-banner/before.json` records
+three own-frame owner-host captures from build `24818c39` (info, caution and
+critical sequentially on display 1). The existing theme and settings were left
+unchanged; its theme/scale selection is not exposed by that status API. The
+shipped one-banner-per-publisher limit prevented a simultaneous stack from this
+single pairing. The exact severity payloads in `alert-banner-{info,caution,critical}-test.json`
+are captured separately under every theme by the existing Windows CI capture
+lane; headless tests retain distinct-publisher severity ordering coverage.

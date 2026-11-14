@@ -164,12 +164,15 @@ async fn test_alert_banner_stacks_by_severity_then_recency() {
             items.windows(2).all(|w| w[0].pixel_y < w[1].pixel_y),
             "slots must descend the screen in order"
         );
-        // The zone's heading typography reaches every TextItem: size, weight and
-        // the horizontal inset from the full-width zone's left edge (x = 0).
+        // The zone's typography reaches every TextItem: size, weight and the
+        // text's left edge in the full-width zone (x = 0): the canonical
+        // `space.alert.margin` (16) inset, the policy's 8 dp
+        // margin_horizontal, then the severity mark's `space.xl` (24) column
+        // and its `space.m` (12) gap.
         for item in &items {
             assert_eq!(item.font_size_px, 24.0, "policy font size");
             assert_eq!(item.font_weight, 700, "policy font weight");
-            assert_eq!(item.pixel_x, 8.0, "margin_horizontal inset");
+            assert_eq!(item.pixel_x, 16.0 + 8.0 + 24.0 + 12.0, "text left edge");
         }
     }
 }
@@ -253,6 +256,8 @@ async fn test_alert_banner_zone_height_grows_with_active_count() {
 #[tokio::test]
 async fn test_alert_banner_text_uses_alert_text_roles() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    // The severity mark's glyph is a text item only with a rasterizer.
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
     compositor.set_token_map(
         [
             ("color.on_alert", "#000000"),
@@ -297,7 +302,7 @@ async fn test_alert_banner_is_an_inset_card_matching_its_hit_regions() {
     let mut scene = make_alert_banner_scene();
     {
         let zone = scene.zone_registry.zones.get_mut("alert-banner").unwrap();
-        zone.rendering_policy.backdrop_radius = Some(12.0);
+        zone.rendering_policy.backdrop_radius = Some(10.0);
     }
     publish_alert(&mut scene, "Disk almost full", 2, "agent-a");
     publish_alert(&mut scene, "Service down", 3, "agent-b");
@@ -318,7 +323,7 @@ async fn test_alert_banner_is_an_inset_card_matching_its_hit_regions() {
         .collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0)
         .chrome
         .into_iter()
-        .filter(|c| c.radius == 12.0)
+        .filter(|c| c.radius == 10.0)
         .map(|c| Rect::new(c.x, c.y, c.width, c.height))
         .collect();
     assert_eq!(backdrops, cards, "drawn backdrops are the hit-tested cards");

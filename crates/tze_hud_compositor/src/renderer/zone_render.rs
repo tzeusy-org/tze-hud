@@ -348,13 +348,13 @@ impl Compositor {
                             }
                         }
                         ZoneContent::Notification(n) => {
-                            // Non-alert-banner notification: the card style's urgency
-                            // tone (semantic container roles).
+                            // The card or banner style's urgency tone
+                            // (semantic container roles).
                             // Per spec: urgency >3 clamped to 3 (critical).
                             // Respect policy.backdrop contract: only emit a backdrop (and
                             // border) when a backdrop is enabled; skip entirely when None.
                             policy.backdrop.map(|_| {
-                                NotificationStyle::resolve(zone_tokens, policy)
+                                NotificationStyle::for_zone(zone_name, zone_tokens, policy)
                                     .tone(n.urgency)
                                     .fill
                             })
@@ -398,7 +398,8 @@ impl Compositor {
                     if let ZoneContent::Notification(payload) = &latest.content {
                         if let Some(icon_id) = super::icon::parse_notification_icon(&payload.icon) {
                             if self.image_texture_cache.contains_key(&icon_id) {
-                                let style = NotificationStyle::resolve(zone_tokens, policy);
+                                let style =
+                                    NotificationStyle::for_zone(zone_name, zone_tokens, policy);
                                 let size = style.icon_size;
                                 let eff_opacity = anim_opacity.clamp(0.0, 1.0);
                                 textured_cmds.push(TexturedDrawCmd {

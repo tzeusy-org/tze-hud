@@ -615,24 +615,30 @@ impl super::Compositor {
             .unwrap_or(0.0);
         // Notification cards: the urgency tone's hairline (`stroke.border.width`
         // dp); the status-bar card keeps `color.border.default` (hud-h51u7.4.4).
-        let border = is_card.then(|| {
-            let (mut color, width) = match content {
-                ZoneContent::Notification(n) => {
-                    let style =
-                        NotificationStyle::for_zone(zone_name, self.zone_tokens(zone_name), policy);
-                    (style.tone(n.urgency).outline, style.hairline)
+        // A transparent outline role (Classic's banner) draws no hairline.
+        let border = is_card
+            .then(|| {
+                let (mut color, width) = match content {
+                    ZoneContent::Notification(n) => {
+                        let style = NotificationStyle::for_zone(
+                            zone_name,
+                            self.zone_tokens(zone_name),
+                            policy,
+                        );
+                        (style.tone(n.urgency).outline, style.hairline)
+                    }
+                    _ => (
+                        resolve_border_default_color(&self.token_map),
+                        NOTIFICATION_BORDER_WIDTH_PX,
+                    ),
+                };
+                color.a *= opacity;
+                RoundedRectBorder {
+                    width,
+                    color: self.gpu_color(color),
                 }
-                _ => (
-                    resolve_border_default_color(&self.token_map),
-                    NOTIFICATION_BORDER_WIDTH_PX,
-                ),
-            };
-            color.a *= opacity;
-            RoundedRectBorder {
-                width,
-                color: self.gpu_color(color),
-            }
-        });
+            })
+            .filter(|b| b.color[3] > 0.0);
         if sdf_radius.is_some() {
             // Notification cards keep their token opacity; others take the policy's.
             if !is_notification_card {

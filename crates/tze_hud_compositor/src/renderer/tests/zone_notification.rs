@@ -1455,11 +1455,23 @@ async fn test_rounded_card_border_follows_the_corner() {
     );
 }
 
-/// alert-banner gets no border — the card border is only for
-/// non-alert-banner notification zones.
+/// An alert banner whose `color.alert.outline` and `color.severity.*` are
+/// transparent (Classic's legacy strip) draws neither a hairline nor a
+/// severity mark: only its flat backdrop quad.
 #[tokio::test]
-async fn test_alert_banner_has_no_border() {
-    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+async fn test_alert_banner_transparent_roles_draw_no_border_or_mark() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    compositor.set_token_map(
+        [
+            "color.alert.outline",
+            "color.severity.info",
+            "color.severity.warning",
+            "color.severity.critical",
+        ]
+        .into_iter()
+        .map(|k| (k.to_owned(), "#00000000".to_owned()))
+        .collect(),
+    );
 
     let mut scene = SceneGraph::new(1280.0, 720.0);
     scene.register_zone(ZoneDefinition {

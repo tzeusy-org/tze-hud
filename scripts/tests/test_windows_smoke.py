@@ -1596,3 +1596,16 @@ def test_capture_png_pixels_baseline_and_changed_only_comment(tmp_path, monkeypa
     ws.capture_fixture(FixtureSmoke(), widgets, lambda index: traced.append(("frame", index)))
     assert [args for tool, args in traced if tool == "frame"] == [1, 2]
     assert [args["params"] for tool, args in traced if tool == "hud_publish"] == [{"status": "online"}, {"status": "away"}]
+
+    # Each banner severity is a separate exact fixture: the shipped zone allows
+    # one publication per agent, so each owned capture gets its own checkpoint.
+    fixture_root = Path(ws.__file__).resolve().parents[2] / ".claude/skills/user-test/scripts"
+    for label, urgency in [("info", 1), ("caution", 2), ("critical", 3)]:
+        name = f"alert-banner-{label}-test"
+        assert name in ws.CAPTURE_FIXTURES
+        messages = json.loads((fixture_root / f"{name}.json").read_text())
+        assert len(messages) == 1 and messages[0]["content"]["urgency"] == urgency
+        traced.clear()
+        ws.capture_fixture(FixtureSmoke(), messages, lambda index: traced.append(("frame", index)))
+        assert [args for tool, args in traced if tool == "frame"] == [1]
+        assert [args["content"] for tool, args in traced if tool == "hud_publish"] == [messages[0]["content"]]

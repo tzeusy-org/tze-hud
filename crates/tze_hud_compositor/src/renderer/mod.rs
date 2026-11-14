@@ -348,9 +348,8 @@ pub struct Compositor {
     last_scroll_smooth_at: Option<std::time::Instant>,
     /// Resolved design token map, set at startup via `set_token_map`.
     ///
-    /// Used to resolve `color.severity.{info,warning,critical}` tokens for
-    /// alert-banner backdrop colors. When empty (the default), all severity
-    /// lookups fall back to the hardcoded `SEVERITY_*` constants.
+    /// Notifications and alert banners resolve their semantic colour and metric
+    /// roles from this map, falling back to canonical token defaults when absent.
     ///
     /// Populated by calling `set_token_map` with the global token map from
     /// scene startup.
@@ -1712,16 +1711,6 @@ impl Compositor {
         })
     }
 
-    /// Replace the compositor's resolved design token map.
-    ///
-    /// Should be called once at startup with the global token map from scene
-    /// startup.  The map is keyed by canonical
-    /// token names (e.g. `"color.severity.warning"`) with hex-color string values
-    /// (e.g. `"#FFB800"`).
-    ///
-    /// At render time the compositor looks up `color.severity.{info,warning,critical}`
-    /// to derive alert-banner backdrop colors, falling back to hardcoded constants
-    /// when a key is absent or unparseable.
     /// The tokens `zone` draws with: its monitor's px per dp when it is
     /// placed on a secondary at another scale, else `token_map`.
     pub(crate) fn zone_tokens(&self, zone: &str) -> &HashMap<String, String> {
@@ -1730,6 +1719,9 @@ impl Compositor {
             .unwrap_or(&self.token_map)
     }
 
+    /// Replace the resolved startup/theme token map and invalidate retained
+    /// style, layout and font state that depends on it. Missing notification
+    /// and alert roles use their canonical token defaults.
     pub fn set_token_map(&mut self, map: HashMap<String, String>) {
         self.zone_motion = easing::ZoneMotion::from_token_map(&map);
         // `font.sans` / `font.mono` / `font.serif` (and the runtime-set fonts
