@@ -89,10 +89,14 @@ pub fn apply_subtitle_token_defaults(policy: &mut RenderingPolicy, tokens: &Desi
         policy.text_align = Some(TextAlign::Center);
     }
     if policy.margin_horizontal.is_none() {
-        policy.margin_horizontal = token_f32(tokens, "space.subtitle.horizontal");
+        policy.margin_horizontal = policy
+            .margin_px
+            .or_else(|| token_f32(tokens, "space.subtitle.horizontal"));
     }
     if policy.margin_vertical.is_none() {
-        policy.margin_vertical = token_f32(tokens, "space.subtitle.vertical");
+        policy.margin_vertical = policy
+            .margin_px
+            .or_else(|| token_f32(tokens, "space.subtitle.vertical"));
     }
     // overflow: Ellipsis per subtitle exemplar spec (hardcoded, not token-driven)
     if policy.overflow.is_none() {
@@ -457,9 +461,10 @@ mod tests {
     #[test]
     fn test_token_defaults_do_not_overwrite_existing_values() {
         let tokens = default_tokens();
-        // Pre-set font_size_px to 32.0 (explicit config value)
+        // Explicit owner values take precedence over semantic token defaults.
         let mut policy = RenderingPolicy {
             font_size_px: Some(32.0),
+            margin_px: Some(5.0),
             transition_in_ms: Some(0),
             transition_out_ms: Some(275),
             ..RenderingPolicy::default()
@@ -467,11 +472,28 @@ mod tests {
 
         apply_token_defaults_for_zone("subtitle", &mut policy, &tokens);
 
-        // font_size_px should remain 32.0, not the canonical default of 28
+        // Keep explicit typography, unified padding and motion values.
         assert_eq!(
             policy.font_size_px,
             Some(32.0),
             "explicit value must not be overwritten by token default"
+        );
+        assert_eq!(
+            (policy.margin_horizontal, policy.margin_vertical),
+            (Some(5.0), Some(5.0)),
+            "explicit unified padding wins over axis token defaults"
+        );
+        let mut axis_policy = RenderingPolicy {
+            margin_px: Some(5.0),
+            margin_horizontal: Some(7.0),
+            margin_vertical: Some(9.0),
+            ..RenderingPolicy::default()
+        };
+        apply_token_defaults_for_zone("subtitle", &mut axis_policy, &tokens);
+        assert_eq!(
+            (axis_policy.margin_horizontal, axis_policy.margin_vertical),
+            (Some(7.0), Some(9.0)),
+            "explicit axis padding wins over unified padding"
         );
         assert_eq!(policy.transition_in_ms, Some(0), "explicit snap wins");
         assert_eq!(
