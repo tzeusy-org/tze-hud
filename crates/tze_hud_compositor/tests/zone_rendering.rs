@@ -107,8 +107,8 @@ fn notification_scene() -> SceneGraph {
     scene
 }
 
-// Canonical card tones at opacity.surface (0.92) over clear (hud-h51u7.4.1):
-// color.surface.container.high, caution.container, error.container.
+// Canonical card tones at opacity.notification (0.92) over clear (hud-h51u7.4.1):
+// color.notification.container, caution.container, error.container.
 const NOTIF_LOW: [u8; 4] = [37, 42, 55, 255];
 const NOTIF_NORMAL: [u8; 4] = NOTIF_LOW;
 const NOTIF_URGENT: [u8; 4] = [73, 58, 30, 255];

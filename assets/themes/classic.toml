@@ -1,8 +1,8 @@
 # Classic — black/navy surfaces, white text and the legacy blue accent.
 # Select with `[design_tokens] theme = "classic"`.
-# Notification cards draw from the semantic roles below (navy containers,
-# caution/error containers for urgency 2/3); the legacy keys that remain feed
-# the status bar and alert banner. Semantic roles are explicit, including
+# The legacy notification look is retained by the notification card roles
+# at the end of the semantic block; the legacy keys that remain feed the
+# status bar and alert banner. Semantic roles are explicit, including
 # intentionally shared grid/easing values rather than fallback.
 
 "color.text.primary"                   = "#F5F7FA"
@@ -99,6 +99,28 @@
 "type.readout.size" = "14"
 "type.readout.line_height" = "20"
 "type.readout.weight" = "500"
+
+# Notification card roles: the legacy Classic card look (black/navy fills
+# at 0.80, grey hairline, white text, 14 dp corners, 9 dp padding, 15/700
+# title and 13.5/400 body).
+"color.notification.container.low" = "#000000"
+"color.notification.container" = "#0C1426"
+"color.notification.outline" = "#6E7A91"
+"color.notification.caution.outline" = "#6E7A91"
+"color.notification.error.outline" = "#6E7A91"
+"color.on_notification" = "#F5F7FA"
+"color.on_notification.variant" = "#F5F7FA"
+"color.on_notification.caution" = "#F5F7FA"
+"color.on_notification.error" = "#F5F7FA"
+"opacity.notification" = "0.80"
+"shape.notification" = "14"
+"space.notification" = "9"
+"type.notification.title.size" = "15"
+"type.notification.title.line_height" = "21"
+"type.notification.title.weight" = "700"
+"type.notification.body.size" = "13.5"
+"type.notification.body.line_height" = "18.9"
+"type.notification.body.weight" = "400"
 
 # Portal color overrides: the existing accepted portal-key exception.
 # Same-theme roles retain neutral structure and existing status meanings.

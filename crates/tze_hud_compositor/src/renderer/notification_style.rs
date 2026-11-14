@@ -1,11 +1,14 @@
 //! The notification card's one resolved style (hud-h51u7.4.1, Tonal Glass).
 //!
 //! Every size, colour and opacity a `notification-area` card draws with comes
-//! from here, read from semantic design tokens: `color.surface.container.high`
-//! card at `opacity.surface` under a 1 dp `color.outline.variant` hairline,
-//! `shape.l` corners, `space.l` padding, `type.title.m` / `type.body.m` text,
-//! `space.xxl` actions in `shape.s` with `state.*` overlays. Urgency 2 and 3
-//! take the caution and error container roles. Backdrop, SDF border, icon,
+//! from here, read from design tokens: the card's own roles
+//! (`color.notification.*`, `color.on_notification.*`,
+//! `opacity.notification`, `shape.notification`, `space.notification`,
+//! `type.notification.{title,body}.*`; Tonal Glass gives them its generic
+//! surface, outline, text, corner, padding and type values, Classic its legacy
+//! card look) and generic roles for the controls: `space.xxl` actions in
+//! `shape.s` with `state.*` overlays. Urgency 2 and 3 fill with the caution
+//! and error container roles. Backdrop, SDF border, icon,
 //! text bands, dismiss and action geometry all read this one view, so drawing
 //! and hit testing cannot drift. The only literals are the canonical defaults
 //! in `tze_hud_config`, used when a token is absent.
@@ -86,12 +89,34 @@ pub(super) struct TextRole {
     pub(super) weight: u16,
 }
 
+/// The `size`, `line_height` and `weight` keys of one type role.
+type RoleKeys = [&'static str; 3];
+const TITLE: RoleKeys = [
+    "type.notification.title.size",
+    "type.notification.title.line_height",
+    "type.notification.title.weight",
+];
+const BODY: RoleKeys = [
+    "type.notification.body.size",
+    "type.notification.body.line_height",
+    "type.notification.body.weight",
+];
+const ACTION: RoleKeys = [
+    "type.body.m.size",
+    "type.body.m.line_height",
+    "type.label.m.weight",
+];
+
 impl TextRole {
-    fn resolve(tokens: &HashMap<String, String>, role: &str, factor: f32) -> Self {
+    fn resolve(
+        tokens: &HashMap<String, String>,
+        [size, line, weight]: RoleKeys,
+        factor: f32,
+    ) -> Self {
         Self {
-            size: dp(tokens, &format!("type.{role}.size")) * factor,
-            line_height: dp(tokens, &format!("type.{role}.line_height")) * factor,
-            weight: number(tokens, &format!("type.{role}.weight")) as u16,
+            size: dp(tokens, size) * factor,
+            line_height: dp(tokens, line) * factor,
+            weight: number(tokens, weight) as u16,
         }
     }
     /// `TextItem::line_height_multiplier` for this role.
@@ -136,67 +161,70 @@ pub(super) struct NotificationStyle {
     primary_container: Rgba,
     on_primary_container: Rgba,
     focus: Rgba,
-    tones: [NotificationTone; 3],
+    tones: [NotificationTone; 4],
 }
 
 impl NotificationStyle {
     /// Resolve from the zone's (monitor-scaled) token map. Zone policy
     /// sizes keep precedence (margins, radius, title size and weight, fill
-    /// opacity); colours are semantic roles, restyled through
+    /// opacity); colours are token roles, restyled through
     /// `[design_tokens]`. Whether a card has a backdrop at all stays the
     /// policy's `backdrop` switch, checked by the callers.
     pub(super) fn resolve(tokens: &HashMap<String, String>, policy: &RenderingPolicy) -> Self {
-        let title_token = dp(tokens, "type.title.m.size");
+        let title_token = dp(tokens, TITLE[0]);
         // An explicit title size scales the whole type ramp with it.
         let factor = policy
             .font_size_px
             .filter(|s| s.is_finite() && *s > 0.0 && title_token > 0.0)
             .map_or(1.0, |s| s / title_token);
-        let mut title = TextRole::resolve(tokens, "title.m", factor);
+        let mut title = TextRole::resolve(tokens, TITLE, factor);
         if let Some(weight) = policy.font_weight {
             title.weight = weight;
         }
-        let body = TextRole::resolve(tokens, "body.m", factor);
-        let mut action_label = TextRole::resolve(tokens, "body.m", factor);
-        action_label.weight = number(tokens, "type.label.m.weight") as u16;
-        let space_l = dp(tokens, "space.l");
+        let body = TextRole::resolve(tokens, BODY, factor);
+        let action_label = TextRole::resolve(tokens, ACTION, factor);
+        let padding = dp(tokens, "space.notification");
         let opacity = policy
             .backdrop_opacity
-            .unwrap_or_else(|| number(tokens, "opacity.surface"))
+            .unwrap_or_else(|| number(tokens, "opacity.notification"))
             .clamp(0.0, 1.0);
         let with_opacity = |mut c: Rgba| {
             c.a *= opacity;
             c
         };
+        let neutral = |fill: &str| NotificationTone {
+            fill: with_opacity(color(tokens, fill)),
+            outline: color(tokens, "color.notification.outline"),
+            title: color(tokens, "color.on_notification"),
+            body: color(tokens, "color.on_notification.variant"),
+        };
+        let caution_text = color(tokens, "color.on_notification.caution");
+        let error_text = color(tokens, "color.on_notification.error");
         let tones = [
-            NotificationTone {
-                fill: with_opacity(color(tokens, "color.surface.container.high")),
-                outline: color(tokens, "color.outline.variant"),
-                title: color(tokens, "color.on_surface"),
-                body: color(tokens, "color.on_surface.variant"),
-            },
+            neutral("color.notification.container.low"),
+            neutral("color.notification.container"),
             NotificationTone {
                 fill: with_opacity(color(tokens, "color.caution.container")),
-                outline: color(tokens, "color.caution.outline"),
-                title: color(tokens, "color.on_caution.container"),
-                body: color(tokens, "color.on_caution.container"),
+                outline: color(tokens, "color.notification.caution.outline"),
+                title: caution_text,
+                body: caution_text,
             },
             NotificationTone {
                 fill: with_opacity(color(tokens, "color.error.container")),
-                outline: color(tokens, "color.error"),
-                title: color(tokens, "color.on_error.container"),
-                body: color(tokens, "color.on_error.container"),
+                outline: color(tokens, "color.notification.error.outline"),
+                title: error_text,
+                body: error_text,
             },
         ];
         Self {
             padding_h: policy
                 .margin_horizontal
                 .or(policy.margin_px)
-                .unwrap_or(space_l),
+                .unwrap_or(padding),
             padding_v: policy
                 .margin_vertical
                 .or(policy.margin_px)
-                .unwrap_or(space_l),
+                .unwrap_or(padding),
             hairline: dp(tokens, "stroke.border.width"),
             stack_gap: dp(tokens, "space.s"),
             icon_size: dp(tokens, "space.xxl"),
@@ -229,9 +257,10 @@ impl NotificationStyle {
         }
     }
 
-    /// Urgency 0-1 neutral, 2 caution, 3 (and above) error.
+    /// Urgency 0 and 1 neutral (each its own fill), 2 caution, 3 (and
+    /// above) error.
     pub(super) fn tone(&self, urgency: u32) -> NotificationTone {
-        self.tones[urgency.saturating_sub(1).min(2) as usize]
+        self.tones[urgency.min(3) as usize]
     }
 
     /// Text column inset from the card's left edge.

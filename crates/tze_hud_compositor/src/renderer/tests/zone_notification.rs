@@ -1099,10 +1099,10 @@ async fn test_notification_area_does_not_use_severity_tokens() {
 
 // ── Notification urgency tone tests ──────────────────────────────────────
 
-/// Urgency tones (hud-h51u7.4.1): 0-1 the neutral high container, 2 the
-/// caution container, 3 (and anything above, clamped) the error container,
-/// each under its own hairline role; a semantic token restyles the card
-/// (sRGB hex decoded to linear) at `opacity.surface`.
+/// Urgency tones (hud-h51u7.4.1): 0 and 1 the notification containers
+/// (equal by default), 2 the caution container, 3 (and anything above,
+/// clamped) the error container, each under its own hairline role; a token
+/// restyles the card (sRGB hex decoded to linear) at `opacity.notification`.
 #[test]
 fn test_notification_urgency_color_tokens() {
     use crate::renderer::notification_style::NotificationStyle;
@@ -1128,7 +1128,7 @@ fn test_notification_urgency_color_tokens() {
     let overrides = [
         (
             0,
-            "color.surface.container.high",
+            "color.notification.container.low",
             "#00FFFF",
             [0.0, 1.0, 1.0],
         ),
@@ -1143,7 +1143,7 @@ fn test_notification_urgency_color_tokens() {
     for (urgency, key, hex, expected) in overrides {
         let tokens = HashMap::from([
             (key.to_string(), hex.to_string()),
-            ("opacity.surface".to_string(), "0.5".to_string()),
+            ("opacity.notification".to_string(), "0.5".to_string()),
         ]);
         let c = NotificationStyle::resolve(&tokens, &policy)
             .tone(urgency)
@@ -1151,13 +1151,16 @@ fn test_notification_urgency_color_tokens() {
         for (got, want) in [c.r, c.g, c.b].into_iter().zip(expected) {
             assert!((got - want).abs() < 0.004, "{key} token {hex}: got {c:?}");
         }
-        assert!((c.a - 0.5).abs() < 1e-6, "opacity.surface applies: {c:?}");
+        assert!(
+            (c.a - 0.5).abs() < 1e-6,
+            "opacity.notification applies: {c:?}"
+        );
     }
 }
 
 /// notification-area card fill opacity: an explicit zone
 /// `backdrop_opacity` keeps precedence; otherwise the card takes
-/// `opacity.surface` (hud-h51u7.4.1).
+/// `opacity.notification` (hud-h51u7.4.1).
 #[tokio::test]
 async fn test_notification_area_backdrop_opacity() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
@@ -1176,7 +1179,7 @@ async fn test_notification_area_backdrop_opacity() {
         accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
         rendering_policy: RenderingPolicy {
             backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 0.5)),
-            // An explicit zone opacity wins over opacity.surface.
+            // An explicit zone opacity wins over opacity.notification.
             backdrop_opacity: Some(0.5),
             text_color: Some(Rgba::WHITE),
             ..Default::default()
@@ -1214,7 +1217,7 @@ async fn test_notification_area_backdrop_opacity() {
         (first_alpha - 0.5).abs() < 0.01,
         "explicit backdrop_opacity must win, got {first_alpha}"
     );
-    // Without it, the card takes opacity.surface (canonical 0.92).
+    // Without it, the card takes opacity.notification (canonical 0.92).
     scene
         .zone_registry
         .zones
@@ -1226,7 +1229,7 @@ async fn test_notification_area_backdrop_opacity() {
     compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
     assert!(
         (vertices[0].color[3] - 0.92).abs() < 0.01,
-        "opacity.surface default, got {}",
+        "opacity.notification default, got {}",
         vertices[0].color[3]
     );
 }
@@ -1331,7 +1334,7 @@ async fn test_notification_card_border_is_an_sdf_border() {
     );
     assert!(
         (dismiss.x + dismiss.width - (x + w - 16.0)).abs() < 0.01,
-        "dismiss inside the space.l padding from the right edge"
+        "dismiss inside the space.notification padding from the right edge"
     );
 
     let rounded = bordered_notification_scene(Some(12.0));
@@ -1371,9 +1374,12 @@ async fn test_rounded_card_border_follows_the_corner() {
     }
     let (mut compositor, surface) = require_gpu!(built);
     let mut tokens = HashMap::new();
-    tokens.insert("color.outline.variant".to_string(), "#00FF00".to_string());
     tokens.insert(
-        "color.surface.container.high".to_string(),
+        "color.notification.outline".to_string(),
+        "#00FF00".to_string(),
+    );
+    tokens.insert(
+        "color.notification.container.low".to_string(),
         "#FF0000".to_string(),
     );
     compositor.set_token_map(tokens);
@@ -1520,16 +1526,17 @@ async fn test_alert_banner_has_no_border() {
 }
 
 /// The card hairline is its urgency tone's outline role: neutral cards
-/// `color.outline.variant`, urgency 2 `color.caution.outline`, urgency 3
-/// `color.error` (hud-h51u7.4.1).
+/// `color.notification.outline`, urgency 2
+/// `color.notification.caution.outline`, urgency 3
+/// `color.notification.error.outline` (hud-h51u7.4.1).
 #[tokio::test]
 async fn test_notification_area_border_uses_border_default_token() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
 
     for (urgency, key) in [
-        (0, "color.outline.variant"),
-        (2, "color.caution.outline"),
-        (3, "color.error"),
+        (0, "color.notification.outline"),
+        (2, "color.notification.caution.outline"),
+        (3, "color.notification.error.outline"),
     ] {
         // Install the role as pure cyan (#00FFFF).
         compositor.set_token_map(HashMap::from([(key.to_string(), "#00FFFF".to_string())]));

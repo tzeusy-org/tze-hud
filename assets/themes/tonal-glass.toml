@@ -104,6 +104,26 @@
 "type.readout.line_height"         = "20"
 "type.readout.weight"              = "500"
 
+# Notification card roles (the card's own fill, hairline, text and metrics).
+"color.notification.container.low"    = "#222833"
+"color.notification.container"        = "#222833"
+"color.notification.outline"          = "#343B47"
+"color.notification.caution.outline"  = "#6B5518"
+"color.notification.error.outline"    = "#FF8A80"
+"color.on_notification"               = "#E8EBF0"
+"color.on_notification.variant"       = "#A9B1BE"
+"color.on_notification.caution"       = "#FFE7A8"
+"color.on_notification.error"         = "#FFDAD6"
+"opacity.notification"                = "0.92"
+"shape.notification"                  = "16"
+"space.notification"                  = "16"
+"type.notification.title.size"        = "16"
+"type.notification.title.line_height" = "24"
+"type.notification.title.weight"      = "600"
+"type.notification.body.size"         = "14"
+"type.notification.body.line_height"  = "20"
+"type.notification.body.weight"       = "400"
+
 # ── Legacy keys the current renderer reads ──────────────────────────────────
 # Mapped onto the semantic palette so today's elements pick up Tonal Glass
 # colours before they are restyled (hud-h51u7.4). Delete each mapping when

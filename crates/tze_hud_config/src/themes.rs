@@ -618,6 +618,8 @@ mod tests {
             "color.error",
             "opacity.surface",
             "opacity.scrim",
+            "color.notification",
+            "opacity.notification",
             "state.",
             "focus.",
             "motion.",
@@ -644,6 +646,16 @@ mod tests {
             ("color.outline", "color.border.default"),
             ("type.body.m.size", "typography.body.size"),
             ("type.body.m.weight", "typography.body.weight"),
+            // The notification card keeps Classic's legacy card look.
+            ("color.on_notification", "color.text.primary"),
+            ("color.notification.outline", "color.border.default"),
+            ("opacity.notification", "opacity.backdrop.opaque"),
+            ("shape.notification", "border.radius.medium"),
+            ("type.notification.title.size", "typography.body.size"),
+            (
+                "type.notification.title.weight",
+                "typography.notification.title.weight",
+            ),
         ] {
             assert_eq!(
                 classic[role], classic[legacy],

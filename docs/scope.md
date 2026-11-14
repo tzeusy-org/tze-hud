@@ -510,7 +510,7 @@ source links when implementation changes the status.
   the panel saves them with
   [`set_design_tokens`](../crates/tze_hud_config/src/config_write.rs). Widget
   text still uses the bundled fonts. The notification card reads only
-  semantic tokens in source
+  design tokens (its own card roles, which Classic sets to its legacy look) in source
   ([`notification_style.rs`](../crates/tze_hud_compositor/src/renderer/notification_style.rs),
   `hud-h51u7.4.1`); its Windows owner signoff (`hud-h51u7.4.6`) is
   outstanding. The remaining restyle/owner-signoff work

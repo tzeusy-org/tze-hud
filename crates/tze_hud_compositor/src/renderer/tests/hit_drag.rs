@@ -140,7 +140,7 @@ async fn zone_hit_dismiss_region_at_top_right_of_slot() {
     let region = &scene.overlay.zone_hit_regions[0];
 
     // Dismiss sits at the top-right of the card, inside its padding, a
-    // title-line square (all token-derived: space.l, type.title.m).
+    // title-line square (all token-derived: space.notification, type.notification.title).
     // Zone geometry: zx = 1920*0.75 = 1440, zw = 1920*0.24 = 460.8.
     let style = crate::renderer::notification_style::NotificationStyle::resolve(
         &std::collections::HashMap::new(),

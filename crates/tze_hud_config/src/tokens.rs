@@ -1017,6 +1017,100 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Numeric readout (gauges, timers): font weight (CSS numeric)",
         default_value: "500",
     },
+    // Notification card roles (hud-h51u7.4.1): the card's own fill, hairline,
+    // text, opacity, corner, padding and type, so a theme can style cards
+    // without restyling every surface that shares the generic roles.
+    // Defaults are Tonal Glass's generic values.
+    CanonicalToken {
+        key: "color.notification.container.low",
+        description: "Notification card fill at urgency 0",
+        default_value: "#222833",
+    },
+    CanonicalToken {
+        key: "color.notification.container",
+        description: "Notification card fill at urgency 1",
+        default_value: "#222833",
+    },
+    CanonicalToken {
+        key: "color.notification.outline",
+        description: "Notification card hairline at urgency 0-1",
+        default_value: "#343B47",
+    },
+    CanonicalToken {
+        key: "color.notification.caution.outline",
+        description: "Notification card hairline at urgency 2",
+        default_value: "#6B5518",
+    },
+    CanonicalToken {
+        key: "color.notification.error.outline",
+        description: "Notification card hairline at urgency 3",
+        default_value: "#FF8A80",
+    },
+    CanonicalToken {
+        key: "color.on_notification",
+        description: "Notification card title at urgency 0-1",
+        default_value: "#E8EBF0",
+    },
+    CanonicalToken {
+        key: "color.on_notification.variant",
+        description: "Notification card body at urgency 0-1",
+        default_value: "#A9B1BE",
+    },
+    CanonicalToken {
+        key: "color.on_notification.caution",
+        description: "Notification card text at urgency 2",
+        default_value: "#FFE7A8",
+    },
+    CanonicalToken {
+        key: "color.on_notification.error",
+        description: "Notification card text at urgency 3",
+        default_value: "#FFDAD6",
+    },
+    CanonicalToken {
+        key: "opacity.notification",
+        description: "Notification card fill opacity (0.0-1.0)",
+        default_value: "0.92",
+    },
+    CanonicalToken {
+        key: "shape.notification",
+        description: "Notification card corner radius (dp)",
+        default_value: "16",
+    },
+    CanonicalToken {
+        key: "space.notification",
+        description: "Notification card padding (dp)",
+        default_value: "16",
+    },
+    CanonicalToken {
+        key: "type.notification.title.size",
+        description: "Notification card title: font size (dp)",
+        default_value: "16",
+    },
+    CanonicalToken {
+        key: "type.notification.title.line_height",
+        description: "Notification card title: line height (dp)",
+        default_value: "24",
+    },
+    CanonicalToken {
+        key: "type.notification.title.weight",
+        description: "Notification card title: font weight (CSS numeric)",
+        default_value: "600",
+    },
+    CanonicalToken {
+        key: "type.notification.body.size",
+        description: "Notification card body: font size (dp)",
+        default_value: "14",
+    },
+    CanonicalToken {
+        key: "type.notification.body.line_height",
+        description: "Notification card body: line height (dp)",
+        default_value: "20",
+    },
+    CanonicalToken {
+        key: "type.notification.body.weight",
+        description: "Notification card body: font weight (CSS numeric)",
+        default_value: "400",
+    },
     // Alert-banner text keys (defaults match the compositor fallbacks;
     // retired when hud-h51u7.4.2 restyles the banner)
     CanonicalToken {

@@ -523,9 +523,12 @@ async fn test_three_pass_ordering_independent_of_registration_order() {
     // its left hairline as an independent positive control. An idle × draws
     // no SDF shape (hud-h51u7.4.1).
     compositor.set_token_map(HashMap::from([
-        ("color.outline.variant".to_owned(), "#00FF00".to_owned()),
         (
-            "color.surface.container.high".to_owned(),
+            "color.notification.outline".to_owned(),
+            "#00FF00".to_owned(),
+        ),
+        (
+            "color.notification.container.low".to_owned(),
             "#FF0000".to_owned(),
         ),
     ]));

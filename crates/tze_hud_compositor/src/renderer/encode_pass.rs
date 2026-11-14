@@ -636,7 +636,9 @@ impl super::Compositor {
         opacity: f32,
     ) -> bool {
         let alert_banner = is_alert_banner_zone(zone_name);
-        // Notification and status-bar cards carry the `color.border.default` border.
+        // Notification and status-bar cards carry a hairline border: the
+        // urgency tone's for notification cards, `color.border.default` for
+        // the status bar.
         let is_card = match content {
             ZoneContent::Notification(_) => !alert_banner,
             ZoneContent::StatusBar(_) => true,

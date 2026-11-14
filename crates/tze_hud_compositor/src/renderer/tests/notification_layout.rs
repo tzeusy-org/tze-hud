@@ -100,7 +100,7 @@ async fn test_notification_stack_adds_dismiss_label_and_reserves_text_width() {
         .find(|item| &*item.text == crate::renderer::notification_style::DISMISS_GLYPH)
         .expect("dismiss text item must exist");
 
-    // Canonical space.l padding; the × is a type.title.m line-height square
+    // Canonical space.notification padding; the × is a type.notification.title line-height square
     // plus a space.s gap: 320 - 16 - 16 - 24 - 8.
     assert_eq!(body_item.pixel_x, 16.0, "body text keeps left inset");
     assert_eq!(
@@ -166,11 +166,11 @@ async fn test_notification_stack_adds_dismiss_label_and_reserves_text_width() {
 
 // ── Dismiss button typography token tests [hud-y08tp, hud-h51u7.4.1] ─────
 //
-// The × glyph fills the `type.title.m` line box at its weight: canonical
+// The × glyph fills the `type.notification.title` line box at its weight: canonical
 // defaults without tokens, theme/owner token values otherwise.
 
-/// A body-only card uses the canonical `type.body.m` size; the dismiss ×
-/// reads `type.title.m.line_height` / `.weight` (defaults and overrides).
+/// A body-only card uses the canonical `type.notification.body` size; the dismiss ×
+/// reads `type.notification.title.line_height` / `.weight` (defaults and overrides).
 #[tokio::test]
 async fn test_dismiss_button_respects_typography_tokens() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
@@ -184,7 +184,7 @@ async fn test_dismiss_button_respects_typography_tokens() {
             "agent-a",
             0.0,
             None,
-            // The × fills the canonical type.title.m line box (24 dp, 600).
+            // The × fills the canonical type.notification.title line box (24 dp, 600).
             Some((24.0_f32, 600_u16)),
         ),
         (
@@ -204,10 +204,13 @@ async fn test_dismiss_button_respects_typography_tokens() {
         let mut token_map = HashMap::new();
         if let Some((line_height, weight)) = tokens {
             token_map.insert(
-                "type.title.m.line_height".to_string(),
+                "type.notification.title.line_height".to_string(),
                 line_height.to_string(),
             );
-            token_map.insert("type.title.m.weight".to_string(), weight.to_string());
+            token_map.insert(
+                "type.notification.title.weight".to_string(),
+                weight.to_string(),
+            );
         }
         compositor.set_token_map(token_map);
 
@@ -260,7 +263,7 @@ async fn test_dismiss_button_respects_typography_tokens() {
             .unwrap_or_else(|| panic!("{case}: notification body text item must exist"));
         assert_eq!(
             body_item.font_size_px, 14.0,
-            "{case}: a body-only card uses the canonical type.body.m size"
+            "{case}: a body-only card uses the canonical type.notification.body size"
         );
 
         if let Some((size, weight)) = expected_dismiss {
@@ -356,7 +359,7 @@ async fn test_notification_text_inset_from_backdrop_edges() {
     assert_eq!(item.bounds_height, style.body.line_height);
     assert!(
         (item.line_height_multiplier * item.font_size_px - style.body.line_height).abs() < 1e-4,
-        "the line box is type.body.m.line_height, not a fixed multiplier"
+        "the line box is type.notification.body.line_height, not a fixed multiplier"
     );
     // Text is left-aligned.
     assert_eq!(
@@ -377,8 +380,8 @@ async fn test_notification_text_inset_from_backdrop_edges() {
 // Spec §Two-line notification layout:
 //   - Empty title → single-line backward-compatible path (1 TextItem)
 //   - Non-empty title → two-line path (2 TextItems: title bold, body regular)
-//   - Card title: type.title.m (size scaled by an explicit policy size,
-//     weight 600); body: type.body.m (14/16 of the title, weight 400)
+//   - Card title: type.notification.title (size scaled by an explicit policy size,
+//     weight 600); body: type.notification.body (14/16 of the title, weight 400)
 //   - Body positioned directly below the title's line box
 
 /// Two-line notification: empty `title` produces exactly 1 TextItem (backward compat).
@@ -529,10 +532,13 @@ async fn test_two_line_notification_title_produces_two_text_items() {
     );
     assert_eq!(
         title_item.font_weight, style.title.weight,
-        "title must use the type.title.m weight ({}), got {}",
+        "title must use the type.notification.title weight ({}), got {}",
         style.title.weight, title_item.font_weight
     );
-    assert_eq!(title_item.font_weight, 600, "canonical type.title.m.weight");
+    assert_eq!(
+        title_item.font_weight, 600,
+        "canonical type.notification.title.weight"
+    );
     assert!(
         (title_item.font_size_px - 16.0).abs() < 0.01,
         "title must use policy font_size_px (16.0), got {}",
@@ -552,7 +558,7 @@ async fn test_two_line_notification_title_produces_two_text_items() {
     let expected_body_size = style.body.size;
     assert!(
         (body_item.font_size_px - 14.0).abs() < 0.1,
-        "body font size must be type.body.m ({expected_body_size:.2}), got {}",
+        "body font size must be type.notification.body ({expected_body_size:.2}), got {}",
         body_item.font_size_px
     );
     assert_eq!(
