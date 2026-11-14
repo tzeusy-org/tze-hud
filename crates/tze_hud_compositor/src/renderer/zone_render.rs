@@ -633,6 +633,15 @@ impl Compositor {
                 sw,
                 sh,
             );
+            // Banner actions occupy the inset card, matching every slot and
+            // draw consumer. Priming at zone width would immediately discard
+            // this live-font descriptor for a narrower fallback layout.
+            let width = if is_alert_banner_zone(name) {
+                let style = NotificationStyle::for_zone(name, &tokens, &zone.rendering_policy);
+                (width - 2.0 * style.margin).max(1.0)
+            } else {
+                width
+            };
             for record in records {
                 cache.resolve_with_fonts(
                     &tokens,

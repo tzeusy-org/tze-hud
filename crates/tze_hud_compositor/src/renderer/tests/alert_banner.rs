@@ -295,6 +295,7 @@ async fn test_alert_banner_text_uses_alert_text_roles() {
 #[tokio::test]
 async fn test_alert_banner_is_an_inset_card_matching_its_hit_regions() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
     compositor.set_token_map(HashMap::from([(
         "space.alert.margin".to_owned(),
         "16".to_owned(),
@@ -336,5 +337,47 @@ async fn test_alert_banner_is_an_inset_card_matching_its_hit_regions() {
     ) {
         assert_eq!(region.bounds, g.close, "dismiss hit region is the drawn ×");
         assert!(g.close.x + g.close.width <= g.bounds.x + g.bounds.width);
+    }
+
+    // Frame priming and inset drawing must retain the same live-font action
+    // descriptor. Include flush Classic geometry and custom outer insets.
+    for margin in [0, 16, 32] {
+        compositor.set_token_map(HashMap::from([(
+            "space.alert.margin".to_owned(),
+            margin.to_string(),
+        )]));
+        let mut scene = make_alert_banner_scene();
+        scene
+            .publish_to_zone(
+                "alert-banner",
+                ZoneContent::Notification(NotificationPayload {
+                    text: "Choose a response".into(),
+                    actions: ["Inspect the service", "Keep monitoring"]
+                        .into_iter()
+                        .map(|label| NotificationAction {
+                            label: label.into(),
+                            callback_id: Some(label.into()),
+                            url: None,
+                        })
+                        .collect(),
+                    ..Default::default()
+                }),
+                "action-agent",
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
+        let _first = compositor.build_windowed_frame(&mut scene, 1280, 720);
+        let shapes = compositor.notification_layouts.borrow().shapes;
+        assert!(shapes > 0, "the action fixture must shape labels");
+        let _second = compositor.build_windowed_frame(&mut scene, 1280, 720);
+        assert_eq!(
+            compositor.notification_layouts.borrow().shapes,
+            shapes,
+            "unchanged inset banner actions retain their primed layout: margin={margin}"
+        );
     }
 }
