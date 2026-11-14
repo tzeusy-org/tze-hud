@@ -373,6 +373,19 @@ class BorrowedSmoke(Smoke):
             raise AssertionError("borrowed test-publication cleanup incomplete")
 
 
+def borrowed_failure(error: BaseException) -> str:
+    """Name a borrowed-smoke failure without leaking transport/response detail.
+
+    Assertion messages are composed by this script from sanitized request
+    labels (RequestFailure) and HUD replies, never the endpoint or PSK, so
+    they are printed. Any other exception may carry a URL or transport
+    detail, so only its class is shown.
+    """
+    name = type(error).__name__
+    message = str(error) if isinstance(error, AssertionError) else ""
+    return f"{name}: {message}" if message else name
+
+
 def run_borrowed(url: str, settle_s: float) -> int:
     """Authorized MUTATING smoke, without any executable ownership."""
     scripts = Path(__file__).resolve().parents[2] / ".claude/skills/user-test/scripts"
@@ -396,7 +409,7 @@ def run_borrowed(url: str, settle_s: float) -> int:
         check_delay(smoke)
         result = 0
     except Exception as error:
-        print(f"FAIL borrowed smoke ({type(error).__name__}); no process/settings repair performed", file=sys.stderr)
+        print(f"FAIL borrowed smoke ({borrowed_failure(error)}); no process/settings repair performed", file=sys.stderr)
     finally:
         if smoke is not None:
             try:
@@ -471,8 +484,7 @@ def run_checks(smoke: Smoke) -> None:
     print(f"ok  hud_surfaces lists {len(surfaces)} surfaces")
 
     widgets = sorted(s["s"] for s in surfaces if s["s"].startswith("widget:"))
-    expected = ["widget:main-countdown", "widget:main-gauge", "widget:main-progress", "widget:main-status"]
-    assert widgets == expected, f"hud_surfaces widgets: expected {expected}, got {widgets}"
+    check_widget_list(widgets, borrowed=isinstance(smoke, BorrowedSmoke))
     gauge = smoke.ok("hud_publish", {"surface": "widget:main-gauge", "params": {"level": 0.5, "label": "CI"}})
     assert gauge.get("ok") is True, f"hud_publish widget:main-gauge: {gauge}"
     print("ok  built-in widgets listed; hud_publish widget:main-gauge")
@@ -496,6 +508,49 @@ def run_checks(smoke: Smoke) -> None:
         f"unknown zone should be ZONE_NOT_FOUND with a hint, got {payload}"
     )
     print("ok  unknown zone -> ZONE_NOT_FOUND with hint")
+
+
+PACKAGED_WIDGETS = ["widget:main-countdown", "widget:main-gauge", "widget:main-progress", "widget:main-status"]
+# The widgets this smoke publishes to (run_checks and check_widget).
+SMOKE_WIDGETS = ["widget:main-gauge", "widget:main-progress"]
+
+
+def check_widget_list(widgets: list[str], *, borrowed: bool) -> None:
+    """The owned run seeds the packaged config, so its widget list is exact.
+
+    A borrowed HUD runs the owner's config, which may predate a packaged
+    widget or add its own; require only the widgets this smoke publishes to.
+    """
+    if borrowed:
+        missing = [w for w in SMOKE_WIDGETS if w not in widgets]
+        assert not missing, f"hud_surfaces widgets: smoke needs {missing}, got {widgets}"
+    else:
+        assert widgets == PACKAGED_WIDGETS, f"hud_surfaces widgets: expected {PACKAGED_WIDGETS}, got {widgets}"
+
+
+def zone_display(smoke: Smoke, surface: str) -> int:
+    """The `/admin/screenshot?display=` index of the display hosting `surface`.
+
+    `[displays.<NAME>] zones` moves a zone off the primary; `/admin/status`
+    `displays[].zones` lists the bare zone names per display, in screenshot
+    index order. An unassigned zone, an unplaced one (it falls back to the
+    primary), or a HUD without `displays` renders on display 0.
+    """
+    status, body = smoke.get("/admin/status?cpu=0")
+    try:
+        displays = json.loads(body).get("displays") if status == 200 else None
+    except (ValueError, AttributeError):
+        displays = None
+    name = surface.removeprefix("zone:")
+    for index, display in enumerate(displays if isinstance(displays, list) else []):
+        zones = display.get("zones") if isinstance(display, dict) else None
+        if isinstance(zones, list) and name in zones:
+            return index
+    return 0
+
+
+def screenshot_path(display: int) -> str:
+    return "/admin/screenshot" if display == 0 else f"/admin/screenshot?display={display}"
 
 
 def surfaces_of(smoke: Smoke) -> list[dict]:
@@ -860,11 +915,14 @@ def _check_delay(smoke: Smoke, evidence: dict | None, *, owned_log=None, produce
     on-screen presentation or visibility between the observed frames.
     """
     zone = next(s["s"] for s in surfaces_of(smoke) if s.get("accepts") == "text")
+    display = zone_display(smoke, zone)
+    if evidence is not None:
+        evidence["display"] = display
     smoke.ok("hud_clear", {"surface": zone})  # earlier steps may still hold this zone
     assert not is_held(surfaces_of(smoke), zone), f"{zone} still held after hud_clear"
-    warm, _, _ = capture_frame(smoke, evidence=evidence, name="warm")
+    warm, _, _ = capture_frame(smoke, evidence=evidence, name="warm", display=display)
     time.sleep(POLL_S)  # Let earlier publication fades settle at the existing cadence.
-    baseline, _, _ = capture_frame(smoke, evidence=evidence, name="baseline")
+    baseline, _, _ = capture_frame(smoke, evidence=evidence, name="baseline", display=display)
     assert baseline[:2] == warm[:2], "screenshot dimensions changed during baseline"
     assert baseline[2] == warm[2], "delay baseline is not stable after hud_clear"
     width, height, before = baseline
@@ -885,7 +943,7 @@ def _check_delay(smoke: Smoke, evidence: dict | None, *, owned_log=None, produce
         if evidence is not None:
             evidence.update(delay_ms=delay_ms, ttl_ms=20_000, sent=sent, accepted=accepted,
                             earliest_due=earliest_due, latest_due=latest_due)
-        early, _, early_finished = capture_frame(smoke, evidence=evidence, name="before-due")
+        early, _, early_finished = capture_frame(smoke, evidence=evidence, name="before-due", display=display)
         assert early_finished < earliest_due, "capture did not finish before the earliest due time"
         assert early[:2] == (width, height), "screenshot dimensions changed before due"
         assert early[2] == before, f"{zone} rendered content before its {delay_ms} ms delay"
@@ -899,7 +957,7 @@ def _check_delay(smoke: Smoke, evidence: dict | None, *, owned_log=None, produce
             assert observer.ready(request_id, evidence) is not None
             assert time.perf_counter() < deadline, "delayed readiness deadline"
             offset = len(observer.events)
-        late, late_started, late_finished = capture_frame(smoke, evidence=evidence, name="after-due")
+        late, late_started, late_finished = capture_frame(smoke, evidence=evidence, name="after-due", display=display)
         if observer is not None:
             assert late_finished >= late_started
             assert late_finished < earliest_due + 20.0, "delayed capture exceeded TTL"
@@ -920,7 +978,7 @@ def _check_delay(smoke: Smoke, evidence: dict | None, *, owned_log=None, produce
         smoke.ok("hud_clear", {"surface": zone})
 
     assert not is_held(surfaces_of(smoke), zone), f"{zone} still held after delayed content was cleared"
-    restored, _, _ = capture_frame(smoke, evidence=evidence, name="restored")
+    restored, _, _ = capture_frame(smoke, evidence=evidence, name="restored", display=display)
     assert restored[:2] == (width, height), "screenshot dimensions changed after clear"
     assert restored[2] == before, "delay capture did not return to its baseline after hud_clear"
     print(
@@ -1324,7 +1382,7 @@ def post_capture_comment(output: Path) -> int:
         return 1
 
 
-def capture_frame(smoke: Smoke, *, evidence: dict | None = None, name: str = "") -> tuple[tuple[int, int, bytes], float, float]:
+def capture_frame(smoke: Smoke, *, evidence: dict | None = None, name: str = "", display: int = 0) -> tuple[tuple[int, int, bytes], float, float]:
     """Decode one own-frame capture, bounded by high-resolution monotonic times.
 
     The response timestamp precedes PNG decoding: CPU decode time is not part
@@ -1334,7 +1392,7 @@ def capture_frame(smoke: Smoke, *, evidence: dict | None = None, name: str = "")
     started = time.perf_counter()
     if evidence is not None:
         evidence["captures"][name] = {"requested_at": started}
-    status, ctype, body = smoke.get_bytes("/admin/screenshot")
+    status, ctype, body = smoke.get_bytes(screenshot_path(display))
     finished = time.perf_counter()
     if evidence is not None:
         evidence["captures"][name]["responded_at"] = finished
@@ -1353,27 +1411,28 @@ def check_screenshot(smoke: Smoke) -> None:
     meaningful number of pixels (the notification's backdrop and text).
     """
 
-    (width, height, before), _, _ = capture_frame(smoke)
-    if sys.platform == "win32":
+    zone = next(s["s"] for s in smoke.ok("hud_surfaces")["surfaces"] if s.get("accepts") == "text")
+    display = zone_display(smoke, zone)
+    (width, height, before), _, _ = capture_frame(smoke, display=display)
+    if sys.platform == "win32" and display == 0:
         import ctypes
 
         ctypes.windll.user32.SetProcessDPIAware()  # physical pixels, like the swapchain
         screen = (ctypes.windll.user32.GetSystemMetrics(0), ctypes.windll.user32.GetSystemMetrics(1))
         assert (width, height) == screen, f"screenshot {width}x{height}, screen {screen}"
 
-    zone = next(s["s"] for s in smoke.ok("hud_surfaces")["surfaces"] if s.get("accepts") == "text")
     smoke.ok("hud_publish", {"surface": zone, "content": "screenshot check", "ttl_ms": 30000})
     deadline, changed = time.monotonic() + 10, 0
     while time.monotonic() < deadline and changed < MIN_CHANGED_PIXELS:
         time.sleep(0.5)  # let the compositor render the publish
-        (w2, h2, after), _, _ = capture_frame(smoke)
+        (w2, h2, after), _, _ = capture_frame(smoke, display=display)
         assert (w2, h2) == (width, height), f"screenshot size changed: {w2}x{h2}"
         changed = sum(1 for i in range(0, len(after), 4) if after[i : i + 4] != before[i : i + 4])
     assert changed >= MIN_CHANGED_PIXELS, (
         f"screenshot after publish differs from the baseline in only {changed} pixels "
         f"(need {MIN_CHANGED_PIXELS}); the notification is not in the captured frame"
     )
-    print(f"ok  /admin/screenshot {width}x{height} PNG, {changed} pixels changed by the notification")
+    print(f"ok  /admin/screenshot display={display} {width}x{height} PNG, {changed} pixels changed by {zone}")
 
 
 def check_admin(smoke: Smoke) -> None:

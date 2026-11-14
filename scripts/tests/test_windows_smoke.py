@@ -274,9 +274,17 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
             return None
 
         def urlopen(self, request, timeout):
+            if request.get_method() == "GET" and "/admin/status" in request.full_url:
+                # Non-sampling status: the zone's display, read before the baseline.
+                assert request.full_url.endswith("/admin/status?cpu=0") and len(self.captures) % 5 == 0
+                secondary = self.case == "secondary display"
+                displays = [{"name": "PRIMARY", "zones": ["notification-area"]},
+                            {"name": "SIDE", "zones": ["subtitle"] if secondary else []}]
+                return Response(ws.json.dumps({"displays": displays}).encode())
             if request.get_method() == "GET":
                 assert not (self.diagnostics / "delay.json").exists()  # No I/O before the witness.
-                assert request.full_url.endswith("/admin/screenshot") and timeout == 15
+                screenshot = "/admin/screenshot?display=1" if self.case == "secondary display" else "/admin/screenshot"
+                assert request.full_url.endswith(screenshot) and timeout == 15
                 started = self.clock()
                 shot = len(self.captures) % 5 + 1
                 visible = self.due is not None and started >= self.due
@@ -467,6 +475,9 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
     independent, _ = run("independent wall domains", success=True)
     coarse_utc, _ = run("coarse client UTC", success=True)
     run("slow decode", success=True)  # Capture timing ends before PNG CPU work.
+    # A zone configured onto another display is captured there, not on display 0.
+    secondary, _ = run("secondary display", success=True)
+    assert ws.json.loads((secondary.diagnostics / "delay.json").read_text())["display"] == 1
     for case in (
         "producer exit", "ambiguous activation", "readiness timeout", "missing capture bracket", "uncertain acceptance",
         "premature", "missing", "too few pixels", "native observed footprint", "unstable baseline", "not restored",
@@ -647,6 +658,58 @@ def test_delay_checks_held_ownership_and_captured_presentation(monkeypatch, subt
 
 
 
+def test_zone_display_selects_the_screenshot_index_of_the_hosting_display(subtests):
+    class Status:
+        def __init__(self, body, status=200):
+            self.body, self.status, self.paths = body, status, []
+
+        def get(self, path):
+            self.paths.append(path)
+            return self.status, self.body
+
+    displays = [{"name": "PRIMARY", "zones": ["notification-area"]},
+                {"name": "LEFT", "zones": []},
+                {"name": "RIGHT", "zones": ["subtitle", "status-bar"]}]
+    for surface, body, want in [
+        ("zone:subtitle", {"displays": displays}, 2),
+        ("zone:status-bar", {"displays": displays}, 2),
+        ("zone:notification-area", {"displays": displays}, 0),
+        ("zone:unassigned", {"displays": displays}, 0),  # Unassigned zones render on the primary.
+        ("zone:subtitle", {}, 0),  # A HUD predating `displays`.
+        ("zone:subtitle", {"displays": None}, 0),
+        ("zone:subtitle", {"displays": ["bad", {"zones": "subtitle"}, {"zones": ["subtitle"]}]}, 2),
+    ]:
+        with subtests.test(surface=surface, body=body):
+            smoke = Status(ws.json.dumps(body))
+            assert ws.zone_display(smoke, surface) == want
+            assert smoke.paths == ["/admin/status?cpu=0"]  # Never the 2 s CPU sample.
+    assert ws.zone_display(Status("not json"), "zone:subtitle") == 0
+    assert ws.zone_display(Status("[]"), "zone:subtitle") == 0
+    assert ws.screenshot_path(0) == "/admin/screenshot"  # Owned CI keeps its request unchanged.
+    assert ws.screenshot_path(2) == "/admin/screenshot?display=2"
+
+
+def test_widget_list_is_exact_when_owned_and_only_needs_used_widgets_when_borrowed():
+    ws.check_widget_list(list(ws.PACKAGED_WIDGETS), borrowed=False)
+    # An older owner config without main-countdown, plus a custom widget.
+    older = ["widget:main-gauge", "widget:main-progress", "widget:main-status", "widget:owner-clock"]
+    ws.check_widget_list(older, borrowed=True)
+    with pytest.raises(AssertionError, match="main-countdown"):
+        ws.check_widget_list(older, borrowed=False)
+    with pytest.raises(AssertionError, match=r"smoke needs \['widget:main-progress'\]"):
+        ws.check_widget_list(["widget:main-gauge"], borrowed=True)
+    assert set(ws.SMOKE_WIDGETS) <= set(ws.PACKAGED_WIDGETS)
+
+
+def test_borrowed_failure_names_assertions_but_not_transport_detail():
+    assert ws.borrowed_failure(AssertionError("zone:subtitle changed only 0 pixels")) == (
+        "AssertionError: zone:subtitle changed only 0 pixels")
+    assert ws.borrowed_failure(AssertionError()) == "AssertionError"
+    failure = ws.RequestFailure("rpc id=3 method=tools/call tool=hud_surfaces: URLError after 0.1s", retryable=True)
+    assert ws.borrowed_failure(failure) == "RequestFailure: " + str(failure)
+    assert ws.borrowed_failure(ValueError("http://private-host/?key=secret")) == "ValueError"
+
+
 def test_borrowed_url_routes_only_authorized_publications_and_own_cleanup(monkeypatch, capsys):
     import json
     import tomllib
@@ -728,6 +791,14 @@ def test_borrowed_url_routes_only_authorized_publications_and_own_cleanup(monkey
     captured = capsys.readouterr()
     assert captured.out.count("UNEXECUTED owner-only:") == 5 and key not in captured.out + captured.err
 
+    # An owner config that predates a packaged widget the smoke never publishes to.
+    packaged = list(entries)
+    entries[:] = [entry for entry in entries if entry["s"] != "widget:main-countdown"]
+    assert len(entries) == len(packaged) - 1
+    assert ws.main(["--url", "http://paired:9090/mcp"]) == 0 and not held
+    entries[:] = packaged
+    capsys.readouterr()
+
     # A lost publish reply can still mean a mutation: clean its tracked surface.
     trace.clear()
     faults["lost_reply"] = True
@@ -742,7 +813,7 @@ def test_borrowed_url_routes_only_authorized_publications_and_own_cleanup(monkey
     held.add("zone:subtitle")
     assert ws.main(["--url", "http://paired:9090/mcp"]) == 1
     assert held == {"zone:subtitle"} and trace == ["initialize", ("hud_surfaces", None)]
-    assert "FAIL borrowed" in capsys.readouterr().err
+    assert "FAIL borrowed smoke (AssertionError: paired agent has existing holdings or portals)" in capsys.readouterr().err
     for argv in ([], ["--url", "http://paired", "--exe", "hud.exe"], ["--url", "http://paired", "--config", "x"], ["--exe", "hud.exe"]):
         with pytest.raises(SystemExit) as failed:
             ws.main(argv)
