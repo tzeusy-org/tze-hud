@@ -925,7 +925,7 @@ mod tests {
         );
         assert!(primary.detail.as_deref().unwrap().starts_with("Override"));
         assert!(primary.reset, "an override offers Reset");
-        assert!(!row(&rows, "tokens.color.text.secondary").reset);
+        assert!(!row(&rows, "tokens.color.on_surface.variant").reset);
         assert!(
             row(&rows, "tokens.reset_all")
                 .detail

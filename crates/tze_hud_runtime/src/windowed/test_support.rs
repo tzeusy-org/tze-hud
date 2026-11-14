@@ -134,6 +134,7 @@ pub(super) fn scene_with_drag_handle_tile(
         .drag_handle_hit_regions
         .push(DragHandleHitRegion {
             element_id,
+            element_bounds: None,
             element_kind: DragHandleElementKind::Tile,
             bounds: handle_bounds,
             interaction_id: interaction_id.clone(),

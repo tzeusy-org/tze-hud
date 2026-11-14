@@ -89,22 +89,6 @@ pub(super) const BORDER_DEFAULT_FALLBACK: Rgba = Rgba {
     a: 1.0,
 };
 
-/// Fallback for `color.text.secondary` (its canonical default, #B0B0B0) when
-/// the token is absent.
-pub(super) const TEXT_SECONDARY_FALLBACK: Rgba = Rgba {
-    r: 0.690,
-    g: 0.690,
-    b: 0.690,
-    a: 1.0,
-};
-
-/// The `color.text.secondary` token as glyphon sRGB bytes: status-bar keys.
-pub(super) fn resolve_text_secondary_color(token_map: &HashMap<String, String>) -> [u8; 4] {
-    crate::text::rgba_to_srgb_u8(
-        resolve_token_color(token_map, "color.text.secondary").unwrap_or(TEXT_SECONDARY_FALLBACK),
-    )
-}
-
 // ─── Tile background token fallback colors ────────────────────────────────────
 
 /// Default tile background color for `TextMarkdown` tiles (linear sRGB) used
@@ -146,15 +130,6 @@ pub(super) const TILE_BG_DEFAULT: Rgba = Rgba {
     b: 0.2,
     a: 1.0,
 };
-
-/// Icon size in pixels for status-bar entry icons.
-///
-/// Icons from `RenderingPolicy::key_icon_map` are rasterized at this size
-/// (square) and rendered to the left of each mapped entry's text value.
-pub(crate) const ICON_SIZE_PX: f32 = 24.0;
-
-/// Gap in pixels between the icon and the text value for status-bar entries.
-pub(super) const ICON_TEXT_GAP_PX: f32 = 6.0;
 
 /// sRGB transfer: linear → sRGB (matches GPU hardware encoding on `*Srgb` surfaces).
 #[inline]

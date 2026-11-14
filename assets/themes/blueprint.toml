@@ -153,10 +153,8 @@
 
 # ── Legacy keys the current renderer reads (see tonal-glass.toml) ───────────
 "color.text.primary"                  = "#F6F7F9"   # on_surface
-"color.text.secondary"                = "#ABB3BF"   # on_surface.variant
 "color.text.accent"                   = "#4C90F0"   # primary
 "color.border.default"                = "#404854"   # outline.variant
-"border.radius.medium"                = "4"         # shape.m
 "portal.divider.color"                = "#404854"   # outline.variant
 "system_card.background"              = "#2F343CF5" # surface.container.high @ 0.96
 "system_card.accent.color"            = "#4C90F0"   # primary
@@ -280,3 +278,12 @@
 "status.tooltip.reason.y" = "104"
 "status.hover.delay_ms" = "180"
 "status.hover.height_pct" = "0.32258065"
+
+# Compact status pill: shared label.m type and semantic surface/outline roles.
+"space.status.margin" = "16"
+"space.status.horizontal" = "14"
+"space.status.key_value" = "6"
+"size.status.height" = "36"
+"size.status.icon" = "14"
+"size.status.divider" = "14"
+"size.status.entry_max" = "240"

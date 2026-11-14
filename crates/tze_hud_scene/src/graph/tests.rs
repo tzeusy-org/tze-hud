@@ -4060,6 +4060,7 @@ fn push_drag_handle(scene: &mut SceneGraph, element_id: SceneId, bounds: Rect, i
         .drag_handle_hit_regions
         .push(DragHandleHitRegion {
             element_id,
+            element_bounds: None,
             element_kind: DragHandleElementKind::Tile,
             bounds,
             interaction_id: interaction_id.clone(),
@@ -4588,6 +4589,7 @@ fn populate_live_drag_handles(scene: &mut SceneGraph) {
                 element_id: id,
                 element_kind: DragHandleElementKind::Tile,
                 bounds: rect,
+                element_bounds: None,
                 interaction_id: format!("drag-handle:{id:?}"),
                 hit_region: HitRegionNode {
                     bounds: rect,

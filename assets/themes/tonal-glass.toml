@@ -154,10 +154,8 @@
 # colours before they are restyled (hud-h51u7.4). Delete each mapping when
 # its consumer moves to the semantic tokens.
 "color.text.primary"                  = "#E8EBF0"   # on_surface
-"color.text.secondary"                = "#A9B1BE"   # on_surface.variant
 "color.text.accent"                   = "#8AB4FF"   # primary
 "color.border.default"                = "#343B47"   # outline.variant
-"border.radius.medium"                = "16"        # shape.l
 "portal.divider.color"                = "#343B47"   # outline.variant
 "system_card.background"              = "#222833EB" # surface.container.high @ 0.92
 "system_card.accent.color"            = "#8AB4FF"   # primary
@@ -183,7 +181,6 @@
 # hud-h51u7.4).
 "typography.body.weight"               = "500"
 "spacing.padding.medium"               = "10"
-"spacing.notification.inset"          = "16"
 
 # Portal color overrides: the existing accepted portal-key exception.
 # Same-theme roles retain neutral structure and existing status meanings.
@@ -301,3 +298,12 @@
 "status.tooltip.reason.y" = "104"
 "status.hover.delay_ms" = "180"
 "status.hover.height_pct" = "0.32258065"
+
+# Compact status pill: shared label.m type and semantic surface/outline roles.
+"space.status.margin" = "16"
+"space.status.horizontal" = "14"
+"space.status.key_value" = "6"
+"size.status.height" = "36"
+"size.status.icon" = "14"
+"size.status.divider" = "14"
+"size.status.entry_max" = "240"

@@ -629,7 +629,7 @@ fn test_zone_slot_layout_iter_visible_clips_and_clamps() {
 }
 
 /// MergeByKey zone: every StatusBar publication's entries are merged, one
-/// row (TextItem) per unique key, in key order.
+/// key/value pair per unique key, in key order.
 #[tokio::test]
 async fn test_merge_by_key_zone_merges_all_status_bar_entries() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
@@ -689,7 +689,7 @@ async fn test_merge_by_key_zone_merges_all_status_bar_entries() {
         .iter()
         .map(|i| i.text.to_string())
         .collect();
-    assert_eq!(texts, ["cpu: 45%", "mem: 8.2 GB", "net: 1.2 MB/s"]);
+    assert_eq!(texts, ["cpu", "45%", "mem", "8.2 GB", "net", "1.2 MB/s"]);
 }
 
 /// MergeByKey zone: when a key appears in multiple publications, the latest
@@ -756,8 +756,8 @@ async fn test_merge_by_key_latest_value_wins_for_duplicate_keys() {
 
     let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
 
-    assert_eq!(items.len(), 1, "must produce one merged TextItem");
-    let text = &items[0].text;
+    assert_eq!(items.len(), 2, "one merged key/value pair");
+    let text = &items[1].text;
 
     // The latest value "90%" must appear; "10%" must not.
     assert!(
@@ -829,48 +829,30 @@ async fn test_status_bar_key_icon_map_produces_per_entry_text_items() {
 
     let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
 
-    // Must produce one TextItem per entry (2 entries → 2 TextItems).
+    assert_eq!(items.len(), 4, "one key/value pair per entry");
+    assert_eq!(&*items[0].text, "cpu");
+    assert_eq!(&*items[2].text, "mem", "unmapped keys do not invent emoji");
+    let zone = &scene.zone_registry.zones["status-bar"];
+    let records = &scene.zone_registry.active_publishes["status-bar"];
+    let card = compositor
+        .status_bar_card(
+            "status-bar",
+            records,
+            zone.contention_policy,
+            &zone.rendering_policy,
+            Rect::new(0.0, 648.0, 1280.0, 72.0),
+        )
+        .unwrap();
     assert_eq!(
-        items.len(),
-        2,
-        "non-empty key_icon_map must produce per-entry TextItems; got {}",
-        items.len()
+        card.entries[0].icon.as_deref(),
+        Some("/nonexistent/cpu.svg")
     );
-
-    // Entries are sorted by key: "cpu" (row 0) then "mem" (row 1).
-    // "cpu" has an SVG icon mapping, so no prefix.
-    // "mem" has no SVG icon mapping, so gets emoji prefix "💾".
-    let cpu_item = items.iter().find(|i| i.text.starts_with("cpu:"));
-    let mem_item = items.iter().find(|i| i.text.starts_with("💾 mem:"));
-
-    assert!(cpu_item.is_some(), "expected a TextItem for 'cpu'");
+    assert!(card.entries[1].icon.is_none());
     assert!(
-        mem_item.is_some(),
-        "expected a TextItem for 'mem' with emoji prefix"
+        (items[0].pixel_x - card.rect.x - card.entries[0].x - 20.0).abs() < 0.01,
+        "mapped icon uses14dp plus6dp gap"
     );
-
-    let cpu_item = cpu_item.unwrap();
-    let mem_item = mem_item.unwrap();
-
-    // "cpu" is icon-mapped: pixel_x must be inset by ICON_SIZE_PX + ICON_TEXT_GAP_PX
-    // relative to "mem" (which has no icon).
-    // Both items use from_zone_policy with x = zx + icon_inset, so:
-    //   cpu.pixel_x = zx + ICON_SIZE_PX + ICON_TEXT_GAP_PX + margin_h
-    //   mem.pixel_x = zx + 0 + margin_h
-    // Difference should be exactly ICON_SIZE_PX + ICON_TEXT_GAP_PX (30.0).
-    let icon_inset = ICON_SIZE_PX + ICON_TEXT_GAP_PX; // 24.0 + 6.0 = 30.0
-    let diff = cpu_item.pixel_x - mem_item.pixel_x;
-    assert!(
-        (diff - icon_inset).abs() < 0.5,
-        "cpu pixel_x must be inset by {icon_inset} px relative to mem; diff={diff}"
-    );
-
-    // "mem" has no icon: bounds_width must be wider than "cpu" by icon_inset.
-    let width_diff = mem_item.bounds_width - cpu_item.bounds_width;
-    assert!(
-        (width_diff - icon_inset).abs() < 0.5,
-        "mem bounds_width must be {icon_inset} px wider than cpu; diff={width_diff}"
-    );
+    assert_eq!(items[2].pixel_x, card.rect.x + card.entries[1].x);
 }
 
 /// LatestWins zone still renders only one TextItem even when multiple

@@ -767,12 +767,27 @@ and `/admin/status` `unplaced_zones` lists them as `not_connected`. Legacy
 Built-in zone placement, as fractions of the display (1% margins):
 `notification-area` is the top-right column (x 75–99%, from y 5.5%, below
 the production `main-status` badge in the top-right corner);
-`pip` sits below it (x 75–97%, y 40–66%); `status-bar` is a card in the
-bottom-right corner (x 83–99%, ending at y 98%). The status-bar card hugs
-its content: one `key: value` row per entry in key order (keys dimmed, values
-in primary text, a long value cut with an ellipsis), as tall as its rows and
-padding on the tonal surface with a card border, growing upward to at most
-24% of the display; with no entries nothing is drawn. `subtitle` and
+`pip` sits below it (x 75–97%, y 40–66%). The `status-bar` is a content-sized
+horizontal pill at bottom-right, inset by `space.status.margin` (16 dp),
+with `size.status.height` (36 dp), `space.status.horizontal` side padding
+(14 dp), `type.label.m` text, `color.surface.container.low` at `opacity.surface`
+and `shape.full` corners. Named label families use the configured `font.sans` role;
+generic mono/serif families select those existing roles. Keys use `color.on_surface.variant`, values
+`color.on_surface`; their gap is `space.status.key_value` (6 dp). Entries are
+sorted by key with `color.outline.variant` dividers. Each entry is bounded by
+`size.status.entry_max` (240 dp); overflowing key/value text is ellipsized and
+a suffix that cannot fit the available display region is hidden. Measurement and
+painted text also honor the existing `max_truncation_input_bytes` profile budget;
+an omitted field suffix is marked by an ellipsis. The empty bar
+draws nothing and has no drag handle. Explicit owner `key_icon_map` SVG icons
+remain supported at `size.status.icon`; unmapped keys are text only.
+Dragging clamps the drawn pill and translates its maximum layout region with it;
+the region size remains available for later publications. When content grows,
+the pill moves inward as needed to stay within its assigned display; shrinking
+restores the short-content placement. Measurement capacity is bounded by the
+display dimensions, rather than the intersection with the translated region.
+Text, dividers, icons and drag bounds share that final rectangle. Geometry and
+styling remain runtime-owned. `subtitle` and
 `alert-banner` are bottom- and top-anchored zones. The subtitle draws a centered,
 content-hugging pill within its zone: at most `size.subtitle.max_width` (760 dp
 in Tonal Glass and Blueprint), with `space.subtitle.horizontal` / `.vertical`

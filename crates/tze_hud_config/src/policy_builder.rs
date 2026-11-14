@@ -174,44 +174,46 @@ pub fn apply_notification_area_token_defaults(
 
 /// Apply token-derived defaults for the `status-bar` zone to `policy`.
 ///
-/// The status bar is a compact card styled like a notification card: the
+/// The status bar is a content-sized horizontal pill: the
 /// theme's tonal container surface, rounded, inset like a card. Values read in
-/// `text_color`; the compositor dims each row's key with `color.text.secondary`.
+/// `text_color`; the compositor dims each entry's key with `color.on_surface.variant`.
 ///
 /// Token mappings:
-/// - `text_color` ← `color.text.primary`
-/// - `font_family` ← `typography.body.family`
-/// - `font_size_px` ← `typography.body.size`
-/// - `backdrop` ← `color.surface.container`
+/// - `text_color` ← `color.on_surface`
+/// - `font_family` ← `type.label.m.family`
+/// - `font_size_px` ← `type.label.m.size`
+/// - `backdrop` ← `color.surface.container.low`
 /// - `backdrop_opacity` ← `opacity.surface`
-/// - `backdrop_radius` ← `border.radius.medium`
-/// - `margin_horizontal`, `margin_vertical` ← `spacing.notification.inset`
-/// - `text_align` ← `Start`; `overflow` ← `Ellipsis` (one line per entry)
+/// - `backdrop_radius` ← `shape.full`
+/// - `margin_horizontal` ← `space.status.horizontal`
+/// - `text_align` ← `Start`; `overflow` ← `Ellipsis` (one horizontal entry)
 pub fn apply_status_bar_token_defaults(policy: &mut RenderingPolicy, tokens: &DesignTokenMap) {
     if policy.text_color.is_none() {
-        policy.text_color = token_color(tokens, "color.text.primary");
+        policy.text_color = token_color(tokens, "color.on_surface");
     }
     if policy.font_family.is_none() {
-        policy.font_family = token_font_family(tokens, "typography.body.family");
+        // Named label faces use the existing shared sans role (`font.sans`).
+        policy.font_family =
+            token_font_family(tokens, "type.label.m.family").or(Some(FontFamily::SystemSansSerif));
     }
     if policy.font_size_px.is_none() {
-        policy.font_size_px = token_f32(tokens, "typography.body.size");
+        policy.font_size_px = token_f32(tokens, "type.label.m.size");
+    }
+    if policy.font_weight.is_none() {
+        policy.font_weight = token_u16(tokens, "type.label.m.weight");
     }
     if policy.backdrop.is_none() {
-        policy.backdrop = token_color(tokens, "color.surface.container");
+        policy.backdrop = token_color(tokens, "color.surface.container.low");
     }
     if policy.backdrop_opacity.is_none() {
         policy.backdrop_opacity = token_f32(tokens, "opacity.surface");
     }
     if policy.backdrop_radius.is_none() {
-        policy.backdrop_radius = token_f32(tokens, "border.radius.medium");
+        policy.backdrop_radius = token_f32(tokens, "shape.full");
     }
-    let inset = token_f32(tokens, "spacing.notification.inset");
+    let inset = token_f32(tokens, "space.status.horizontal");
     if policy.margin_horizontal.is_none() {
         policy.margin_horizontal = inset;
-    }
-    if policy.margin_vertical.is_none() {
-        policy.margin_vertical = inset;
     }
     if policy.text_align.is_none() {
         policy.text_align = Some(TextAlign::Start);
@@ -353,8 +355,7 @@ mod tests {
 
     #[test]
     fn notification_margins_follow_the_notification_inset_token() {
-        let mut tokens = default_tokens();
-        tokens.insert("spacing.notification.inset".into(), "16".into());
+        let tokens = default_tokens();
         let mut policy = RenderingPolicy::default();
         apply_token_defaults_for_zone("notification-area", &mut policy, &tokens);
         assert_eq!(policy.margin_horizontal, Some(16.0));
@@ -641,27 +642,21 @@ mod tests {
         apply_token_defaults_for_zone("status-bar", &mut policy, &tokens);
 
         // A card on the theme's tonal surface, values in primary text.
-        assert_eq!(
-            policy.text_color,
-            token_color(&tokens, "color.text.primary")
-        );
+        assert_eq!(policy.text_color, token_color(&tokens, "color.on_surface"));
         assert!(policy.font_family.is_some());
         assert!(policy.font_size_px.is_some());
         assert_eq!(
             policy.backdrop,
-            token_color(&tokens, "color.surface.container")
+            token_color(&tokens, "color.surface.container.low")
         );
         assert_eq!(
             policy.backdrop_opacity,
             token_f32(&tokens, "opacity.surface")
         );
-        assert_eq!(
-            policy.backdrop_radius,
-            token_f32(&tokens, "border.radius.medium")
-        );
+        assert_eq!(policy.backdrop_radius, token_f32(&tokens, "shape.full"));
         assert_eq!(
             policy.margin_horizontal,
-            token_f32(&tokens, "spacing.notification.inset")
+            token_f32(&tokens, "space.status.horizontal")
         );
         assert_eq!(policy.overflow, Some(TextOverflow::Ellipsis));
     }

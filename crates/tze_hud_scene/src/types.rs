@@ -2248,6 +2248,9 @@ pub struct DragHandleHitRegion {
     pub element_kind: DragHandleElementKind,
     /// Display-space bounds for hit-testing and rendering.
     pub bounds: Rect,
+    /// Drawn element bounds, which may hug content inside a larger zone region.
+    #[serde(default)]
+    pub element_bounds: Option<Rect>,
     /// Interaction identifier (`drag-handle:<element_id_hex>`).
     pub interaction_id: String,
     /// Runtime-internal hit-region node contract for this handle.
@@ -3207,19 +3210,17 @@ impl ZoneRegistry {
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
 
-        // 1. status-bar: bottom-right corner card, MergeByKey, Chrome layer.
-        // The region is the most the card may grow to; the drawn card hugs its
-        // rows and sits on the region's bottom edge (1% margins, like the
-        // notification column above it).
+        // 1. status-bar: a content-sized horizontal pill at bottom-right.
+        // The compositor applies the token outer inset inside this maximum region.
         registry.register(ZoneDefinition {
             id: SceneId::new(),
             name: "status-bar".to_string(),
-            description: "Status bar — bottom-right card, one row per key".to_string(),
+            description: "Status bar — compact horizontal key/value pill".to_string(),
             geometry_policy: GeometryPolicy::Relative {
-                x_pct: 0.83,
-                y_pct: 0.74,
-                width_pct: 0.16,
-                height_pct: 0.24,
+                x_pct: 0.0,
+                y_pct: 0.0,
+                width_pct: 1.0,
+                height_pct: 1.0,
             },
             accepted_media_types: vec![ZoneMediaType::KeyValuePairs],
             rendering_policy: RenderingPolicy::default(),

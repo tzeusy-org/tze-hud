@@ -210,11 +210,6 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "#FFFFFF",
     },
     CanonicalToken {
-        key: "color.text.secondary",
-        description: "Secondary/muted text color",
-        default_value: "#B0B0B0",
-    },
-    CanonicalToken {
         key: "color.text.accent",
         description: "Accent/highlight text color",
         default_value: "#4A9EFF",
@@ -317,6 +312,41 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Subtitle text outline color (Classic readability)",
         default_value: "#000000",
     },
+    CanonicalToken {
+        key: "space.status.margin",
+        description: "Status pill outer bottom and right inset (dp)",
+        default_value: "16",
+    },
+    CanonicalToken {
+        key: "space.status.horizontal",
+        description: "Status pill side padding (dp)",
+        default_value: "14",
+    },
+    CanonicalToken {
+        key: "space.status.key_value",
+        description: "Status pill key/value and icon/text gap (dp)",
+        default_value: "6",
+    },
+    CanonicalToken {
+        key: "size.status.height",
+        description: "Status pill height (dp)",
+        default_value: "36",
+    },
+    CanonicalToken {
+        key: "size.status.icon",
+        description: "Explicit owner status icon size (dp)",
+        default_value: "14",
+    },
+    CanonicalToken {
+        key: "size.status.divider",
+        description: "Status pill divider height (dp)",
+        default_value: "14",
+    },
+    CanonicalToken {
+        key: "size.status.entry_max",
+        description: "Maximum status entry width before ellipsis (dp)",
+        default_value: "240",
+    },
     // Spacing
     CanonicalToken {
         key: "spacing.unit",
@@ -337,11 +367,6 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         key: "spacing.padding.large",
         description: "Large internal padding in pixels",
         default_value: "16",
-    },
-    CanonicalToken {
-        key: "spacing.notification.inset",
-        description: "Notification card inset in pixels: text, actions and dismiss from the card edge",
-        default_value: "9",
     },
     CanonicalToken {
         key: "state.hidden.opacity",
@@ -662,11 +687,6 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         key: "border.radius.small",
         description: "Small corner radius in pixels",
         default_value: "4",
-    },
-    CanonicalToken {
-        key: "border.radius.medium",
-        description: "Medium corner radius in pixels",
-        default_value: "8",
     },
     CanonicalToken {
         key: "border.radius.large",
@@ -2004,13 +2024,13 @@ mod tests {
     fn test_resolve_tokens_layer_order() {
         let mut theme = DesignTokenMap::new();
         theme.insert("color.text.primary".into(), "#00FF00".into());
-        theme.insert("color.text.secondary".into(), "#00FF00".into());
+        theme.insert("color.on_surface.variant".into(), "#00FF00".into());
         let mut config = DesignTokenMap::new();
         config.insert("color.text.primary".into(), "#FF0000".into());
         let map = resolve_tokens(&theme, &config);
         assert_eq!(map["color.text.primary"], "#FF0000", "config beats theme");
         assert_eq!(
-            map["color.text.secondary"], "#00FF00",
+            map["color.on_surface.variant"], "#00FF00",
             "theme beats canonical"
         );
         assert_eq!(

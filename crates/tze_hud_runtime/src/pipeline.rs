@@ -296,6 +296,7 @@ mod tests {
                     element_id: tze_hud_scene::SceneId::new(),
                     element_kind: tze_hud_scene::DragHandleElementKind::Zone,
                     bounds,
+                    element_bounds: None,
                     interaction_id: format!("resize-grip:{i}"),
                     hit_region: tze_hud_scene::HitRegionNode {
                         bounds,
@@ -315,6 +316,7 @@ mod tests {
                 element_id: tze_hud_scene::SceneId::new(),
                 element_kind: tze_hud_scene::DragHandleElementKind::Zone,
                 bounds: handle,
+                element_bounds: None,
                 interaction_id: "drag-handle:move".to_string(),
                 hit_region: tze_hud_scene::HitRegionNode {
                     bounds: handle,

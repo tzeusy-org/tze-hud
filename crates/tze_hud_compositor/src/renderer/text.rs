@@ -21,10 +21,7 @@ use super::token_colors::{
     DISCONNECT_BADGE_LABEL, TILE_CLOSE_GLYPH, resolve_disconnect_badge_tokens,
     resolve_tile_close_tokens, tile_close_button_bounds,
 };
-use super::token_colors::{
-    ICON_SIZE_PX, ICON_TEXT_GAP_PX, resolve_composer_overlay_tokens, resolve_text_secondary_color,
-    resolve_transcript_max_measure_px,
-};
+use super::token_colors::{resolve_composer_overlay_tokens, resolve_transcript_max_measure_px};
 
 /// Default line-height multiplier (`font_size_px × 1.4 = line_height_px`).
 ///
@@ -49,85 +46,6 @@ const TILE_CLOSE_GLYPH_SCALE: f32 = 0.9;
 // ─── Text-collection impl block ───────────────────────────────────────────────
 
 impl super::Compositor {
-    /// Returns a unicode emoji prefix for well-known status-bar keys: the
-    /// fallback for an unmapped key while other rows show `key_icon_map` icons.
-    /// Empty when the key is not recognized.
-    fn status_bar_icon_prefix(key: &str) -> &str {
-        match key {
-            "battery" => "🔋",
-            "wifi" | "network" => "📶",
-            "cpu" => "🖥",
-            "memory" | "mem" => "💾",
-            "time" | "clock" => "🕐",
-            "weather" => "☀",
-            "temperature" | "temp" => "🌡",
-            _ => "",
-        }
-    }
-
-    /// One `TextItem` per status-bar card row (see `status_bar_card`).
-    ///
-    /// Each row is a single `key: value` line, vertically centred in its row
-    /// and cut with an ellipsis rather than wrapped. The key (and its `:`) is
-    /// drawn in `key_color` (`color.text.secondary`), the value in the policy's
-    /// `text_color`. A row whose key has an icon is inset past it.
-    fn status_bar_text_items(
-        card: &super::zone_render::StatusBarCard,
-        policy: &RenderingPolicy,
-        opacity: f32,
-        scale: f32,
-        key_color: [u8; 4],
-    ) -> Vec<TextItem> {
-        let key_color = crate::text::apply_opacity_to_color(key_color, opacity);
-        card.rows
-            .iter()
-            .enumerate()
-            .map(|(i, (k, v))| {
-                let has_icon = card.icon_layout && policy.key_icon_map.contains_key(k.as_str());
-                let icon_inset = if has_icon {
-                    (ICON_SIZE_PX + ICON_TEXT_GAP_PX) * scale
-                } else {
-                    0.0
-                };
-                let prefix = if card.icon_layout && !has_icon {
-                    Self::status_bar_icon_prefix(k.as_str())
-                } else {
-                    ""
-                };
-                let key = if prefix.is_empty() {
-                    format!("{k}:")
-                } else {
-                    format!("{prefix} {k}:")
-                };
-                let text = format!("{key} {v}");
-                // from_zone_policy supplies font, colour and the horizontal
-                // inset; the row fixes the vertical placement.
-                let mut item = TextItem::from_zone_policy(
-                    &text,
-                    card.rect.x + icon_inset,
-                    0.0,
-                    card.rect.width - icon_inset,
-                    0.0,
-                    policy,
-                    opacity,
-                    scale,
-                );
-                let y = card.row_y(i) + (card.row_h - card.line_h) * 0.5;
-                item.pixel_y = y;
-                item.clip_pixel_y = y;
-                item.bounds_height = card.line_h;
-                item.clip_bounds_height = card.line_h;
-                item.overflow = TextOverflow::Ellipsis;
-                item.color_runs = Box::new([crate::text::ColorRunItem {
-                    start_byte: 0,
-                    end_byte: key.len(),
-                    color: key_color,
-                }]);
-                item
-            })
-            .collect()
-    }
-
     /// Build a zone-derived [`TextItem`] with the shared boilerplate filled in.
     ///
     /// All notification and icon-inset `TextItem` literals in
@@ -285,20 +203,14 @@ impl super::Compositor {
             // Status-bar rows are always ellipsized, whatever the policy says,
             // so prime exactly the rows the frame path draws.
             if !matches!(zone_def.contention_policy, ContentionPolicy::Stack { .. }) {
-                if let Some(card) = Self::status_bar_card(
+                if let Some(card) = self.status_bar_card(
+                    zone_name,
                     publishes,
                     zone_def.contention_policy,
                     policy,
-                    scale,
                     Rect::new(zx, zy, zw, zh),
                 ) {
-                    items.extend(Self::status_bar_text_items(
-                        &card,
-                        policy,
-                        1.0,
-                        scale,
-                        resolve_text_secondary_color(zone_tokens),
-                    ));
+                    items.extend(card.text_items(1.0));
                     continue;
                 }
             }
@@ -697,20 +609,14 @@ impl super::Compositor {
                     }
                 }
                 ContentionPolicy::MergeByKey { .. } => {
-                    if let Some(card) = Self::status_bar_card(
+                    if let Some(card) = self.status_bar_card(
+                        zone_name,
                         publishes,
                         zone_def.contention_policy,
                         policy,
-                        scale,
                         Rect::new(zx, zy, zw, zh),
                     ) {
-                        items.extend(Self::status_bar_text_items(
-                            &card,
-                            policy,
-                            anim_opacity,
-                            scale,
-                            resolve_text_secondary_color(zone_tokens),
-                        ));
+                        items.extend(card.text_items(anim_opacity));
                     } else {
                         // Fallback: render whatever the latest publication contains.
                         for record in publishes.iter().rev() {
@@ -824,20 +730,14 @@ impl super::Compositor {
                                 break;
                             }
                             ZoneContent::StatusBar(_) => {
-                                if let Some(card) = Self::status_bar_card(
+                                if let Some(card) = self.status_bar_card(
+                                    zone_name,
                                     publishes,
                                     zone_def.contention_policy,
                                     policy,
-                                    scale,
                                     Rect::new(zx, zy, zw, zh),
                                 ) {
-                                    items.extend(Self::status_bar_text_items(
-                                        &card,
-                                        policy,
-                                        anim_opacity,
-                                        scale,
-                                        resolve_text_secondary_color(zone_tokens),
-                                    ));
+                                    items.extend(card.text_items(anim_opacity));
                                 }
                                 // Only render the most-recent StatusBar publish.
                                 break;

@@ -65,6 +65,7 @@ mod notification_style;
 mod notification_text;
 pub(crate) mod portal_reading;
 mod safe_mode_overlay;
+mod status_bar;
 mod subtitle;
 mod system_card;
 pub(crate) mod text;
@@ -531,6 +532,7 @@ pub struct Compositor {
     configured_fonts: crate::fonts::FontConfig,
     notification_layouts: std::cell::RefCell<notification_layout::NotificationLayoutCache>,
     subtitle_layouts: std::cell::RefCell<subtitle::SubtitleLayoutCache>,
+    status_bar_layouts: std::cell::RefCell<status_bar::StatusBarLayoutCache>,
     /// Saved editor state remains resident while explicit notification focus
     /// suppresses its caret and focus ring.
     notification_keyboard_active: bool,
@@ -994,6 +996,7 @@ impl Compositor {
             font_fallback_wake: Default::default(),
             notification_layouts: Default::default(),
             subtitle_layouts: Default::default(),
+            status_bar_layouts: Default::default(),
             notification_keyboard_active: false,
             configured_fonts: crate::fonts::FontConfig::default(),
             text_format: None,
@@ -1341,6 +1344,7 @@ impl Compositor {
             font_fallback_wake: Default::default(),
             notification_layouts: Default::default(),
             subtitle_layouts: Default::default(),
+            status_bar_layouts: Default::default(),
             notification_keyboard_active: false,
             configured_fonts: crate::fonts::FontConfig::default(),
             text_format: None,
@@ -2151,6 +2155,7 @@ impl Compositor {
         // already match the draw pass (including uploaded-font fallback).
         self.prime_notification_layouts(scene, scene.display_area.width, scene.display_area.height);
         self.prime_subtitle_layout(scene, scene.display_area.width, scene.display_area.height);
+        self.prime_status_bar_layouts(scene, scene.display_area.width, scene.display_area.height);
 
         // Zone StreamText items are not produced by the tile-node walk below, so
         // prime them separately.  Without this, an overflowing streaming zone

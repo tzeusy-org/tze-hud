@@ -5208,6 +5208,7 @@ mod tests {
                     element_id: tile,
                     element_kind: tze_hud_scene::DragHandleElementKind::Tile,
                     bounds: band,
+                    element_bounds: None,
                     interaction_id: "portal-header".into(),
                     hit_region: HitRegionNode {
                         accepts_pointer: true,

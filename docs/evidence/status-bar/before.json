@@ -1,0 +1,22 @@
+{
+  "captured_at": "2026-11-14T22:32:15.527447+00:00",
+  "source": "paired owner own-frame admin screenshot",
+  "build": "24818c39c44dba4ffbe596aa1edc92d849f893d9",
+  "fixture": ".claude/skills/user-test/scripts/status-bar-restyle-test.json",
+  "fixture_sha256": "1e9c984353ef33350b00f7b4b0b595d000d5c2f955125128b641fe806b42129a",
+  "file": "before-owner.png",
+  "png_sha256": "a658cac75bec9a4be61a48dcda8e0fa270325c7cf4c41514d20c2ba6dcbfb96c",
+  "dimensions": [
+    3840,
+    2160
+  ],
+  "publish": {
+    "expires_in_ms": 15000,
+    "ok": true
+  },
+  "settings_changed": false,
+  "input_read_or_acknowledged": false,
+  "cleanup": "finite15sTTLexpiry only; no shared clear",
+  "theme": "existing owner choice, unknown",
+  "scale": "existing owner choice, unknown"
+}

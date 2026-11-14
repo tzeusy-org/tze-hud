@@ -169,22 +169,26 @@ impl Compositor {
             let (x, y, w, h) =
                 Self::resolve_zone_geometry(&scene.effective_zone_geometry(zone_def), sw, sh);
             // A status-bar card's handle sits on the card it draws, not on the
-            // (taller) region the card may grow to.
+            // maximum region the card may grow to.
             let zone_rect = Rect::new(x, y, w, h);
-            let element_bounds_zone = scene
-                .zone_registry
-                .active_publishes
-                .get(zone_name)
-                .and_then(|publishes| {
-                    Self::status_bar_card(
-                        publishes,
-                        zone_def.contention_policy,
-                        &zone_def.rendering_policy,
-                        tze_hud_config::tokens::px_scale(self.zone_tokens(zone_name)),
-                        zone_rect,
-                    )
-                })
-                .map_or(zone_rect, |card| card.rect);
+            let records = scene.zone_registry.active_publishes.get(zone_name);
+            let card = records.and_then(|publishes| {
+                self.status_bar_card(
+                    zone_name,
+                    publishes,
+                    zone_def.contention_policy,
+                    &zone_def.rendering_policy,
+                    zone_rect,
+                )
+            });
+            if card.is_none()
+                && records
+                    .and_then(|p| p.last())
+                    .is_some_and(|r| matches!(r.content, ZoneContent::StatusBar(_)))
+            {
+                continue;
+            }
+            let element_bounds_zone = card.map_or(zone_rect, |c| c.rect);
             let element_bounds_zone = if zone_name == "subtitle" {
                 let Some(ZoneContent::StreamText(text)) = scene
                     .zone_registry

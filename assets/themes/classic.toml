@@ -1,8 +1,8 @@
 # Classic — black/navy surfaces, white text and the legacy blue accent.
 # Select with `[design_tokens] theme = "classic"`.
 # The legacy notification and alert-banner looks are retained by their
-# roles at the end of the semantic block; the legacy keys that remain feed
-# the status bar. Semantic roles are explicit, including
+# roles at the end of the semantic block; remaining legacy keys feed
+# generic text and frame consumers. Semantic roles are explicit, including
 # intentionally shared grid/easing values rather than fallback.
 
 "color.text.primary"                   = "#F5F7FA"
@@ -10,7 +10,6 @@
 "typography.body.size"                 = "15"
 "typography.body.weight"               = "500"
 "spacing.padding.medium"               = "10"
-"border.radius.medium"                 = "14"
 
 # Semantic surfaces and text; tonal levels carry structure. Blue denotes
 # interaction, green success, amber caution and red error. Existing labels
@@ -259,3 +258,12 @@
 "status.tooltip.reason.y" = "104"
 "status.hover.delay_ms" = "180"
 "status.hover.height_pct" = "0.32258065"
+
+# Compact status pill: shared label.m type and semantic surface/outline roles.
+"space.status.margin" = "16"
+"space.status.horizontal" = "14"
+"space.status.key_value" = "6"
+"size.status.height" = "36"
+"size.status.icon" = "14"
+"size.status.divider" = "14"
+"size.status.entry_max" = "240"
