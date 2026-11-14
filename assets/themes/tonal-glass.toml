@@ -122,6 +122,7 @@
 "type.notification.body.size"         = "14"
 "type.notification.body.line_height"  = "20"
 "type.notification.body.weight"       = "400"
+"type.gauge.readout.size"             = "18"
 
 # Alert banner roles: an inset surface card; the severity mark (a ringed
 # glyph tinted color.severity.*) carries info and caution, the error

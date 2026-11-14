@@ -30,7 +30,7 @@
     text-anchor="middle"
     dominant-baseline="central"
     font-family="{{token.type.readout.family}}, monospace"
-    font-size="{{token.type.readout.size}}"
+    font-size="{{token.type.gauge.readout.size}}"
     font-weight="{{token.type.readout.weight}}"
     fill="{{token.color.on_surface}}"><tspan id="percent-value">0</tspan>%</text>
 

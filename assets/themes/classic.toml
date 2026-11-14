@@ -114,6 +114,7 @@
 "type.notification.body.size" = "13.5"
 "type.notification.body.line_height" = "18.9"
 "type.notification.body.weight" = "400"
+"type.gauge.readout.size" = "18"
 
 # Alert banner roles: the legacy Classic banner (a full-width flush strip
 # filled with the old severity colours #4A9EFF / #FFB800 / #FF0000 at 0.90,

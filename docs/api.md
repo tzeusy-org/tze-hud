@@ -1131,9 +1131,10 @@ status-indicator draw tonal cards from the semantic roles
 status roles) and the `type.*` scale. The gauge is a 128x132 card
 (`color.surface.container`, `shape.l`) holding an 80x80 ring: a
 severity-colored arc on a `color.outline.variant` track, clockwise from
-12 o'clock, with `level` as a whole percent centred in `type.readout` and
-`label` below in `type.label.m`; hover shows `readout` in the label's
-place. All three bundles' SVG viewBox units are logical px; instance geometry sets the scale, and `production.toml`
+12 o'clock, with `level` as a whole percent centred in `type.readout` at
+`type.gauge.readout.size`, and `label` below in `type.label.m`; hover
+shows `readout` in the label's place. All three bundles' SVG viewBox
+units are logical px; instance geometry sets the scale, and `production.toml`
 sizes them at 1.5x the viewBox on a 3840x2160 panel.
 
 **A theme is a named set of token values, with no layout logic.** The
@@ -1230,6 +1231,7 @@ color overrides still take precedence.
 | State | `state.hover.opacity`, `state.pressed.opacity`, `focus.ring.width`, `focus.ring.offset` |
 | Notification card | `color.notification.container[.low]`, `color.notification[.caution\|.error].outline`, `color.on_notification.{variant,caution,error}`, `opacity.notification`, `shape.notification`, `space.notification`, `type.notification.{title,body}.{size,line_height,weight}` |
 | Alert banner | `color.alert.container`, `color.alert.{caution,error}.container`, `color.alert.outline`, `color.on_alert[.variant\|.error]`, `color.severity.{info,warning,critical}` (the severity mark), `opacity.alert`, `shape.alert`, `space.alert.{margin,horizontal,vertical}`, `type.alert.{title,body}.{size,line_height,weight}` |
+| Gauge ring | `type.gauge.readout.size` (centred percent; family and weight follow `type.readout`) |
 | Choice actions | `notification.action.link_mark` |
 | Motion | `motion.{enter,exit,state}.ms`, `motion.{enter,exit}.easing` (`linear`, `standard`, `decelerate`, `accelerate`) |
 | Shape | `shape.{xs,s,m,l,xl,full}` (corner radius) |

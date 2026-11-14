@@ -930,6 +930,14 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Numeric readout (gauges, timers): font weight (CSS numeric)",
         default_value: "500",
     },
+    // Gauge ring readout (hud-h51u7.8.1): the approved ring centres an 18dp
+    // percent, larger than the shared 14dp readout used by countdown/kpi.
+    // Family and weight follow type.readout.
+    CanonicalToken {
+        key: "type.gauge.readout.size",
+        description: "Gauge ring centred percent: font size (dp)",
+        default_value: "18",
+    },
     // Notification card roles (hud-h51u7.4.1): the card's own fill, hairline,
     // text, opacity, corner, padding and type, so a theme can style cards
     // without restyling every surface that shares the generic roles.

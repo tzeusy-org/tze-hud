@@ -6,7 +6,7 @@
 #   opacity.surface, shape.l corners and a stroke.border.width hairline
 # - An 80x80 ring: a primary arc on an outline.variant track, clockwise
 #   from 12 o'clock, with the level as a whole percent centred in
-#   type.readout; the label below in type.label.m
+#   type.readout at type.gauge.readout.size; the label below in type.label.m
 # - Severity colors the arc and the hairline: info uses fill_color
 #   (default color.primary), warning color.caution, error color.error
 # - Hover (runtime-driven `tooltip_visible`) lays a state layer over the

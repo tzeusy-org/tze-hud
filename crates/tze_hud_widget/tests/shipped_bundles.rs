@@ -53,6 +53,7 @@ fn shipped_tokens() -> HashMap<String, String> {
         ("type.readout.family", "IBM Plex Mono"),
         ("type.readout.size", "14"),
         ("type.readout.weight", "500"),
+        ("type.gauge.readout.size", "18"),
     ]
     .into_iter()
     .map(|(k, v)| (k.to_string(), v.to_string()))

@@ -126,6 +126,7 @@
 "type.notification.body.size"         = "14"
 "type.notification.body.line_height"  = "18"
 "type.notification.body.weight"       = "400"
+"type.gauge.readout.size"             = "16"
 
 # Alert banner roles (as the notification card's, inset at the top edge).
 "color.alert.container"          = "#2F343C"   # surface.container.high
