@@ -51,39 +51,27 @@ fn token_font_family(tokens: &DesignTokenMap, key: &str) -> Option<FontFamily> {
 
 // ─── Token-to-RenderingPolicy mapper ──────────────────────────────────────────
 
-/// Apply token-derived defaults for the `subtitle` zone to `policy`.
-///
-/// Populates `None` fields only — explicit (non-`None`) values are left untouched.
-///
-/// Token mappings (per spec §Requirement: Default Zone Rendering with Tokens):
-/// - `text_color` ← `color.text.primary`
-/// - `font_family` ← `typography.subtitle.family`
-/// - `font_size_px` ← `typography.subtitle.size`
-/// - `font_weight` ← `typography.subtitle.weight`
-/// - `backdrop` ← `color.subtitle.backdrop`, `backdrop_opacity` ←
-///   `opacity.subtitle.backdrop`, only when that opacity is above 0
-/// - `outline_color` ← `color.outline.default`
-/// - `outline_width` ← `stroke.outline.width`
-/// - `text_align` ← `Center` (hardcoded, not token-driven)
-/// - `margin_vertical` ← `spacing.padding.medium`
-/// - `overflow` ← `Ellipsis` (hardcoded per subtitle exemplar spec)
+/// Caption typography and text padding for the subtitle pill. Explicit owner
+/// policy values win. The optional whole-zone contrast backdrop is separate
+/// from the compositor's content-hugging themed pill.
 pub fn apply_subtitle_token_defaults(policy: &mut RenderingPolicy, tokens: &DesignTokenMap) {
     if policy.text_color.is_none() {
-        policy.text_color = token_color(tokens, "color.text.primary");
+        policy.text_color = token_color(tokens, "color.on_surface");
     }
     if policy.font_family.is_none() {
-        policy.font_family = token_font_family(tokens, "typography.subtitle.family");
+        // Named caption families use the configured sans role; generic family
+        // keywords can select mono/serif without changing other zone roles.
+        policy.font_family = token_font_family(tokens, "type.caption.display.family")
+            .or(Some(FontFamily::SystemSansSerif));
     }
     if policy.font_size_px.is_none() {
-        policy.font_size_px = token_f32(tokens, "typography.subtitle.size");
+        policy.font_size_px = token_f32(tokens, "type.caption.display.size");
     }
     if policy.font_weight.is_none() {
-        policy.font_weight = token_u16(tokens, "typography.subtitle.weight");
+        policy.font_weight = token_u16(tokens, "type.caption.display.weight");
     }
-    // Subtitle reads by its text outline alone over a transparent zone. The
-    // owner can add a fill behind the whole zone (Appearance → Subtitle
-    // backdrop), which makes streamed subtitles stand out: it is drawn only
-    // while `opacity.subtitle.backdrop` > 0.
+    // Preserve Appearance → Subtitle backdrop: an optional whole-zone fill,
+    // independent of the content-hugging themed pill.
     if policy.backdrop.is_none()
         && let Some(opacity) = token_f32(tokens, "opacity.subtitle.backdrop").filter(|o| *o > 0.0)
     {
@@ -91,17 +79,24 @@ pub fn apply_subtitle_token_defaults(policy: &mut RenderingPolicy, tokens: &Desi
         policy.backdrop_opacity = Some(opacity.min(1.0));
     }
     if policy.outline_color.is_none() {
-        policy.outline_color = token_color(tokens, "color.outline.default");
+        policy.outline_color = token_color(tokens, "color.subtitle.outline");
     }
     if policy.outline_width.is_none() {
-        policy.outline_width = token_f32(tokens, "stroke.outline.width");
+        policy.outline_width = token_f32(tokens, "stroke.subtitle.text");
     }
     // text_align: hardcoded default (Center), not token-driven
     if policy.text_align.is_none() {
         policy.text_align = Some(TextAlign::Center);
     }
+    if policy.margin_horizontal.is_none() {
+        policy.margin_horizontal = policy
+            .margin_px
+            .or_else(|| token_f32(tokens, "space.subtitle.horizontal"));
+    }
     if policy.margin_vertical.is_none() {
-        policy.margin_vertical = token_f32(tokens, "spacing.padding.medium");
+        policy.margin_vertical = policy
+            .margin_px
+            .or_else(|| token_f32(tokens, "space.subtitle.vertical"));
     }
     // overflow: Ellipsis per subtitle exemplar spec (hardcoded, not token-driven)
     if policy.overflow.is_none() {
@@ -379,23 +374,22 @@ mod tests {
         let mut policy = RenderingPolicy::default();
         apply_token_defaults_for_zone("subtitle", &mut policy, &tokens);
 
-        // text_color should be populated from color.text.primary = "#FFFFFF"
-        assert!(
-            policy.text_color.is_some(),
-            "text_color should be set from tokens"
+        assert_eq!(policy.text_color, token_color(&tokens, "color.on_surface"));
+        assert_eq!(
+            policy.font_size_px,
+            token_f32(&tokens, "type.caption.display.size")
         );
-        let tc = policy.text_color.unwrap();
-        assert!(
-            (tc.r - 1.0).abs() < 1e-4,
-            "text_color.r should be 1.0 for #FFFFFF"
+        assert_eq!(
+            policy.font_weight,
+            token_u16(&tokens, "type.caption.display.weight")
         );
-        assert!(
-            (tc.g - 1.0).abs() < 1e-4,
-            "text_color.g should be 1.0 for #FFFFFF"
+        assert_eq!(
+            policy.margin_horizontal,
+            token_f32(&tokens, "space.subtitle.horizontal")
         );
-        assert!(
-            (tc.b - 1.0).abs() < 1e-4,
-            "text_color.b should be 1.0 for #FFFFFF"
+        assert_eq!(
+            policy.margin_vertical,
+            token_f32(&tokens, "space.subtitle.vertical")
         );
 
         // font_family should be set
@@ -467,9 +461,10 @@ mod tests {
     #[test]
     fn test_token_defaults_do_not_overwrite_existing_values() {
         let tokens = default_tokens();
-        // Pre-set font_size_px to 32.0 (explicit config value)
+        // Explicit owner values take precedence over semantic token defaults.
         let mut policy = RenderingPolicy {
             font_size_px: Some(32.0),
+            margin_px: Some(5.0),
             transition_in_ms: Some(0),
             transition_out_ms: Some(275),
             ..RenderingPolicy::default()
@@ -477,11 +472,28 @@ mod tests {
 
         apply_token_defaults_for_zone("subtitle", &mut policy, &tokens);
 
-        // font_size_px should remain 32.0, not the canonical default of 28
+        // Keep explicit typography, unified padding and motion values.
         assert_eq!(
             policy.font_size_px,
             Some(32.0),
             "explicit value must not be overwritten by token default"
+        );
+        assert_eq!(
+            (policy.margin_horizontal, policy.margin_vertical),
+            (Some(5.0), Some(5.0)),
+            "explicit unified padding wins over axis token defaults"
+        );
+        let mut axis_policy = RenderingPolicy {
+            margin_px: Some(5.0),
+            margin_horizontal: Some(7.0),
+            margin_vertical: Some(9.0),
+            ..RenderingPolicy::default()
+        };
+        apply_token_defaults_for_zone("subtitle", &mut axis_policy, &tokens);
+        assert_eq!(
+            (axis_policy.margin_horizontal, axis_policy.margin_vertical),
+            (Some(7.0), Some(9.0)),
+            "explicit axis padding wins over unified padding"
         );
         assert_eq!(policy.transition_in_ms, Some(0), "explicit snap wins");
         assert_eq!(
@@ -493,9 +505,9 @@ mod tests {
 
     #[test]
     fn test_custom_color_token_reflected_in_policy() {
-        // spec: WHEN color.text.primary = "#00FF00" THEN text_color = Rgba(0,1,0,1)
+        // spec: WHEN color.on_surface = "#00FF00" THEN text_color = Rgba(0,1,0,1)
         let mut config_tokens = DesignTokenMap::new();
-        config_tokens.insert("color.text.primary".to_string(), "#00FF00".to_string());
+        config_tokens.insert("color.on_surface".to_string(), "#00FF00".to_string());
         let tokens = resolve_tokens(&DesignTokenMap::new(), &config_tokens);
 
         let mut policy = RenderingPolicy::default();

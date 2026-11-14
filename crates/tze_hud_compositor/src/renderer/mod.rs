@@ -65,6 +65,7 @@ mod notification_style;
 mod notification_text;
 pub(crate) mod portal_reading;
 mod safe_mode_overlay;
+mod subtitle;
 mod system_card;
 pub(crate) mod text;
 mod text_fit;
@@ -529,6 +530,7 @@ pub struct Compositor {
     /// [`Compositor::init_text_renderer`].
     configured_fonts: crate::fonts::FontConfig,
     notification_layouts: std::cell::RefCell<notification_layout::NotificationLayoutCache>,
+    subtitle_layouts: std::cell::RefCell<subtitle::SubtitleLayoutCache>,
     /// Saved editor state remains resident while explicit notification focus
     /// suppresses its caret and focus ring.
     notification_keyboard_active: bool,
@@ -991,6 +993,7 @@ impl Compositor {
             configured_max_truncation_input_bytes: None,
             font_fallback_wake: Default::default(),
             notification_layouts: Default::default(),
+            subtitle_layouts: Default::default(),
             notification_keyboard_active: false,
             configured_fonts: crate::fonts::FontConfig::default(),
             text_format: None,
@@ -1337,6 +1340,7 @@ impl Compositor {
             configured_max_truncation_input_bytes: None,
             font_fallback_wake: Default::default(),
             notification_layouts: Default::default(),
+            subtitle_layouts: Default::default(),
             notification_keyboard_active: false,
             configured_fonts: crate::fonts::FontConfig::default(),
             text_format: None,
@@ -2146,6 +2150,7 @@ impl Compositor {
         // with the live rasterizer fonts first, so visible slots and text keys
         // already match the draw pass (including uploaded-font fallback).
         self.prime_notification_layouts(scene, scene.display_area.width, scene.display_area.height);
+        self.prime_subtitle_layout(scene, scene.display_area.width, scene.display_area.height);
 
         // Zone StreamText items are not produced by the tile-node walk below, so
         // prime them separately.  Without this, an overflowing streaming zone

@@ -332,9 +332,18 @@ impl super::Compositor {
                     // Only the most-recent StreamText publish renders (and is primed).
                     for record in publishes.iter().rev() {
                         if let ZoneContent::StreamText(text) = &record.content {
-                            items.push(Self::zone_stream_text_item(
-                                text, zx, zy, zw, zh, policy, 1.0, scale,
-                            ));
+                            if let Some(pill) = self.subtitle_layout(
+                                zone_name,
+                                text,
+                                policy,
+                                Rect::new(zx, zy, zw, zh),
+                            ) {
+                                items.push(pill.text_item(text, 1.0, zone_tokens));
+                            } else if zone_name != "subtitle" {
+                                items.push(Self::zone_stream_text_item(
+                                    text, zx, zy, zw, zh, policy, 1.0, scale,
+                                ));
+                            }
                             break;
                         }
                     }
@@ -770,16 +779,29 @@ impl super::Compositor {
                                 } else {
                                     text.as_str()
                                 };
-                                items.push(Self::zone_stream_text_item(
-                                    visible_text,
-                                    zx,
-                                    zy,
-                                    zw,
-                                    zh,
+                                if let Some(pill) = self.subtitle_layout(
+                                    zone_name,
+                                    text,
                                     policy,
-                                    anim_opacity,
-                                    scale,
-                                ));
+                                    Rect::new(zx, zy, zw, zh),
+                                ) {
+                                    items.push(pill.text_item(
+                                        visible_text,
+                                        anim_opacity,
+                                        zone_tokens,
+                                    ));
+                                } else if zone_name != "subtitle" {
+                                    items.push(Self::zone_stream_text_item(
+                                        visible_text,
+                                        zx,
+                                        zy,
+                                        zw,
+                                        zh,
+                                        policy,
+                                        anim_opacity,
+                                        scale,
+                                    ));
+                                }
                                 // Only render the most-recent StreamText publish.
                                 break;
                             }

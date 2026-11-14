@@ -227,6 +227,15 @@
 "portal.window.resize_grip.color"          = "#5A6475"    # color.outline
 "portal.window.resize_grip.hover_color"    = "#A9B1BE"    # color.on_surface.variant
 
+# Subtitle pill: Classic keeps its outline-only presentation.
+"opacity.subtitle" = "1"
+"space.subtitle.horizontal" = "20"
+"space.subtitle.vertical" = "10"
+"size.subtitle.max_width" = "760"
+"stroke.subtitle.text" = "0"
+"color.subtitle.outline" = "#000000"
+"space.subtitle.bottom" = "48"
+
 # Approved ring geometry and bound visibility; logical SVG units map once
 # into the configured widget box. Keep radius and circumference consistent.
 "state.hidden.opacity" = "0"
