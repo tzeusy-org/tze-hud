@@ -572,7 +572,7 @@ DELAY_NUMBERS = {
     "scene_version", "accepted", "success", "identity_valid", "is_subtitle", "frame",
     "duration_ms", "from_opacity", "target_opacity", "active_publications", "opacity",
     "transition_active", "transition_complete", "transition_elapsed_us", "transition_duration_ms",
-    "zones_shown", "normal_animation",
+    "zones_shown", "normal_animation", "fade_in_ms", "os_reduce_motion",
     "geometry_epoch", "acquired", "gpu_submitted", "ready", "deferred",
     "secondary_presented", "primary_presented",
 }
@@ -742,7 +742,12 @@ class DelayReadiness:
                 assert self.integer(event, "duration_ms") > 0
                 start = event
             elif event["event"] in {"zone_fade_observed", "zone_text_sample"}:
-                assert start is not None, "delayed sample precedes fade"
+                # Windows "Show animations" off (hosted runners) zeroes the
+                # subtitle fade (hud-ljhku.13): the text snaps in, so a sample
+                # without a fade is ready only when the HUD reports exactly that.
+                snapped = (start is None and event["event"] == "zone_text_sample"
+                           and event.get("os_reduce_motion") is True and event.get("fade_in_ms") == 0)
+                assert start is not None or snapped, "delayed sample precedes fade"
                 assert event.get("zones_shown") is True and event.get("normal_animation") is True, "hidden/forced delayed opacity"
                 opacity = event.get("opacity")
                 assert type(opacity) in (int, float) and 0 <= opacity <= 1, "invalid delayed opacity"
