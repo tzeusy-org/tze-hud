@@ -250,6 +250,11 @@ pub(crate) fn set_window_state_probe(probe: WindowStateProbe) {
 /// `/admin/screenshot?display=<i>` index (0 = primary).
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct DisplayStatus {
+    /// Config key for `[displays."<key>"]`: EDID model+serial, with
+    /// `@<connector>` when two monitors share one; the OS name when the
+    /// monitor has no stable identity.
+    pub key: String,
+    /// OS display name (`DISPLAY6`).
     pub name: String,
     /// Origin in scene pixels (the primary's top-left is 0,0).
     pub x: i32,
@@ -257,18 +262,18 @@ pub struct DisplayStatus {
     pub width: u32,
     pub height: u32,
     pub primary: bool,
-    /// Zones configured onto this display (`[displays.<NAME>]`).
+    /// Zones configured onto this display (`[displays."<key>"]`).
     pub zones: Vec<String>,
     /// Null outside Windows, or when the native window is unavailable.
     pub window_state: Option<OverlayWindowState>,
 }
 
-/// A configured zone placement (`[displays.<NAME>]`) that has no overlay
+/// A configured zone placement (`[displays."<key>"]`) that has no overlay
 /// window; the zone renders on the primary instead.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 pub struct UnplacedZone {
     pub zone: String,
-    /// The display name the zone is configured for.
+    /// The display key the zone is configured for, as written in config.
     pub display: String,
     pub reason: UnplacedReason,
 }
@@ -277,7 +282,7 @@ pub struct UnplacedZone {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UnplacedReason {
-    /// No connected monitor has that name.
+    /// No connected monitor matches that key.
     NotConnected,
     /// The monitor is connected, but its overlay surface kept failing and the
     /// runtime stopped recreating it.

@@ -542,8 +542,10 @@ agents until one is paired.
   `clipboard_writes` monotonically counts HUD clipboard writes (pairing code,
   OUTPUT copy); the non-Windows stub counts too.
   `/admin/status` `displays` lists the overlaid monitors, primary first:
-  `{name, x, y, width, height, primary, zones, window_state}` in scene pixels (the primary's
+  `{key, name, x, y, width, height, primary, zones, window_state}` in scene pixels (the primary's
   top-left is 0,0; others may be negative) and the zones configured onto each.
+  `key` is the `[displays."<key>"]` key (see Configuration); `name` is the OS
+  display name.
   On Windows, `window_state` samples `{visible, iconic, topmost, cloaked}` from
   the live HWND (`cloaked: null` if DWM cannot report it); the whole object is
   `null` outside Windows or when the window is unavailable. Status preserves the
@@ -558,7 +560,8 @@ agents until one is paired.
   redraw. Ready images also bypass an unchanged-cursor idle shortcut. A panel
   interaction or another publish is not required to retry that owed image.
   `unplaced_zones` lists `{zone, display, reason}` placements with no overlay
-  window, rendering on the primary instead: `reason` is `not_connected`, or
+  window, rendering on the primary instead (`display` is the key as
+  configured): `reason` is `not_connected` (no connected monitor matches it), or
   `overlay_failed` when that monitor's overlay surface was lost and recreated
   3 times in a row (it is retried when the monitor is reconnected).
   `/admin/screenshot` returns a PNG of the frame the compositor draws (not an
@@ -735,8 +738,28 @@ remove or correct the field. Remove those obsolete entries rather than
 renaming their zone values. Tabs and their widgets remain configurable
 (a `[[tabs.widgets]]` entry's `geometry` and `auto_clear_ms` are what the
 control panel's Layout card writes);
-`[displays.<NAME>].zones` remains the supported way to assign built-in zones
-to a display.
+`[displays."<key>"].zones` remains the supported way to assign built-in zones
+to a display. `<key>` is the monitor's EDID key, uppercase, any case accepted:
+`<MFG><PRODUCT as 4 hex>-<SERIAL>` (e.g. `DEL41A2-7XK2N13`; the serial keeps
+`A-Z 0-9 . _ -`, other characters become `_`), or `<MFG><PRODUCT>` when the
+serial is blank. When two connected monitors would share a key (same model and
+serial, or same model with blank serials), every one of them gets
+`@<connector>`: the full PnP device instance id with `\` written as `/`, other
+characters outside `A-Z 0-9 . _ & -` as `%XX`, e.g.
+`GSM5B7F@DISPLAY/GSM5B7F/5&1A2B3C&0&UID4352`. Windows documents that id as
+unique on the system and persistent across restarts. Quote keys:
+`[displays."DEL41A2-7XK2N13"]`. A key without the suffix still matches when
+exactly one connected monitor has that model and serial, so owners with
+distinct monitors never write one. A monitor without a usable EDID identity
+(non-Windows, headless, or a failed query), or in a shared set without an
+instance id, is keyed by its OS name (`DISPLAY6`) with a warning. Copy keys
+from `/admin/status` `displays[].key` or the log's per-display
+`display <key> = <name> <w>x<h> @ (<x>,<y>)[ primary]` lines, written at
+startup and on every layout change. A configured key that matches no
+connected monitor keeps its zones on the primary, never another monitor; the
+log warns once per change naming the key, its zones and every connected key,
+and `/admin/status` `unplaced_zones` lists them as `not_connected`. Legacy
+`DISPLAYn` keys match only a monitor that is itself keyed by that OS name.
 
 Built-in zone placement, as fractions of the display (1% margins):
 `notification-area` is the top-right column (x 75–99%, from y 5.5%, below
@@ -1004,8 +1027,8 @@ caps each publication at that long after it was published, including what
 shows now, unless the agent asked for less. Both are saved into the
 widget's own `[[tabs.widgets]]` entry with the file's comments kept; when the
 save fails the change lasts the session and the row says so. A
-`[displays.<NAME>]` table's zones show read-only until monitor names are
-stable across reboots. This read-only assignment does not prevent live zone
+`[displays."<key>"]` table's zones show read-only until the Layout row can
+edit them (`hud-vniri.8`). This read-only assignment does not prevent live zone
 placement: drag an existing zone grip to move the whole zone for this runtime
 session. The shown `pip` zone also has a resize grip in its corner facing the
 display centre (diagonal resize cursor): dragging it scales the zone with its

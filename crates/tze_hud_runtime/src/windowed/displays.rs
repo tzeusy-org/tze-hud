@@ -6,7 +6,9 @@
 //! coordinates are physical desktop pixels relative to the primary monitor's
 //! top-left, so a secondary at desktop `(x, y)` sees the scene from
 //! `(x - primary.x, y - primary.y)`. Zones move to a secondary only when
-//! `[displays.<NAME>]` assigns them there.
+//! `[displays."<key>"]` assigns them there; keys come from each monitor's EDID
+//! identity ([`super::monitor_identity::display_keys`]) and are resolved to OS
+//! names once per topology sync.
 //!
 //! Monitor changes arrive as `WM_DISPLAYCHANGE` (a hidden-window watcher on
 //! Windows) or as move/resize/DPI events on one of our windows; both mark the
@@ -17,6 +19,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex as StdMutex};
 use std::time::{Duration, Instant};
 
+use super::monitor_identity::{DisplayKey, MonitorIdentity, display_keys};
 use crate::operator::status::{UnplacedReason, UnplacedZone};
 
 use tze_hud_compositor::{DisplayLayout, DisplayRect, FrameTarget, WindowSurface};
@@ -128,6 +131,94 @@ pub(super) fn plan_secondary_changes(
         .cloned()
         .collect();
     (remove, add)
+}
+
+/// A connected monitor's normalized OS name and config key.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct KeyedMonitor {
+    pub name: String,
+    pub key: DisplayKey,
+}
+
+/// Key every connected monitor (`names`: normalized OS names, all of them,
+/// before any overlay filtering). Identities join by normalized GDI name; a
+/// name matching zero or several identities has none.
+pub(super) fn key_monitors(names: &[&str], identities: &[MonitorIdentity]) -> Vec<KeyedMonitor> {
+    let joined: Vec<(&str, Option<&MonitorIdentity>)> = names
+        .iter()
+        .map(|name| {
+            let mut found = identities
+                .iter()
+                .filter(|id| tze_hud_compositor::normalize_display_name(&id.gdi_name) == *name);
+            match (found.next(), found.next()) {
+                (Some(id), None) => (*name, Some(id)),
+                _ => (*name, None),
+            }
+        })
+        .collect();
+    names
+        .iter()
+        .zip(display_keys(&joined))
+        .map(|(name, key)| KeyedMonitor {
+            name: (*name).to_string(),
+            key,
+        })
+        .collect()
+}
+
+/// Resolve configured `[displays]` keys (zone -> key) to connected OS names
+/// (zone -> name). A zone whose key matches no monitor is absent: it stays on
+/// the primary and is reported unplaced.
+pub(super) fn resolve_zone_displays(
+    zone_displays: &HashMap<String, String>,
+    keyed: &[KeyedMonitor],
+) -> HashMap<String, String> {
+    let connected: Vec<(&str, Option<&str>)> = keyed
+        .iter()
+        .map(|m| (m.key.key.as_str(), m.key.base.as_deref()))
+        .collect();
+    zone_displays
+        .iter()
+        .filter_map(|(zone, configured)| {
+            let i = tze_hud_config::displays::match_display_key(configured, &connected)?;
+            Some((zone.clone(), keyed[i].name.clone()))
+        })
+        .collect()
+}
+
+/// Configured keys that match no connected monitor, each with its zones,
+/// sorted: one warning per key.
+pub(super) fn unmatched_display_keys(
+    zone_displays: &HashMap<String, String>,
+    resolved: &HashMap<String, String>,
+) -> Vec<(String, Vec<String>)> {
+    let mut by_key: std::collections::BTreeMap<&str, Vec<String>> = Default::default();
+    for (zone, configured) in zone_displays {
+        if !resolved.contains_key(zone) {
+            by_key.entry(configured).or_default().push(zone.clone());
+        }
+    }
+    by_key
+        .into_iter()
+        .map(|(key, mut zones)| {
+            zones.sort();
+            (key.to_string(), zones)
+        })
+        .collect()
+}
+
+/// The per-sync log line naming one display's key, so it can be copied into
+/// `[displays."<key>"]`.
+pub(super) fn display_log_line(key: &str, spec: &MonitorSpec, primary: bool) -> String {
+    format!(
+        "display {key} = {} {}x{} @ ({},{}){}",
+        spec.name,
+        spec.width,
+        spec.height,
+        spec.x,
+        spec.y,
+        if primary { " primary" } else { "" }
+    )
 }
 
 /// Each monitor's scale factor for appearance: the primary's, and that of
@@ -527,23 +618,22 @@ pub(super) fn window_to_scene(
     (position.0 as f32 + ox as f32, position.1 as f32 + oy as f32)
 }
 
-/// Configured zone placements whose display is not connected:
-/// `(zone, configured display)`, sorted.
+/// Configured zone placements without an overlay window, by configured key,
+/// sorted. `resolved` maps zones to the OS name their key matched.
 pub(super) fn unplaced_zones(
     zone_displays: &HashMap<String, String>,
+    resolved: &HashMap<String, String>,
     connected: &[&str],
     failed: &[&str],
 ) -> Vec<UnplacedZone> {
     let mut out: Vec<UnplacedZone> = zone_displays
         .iter()
         .filter_map(|(zone, display)| {
-            let name = tze_hud_compositor::normalize_display_name(display);
-            let reason = if failed.contains(&name.as_str()) {
-                UnplacedReason::OverlayFailed
-            } else if connected.contains(&name.as_str()) {
-                return None;
-            } else {
-                UnplacedReason::NotConnected
+            let name = resolved.get(zone).map(String::as_str);
+            let reason = match name {
+                Some(name) if failed.contains(&name) => UnplacedReason::OverlayFailed,
+                Some(name) if connected.contains(&name) => return None,
+                _ => UnplacedReason::NotConnected,
             };
             Some(UnplacedZone {
                 zone: zone.clone(),
@@ -812,6 +902,19 @@ impl super::WinitApp {
             }
         }
 
+        // Key every connected monitor before overlay filtering, so ambiguity
+        // and matching see all the hardware. One identity query per sync.
+        let all_specs: Vec<MonitorSpec> = std::iter::once(primary.clone())
+            .chain(desired.iter().cloned())
+            .collect();
+        let identities = super::monitor_identity::monitor_identities();
+        let names: Vec<&str> = all_specs.iter().map(|m| m.name.as_str()).collect();
+        let keyed = key_monitors(&names, &identities);
+        let keys_changed = keyed != self.state.display_keys;
+        if keys_changed {
+            self.adopt_display_keys(keyed, &identities);
+        }
+
         let first_sync = self
             .state
             .display_targets
@@ -914,6 +1017,7 @@ impl super::WinitApp {
             && !first_sync
             && !lost_any
             && !rescaled
+            && !keys_changed
         {
             if multi {
                 self.refit_overlay_windows(&primary_window, &primary);
@@ -953,10 +1057,52 @@ impl super::WinitApp {
                 display.surface.request_resize(size.width, size.height);
             }
         }
+        for (i, (spec, m)) in all_specs.iter().zip(&self.state.display_keys).enumerate() {
+            tracing::info!("{}", display_log_line(&m.key.key, spec, i == 0));
+        }
         self.publish_displays(&primary);
         if multi {
             self.refit_overlay_windows(&primary_window, &primary);
         }
+    }
+
+    /// Record a new key snapshot and resolve `[displays]` against it. Warns,
+    /// once per change, about monitors keyed by OS name and configured keys
+    /// that match no connected monitor (their zones stay on the primary).
+    fn adopt_display_keys(&mut self, keyed: Vec<KeyedMonitor>, identities: &[MonitorIdentity]) {
+        for id in identities {
+            tracing::debug!(
+                gdi = %id.gdi_name,
+                manufacturer = %id.manufacturer,
+                product = format_args!("{:#06x}", id.product),
+                serial = %id.serial,
+                friendly = %id.friendly_name,
+                target_id = id.connector.target_id,
+                output_technology = id.connector.output_technology,
+                path_instance = %id.connector.path_instance,
+                device_instance_id = ?id.connector.device_instance_id,
+                "monitor EDID identity"
+            );
+        }
+        for m in keyed.iter().filter(|m| !m.key.stable) {
+            tracing::warn!(
+                display = %m.name,
+                key = %m.key.key,
+                "no stable EDID identity for this display; its key is the OS name, which can change on replug"
+            );
+        }
+        let resolved = resolve_zone_displays(&self.state.zone_displays, &keyed);
+        let connected: Vec<&str> = keyed.iter().map(|m| m.key.key.as_str()).collect();
+        for (configured, zones) in unmatched_display_keys(&self.state.zone_displays, &resolved) {
+            tracing::warn!(
+                configured = %configured,
+                ?zones,
+                ?connected,
+                "[displays] key matches no connected display; its zones render on the primary"
+            );
+        }
+        self.state.zone_targets = resolved;
+        self.state.display_keys = keyed;
     }
 
     /// Consume a minimized resize before it can shrink the scene or surface.
@@ -1129,7 +1275,7 @@ impl super::WinitApp {
         let (Some(appearance), Some(rt)) = (&self.state.appearance, &self.state.network_rt) else {
             return;
         };
-        let scales = display_scales(primary, secondaries, &self.state.zone_displays);
+        let scales = display_scales(primary, secondaries, &self.state.zone_targets);
         let appearance = Arc::clone(appearance);
         rt.rt.spawn(async move {
             if let Err(error) = appearance.set_display_scales(scales).await {
@@ -1145,19 +1291,27 @@ impl super::WinitApp {
             .iter()
             .map(|s| s.spec.clone())
             .collect();
-        let layout = display_layout(primary, &specs, &self.state.zone_displays);
+        let layout = display_layout(primary, &specs, &self.state.zone_targets);
         let zones_on = |name: &str| -> Vec<String> {
             let mut zones: Vec<String> = self
                 .state
-                .zone_displays
+                .zone_targets
                 .iter()
-                .filter(|(_, d)| tze_hud_compositor::normalize_display_name(d) == name)
+                .filter(|(_, d)| d.as_str() == name)
                 .map(|(z, _)| z.clone())
                 .collect();
             zones.sort();
             zones
         };
+        let key_of = |name: &str| -> String {
+            self.state
+                .display_keys
+                .iter()
+                .find(|m| m.name == name)
+                .map_or_else(|| name.to_string(), |m| m.key.key.clone())
+        };
         let mut status = vec![crate::operator::status::DisplayStatus {
+            key: key_of(&primary.name),
             name: primary.name.clone(),
             x: 0,
             y: 0,
@@ -1170,6 +1324,7 @@ impl super::WinitApp {
         status.extend(specs.iter().map(|m| {
             let (x, y) = m.scene_origin(primary);
             crate::operator::status::DisplayStatus {
+                key: key_of(&m.name),
                 name: m.name.clone(),
                 x,
                 y,
@@ -1189,21 +1344,22 @@ impl super::WinitApp {
             .map(String::as_str)
             .filter(|name| self.overlay_disabled(name))
             .collect();
-        let unplaced = unplaced_zones(&self.state.zone_displays, &connected, &failed);
-        for u in &unplaced {
-            match u.reason {
-                UnplacedReason::NotConnected => tracing::warn!(
-                    zone = %u.zone,
-                    configured = %u.display,
-                    connected = ?connected,
-                    "zone placed on a display that is not connected; it renders on the primary"
-                ),
-                UnplacedReason::OverlayFailed => tracing::warn!(
-                    zone = %u.zone,
-                    configured = %u.display,
-                    "zone placed on a display whose overlay kept failing; it renders on the primary"
-                ),
-            }
+        let unplaced = unplaced_zones(
+            &self.state.zone_displays,
+            &self.state.zone_targets,
+            &connected,
+            &failed,
+        );
+        // Unmatched keys were warned about when the key snapshot changed.
+        for u in unplaced
+            .iter()
+            .filter(|u| u.reason == UnplacedReason::OverlayFailed)
+        {
+            tracing::warn!(
+                zone = %u.zone,
+                configured = %u.display,
+                "zone placed on a display whose overlay kept failing; it renders on the primary"
+            );
         }
         #[cfg(target_os = "windows")]
         {
@@ -1610,14 +1766,40 @@ mod tests {
     #[test]
     fn layout_places_assigned_zones_on_their_display() {
         let (primary, secondaries) = rig();
-        let zones = HashMap::from([("subtitle".to_string(), "display8".to_string())]);
+        // Zones are configured by EDID key: an unsuffixed model+serial matches
+        // the one monitor that has it, whatever its DISPLAYn name today.
+        let id = super::super::monitor_identity::test_identity;
+        let identities = [
+            id(r"\\.\DISPLAY7", "DEL", 0x41A2, "P1", None),
+            id(r"\\.\DISPLAY6", "DEL", 0x41A2, "S6", None),
+            id(r"\\.\DISPLAY8", "ACI", 0x27A1, "S8", None),
+        ];
+        let keyed = key_monitors(&["DISPLAY7", "DISPLAY6", "DISPLAY8"], &identities);
+        let configured = HashMap::from([
+            ("subtitle".to_string(), "aci27a1-s8".to_string()),
+            ("pip".to_string(), "DEL41A2-GONE".to_string()),
+        ]);
+        let zones = resolve_zone_displays(&configured, &keyed);
+        assert_eq!(
+            zones,
+            HashMap::from([("subtitle".to_string(), "DISPLAY8".to_string())])
+        );
         let layout = display_layout(&primary, &secondaries, &zones);
         assert_eq!(layout.displays().len(), 3);
         assert_eq!(
             layout.zone_display_rect("subtitle"),
             Some(Rect::new(17.0, -2160.0, 3840.0, 2160.0))
         );
+        // The unmatched key stays on the primary (no other secondary).
         assert_eq!(layout.zone_display_rect("pip"), None);
+        assert_eq!(
+            display_log_line(&keyed[2].key.key, &secondaries[1], false),
+            "display ACI27A1-S8 = DISPLAY8 3840x2160 @ (17,-2160)"
+        );
+        assert_eq!(
+            display_log_line(&keyed[0].key.key, &primary, true),
+            "display DEL41A2-P1 = DISPLAY7 3840x2160 @ (0,0) primary"
+        );
     }
 
     #[test]
@@ -1967,29 +2149,60 @@ mod tests {
     #[test]
     fn zones_on_disconnected_or_failed_displays_are_reported_unplaced() {
         let zones = HashMap::from([
-            ("subtitle".to_string(), r"\\.\display9".to_string()),
-            ("pip".to_string(), "DISPLAY6".to_string()),
-            ("ticker".to_string(), "DISPLAY7".to_string()),
+            ("subtitle".to_string(), "DEL41A2-GONE".to_string()),
+            ("alert-banner".to_string(), "DEL41A2-GONE".to_string()),
+            ("pip".to_string(), "del41a2-s6".to_string()),
+            ("ticker".to_string(), "ACI27A1-S7".to_string()),
         ]);
+        let id = super::super::monitor_identity::test_identity;
+        let identities = [
+            id(r"\\.\DISPLAY6", "DEL", 0x41A2, "S6", None),
+            id(r"\\.\DISPLAY7", "ACI", 0x27A1, "S7", None),
+        ];
+        let keyed = key_monitors(&["DISPLAY7", "DISPLAY6"], &identities);
+        let resolved = resolve_zone_displays(&zones, &keyed);
+        // One warning per unmatched configured key, listing its zones.
+        assert_eq!(
+            unmatched_display_keys(&zones, &resolved),
+            vec![(
+                "DEL41A2-GONE".to_string(),
+                vec!["alert-banner".to_string(), "subtitle".to_string()]
+            )]
+        );
         let unplaced = |zone: &str, display: &str, reason| UnplacedZone {
             zone: zone.into(),
             display: display.into(),
             reason,
         };
+        let gone = |zone| unplaced(zone, "DEL41A2-GONE", UnplacedReason::NotConnected);
         assert_eq!(
-            unplaced_zones(&zones, &["DISPLAY7", "DISPLAY6"], &[]),
-            vec![unplaced(
-                "subtitle",
-                r"\\.\display9",
-                UnplacedReason::NotConnected
-            )]
+            unplaced_zones(&zones, &resolved, &["DISPLAY7", "DISPLAY6"], &[]),
+            vec![gone("alert-banner"), gone("subtitle")]
         );
         assert_eq!(
-            unplaced_zones(&zones, &["DISPLAY6"], &["DISPLAY7"]),
+            unplaced_zones(&zones, &resolved, &["DISPLAY6"], &["DISPLAY7"]),
             vec![
-                unplaced("subtitle", r"\\.\display9", UnplacedReason::NotConnected),
-                unplaced("ticker", "DISPLAY7", UnplacedReason::OverlayFailed),
+                gone("alert-banner"),
+                gone("subtitle"),
+                unplaced("ticker", "ACI27A1-S7", UnplacedReason::OverlayFailed),
             ]
+        );
+        // /admin/status shows each display's key beside its OS name.
+        let status = crate::operator::status::DisplayStatus {
+            key: keyed[0].key.key.clone(),
+            name: keyed[0].name.clone(),
+            x: 0,
+            y: 0,
+            width: 3840,
+            height: 2160,
+            primary: true,
+            zones: vec!["ticker".into()],
+            window_state: None,
+        };
+        let json = serde_json::to_value(&status).unwrap();
+        assert_eq!(
+            (&json["key"], &json["name"]),
+            (&"ACI27A1-S7".into(), &"DISPLAY7".into())
         );
     }
 }
