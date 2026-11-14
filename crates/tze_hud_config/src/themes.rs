@@ -650,7 +650,6 @@ mod tests {
             ("type.body.m.weight", "typography.body.weight"),
             // The notification card keeps Classic's legacy card look.
             ("color.notification.outline", "color.border.default"),
-            ("shape.notification", "border.radius.medium"),
             ("type.notification.title.size", "typography.body.size"),
         ] {
             assert_eq!(

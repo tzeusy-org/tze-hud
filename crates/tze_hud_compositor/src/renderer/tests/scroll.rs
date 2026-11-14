@@ -41,6 +41,18 @@ async fn test_ensure_icon_texture_resolves_token_placeholder() {
         "resolved icon must be in image_texture_cache"
     );
 
+    let id = ResourceId::of(path.as_bytes());
+    assert_eq!(compositor.image_texture_cache[&id].width, 14);
+    compositor.set_token_map({
+        let mut tokens = compositor.token_map.clone();
+        tokens.insert("size.status.icon".into(), "20".into());
+        tokens
+    });
+    assert!(compositor.ensure_icon_texture(&path));
+    assert_eq!(
+        compositor.image_texture_cache[&id].width, 20,
+        "token resize refreshes the same path texture"
+    );
     let _ = std::fs::remove_file(&svg_path);
 }
 

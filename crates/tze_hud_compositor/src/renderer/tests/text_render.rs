@@ -429,14 +429,13 @@ async fn test_zone_status_bar_renders_visible_text() {
         )
         .unwrap();
 
-    // One TextItem per entry, sorted by key ("battery" < "time"). The 36px
-    // zone fits one row, so only "battery" shows.
+    // Horizontal key/value pairs are sorted, including in a custom top-edge zone.
     let items = compositor.collect_text_items(&scene, 1280.0, 720.0);
     let texts: Vec<&str> = items.iter().map(|i| &*i.text).collect();
     assert_eq!(
         texts,
-        ["battery: 95%"],
-        "rows sorted by key, capped to the zone"
+        ["battery", "95%", "time", "12:34"],
+        "horizontal entries sorted by key"
     );
     let item = &items[0];
     // Zone top-edge: y = 8.0 (margin_px), height = 720*0.05 = 36.

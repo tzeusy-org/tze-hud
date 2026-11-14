@@ -4,7 +4,7 @@ use super::*;
 
 const SW: f32 = 1920.0;
 const SH: f32 = 1080.0;
-const FONT_PX: f32 = 16.0;
+const FONT_PX: f32 = 12.0;
 const PAD_PX: f32 = 9.0;
 
 fn status_bar_zone(policy: RenderingPolicy) -> ZoneDefinition {
@@ -33,6 +33,7 @@ fn card_policy() -> RenderingPolicy {
     RenderingPolicy {
         backdrop: Some(Rgba::new(0.1, 0.12, 0.15, 1.0)),
         backdrop_opacity: Some(0.92),
+        backdrop_radius: Some(0.0),
         text_color: Some(Rgba::WHITE),
         font_size_px: Some(FONT_PX),
         margin_horizontal: Some(PAD_PX),
@@ -67,7 +68,10 @@ fn zone_rect() -> Rect {
     Rect::new(0.83 * SW, 0.74 * SH, 0.16 * SW, 0.24 * SH)
 }
 
-fn card_for(scene: &SceneGraph) -> Option<super::zone_render::StatusBarCard> {
+fn card_for(
+    compositor: &Compositor,
+    scene: &SceneGraph,
+) -> Option<crate::renderer::status_bar::StatusBarCard> {
     let zone = &scene.zone_registry.zones["status-bar"];
     let publishes = scene
         .zone_registry
@@ -75,22 +79,21 @@ fn card_for(scene: &SceneGraph) -> Option<super::zone_render::StatusBarCard> {
         .get("status-bar")
         .map(Vec::as_slice)
         .unwrap_or_default();
-    Compositor::status_bar_card(
+    compositor.status_bar_card(
+        "status-bar",
         publishes,
         zone.contention_policy,
         &zone.rendering_policy,
-        1.0,
         zone_rect(),
     )
 }
 
-/// The card is rows × line height + padding tall, sits on the region's bottom
-/// edge, and grows upward one line per entry.
-#[test]
-fn status_bar_card_hugs_rows_and_is_bottom_anchored() {
-    let line_h = FONT_PX * crate::text::LINE_HEIGHT_MULTIPLIER;
+/// Entry count changes width, never height; the pill keeps its bottom/right inset.
+#[tokio::test]
+async fn status_bar_card_hugs_rows_and_is_bottom_anchored() {
+    let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1920, 1080).await);
     let zone = zone_rect();
-    let mut previous_top = f32::MAX;
+    let mut previous_width = 0.0;
     for n in 1..=4 {
         let entries: Vec<(String, String)> =
             (0..n).map(|i| (format!("k{i}"), format!("v{i}"))).collect();
@@ -98,34 +101,60 @@ fn status_bar_card_hugs_rows_and_is_bottom_anchored() {
             .iter()
             .map(|(k, v)| (k.as_str(), v.as_str()))
             .collect();
-        let card = card_for(&scene_with_entries(card_policy(), &borrowed)).expect("card");
-        let expected_h = n as f32 * line_h + 2.0 * PAD_PX;
+        let card =
+            card_for(&compositor, &scene_with_entries(card_policy(), &borrowed)).expect("card");
+        assert_eq!(card.rect.height, 36.0, "entry count never adds rows");
+        assert!((card.rect.y + card.rect.height - (zone.y + zone.height - 16.0)).abs() < 0.01);
+        assert!((card.rect.x + card.rect.width - (zone.x + zone.width - 16.0)).abs() < 0.01);
         assert!(
-            (card.rect.height - expected_h).abs() < 0.01,
-            "{n} rows: height {} != {expected_h}",
-            card.rect.height
+            card.rect.width > previous_width,
+            "content grows the pill horizontally"
         );
+        previous_width = card.rect.width;
+        assert_eq!(card.entries.len(), n);
+    }
+    for factor in [1.0, 1.5, 1.875] {
+        let mut tokens = tze_hud_config::tokens::resolve_tokens(&HashMap::new(), &HashMap::new());
+        tze_hud_config::tokens::set_px_scale(&mut tokens, factor);
+        let factor = factor as f32;
+        tokens.insert("space.status.key_value".into(), "10".into());
+        let policy = tze_hud_config::policy_builder::build_effective_policy(
+            "status-bar",
+            &RenderingPolicy::default(),
+            &tokens,
+        );
+        compositor.set_token_map(tokens);
+        let scene = scene_with_entries(policy, &[("scale", "150%")]);
+        let card = card_for(&compositor, &scene).unwrap();
+        assert!((card.rect.height - 36.0 * factor).abs() < 0.01);
+        assert!((zone.x + zone.width - card.rect.x - card.rect.width - 16.0 * factor).abs() < 0.01);
+        let items = card.text_items(1.0);
+        assert_eq!(items.len(), 2);
+        assert!((items[0].font_size_px - 12.0 * factor).abs() < 0.01);
         assert!(
-            (card.rect.y + card.rect.height - (zone.y + zone.height)).abs() < 0.01,
-            "{n} rows: card must end on the region's bottom edge"
+            (items[1].pixel_x - items[0].pixel_x - items[0].bounds_width - 10.0 * factor).abs()
+                < 0.01
         );
-        assert_eq!((card.rect.x, card.rect.width), (zone.x, zone.width));
-        assert!(card.rect.y < previous_top, "more rows grow the card upward");
-        previous_top = card.rect.y;
-        assert_eq!(card.rows.len(), n);
     }
 }
 
-/// Rows are in key order (publish order is not carried) and capped to what
-/// fits the region; the card never outgrows it.
-#[test]
-fn status_bar_card_sorts_keys_and_caps_rows_to_the_region() {
-    let card = card_for(&scene_with_entries(
-        card_policy(),
-        &[("wifi", "ok"), ("agent", "Claude"), ("cpu", "4%")],
-    ))
+/// Entries keep key order and the horizontal pill never exceeds its maximum region.
+#[tokio::test]
+async fn status_bar_card_sorts_keys_and_caps_rows_to_the_region() {
+    let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1920, 1080).await);
+    let card = card_for(
+        &compositor,
+        &scene_with_entries(
+            card_policy(),
+            &[("wifi", "ok"), ("agent", "Claude"), ("cpu", "4%")],
+        ),
+    )
     .unwrap();
-    let keys: Vec<&str> = card.rows.iter().map(|(k, _)| k.as_str()).collect();
+    let keys: Vec<&str> = card
+        .entries
+        .iter()
+        .map(|entry| entry.key.as_str())
+        .collect();
     assert_eq!(keys, ["agent", "cpu", "wifi"]);
 
     let entries: Vec<(String, String)> = (0..40)
@@ -135,12 +164,19 @@ fn status_bar_card_sorts_keys_and_caps_rows_to_the_region() {
         .iter()
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
-    let card = card_for(&scene_with_entries(card_policy(), &borrowed)).unwrap();
-    let line_h = FONT_PX * crate::text::LINE_HEIGHT_MULTIPLIER;
-    let fit = ((zone_rect().height - 2.0 * PAD_PX) / line_h).floor() as usize;
-    assert_eq!(card.rows.len(), fit);
-    assert!(card.rect.height <= zone_rect().height);
-    assert!(card.rect.y >= zone_rect().y);
+    let card = card_for(&compositor, &scene_with_entries(card_policy(), &borrowed)).unwrap();
+    assert!(
+        card.entries.len() < borrowed.len(),
+        "hide sorted suffix that cannot fit"
+    );
+    assert!(!card.entries.is_empty());
+    assert!(card.rect.width <= zone_rect().width - 32.0);
+    assert_eq!(card.rect.height, 36.0);
+    assert!(
+        card.entries
+            .windows(2)
+            .all(|pair| pair[0].x + pair[0].width < pair[1].x)
+    );
 }
 
 /// No entries: no card, and no backdrop quad, SDF command, text or drag
@@ -169,7 +205,7 @@ async fn status_bar_without_entries_draws_nothing() {
             None,
         )
         .unwrap();
-    assert!(card_for(&scene).is_none());
+    assert!(card_for(&compositor, &scene).is_none());
 
     let mut vertices = Vec::new();
     compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), SW, SH, None);
@@ -180,6 +216,12 @@ async fn status_bar_without_entries_draws_nothing() {
     let sdf = compositor.collect_all_rounded_rect_cmds(&scene, SW, SH);
     assert!(sdf.chrome.is_empty(), "no SDF card for an empty status bar");
     assert!(compositor.collect_text_items(&scene, SW, SH).is_empty());
+    assert!(
+        compositor
+            .collect_drag_handle_entries(&scene, SW, SH)
+            .is_empty(),
+        "no empty status handle"
+    );
 }
 
 /// The flat backdrop, the SDF card (with its border) and the drag handle's
@@ -191,17 +233,17 @@ async fn status_bar_draw_paths_share_the_card_rect() {
 
     // Flat path (no radius): one quad covering the card.
     let scene = scene_with_entries(card_policy(), &entries);
-    let card = card_for(&scene).unwrap().rect;
+    let card = card_for(&compositor, &scene).unwrap().rect;
     let mut vertices = Vec::new();
     compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), SW, SH, None);
-    assert_eq!(vertices.len(), 6, "one backdrop quad");
+    assert_eq!(vertices.len(), 12, "backdrop plus one divider quad");
     let to_px = |v: &crate::pipeline::RectVertex| {
         (
             (v.position[0] + 1.0) * 0.5 * SW,
             (1.0 - v.position[1]) * 0.5 * SH,
         )
     };
-    let (min_x, min_y, max_x, max_y) = vertices.iter().map(to_px).fold(
+    let (min_x, min_y, max_x, max_y) = vertices[..6].iter().map(to_px).fold(
         (f32::MAX, f32::MAX, f32::MIN, f32::MIN),
         |(a, b, c, d), (x, y)| (a.min(x), b.min(y), c.max(x), d.max(y)),
     );
@@ -240,7 +282,11 @@ async fn status_bar_draw_paths_share_the_card_rect() {
     assert!(cmd.border.is_some() && cmd.radius > 0.0);
     let mut vertices = Vec::new();
     compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), SW, SH, None);
-    assert!(vertices.is_empty(), "rounded cards skip the flat quad");
+    assert_eq!(
+        vertices.len(),
+        6,
+        "rounded card leaves only its divider quad"
+    );
 
     // Drag handle: on the card, not the taller region.
     let handles = compositor.collect_drag_handle_entries(&scene, SW, SH);
@@ -251,42 +297,40 @@ async fn status_bar_draw_paths_share_the_card_rect() {
     assert_eq!(handle.element_bounds, card);
 }
 
-/// One single-line, ellipsized TextItem per row, each inside its row of the
-/// card; the key (with its colon) is dimmed, the value keeps the text color.
+/// Separate key/value boxes share one baseline, token gap and pill bounds.
 #[tokio::test]
 async fn status_bar_rows_are_single_line_with_dimmed_keys() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1920, 1080).await);
     let scene = scene_with_entries(
         card_policy(),
-        &[
-            ("agent", "Claude · reviewing a very long pull request title"),
-            ("build", "green"),
-        ],
+        &[("agent", "Claude reviewing"), ("build", "green")],
     );
-    let card = card_for(&scene).unwrap();
+    let card = card_for(&compositor, &scene).unwrap();
     let items = compositor.collect_text_items(&scene, SW, SH);
-    assert_eq!(items.len(), 2, "one TextItem per entry");
     assert_eq!(
-        &*items[0].text,
-        "agent: Claude · reviewing a very long pull request title"
+        items.len(),
+        4,
+        "separate key and value boxes preserve the token gap"
     );
-    assert_eq!(&*items[1].text, "build: green");
-    let secondary = crate::text::rgba_to_srgb_u8(super::token_colors::TEXT_SECONDARY_FALLBACK);
-    for (i, item) in items.iter().enumerate() {
-        assert_eq!(item.overflow, TextOverflow::Ellipsis, "values never wrap");
-        assert!(
-            (item.bounds_height - card.line_h).abs() < 0.01,
-            "exactly one line tall"
-        );
-        assert!(item.pixel_y >= card.row_y(i) && item.pixel_y < card.row_y(i + 1));
+    assert_eq!(&*items[0].text, "agent");
+    assert_eq!(&*items[1].text, "Claude reviewing");
+    assert_eq!(&*items[2].text, "build");
+    assert_eq!(&*items[3].text, "green");
+    for item in &items {
+        assert_eq!(item.overflow, TextOverflow::Ellipsis);
+        assert_eq!(item.bounds_height, 16.0);
+        assert_eq!(item.pixel_y, card.rect.y + 10.0);
         assert!(item.pixel_x >= card.rect.x + PAD_PX);
         assert!(item.pixel_x + item.bounds_width <= card.rect.x + card.rect.width - PAD_PX + 0.01);
-        assert_eq!(item.color[..3], [255, 255, 255], "values in text_color");
-        let key_len = item.text.find(' ').unwrap();
-        assert_eq!(item.color_runs.len(), 1);
-        let run = &item.color_runs[0];
-        assert_eq!((run.start_byte, run.end_byte), (0, key_len));
-        assert_eq!(run.color[..3], secondary[..3], "keys dimmed");
+    }
+    assert_eq!(items[1].color[..3], [255, 255, 255]);
+    assert_ne!(
+        items[0].color[..3],
+        items[1].color[..3],
+        "keys are dimmer than values"
+    );
+    for pair in items.chunks_exact(2) {
+        assert!((pair[1].pixel_x - pair[0].pixel_x - pair[0].bounds_width - 6.0).abs() < 0.01);
     }
 }
 
@@ -303,10 +347,10 @@ async fn status_bar_long_value_is_ellipsized_not_wrapped() {
             "Claude reviewing the status bar redesign pull request right now",
         )],
     );
-    let card = card_for(&scene).unwrap().rect;
+    let card = card_for(&compositor, &scene).unwrap().rect;
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
-    let item = compositor.collect_text_items(&scene, SW, SH).remove(0);
+    let item = compositor.collect_text_items(&scene, SW, SH).remove(1);
     let key = crate::text::effective_truncation_key(&item).expect("ellipsis item");
     let shown = compositor
         .text_rasterizer
@@ -318,8 +362,15 @@ async fn status_bar_long_value_is_ellipsized_not_wrapped() {
         .text
         .clone();
     assert!(
-        shown.starts_with("agent: Claude") && shown.ends_with(crate::overflow::ELLIPSIS),
+        shown.starts_with("Claude") && shown.ends_with(crate::overflow::ELLIPSIS),
         "long value must be cut with an ellipsis; shown {shown:?}"
+    );
+    let shapes = compositor.status_bar_layouts.borrow().shapes;
+    compositor.prime_truncation_cache(&scene);
+    assert_eq!(
+        compositor.status_bar_layouts.borrow().shapes,
+        shapes,
+        "unchanged publication does not shape again"
     );
     compositor.render_frame_headless(&mut scene, &surface);
     let pixels = surface.read_pixels(&compositor.device);
@@ -334,7 +385,7 @@ async fn status_bar_long_value_is_ellipsized_not_wrapped() {
         })
         .collect();
     assert!(!bright_rows.is_empty(), "the row renders visible text");
-    let line_h = FONT_PX * crate::text::LINE_HEIGHT_MULTIPLIER;
+    let line_h = 16.0;
     let span = (bright_rows.last().unwrap() - bright_rows.first().unwrap()) as f32;
     assert!(
         span < line_h,
@@ -348,4 +399,38 @@ async fn status_bar_long_value_is_ellipsized_not_wrapped() {
         })
     });
     assert!(!right_ink, "no glyphs inside the right padding");
+    let before_font_change = compositor.status_bar_layouts.borrow().shapes;
+    let mut tokens = compositor.token_map.clone();
+    tokens.insert("font.sans".into(), "IBM Plex Mono".into());
+    compositor.set_token_map(tokens);
+    compositor.prime_truncation_cache(&scene);
+    assert!(
+        compositor.status_bar_layouts.borrow().shapes > before_font_change,
+        "changing real font roles invalidates measured status widths"
+    );
+    compositor.set_max_truncation_input_bytes(64);
+    scene
+        .publish_to_zone(
+            "status-bar",
+            ZoneContent::StatusBar(StatusBarPayload {
+                entries: HashMap::from([("agent".into(), "é\n🚀".repeat(4096))]),
+            }),
+            "agent",
+            None,
+            None,
+            None,
+        )
+        .unwrap();
+    compositor.prime_truncation_cache(&scene);
+    let bounded = compositor.collect_text_items(&scene, SW, SH);
+    assert!(
+        bounded
+            .iter()
+            .all(|item| item.text.len() <= 64 + crate::overflow::ELLIPSIS.len())
+    );
+    assert!(bounded[1].text.ends_with(crate::overflow::ELLIPSIS));
+    assert!(
+        !bounded[1].text.contains('\n'),
+        "status values stay on one line"
+    );
 }

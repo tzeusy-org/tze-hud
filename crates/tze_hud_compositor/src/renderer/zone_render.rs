@@ -32,35 +32,11 @@ use super::Compositor;
 use super::draw_cmds::TexturedDrawCmd;
 use super::notification_style::NotificationStyle;
 use super::token_colors::{
-    ICON_SIZE_PX, STATIC_IMAGE_PLACEHOLDER_COLOR, is_alert_banner_zone, sort_alert_banner_indices,
+    STATIC_IMAGE_PLACEHOLDER_COLOR, is_alert_banner_zone, sort_alert_banner_indices,
     zone_opacity_ceiling,
 };
 use crate::pipeline::RectVertex;
 use crate::pipeline::rect_vertices;
-
-/// A laid-out status-bar card (see [`Compositor::status_bar_card`]).
-#[derive(Debug, Clone, PartialEq)]
-pub(crate) struct StatusBarCard {
-    /// The drawn card: backdrop, border, rows and drag handle all use it.
-    pub(crate) rect: Rect,
-    /// Height of one row (a text line, or the icon if taller).
-    pub(crate) row_h: f32,
-    /// Height of one text line (`font_size_px × LINE_HEIGHT_MULTIPLIER`).
-    pub(crate) line_h: f32,
-    /// Vertical padding above the first row and below the last.
-    pub(crate) pad_v: f32,
-    /// Whether rows reserve space for `key_icon_map` icons.
-    pub(crate) icon_layout: bool,
-    /// The shown `(key, value)` rows, sorted by key.
-    pub(crate) rows: Vec<(String, String)>,
-}
-
-impl StatusBarCard {
-    /// Top of row `i`.
-    pub(crate) fn row_y(&self, i: usize) -> f32 {
-        self.rect.y + self.pad_v + i as f32 * self.row_h
-    }
-}
 
 impl Compositor {
     /// Render zone content backdrop quads driven by `RenderingPolicy`.
@@ -131,7 +107,6 @@ impl Compositor {
                 None => continue,
             };
             let zone_tokens = self.zone_tokens(zone_name);
-            let scale = tze_hud_config::tokens::px_scale(zone_tokens);
             // Layer filter: skip zones that don't match the requested layer.
             if let Some(required_layer) = only_layer {
                 if zone_def.layer_attachment != required_layer {
@@ -321,13 +296,13 @@ impl Compositor {
                     } else {
                         None
                     };
-                    // Status-bar content draws as a card hugging its rows; with no
+                    // Status-bar content draws as a pill hugging its entries; with no
                     // entries nothing is drawn at all.
-                    let card = Self::status_bar_card(
+                    let card = self.status_bar_card(
+                        zone_name,
                         publishes,
                         zone_def.contention_policy,
                         policy,
-                        scale,
                         Rect::new(x, y, w, h),
                     );
                     if card.is_none() && matches!(&latest.content, ZoneContent::StatusBar(_)) {
@@ -359,6 +334,7 @@ impl Compositor {
                                 Some(STATIC_IMAGE_PLACEHOLDER_COLOR)
                             }
                         }
+                        ZoneContent::StatusBar(_) => card.as_ref().map(|c| c.style.fill),
                         ZoneContent::Notification(n) => {
                             // The card or banner style's urgency tone
                             // (semantic container roles).
@@ -381,7 +357,7 @@ impl Compositor {
                         // For non-notification content: apply policy backdrop_opacity.
                         // For Notification content opacity is already set by the
                         // card style above; skip policy override.
-                        if !is_notification_content {
+                        if !is_notification_content && card.is_none() {
                             if let Some(opacity) = policy.backdrop_opacity {
                                 rgba.a = opacity.clamp(0.0, 1.0);
                             }
@@ -393,7 +369,11 @@ impl Compositor {
                         rgba.a *= anim_opacity.clamp(0.0, 1.0);
 
                         // Skip flat-rect emission for rounded zones — handled by the SDF pass.
-                        if !use_rounded_rect {
+                        if !card.as_ref().map_or(use_rounded_rect, |c| {
+                            c.style.radius > 0.0
+                                && self.degradation_policy.level
+                                    < tze_hud_scene::DegradationLevel::Simplified
+                        }) {
                             vertices.extend_from_slice(&rect_vertices(
                                 x,
                                 y,
@@ -448,35 +428,39 @@ impl Compositor {
                         }
                     }
 
-                    // ── StatusBar icon rendering ──────────────────────────────
-                    // One icon per shown row whose key maps to a cached icon
-                    // texture, at the left inset, centred in the row.
-                    if let Some(card) = card.as_ref().filter(|c| c.icon_layout) {
-                        let margin_h = policy
-                            .margin_horizontal
-                            .or(policy.margin_px)
-                            .unwrap_or(8.0 * scale);
-                        let icon = ICON_SIZE_PX * scale;
-                        for (row, (k, _v)) in card.rows.iter().enumerate() {
-                            let Some(svg_path) = policy.key_icon_map.get(k.as_str()) else {
+                    // Explicit owner icons share the measured horizontal entry positions.
+                    if let Some(card) = card.as_ref() {
+                        let icon = card.style.icon;
+                        for entry in &card.entries {
+                            let Some(svg_path) = &entry.icon else {
                                 continue;
                             };
-                            // Cached under the path-derived ResourceId by
-                            // ensure_scene_icon_textures before this pass; a
-                            // failed rasterization leaves it absent.
                             let resource_id = ResourceId::of(svg_path.as_bytes());
                             if !self.image_texture_cache.contains_key(&resource_id) {
                                 continue;
                             }
                             textured_cmds.push(TexturedDrawCmd {
                                 resource_id,
-                                x: card.rect.x + margin_h,
-                                y: card.row_y(row) + (card.row_h - icon) * 0.5,
+                                x: card.rect.x + entry.x,
+                                y: card.rect.y + (card.rect.height - icon) * 0.5,
                                 w: icon,
                                 h: icon,
                                 uv_rect: [0.0, 0.0, 1.0, 1.0],
                                 tint: [1.0, 1.0, 1.0, anim_opacity.clamp(0.0, 1.0)],
                             });
+                        }
+                        let mut divider = card.style.outline;
+                        divider.a *= anim_opacity;
+                        for rect in card.dividers() {
+                            vertices.extend_from_slice(&rect_vertices(
+                                rect.x,
+                                rect.y,
+                                rect.width,
+                                rect.height,
+                                sw,
+                                sh,
+                                self.gpu_color(divider),
+                            ));
                         }
                     }
                 }
@@ -529,91 +513,6 @@ impl Compositor {
                 vertices.extend_from_slice(&rect_vertices(x, y, w, h, sw, sh, color));
             }
         }
-    }
-
-    /// Lay out the status-bar card for a zone: the one rect that its backdrop,
-    /// border, text rows, icons and drag handle all use, plus its visible rows.
-    ///
-    /// Returns `None` when the zone shows no status-bar entries — nothing is
-    /// drawn, not even an empty backdrop.
-    ///
-    /// - Entries: `MergeByKey` merges every active StatusBar publication (the
-    ///   latest value per key wins); other policies use the most-recent
-    ///   publication only, and only while it is a StatusBar. Rows are sorted
-    ///   by key (`StatusBarPayload.entries` carries no publish order).
-    /// - Rows: one line each, `font_size_px × LINE_HEIGHT_MULTIPLIER` tall (at
-    ///   least the icon height while any shown key has a `key_icon_map` icon).
-    ///   As many rows as fit the zone are shown, never fewer than one.
-    /// - Rect: the zone's full width, `rows × row_h + 2 × margin_v` tall,
-    ///   anchored to the zone's bottom edge (the zone is the most it may grow
-    ///   to, not the drawn size).
-    pub(crate) fn status_bar_card(
-        publishes: &[ZonePublishRecord],
-        contention_policy: ContentionPolicy,
-        policy: &RenderingPolicy,
-        scale: f32,
-        zone: Rect,
-    ) -> Option<StatusBarCard> {
-        let mut entries: Vec<(String, String)> = match contention_policy {
-            ContentionPolicy::MergeByKey { max_keys } => {
-                let mut merged: HashMap<&str, &str> = HashMap::with_capacity(max_keys as usize);
-                for record in publishes {
-                    if let ZoneContent::StatusBar(payload) = &record.content {
-                        for (k, v) in &payload.entries {
-                            merged.insert(k, v);
-                        }
-                    }
-                }
-                merged
-                    .into_iter()
-                    .map(|(k, v)| (k.to_owned(), v.to_owned()))
-                    .collect()
-            }
-            _ => match publishes.last().map(|r| &r.content) {
-                Some(ZoneContent::StatusBar(p)) => p
-                    .entries
-                    .iter()
-                    .map(|(k, v)| (k.clone(), v.clone()))
-                    .collect(),
-                _ => Vec::new(),
-            },
-        };
-        if entries.is_empty() {
-            return None;
-        }
-        entries.sort_by(|(a, _), (b, _)| a.cmp(b));
-
-        // Per-entry icons only while a shown key is mapped, so configuring
-        // the map for absent keys never changes the layout.
-        let icon_layout = !policy.key_icon_map.is_empty()
-            && entries
-                .iter()
-                .any(|(k, _)| policy.key_icon_map.contains_key(k.as_str()));
-        let font_size_px = policy
-            .font_size_px
-            .unwrap_or(16.0 * scale)
-            .clamp(6.0, 200.0);
-        let line_h = font_size_px * crate::text::LINE_HEIGHT_MULTIPLIER;
-        let row_h = if icon_layout {
-            line_h.max(ICON_SIZE_PX * scale)
-        } else {
-            line_h
-        };
-        let pad_v = policy
-            .margin_vertical
-            .or(policy.margin_px)
-            .unwrap_or(8.0 * scale);
-        let fit = ((zone.height - 2.0 * pad_v) / row_h).floor().max(1.0) as usize;
-        entries.truncate(fit);
-        let height = (entries.len() as f32 * row_h + 2.0 * pad_v).min(zone.height);
-        Some(StatusBarCard {
-            rect: Rect::new(zone.x, zone.y + zone.height - height, zone.width, height),
-            row_h,
-            line_h,
-            pad_v,
-            icon_layout,
-            rows: entries,
-        })
     }
 
     /// Compute the per-slot height for a Stack zone (single-line content).

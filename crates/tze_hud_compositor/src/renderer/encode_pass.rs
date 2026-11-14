@@ -421,7 +421,6 @@ impl super::Compositor {
                 None => continue,
             };
             let zone_tokens = self.zone_tokens(zone_name);
-            let scale = tze_hud_config::tokens::px_scale(zone_tokens);
             let policy = &zone_def.rendering_policy;
             // Backdrop drawn by the SDF pass (else by the flat pass, square).
             let sdf_radius = match policy.backdrop_radius {
@@ -555,20 +554,24 @@ impl super::Compositor {
                     } else {
                         None
                     };
-                    // The status-bar card hugs its rows (the same rect the flat
+                    // The status pill hugs its entries (the same rect the flat
                     // pass, text and drag handle use); no entries, no card.
                     let zone_rect = Rect::new(x, y, w, h);
-                    let rect = match Self::status_bar_card(
+                    let card = self.status_bar_card(
+                        zone_name,
                         publishes,
                         zone_def.contention_policy,
                         policy,
-                        scale,
                         zone_rect,
-                    ) {
+                    );
+                    let rect = match &card {
                         Some(card) => card.rect,
                         None if matches!(&latest.content, ZoneContent::StatusBar(_)) => continue,
                         None => zone_rect,
                     };
+                    let sdf_radius = card.as_ref().map_or(sdf_radius, |c| {
+                        (!degraded && c.style.radius > 0.0).then_some(c.style.radius)
+                    });
                     self.push_zone_backdrop_cmd(
                         out,
                         zone_name,
@@ -609,7 +612,7 @@ impl super::Compositor {
     ) -> bool {
         // Notification cards, alert banners and the status-bar card carry a
         // hairline border: the urgency tone's for notifications,
-        // `color.border.default` for the status bar.
+        // `color.outline.variant` for the status pill.
         let is_card = matches!(
             content,
             ZoneContent::Notification(_) | ZoneContent::StatusBar(_)
@@ -623,6 +626,9 @@ impl super::Compositor {
                     .tone(n.urgency)
                     .fill
             }),
+            ZoneContent::StatusBar(_) => Some(
+                super::status_bar::StatusStyle::resolve(self.zone_tokens(zone_name), policy).fill,
+            ),
             _ => policy.backdrop,
         };
         let Some(mut rgba) = backdrop_rgba else {
@@ -633,7 +639,7 @@ impl super::Compositor {
             .map(|r| r.min((slot.width * 0.5).min(slot.height * 0.5)).max(0.0))
             .unwrap_or(0.0);
         // Notification cards: the urgency tone's hairline (`stroke.border.width`
-        // dp); the status-bar card keeps `color.border.default` (hud-h51u7.4.4).
+        // dp); status pills use the semantic outline and hairline too.
         // A transparent outline role (Classic's banner) draws no hairline.
         let border = is_card
             .then(|| {
@@ -645,6 +651,13 @@ impl super::Compositor {
                             policy,
                         );
                         (style.tone(n.urgency).outline, style.hairline)
+                    }
+                    ZoneContent::StatusBar(_) => {
+                        let style = super::status_bar::StatusStyle::resolve(
+                            self.zone_tokens(zone_name),
+                            policy,
+                        );
+                        (style.outline, style.hairline)
                     }
                     _ => (
                         resolve_border_default_color(&self.token_map),
@@ -660,7 +673,7 @@ impl super::Compositor {
             .filter(|b| b.color[3] > 0.0);
         if sdf_radius.is_some() {
             // Notification cards keep their token opacity; others take the policy's.
-            if !is_notification_card {
+            if !is_notification_card && !matches!(content, ZoneContent::StatusBar(_)) {
                 if let Some(o) = policy.backdrop_opacity {
                     rgba.a = o.clamp(0.0, 1.0);
                 }

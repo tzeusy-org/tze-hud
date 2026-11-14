@@ -432,6 +432,7 @@ impl super::Compositor {
     /// surface resize or format change).
     pub fn init_text_renderer(&mut self, format: wgpu::TextureFormat) {
         self.subtitle_layouts.borrow_mut().invalidate();
+        self.status_bar_layouts.borrow_mut().invalidate();
         let mut rasterizer = TextRasterizer::with_font_config(
             &self.device,
             &self.queue,
@@ -502,6 +503,7 @@ impl super::Compositor {
         self.truncation_cache_scene_instance = None;
         self.notification_layouts.borrow_mut().invalidate();
         self.subtitle_layouts.borrow_mut().invalidate();
+        self.status_bar_layouts.borrow_mut().invalidate();
         true
     }
 
@@ -520,6 +522,9 @@ impl super::Compositor {
     /// historical behaviour for configs that omit the override.
     pub fn set_max_truncation_input_bytes(&mut self, bytes: usize) {
         self.configured_max_truncation_input_bytes = Some(bytes);
+        self.status_bar_layouts
+            .borrow_mut()
+            .set_max_input_bytes(bytes);
         self.subtitle_layouts
             .borrow_mut()
             .set_max_input_bytes(bytes);
@@ -615,6 +620,7 @@ impl super::Compositor {
                 self.truncation_cache_scene_instance = None;
                 self.notification_layouts.borrow_mut().invalidate();
                 self.subtitle_layouts.borrow_mut().invalidate();
+                self.status_bar_layouts.borrow_mut().invalidate();
                 tracing::debug!(
                     resource_id = %crate::text::format_resource_id(&resource_id),
                     "load_font_bytes: new font loaded — truncation cache invalidated [hud-v2z6u]"
@@ -850,7 +856,7 @@ impl super::Compositor {
     ///    It only occurs once per unique SVG path (cache miss); subsequent
     ///    calls for the same path return immediately from cache or the
     ///    negative-cache set (`failed_icon_paths`).
-    /// 2. Rasterizes at [`ICON_SIZE_PX`] × [`ICON_SIZE_PX`] via resvg/tiny-skia.
+    /// 2. Rasterizes at the resolved `size.status.icon` via resvg/tiny-skia.
     /// 3. Uploads the RGBA pixmap to a `wgpu::Texture`.
     /// 4. Inserts into `image_texture_cache` under the path-derived `ResourceId`.
     ///
@@ -859,15 +865,28 @@ impl super::Compositor {
     /// attempted for this path (graceful degradation — text-only fallback).
     pub(super) fn ensure_icon_texture(&mut self, path: &str) -> bool {
         let resource_id = ResourceId::of(path.as_bytes());
-        if self.image_texture_cache.contains_key(&resource_id) {
+        // One path texture serves all displays; retain enough pixels for the
+        // largest resolved status icon and refresh it when that demand changes.
+        let size = std::iter::once(&self.token_map)
+            .chain(self.secondary_zone_tokens.values())
+            .map(|tokens| {
+                super::status_bar::number(tokens, "size.status.icon")
+                    * tze_hud_config::tokens::px_scale(tokens)
+            })
+            .fold(0.0_f32, f32::max)
+            .ceil()
+            .max(1.0)
+            .min(self.device.limits().max_texture_dimension_2d as f32) as u32;
+        if self
+            .image_texture_cache
+            .get(&resource_id)
+            .is_some_and(|entry| entry.width == size && entry.height == size)
+        {
             return true;
         }
-        // Negative cache: skip repeated I/O for known-bad paths.
         if self.failed_icon_paths.contains(&resource_id) {
             return false;
         }
-
-        let size = super::token_colors::ICON_SIZE_PX as u32;
 
         // Read SVG bytes from disk (blocking; occurs at most once per path).
         let svg_bytes = match std::fs::read(path) {
