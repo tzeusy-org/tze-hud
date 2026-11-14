@@ -742,7 +742,9 @@ control panel's Layout card writes);
 to a display. `<key>` is the monitor's EDID key, uppercase, any case accepted:
 `<MFG><PRODUCT as 4 hex>-<SERIAL>` (e.g. `DEL41A2-7XK2N13`; the serial keeps
 `A-Z 0-9 . _ -`, other characters become `_`), or `<MFG><PRODUCT>` when the
-serial is blank. When two connected monitors would share a key (same model and
+serial is blank. All connected hardware participates in this ambiguity check,
+including monitors without an overlay in fullscreen or explicitly sized mode.
+When two connected monitors would share a key (same model and
 serial, or same model with blank serials), every one of them gets
 `@<connector>`: the full PnP device instance id with `\` written as `/`, other
 characters outside `A-Z 0-9 . _ & -` as `%XX`, e.g.

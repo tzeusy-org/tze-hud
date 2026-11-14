@@ -110,6 +110,40 @@ pub(super) fn split_primary(
     (primary, secondaries)
 }
 
+/// Hardware identity uses the complete inventory in every window mode. The
+/// selected windows can instead be a single fullscreen or explicitly sized
+/// window, whose dimensions must remain those of that window.
+struct MonitorPlan {
+    primary: MonitorSpec,
+    desired: Vec<MonitorSpec>,
+    connected: Vec<MonitorSpec>,
+}
+
+fn plan_monitor_windows(
+    connected: Option<(MonitorSpec, Vec<MonitorSpec>)>,
+    fallback: MonitorSpec,
+    multi: bool,
+) -> MonitorPlan {
+    let all = connected.as_ref().map_or_else(
+        || vec![fallback.clone()],
+        |(primary, secondaries)| {
+            std::iter::once(primary.clone())
+                .chain(secondaries.iter().cloned())
+                .collect()
+        },
+    );
+    let (primary, desired) = if multi {
+        connected.unwrap_or((fallback, Vec::new()))
+    } else {
+        (fallback, Vec::new())
+    };
+    MonitorPlan {
+        primary,
+        desired,
+        connected: all,
+    }
+}
+
 /// Which current secondaries to tear down (indices, descending) and which
 /// desired monitors need a new window. A monitor whose name or geometry
 /// changed is torn down and recreated: simpler than moving a live surface
@@ -866,26 +900,25 @@ impl super::WinitApp {
         };
         let multi = self.state.effective_mode == crate::window::WindowMode::Overlay
             && self.state.config.overlay_auto_size;
-        let (primary, desired) = match multi.then(|| enumerate_monitors(event_loop)).flatten() {
-            Some(found) => found,
-            None => {
-                let size = primary_window.inner_size();
-                let name = primary_window
-                    .current_monitor()
-                    .and_then(|m| m.name())
-                    .map(|n| tze_hud_compositor::normalize_display_name(&n))
-                    .unwrap_or_else(|| "PRIMARY".into());
-                let spec = MonitorSpec {
-                    name,
-                    x: 0,
-                    y: 0,
-                    width: size.width.max(1),
-                    height: size.height.max(1),
-                    scale: primary_window.scale_factor(),
-                };
-                (spec, Vec::new())
-            }
+        let size = primary_window.inner_size();
+        let name = primary_window
+            .current_monitor()
+            .and_then(|m| m.name())
+            .map(|n| tze_hud_compositor::normalize_display_name(&n))
+            .unwrap_or_else(|| "PRIMARY".into());
+        let fallback = MonitorSpec {
+            name,
+            x: 0,
+            y: 0,
+            width: size.width.max(1),
+            height: size.height.max(1),
+            scale: primary_window.scale_factor(),
         };
+        let MonitorPlan {
+            primary,
+            desired,
+            connected: all_specs,
+        } = plan_monitor_windows(enumerate_monitors(event_loop), fallback, multi);
 
         #[cfg(target_os = "windows")]
         if self.state.effective_mode == crate::window::WindowMode::Overlay {
@@ -904,9 +937,6 @@ impl super::WinitApp {
 
         // Key every connected monitor before overlay filtering, so ambiguity
         // and matching see all the hardware. One identity query per sync.
-        let all_specs: Vec<MonitorSpec> = std::iter::once(primary.clone())
-            .chain(desired.iter().cloned())
-            .collect();
         let identities = super::monitor_identity::monitor_identities();
         let names: Vec<&str> = all_specs.iter().map(|m| m.name.as_str()).collect();
         let keyed = key_monitors(&names, &identities);
@@ -1800,6 +1830,57 @@ mod tests {
             display_log_line(&keyed[0].key.key, &primary, true),
             "display DEL41A2-P1 = DISPLAY7 3840x2160 @ (0,0) primary"
         );
+
+        // Identity ambiguity is a property of connected hardware, even when
+        // fullscreen/explicit-size mode selects only the primary window.
+        let ambiguous = [
+            id(
+                r"\\.\DISPLAY7",
+                "DEL",
+                0x41A2,
+                "SAME",
+                Some(r"DISPLAY\DEL41A2\A"),
+            ),
+            id(
+                r"\\.\DISPLAY6",
+                "DEL",
+                0x41A2,
+                "SAME",
+                Some(r"DISPLAY\DEL41A2\B"),
+            ),
+            identities[2].clone(),
+        ];
+        let single_window = MonitorSpec {
+            width: 800,
+            height: 600,
+            ..primary.clone()
+        };
+        for multi in [true, false] {
+            let plan = plan_monitor_windows(
+                Some((primary.clone(), secondaries.clone())),
+                single_window.clone(),
+                multi,
+            );
+            let names: Vec<&str> = plan.connected.iter().map(|m| m.name.as_str()).collect();
+            let keyed = key_monitors(&names, &ambiguous);
+            assert_eq!(keyed.len(), 3);
+            assert_eq!(keyed[0].key.key, "DEL41A2-SAME@DISPLAY/DEL41A2/A");
+            let configured = HashMap::from([("subtitle".into(), "DEL41A2-SAME".into())]);
+            assert!(resolve_zone_displays(&configured, &keyed).is_empty());
+            assert_eq!(plan.desired.len(), if multi { 2 } else { 0 });
+            assert_eq!(
+                plan.primary,
+                if multi {
+                    primary.clone()
+                } else {
+                    single_window.clone()
+                }
+            );
+        }
+        let headless = plan_monitor_windows(None, single_window.clone(), true);
+        assert_eq!(headless.connected, vec![single_window.clone()]);
+        assert_eq!(headless.primary, single_window);
+        assert!(headless.desired.is_empty());
     }
 
     #[test]
