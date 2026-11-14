@@ -505,7 +505,7 @@ fn status_indicator_status_maps_each_value_to_its_color() {
 
 /// Shipped SVGs and manifests take every color from design tokens.
 #[test]
-fn shipped_bundles_have_no_hardcoded_hex_colors() {
+fn shipped_bundles_have_no_hardcoded_colors_or_gauge_opacity() {
     for (bundle, files) in [
         ("gauge", &["background.svg", "fill.svg", "widget.toml"][..]),
         (
@@ -533,6 +533,17 @@ fn shipped_bundles_have_no_hardcoded_hex_colors() {
                     .filter(|line| !line.trim_start().starts_with('#'))
                     .collect::<Vec<_>>()
                     .join("\n");
+            }
+            if bundle == "gauge" && file.ends_with(".svg") {
+                for attribute in ["opacity", "fill-opacity", "stroke-opacity"] {
+                    let marker = format!("{attribute}=\"");
+                    for rest in text.split(&marker).skip(1) {
+                        assert!(
+                            rest.starts_with("{{token."),
+                            "{bundle}/{file}: literal {attribute}"
+                        );
+                    }
+                }
             }
             for (i, _) in text.match_indices('#') {
                 let digits = text[i + 1..]

@@ -1505,7 +1505,7 @@ severity/status enums. Styling and hover state no longer spend discovery tokens:
   `initial_params`, independent of `[design_tokens].theme`.
 - Gauge/progress-bar `fill_color` is an owner info-color override. Severity
   warning/error always use their theme tokens.
-- `tooltip_visible` stays in the bundle schema for runtime hover after 180 ms,
+- `tooltip_visible` stays in the bundle schema for runtime hover (180 ms by default),
   with its declared SVG bindings. Agents neither discover nor publish it.
 
 
