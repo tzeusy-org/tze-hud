@@ -2,7 +2,8 @@
 //!
 //! Every size, colour and opacity a `notification-area` card draws with comes
 //! from here, read from design tokens: the card's own roles
-//! (`color.notification.*`, `color.on_notification.*`,
+//! (`color.notification.*`, `color.on_notification.*`, with titles in
+//! `color.on_surface`,
 //! `opacity.notification`, `shape.notification`, `space.notification`,
 //! `type.notification.{title,body}.*`; Tonal Glass gives them its generic
 //! surface, outline, text, corner, padding and type values, Classic its legacy
@@ -195,7 +196,7 @@ impl NotificationStyle {
         let neutral = |fill: &str| NotificationTone {
             fill: with_opacity(color(tokens, fill)),
             outline: color(tokens, "color.notification.outline"),
-            title: color(tokens, "color.on_notification"),
+            title: color(tokens, "color.on_surface"),
             body: color(tokens, "color.on_notification.variant"),
         };
         let caution_text = color(tokens, "color.on_notification.caution");

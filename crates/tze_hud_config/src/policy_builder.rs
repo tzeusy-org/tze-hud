@@ -121,7 +121,7 @@ pub fn apply_subtitle_token_defaults(policy: &mut RenderingPolicy, tokens: &Desi
 /// Token mappings (the notification card roles, hud-h51u7.4.1; the
 /// compositor's `NotificationStyle` reads every other card metric and colour
 /// from tokens directly):
-/// - `text_color` ← `color.on_notification`
+/// - `text_color` ← `color.on_surface`
 /// - `font_family` ← `typography.body.family`
 /// - `font_size_px` / `font_weight` ← `type.notification.title.size` /
 ///   `.weight` (the title; the body and action roles scale with an explicit
@@ -138,7 +138,7 @@ pub fn apply_notification_area_token_defaults(
     tokens: &DesignTokenMap,
 ) {
     if policy.text_color.is_none() {
-        policy.text_color = token_color(tokens, "color.on_notification");
+        policy.text_color = token_color(tokens, "color.on_surface");
     }
     if policy.font_family.is_none() {
         policy.font_family = token_font_family(tokens, "typography.body.family");
@@ -505,10 +505,7 @@ mod tests {
         apply_token_defaults_for_zone("notification-area", &mut policy, &tokens);
 
         // The card reads its own notification roles (hud-h51u7.4.1).
-        assert_eq!(
-            policy.text_color,
-            token_color(&tokens, "color.on_notification")
-        );
+        assert_eq!(policy.text_color, token_color(&tokens, "color.on_surface"));
         assert!(policy.font_family.is_some());
         assert_eq!(
             policy.font_size_px,

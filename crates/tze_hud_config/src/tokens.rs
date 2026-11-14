@@ -1047,11 +1047,6 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "#FF8A80",
     },
     CanonicalToken {
-        key: "color.on_notification",
-        description: "Notification card title at urgency 0-1",
-        default_value: "#E8EBF0",
-    },
-    CanonicalToken {
         key: "color.on_notification.variant",
         description: "Notification card body at urgency 0-1",
         default_value: "#A9B1BE",

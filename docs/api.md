@@ -1198,7 +1198,7 @@ color overrides still take precedence.
 | Surfaces | `color.surface`, `color.surface.container`, `color.surface.container.{low,high,highest}`, `opacity.surface`, `opacity.scrim` |
 | Roles | `color.on_surface[.variant]`, `color.outline[.variant]`, `color.primary`, `color.on_primary`, `color.[on_]primary.container`, `color.success`, `color.caution`, `color.error`, `color.[on_]caution.container`, `color.[on_]error.container` |
 | State | `state.hover.opacity`, `state.pressed.opacity`, `focus.ring.width`, `focus.ring.offset` |
-| Notification card | `color.notification.container[.low]`, `color.notification[.caution\|.error].outline`, `color.on_notification[.variant\|.caution\|.error]`, `opacity.notification`, `shape.notification`, `space.notification`, `type.notification.{title,body}.{size,line_height,weight}` |
+| Notification card | `color.notification.container[.low]`, `color.notification[.caution\|.error].outline`, `color.on_notification.{variant,caution,error}`, `opacity.notification`, `shape.notification`, `space.notification`, `type.notification.{title,body}.{size,line_height,weight}` |
 | Choice actions | `notification.action.link_mark`, `notification.action.{height,gap,padding}_px`, `notification.action.background{,_hover,_pressed}`, `typography.notification.action.{font_size_px,font_weight}` |
 | Motion | `motion.{enter,exit,state}.ms`, `motion.{enter,exit}.easing` (`linear`, `standard`, `decelerate`, `accelerate`) |
 | Shape | `shape.{xs,s,m,l,xl,full}` (corner radius) |
@@ -1220,7 +1220,7 @@ or `color.notification.container.low` (urgency 0) at
 `opacity.notification`, with a `stroke.border.width`
 `color.notification.outline` hairline, `shape.notification` corners and
 `space.notification` padding; cards stack `space.s` apart. The title uses
-`type.notification.title.*` in `color.on_notification`, the body
+`type.notification.title.*` in `color.on_surface`, the body
 `type.notification.body.*` in `color.on_notification.variant`. Urgency 2
 fills with `color.caution.container` under
 `color.notification.caution.outline`, with `color.on_notification.caution`

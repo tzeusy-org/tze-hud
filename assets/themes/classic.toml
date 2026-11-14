@@ -108,7 +108,6 @@
 "color.notification.outline" = "#6E7A91"
 "color.notification.caution.outline" = "#6E7A91"
 "color.notification.error.outline" = "#6E7A91"
-"color.on_notification" = "#F5F7FA"
 "color.on_notification.variant" = "#F5F7FA"
 "color.on_notification.caution" = "#F5F7FA"
 "color.on_notification.error" = "#F5F7FA"

@@ -647,7 +647,6 @@ mod tests {
             ("type.body.m.size", "typography.body.size"),
             ("type.body.m.weight", "typography.body.weight"),
             // The notification card keeps Classic's legacy card look.
-            ("color.on_notification", "color.text.primary"),
             ("color.notification.outline", "color.border.default"),
             ("opacity.notification", "opacity.backdrop.opaque"),
             ("shape.notification", "border.radius.medium"),
@@ -662,6 +661,29 @@ mod tests {
                 "Classic {role} lost its legacy meaning"
             );
         }
+        // Classic's derived legacy card metrics: the body at the title size
+        // times the body scale, line boxes at 1.4 x size, the 9 dp inset.
+        let num = |key: &str| classic[key].parse::<f32>().unwrap();
+        assert_eq!(
+            num("type.notification.body.size"),
+            num("typography.body.size") * num("typography.notification.body.scale")
+        );
+        assert!(
+            (num("type.notification.title.line_height")
+                - 1.4 * num("type.notification.title.size"))
+            .abs()
+                < 1e-4
+        );
+        assert!(
+            (num("type.notification.body.line_height") - 1.4 * num("type.notification.body.size"))
+                .abs()
+                < 1e-4
+        );
+        assert_eq!(
+            num("space.notification"),
+            9.0,
+            "Classic's legacy card inset"
+        );
 
         // Opaque declared text/fill pairs only: no wallpaper, state layer or
         // user override is certified by these unrounded contrast assertions.
