@@ -15,7 +15,7 @@ no settings, deployment, restart, pairing, permissions, input read/ACK or shared
 clear occurred. The vertical card and all three synthetic entries were inspected.
 
 AFTER is actual production scene startup and windowed GPU build/capture on
-Mesa llvmpipe at source `46ead92afb970d11e8e2a621d45e4b28a1645112`, with clean
+Mesa llvmpipe at source `f0dc5d316c6895cd3ec8b59316599265bcc33107`, with clean
 tracked source throughout. Each theme uses the exact same fixture, one second
 after publication, at 1920×1080 with monitor scale 1 and UI scale 1. The unchanged
 capture binary and compiled example source are hashed in the manifest. All three
@@ -46,13 +46,30 @@ owner icon resizing. The compositor exports the drawn bounds to runtime drag
 admission. The existing runtime drag parent failed against the old handler
 (the full-screen region clamped movement to 0,0), then passed the correction:
 visible-pill movement, both stale and refreshed frame bounds, and screen-edge
-clamping retain the original maximum region. No new drag schema is agent-facing.
+clamping retain the original maximum region. Independent review then reproduced
+later growth escaping the display after a valid left drag: a full-width pill
+started at x=-984 and eight text boxes began offscreen. The corrected layout
+caps measurement to the assigned display dimensions and clamps the final pill,
+while preserving its original maximum region and short-content placement.
+The same existing GPU parent now exercises growth/shrinkage after translation,
+both screen edges, a secondary display with a negative origin, and a display
+smaller than the region. Text/SDF/drag geometry agree; unchanged actual-font
+layouts reuse measurement. No new drag schema is agent-facing.
 
 `just gesture drag-alignment` passed on the corrected source in 2.6 seconds,
 using real XTEST input on a private owned Xvfb display. An initial run on
 813acdbb failed at composer focus before any drag; an older landed binary and
-this final source passed the same harness. The cause is unproven and retained in
+the corrected sources passed the same harness. The cause is unproven and retained in
 **hud-7e55f**; the later pass does not claim to fix that focus failure.
+
+The refreshed three-theme PNGs are byte-identical to the preceding source's
+unchanged fixture captures; their new manifest binds the corrected source.
+
+Earlier Windows run 43650526249 on head 6c0ac9dc passed runtime 622/parser 2/
+font 7 tests and boot smoke. Its aggregate success masked informational
+fullscreen gesture failures and a foreign-foreground refusal with 0/0 complete
+results; only the two overlay scenarios passed. **hud-xq14t** retains that
+limitation. This is not a native fullscreen gesture pass or an owner signoff.
 
 Tests: +0 ~20 -0; no added test functions.
 
