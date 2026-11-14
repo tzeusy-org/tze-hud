@@ -188,7 +188,7 @@ async fn panel_layout_is_reused_until_the_model_or_size_changes() {
 
 /// Owner hiding (CP-6): a hidden tile and a hidden zone draw nothing, showing
 /// them again draws the current content, and while anything is hidden the
-/// closed panel's notice pill sits at the bottom right.
+/// closed panel's notice card sits at the bottom right, lifted clear of the taskbar.
 #[tokio::test]
 async fn hidden_content_is_not_drawn_and_the_closed_notice_is() {
     use tze_hud_scene::graph::SurfaceClasses;
@@ -245,8 +245,9 @@ async fn hidden_content_is_not_drawn_and_the_closed_notice_is() {
         vertices.len() + textured.len()
     };
     let center = |px: &[u8]| crate::test_pixels::pixel_at(px, w, w / 2, h / 2);
-    // The pill sits at the bottom right: sample its middle-right part.
-    let notice_at = |px: &[u8]| crate::test_pixels::pixel_at(px, w, w - 30, h - 24);
+    // The card sits at the bottom right, lifted 5% clear of the taskbar:
+    // sample its lower padding.
+    let notice_at = |px: &[u8]| crate::test_pixels::pixel_at(px, w, w - 40, h * 95 / 100 - 34);
     assert!(zone_vertices(&compositor, &scene) > 0);
 
     scene.set_owner_hidden(SurfaceClasses::ALL);
@@ -330,7 +331,7 @@ async fn capture_leaves_the_closed_notice_out() {
             .expect("capture")
             .rgba
     };
-    let notice_at = |px: &[u8]| crate::test_pixels::pixel_at(px, w, w - 30, h - 24);
+    let notice_at = |px: &[u8]| crate::test_pixels::pixel_at(px, w, w - 40, h * 95 / 100 - 34);
 
     compositor.render_frame_headless(&mut scene, &surface);
     let bare_screen = surface.read_pixels(&compositor.device);

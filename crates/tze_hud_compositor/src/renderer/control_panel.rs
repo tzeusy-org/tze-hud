@@ -1855,9 +1855,14 @@ pub struct PanelNotice {
     pub key: String,
 }
 
-/// The closed panel's notice: one pill at the bottom right of a `sw` x `sh`
-/// surface, on the panel's input-field surface. Text too wide for the
-/// surface ends in an ellipsis; the chord keeps its width.
+/// How far above the surface's bottom margin the notice sits, as a fraction
+/// of the surface height: clear of the Windows taskbar clock.
+const NOTICE_LIFT: f32 = 0.05;
+
+/// The closed panel's notice: a compact card at the bottom right of a `sw` x
+/// `sh` surface, lifted clear of the taskbar, on the panel's input-field
+/// surface. The text sits above the chord that opens the panel; either line
+/// too wide for the surface ends in an ellipsis.
 pub(super) fn closed_notice_layout(
     tokens: &HashMap<String, String>,
     notice: &PanelNotice,
@@ -1875,28 +1880,33 @@ pub(super) fn closed_notice_layout(
         hits: Vec::new(),
     };
     let (text_ty, key_ty) = (s.label, s.label_s);
-    // Clear of the rounded ends: half the pill height on each side.
-    let h = text_ty.line + s.space_s;
-    let pad = h / 2.0;
-    let gap = s.space_xs * 2.0 / 3.0;
-    let key_w = p.width(&notice.key, key_ty, true);
+    let pad = s.space_s;
+    let gap = s.space_xs / 2.0;
     let max_w = (sw - s.space_m * 2.0).max(1.0);
-    let text_w = p
-        .width(&notice.text, text_ty, false)
-        .min((max_w - key_w - gap - pad * 2.0).max(1.0));
-    let w = (text_w + gap + key_w + pad * 2.0).min(max_w);
+    let inner_max = (max_w - pad * 2.0).max(1.0);
+    let text_w = p.width(&notice.text, text_ty, false).min(inner_max);
+    let key_w = p.width(&notice.key, key_ty, true).min(inner_max);
+    let w = (text_w.max(key_w) + pad * 2.0).min(max_w);
+    let h = text_ty.line + gap + key_ty.line + pad * 2.0;
     let rect = PanelRect {
         x: (sw - s.space_m - w).max(0.0),
-        y: (sh - s.space_m - h).max(0.0),
+        y: (sh * (1.0 - NOTICE_LIFT) - s.space_m - h).max(0.0),
         w,
         h,
     };
-    let cy = rect.y + h / 2.0;
-    p.shape(rect, h / 2.0, s.field, Some((1.0, s.outline_variant)), None);
+    p.shape(
+        rect,
+        s.shape_row,
+        s.field,
+        Some((1.0, s.outline_variant)),
+        None,
+    );
+    let text_cy = rect.y + pad + text_ty.line / 2.0;
+    let key_cy = rect.y + pad + text_ty.line + gap + key_ty.line / 2.0;
     p.text(
         &notice.text,
         rect.x + pad,
-        cy,
+        text_cy,
         text_w,
         text_ty,
         s.on_surface,
@@ -1906,8 +1916,8 @@ pub(super) fn closed_notice_layout(
     );
     p.text(
         &notice.key,
-        rect.x + pad + text_w + gap,
-        cy,
+        rect.x + pad,
+        key_cy,
         key_w,
         key_ty,
         s.on_surface_variant,
