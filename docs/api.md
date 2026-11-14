@@ -1198,6 +1198,7 @@ color overrides still take precedence.
 | Surfaces | `color.surface`, `color.surface.container`, `color.surface.container.{low,high,highest}`, `opacity.surface`, `opacity.scrim` |
 | Roles | `color.on_surface[.variant]`, `color.outline[.variant]`, `color.primary`, `color.on_primary`, `color.[on_]primary.container`, `color.success`, `color.caution`, `color.error`, `color.[on_]caution.container`, `color.[on_]error.container` |
 | State | `state.hover.opacity`, `state.pressed.opacity`, `focus.ring.width`, `focus.ring.offset` |
+| Notification card | `color.notification.container[.low]`, `color.notification[.caution\|.error].outline`, `color.on_notification.{variant,caution,error}`, `opacity.notification`, `shape.notification`, `space.notification`, `type.notification.{title,body}.{size,line_height,weight}` |
 | Choice actions | `notification.action.link_mark`, `notification.action.{height,gap,padding}_px`, `notification.action.background{,_hover,_pressed}`, `typography.notification.action.{font_size_px,font_weight}` |
 | Motion | `motion.{enter,exit,state}.ms`, `motion.{enter,exit}.easing` (`linear`, `standard`, `decelerate`, `accelerate`) |
 | Shape | `shape.{xs,s,m,l,xl,full}` (corner radius) |
@@ -1208,9 +1209,43 @@ Font family values are free-form family names. A name that is not loaded
 falls back to the renderer's default face for its role (see
 [Fonts](#fonts) for how names resolve). The older keys
 (`color.text.*`, `color.backdrop.default`, `border.radius.*`,
-`typography.*`, `color.notification.urgency.*`, and so on) still work.
+`typography.*`, and so on) still work.
 `tonal-glass` maps them onto the semantic palette until each element is
 restyled to read the semantic keys directly.
+
+**Notification cards** (`notification-area`) read their own card roles,
+so a theme can style cards without restyling every surface that shares
+the generic roles. A card is `color.notification.container` (urgency 1)
+or `color.notification.container.low` (urgency 0) at
+`opacity.notification`, with a `stroke.border.width`
+`color.notification.outline` hairline, `shape.notification` corners and
+`space.notification` padding; cards stack `space.s` apart. The title uses
+`type.notification.title.*` in `color.on_surface`, the body
+`type.notification.body.*` in `color.on_notification.variant`. Urgency 2
+fills with `color.caution.container` under
+`color.notification.caution.outline`, with `color.on_notification.caution`
+text; urgency 3 fills with `color.error.container` under
+`color.notification.error.outline`, with `color.on_notification.error`
+text. Tonal Glass and Blueprint set these roles to their generic surface,
+outline, text, corner, padding and type values; Classic sets its legacy
+card look (black and navy fills at 0.80, a grey hairline, white text,
+14 dp corners, 9 dp padding, a 15/700 title and a 13.5/400 body). The
+dismiss × fills a square as tall as the title line, `space.s` from the
+text. Actions are `space.xxl` tall with `space.m` label padding,
+`shape.s` corners and `type.body.m` labels at `type.label.m` weight: the
+first is filled `color.primary.container` with
+`color.on_primary.container` text; the others are transparent with
+`color.primary` text on a neutral card or the tone's text role on caution
+and error cards. Hover and press add `state.hover.opacity` /
+`state.pressed.opacity` layers of `color.on_surface`; keyboard focus draws
+a `focus.ring.width` ring in `color.primary`. The zone's explicit margins,
+radius, title size and weight and backdrop opacity keep precedence; an
+explicit title size scales the whole card type ramp.
+`color.notification.urgency.*`, `opacity.notification.backdrop`,
+`typography.notification.dismiss.font_size_px` and
+`typography.notification.dismiss.font_weight` are retired: themes do not
+set them and a `[design_tokens]` entry for them is ignored. Alert banners
+keep their older `notification.*` metrics until they are restyled.
 
 **Adding a theme:** add `assets/themes/<name>.toml` as a flat map of
 quoted canonical keys to string values, then add it to `BUILTIN_THEMES`

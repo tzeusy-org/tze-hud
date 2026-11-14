@@ -107,12 +107,15 @@ fn notification_scene() -> SceneGraph {
     scene
 }
 
-const NOTIF_LOW: [u8; 4] = [25, 25, 39, 255];
-const NOTIF_NORMAL: [u8; 4] = [30, 33, 53, 255];
-const NOTIF_URGENT: [u8; 4] = [47, 39, 41, 255];
-const NOTIF_CRITICAL: [u8; 4] = [68, 28, 44, 255];
+// Canonical card tones at opacity.notification (0.92) over clear (hud-h51u7.4.1):
+// color.notification.container, caution.container, error.container.
+const NOTIF_LOW: [u8; 4] = [37, 42, 55, 255];
+const NOTIF_NORMAL: [u8; 4] = NOTIF_LOW;
+const NOTIF_URGENT: [u8; 4] = [73, 58, 30, 255];
+const NOTIF_CRITICAL: [u8; 4] = [90, 31, 34, 255];
 
-/// Each urgency level maps to its own backdrop colour (0.8 alpha over clear).
+/// Urgency 0-1 share the neutral card tone; 2 and 3 take the caution and
+/// error containers.
 #[tokio::test]
 async fn notification_urgency_maps_to_backdrop_color() {
     let Some(mut gpu) = Gpu::new(256, 256).await else {
@@ -143,7 +146,8 @@ async fn notification_icon_renders_only_when_bytes_registered() {
         .register_image_bytes(icon_id, Arc::from(icon_bytes.as_slice()), 24, 24);
     let unregistered = ResourceId::of(b"unregistered-icon");
 
-    // Icon centre: zone x 192 + inset 9 + half the 24px icon.
+    // Icon centre: zone x 192 + space.l 16 + half the space.xxl (32) icon;
+    // y: centred on the 52 px body-only text block.
     for (icon, expected, what) in [
         (icon_id.to_hex(), [0, 200, 0, 255], "registered icon"),
         (String::new(), NOTIF_LOW, "no icon"),
@@ -151,7 +155,7 @@ async fn notification_icon_renders_only_when_bytes_registered() {
     ] {
         let mut scene = notification_scene();
         publish_notification(&mut scene, "notification-area", 0, icon, "a");
-        gpu.render(&mut scene).expect(213, 17, expected, 20, what);
+        gpu.render(&mut scene).expect(224, 26, expected, 20, what);
     }
 }
 

@@ -796,15 +796,16 @@ mod tests {
         assert_eq!(first.dimensions(), (1920, 1080));
         assert_eq!(settled.dimensions(), first.dimensions());
         // Canonical notification area starts at (75%, 5.5%), below the
-        // main-status badge, and is 30% tall (59.4..383.4 px). Tonal Glass two-line slots are 91.2px (20px body
-        // text, 16px `spacing.notification.inset` top and bottom) plus a 42px
-        // button row on cards with actions (22px buttons, 4px gap, 16px
-        // bottom inset), 10px apart, newest at the top. These interior
-        // regions exclude borders, dismiss controls and the portal grip.
-        let slot_heights = [133.2_f32, 133.2];
-        let top_of = |slot: usize| {
-            (59.4 + slot_heights[..slot].iter().map(|h| h + 10.0).sum::<f32>()) as u32
-        };
+        // main-status badge, and is 30% tall (59.4..383.4 px). Tonal Glass
+        // cards with a title and actions are 120px: `space.notification` (16)
+        // padding, a 24px `type.notification.title` line, a 20px
+        // `type.notification.body` line, a `space.m`
+        // (12) gap and a 32px `space.xxl` action row, `space.s` (8) apart,
+        // newest at the top. These interior regions exclude borders,
+        // dismiss controls and the portal grip.
+        let slot_heights = [120.0_f32, 120.0];
+        let top_of =
+            |slot: usize| (59.4 + slot_heights[..slot].iter().map(|h| h + 8.0).sum::<f32>()) as u32;
         // The third card (Normal / Blue-Black) would end past the
         // zone bottom, so it and the oldest are not shown at all rather than
         // drawn cut off.
@@ -819,7 +820,7 @@ mod tests {
         );
         for (slot, title) in titles[..2].iter().enumerate() {
             let top = top_of(slot);
-            for (line, from, to) in [("title", top + 16, top + 44), ("body", top + 46, top + 69)] {
+            for (line, from, to) in [("title", top + 16, top + 40), ("body", top + 40, top + 60)] {
                 let ink = |pixels: &image::RgbaImage| {
                     (from..to)
                         .flat_map(|y| (1450..1800).map(move |x| pixels.get_pixel(x, y)))

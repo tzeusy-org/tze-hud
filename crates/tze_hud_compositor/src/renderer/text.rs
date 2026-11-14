@@ -16,16 +16,15 @@ use tze_hud_scene::types::*;
 use crate::text::TextItem;
 
 use super::icon::parse_notification_icon;
+use super::notification_style::{DISMISS_GLYPH, NotificationStyle, dismiss_bounds};
 use super::token_colors::{
     DISCONNECT_BADGE_LABEL, TILE_CLOSE_GLYPH, resolve_disconnect_badge_tokens,
     resolve_tile_close_tokens, tile_close_button_bounds,
 };
 use super::token_colors::{
-    ICON_SIZE_PX, ICON_TEXT_GAP_PX, NOTIFICATION_DISMISS_FONT_SIZE_PX,
-    NOTIFICATION_DISMISS_FONT_WEIGHT, NOTIFICATION_ICON_GAP_PX, NOTIFICATION_ICON_SIZE_PX,
-    is_alert_banner_zone, notification_dismiss_bounds, notification_inset,
-    resolve_composer_overlay_tokens, resolve_notification_action_tokens,
-    resolve_text_secondary_color, resolve_transcript_max_measure_px, urgency_to_on_severity_color,
+    ICON_SIZE_PX, ICON_TEXT_GAP_PX, is_alert_banner_zone, resolve_composer_overlay_tokens,
+    resolve_notification_action_tokens, resolve_text_secondary_color,
+    resolve_transcript_max_measure_px, urgency_to_on_severity_color,
 };
 
 /// Default line-height multiplier (`font_size_px × 1.4 = line_height_px`).
@@ -455,21 +454,9 @@ impl super::Compositor {
 
                     // Resolve notification typography tokens needed for text rendering
                     // (not slot geometry — those live in zone_slot_layout).
-                    let notif_dismiss_font_size_px = self
-                        .token_map
-                        .get("typography.notification.dismiss.font_size_px")
-                        .and_then(|v| v.trim_end_matches("px").parse::<f32>().ok())
-                        .unwrap_or(NOTIFICATION_DISMISS_FONT_SIZE_PX)
-                        .clamp(6.0, 200.0)
-                        * scale;
                     let action_tokens = resolve_notification_action_tokens(zone_tokens);
                     let (notif_action_font_size_px, notif_action_font_weight) =
                         (action_tokens.font_size_px, action_tokens.font_weight);
-                    let notif_dismiss_font_weight = self
-                        .token_map
-                        .get("typography.notification.dismiss.font_weight")
-                        .and_then(|v| v.parse::<u16>().ok())
-                        .unwrap_or(NOTIFICATION_DISMISS_FONT_WEIGHT);
 
                     for (pub_idx, slot_y, effective_slot_h) in layout.iter_visible(zy) {
                         let record = &publishes[pub_idx];
@@ -498,24 +485,12 @@ impl super::Compositor {
                                 ));
                             }
                             ZoneContent::Notification(payload) => {
-                                // Notification text rendering priority:
-                                // 1. RenderingPolicy explicit values (set by zone configuration)
-                                // 2. Token-resolved values (typography.body.size, color.text.primary)
-                                // 3. Hardcoded defaults (16px, near-white)
-                                //
-                                // This allows alert-banner and other configured zones to override
-                                // the defaults via RenderingPolicy while notification-area falls
-                                // through to the token/default path.
-                                //
-                                // Layout: left-aligned at the card inset (`notification_inset`),
-                                // keeps the existing one-line title/body bands; overflow is visibly ellipsized.
-                                // When a valid icon texture is cached, the text is additionally
-                                // inset to the right of the icon (icon_size + gap).
-                                // Spec-defined inset for notification-area zones:
-                                // the zone policy's margins (notification-area:
-                                // `spacing.notification.inset`), else 9 dp. The
-                                // action row and × share the horizontal inset.
-                                let inset_h = notification_inset(policy, scale);
+                                // Notification cards take every size and colour
+                                // from `NotificationStyle` (hud-h51u7.4.1); alert
+                                // banners keep their policy/severity text until
+                                // hud-h51u7.4.2. Bands come from the shared
+                                // `notification_text_layout`, which admission-time
+                                // fit measurement also uses.
                                 // If a cached icon texture exists, inset text to the right of it.
                                 let icon_shown = parse_notification_icon(&payload.icon)
                                     .is_some_and(|id| self.image_texture_cache.contains_key(&id));
@@ -567,8 +542,30 @@ impl super::Compositor {
                                     _ => (None, None),
                                 };
 
+                                // Cards colour each band by its urgency tone:
+                                // a lone body line is the message (title role
+                                // colour), under a title it is the variant.
+                                let card_style = (!is_alert_banner_zone(zone_name))
+                                    .then(|| NotificationStyle::resolve(zone_tokens, policy));
+                                let tone = card_style.as_ref().map(|s| s.tone(payload.urgency));
+                                let tone_color = |c: Rgba| {
+                                    crate::text::apply_opacity_to_color(
+                                        crate::text::rgba_to_srgb_u8(c),
+                                        effective_opacity,
+                                    )
+                                };
                                 for band in &text_layout.bands {
-                                    items.push(Self::make_zone_text_item(
+                                    let band_color = match tone {
+                                        Some(t)
+                                            if band.field == "body"
+                                                && !payload.title.is_empty() =>
+                                        {
+                                            tone_color(t.body)
+                                        }
+                                        Some(t) => tone_color(t.title),
+                                        None => color,
+                                    };
+                                    let mut item = Self::make_zone_text_item(
                                         Arc::from(band.text),
                                         zx + text_layout.x,
                                         slot_y + band.y,
@@ -577,30 +574,37 @@ impl super::Compositor {
                                         band.font_size_px,
                                         font_family,
                                         band.font_weight,
-                                        color,
+                                        band_color,
                                         tze_hud_scene::types::TextAlign::Start,
                                         tze_hud_scene::types::TextOverflow::Ellipsis,
                                         oc,
                                         ow,
                                         effective_opacity,
-                                    ));
+                                    );
+                                    if let Some(m) = band.line_multiplier {
+                                        item.line_height_multiplier = m;
+                                    }
+                                    items.push(item);
                                 }
 
                                 if self.text_rasterizer.is_some() {
                                     let action_layout = self
                                         .notification_action_layout(zone_name, record, policy, zw);
+                                    let (label_size, label_weight) = match &card_style {
+                                        Some(s) => (s.action_label.size, s.action_label.weight),
+                                        None => {
+                                            (notif_action_font_size_px, notif_action_font_weight)
+                                        }
+                                    };
                                     for (index, (action, b)) in payload
                                         .actions
                                         .iter()
-                                        .zip(action_layout.bounds(
-                                            zx,
-                                            slot_y,
-                                            zw,
-                                            effective_slot_h,
-                                            inset_h,
-                                        ))
+                                        .zip(action_layout.bounds(zx, slot_y, zw, effective_slot_h))
                                         .enumerate()
                                     {
+                                        let label_color = card_style.as_ref().map_or(color, |s| {
+                                            tone_color(s.action_label_color(index, payload.urgency))
+                                        });
                                         let available =
                                             (b.width - action_layout.padding * 2.0).max(1.0);
                                         let hint_width = action_layout.hint_width.min(available);
@@ -611,96 +615,93 @@ impl super::Compositor {
                                         let mark_width = mark.map_or(0.0, |(_, width)| {
                                             (*width).min((available - hint_width).max(0.0))
                                         });
+                                        let label_y = b.y + action_layout.label_y;
+                                        let label_h = action_layout.label_height.max(1.0);
+                                        let label = |text: Arc<str>, x: f32, width: f32, align| {
+                                            let mut item = Self::make_zone_text_item(
+                                                text,
+                                                x,
+                                                label_y,
+                                                width,
+                                                label_h,
+                                                label_size,
+                                                font_family,
+                                                label_weight,
+                                                label_color,
+                                                align,
+                                                tze_hud_scene::types::TextOverflow::Clip,
+                                                None,
+                                                None,
+                                                effective_opacity,
+                                            );
+                                            if let Some(m) = action_layout.label_line_multiplier {
+                                                item.line_height_multiplier = m;
+                                            }
+                                            item
+                                        };
                                         if scene.overlay.notification_answer
                                             == Some(record.publication_id)
                                         {
-                                            items.push(Self::make_zone_text_item(
+                                            items.push(label(
                                                 Arc::from((index + 1).to_string()),
                                                 b.x + action_layout.padding,
-                                                b.y + action_layout.padding,
                                                 hint_width,
-                                                (b.height - action_layout.padding * 2.0).max(1.0),
-                                                notif_action_font_size_px,
-                                                font_family,
-                                                notif_action_font_weight,
-                                                color,
                                                 tze_hud_scene::types::TextAlign::Start,
-                                                tze_hud_scene::types::TextOverflow::Clip,
-                                                None,
-                                                None,
-                                                effective_opacity,
                                             ));
                                         }
-                                        items.push(Self::make_zone_text_item(
+                                        items.push(label(
                                             Arc::from(action.label.as_str()),
                                             b.x + action_layout.padding + hint_width,
-                                            b.y + action_layout.padding,
                                             action_layout.label_width(&b, index),
-                                            (b.height - action_layout.padding * 2.0).max(1.0),
-                                            notif_action_font_size_px,
-                                            font_family,
-                                            notif_action_font_weight,
-                                            color,
                                             tze_hud_scene::types::TextAlign::Center,
-                                            tze_hud_scene::types::TextOverflow::Clip,
-                                            None,
-                                            None,
-                                            effective_opacity,
                                         ));
                                         if let Some((mark, _)) = mark {
-                                            items.push(Self::make_zone_text_item(
+                                            items.push(label(
                                                 Arc::from(mark.as_str()),
                                                 b.x + b.width - action_layout.padding - mark_width,
-                                                b.y + action_layout.padding,
                                                 mark_width,
-                                                (b.height - action_layout.padding * 2.0).max(1.0),
-                                                notif_action_font_size_px,
-                                                font_family,
-                                                notif_action_font_weight,
-                                                color,
                                                 tze_hud_scene::types::TextAlign::Start,
-                                                tze_hud_scene::types::TextOverflow::Clip,
-                                                None,
-                                                None,
-                                                effective_opacity,
                                             ));
                                         }
                                     }
                                 }
 
-                                if !is_alert_banner_zone(zone_name)
+                                if let Some(style) = &card_style
                                     && self.text_rasterizer.is_some()
                                 {
-                                    let dismiss_bounds = notification_dismiss_bounds(
+                                    let dismiss = dismiss_bounds(
+                                        zone_name,
+                                        zone_tokens,
+                                        policy,
                                         zx,
                                         slot_y,
                                         zw,
                                         effective_slot_h,
-                                        scale,
-                                        inset_h,
                                     );
-                                    let dismiss_color = crate::text::apply_opacity_to_color(
-                                        base_color,
-                                        effective_opacity,
-                                    );
+                                    let tone = style.tone(payload.urgency);
+                                    let glyph = style.dismiss_glyph;
                                     static DISMISS_LABEL: std::sync::OnceLock<Arc<str>> =
                                         std::sync::OnceLock::new();
-                                    items.push(Self::make_zone_text_item(
-                                        Arc::clone(DISMISS_LABEL.get_or_init(|| Arc::from("X"))),
-                                        dismiss_bounds.x,
-                                        dismiss_bounds.y + 1.0,
-                                        dismiss_bounds.width.max(1.0),
-                                        dismiss_bounds.height.max(1.0),
-                                        notif_dismiss_font_size_px,
+                                    let mut item = Self::make_zone_text_item(
+                                        Arc::clone(
+                                            DISMISS_LABEL.get_or_init(|| Arc::from(DISMISS_GLYPH)),
+                                        ),
+                                        dismiss.x,
+                                        dismiss.y + (dismiss.height - glyph.line_height) * 0.5,
+                                        dismiss.width.max(1.0),
+                                        glyph.line_height.max(1.0),
+                                        glyph.size,
                                         font_family,
-                                        notif_dismiss_font_weight,
-                                        dismiss_color,
+                                        glyph.weight,
+                                        tone_color(tone.body),
                                         tze_hud_scene::types::TextAlign::Center,
                                         tze_hud_scene::types::TextOverflow::Clip,
                                         None,
                                         None,
                                         effective_opacity,
-                                    ));
+                                    );
+                                    item.line_height_multiplier = glyph.multiplier();
+                                    items.push(item);
                                 }
                             }
                             _ => {}
@@ -742,86 +743,17 @@ impl super::Compositor {
                                 ZoneContent::Notification(payload) => {
                                     // MergeByKey fallback: icon-aware inset, same logic
                                     // as the LatestWins/Replace path.
-                                    let icon_width_reserved =
-                                        parse_notification_icon(&payload.icon)
-                                            .filter(|id| self.image_texture_cache.contains_key(id))
-                                            .map(|_| {
-                                                (NOTIFICATION_ICON_SIZE_PX
-                                                    + NOTIFICATION_ICON_GAP_PX)
-                                                    * scale
-                                            })
-                                            .unwrap_or(0.0);
-                                    if icon_width_reserved > 0.0 {
-                                        // The same inset as the icon draw path, so text and icon
-                                        // stay aligned.
-                                        let margin_h = notification_inset(policy, scale);
-                                        let margin_v =
-                                            policy.margin_vertical.or(policy.margin_px).unwrap_or(
-                                                super::token_colors::NOTIFICATION_INSET_DEFAULT_PX
-                                                    * scale,
-                                            );
-                                        let font_size_px = policy
-                                            .font_size_px
-                                            .unwrap_or(16.0 * scale)
-                                            .clamp(6.0, 200.0);
-                                        let font_family = policy.font_family.unwrap_or(
-                                            tze_hud_scene::types::FontFamily::SystemSansSerif,
-                                        );
-                                        let font_weight =
-                                            policy.font_weight.unwrap_or(400).clamp(100, 900);
-                                        let base_color = policy
-                                            .text_color
-                                            .map(crate::text::rgba_to_srgb_u8)
-                                            .unwrap_or([255, 255, 255, 220]);
-                                        let color = crate::text::apply_opacity_to_color(
-                                            base_color,
-                                            anim_opacity,
-                                        );
-                                        let (oc, ow) =
-                                            match (policy.outline_color, policy.outline_width) {
-                                                (Some(oc), Some(ow)) if ow > 0.0 => {
-                                                    let oc_srgb =
-                                                        crate::text::apply_opacity_to_color(
-                                                            crate::text::rgba_to_srgb_u8(oc),
-                                                            anim_opacity,
-                                                        );
-                                                    (Some(oc_srgb), Some(ow))
-                                                }
-                                                _ => (None, None),
-                                            };
-                                        items.push(Self::make_zone_text_item(
-                                            Arc::from(payload.text.as_str()),
-                                            zx + margin_h + icon_width_reserved,
-                                            zy + margin_v,
-                                            (zw - margin_h - icon_width_reserved - margin_h)
-                                                .max(1.0),
-                                            (zh - margin_v * 2.0).max(1.0),
-                                            font_size_px,
-                                            font_family,
-                                            font_weight,
-                                            color,
-                                            policy
-                                                .text_align
-                                                .unwrap_or(tze_hud_scene::types::TextAlign::Start),
-                                            policy.overflow.unwrap_or(
-                                                tze_hud_scene::types::TextOverflow::Clip,
-                                            ),
-                                            oc,
-                                            ow,
-                                            anim_opacity,
-                                        ));
-                                    } else {
-                                        items.push(TextItem::from_zone_policy(
-                                            &payload.text,
-                                            zx,
-                                            zy,
-                                            zw,
-                                            zh,
-                                            policy,
-                                            anim_opacity,
-                                            scale,
-                                        ));
-                                    }
+                                    items.push(self.single_notification_text_item(
+                                        payload,
+                                        zx,
+                                        zy,
+                                        zw,
+                                        zh,
+                                        policy,
+                                        zone_tokens,
+                                        anim_opacity,
+                                        scale,
+                                    ));
                                     break;
                                 }
                                 _ => {}
@@ -876,83 +808,17 @@ impl super::Compositor {
                                 // Render the notification text.
                                 // When a valid icon texture is cached, inset the text
                                 // to the right of the icon (icon_size + gap px).
-                                let icon_width_reserved = parse_notification_icon(&payload.icon)
-                                    .filter(|id| self.image_texture_cache.contains_key(id))
-                                    .map(|_| {
-                                        (NOTIFICATION_ICON_SIZE_PX + NOTIFICATION_ICON_GAP_PX)
-                                            * scale
-                                    })
-                                    .unwrap_or(0.0);
-                                if icon_width_reserved > 0.0 {
-                                    // Build TextItem manually to apply icon offset.
-                                    // The same inset as the icon draw path, so text and icon
-                                    // stay aligned.
-                                    let margin_h = notification_inset(policy, scale);
-                                    let margin_v =
-                                        policy.margin_vertical.or(policy.margin_px).unwrap_or(
-                                            super::token_colors::NOTIFICATION_INSET_DEFAULT_PX
-                                                * scale,
-                                        );
-                                    let font_size_px = policy
-                                        .font_size_px
-                                        .unwrap_or(16.0 * scale)
-                                        .clamp(6.0, 200.0);
-                                    let font_family = policy.font_family.unwrap_or(
-                                        tze_hud_scene::types::FontFamily::SystemSansSerif,
-                                    );
-                                    let font_weight =
-                                        policy.font_weight.unwrap_or(400).clamp(100, 900);
-                                    let base_color = policy
-                                        .text_color
-                                        .map(crate::text::rgba_to_srgb_u8)
-                                        .unwrap_or([255, 255, 255, 220]);
-                                    let color = crate::text::apply_opacity_to_color(
-                                        base_color,
-                                        anim_opacity,
-                                    );
-                                    let (oc, ow) =
-                                        match (policy.outline_color, policy.outline_width) {
-                                            (Some(oc), Some(ow)) if ow > 0.0 => {
-                                                let oc_srgb = crate::text::apply_opacity_to_color(
-                                                    crate::text::rgba_to_srgb_u8(oc),
-                                                    anim_opacity,
-                                                );
-                                                (Some(oc_srgb), Some(ow))
-                                            }
-                                            _ => (None, None),
-                                        };
-                                    items.push(Self::make_zone_text_item(
-                                        Arc::from(payload.text.as_str()),
-                                        zx + margin_h + icon_width_reserved,
-                                        zy + margin_v,
-                                        (zw - margin_h - icon_width_reserved - margin_h).max(1.0),
-                                        (zh - margin_v * 2.0).max(1.0),
-                                        font_size_px,
-                                        font_family,
-                                        font_weight,
-                                        color,
-                                        policy
-                                            .text_align
-                                            .unwrap_or(tze_hud_scene::types::TextAlign::Start),
-                                        policy
-                                            .overflow
-                                            .unwrap_or(tze_hud_scene::types::TextOverflow::Clip),
-                                        oc,
-                                        ow,
-                                        anim_opacity,
-                                    ));
-                                } else {
-                                    items.push(TextItem::from_zone_policy(
-                                        &payload.text,
-                                        zx,
-                                        zy,
-                                        zw,
-                                        zh,
-                                        policy,
-                                        anim_opacity,
-                                        scale,
-                                    ));
-                                }
+                                items.push(self.single_notification_text_item(
+                                    payload,
+                                    zx,
+                                    zy,
+                                    zw,
+                                    zh,
+                                    policy,
+                                    zone_tokens,
+                                    anim_opacity,
+                                    scale,
+                                ));
                                 // Only render the most-recent publish.
                                 break;
                             }
@@ -1322,25 +1188,113 @@ impl super::Compositor {
         items
     }
 
-    /// Resolve `color.text.primary` from the token map as a sRGB u8 color.
-    ///
-    /// Falls back to near-white (R=255, G=255, B=255, A=223) when the token
-    /// is absent — matching the canonical default for text on dark backgrounds.
-    pub(super) fn resolve_text_primary_color(token_map: &HashMap<String, String>) -> [u8; 4] {
-        super::token_colors::resolve_token_color(token_map, "color.text.primary")
-            .map(crate::text::rgba_to_srgb_u8)
-            .unwrap_or([255, 255, 255, 223]) // near-white, alpha ≈ 87.5%
+    /// One-text-item notification in a non-Stack zone: the card style's
+    /// padding, beside the icon when its texture is cached.
+    #[allow(clippy::too_many_arguments)]
+    fn single_notification_text_item(
+        &self,
+        payload: &tze_hud_scene::types::NotificationPayload,
+        zx: f32,
+        zy: f32,
+        zw: f32,
+        zh: f32,
+        policy: &tze_hud_scene::types::RenderingPolicy,
+        zone_tokens: &HashMap<String, String>,
+        opacity: f32,
+        scale: f32,
+    ) -> TextItem {
+        let icon_shown = parse_notification_icon(&payload.icon)
+            .is_some_and(|id| self.image_texture_cache.contains_key(&id));
+        if !icon_shown {
+            return TextItem::from_zone_policy(
+                &payload.text,
+                zx,
+                zy,
+                zw,
+                zh,
+                policy,
+                opacity,
+                scale,
+            );
+        }
+        let style = NotificationStyle::resolve(zone_tokens, policy);
+        let left = style.text_left(true);
+        let color = crate::text::apply_opacity_to_color(
+            policy
+                .text_color
+                .map(crate::text::rgba_to_srgb_u8)
+                .unwrap_or_else(|| Self::resolve_text_primary_color(zone_tokens)),
+            opacity,
+        );
+        let (oc, ow) = match (policy.outline_color, policy.outline_width) {
+            (Some(oc), Some(ow)) if ow > 0.0 => (
+                Some(crate::text::apply_opacity_to_color(
+                    crate::text::rgba_to_srgb_u8(oc),
+                    opacity,
+                )),
+                Some(ow),
+            ),
+            _ => (None, None),
+        };
+        Self::make_zone_text_item(
+            Arc::from(payload.text.as_str()),
+            zx + left,
+            zy + style.padding_v,
+            (zw - left - style.padding_h).max(1.0),
+            (zh - style.padding_v * 2.0).max(1.0),
+            policy
+                .font_size_px
+                .unwrap_or_else(|| Self::resolve_body_font_size(zone_tokens)),
+            policy
+                .font_family
+                .unwrap_or(tze_hud_scene::types::FontFamily::SystemSansSerif),
+            policy
+                .font_weight
+                .unwrap_or(style.body.weight)
+                .clamp(100, 900),
+            color,
+            policy
+                .text_align
+                .unwrap_or(tze_hud_scene::types::TextAlign::Start),
+            policy
+                .overflow
+                .unwrap_or(tze_hud_scene::types::TextOverflow::Clip),
+            oc,
+            ow,
+            opacity,
+        )
     }
 
-    /// Resolve `typography.body.size` from the token map as a pixel value.
-    ///
-    /// Falls back to 16.0 px (canonical body text default) when the token is
-    /// absent or cannot be parsed as a number.
+    /// Resolve `color.text.primary` from the token map as a sRGB u8 color,
+    /// falling back to its canonical default.
+    pub(super) fn resolve_text_primary_color(token_map: &HashMap<String, String>) -> [u8; 4] {
+        let canonical = || {
+            tze_hud_config::tokens::CANONICAL_TOKENS
+                .iter()
+                .find(|t| t.key == "color.text.primary")
+                .and_then(|t| super::token_colors::parse_hex_color(t.default_value))
+        };
+        crate::text::rgba_to_srgb_u8(
+            super::token_colors::resolve_token_color(token_map, "color.text.primary")
+                .or_else(canonical)
+                .unwrap_or(tze_hud_scene::types::Rgba::WHITE),
+        )
+    }
+
+    /// Resolve `typography.body.size` from the token map as a pixel value,
+    /// falling back to its canonical default.
     pub(super) fn resolve_body_font_size(token_map: &HashMap<String, String>) -> f32 {
+        let parse = |v: &str| v.trim().trim_end_matches("px").parse::<f32>().ok();
         token_map
             .get("typography.body.size")
-            .and_then(|v| v.trim_end_matches("px").parse::<f32>().ok())
-            .unwrap_or(16.0)
+            .and_then(|v| parse(v))
+            .or_else(|| {
+                tze_hud_config::tokens::CANONICAL_TOKENS
+                    .iter()
+                    .find(|t| t.key == "typography.body.size")
+                    .and_then(|t| parse(t.default_value))
+            })
+            .unwrap_or(1.0)
             .clamp(6.0, 200.0)
             * tze_hud_config::tokens::px_scale(token_map)
     }

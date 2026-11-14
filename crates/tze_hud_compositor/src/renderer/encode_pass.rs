@@ -37,12 +37,12 @@ use crate::pipeline::{
 use super::LayerPartitionedRoundedRectCmds;
 use super::draw_cmds::TexturedDrawCmd;
 use super::hit_regions::{notification_action_interaction_id, notification_dismiss_interaction_id};
+use super::notification_style::{NotificationStyle, dismiss_bounds};
 use super::token_colors::{
     NOTIFICATION_BORDER_WIDTH_PX, STATIC_IMAGE_PLACEHOLDER_COLOR, is_alert_banner_zone,
-    linear_to_srgb, notification_backdrop_opacity, notification_dismiss_bounds, notification_inset,
-    resolve_border_default_color, resolve_notification_action_tokens,
-    resolve_notification_control_color, srgb_to_linear, urgency_to_notification_color,
-    urgency_to_severity_color, zone_opacity_ceiling,
+    linear_to_srgb, resolve_border_default_color, resolve_notification_action_tokens,
+    resolve_notification_control_color, srgb_to_linear, urgency_to_severity_color,
+    zone_opacity_ceiling,
 };
 
 #[inline]
@@ -337,6 +337,50 @@ impl super::Compositor {
         }
     }
 
+    /// A card control (dismiss or action): `fill` (if any) in `shape.s`
+    /// corners, outlined only by the focus ring while focused; `opacity` is
+    /// the slot fade.
+    /// `None` for an idle borderless control: nothing to draw.
+    fn card_control_cmd(
+        &self,
+        bounds: Rect,
+        state: ChromeLocalState,
+        fill: Option<Rgba>,
+        style: &NotificationStyle,
+        opacity: f32,
+    ) -> Option<crate::pipeline::RoundedRectDrawCmd> {
+        if fill.is_none() && !state.focused {
+            return None;
+        }
+        let radius = style
+            .control_radius
+            .min(bounds.width * 0.5)
+            .min(bounds.height * 0.5)
+            .max(0.0);
+        let border = state.focused.then(|| {
+            let mut ring = style.focus_color();
+            ring.a *= opacity;
+            RoundedRectBorder {
+                width: style.focus_width,
+                color: self.gpu_color(ring),
+            }
+        });
+        let color = fill.map_or([0.0; 4], |mut fill| {
+            fill.a *= opacity;
+            self.gpu_color(fill)
+        });
+        Some(crate::pipeline::RoundedRectDrawCmd {
+            x: bounds.x,
+            y: bounds.y,
+            width: bounds.width,
+            height: bounds.height,
+            radius,
+            color,
+            border,
+            clip: None,
+        })
+    }
+
     fn notification_control_cmd(
         &self,
         bounds: Rect,
@@ -444,6 +488,8 @@ impl super::Compositor {
                     // Slot geometry is computed once by zone_slot_layout and shared
                     // with collect_text_items / render_zone_content (hud-qlerb).
                     let layout = self.zone_slot_layout(zone_name, publishes, policy, h, w);
+                    let card_style =
+                        notification_cards.then(|| NotificationStyle::resolve(zone_tokens, policy));
                     for (pub_idx, slot_y, effective_slot_h) in layout.iter_visible(y) {
                         let record = &publishes[pub_idx];
                         let opacity = (anim_opacity * self.pub_opacity_at(zone_name, record, now))
@@ -461,8 +507,6 @@ impl super::Compositor {
                         let ZoneContent::Notification(payload) = &record.content else {
                             continue;
                         };
-                        let mut outline = resolve_notification_control_color(policy, zone_tokens);
-                        outline.a *= opacity;
                         let chrome_state = |id: String| {
                             scene
                                 .overlay
@@ -471,55 +515,73 @@ impl super::Compositor {
                                 .copied()
                                 .unwrap_or_default()
                         };
-                        // Dismiss control outline, filled while hovered/pressed.
-                        if pushed && notification_cards {
-                            let b = notification_dismiss_bounds(
+                        let action_layout =
+                            self.notification_action_layout(zone_name, record, policy, w);
+                        let Some(style) = &card_style else {
+                            // Alert-banner actions keep their pre-restyle
+                            // outlined buttons (hud-h51u7.4.2).
+                            let mut outline =
+                                resolve_notification_control_color(policy, zone_tokens);
+                            outline.a *= opacity;
+                            for (index, b) in action_layout
+                                .bounds(x, slot_y, w, effective_slot_h)
+                                .into_iter()
+                                .enumerate()
+                            {
+                                let state = chrome_state(notification_action_interaction_id(
+                                    zone_name, record, index,
+                                ));
+                                out.push(self.notification_control_cmd(
+                                    b,
+                                    state,
+                                    action_tokens.state_fill(state, Some(action_tokens.background)),
+                                    outline,
+                                    opacity,
+                                    zone_tokens,
+                                ));
+                            }
+                            continue;
+                        };
+                        // Dismiss: a borderless × that takes a state layer.
+                        if pushed {
+                            let b = dismiss_bounds(
+                                zone_name,
+                                zone_tokens,
+                                policy,
                                 x,
                                 slot_y,
                                 w,
                                 effective_slot_h,
-                                scale,
-                                notification_inset(policy, scale),
                             );
                             let state = chrome_state(notification_dismiss_interaction_id(
                                 zone_name, record,
                             ));
-                            out.push(self.notification_control_cmd(
+                            out.extend(self.card_control_cmd(
                                 b,
                                 state,
-                                action_tokens.state_fill(state, None),
-                                outline,
+                                style.control_fill(state, None),
+                                style,
                                 opacity,
-                                zone_tokens,
                             ));
                         }
                         // Action buttons: at exactly the bounds
                         // `populate_notification_hit_regions` registers; labels
                         // are drawn by `collect_text_items`.
-                        let action_layout =
-                            self.notification_action_layout(zone_name, record, policy, w);
                         for (index, (_action, b)) in payload
                             .actions
                             .iter()
-                            .zip(action_layout.bounds(
-                                x,
-                                slot_y,
-                                w,
-                                effective_slot_h,
-                                notification_inset(policy, scale),
-                            ))
+                            .zip(action_layout.bounds(x, slot_y, w, effective_slot_h))
                             .enumerate()
                         {
                             let state = chrome_state(notification_action_interaction_id(
                                 zone_name, record, index,
                             ));
-                            out.push(self.notification_control_cmd(
+                            out.extend(self.card_control_cmd(
                                 b,
                                 state,
-                                action_tokens.state_fill(state, Some(action_tokens.background)),
-                                outline,
+                                style.control_fill(state, style.action_fill(index)),
+                                style,
                                 opacity,
-                                zone_tokens,
                             ));
                         }
                     }
@@ -574,7 +636,9 @@ impl super::Compositor {
         opacity: f32,
     ) -> bool {
         let alert_banner = is_alert_banner_zone(zone_name);
-        // Notification and status-bar cards carry the `color.border.default` border.
+        // Notification and status-bar cards carry a hairline border: the
+        // urgency tone's for notification cards, `color.border.default` for
+        // the status bar.
         let is_card = match content {
             ZoneContent::Notification(_) => !alert_banner,
             ZoneContent::StatusBar(_) => true,
@@ -588,9 +652,9 @@ impl super::Compositor {
                 .backdrop
                 .map(|_| urgency_to_severity_color(n.urgency, &self.token_map)),
             ZoneContent::Notification(n) => policy.backdrop.map(|_| {
-                let mut color = urgency_to_notification_color(n.urgency, &self.token_map);
-                color.a = notification_backdrop_opacity(&self.token_map);
-                color
+                NotificationStyle::resolve(self.zone_tokens(zone_name), policy)
+                    .tone(n.urgency)
+                    .fill
             }),
             _ => policy.backdrop,
         };
@@ -601,11 +665,22 @@ impl super::Compositor {
         let radius = sdf_radius
             .map(|r| r.min((slot.width * 0.5).min(slot.height * 0.5)).max(0.0))
             .unwrap_or(0.0);
+        // Notification cards: the urgency tone's hairline (`stroke.border.width`
+        // dp); the status-bar card keeps `color.border.default` (hud-h51u7.4.4).
         let border = is_card.then(|| {
-            let mut color = resolve_border_default_color(&self.token_map);
+            let (mut color, width) = match content {
+                ZoneContent::Notification(n) => {
+                    let style = NotificationStyle::resolve(self.zone_tokens(zone_name), policy);
+                    (style.tone(n.urgency).outline, style.hairline)
+                }
+                _ => (
+                    resolve_border_default_color(&self.token_map),
+                    NOTIFICATION_BORDER_WIDTH_PX,
+                ),
+            };
             color.a *= opacity;
             RoundedRectBorder {
-                width: NOTIFICATION_BORDER_WIDTH_PX,
+                width,
                 color: self.gpu_color(color),
             }
         });

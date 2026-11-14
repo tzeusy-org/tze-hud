@@ -517,14 +517,18 @@ async fn test_three_pass_ordering_independent_of_registration_order() {
     );
 
     // Exercise the production builder and the plan the real encoder consumes.
-    // Integer card geometry: (128,72)-(384,104); dismiss, inset 9 px from the
-    // card's top and right: (355,81)-(375,101). Chrome starts at x=380,
-    // covering the card's right border but leaving the dismiss outline and
-    // left card border as independent positive controls.
+    // Integer card geometry: (128,72)-(384,97) (a body-only card: 0 dp
+    // vertical margin plus the 25 px body line at the 20 px title size).
+    // Chrome starts at x=380, covering the card's right hairline but leaving
+    // its left hairline as an independent positive control. An idle × draws
+    // no SDF shape (hud-h51u7.4.1).
     compositor.set_token_map(HashMap::from([
-        ("color.border.default".to_owned(), "#00FF00".to_owned()),
         (
-            "color.notification.urgency.low".to_owned(),
+            "color.notification.outline".to_owned(),
+            "#00FF00".to_owned(),
+        ),
+        (
+            "color.notification.container.low".to_owned(),
             "#FF0000".to_owned(),
         ),
     ]));
@@ -642,19 +646,11 @@ async fn test_three_pass_ordering_independent_of_registration_order() {
     assert_eq!((bg_end, chrome_start, flat.len()), (6, 12, 18));
     let inputs = compositor.collect_encode_inputs(&layered, 1280, 720);
     assert!(inputs.rr_background.is_empty());
-    assert_eq!(
-        inputs.rr_content.len(),
-        2,
-        "actual card border and dismiss outline"
-    );
+    assert_eq!(inputs.rr_content.len(), 1, "actual card border");
     assert_eq!(inputs.rr_post.len(), 1, "actual Chrome SDF control");
     assert_eq!(
         inputs.rr_content[0].color, [0.0; 4],
         "flat card is border-only SDF"
-    );
-    assert_eq!(
-        inputs.rr_content[1].color, [0.0; 4],
-        "dismiss is border-only SDF"
     );
     let passes = geometry_pass_plan(&inputs, flat.len(), bg_end, chrome_start);
     assert!(
@@ -720,11 +716,6 @@ async fn test_three_pass_ordering_independent_of_registration_order() {
     assert!(
         border[1] > 150 && border[1].saturating_sub(border[0]) > 60 && border[2] < 60,
         "uncovered Content border must remain green, got {border:?}"
-    );
-    let dismiss = pixel(355, 85);
-    assert!(
-        dismiss[1] > 150 && dismiss[2] > 150 && dismiss[0] < 100,
-        "uncovered dismiss outline must remain cyan, got {dismiss:?}"
     );
 }
 

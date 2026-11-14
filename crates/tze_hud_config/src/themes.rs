@@ -618,6 +618,8 @@ mod tests {
             "color.error",
             "opacity.surface",
             "opacity.scrim",
+            "color.notification",
+            "opacity.notification",
             "state.",
             "focus.",
             "motion.",
@@ -642,22 +644,46 @@ mod tests {
         for (role, legacy) in [
             ("color.on_surface", "color.text.primary"),
             ("color.outline", "color.border.default"),
-            (
-                "color.caution.container",
-                "color.notification.urgency.urgent",
-            ),
-            (
-                "color.error.container",
-                "color.notification.urgency.critical",
-            ),
             ("type.body.m.size", "typography.body.size"),
             ("type.body.m.weight", "typography.body.weight"),
+            // The notification card keeps Classic's legacy card look.
+            ("color.notification.outline", "color.border.default"),
+            ("opacity.notification", "opacity.backdrop.opaque"),
+            ("shape.notification", "border.radius.medium"),
+            ("type.notification.title.size", "typography.body.size"),
+            (
+                "type.notification.title.weight",
+                "typography.notification.title.weight",
+            ),
         ] {
             assert_eq!(
                 classic[role], classic[legacy],
                 "Classic {role} lost its legacy meaning"
             );
         }
+        // Classic's derived legacy card metrics: the body at the title size
+        // times the body scale, line boxes at 1.4 x size, the 9 dp inset.
+        let num = |key: &str| classic[key].parse::<f32>().unwrap();
+        assert_eq!(
+            num("type.notification.body.size"),
+            num("typography.body.size") * num("typography.notification.body.scale")
+        );
+        assert!(
+            (num("type.notification.title.line_height")
+                - 1.4 * num("type.notification.title.size"))
+            .abs()
+                < 1e-4
+        );
+        assert!(
+            (num("type.notification.body.line_height") - 1.4 * num("type.notification.body.size"))
+                .abs()
+                < 1e-4
+        );
+        assert_eq!(
+            num("space.notification"),
+            9.0,
+            "Classic's legacy card inset"
+        );
 
         // Opaque declared text/fill pairs only: no wallpaper, state layer or
         // user override is certified by these unrounded contrast assertions.

@@ -229,8 +229,10 @@ async fn test_lifecycle_sentinel_keeps_cached_markdown_render_path() {
 }
 
 /// Notification action buttons are drawn at exactly the bounds the pointer
-/// hit regions register, as outlined SDF controls in token-styled fill (the
-/// hover/pressed fills when `chrome_states` says so), with their labels. Two
+/// hit regions register, as `shape.s` SDF controls: the first filled with
+/// `color.primary.container`, the rest transparent, with `state.*` layers
+/// when `chrome_states` says so and the focus ring when focused; an idle
+/// transparent button draws nothing. Labels sit inside each button. Two
 /// notifications (the older one titled, so slot heights differ) exercise the
 /// shared slot layout. Draw-command level (no pixel readback).
 #[tokio::test]
@@ -264,9 +266,9 @@ async fn notification_actions_layout_matches_hit_regions() {
             ("runtime.px_scale".into(), "1.5".into()),
             ("notification.action.link_mark".into(), "↗︎".into()),
             ("font.sans".into(), "IBM Plex Mono".into()),
-            ("notification.action.background".into(), "#336699".into()),
-            ("notification.action.padding_px".into(), "3".into()),
-            ("notification.action.gap_px".into(), "6".into()),
+            ("color.primary.container".into(), "#336699".into()),
+            ("space.m".into(), "10".into()),
+            ("space.xs".into(), "6".into()),
         ]);
         tokens = tze_hud_config::themes::resolve_config_tokens(&tokens);
         compositor.set_token_map(tokens);
@@ -276,10 +278,11 @@ async fn notification_actions_layout_matches_hit_regions() {
             .zones
             .remove("notification-area")
             .unwrap();
+        // The mock's 368 dp card at 1.5x: 552 px.
         zone.geometry_policy = GeometryPolicy::Relative {
-            x_pct: 0.6,
+            x_pct: 0.5,
             y_pct: 0.0,
-            width_pct: 0.35,
+            width_pct: 552.0 / 1280.0,
             height_pct: 0.95,
         };
         zone.rendering_policy.margin_horizontal = Some(18.0);
@@ -315,7 +318,7 @@ async fn notification_actions_layout_matches_hit_regions() {
         let record = &scene.zone_registry.active_for_zone("notification-area")[1];
         let policy = &scene.zone_registry.zones["notification-area"].rendering_policy;
         let descriptor =
-            compositor.notification_action_layout("notification-area", record, policy, 448.0);
+            compositor.notification_action_layout("notification-area", record, policy, 552.0);
         let publication_id = record.publication_id;
         assert_eq!(descriptor.stacked, stacked);
         let shapes = compositor.notification_layouts.borrow().shapes;
@@ -341,21 +344,44 @@ async fn notification_actions_layout_matches_hit_regions() {
             .collect_all_rounded_rect_cmds(&scene, 1280.0, 1080.0)
             .chrome;
         let items = compositor.collect_text_items(&scene, 1280.0, 1080.0);
-        let tokens = resolve_notification_action_tokens(&compositor.token_map);
+        let style = crate::renderer::notification_style::NotificationStyle::resolve(
+            compositor.zone_tokens("notification-area"),
+            &scene.zone_registry.zones["notification-area"].rendering_policy,
+        );
         for region in &action_regions {
             let ZoneInteractionKind::Action { index } = &region.kind else {
                 unreachable!()
             };
             let index = *index;
             let bounds = region.bounds;
-            let fill = match index {
-                0 => tokens.background_hover,
-                1 => tokens.background_pressed,
-                _ => tokens.background,
-            };
-            assert!(commands.iter().any(|c| (c.x, c.y, c.width, c.height)
-                == (bounds.x, bounds.y, bounds.width, bounds.height)
-                && c.color == compositor.gpu_color(fill)));
+            let state = scene
+                .overlay
+                .chrome_states
+                .get(&region.interaction_id)
+                .copied()
+                .unwrap_or_default();
+            let fill = style.control_fill(state, style.action_fill(index));
+            let drawn: Vec<_> = commands
+                .iter()
+                .filter(|c| {
+                    (c.x, c.y, c.width, c.height)
+                        == (bounds.x, bounds.y, bounds.width, bounds.height)
+                })
+                .collect();
+            match (index, fill) {
+                (3, None) => assert!(drawn.is_empty(), "an idle transparent action draws nothing"),
+                (2, None) => {
+                    assert_eq!(drawn.len(), 1);
+                    assert_eq!(drawn[0].color, [0.0; 4], "focused: ring only");
+                    assert_eq!(drawn[0].border.as_ref().unwrap().width, style.focus_width);
+                }
+                (_, Some(fill)) => {
+                    assert_eq!(drawn.len(), 1);
+                    assert_eq!(drawn[0].color, compositor.gpu_color(fill));
+                    assert_eq!(drawn[0].radius, style.control_radius);
+                }
+                other => panic!("unexpected action state {other:?}"),
+            }
             let item = items
                 .iter()
                 .find(|item| &*item.text == labels[index])
@@ -396,7 +422,7 @@ async fn notification_actions_layout_matches_hit_regions() {
                     .all(|i| i.pixel_y + i.bounds_height <= action_regions[0].bounds.y)
             );
             if stacked {
-                assert_eq!(bounds.width, 448.0 - 36.0);
+                assert_eq!(bounds.width, 552.0 - 2.0 * style.padding_h);
             }
         }
         for pair in action_regions.windows(2) {
@@ -475,17 +501,15 @@ async fn notification_action_row_is_reserved_below_the_text() {
     check_notification_action_row(None).await;
 }
 
-/// The same draw/hit/reserve agreement at a themed inset (tonal-glass's
-/// `spacing.notification.inset` = 16).
+/// The same draw/hit/reserve agreement at an explicit horizontal zone margin
+/// (20 px, unlike the canonical 16 dp vertical padding).
 #[tokio::test]
 async fn notification_action_row_follows_a_themed_inset() {
-    check_notification_action_row(Some(16.0)).await;
+    check_notification_action_row(Some(20.0)).await;
 }
 
 async fn check_notification_action_row(margin: Option<f32>) {
-    use crate::renderer::token_colors::{
-        NOTIFICATION_INSET_DEFAULT_PX, NOTIFICATION_STACK_GAP_DEFAULT_PX,
-    };
+    use crate::renderer::notification_style::{DISMISS_GLYPH, NotificationStyle};
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
 
@@ -495,7 +519,14 @@ async fn check_notification_action_row(margin: Option<f32>) {
         margin_horizontal: margin,
         ..Default::default()
     };
-    let card_inset = margin.unwrap_or(NOTIFICATION_INSET_DEFAULT_PX);
+    // Every card metric is token-derived (hud-h51u7.4.1).
+    let style = NotificationStyle::resolve(&HashMap::new(), &policy);
+    let card_inset = style.padding_h;
+    assert_eq!(
+        card_inset,
+        margin.unwrap_or(16.0),
+        "policy margin, else space.l"
+    );
     let action = |label: &str| tze_hud_scene::types::NotificationAction {
         label: label.to_owned(),
         callback_id: Some(label.to_lowercase()),
@@ -609,7 +640,7 @@ async fn check_notification_action_row(margin: Option<f32>) {
         let (_, next_y, _) = pair[1];
         assert_eq!(
             next_y - (top_y + top_h),
-            NOTIFICATION_STACK_GAP_DEFAULT_PX,
+            style.stack_gap,
             "consecutive cards are separated by the stack gap"
         );
     }
@@ -635,7 +666,7 @@ async fn check_notification_action_row(margin: Option<f32>) {
         assert!(
             b.x >= zx + inset - 0.01
                 && b.x + b.width <= zx + zw - inset + 0.01
-                && b.y + b.height <= card_y + card_h - inset + 0.01,
+                && b.y + b.height <= card_y + card_h - style.padding_v + 0.01,
             "button {b:?} must sit inside card y={card_y} h={card_h} minus the {inset} px inset"
         );
     }
@@ -658,8 +689,8 @@ async fn check_notification_action_row(margin: Option<f32>) {
             .expect("each × lies in a card");
         assert!(
             b.x + b.width <= zx + zw - inset + 0.01
-                && b.y >= card_y + inset - 0.01
-                && b.y + b.height <= card_y + card_h - inset + 0.01,
+                && b.y >= card_y + style.padding_v - 0.01
+                && b.y + b.height <= card_y + card_h - style.padding_v + 0.01,
             "× {b:?} must sit inside card y={card_y} h={card_h} minus the {inset} px inset"
         );
     }
@@ -667,7 +698,7 @@ async fn check_notification_action_row(margin: Option<f32>) {
         a.x < x + w && x < a.x + a.width && a.y < y + h && y < a.y + a.height
     };
     // Card text only: skip the × glyph itself.
-    for item in items.iter().filter(|i| &*i.text != "X") {
+    for item in items.iter().filter(|i| &*i.text != DISMISS_GLYPH) {
         for b in &dismiss_regions {
             assert!(
                 !overlaps(
@@ -992,7 +1023,7 @@ async fn test_alert_banner_urgency_low_maps_to_info() {
 }
 
 /// notification-area does NOT use urgency-to-severity mapping (color.severity.*).
-/// It uses color.notification.urgency.* tokens instead.
+/// It uses the card's urgency tones (`color.error.container` at urgency 3).
 /// Even with urgency=3, it must NOT produce severity critical (red #FF0000).
 #[tokio::test]
 async fn test_notification_area_does_not_use_severity_tokens() {
@@ -1029,7 +1060,7 @@ async fn test_notification_area_does_not_use_severity_tokens() {
             ZoneContent::Notification(NotificationPayload {
                 text: "System alert".to_owned(),
                 icon: String::new(),
-                urgency: 3, // Critical — must use color.notification.urgency.critical, NOT color.severity.critical
+                urgency: 3, // Critical — the error-container tone, NOT color.severity.critical
                 ttl_ms: None,
                 title: String::new(),
                 actions: Vec::new(),
@@ -1048,7 +1079,7 @@ async fn test_notification_area_does_not_use_severity_tokens() {
     );
 
     // Render and check: the backdrop must NOT be severity critical (pure red R~1.0, G~0.0, B~0.0).
-    // It should be notification urgency critical fallback: #450612.
+    // It should be the card's error-container tone.
     let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
     compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
 
@@ -1066,48 +1097,72 @@ async fn test_notification_area_does_not_use_severity_tokens() {
     );
 }
 
-// ── Notification urgency token tests ─────────────────────────────────────
+// ── Notification urgency tone tests ──────────────────────────────────────
 
-/// Notification urgency colours: urgency above 3 clamps to critical, and a
-/// `color.notification.urgency.*` token overrides the fallback (sRGB hex decoded
-/// to linear).
+/// Urgency tones (hud-h51u7.4.1): 0 and 1 the notification containers
+/// (equal by default), 2 the caution container, 3 (and anything above,
+/// clamped) the error container, each under its own hairline role; a token
+/// restyles the card (sRGB hex decoded to linear) at `opacity.notification`.
 #[test]
 fn test_notification_urgency_color_tokens() {
-    let no_tokens = HashMap::new();
-    let critical = urgency_to_notification_color(3, &no_tokens);
+    use crate::renderer::notification_style::NotificationStyle;
+    let policy = RenderingPolicy::default();
+    let style = NotificationStyle::resolve(&HashMap::new(), &policy);
+    let rgb = |c: Rgba| (c.r, c.g, c.b);
+    assert_eq!(
+        rgb(style.tone(0).fill),
+        rgb(style.tone(1).fill),
+        "0 and 1 are neutral"
+    );
+    assert_ne!(rgb(style.tone(1).fill), rgb(style.tone(2).fill));
+    assert_ne!(rgb(style.tone(2).fill), rgb(style.tone(3).fill));
     for urgency in [4, 100] {
-        let clamped = urgency_to_notification_color(urgency, &no_tokens);
         assert_eq!(
-            (clamped.r, clamped.g, clamped.b),
-            (critical.r, critical.g, critical.b),
+            rgb(style.tone(urgency).fill),
+            rgb(style.tone(3).fill),
             "urgency={urgency} must clamp to critical"
         );
     }
 
-    // (urgency, token, hex, expected linear rgb)
+    // (urgency, role token, hex, expected linear rgb)
     let overrides = [
-        (0, "low", "#00FFFF", [0.0, 1.0, 1.0]),
-        (3, "critical", "#450612", [0.0595, 0.0018, 0.0060]),
+        (
+            0,
+            "color.notification.container.low",
+            "#00FFFF",
+            [0.0, 1.0, 1.0],
+        ),
+        (2, "color.caution.container", "#FF0000", [1.0, 0.0, 0.0]),
+        (
+            3,
+            "color.error.container",
+            "#450612",
+            [0.0595, 0.0018, 0.0060],
+        ),
     ];
-    for (urgency, name, hex, expected) in overrides {
-        let tokens = HashMap::from([(
-            format!("color.notification.urgency.{name}"),
-            hex.to_string(),
-        )]);
-        let c = urgency_to_notification_color(urgency, &tokens);
+    for (urgency, key, hex, expected) in overrides {
+        let tokens = HashMap::from([
+            (key.to_string(), hex.to_string()),
+            ("opacity.notification".to_string(), "0.5".to_string()),
+        ]);
+        let c = NotificationStyle::resolve(&tokens, &policy)
+            .tone(urgency)
+            .fill;
         for (got, want) in [c.r, c.g, c.b].into_iter().zip(expected) {
-            assert!((got - want).abs() < 0.004, "{name} token {hex}: got {c:?}");
+            assert!((got - want).abs() < 0.004, "{key} token {hex}: got {c:?}");
         }
+        assert!(
+            (c.a - 0.5).abs() < 1e-6,
+            "opacity.notification applies: {c:?}"
+        );
     }
 }
 
-/// notification-area urgency-tinted backdrop: renders backdrop at the `opacity.notification.backdrop` opacity (0.8 by default).
-///
-/// Per spec: non-alert-banner Notification content must use
-/// color.notification.urgency.* tokens at the `opacity.notification.backdrop` opacity.
-/// The policy.backdrop_opacity must NOT override this.
+/// notification-area card fill opacity: an explicit zone
+/// `backdrop_opacity` keeps precedence; otherwise the card takes
+/// `opacity.notification` (hud-h51u7.4.1).
 #[tokio::test]
-async fn test_notification_area_backdrop_uses_0_8_opacity() {
+async fn test_notification_area_backdrop_opacity() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
 
     let mut scene = SceneGraph::new(1280.0, 720.0);
@@ -1124,7 +1179,7 @@ async fn test_notification_area_backdrop_uses_0_8_opacity() {
         accepted_media_types: vec![ZoneMediaType::ShortTextWithIcon],
         rendering_policy: RenderingPolicy {
             backdrop: Some(Rgba::new(0.0, 0.0, 0.0, 0.5)),
-            // backdrop_opacity = 0.5 must NOT override the 0.8 fixed opacity
+            // An explicit zone opacity wins over opacity.notification.
             backdrop_opacity: Some(0.5),
             text_color: Some(Rgba::WHITE),
             ..Default::default()
@@ -1157,11 +1212,25 @@ async fn test_notification_area_backdrop_uses_0_8_opacity() {
     compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
 
     assert!(!vertices.is_empty(), "expected vertices");
-    // The first quad's alpha (index 3 of color) should be 0.8.
     let first_alpha = vertices[0].color[3];
     assert!(
-        (first_alpha - 0.8).abs() < 0.01,
-        "notification-area backdrop alpha must be 0.8, got {first_alpha}"
+        (first_alpha - 0.5).abs() < 0.01,
+        "explicit backdrop_opacity must win, got {first_alpha}"
+    );
+    // Without it, the card takes opacity.notification (canonical 0.92).
+    scene
+        .zone_registry
+        .zones
+        .get_mut("notification-area")
+        .unwrap()
+        .rendering_policy
+        .backdrop_opacity = None;
+    let mut vertices: Vec<crate::pipeline::RectVertex> = Vec::new();
+    compositor.render_zone_content(&scene, &mut vertices, &mut Vec::new(), 1280.0, 720.0, None);
+    assert!(
+        (vertices[0].color[3] - 0.92).abs() < 0.01,
+        "opacity.notification default, got {}",
+        vertices[0].color[3]
     );
 }
 
@@ -1212,10 +1281,11 @@ fn bordered_notification_scene(radius: Option<f32>) -> SceneGraph {
     scene
 }
 
-/// The notification card border and dismiss outline are SDF borders, not flat
-/// quads. On a flat backdrop (no radius) the flat pass emits only the backdrop
-/// and the SDF pass adds a border-only card shape plus the dismiss outline; on
-/// a rounded backdrop the border rides on the backdrop's own SDF shape.
+/// The notification card hairline is an SDF border, not flat quads. On a flat
+/// backdrop (no radius) the flat pass emits only the backdrop and the SDF pass
+/// adds a border-only card shape; on a rounded backdrop the hairline rides on
+/// the backdrop's own SDF shape. An idle × draws no shape; a hovered one
+/// takes the state layer at the shared dismiss bounds.
 #[tokio::test]
 async fn test_notification_card_border_is_an_sdf_border() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
@@ -1229,19 +1299,42 @@ async fn test_notification_card_border_is_an_sdf_border() {
     let cmds = compositor
         .collect_all_rounded_rect_cmds(&flat, 1280.0, 720.0)
         .chrome;
-    assert_eq!(cmds.len(), 2, "card border + dismiss outline: {cmds:?}");
+    assert_eq!(cmds.len(), 1, "card hairline only (idle ×): {cmds:?}");
     let card = &cmds[0];
     assert_eq!(card.color, [0.0; 4], "border-only over the flat backdrop");
     assert_eq!(card.radius, 0.0);
     assert!((card.x - x).abs() < 0.01 && (card.y - y).abs() < 0.01);
     assert!((card.width - w).abs() < 0.01, "card spans the slot width");
-    assert_eq!(card.border.map(|b| b.width), Some(1.0));
+    assert_eq!(
+        card.border.map(|b| b.width),
+        Some(1.0),
+        "stroke.border.width dp"
+    );
+    let mut hovered = flat.clone();
+    compositor.populate_zone_hit_regions(&mut hovered, 1280.0, 720.0);
+    let id = hovered
+        .overlay
+        .zone_hit_regions
+        .iter()
+        .find(|r| matches!(r.kind, ZoneInteractionKind::Dismiss))
+        .unwrap()
+        .clone();
+    hovered.set_chrome_hovered(&id.interaction_id, true);
+    let cmds = compositor
+        .collect_all_rounded_rect_cmds(&hovered, 1280.0, 720.0)
+        .chrome;
+    assert_eq!(cmds.len(), 2, "card + hovered ×: {cmds:?}");
     let dismiss = &cmds[1];
-    assert_eq!(dismiss.color, [0.0; 4]);
-    assert_eq!(dismiss.border.map(|b| b.width), Some(1.0));
+    assert!(dismiss.color[3] > 0.0, "hover state layer");
+    assert!(dismiss.border.is_none(), "no outline unless focused");
+    assert_eq!(
+        (dismiss.x, dismiss.y, dismiss.width, dismiss.height),
+        (id.bounds.x, id.bounds.y, id.bounds.width, id.bounds.height),
+        "drawn × is the hit region"
+    );
     assert!(
-        (dismiss.x + dismiss.width - (x + w - 9.0)).abs() < 0.01,
-        "dismiss inset 9 px from the right edge"
+        (dismiss.x + dismiss.width - (x + w - 16.0)).abs() < 0.01,
+        "dismiss inside the space.notification padding from the right edge"
     );
 
     let rounded = bordered_notification_scene(Some(12.0));
@@ -1261,7 +1354,7 @@ async fn test_notification_card_border_is_an_sdf_border() {
     let cmds = compositor
         .collect_all_rounded_rect_cmds(&rounded, 1280.0, 720.0)
         .chrome;
-    assert_eq!(cmds.len(), 2, "card + dismiss outline: {cmds:?}");
+    assert_eq!(cmds.len(), 1, "card (idle ×): {cmds:?}");
     assert_eq!(cmds[0].radius, 12.0);
     assert!(cmds[0].color[3] > 0.7, "card carries its fill");
     assert_eq!(cmds[0].border.map(|b| b.width), Some(1.0));
@@ -1281,9 +1374,12 @@ async fn test_rounded_card_border_follows_the_corner() {
     }
     let (mut compositor, surface) = require_gpu!(built);
     let mut tokens = HashMap::new();
-    tokens.insert("color.border.default".to_string(), "#00FF00".to_string());
     tokens.insert(
-        "color.notification.urgency.low".to_string(),
+        "color.notification.outline".to_string(),
+        "#00FF00".to_string(),
+    );
+    tokens.insert(
+        "color.notification.container.low".to_string(),
         "#FF0000".to_string(),
     );
     compositor.set_token_map(tokens);
@@ -1429,25 +1525,40 @@ async fn test_alert_banner_has_no_border() {
     );
 }
 
-/// Border color uses color.border.default token when present.
+/// The card hairline is its urgency tone's outline role: neutral cards
+/// `color.notification.outline`, urgency 2
+/// `color.notification.caution.outline`, urgency 3
+/// `color.notification.error.outline` (hud-h51u7.4.1).
 #[tokio::test]
 async fn test_notification_area_border_uses_border_default_token() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
 
-    // Install a custom border token: pure cyan (#00FFFF).
-    let mut token_map = HashMap::new();
-    token_map.insert("color.border.default".to_string(), "#00FFFF".to_string());
-    compositor.set_token_map(token_map);
-
-    let scene = bordered_notification_scene(None);
-    let cmds = compositor
-        .collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0)
-        .chrome;
-    let border = cmds[0].border.expect("card border").color;
-    assert!(
-        border[0] < 0.1 && border[1] > 0.9 && border[2] > 0.9,
-        "card border must be the cyan token, got {border:?}"
-    );
+    for (urgency, key) in [
+        (0, "color.notification.outline"),
+        (2, "color.notification.caution.outline"),
+        (3, "color.notification.error.outline"),
+    ] {
+        // Install the role as pure cyan (#00FFFF).
+        compositor.set_token_map(HashMap::from([(key.to_string(), "#00FFFF".to_string())]));
+        let mut scene = bordered_notification_scene(None);
+        if let ZoneContent::Notification(n) = &mut scene
+            .zone_registry
+            .active_publishes
+            .get_mut("notification-area")
+            .unwrap()[0]
+            .content
+        {
+            n.urgency = urgency;
+        }
+        let cmds = compositor
+            .collect_all_rounded_rect_cmds(&scene, 1280.0, 720.0)
+            .chrome;
+        let border = cmds[0].border.expect("card border").color;
+        assert!(
+            border[0] < 0.1 && border[1] > 0.9 && border[2] > 0.9,
+            "urgency {urgency} hairline must be the cyan {key}, got {border:?}"
+        );
+    }
 }
 
 // ── Token-resolved severity color tests ───────────────────────────────────

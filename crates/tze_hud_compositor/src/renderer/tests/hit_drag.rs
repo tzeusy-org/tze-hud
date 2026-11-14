@@ -139,20 +139,29 @@ async fn zone_hit_dismiss_region_at_top_right_of_slot() {
     );
     let region = &scene.overlay.zone_hit_regions[0];
 
-    // Dismiss should be at the top-right of the slot, inset 9 px.
+    // Dismiss sits at the top-right of the card, inside its padding, a
+    // title-line square (all token-derived: space.notification, type.notification.title).
     // Zone geometry: zx = 1920*0.75 = 1440, zw = 1920*0.24 = 460.8.
-    // Dismiss x = zx + zw - 9 - 20 = 1871.8.
-    let expected_x = sw * 0.75 + sw * 0.24 - 9.0 - 20.0;
+    let style = crate::renderer::notification_style::NotificationStyle::resolve(
+        &std::collections::HashMap::new(),
+        &tze_hud_scene::types::RenderingPolicy {
+            font_size_px: Some(16.0),
+            ..Default::default()
+        },
+    );
+    let expected_x = sw * 0.75 + sw * 0.24 - style.padding_h - style.dismiss_size;
     assert!(
         (region.bounds.x - expected_x).abs() < 1.0,
         "dismiss x must be at top-right (expected≈{expected_x:.1}, got {:.1})",
         region.bounds.x
     );
     assert!(
-        (region.bounds.y - 9.0).abs() < 1.0,
-        "dismiss y must be inset from the slot top (expected≈9, got {:.1})",
+        (region.bounds.y - style.padding_v).abs() < 1.0,
+        "dismiss y must be inset from the slot top (expected≈{}, got {:.1})",
+        style.padding_v,
         region.bounds.y
     );
+    assert_eq!(region.bounds.width, style.dismiss_size);
 }
 
 /// A notification with 2 actions MUST produce 3 regions: 1 dismiss + 2 actions.

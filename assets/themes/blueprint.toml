@@ -108,6 +108,25 @@
 "type.readout.line_height"         = "18"
 "type.readout.weight"              = "400"
 
+# Notification card roles (the card's own fill, hairline, text and metrics).
+"color.notification.container.low"    = "#2F343C"
+"color.notification.container"        = "#2F343C"
+"color.notification.outline"          = "#404854"
+"color.notification.caution.outline"  = "#935610"
+"color.notification.error.outline"    = "#FA999C"
+"color.on_notification.variant"       = "#ABB3BF"
+"color.on_notification.caution"       = "#F6F7F9"
+"color.on_notification.error"         = "#F6F7F9"
+"opacity.notification"                = "0.96"
+"shape.notification"                  = "4"
+"space.notification"                  = "16"
+"type.notification.title.size"        = "16"
+"type.notification.title.line_height" = "20"
+"type.notification.title.weight"      = "600"
+"type.notification.body.size"         = "14"
+"type.notification.body.line_height"  = "18"
+"type.notification.body.weight"       = "400"
+
 # ── Legacy keys the current renderer reads (see tonal-glass.toml) ───────────
 "color.text.primary"                  = "#F6F7F9"   # on_surface
 "color.text.secondary"                = "#ABB3BF"   # on_surface.variant
@@ -122,10 +141,6 @@
 "color.on_severity.critical"      = "#111418"
 "opacity.backdrop.opaque"             = "0.96"      # opacity.surface
 "border.radius.medium"                = "4"         # shape.m
-"color.notification.urgency.low"      = "#252A31"   # surface.container
-"color.notification.urgency.normal"   = "#2F343C"   # surface.container.high
-"color.notification.urgency.urgent"   = "#77450D"   # caution.container
-"color.notification.urgency.critical" = "#8E292C"   # error.container
 "portal.divider.color"                = "#404854"   # outline.variant
 "system_card.background"              = "#2F343CF5" # surface.container.high @ 0.96
 "system_card.accent.color"            = "#4C90F0"   # primary
