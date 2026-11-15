@@ -625,7 +625,7 @@ validation remains pending.
 
 ### Hosted overlay gesture check
 
-The existing informational Windows gesture step runs fullscreen WARP first,
+The existing Windows gesture step runs fullscreen WARP first,
 then `windows_overlay_gestures.py` runs only scenario 11 in real overlay mode.
 It downloads Mesa lavapipe 26.2.6 from the upstream release asset and verifies
 its pinned SHA256 before extracting the x64 driver. The runner's preinstalled
@@ -647,8 +647,10 @@ python scripts/ci/windows_overlay_gestures.py --exe target/release-dev/tze_hud.e
 The existing `gestures` artifact includes `overlay/timeline.json`, native logs,
 status and desktop captures, plus `overlay/setup.json` with setup and total
 added occupancy (target: combined gesture step at most four minutes). Native
-failures remain failures in these artifacts even though the step is
-informational. This checks hosted software-rendered mechanics; owner GPU,
+failures remain failures in these artifacts. Scenario 11 (`overlay-pointer`)
+and `tray` are in the step's `GESTURES_REQUIRED`
+list, so their failure, or a setup failure, fails `windows-build` in its last
+step and withholds the `dev` prerelease; merges are unaffected. This checks hosted software-rendered mechanics; owner GPU,
 DWM transparency, multiple monitors and DPI acceptance remain separate.
 An original scenario failure is preserved if its failure screenshot also
 fails (`diagnostic_error`). Desktop captures check GDI results and release
