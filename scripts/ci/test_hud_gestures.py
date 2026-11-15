@@ -372,7 +372,7 @@ class WindowsGuardTests(unittest.TestCase):
                     self.assertEqual("overlay-pointer" in selected, mode == "overlay")
                     self.assertEqual("tray" in selected, mode == "overlay")
                     # 25: hud-ljhku.5 added "stack-trim"; hud-ljhku.2 added "portal-reading".
-                    self.assertEqual(len(selected), 2 if mode == "overlay" else 25)
+                    self.assertEqual(len(selected), 2 if mode == "overlay" else 27)
                     # Real link handoffs can foreground a browser late, so they run
                     # after every other injecting scenario; MCP-only restart stays last.
                     self.assertEqual(selected[-3:] == ["portal-reading", "card-link", "restart"],

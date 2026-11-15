@@ -29,6 +29,7 @@ Stdlib only (plus `xdotool`, `Xvfb` and optional `ffmpeg` for tier L).
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import secrets
@@ -129,6 +130,20 @@ def portal_entry(status: dict, surface: str) -> dict | None:
 def notification_entry(status: dict, key: str, surface: str = "zone:notification-area") -> dict | None:
     return next((p for p in status.get("notifications") or []
                  if p.get("s") == surface and p.get("key") == key), None)
+
+
+FOREIGN_AGENT = "gesture-foreign"
+
+
+def keyed_cards(status: dict, key: str) -> list[list[str]]:
+    """Action labels of every drawn, non-exiting notification card with `key`.
+
+    Status omits publishers and bodies, so cross-agent scenarios tell same-key
+    cards apart by their distinct action labels."""
+    return [[a["label"] for a in card.get("actions") or []]
+            for card in status.get("notifications") or []
+            if card.get("s") == "zone:notification-area" and card.get("key") == key
+            and card.get("state") != "exiting"]
 
 
 def widget_entry(status: dict, surface: str) -> dict | None:
@@ -278,6 +293,9 @@ class Run:
     display: str = ""
     port: int = 0
     psk: str = field(default_factory=lambda: secrets.token_hex(16))
+    # A second authenticated agent, for cross-agent isolation scenarios only.
+    foreign_psk: str = field(default_factory=lambda: secrets.token_hex(16))
+    foreign: Smoke | None = None
     xvfb: subprocess.Popen | None = None
     hud: subprocess.Popen | None = None
     owned_pids: list[int] = field(default_factory=list)
@@ -324,6 +342,10 @@ class Run:
         env["TZE_HUD_LOG_JSON"] = "1"
         self.port = free_port()
         config = seed_config(CONFIG, self.psk)
+        # Seed the second agent beside the first: PSK hash only, no admin grant.
+        digest = hashlib.sha256(self.foreign_psk.encode()).hexdigest()
+        with open(config.parent / "agents.toml", "a", encoding="utf-8") as agents:
+            agents.write(f'\n[agents.{FOREIGN_AGENT}]\npsk_sha256 = "{digest}"\nallow = ["*"]\n')
         self.config_dir = config.parent
         self.config = config
         self.log = self.out / "hud.log"
@@ -338,6 +360,7 @@ class Run:
             )
         self.owned_pids.append(self.hud.pid)
         self.smoke = Smoke(f"http://127.0.0.1:{self.port}/mcp", self.psk)
+        self.foreign = Smoke(f"http://127.0.0.1:{self.port}/mcp", self.foreign_psk)
         wait_for_mcp(self.smoke, self.hud, 60)
         self.inj = XTest(self.display, self.guard) if self.injector == "xtest" else WIN.SendInput(self.guard)
         if self.injector == "sendinput":
@@ -940,6 +963,103 @@ def scenario_card_click(run: Run) -> None:
     open_card(run, key)
     run.click(f"zone:notification-area/{key}/0")
     take_card_answer(run, key, f"{key}-first")
+
+
+def foreign_call(run: Run, tool: str, args: dict) -> dict:
+    run.mark()
+    is_error, reply = run.foreign.call(tool, args)
+    run.step(f"{FOREIGN_AGENT} {tool} {args.get('surface')} key={args.get('key')}")
+    if is_error:
+        raise ScenarioFailed(f"{FOREIGN_AGENT} {tool} refused", {"code": reply.get("code"), "hint": reply.get("hint")})
+    return reply
+
+
+def foreign_inputs(run: Run) -> list[dict]:
+    is_error, reply = run.foreign.call("hud_input", {"max_items": 20})
+    if is_error:
+        raise ScenarioFailed(f"{FOREIGN_AGENT} hud_input refused", {"code": reply.get("code")})
+    return reply.get("items") or []
+
+
+def scenario_foreign_publisher(run: Run) -> None:
+    """hud-bz9bv.6 AC10: another authenticated agent's same-key replace and
+    keyed or whole clear never touch A's card, and A's answer routes only to A."""
+    key, zone = "gesture-foreign", "zone:notification-area"
+    # Both cards must fit the zone at tier L's 600 px screen, or the stack's
+    # visibility bound hides one, which is not a replace: A's card has one
+    # action and the foreign card none. Cards are told apart by action labels.
+    mine, theirs = ["First"], []
+    open_card(run, key, actions=[{"label": "First", "callback_id": f"{key}-first"}])
+    foreign = {"surface": zone, "key": key, "ttl_ms": 0, "content": {"body": "Foreign gesture check"}}
+    try:
+        foreign_call(run, "hud_publish", foreign)
+        run.expect("a foreign same-key publish adds its own card beside A's",
+                   lambda st: sorted(keyed_cards(st, key)) == sorted([mine, theirs]))
+        foreign_call(run, "hud_publish", foreign)  # the foreign agent's own same-key replace
+        run.expect("a foreign same-key replace replaces only its own card",
+                   lambda st: sorted(keyed_cards(st, key)) == sorted([mine, theirs]))
+        foreign_call(run, "hud_clear", {"surface": zone, "key": key})
+        run.expect("a foreign keyed clear removes only its own card", lambda st: keyed_cards(st, key) == [mine])
+        foreign_call(run, "hud_publish", foreign)
+        run.expect("foreign card back", lambda st: sorted(keyed_cards(st, key)) == sorted([mine, theirs]))
+        foreign_call(run, "hud_clear", {"surface": zone})
+        run.expect("a foreign whole-zone clear removes only its own cards", lambda st: keyed_cards(st, key) == [mine])
+        run.observe_for("and A's card stays, unanswered", lambda st: keyed_cards(st, key) == [mine]
+                        and notification_entry(st, key)["chosen"] is None, 0.3)
+    finally:
+        run.foreign.call("hud_clear", {"surface": zone})
+    run.click(f"{zone}/{key}/0")
+    take_card_answer(run, key, f"{key}-first")
+    if items := foreign_inputs(run):
+        raise ScenarioFailed("A's answer reaches no other agent", {"items": items})
+
+
+def held_press_on_retired_card(run: Run, key: str, retire: Callable[[], None], what: str) -> None:
+    """Press A's action, retire that card while the button is down, release:
+    the retired publication's press must send nothing."""
+    open_card(run, key)
+    run.point(f"zone:notification-area/{key}/0")
+    run.mark()
+    run.inj.button(True)
+    run.step("button down (held)")
+    try:
+        retire()
+        run.settle()
+    finally:
+        run.mark()
+        run.inj.button(False)
+        run.step("button up")
+    run.observe_for(f"releasing after {what} activates nothing",
+                    lambda st: all(c.get("chosen") is None for c in st.get("notifications") or []), 0.5)
+    if items := run.inputs():
+        raise ScenarioFailed(f"releasing after {what} sends nothing", {"items": items, "status": run.status()})
+
+
+def scenario_held_press(run: Run) -> None:
+    """hud-bz9bv.6 AC2/AC10: a press held across a same-key replace, or across
+    a keyed clear, never activates on release; the replacement still answers."""
+    zone = "zone:notification-area"
+    replaced = "gesture-held-replace"
+    fresh = [{"label": "Third", "callback_id": f"{replaced}-third"},
+             {"label": "Fourth", "callback_id": f"{replaced}-fourth"}]
+
+    def replace() -> None:
+        run.publish(zone, key=replaced, ttl_ms=0, content={"body": "Replaced gesture check", "actions": fresh})
+        run.expect("the same-key replace is drawn", lambda st: keyed_cards(st, replaced) == [["Third", "Fourth"]])
+
+    held_press_on_retired_card(run, replaced, replace, "a same-key replace")
+    run.click(f"{zone}/{replaced}/0")
+    take_card_answer(run, replaced, f"{replaced}-third")
+
+    cleared = "gesture-held-clear"
+
+    def clear() -> None:
+        run.mark()
+        run.smoke.ok("hud_clear", {"surface": zone, "key": cleared})
+        run.step(f"hud_clear {zone} key={cleared}")
+        run.expect("the keyed clear removes the card", lambda st: not keyed_cards(st, cleared))
+
+    held_press_on_retired_card(run, cleared, clear, "a keyed clear")
 
 
 def scenario_card_keyboard(run: Run) -> None:
@@ -1943,6 +2063,8 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
     "card-click": scenario_card_click,
     "card-keyboard": scenario_card_keyboard,
     "card-dismiss": scenario_card_dismiss,
+    "foreign-publisher": scenario_foreign_publisher,
+    "held-press": scenario_held_press,
     "card-link": scenario_card_link,
     "stack-trim": scenario_stack_trim,
     "portal-reading": scenario_portal_reading,
