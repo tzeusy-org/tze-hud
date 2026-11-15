@@ -42,7 +42,7 @@ pub struct FrameTelemetry {
 
     // ── Per-stage timings ────────────────────────────────────────────────────
     /// Stage 1 — Input Drain (main thread). p99 budget: 500us.
-    /// Drain OS input events, attach hardware timestamps, enqueue InputEvent records.
+    /// Drain OS input events and attach hardware timestamps.
     pub stage1_input_drain_us: u64,
 
     /// Stage 2 — Local Feedback (main thread). p99 budget: 500us.

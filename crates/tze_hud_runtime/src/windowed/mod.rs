@@ -39,12 +39,10 @@
 //!
 //! The winit event loop runs on the main thread (OS requirement on macOS).
 //! On each `WindowEvent::RedrawRequested`, the main thread:
-//! 1. Drains pending `PointerEvent` / `KeyboardEvent` from the input channel.
+//! 1. Handles pending pointer and keyboard input on this thread.
 //! 2. Checks `FrameReadySignal` (tokio::sync::watch) for a compositor-ready signal.
 //! 3. Calls `surface.get_current_texture()` then `surface_texture.present()` if
 //!    a frame is ready.
-//!
-//! Input events are forwarded to the compositor thread via `input_tx` (ring buffer).
 //!
 //! ## Input integration
 //!
@@ -52,10 +50,6 @@
 //! - `CursorMoved`  → `PointerEvent { kind: Move, x, y }`
 //! - `MouseInput`   → `PointerEvent { kind: Down | Up, x, y }`
 //! - `KeyboardInput`→ `KeyboardEvent { key_code, logical_key, modifiers, pressed }`
-//!
-//! Per spec §Stage 1 Input Drain (line 72): "MUST drain all pending OS input
-//! events, attach hardware timestamps, produce InputEvent records, enqueue to
-//! InputEvent channel."
 //!
 //! ## FrameReadySignal and surface.present()
 //!
@@ -2446,7 +2440,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             }
 
             // ── Pointer: cursor moved ──────────────────────────────────────
-            // Stage 1: Drain OS input event → InputEvent ring buffer.
             // Stage 2: Apply local feedback.
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(source) = wake_source {
