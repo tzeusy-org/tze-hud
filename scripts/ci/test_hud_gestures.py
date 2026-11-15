@@ -175,6 +175,23 @@ class WindowsGuardTests(unittest.TestCase):
                 native.gdi32.DeleteObject.assert_called_with(bitmap)
                 native.user32.ReleaseDC.assert_called_with(0, screen)
 
+    def test_a_refused_guard_keeps_earlier_outcomes(self) -> None:
+        run = mock.Mock(out=Path("unused"))
+        run.clear_publications.return_value = []
+        first = mock.Mock(__doc__="first scenario")
+
+        def second(_run):
+            raise g.Refused("the foreground window belongs to pid 7, not an owned process")
+
+        third = mock.Mock(__doc__="third scenario")
+        with mock.patch.dict(g.SCENARIOS, {"first": first, "second": second, "third": third}, clear=True), \
+                contextlib.redirect_stdout(io.StringIO()), self.assertRaises(g.Refused) as refused:
+            g.run_scenarios(run, ["first", "second", "third"])
+        outcomes = [(r["scenario"], r["outcome"]) for r in refused.exception.results]
+        self.assertEqual(outcomes, [("first", "PASS"), ("second", "FAIL")])
+        self.assertIn("not an owned process", refused.exception.results[1]["step"])
+        third.assert_not_called()
+
     def test_failed_diagnostic_keeps_original_result_and_next_scenario(self) -> None:
         cases = [(g.ScenarioFailed("original failure", {"marker": 1}),
                   "original failure", {"marker": 1})]
@@ -356,7 +373,9 @@ class WindowsGuardTests(unittest.TestCase):
                     self.assertEqual("tray" in selected, mode == "overlay")
                     # 25: hud-ljhku.5 added "stack-trim"; hud-ljhku.2 added "portal-reading".
                     self.assertEqual(len(selected), 2 if mode == "overlay" else 25)
-                    self.assertEqual(selected[-1] == "restart", mode == "fullscreen")
+                    # The real link handoff can foreground a browser late, so it
+                    # runs after the HUD-replacing restart, last of all.
+                    self.assertEqual(selected[-2:] == ["restart", "card-link"], mode == "fullscreen")
             for mode, scenario in (("fullscreen", "overlay-pointer"), ("overlay", "composer")):
                 with mock.patch.object(g, "WINDOWS", True), contextlib.redirect_stderr(io.StringIO()), \
                         self.assertRaises(SystemExit) as failure:

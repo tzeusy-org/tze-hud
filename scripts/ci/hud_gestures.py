@@ -1972,7 +1972,13 @@ def run_scenarios(run: Run, names: list[str]) -> list[dict]:
             result["outcome"] = "PASS"
         except ScenarioFailed as failure:
             result.update(outcome="FAIL", step=failure.step, last=failure.last)
-        except Refused:
+        except Refused as err:
+            # Keep every earlier outcome: the timeline and summary must not
+            # collapse to 0/0 because a later guard refused (hud-xq14t).
+            result.update(outcome="FAIL", step=f"refused: {err}", last=None,
+                          seconds=round(time.monotonic() - started, 2))
+            results.append(result)
+            err.results = results
             raise
         except subprocess.CalledProcessError as err:
             stderr = err.stderr or ""
@@ -2037,8 +2043,12 @@ def main(argv: list[str] | None = None) -> int:
     names = args.scenarios or [n for n in SCENARIOS
                                if (tier_w or n not in TIER_W_ONLY)
                                and ((n in overlay_names) == (args.window_mode == "overlay"))]
-    if "restart" in names:  # it replaces the HUD; keep it last
-        names = [n for n in names if n != "restart"] + ["restart"]
+    # "restart" replaces the HUD, and "card-link" hands a real link to the
+    # browser, which can take the foreground seconds later (Edge first-run UI
+    # covered the HUD for every later scenario, hud-xq14t). Run both last, the
+    # link handoff after everything else that needs the owned foreground.
+    trailing = [n for n in ("restart", "card-link") if n in names]
+    names = [n for n in names if n not in trailing] + trailing
     sha = git_sha()
     # The pid keeps parallel runs started in the same second apart.
     out = args.out or REPO / "test_results/gestures" / sha / f"{time.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}"
@@ -2061,6 +2071,7 @@ def main(argv: list[str] | None = None) -> int:
             failure = f"{unacked} un-acked hud_input item(s) at exit"
     except Refused as err:
         failure = f"refused: {err}"
+        results = getattr(err, "results", results)
     except Exception as err:  # noqa: BLE001
         failure = f"harness: {type(err).__name__}: {err}"
     finally:
