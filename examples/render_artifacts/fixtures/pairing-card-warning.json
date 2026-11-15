@@ -1,0 +1,6 @@
+{
+  "kind": "pairing",
+  "title": "Pair an agent",
+  "lines": ["482913", "http://192.0.2.10:9090/pair", "valid for 5 minutes", "Windows Firewall blocks remote agents: run tze_hud --allow-remote on this machine."],
+  "host": "hud-example"
+}

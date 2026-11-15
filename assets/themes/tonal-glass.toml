@@ -157,8 +157,6 @@
 "color.text.accent"                   = "#8AB4FF"   # primary
 "color.border.default"                = "#343B47"   # outline.variant
 "portal.divider.color"                = "#343B47"   # outline.variant
-"system_card.background"              = "#222833EB" # surface.container.high @ 0.92
-"system_card.accent.color"            = "#8AB4FF"   # primary
 "color.tile.background.text_markdown" = "#222833"   # surface.container.high (as notification cards)
 "color.tile.background.default"       = "#222833"   # surface.container.high
 "color.tile.background.static_image"  = "#1B2028"   # surface.container

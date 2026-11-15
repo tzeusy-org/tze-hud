@@ -807,51 +807,51 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Trailing mark on a notification HTTPS link button",
         default_value: "↗",
     },
-    // Runtime system card / toast (pairing code, update notices); never agent-visible.
+    // Owner-only pairing cards and toasts. Generic surfaces, corners and type are shared.
     CanonicalToken {
-        key: "system_card.background",
-        description: "System card and toast fill (RGBA hex)",
-        default_value: "#0C1426F2",
+        key: "size.system_card.width",
+        description: "System card and toast width (logical dp)",
+        default_value: "440",
     },
     CanonicalToken {
-        key: "system_card.accent.color",
-        description: "System card left accent bar color",
-        default_value: "#4A9EFF",
+        key: "space.system_card.padding",
+        description: "System card inner padding (logical dp)",
+        default_value: "28",
     },
     CanonicalToken {
-        key: "system_card.accent.width_px",
-        description: "System card left accent bar width (px)",
-        default_value: "4",
-    },
-    CanonicalToken {
-        key: "system_card.width_px",
-        description: "System card and toast width (px)",
-        default_value: "420",
-    },
-    CanonicalToken {
-        key: "system_card.padding_px",
-        description: "System card inner padding (px)",
+        key: "space.system_card.group_gap",
+        description: "System card group separation (logical dp)",
         default_value: "20",
     },
     CanonicalToken {
-        key: "system_card.toast.margin_px",
-        description: "Toast distance from the bottom display edge (px)",
-        default_value: "32",
+        key: "space.system_card.row_gap",
+        description: "System card metadata row separation (logical dp)",
+        default_value: "6",
     },
     CanonicalToken {
-        key: "system_card.title.font_size_px",
-        description: "System card title font size (px)",
-        default_value: "18",
+        key: "size.system_card.metadata_key",
+        description: "System card metadata key column (logical dp)",
+        default_value: "72",
     },
     CanonicalToken {
-        key: "system_card.body.font_size_px",
-        description: "System card body line font size (px)",
-        default_value: "14",
+        key: "opacity.system_card",
+        description: "System card and toast surface opacity",
+        default_value: "0.96",
     },
     CanonicalToken {
-        key: "system_card.code.font_size_px",
-        description: "Pairing code font size on the system card (px)",
-        default_value: "40",
+        key: "type.system_card.metadata.size",
+        description: "System card metadata key size (logical dp)",
+        default_value: "13",
+    },
+    CanonicalToken {
+        key: "type.system_card.metadata.line_height",
+        description: "System card metadata row line height (logical dp)",
+        default_value: "20",
+    },
+    CanonicalToken {
+        key: "type.system_card.metadata.weight",
+        description: "System card metadata key font weight",
+        default_value: "400",
     },
     // Semantic surfaces (tonal elevation, lowest -> highest; hud-h51u7)
     CanonicalToken {

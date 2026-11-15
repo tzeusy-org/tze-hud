@@ -540,6 +540,12 @@ source links when implementation changes the status.
   status/reason pill (`hud-h51u7.8.2`), preserving owner-only
   minimal/system/friendly markers and the model schema. Their Windows owner
   signoff remains in `hud-h51u7.8.6`.
+  Pairing cards and toasts use semantic tokens and rounded SDF surfaces in
+  source (`hud-h51u7.8.3`), with a monospace code well, owner-only host/URL
+  metadata and caution text for a blocked firewall verdict. Their layout is
+  measured with the renderer fonts and retained until content, tokens, fonts or
+  display size changes. Standalone cards remain display-only; Connect owns
+  pairing actions. Windows owner signoff remains in `hud-h51u7.8.6`.
   The remaining restyle/owner-signoff work
   in `hud-h51u7` is outstanding. The Windows workflow captures theme fixtures and reports
   pixel differences; that evidence is not an owner visual signoff.

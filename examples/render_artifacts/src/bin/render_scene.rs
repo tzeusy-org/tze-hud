@@ -12,7 +12,7 @@ use serde::Deserialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tze_hud_compositor::widget::{WidgetRenderPlan, rasterize_widget_render_plan};
-use tze_hud_compositor::{CapturedFrame, Compositor, FrameTarget};
+use tze_hud_compositor::{CapturedFrame, Compositor, FrameTarget, SystemCardKind, SystemCardModel};
 use tze_hud_config::loader::TzeHudConfig;
 use tze_hud_config::raw::{RawConfig, RawDesignTokens};
 use tze_hud_config::themes::{DEFAULT_THEME, selected_theme_name};
@@ -29,8 +29,8 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 const MAX_INPUT: usize = 1024 * 1024;
 const DEFAULT_SCENE_CAPTURE_MS: u64 = 250;
 const LOCAL_IDENTITY: &str = "offline-render-scene-not-a-paired-credential";
-const HELP: &str = "Usage: render-scene (--fixture FILE | --widget BUNDLE --params JSON) --output PNG\n\
-    [--config TOML (fixture mode)] [--theme tonal-glass|classic|blueprint] [--tokens TOML]\n\
+const HELP: &str = "Usage: render-scene (--fixture FILE | --system-card JSON | --widget BUNDLE --params JSON) --output PNG\n\
+    [--config TOML (scene/card mode)] [--theme tonal-glass|classic|blueprint] [--tokens TOML]\n\
     [--width PX] [--height PX]\n\
     [--capture-at-ms MS]\n\
 Scene defaults: 1920x1080, tonal-glass, fixture checkpoint at 250ms (explicit 0ms is the first frame).\n\
@@ -40,6 +40,7 @@ Output must not exist. JSON manifest is printed to stdout; compile time is separ
 #[derive(Clone, Debug)]
 struct Args {
     fixture: Option<PathBuf>,
+    system_card: Option<PathBuf>,
     widget: Option<PathBuf>,
     config: Option<PathBuf>,
     params: Value,
@@ -59,6 +60,7 @@ fn parse_args(values: impl IntoIterator<Item = String>) -> Result<Option<Args>> 
     let mut values = values.into_iter();
     let mut args = Args {
         fixture: None,
+        system_card: None,
         widget: None,
         config: None,
         params: json!({}),
@@ -82,6 +84,7 @@ fn parse_args(values: impl IntoIterator<Item = String>) -> Result<Option<Args>> 
             .ok_or_else(|| error(format!("{flag} needs a value")))?;
         match flag.as_str() {
             "--fixture" => args.fixture = Some(value.into()),
+            "--system-card" => args.system_card = Some(value.into()),
             "--widget" => args.widget = Some(value.into()),
             "--config" => args.config = Some(value.into()),
             "--params" => {
@@ -102,10 +105,21 @@ fn parse_args(values: impl IntoIterator<Item = String>) -> Result<Option<Args>> 
             _ => return Err(error(format!("unknown argument {flag}; use --help"))),
         }
     }
-    if args.fixture.is_some() == args.widget.is_some() {
-        return Err(error("choose exactly one of --fixture and --widget"));
+    if [
+        args.fixture.is_some(),
+        args.system_card.is_some(),
+        args.widget.is_some(),
+    ]
+    .into_iter()
+    .filter(|present| *present)
+    .count()
+        != 1
+    {
+        return Err(error(
+            "choose exactly one of --fixture, --system-card and --widget",
+        ));
     }
-    if args.fixture.is_some() && seen.contains("--params") {
+    if args.widget.is_none() && seen.contains("--params") {
         return Err(error("--params belongs to --widget"));
     }
     if args.widget.is_some() && !seen.contains("--capture-at-ms") {
@@ -116,8 +130,8 @@ fn parse_args(values: impl IntoIterator<Item = String>) -> Result<Option<Args>> 
 }
 
 fn validate_args(args: &Args) -> Result<()> {
-    if args.config.is_some() && args.fixture.is_none() {
-        return Err(error("--config belongs to --fixture"));
+    if args.config.is_some() && args.widget.is_some() {
+        return Err(error("--config belongs to --fixture or --system-card"));
     }
     if args.width == 0
         || args.height == 0
@@ -381,16 +395,50 @@ fn straight_alpha(mut frame: CapturedFrame, domain: AlphaDomain) -> Result<Captu
     Ok(frame)
 }
 
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CardFixture {
+    kind: String,
+    title: String,
+    lines: Vec<String>,
+    host: Option<String>,
+}
+
 async fn render_fixture(args: &Args, raw: &RawConfig) -> Result<(CapturedFrame, Value)> {
     let path = args
         .fixture
         .as_ref()
-        .ok_or_else(|| error("missing fixture"))?;
+        .or(args.system_card.as_ref())
+        .ok_or_else(|| error("missing scene/card fixture"))?;
     let bytes = bounded_read(path)?;
-    let messages: Vec<Message> = serde_json::from_slice(&bytes)?;
-    if messages.is_empty() || messages.len() > 1024 {
-        return Err(error("fixture must contain 1..1024 messages"));
-    }
+    // Direct owner-only model injection is offline only: no listener, pairing
+    // state, issued code, or agent surface is created by this authoring tool.
+    let (messages, card) = if args.system_card.is_some() {
+        let card: CardFixture = serde_json::from_slice(&bytes)?;
+        let kind = match card.kind.as_str() {
+            "pairing" => SystemCardKind::Pairing,
+            "toast" => SystemCardKind::Toast,
+            _ => return Err(error("system-card kind must be pairing or toast")),
+        };
+        if kind == SystemCardKind::Pairing && card.lines.is_empty() {
+            return Err(error("pairing fixture needs its synthetic code line"));
+        }
+        (
+            Vec::new(),
+            Some(SystemCardModel {
+                kind,
+                title: card.title,
+                lines: card.lines,
+                host: card.host,
+            }),
+        )
+    } else {
+        let messages: Vec<Message> = serde_json::from_slice(&bytes)?;
+        if messages.is_empty() || messages.len() > 1024 {
+            return Err(error("fixture must contain 1..1024 messages"));
+        }
+        (messages, None)
+    };
     let requests = messages
         .iter()
         .enumerate()
@@ -420,6 +468,7 @@ async fn render_fixture(args: &Args, raw: &RawConfig) -> Result<(CapturedFrame, 
     let startup = run_scene_startup(raw, config_parent, &mut scene, true);
     let server = server(scene, &startup.global_tokens);
     compositor.set_token_map(startup.global_tokens);
+    compositor.set_system_card(card);
     let renderer = compositor
         .widget_renderer_mut()
         .ok_or_else(|| error("widget renderer unavailable"))?;
@@ -456,7 +505,7 @@ async fn render_fixture(args: &Args, raw: &RawConfig) -> Result<(CapturedFrame, 
     )?;
     Ok((
         frame,
-        json!({"pipeline":"windowed build/capture","fixture":path,"fixture_sha256":hash(&bytes),"messages_applied":messages.len(),"checkpoint":"after all ordered messages; latest-wins per surface","capture_at_ms":args.capture_at_ms,"adapter":adapter}),
+        json!({"pipeline":"windowed build/capture","fixture":path,"fixture_sha256":hash(&bytes),"messages_applied":messages.len(),"owner_only_system_card":args.system_card.is_some(),"checkpoint":"after all ordered messages; latest-wins per surface","capture_at_ms":args.capture_at_ms,"adapter":adapter}),
     ))
 }
 
@@ -581,12 +630,12 @@ async fn execute(args: &Args) -> Result<Value> {
     validate_args(args)?;
     let start = Instant::now();
     let (raw, config_sha256) = raw_config(args)?;
-    let (frame, mut manifest) = if args.fixture.is_some() {
+    let (frame, mut manifest) = if args.widget.is_none() {
         render_fixture(args, &raw).await?
     } else {
         render_widget(args, &raw).await?
     };
-    let domain = if args.fixture.is_some() {
+    let domain = if args.widget.is_none() {
         AlphaDomain::LinearFramebuffer
     } else {
         AlphaDomain::SrgbBytes
@@ -624,7 +673,7 @@ async fn execute(args: &Args) -> Result<Value> {
     manifest["output"] = json!(args.output);
     manifest["png_sha256"] = json!(hash(&png));
     manifest["png_bytes"] = json!(png.len());
-    manifest["alpha"] = json!(if args.fixture.is_some() {
+    manifest["alpha"] = json!(if args.widget.is_none() {
         "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black"
     } else {
         "straight sRGB RGBA: unpremultiply tiny-skia sRGB bytes; alpha0 transparent black"
@@ -668,6 +717,7 @@ mod tests {
             .join("../../assets/widget_bundles/status-indicator");
         let args = Args {
             fixture: None,
+            system_card: None,
             widget: Some(bundle),
             config: None,
             params: json!({"status":"online","label":"PNG","reason":"offline authoring"}),
@@ -768,6 +818,40 @@ mod tests {
             parse_args(["--widget", "a", "--config", "b", "--output", "c"].map(str::to_owned))
                 .is_err()
         );
+        let card_path = dir.join("pairing.json");
+        for invalid in [
+            r#"{"kind":"unknown","title":"Pair","lines":["482913"]}"#,
+            r#"{"kind":"pairing","title":"Pair","lines":[]}"#,
+        ] {
+            fs::write(&card_path, invalid).unwrap();
+            let bad = Args {
+                fixture: None,
+                widget: None,
+                system_card: Some(card_path.clone()),
+                output: dir.join("bad-card.png"),
+                ..args.clone()
+            };
+            assert!(execute(&bad).await.is_err());
+            assert!(!bad.output.exists());
+        }
+        fs::write(&card_path,r#"{"kind":"pairing","title":"Pair an agent","lines":["482913","http://192.0.2.10:9090/pair","valid for 5 minutes"],"host":"hud-example"}"#).unwrap();
+        let card_args = Args {
+            fixture: None,
+            widget: None,
+            system_card: Some(card_path),
+            width: 800,
+            height: 600,
+            output: dir.join("pairing.png"),
+            ..args.clone()
+        };
+        let card_manifest = execute(&card_args)
+            .await
+            .expect("owner-only card uses actual windowed GPU capture");
+        assert_eq!(card_manifest["owner_only_system_card"], true);
+        assert_eq!(card_manifest["messages_applied"], 0);
+        let card_png = image::open(&card_args.output).unwrap().to_rgba8();
+        assert_eq!(card_png.dimensions(), (800, 600));
+        assert!(card_png.pixels().any(|p| p[3] > 0));
         // Owner-only initial parameters must enter through config startup,
         // while agent fixture publications keep their existing typed surface.
         let config_path = dir.join("owner.toml");

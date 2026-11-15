@@ -506,7 +506,7 @@ Python packages go in `scripts/requirements-dev.txt`, which CI also uses.
 Keep the checkout on the WSL filesystem (`~/...`), not
 `/mnt/c`, because cargo and git over the Windows mount are many times slower.
 
-### Offline scene and widget PNGs in WSL
+### Offline scene, owner card and widget PNGs in WSL
 
 `just render-scene` applies a user-test JSON batch to an isolated scene through
 the normal typed MCP handlers, then uses the compositor's **windowed frame
@@ -525,6 +525,15 @@ just render-widget --widget assets/widget_bundles/status-indicator \
   > test_results/render-scene/widget.json
 ```
 
+For owner-only system chrome, `--system-card examples/render_artifacts/fixtures/pairing-card.json`
+(or `pairing-card-warning.json` / `system-toast.json`) uses the same production
+startup and windowed GPU capture, directly setting the compositor model without
+starting pairing or publishing through an agent surface. The JSON contains
+`kind` (`pairing` or `toast`), `title`, `lines` and optional `host`; pairing lines
+are code, pairing URL, validity and then an actual firewall warning. Use only
+synthetic codes and example addresses/hosts. This is offline authoring evidence;
+it does not substitute for a current owner BEFORE screenshot or owner acceptance.
+
 Both recipes forward arguments to the single `render-scene` binary. Widget
 mode validates the bundle and typed parameters, then uses the existing retained
 `WidgetRenderPlan` primitive/resvg CPU rasterizer. `--theme` selects `tonal-glass`,
@@ -532,7 +541,7 @@ mode validates the bundle and typed parameters, then uses the existing retained
 table, with an explicit `--theme` taking precedence over its selector. Positive
 `--width`/`--height` are bounded to 8192 per axis and 16M pixels total.
 
-Fixture mode also accepts `--config FILE` to capture a local owner configuration,
+Scene and owner-card modes also accept `--config FILE` to capture a local owner configuration,
 including widget `initial_params`, through production scene startup. It validates
 the file (at most 1MiB), resolves bundle paths and fonts relative to its directory,
 and starts no configured listeners or agents. Without this flag the embedded

@@ -1,0 +1,6 @@
+{
+  "kind": "toast",
+  "title": "Updated to dev-example",
+  "lines": ["The HUD is ready."],
+  "host": null
+}

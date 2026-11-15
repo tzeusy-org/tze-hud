@@ -246,10 +246,19 @@ async fn test_system_card_drawn_above_safe_mode_overlay_and_content() {
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
     compositor.set_safe_mode_overlay(true);
+    let bare_build = compositor.build_windowed_frame(&mut scene, 800, 600);
+    let bare = compositor
+        .capture_windowed_frame(
+            &bare_build,
+            &primary_of(&bare_build),
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+        )
+        .expect("bare overlay capture");
     compositor.set_system_card(Some(SystemCardModel {
         kind: SystemCardKind::Pairing,
         title: "Pair an agent".into(),
         lines: vec!["482913".into()],
+        host: None,
     }));
 
     let build = compositor.build_windowed_frame(&mut scene, 800, 600);
@@ -261,15 +270,37 @@ async fn test_system_card_drawn_above_safe_mode_overlay_and_content() {
         )
         .expect("capture");
 
-    // Default card geometry: 420 wide, centred. Tall enough that the centre
-    // row is inside it; scan that card-wide band for pixels.
-    let (x0, x1) = (190usize, 610usize);
-    let (y0, y1) = (240usize, 360usize);
+    // Use the actual token/font-resolved geometry of the final SDF card.
+    let card_rect = compositor
+        .ensure_system_card_layout(800.0, 600.0)
+        .unwrap()
+        .shapes[0]
+        .rect;
+    let (x0, x1) = (
+        card_rect.x.ceil() as usize,
+        (card_rect.x + card_rect.w).floor() as usize,
+    );
+    let (y0, y1) = (
+        card_rect.y.ceil() as usize,
+        (card_rect.y + card_rect.h).floor() as usize,
+    );
     let px = |x: usize, y: usize| &frame.rgba[(y * 800 + x) * 4..(y * 800 + x) * 4 + 4];
-    // Backdrop (#0C1426, ~95% opaque): the red tile must not bleed through and
+    let bare_px = |x: usize, y: usize| &bare.rgba[(y * 800 + x) * 4..(y * 800 + x) * 4 + 4];
+    assert_eq!(
+        px(x0 + 1, y0 + 1),
+        bare_px(x0 + 1, y0 + 1),
+        "rounded corner exposes the underlying dimmed tile"
+    );
+    let center = (x0 + x1) / 2;
+    assert_ne!(
+        px(center, y0),
+        px(center, y0 + 4),
+        "SDF hairline is distinct from the inner fill"
+    );
+    // Semantic highest-container backdrop: the red tile must not bleed through and
     // the 70% black dim must not darken it to black. Sample inside the card,
-    // right of the text, below the accent bar.
-    let backdrop = px(x1 - 10, y0 + 12);
+    // right of the text, inside the rounded corner.
+    let backdrop = px(x1 - 28, y0 + 12);
     assert!(
         backdrop[0] < 60 && backdrop[2] > 15,
         "card backdrop must be drawn above tile and dim, got {backdrop:?}"

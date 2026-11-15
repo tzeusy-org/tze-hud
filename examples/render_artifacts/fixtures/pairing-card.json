@@ -1,0 +1,6 @@
+{
+  "kind": "pairing",
+  "title": "Pair an agent",
+  "lines": ["482913", "http://192.0.2.10:9090/pair", "valid for 5 minutes"],
+  "host": "hud-example"
+}

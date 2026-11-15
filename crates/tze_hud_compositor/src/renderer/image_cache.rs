@@ -433,6 +433,7 @@ impl super::Compositor {
     pub fn init_text_renderer(&mut self, format: wgpu::TextureFormat) {
         self.subtitle_layouts.borrow_mut().invalidate();
         self.status_bar_layouts.borrow_mut().invalidate();
+        self.system_card_layout = None;
         let mut rasterizer = TextRasterizer::with_font_config(
             &self.device,
             &self.queue,
@@ -504,6 +505,7 @@ impl super::Compositor {
         self.notification_layouts.borrow_mut().invalidate();
         self.subtitle_layouts.borrow_mut().invalidate();
         self.status_bar_layouts.borrow_mut().invalidate();
+        self.system_card_layout = None;
         true
     }
 
@@ -621,6 +623,7 @@ impl super::Compositor {
                 self.notification_layouts.borrow_mut().invalidate();
                 self.subtitle_layouts.borrow_mut().invalidate();
                 self.status_bar_layouts.borrow_mut().invalidate();
+                self.system_card_layout = None;
                 tracing::debug!(
                     resource_id = %crate::text::format_resource_id(&resource_id),
                     "load_font_bytes: new font loaded — truncation cache invalidated [hud-v2z6u]"

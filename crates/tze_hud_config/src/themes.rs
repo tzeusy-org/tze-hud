@@ -113,7 +113,7 @@ pub fn builtin_theme_names() -> impl Iterator<Item = &'static str> {
 ///
 /// Other keys are checked against [`crate::tokens::CANONICAL_TOKENS`] rather than
 /// the `[design_tokens]` key pattern, so a theme can also set the runtime-only
-/// `system_card.*` / `safe_mode.*` tokens that config cannot spell.
+/// `safe_mode.*` tokens that config cannot spell.
 pub fn parse_theme(src: &str) -> Result<DesignTokenMap, Vec<String>> {
     let map: DesignTokenMap = toml::from_str(src).map_err(|e| vec![e.to_string()])?;
     let mut errors: Vec<String> = map

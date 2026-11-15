@@ -460,6 +460,11 @@ impl Pairing {
             kind: tze_hud_compositor::SystemCardKind::Pairing,
             title: "Pair an agent".to_owned(),
             lines: pairing_lines(&issued.code, address.clone(), known.as_ref()),
+            // Named local identity only, no discovery or lookup in the render loop.
+            host: std::env::var("COMPUTERNAME")
+                .or_else(|_| std::env::var("HOSTNAME"))
+                .ok()
+                .filter(|host| !host.trim().is_empty()),
             // Wall-clock deadline, taken at the same moment as the monotonic
             // code expiry; they can drift apart only if the system clock is
             // adjusted within the 5 minutes. The text is a fixed validity, not
