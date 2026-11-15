@@ -16,7 +16,7 @@ input read/ACK or shared clear occurred.
 
 AFTER uses production scene startup and the actual windowed GPU build/capture
 on Mesa llvmpipe at clean source
-`a51c14db3bc64ec7fbe97ea7884989ef54e65d36`. Each frame uses that same fixture,
+`537537d7b3b602a433ea41e0c6d7600f21a27863`. Each frame uses that same fixture,
 1920×1080, monitor/UI scale 1, and a one-second capture checkpoint. The capture
 binary and compiled example source are hashed. Offline `--drag-hover-at 1500,100`
 resolves through the refreshed frame's hit-test snapshot and local hover mirror;
@@ -36,6 +36,13 @@ Portal frames retain their full header input band and draw a small pill within
 it; widgets retain their adopted no-handle/Layout placement contract. The pip
 resize mark remains separate. These notification captures do not depict portal
 or pip appearance.
+
+Independent review reproduced a rear-tile pill on overlapping body hover. The
+existing runtime parent now fails on that old query and passes front-to-back
+hover selection, while exposed rear bodies still resolve to their own pill and
+grip capture stays unchanged. Refreshed captures on the corrected source are
+byte-identical to the six previously inspected originals; their new manifest
+binds the corrected executable and clean source.
 
 Nine focused existing parents passed, including actual PNG readback, all three
 themes at 100/150/200% scale, token overrides, active drag feedback, quiet hover
