@@ -1000,27 +1000,37 @@ def scenario_stack_trim(run: Run) -> None:
             raise ScenarioFailed(f"hud_clear {key} refused", {"code": reply.get("code")})
 
 
+def regain_owned_foreground(run: Run, what: str, timeout_s: float) -> None:
+    """After a real link handoff, ShellExecute may have foregrounded a browser.
+    Regain only the owned HUD, without injecting; the normal guard still runs
+    before every later SendInput. Only link scenarios use this, never a
+    focus-preservation assertion."""
+    if run.injector != "sendinput":
+        return
+    if run.status().get("pid") != run.pid:
+        raise Refused(f"owned HUD changed: {what}")
+
+    def foreground():
+        if WIN.foreground_pid() != run.pid:
+            WIN.bring_to_front(run.pid)
+        return WIN.foreground_pid() == run.pid, WIN.foreground_pid()
+    wait_until(foreground, what=what, timeout_s=timeout_s, interval_s=0.02)
+
+
 def scenario_card_link(run: Run) -> None:
     """R14.2 S4/S5: one real link handoff; same action within 2s is refused, with no input."""
     key = "gesture-card-link"
     open_card(run, key, actions=[{"label": "Open test page", "url": "https://example.invalid/"}])
+    # portal-reading's handoffs run just before this one.
+    regain_owned_foreground(run, "owned HUD foreground before the first link press", 2.0)
     before = run.status()["link_launches"]
     run.point(f"zone:notification-area/{key}/0")
     first = time.monotonic()
     run.inj.click()
     run.expect("one accepted link launch", lambda s: s["link_launches"] == before + 1,
                timeout_s=1.0, interval_s=0.02)
-    # ShellExecute may have foregrounded a browser. Regain only the owned HUD,
-    # without injecting, and keep the normal guard on every subsequent SendInput.
-    if run.injector == "sendinput":
-        if run.status().get("pid") != run.pid:
-            raise Refused("owned HUD changed before the second link press")
-        def foreground():
-            if WIN.foreground_pid() != run.pid:
-                WIN.bring_to_front(run.pid)
-            return WIN.foreground_pid() == run.pid, WIN.foreground_pid()
-        wait_until(foreground, what="owned HUD foreground before second link press",
-                   timeout_s=max(0.01, first + 1.8 - time.monotonic()), interval_s=0.02)
+    regain_owned_foreground(run, "owned HUD foreground before second link press",
+                            max(0.01, first + 1.8 - time.monotonic()))
     run.inj.click()
     second = time.monotonic()
     if second - first >= 2.0:
@@ -1074,18 +1084,9 @@ def scenario_portal_reading(run: Run) -> None:
     run.expect("arrow over blank OUTPUT", on(s, lambda p: p["cursor"] == "arrow"))
 
     launches = run.status()["link_launches"]
-    run.glide(x, a)
-    run.click()
-    run.expect("a link click launches once (R2.1 S1)", lambda st: st["link_launches"] == launches + 1)
-    time.sleep(0.7)  # past the double-click interval
-    run.glide(x, b)
-    run.inj.click(repeat=2)
-    run.expect("a link double-click launches once and selects nothing (R2.1 S3)",
-               lambda st: st["link_launches"] == launches + 2 and portal_entry(st, s)["selection_chars"] == 0)
-    time.sleep(0.7)
     run.drag((x, a), (x + 120, a))
     run.expect("a press-drag on a link selects (R2.1 S2)", on(s, lambda p: p["selection_chars"] > 0))
-    run.observe_for("and launches nothing", lambda st: st["link_launches"] == launches + 2, 0.3)
+    run.observe_for("and launches nothing", lambda st: st["link_launches"] == launches, 0.3)
     run.key("Escape")
     run.expect("Esc clears the selection (R2.2 S4)", on(s, lambda p: p["selection_chars"] == 0))
 
@@ -1104,6 +1105,19 @@ def scenario_portal_reading(run: Run) -> None:
             raise ScenarioFailed("the clipboard holds the three selected lines", {"chars": len(text)})
     run.key("Escape")
     run.expect("selection cleared", on(s, lambda p: p["selection_chars"] == 0))
+
+    # Real link handoffs last: the browser can take the foreground late
+    # (hud-xq14t), so nothing but state reads follows a launch.
+    time.sleep(0.7)  # past the double-click interval
+    run.glide(x, a)
+    run.click()
+    run.expect("a link click launches once (R2.1 S1)", lambda st: st["link_launches"] == launches + 1)
+    time.sleep(0.7)
+    regain_owned_foreground(run, "owned HUD foreground before the link double-click", 1.0)
+    run.glide(x, b)
+    run.inj.click(repeat=2)
+    run.expect("a link double-click launches once and selects nothing (R2.1 S3)",
+               lambda st: st["link_launches"] == launches + 2 and portal_entry(st, s)["selection_chars"] == 0)
     if items := run.inputs():
         raise ScenarioFailed("OUTPUT reading creates no hud_input item", {"items": items})
 
@@ -1952,6 +1966,9 @@ SCENARIOS: dict[str, Callable[[Run], None]] = {
 # ── Runner ───────────────────────────────────────────────────────────────────
 
 
+LINK_SCENARIOS = ("portal-reading", "card-link")  # each launches a real browser handoff
+
+
 def git_sha() -> str:
     try:
         return subprocess.run(["git", "rev-parse", "--short=12", "HEAD"], cwd=REPO, capture_output=True,
@@ -2043,11 +2060,11 @@ def main(argv: list[str] | None = None) -> int:
     names = args.scenarios or [n for n in SCENARIOS
                                if (tier_w or n not in TIER_W_ONLY)
                                and ((n in overlay_names) == (args.window_mode == "overlay"))]
-    # "restart" replaces the HUD, and "card-link" hands a real link to the
-    # browser, which can take the foreground seconds later (Edge first-run UI
-    # covered the HUD for every later scenario, hud-xq14t). Run both last, the
-    # link handoff after everything else that needs the owned foreground.
-    trailing = [n for n in ("restart", "card-link") if n in names]
+    # Real link handoffs ("portal-reading", "card-link") can let a browser take
+    # the foreground seconds later (Edge first-run UI covered the HUD for every
+    # later scenario, hud-xq14t), so they run after everything else that
+    # injects input. "restart" replaces the HUD and only uses MCP; it stays last.
+    trailing = [n for n in LINK_SCENARIOS + ("restart",) if n in names]
     names = [n for n in names if n not in trailing] + trailing
     sha = git_sha()
     # The pid keeps parallel runs started in the same second apart.

@@ -373,9 +373,10 @@ class WindowsGuardTests(unittest.TestCase):
                     self.assertEqual("tray" in selected, mode == "overlay")
                     # 25: hud-ljhku.5 added "stack-trim"; hud-ljhku.2 added "portal-reading".
                     self.assertEqual(len(selected), 2 if mode == "overlay" else 25)
-                    # The real link handoff can foreground a browser late, so it
-                    # runs after the HUD-replacing restart, last of all.
-                    self.assertEqual(selected[-2:] == ["restart", "card-link"], mode == "fullscreen")
+                    # Real link handoffs can foreground a browser late, so they run
+                    # after every other injecting scenario; MCP-only restart stays last.
+                    self.assertEqual(selected[-3:] == ["portal-reading", "card-link", "restart"],
+                                     mode == "fullscreen")
             for mode, scenario in (("fullscreen", "overlay-pointer"), ("overlay", "composer")):
                 with mock.patch.object(g, "WINDOWS", True), contextlib.redirect_stderr(io.StringIO()), \
                         self.assertRaises(SystemExit) as failure:
