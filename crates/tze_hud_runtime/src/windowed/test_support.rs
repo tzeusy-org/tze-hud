@@ -1,5 +1,5 @@
 use super::{WindowedConfig, WindowedRuntimeState, WinitApp};
-use crate::channels::{INPUT_EVENT_CAPACITY, frame_ready_channel};
+use crate::channels::frame_ready_channel;
 use crate::pipeline::FramePipeline;
 use crate::runtime_context::RuntimeContext;
 use crate::threads::ShutdownToken;
@@ -70,8 +70,6 @@ pub(super) fn make_shared_state() -> Arc<TokioMutex<SharedState>> {
         safe_mode_atomic: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
         token_store: TokenStore::new(),
-        input_capture_tx: None,
-        input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
     }))
 }
 
@@ -236,7 +234,6 @@ pub(super) fn make_windowed_keyboard_test_app(
     let portals =
         tze_hud_mcp::PortalHandle::new(tze_hud_portal::hub::PortalHub::default(), scene.clock());
     let shared_state = make_shared_state();
-    let (input_capture_tx, input_capture_rx) = tokio::sync::mpsc::unbounded_channel();
     let (frame_ready_tx, frame_ready_rx) = frame_ready_channel();
     let input_event_tx = tze_hud_protocol::session_server::InputEventSender::new(8);
     let input_event_rx = input_event_tx.subscribe_all();
@@ -281,9 +278,6 @@ pub(super) fn make_windowed_keyboard_test_app(
         )),
         pairing: None,
         control_panel: None,
-        input_ring: Arc::new(std::sync::Mutex::new(
-            std::collections::VecDeque::with_capacity(INPUT_EVENT_CAPACITY),
-        )),
         pending_input_latency: Arc::new(StdMutex::new(VecDeque::new())),
         frame_ready_rx,
         deferred_present: false,
@@ -293,8 +287,6 @@ pub(super) fn make_windowed_keyboard_test_app(
         compositor: None,
         window_surface: None,
         input_processor,
-        input_capture_rx,
-        pending_input_capture_commands: std::collections::VecDeque::new(),
         focus_manager,
         keyboard_processor: KeyboardProcessor::new(),
         telemetry: TelemetryCollector::new(),
@@ -367,8 +359,6 @@ pub(super) fn make_windowed_keyboard_test_app(
         pending_pointer_move: false,
         interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
     };
-
-    drop(input_capture_tx);
 
     (WinitApp { state }, input_event_rx)
 }

@@ -22,12 +22,11 @@ use tze_hud_telemetry::{
     QuiescentEfficiencyValidation, QuiescentMeasurementStatus,
 };
 
-use crate::channels::{InputEvent, InputEventKind};
 use crate::window::WindowMode;
 
 use super::input_dispatch::{
     dispatch_capture_released_event, dispatch_focus_event, dispatch_pointer_event,
-    dispatch_scroll_offset_event, enqueue_input, nanoseconds_since_start,
+    dispatch_scroll_offset_event,
 };
 use super::portal::{
     DragRelease, DragTarget, PortalResizePointerOutcome, PrimaryDragGesture,
@@ -2293,71 +2292,6 @@ impl WinitApp {
         }
     }
 
-    pub(super) fn drain_input_capture_commands(&mut self) {
-        while let Ok(command) = self.state.input_capture_rx.try_recv() {
-            self.state.pending_input_capture_commands.push_back(command);
-        }
-
-        while let Some(command) = self.state.pending_input_capture_commands.pop_front() {
-            let Ok(state) = self.state.shared_state.try_lock() else {
-                tracing::warn!("input capture command deferred: shared_state lock busy");
-                self.state
-                    .pending_input_capture_commands
-                    .push_front(command);
-                break;
-            };
-            let Ok(scene) = state.scene.try_lock() else {
-                tracing::warn!("input capture command deferred: scene lock busy");
-                self.state
-                    .pending_input_capture_commands
-                    .push_front(command);
-                break;
-            };
-
-            match command {
-                tze_hud_protocol::session::InputCaptureCommand::Request {
-                    tile_id,
-                    node_id,
-                    device_id,
-                    release_on_up,
-                } => {
-                    let req = tze_hud_input::CaptureRequest {
-                        tile_id,
-                        node_id,
-                        device_id,
-                    };
-                    if let Some(dispatch) =
-                        self.state
-                            .input_processor
-                            .request_capture(&req, &scene, release_on_up)
-                    {
-                        tracing::debug!(
-                            tile_id = ?tile_id,
-                            node_id = ?node_id,
-                            device_id,
-                            kind = ?dispatch.kind,
-                            "session input capture request applied"
-                        );
-                    } else {
-                        tracing::warn!(
-                            tile_id = ?tile_id,
-                            node_id = ?node_id,
-                            device_id,
-                            "session input capture request ignored: target not found"
-                        );
-                    }
-                }
-                tze_hud_protocol::session::InputCaptureCommand::Release { device_id } => {
-                    let req = tze_hud_input::CaptureReleaseRequest { device_id };
-                    if let Some(dispatch) = self.state.input_processor.release_capture(&req, &scene)
-                    {
-                        dispatch_capture_released_event(&self.state.input_event_tx, dispatch);
-                    }
-                }
-            }
-        }
-    }
-
     /// The scene committed this outcome; no shared-state or scene guard survives.
     pub(super) fn deliver_notification_activation(
         &mut self,
@@ -2721,22 +2655,13 @@ impl WinitApp {
         Some((frac * draft_text_len.unwrap_or(0) as f64).round() as usize)
     }
 
-    /// Enqueue a pointer event into the input ring buffer.
-    ///
-    /// Maps a `PointerEventKind` to the corresponding `InputEventKind` variant
-    /// understood by the channel topology and compositor pipeline.
+    /// Handle one pointer event: local feedback, drags and agent dispatch.
     ///
     /// In overlay mode, dynamically toggles cursor hittest based on whether the
     /// cursor is inside any active hit-region (spec §Overlay click-through, line 181):
     /// - Inside a hit-region → `set_cursor_hittest(true)` (window captures events).
     /// - Outside all hit-regions → `set_cursor_hittest(false)` (events pass through).
     pub(super) fn enqueue_pointer_event(&mut self, kind: PointerEventKind) {
-        self.handle_pointer_event(kind, true);
-    }
-
-    /// `record` is false only when replaying a retained Move (hud-65gpz): the
-    /// input ring already holds the original event.
-    fn handle_pointer_event(&mut self, kind: PointerEventKind, record: bool) {
         if kind == PointerEventKind::Down && self.state.answer_keyboard.focus.take().is_some() {
             self.state.input_processor.chrome_feedback_cancel_pending = true;
         }
@@ -2789,19 +2714,6 @@ impl WinitApp {
         self.update_overlay_cursor_hittest();
 
         self.tick_widget_hover_tracking();
-
-        let channel_kind = match kind {
-            PointerEventKind::Move => InputEventKind::PointerMove { x, y },
-            PointerEventKind::Down => InputEventKind::PointerPress { x, y, button: 0 },
-            PointerEventKind::Up => InputEventKind::PointerRelease { x, y, button: 0 },
-        };
-        let input_event = InputEvent {
-            timestamp_ns: nanoseconds_since_start(),
-            kind: channel_kind,
-        };
-        if record {
-            enqueue_input(&self.state.input_ring, input_event);
-        }
 
         // Also feed the InputProcessor for local feedback (Stage 2).
         // This happens synchronously on the main thread per spec §Stage 2.
@@ -3529,7 +3441,7 @@ impl WinitApp {
         let scrolled = self.apply_retained_scroll().unwrap_or(false);
         let mut moved = false;
         if self.state.pending_pointer_move {
-            self.handle_pointer_event(PointerEventKind::Move, false);
+            self.enqueue_pointer_event(PointerEventKind::Move);
             moved = !self.state.pending_pointer_move;
         }
         scrolled || moved

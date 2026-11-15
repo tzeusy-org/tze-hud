@@ -14,21 +14,6 @@ use tze_hud_scene::graph::SceneGraph;
 use crate::proto::session::ServerMessage;
 use crate::token::TokenStore;
 
-/// Runtime input-capture command for the local input processor owned by the
-/// compositor/window thread.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum InputCaptureCommand {
-    Request {
-        tile_id: SceneId,
-        node_id: SceneId,
-        device_id: u32,
-        release_on_up: bool,
-    },
-    Release {
-        device_id: u32,
-    },
-}
-
 /// Shared state between the gRPC server and the compositor.
 ///
 /// # Scene coherence
@@ -93,14 +78,6 @@ pub struct SharedState {
     /// In-memory resume token store (RFC 0005 §6.1).
     /// Cleared on process restart; never persisted.
     pub token_store: TokenStore,
-    /// Optional bridge for session-plane pointer capture requests. Windowed
-    /// runtime installs the receiving end; the gRPC session plane no longer
-    /// sends commands (the capture requests were removed in T5 S6).
-    pub input_capture_tx: Option<mpsc::UnboundedSender<InputCaptureCommand>>,
-    /// Main-loop-only wake paired with `input_capture_tx`. Successful command
-    /// enqueue uses this to wake the sole windowed consumer without creating a
-    /// speculative compositor generation.
-    pub input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier,
 }
 
 impl SharedState {

@@ -371,7 +371,6 @@ impl WinitApp {
         let has_other_work = self.state.shutdown.is_triggered()
             || self.state.left_button_down
             || self.state.quiescent_efficiency.is_some()
-            || !self.state.pending_input_capture_commands.is_empty()
             || !self.state.pending_keyboard_events.is_empty()
             || self.state.wake.has_unfinished_main_work();
         if has_other_work || previous != Some(signature) {

@@ -249,8 +249,7 @@ enum ShellShortcutOutcome {
 ///
 /// Stored in `WindowedRuntimeState::pending_keyboard_events` and retried once
 /// per `about_to_wait` iteration via `drain_pending_keyboard_events`, matching
-/// the `pending_input_capture_commands` / `drain_portal_projection` sibling
-/// patterns in the same file.
+/// the `drain_portal_projection` sibling pattern.
 #[derive(Debug)]
 pub(super) enum PendingKeyboardEvent {
     KeyDown(RawKeyDownEvent),
@@ -2131,7 +2130,7 @@ impl WinitApp {
     /// because the active-tab mirror was momentarily busy (hud-2fz34).
     ///
     /// Called from `about_to_wait` once per event-loop iteration, matching the
-    /// `drain_input_capture_commands` sibling pattern.  Each event is popped
+    /// `drain_portal_projection` sibling pattern.  Each event is popped
     /// from the front of `pending_keyboard_events` and routed through the
     /// **inner** dispatch fns (`dispatch_*_event_inner`), NOT the public
     /// Stage-1 entry.

@@ -39,12 +39,10 @@
 //!
 //! The winit event loop runs on the main thread (OS requirement on macOS).
 //! On each `WindowEvent::RedrawRequested`, the main thread:
-//! 1. Drains pending `PointerEvent` / `KeyboardEvent` from the input channel.
+//! 1. Handles pending pointer and keyboard input on this thread.
 //! 2. Checks `FrameReadySignal` (tokio::sync::watch) for a compositor-ready signal.
 //! 3. Calls `surface.get_current_texture()` then `surface_texture.present()` if
 //!    a frame is ready.
-//!
-//! Input events are forwarded to the compositor thread via `input_tx` (ring buffer).
 //!
 //! ## Input integration
 //!
@@ -52,10 +50,6 @@
 //! - `CursorMoved`  → `PointerEvent { kind: Move, x, y }`
 //! - `MouseInput`   → `PointerEvent { kind: Down | Up, x, y }`
 //! - `KeyboardInput`→ `KeyboardEvent { key_code, logical_key, modifiers, pressed }`
-//!
-//! Per spec §Stage 1 Input Drain (line 72): "MUST drain all pending OS input
-//! events, attach hardware timestamps, produce InputEvent records, enqueue to
-//! InputEvent channel."
 //!
 //! ## FrameReadySignal and surface.present()
 //!
@@ -99,10 +93,7 @@ use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::ZoneContent;
 use tze_hud_telemetry::TelemetryCollector;
 
-use crate::channels::{
-    FrameReadyRx, FrameReadyTx, INPUT_EVENT_CAPACITY, InputEvent, InputEventKind,
-    frame_ready_channel,
-};
+use crate::channels::{FrameReadyRx, FrameReadyTx, frame_ready_channel};
 use crate::element_store::bootstrap_scene_element_store;
 use crate::mcp::{McpServerConfig, start_mcp_http_server_with_render_wake};
 use crate::pipeline::FramePipeline;
@@ -225,9 +216,8 @@ pub use self::config::{Relaunch, WindowedConfig, WindowedQuiescentEfficiencyConf
 pub use self::event_loop_harness::HeadlessEventLoopHarness;
 use self::hittest::{refresh_interaction_hit_regions_after_render, sync_scene_display_area};
 use self::input_dispatch::{
-    enqueue_input, key_press_text, logical_key_to_str, nanoseconds_since_start,
-    normalize_mouse_wheel_delta, physical_key_to_key_code_str, physical_key_to_u32,
-    winit_mods_to_keyboard_modifiers,
+    key_press_text, logical_key_to_str, nanoseconds_since_start, normalize_mouse_wheel_delta,
+    physical_key_to_key_code_str, winit_mods_to_keyboard_modifiers,
 };
 use self::keyboard::PendingKeyboardEvent;
 use self::lifecycle::{
@@ -346,8 +336,6 @@ struct WindowedRuntimeState {
     /// Main-thread bookkeeping for the open panel: focus handoff, the
     /// pressed and hovered targets.
     panel_input: PanelInputState,
-    /// Input channel (ring buffer) — main thread writes, compositor thread reads.
-    input_ring: Arc<std::sync::Mutex<std::collections::VecDeque<InputEvent>>>,
     /// Pending Stage 1/2 input latency samples for the next compositor frame.
     pending_input_latency: PendingInputLatencySamples,
     /// Frame-ready signal: compositor → main thread.
@@ -375,11 +363,6 @@ struct WindowedRuntimeState {
     window_surface: Option<Arc<WindowSurface>>,
     /// Input processor for local feedback.
     input_processor: InputProcessor,
-    /// Session-plane pointer capture commands delivered from the gRPC server.
-    input_capture_rx:
-        tokio::sync::mpsc::UnboundedReceiver<tze_hud_protocol::session::InputCaptureCommand>,
-    pending_input_capture_commands:
-        std::collections::VecDeque<tze_hud_protocol::session::InputCaptureCommand>,
     /// Focus manager — tracks which node / tile has keyboard focus per tab.
     ///
     /// Updated on every pointer-down via `InputProcessor::process_with_focus`.
@@ -638,12 +621,11 @@ struct WindowedRuntimeState {
     /// `try_lock`, the raw event is pushed here rather than blocking the
     /// event-loop thread.  `drain_pending_keyboard_events` retries from
     /// `about_to_wait` once per iteration, matching the sibling deferral
-    /// patterns in `drain_portal_projection` and `drain_input_capture_commands`.
+    /// pattern in `drain_portal_projection`.
     ///
     /// In normal operation the queue is empty; it only accumulates under the
     /// brief lock contention window caused by concurrent gRPC scene mutations.
-    /// The queue is unbounded in the same sense as
-    /// `pending_input_capture_commands` — bounded in practice by the number of
+    /// The queue is unbounded but bounded in practice by the number of
     /// keystrokes that arrive during a single lock-contention window.
     pending_keyboard_events: VecDeque<PendingKeyboardEvent>,
     /// Wheel input that found the scene lock busy (hud-65gpz). Applied in
@@ -1053,7 +1035,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         }
         self.sync_zone_assignments();
         self.refresh_cursor_position_from_os();
-        self.drain_input_capture_commands();
         self.synthesize_left_release_if_physically_up();
         self.refresh_widget_hover_tracking();
         self.update_overlay_cursor_hittest();
@@ -1163,7 +1144,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             event_loop.listen_device_events(listen);
         }
         let has_deferred_scene_work = portal_drain.is_deferred()
-            || !self.state.pending_input_capture_commands.is_empty()
             || !self.state.pending_keyboard_events.is_empty()
             || !self.state.pending_scroll.is_empty()
             || self.state.pending_pointer_move
@@ -2460,7 +2440,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             }
 
             // ── Pointer: cursor moved ──────────────────────────────────────
-            // Stage 1: Drain OS input event → InputEvent ring buffer.
             // Stage 2: Apply local feedback.
             WindowEvent::CursorMoved { position, .. } => {
                 if let Some(source) = wake_source {
@@ -2549,8 +2528,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             }
 
             // ── Keyboard ──────────────────────────────────────────────────
-            // Stage 1: Drain keyboard events into the input ring buffer.
-            // Map winit keyboard events to InputEventKind::KeyPress / KeyRelease.
             WindowEvent::KeyboardInput { event, .. } => {
                 // ── IME: keys it handles are not ours (hud-ljhku.13) ────────
                 // Windows reports them with logical key `Process`, press and
@@ -2578,18 +2555,6 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                         self.state.wake.mark_main_work_pending(source);
                     }
                 }
-
-                // Extract a u32 key code from the physical key for the channel type.
-                let key_u32 = physical_key_to_u32(&event.physical_key);
-                let input_event = InputEvent {
-                    timestamp_ns: nanoseconds_since_start(),
-                    kind: if event.state == ElementState::Pressed {
-                        InputEventKind::KeyPress { key: key_u32 }
-                    } else {
-                        InputEventKind::KeyRelease { key: key_u32 }
-                    },
-                };
-                enqueue_input(&self.state.input_ring, input_event);
 
                 // ── Keyboard → KeyboardProcessor drain (Stage 2) ─────────────
                 // Translate the raw OS event to a typed KeyboardDispatch using the
@@ -2895,7 +2860,6 @@ impl WindowedRuntime {
             )
         };
         let sessions = tze_hud_protocol::session::SessionRegistry::new();
-        let (input_capture_tx, input_capture_rx) = tokio::sync::mpsc::unbounded_channel();
         let safe_mode_atomic = Arc::new(std::sync::atomic::AtomicBool::new(false));
         // Lock-free mirror of `scene.active_tab` for the winit event thread's
         // keyboard-dispatch path (hud-dwcr7).  Held both by `SharedState` (the
@@ -2960,14 +2924,9 @@ impl WindowedRuntime {
             safe_mode_atomic: Arc::clone(&safe_mode_atomic),
             active_tab_mirror: Arc::clone(&active_tab_mirror),
             token_store: TokenStore::new(),
-            input_capture_tx: Some(input_capture_tx),
-            input_capture_wake: wake.main_work_notifier(),
         }));
 
         let (frame_ready_tx, frame_ready_rx) = frame_ready_channel();
-        let input_ring = Arc::new(std::sync::Mutex::new(
-            std::collections::VecDeque::with_capacity(INPUT_EVENT_CAPACITY),
-        ));
         let pending_input_latency = Arc::new(StdMutex::new(VecDeque::new()));
         let shutdown = ShutdownToken::new();
         // One way to stop this instance cleanly: the quit event
@@ -3373,7 +3332,6 @@ impl WindowedRuntime {
             chrome_state,
             system_card,
             live,
-            input_ring,
             pending_input_latency,
             frame_ready_rx,
             deferred_present: false,
@@ -3383,8 +3341,6 @@ impl WindowedRuntime {
             compositor: None,
             window_surface: None,
             input_processor: input_processor_with_system_gestures(),
-            input_capture_rx,
-            pending_input_capture_commands: std::collections::VecDeque::new(),
             focus_manager: FocusManager::new(),
             keyboard_processor: KeyboardProcessor::new(),
             telemetry: TelemetryCollector::new(),
