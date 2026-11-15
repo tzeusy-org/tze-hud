@@ -381,11 +381,11 @@ fn populate_notification_hit_regions_in(
         );
         let layout = Compositor::zone_slot_layout_with_tokens(
             &zone_tokens,
+            scene,
             zone_name,
             publishes,
             policy,
-            zh,
-            zw,
+            (zw, zh),
             layouts,
         );
 

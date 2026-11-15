@@ -755,6 +755,7 @@ async fn test_two_line_notification_title_produces_two_text_items() {
                     let records = scene.zone_registry.active_for_zone("notification-area");
                     let policy = &scene.zone_registry.zones["notification-area"].rendering_policy;
                     let layout = compositor.zone_slot_layout(
+                        &scene,
                         "notification-area",
                         records,
                         policy,
@@ -937,6 +938,7 @@ async fn test_two_line_notifications_stack_correctly() {
         "all 4 TextItems must have distinct pixel_y values, got: {ys:?}"
     );
     let before = compositor.zone_slot_layout(
+        &scene,
         "notification-area",
         scene.zone_registry.active_for_zone("notification-area"),
         &scene.zone_registry.zones["notification-area"].rendering_policy,
@@ -965,6 +967,7 @@ async fn test_two_line_notifications_stack_correctly() {
         .collect();
     }
     let after = compositor.zone_slot_layout(
+        &scene,
         "notification-area",
         scene.zone_registry.active_for_zone("notification-area"),
         &scene.zone_registry.zones["notification-area"].rendering_policy,

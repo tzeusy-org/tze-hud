@@ -1213,6 +1213,7 @@ async fn drag_visual_feedback_applied_during_active_drag() {
                 1080.0,
             );
             let slots = compositor.zone_slot_layout(
+                &scene,
                 "notif",
                 &scene.zone_registry.active_publishes["notif"],
                 &zone.rendering_policy,
@@ -1253,6 +1254,7 @@ async fn drag_visual_feedback_applied_during_active_drag() {
         let handle = handles.iter().find(|h| h.element_id == zone_id).unwrap();
         let zone = &scene.zone_registry.zones["notif"];
         let slots = compositor.zone_slot_layout(
+            &scene,
             "notif",
             &scene.zone_registry.active_publishes["notif"],
             &zone.rendering_policy,

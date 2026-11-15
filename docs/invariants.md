@@ -66,7 +66,12 @@ that same FIFO. Accepted callback/human-X wins before local removal; replacement
 expiry, stack trim and clear latch only the first unanswered terminal reason.
 A full notification stack trims its oldest card that is not an unanswered
 question, on both admission planes; only an all-question stack drops its oldest
-question. A trimmed, unanswered, unexpired card queues exactly one `displaced`
+question. The shared regular-stack layout presents unanswered questions first,
+newest-first within each group, using the same scene predicate as admission.
+Drawing, hit regions, keyboard order and operator geometry use those same slots;
+answered, expired and URL-only cards have no question priority. A fixed-height
+zone may omit later cards, but cannot put a retained question behind status cards.
+Alert banners retain severity ordering. A trimmed, unanswered, unexpired card queues exactly one `displaced`
 FIFO item for its own publisher, unless an armed wait on that exact card takes
 the displacement instead; expiry, clear and same-key replacement queue nothing.
 Receipts never grow at publish rate: one per key and at most

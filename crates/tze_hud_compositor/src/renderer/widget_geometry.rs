@@ -337,6 +337,7 @@ impl Compositor {
                         // Draw the occupied envelope from the very same admitted
                         // slots as the card/text/control passes, including gaps.
                         let slots = self.zone_slot_layout(
+                            scene,
                             &zone.name,
                             publishes,
                             &zone.rendering_policy,

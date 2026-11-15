@@ -136,6 +136,8 @@ Sessions sharing a pairing need one coordinated consumer/demultiplexer or
 separate identities. Do not auto-ACK another session's records. `wait_ms` defaults
 to 0 and caps at 30000; a CLI/network timeout does not establish a user's answer.
 
+Unanswered questions appear before other cards in a regular notification stack;
+newest-first order is retained within each group. Answered cards lose that priority.
 A full notification stack keeps unanswered questions and trims the oldest
 other card. When your trimmed card was never answered, `hud_input` returns one
 `kind:"displaced"` item (with `key` if keyed) to you alone; republish only if it

@@ -460,7 +460,7 @@ impl super::Compositor {
                 ContentionPolicy::Stack { .. } => {
                     // Slot geometry is computed once by zone_slot_layout and shared
                     // with collect_text_items / render_zone_content (hud-qlerb).
-                    let layout = self.zone_slot_layout(zone_name, publishes, policy, h, w);
+                    let layout = self.zone_slot_layout(scene, zone_name, publishes, policy, h, w);
                     let style = NotificationStyle::for_zone(zone_name, zone_tokens, policy);
                     for (pub_idx, slot) in layout.iter_visible(Rect::new(x, y, w, h)) {
                         let record = &publishes[pub_idx];
