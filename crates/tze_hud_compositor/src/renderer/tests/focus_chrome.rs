@@ -512,8 +512,11 @@ async fn system_card_emits_draw_cmds_only_while_set() {
         "rounded backdrop and code well"
     );
     let texts = compositor.system_card_text_items(800.0, 600.0);
-    assert_eq!(texts.len(), 3, "title, explanation and code");
-    assert_eq!(&*texts[2].text, "482913");
+    assert_eq!(texts.len(), 8, "title, explanation and six grouped digits");
+    assert_eq!(
+        texts[2..].iter().map(|t| &*t.text).collect::<String>(),
+        "482913"
+    );
 
     assert!(compositor.set_system_card(None));
     assert!(compositor.system_card_shapes(800.0, 600.0).is_empty());

@@ -463,7 +463,8 @@ agents until one is paired.
   address refreshes an already displayed, still-valid startup/`--pair` card,
   preserving its code and original expiration. The owner-only card and update
   toasts use semantic surface/type/outline tokens and rounded SDF geometry.
-  The code uses the monospace display role, with pairing URL and optional local
+  The code uses the monospace display role with tracked three-digit groups
+  (the underlying six-digit value is unchanged), with pairing URL and optional local
   host metadata below it; an actual blocked firewall verdict adds caution text.
   The complete message fits within the display, including at increased UI scale.
   The standalone card has no input controls: regeneration and closing remain in

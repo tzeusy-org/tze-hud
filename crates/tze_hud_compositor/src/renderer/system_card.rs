@@ -189,13 +189,40 @@ pub(super) fn system_card_layout(
                 let inset = dp("space.l").min(inner / 2.0);
                 let measure = (inner - inset * 2.0).max(f32::EPSILON);
                 // The code must remain on one line, even on a narrow display.
-                let natural = crate::text::single_line_width(
-                    fonts,
-                    digits,
-                    code.size,
-                    code.family,
-                    code.weight,
-                );
+                let grouped = digits.len() == 6 && digits.bytes().all(|c| c.is_ascii_digit());
+                let tracking = code.size * number(tokens, "type.code.display.tracking_em");
+                let advances: Vec<_> = if grouped {
+                    digits
+                        .chars()
+                        .map(|digit| {
+                            crate::text::single_line_width(
+                                fonts,
+                                &digit.to_string(),
+                                code.size,
+                                code.family,
+                                code.weight,
+                            )
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
+                let group_space = if grouped {
+                    crate::text::single_line_width(fonts, " ", code.size, code.family, code.weight)
+                } else {
+                    0.0
+                };
+                let natural = if grouped {
+                    advances.iter().sum::<f32>() + tracking * 6.0 + group_space
+                } else {
+                    crate::text::single_line_width(
+                        fonts,
+                        digits,
+                        code.size,
+                        code.family,
+                        code.weight,
+                    )
+                };
                 let fit = (measure / natural.max(f32::EPSILON)).min(1.0);
                 code.size *= fit;
                 code.line *= fit;
@@ -212,17 +239,41 @@ pub(super) fn system_card_layout(
                     border: None,
                     clip: None,
                 });
-                texts.push(code.item(
-                    digits,
-                    PanelRect {
-                        x: padding + inset,
-                        y: y + inset,
-                        w: measure,
-                        h: code.line,
-                    },
-                    primary,
-                    TextAlign::Center,
-                ));
+                if grouped {
+                    // Six bounded numeric cells provide the approved tracking
+                    // and 3+3 grouping without changing the runtime code or the
+                    // shared text pipeline. Unchanged frames reuse their buffers.
+                    let mut x = padding + inset + (measure - natural * fit) / 2.0;
+                    for (i, (digit, advance)) in digits.chars().zip(advances).enumerate() {
+                        texts.push(code.item(
+                            &digit.to_string(),
+                            PanelRect {
+                                x,
+                                y: y + inset,
+                                w: (advance + tracking) * fit,
+                                h: code.line,
+                            },
+                            primary,
+                            TextAlign::Start,
+                        ));
+                        x += (advance + tracking) * fit;
+                        if i == 2 {
+                            x += (group_space + tracking) * fit;
+                        }
+                    }
+                } else {
+                    texts.push(code.item(
+                        digits,
+                        PanelRect {
+                            x: padding + inset,
+                            y: y + inset,
+                            w: measure,
+                            h: code.line,
+                        },
+                        primary,
+                        TextAlign::Center,
+                    ));
+                }
                 y += well_height + gap;
             }
             let key_width = dp("size.system_card.metadata_key").min(inner / 2.0);
@@ -421,7 +472,18 @@ mod tests {
         );
         assert_eq!(layout.shapes[0].radius, 28.0);
         assert_eq!(layout.shapes[0].border.unwrap().0, 1.0);
-        let code = layout.texts.iter().find(|t| &*t.text == "482913").unwrap();
+        let code = layout.texts.iter().find(|t| &*t.text == "4").unwrap();
+        let digits: Vec<_> = layout
+            .texts
+            .iter()
+            .filter(|t| t.text.len() == 1 && t.text.bytes().all(|c| c.is_ascii_digit()))
+            .collect();
+        assert_eq!(
+            digits.iter().map(|t| &*t.text).collect::<String>(),
+            "482913"
+        );
+        let ordinary_gap = digits[1].pixel_x - digits[0].pixel_x;
+        assert!(digits[3].pixel_x - digits[2].pixel_x > ordinary_gap);
         assert_eq!(code.font_size_px, 40.0);
         assert_eq!(code.font_family, FontFamily::SystemMonospace);
         assert_eq!(code.line_height_multiplier, 48.0 / 40.0);
@@ -462,7 +524,7 @@ mod tests {
                 let bg = &result.shapes[0];
                 assert!((bg.rect.w - 440.0 * scale).abs() < 0.01, "{theme}/{scale}");
                 assert_eq!(bg.fill.a, number(&tokens, "opacity.system_card"));
-                let code = result.texts.iter().find(|t| &*t.text == "482913").unwrap();
+                let code = result.texts.iter().find(|t| &*t.text == "4").unwrap();
                 assert!(
                     (code.font_size_px - number(&tokens, "type.code.display.size") * scale).abs()
                         < 0.01
@@ -502,8 +564,11 @@ mod tests {
         let result = layout(&tokens, &pairing(), 1920.0, 1080.0);
         assert_eq!(result.shapes[0].rect.w, 600.0);
         assert_eq!(result.shapes[0].fill.r, 1.0);
-        assert!(result.texts.iter().any(|t| &*t.text == "482913"
-            && t.font_size_px == 64.0
-            && t.color[..3] == [0, 255, 0]));
+        assert!(
+            result
+                .texts
+                .iter()
+                .any(|t| &*t.text == "4" && t.font_size_px == 64.0 && t.color[..3] == [0, 255, 0])
+        );
     }
 }

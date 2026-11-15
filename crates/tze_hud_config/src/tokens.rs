@@ -1129,6 +1129,11 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         default_value: "500",
     },
     CanonicalToken {
+        key: "type.code.display.tracking_em",
+        description: "Pairing code letter spacing as a fraction of its font size",
+        default_value: "0.06",
+    },
+    CanonicalToken {
         key: "type.caption.display.family",
         description: "Subtitle/caption display: font family name",
         default_value: "IBM Plex Sans",

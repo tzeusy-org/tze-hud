@@ -316,3 +316,4 @@
 "type.system_card.metadata.size" = "13"
 "type.system_card.metadata.line_height" = "20"
 "type.system_card.metadata.weight" = "400"
+"type.code.display.tracking_em" = "0.06"
