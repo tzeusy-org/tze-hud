@@ -186,11 +186,13 @@ jobs:
       # Graduated 2026-11-15: overlay-pointer, tray (hud-ljhku.16 PR).
       # continue-on-error keeps the uploads running; "Required gesture verdict"
       # fails the job afterwards, fail-closed if this step never set its output.
+      # Required scenarios run first within each HUD boot, but the timeout is
+      # shared: an informational run that hangs past it also fails the job.
       - name: Gesture scenarios (SendInput)
         id: gestures
         if: steps.changes.outputs.gestures == 'true'
         continue-on-error: true
-        timeout-minutes: 6
+        timeout-minutes: 8
         env:
           GH_TOKEN: ${{ github.token }}
           GESTURES_REQUIRED: overlay-pointer,tray
@@ -270,7 +272,11 @@ jobs:
         run: |
           $failed = @()
           foreach ($v in @("$env:RUNNER_TEMP/gestures/verdict.json", "$env:RUNNER_TEMP/gestures/overlay/verdict.json")) {
-            if (Test-Path $v) { $failed += (Get-Content $v -Raw | ConvertFrom-Json).required_failed }
+            if (Test-Path $v) {
+              $verdict = Get-Content $v -Raw | ConvertFrom-Json
+              $failed += $verdict.required_failed
+              $failed += $verdict.required_unproven | ForEach-Object { "$_ (not run: $($verdict.harness_failure))" }
+            }
           }
           $named = if ($failed) { "required failed: $($failed -join ', ')" } else { "harness failure, timeout or setup failure with required scenarios" }
           Write-Output "::error title=Required gesture scenarios::$named (see the gesture step summary and gestures artifact)"

@@ -647,8 +647,8 @@ python scripts/ci/windows_overlay_gestures.py --exe target/release-dev/tze_hud.e
 The existing `gestures` artifact includes `overlay/timeline.json`, native logs,
 status and desktop captures, plus `overlay/setup.json` with setup and total
 added occupancy (target: combined gesture step at most four minutes). Native
-failures remain failures in these artifacts. Scenarios 11 and the tray
-controls (`overlay-pointer`, `tray`) are in the step's `GESTURES_REQUIRED`
+failures remain failures in these artifacts. Scenario 11 (`overlay-pointer`)
+and `tray` are in the step's `GESTURES_REQUIRED`
 list, so their failure, or a setup failure, fails `windows-build` in its last
 step and withholds the `dev` prerelease; merges are unaffected. This checks hosted software-rendered mechanics; owner GPU,
 DWM transparency, multiple monitors and DPI acceptance remain separate.

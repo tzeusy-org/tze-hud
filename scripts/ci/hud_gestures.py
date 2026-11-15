@@ -2136,15 +2136,19 @@ def required_names(value: str) -> list[str]:
 
 def gate_verdict(results: list[dict], required: set[str], failure: str | None) -> dict:
     """Which failures block: a failed required scenario, or a harness failure
-    (refusal, crash, leftover process) in an invocation that carries required
-    scenarios, since it can stop them running. Informational failures never do."""
+    (refusal, crash, leftover process) that left a required scenario without a
+    PASS. A harness failure after every required scenario passed, such as an
+    informational link scenario losing the foreground, does not block.
+    Informational failures never do."""
     outcomes = {r["scenario"]: r["outcome"] for r in results}
     required_failed = sorted(n for n in required if outcomes.get(n) == "FAIL")
+    required_unproven = sorted(n for n in required if outcomes.get(n) not in ("PASS", "FAIL"))
     informational_failed = [r["scenario"] for r in results
                             if r["scenario"] not in required and r["outcome"] != "PASS"]
-    blocking = bool(required_failed) or (failure is not None and bool(required))
+    blocking = bool(required_failed) or (failure is not None and bool(required_unproven))
     return {"required": sorted(required), "required_failed": required_failed,
-            "informational_failed": informational_failed, "harness_failure": failure, "blocking": blocking}
+            "required_unproven": required_unproven, "informational_failed": informational_failed,
+            "harness_failure": failure, "blocking": blocking}
 
 
 def write_step_summary(injector: str, results: list[dict], failure: str | None, passed: int, seconds: float,

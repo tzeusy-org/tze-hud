@@ -385,9 +385,10 @@ class WindowsGuardTests(unittest.TestCase):
 
 
 class RequiredGateTests(unittest.TestCase):
-    """hud-ljhku.16: only required scenarios (and harness failures that carry them) fail the run."""
+    """hud-ljhku.16: only required scenarios (and harness failures that cost one its PASS) fail the run."""
 
-    def gate(self, required, outcomes, *, refuse=False, mode="fullscreen"):
+    def gate(self, required, outcomes, *, refuse=None, mode="fullscreen"):
+        """`refuse` is how many scenarios finish before the harness refuses."""
         with tempfile.TemporaryDirectory() as directory:
             fake = mock.Mock(home=None, log=None, display="", port=0)
             fake.exe = Path("target/release-dev/tze_hud.exe")
@@ -397,11 +398,12 @@ class RequiredGateTests(unittest.TestCase):
             fake.smoke.ok.return_value = {}
 
             def scenarios(_run, names):
-                if refuse:
+                results = [{"scenario": n, "outcome": outcomes.get(n, "PASS"), "seconds": 0} for n in names]
+                if refuse is not None:
                     err = g.Refused("foreground lost")
-                    err.results = []
+                    err.results = results[:refuse]
                     raise err
-                return [{"scenario": n, "outcome": outcomes.get(n, "PASS"), "seconds": 0} for n in names]
+                return results
 
             gate = [] if required is None else ["--required", required]
             with mock.patch.object(g, "WINDOWS", True), mock.patch.object(g, "Run", return_value=fake), \
@@ -420,13 +422,14 @@ class RequiredGateTests(unittest.TestCase):
 
     def test_exit_codes(self) -> None:
         cases = [
-            ("informational failure passes and is listed", "composer", {"keyboard": "FAIL"}, False, 0),
-            ("required failure fails", "composer", {"composer": "FAIL"}, False, 1),
-            ("harness failure carrying required scenarios fails", "composer", {}, True, 1),
-            ("harness failure with nothing required in this mode passes", "overlay-pointer", {}, True, 0),
-            ("no --required keeps every scenario required", None, {"keyboard": "FAIL"}, False, 1),
+            ("informational failure passes and is listed", "composer", {"keyboard": "FAIL"}, None, 0),
+            ("required failure fails", "composer", {"composer": "FAIL"}, None, 1),
+            ("harness failure before a required scenario ran fails", "composer", {}, 0, 1),
+            ("harness failure after every required scenario passed passes", "composer", {}, 1, 0),
+            ("harness failure with nothing required in this mode passes", "overlay-pointer", {}, 0, 0),
+            ("no --required keeps every scenario required", None, {"keyboard": "FAIL"}, None, 1),
         ]
-        for label, required, outcomes, refuse, expected in cases:
+        for label, required, outcomes, refuse, expected in cases:  # refuse: scenarios done first
             with self.subTest(label):
                 code, _, verdict = self.gate(required, outcomes, refuse=refuse)
                 self.assertEqual(code, expected)
