@@ -282,6 +282,8 @@ pub struct UnplacedZone {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum UnplacedReason {
+    /// Retired Windows enumeration key; ignored even if that OS name is connected.
+    LegacyKey,
     /// No connected monitor matches that key.
     NotConnected,
     /// The monitor is connected, but its overlay surface kept failing and the

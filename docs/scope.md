@@ -493,9 +493,12 @@ source links when implementation changes the status.
   `/admin/status` `displays[].key` and a per-display log line show them, and
   unmatched keys stay on the primary as `unplaced_zones` `not_connected`
   (`hud-avr7s.2`, unit-tested on Linux, Windows code compiled by
-  `clippy-windows-gnu`). Legacy `DISPLAYn` sections are not yet reported with
-  their replacement key (`hud-avr7s.3`), and whether keys survive replug,
-  cable swap and reboot on the owner rig is unverified (`hud-avr7s.4`).
+  `clippy-windows-gnu`). Legacy `DISPLAYn` sections stay on the primary with
+  `legacy_key`, including when EDID is unavailable; nonfatal diagnostics use
+  the current all-connected join for an exact usable replacement, physical
+  absence or unavailable identity (`hud-avr7s.3`, source implementation).
+  Whether keys survive replug, cable swap and reboot on the owner rig is
+  unverified (`hud-avr7s.4`).
   Token sizes are dp at each monitor's scale × `ui.scale`
   ([`set_px_scale`](../crates/tze_hud_config/src/tokens.rs), `hud-h51u7.3`).
   Mixed-DPI window sizing (`hud-670ds`) remains open. The vision describes their

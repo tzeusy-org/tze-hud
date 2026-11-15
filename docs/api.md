@@ -562,7 +562,8 @@ agents until one is paired.
   interaction or another publish is not required to retry that owed image.
   `unplaced_zones` lists `{zone, display, reason}` placements with no overlay
   window, rendering on the primary instead (`display` is the key as
-  configured): `reason` is `not_connected` (no connected monitor matches it), or
+  configured): `reason` is `legacy_key` (a retired Windows enumeration key),
+  `not_connected` (no connected monitor matches it), or
   `overlay_failed` when that monitor's overlay surface was lost and recreated
   3 times in a row (it is retried when the monitor is reconnected).
   `/admin/screenshot` returns a PNG of the frame the compositor draws (not an
@@ -755,14 +756,22 @@ unique on the system and persistent across restarts. Quote keys:
 exactly one connected monitor has that model and serial, so owners with
 distinct monitors never write one. A monitor without a usable EDID identity
 (non-Windows, headless, or a failed query), or in a shared set without an
-instance id, is keyed by its OS name (`DISPLAY6`) with a warning. Copy keys
+instance id, is keyed by its OS name with a warning. Copy usable keys
 from `/admin/status` `displays[].key` or the log's per-display
 `display <key> = <name> <w>x<h> @ (<x>,<y>)[ primary]` lines, written at
 startup and on every layout change. A configured key that matches no
 connected monitor keeps its zones on the primary, never another monitor; the
 log warns once per change naming the key, its zones and every connected key,
-and `/admin/status` `unplaced_zones` lists them as `not_connected`. Legacy
-`DISPLAYn` keys match only a monitor that is itself keyed by that OS name.
+and `/admin/status` `unplaced_zones` lists them as `not_connected`.
+
+Legacy Windows enumeration section keys (`DISPLAYn`, ignoring case, outer
+whitespace and an optional `\\.\` prefix) are ignored even when a matching OS
+fallback is connected; their zones render on the primary with
+`unplaced_zones.reason = "legacy_key"`.
+The nonfatal topology warning supplies the exact current EDID-derived
+replacement for a unique usable connected identity, otherwise reports
+`not connected` or `identity unavailable`; rename the section only when a
+replacement is supplied, and keep nonlegacy OS fallback keys unchanged.
 
 Built-in zone placement, as fractions of the display (1% margins):
 `notification-area` is the top-right column (x 75–99%, from y 5.5%, below
