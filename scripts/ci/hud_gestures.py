@@ -2038,13 +2038,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--window-mode", choices=("fullscreen", "overlay"), default="fullscreen")
     parser.add_argument("--out", type=Path, help="artifact dir (default test_results/gestures/<sha>/<run>)")
     parser.add_argument("--list", action="store_true", help="list scenarios and exit")
+    parser.add_argument("--required", type=required_names, metavar="NAMES",
+                        help="comma-separated scenarios whose failure fails the run; the rest become "
+                             "informational (listed, exit 0). Without it every scenario is required.")
     parser.add_argument("scenarios", nargs="*", help="scenario names (default: all)")
     args = parser.parse_args(argv)
     if args.list:
         for name, fn in SCENARIOS.items():
             print(f"{name:20} {(fn.__doc__ or '').strip().splitlines()[0]}")
         return 0
-    unknown = [n for n in args.scenarios if n not in SCENARIOS]
+    unknown = [n for n in args.scenarios + (args.required or []) if n not in SCENARIOS]
     if unknown:
         parser.error(f"unknown scenario(s): {', '.join(unknown)}; see --list")
     if (args.injector == "sendinput") != WINDOWS:
@@ -2064,8 +2067,13 @@ def main(argv: list[str] | None = None) -> int:
     # the foreground seconds later (Edge first-run UI covered the HUD for every
     # later scenario, hud-xq14t), so they run after everything else that
     # injects input. "restart" replaces the HUD and only uses MCP; it stays last.
+    # Before those, required scenarios run first in the fresh HUD and
+    # informational ones follow in the same boot. A list naming the other window
+    # mode's scenarios only gates the ones this invocation runs.
     trailing = [n for n in LINK_SCENARIOS + ("restart",) if n in names]
-    names = [n for n in names if n not in trailing] + trailing
+    required = set(names) if args.required is None else set(args.required).intersection(names)
+    names = ([n for n in names if n in required and n not in trailing]
+             + [n for n in names if n not in required and n not in trailing] + trailing)
     sha = git_sha()
     # The pid keeps parallel runs started in the same second apart.
     out = args.out or REPO / "test_results/gestures" / sha / f"{time.strftime('%Y%m%dT%H%M%S')}-{os.getpid()}"
@@ -2102,6 +2110,7 @@ def main(argv: list[str] | None = None) -> int:
             "geometry": (status.get("displays") if "status" in locals() else None),
             "theme_scale": ({k: status.get(k) for k in ("theme", "ui_scale") if k in status} if "status" in locals() else None),
             "seconds": round(time.monotonic() - started, 2), "results": results, "failure": failure,
+            "required": sorted(required),
             "steps": run.timeline,
             "sendinput_calls": getattr(run.inj, "calls", None) if args.injector == "sendinput" else None,
         }
@@ -2109,24 +2118,51 @@ def main(argv: list[str] | None = None) -> int:
         if run.log and run.log.exists():
             tail = run.log.read_text(errors="replace").splitlines()[-200:]
             (out / "hud.log.tail").write_text("\n".join(tail))
+    for result in results:
+        result["required"] = result["scenario"] in required
     passed = sum(r["outcome"] == "PASS" for r in results)
     print(f"{passed}/{len(results)} scenarios passed in {time.monotonic() - started:.1f}s; artifacts: {out}")
     if failure:
         print(f"FAIL harness: {failure}")
-    write_step_summary(args.injector, results, failure, passed, time.monotonic() - started)
-    return 0 if failure is None and passed == len(results) else 1
+    verdict = gate_verdict(results, required, failure)
+    (out / "verdict.json").write_text(json.dumps(verdict, indent=1))
+    write_step_summary(args.injector, results, failure, passed, time.monotonic() - started, verdict)
+    return 1 if verdict["blocking"] else 0
 
 
-def write_step_summary(injector: str, results: list[dict], failure: str | None, passed: int, seconds: float) -> None:
+def required_names(value: str) -> list[str]:
+    return [name for name in (part.strip() for part in value.split(",")) if name]
+
+
+def gate_verdict(results: list[dict], required: set[str], failure: str | None) -> dict:
+    """Which failures block: a failed required scenario, or a harness failure
+    (refusal, crash, leftover process) in an invocation that carries required
+    scenarios, since it can stop them running. Informational failures never do."""
+    outcomes = {r["scenario"]: r["outcome"] for r in results}
+    required_failed = sorted(n for n in required if outcomes.get(n) == "FAIL")
+    informational_failed = [r["scenario"] for r in results
+                            if r["scenario"] not in required and r["outcome"] != "PASS"]
+    blocking = bool(required_failed) or (failure is not None and bool(required))
+    return {"required": sorted(required), "required_failed": required_failed,
+            "informational_failed": informational_failed, "harness_failure": failure, "blocking": blocking}
+
+
+def write_step_summary(injector: str, results: list[dict], failure: str | None, passed: int, seconds: float,
+                       verdict: dict | None = None) -> None:
     """A GitHub step summary table, so a dispatching agent reads outcomes without the artifact."""
     path = os.environ.get("GITHUB_STEP_SUMMARY")
     if not path:
         return
     rows = [f"## Gesture scenarios ({injector}): {passed}/{len(results)} passed in {seconds:.0f}s", "",
-            "| scenario | outcome | s | failing step |", "|---|---|---|---|"]
-    rows += [f"| {r['scenario']} | {r['outcome']} | {r['seconds']} | {r.get('step', '')} |" for r in results]
+            "| scenario | gate | outcome | s | failing step |", "|---|---|---|---|---|"]
+    rows += [f"| {r['scenario']} | {'required' if r.get('required', True) else 'info'} | {r['outcome']} "
+             f"| {r['seconds']} | {r.get('step', '')} |" for r in results]
     if failure:
         rows += ["", f"**harness:** {failure}"]
+    if verdict and verdict["required_failed"]:
+        rows += ["", f"**required failed:** {', '.join(verdict['required_failed'])}"]
+    if verdict and verdict["informational_failed"]:
+        rows += ["", f"Informational failures (do not fail the job): {', '.join(verdict['informational_failed'])}"]
     with open(path, "a", encoding="utf-8") as fh:
         fh.write("\n".join(rows) + "\n")
 

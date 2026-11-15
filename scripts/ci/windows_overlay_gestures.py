@@ -24,6 +24,7 @@ VERSION = "26.2.6"
 ASSET_ID = 704037727
 SHA256 = "b2e00615feaba45942343c265cc8c5f576142ca682c1ac6661922d4b72492877"
 REGISTRY_KEY = r"SOFTWARE\Khronos\Vulkan\Drivers"
+OVERLAY_SCENARIOS = {"overlay-pointer", "tray"}
 
 
 def extract_driver(work: Path, *, expected_sha256: str = SHA256) -> Path:
@@ -80,6 +81,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--exe", type=Path, required=True)
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--required", default=None,
+                        help="passed through to hud_gestures.py; setup failure blocks only when it names an "
+                             "overlay scenario")
     args = parser.parse_args(argv)
     if sys.platform != "win32" or os.environ.get("GITHUB_ACTIONS") != "true":
         parser.error("software Vulkan installation runs only on a hosted Windows CI VM")
@@ -100,15 +104,17 @@ def main(argv: list[str] | None = None) -> int:
             manifest = extract_driver(Path(directory))
             with registered_driver(manifest, winreg):
                 receipt["setup_seconds"] = round(time.monotonic() - started, 3)
+                gate = [] if args.required is None else ["--required", args.required]
                 result = hud_gestures.main(["--exe", str(args.exe), "--injector", "sendinput",
                                            "--window-mode", "overlay", "--out", str(args.out),
-                                           "overlay-pointer", "tray"])
+                                           *gate, *sorted(OVERLAY_SCENARIOS)])
                 receipt["scenario_exit"] = result
             receipt["registration_removed"] = True
     except Exception as error:  # retain setup/cleanup failures alongside the scenario artifacts
         receipt["failure"] = f"{type(error).__name__}: {error}"
         print(f"FAIL overlay setup/cleanup: {receipt['failure']}", file=sys.stderr)
-        result = 1
+        overlay_required = OVERLAY_SCENARIOS.intersection(hud_gestures.required_names(args.required or ""))
+        result = 1 if args.required is None or overlay_required else 0
     finally:
         receipt["total_seconds"] = round(time.monotonic() - started, 3)
         (args.out / "setup.json").write_text(json.dumps(receipt, indent=2), encoding="utf-8")
