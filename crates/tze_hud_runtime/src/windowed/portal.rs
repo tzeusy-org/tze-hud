@@ -4774,13 +4774,11 @@ mod tests {
                 .terminal
                 .is_some()
         );
-        let ring_after_up = app.state.input_ring.lock().unwrap().len();
         app.enqueue_pointer_event(PointerEventKind::Down);
         assert_eq!(
             app.state.primary_drag_gesture.as_ref().unwrap().press_start,
             original_press
         );
-        assert_eq!(app.state.input_ring.lock().unwrap().len(), ring_after_up);
         // The real availability waiter briefly reacquires both scene locks.
         // Settle only after its completion, as the event loop does on its wake.
         release_and_wait(&app, held);
@@ -4797,11 +4795,6 @@ mod tests {
         );
         assert!(app.state.primary_drag_gesture.is_none());
         assert!(!app.state.input_processor.drag_states.contains_key(&0));
-        assert_eq!(
-            app.state.input_ring.lock().unwrap().len(),
-            ring_after_up,
-            "retry emits no second input"
-        );
         for id in [frame_id, transcript_id, composer_id, backstop] {
             assert!(
                 has_override(&app, id),
@@ -4966,9 +4959,7 @@ mod tests {
                     .terminal
                     .is_some()
             );
-            let ring = app.state.input_ring.lock().unwrap().len();
             app.enqueue_pointer_event(PointerEventKind::Down);
-            assert_eq!(app.state.input_ring.lock().unwrap().len(), ring);
             {
                 let mut scene = held.scene.try_lock().unwrap();
                 match terminal {
@@ -5004,7 +4995,6 @@ mod tests {
             app.settle_scene_work();
             assert!(app.state.primary_drag_gesture.is_none());
             assert!(app.state.input_processor.drag_states.is_empty());
-            assert_eq!(app.state.input_ring.lock().unwrap().len(), ring);
             let shared = shared_state.try_lock().unwrap();
             let scene = shared.scene.try_lock().unwrap();
             assert!(!scene.is_drag_active(id));

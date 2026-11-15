@@ -1,4 +1,3 @@
-use std::sync::Arc;
 use std::time::Instant;
 
 use winit::event::MouseScrollDelta;
@@ -6,7 +5,6 @@ use winit::event::MouseScrollDelta;
 use crate::os_prefs::WheelLines;
 use tze_hud_input::{WHEEL_LINE_PX, WheelStep};
 
-use crate::channels::{INPUT_EVENT_CAPACITY, InputEvent};
 use tze_hud_protocol::proto::{EventBatch, InputEnvelope};
 use tze_hud_scene::MonoUs;
 use tze_hud_scene::graph::SceneGraph;
@@ -608,20 +606,7 @@ pub(super) fn dispatch_portal_geometry_event(
     let _ = tx.send(event);
 }
 
-/// Push an `InputEvent` into the ring buffer, dropping the oldest if full.
-pub(super) fn enqueue_input(
-    ring: &Arc<std::sync::Mutex<std::collections::VecDeque<InputEvent>>>,
-    event: InputEvent,
-) {
-    if let Ok(mut q) = ring.lock() {
-        if q.len() >= INPUT_EVENT_CAPACITY {
-            q.pop_front(); // Drop oldest to make room.
-        }
-        q.push_back(event);
-    }
-}
-
-/// Monotonic nanosecond timestamp for `InputEvent.timestamp_ns`.
+/// Monotonic nanoseconds since process start.
 ///
 /// Uses process-relative time so values are comparable within a session.
 pub(super) fn nanoseconds_since_start() -> u64 {
@@ -639,19 +624,6 @@ pub(super) fn nanoseconds_since_start() -> u64 {
 /// clamp the first sub-microsecond sample to one.
 pub(super) fn monotonic_us_since_start() -> MonoUs {
     MonoUs((nanoseconds_since_start() / 1_000).max(1))
-}
-
-/// Map a winit `PhysicalKey` to a compact u32 key code.
-///
-/// This is a best-effort mapping for the `InputEventKind::KeyPress/KeyRelease`
-/// channel type. The full keyboard pipeline uses `tze_hud_input::KeyboardProcessor`
-/// for richer key event data.
-pub(super) fn physical_key_to_u32(key: &winit::keyboard::PhysicalKey) -> u32 {
-    use winit::keyboard::PhysicalKey;
-    match key {
-        PhysicalKey::Code(code) => *code as u32,
-        PhysicalKey::Unidentified(_) => 0,
-    }
 }
 
 /// Map a winit `PhysicalKey` to the DOM `KeyboardEvent.code`-style string
@@ -745,7 +717,6 @@ mod tests {
         let rx = tx.subscribe_all();
         (tx, rx)
     }
-    use crate::channels::{INPUT_EVENT_CAPACITY, InputEventKind};
 
     #[test]
     fn key_press_text_types_layout_and_packet_text_but_not_chords() {
@@ -782,35 +753,6 @@ mod tests {
         assert_eq!(
             key_press_text(&Key::Named(NamedKey::Space), Some(" "), none),
             None
-        );
-    }
-
-    #[test]
-    fn enqueue_input_drops_oldest_when_full() {
-        let ring = Arc::new(std::sync::Mutex::new(
-            std::collections::VecDeque::with_capacity(INPUT_EVENT_CAPACITY),
-        ));
-        // Fill beyond capacity.
-        for i in 0..INPUT_EVENT_CAPACITY + 10 {
-            let event = InputEvent {
-                timestamp_ns: i as u64,
-                kind: InputEventKind::KeyPress { key: 0 },
-            };
-            enqueue_input(&ring, event);
-        }
-        let q = ring.lock().unwrap();
-        assert_eq!(
-            q.len(),
-            INPUT_EVENT_CAPACITY,
-            "ring buffer should never exceed capacity"
-        );
-        // The oldest entry was dropped; the newest should have timestamp
-        // INPUT_EVENT_CAPACITY + 9.
-        let last = q.back().unwrap();
-        assert_eq!(
-            last.timestamp_ns,
-            (INPUT_EVENT_CAPACITY + 9) as u64,
-            "most recent event should be at the back"
         );
     }
 

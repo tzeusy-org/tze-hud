@@ -113,10 +113,6 @@ impl WindowedRuntimeState {
         )));
 
         let (frame_ready_tx, frame_ready_rx) = crate::channels::frame_ready_channel();
-        // Input-capture / paste channels: the drain path never reads these, but
-        // the fields require a receiver. Drop the senders — a disconnected
-        // receiver is harmless here.
-        let (_input_capture_tx, input_capture_rx) = tokio::sync::mpsc::unbounded_channel();
 
         WindowedRuntimeState {
             wake: super::wake::WindowedWake::disconnected(),
@@ -140,7 +136,6 @@ impl WindowedRuntimeState {
             )),
             pairing: None,
             control_panel: None,
-            input_ring: Arc::new(StdMutex::new(VecDeque::new())),
             pending_input_latency: Arc::new(StdMutex::new(VecDeque::new())),
             frame_ready_rx,
             deferred_present: false,
@@ -150,8 +145,6 @@ impl WindowedRuntimeState {
             compositor: None,
             window_surface: None,
             input_processor: InputProcessor::new(),
-            input_capture_rx,
-            pending_input_capture_commands: VecDeque::new(),
             focus_manager: FocusManager::new(),
             keyboard_processor: KeyboardProcessor::new(),
             telemetry: tze_hud_telemetry::TelemetryCollector::new(),
@@ -254,8 +247,6 @@ impl SharedStateBuilder {
             safe_mode_atomic,
             active_tab_mirror,
             token_store: tze_hud_protocol::token::TokenStore::new(),
-            input_capture_tx: None,
-            input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         }
     }
 }
@@ -3562,7 +3553,6 @@ mod tests {
                             .is_some()
                     );
                 }
-                let ring = harness.app.state.input_ring.lock().unwrap().len();
                 if let Some(native) = &native {
                     native.lose();
                     harness.app.state.press_window = Some(winit::window::WindowId::from(77));
@@ -3587,11 +3577,6 @@ mod tests {
                     cancellations_not_disarmed.push((native_loss, held_terminal));
                     continue;
                 }
-                assert_eq!(
-                    harness.app.state.input_ring.lock().unwrap().len(),
-                    ring,
-                    "cancel creates no synthetic input"
-                );
                 if held_terminal {
                     assert!(harness.app.settle_scene_work().is_deferred());
                 }

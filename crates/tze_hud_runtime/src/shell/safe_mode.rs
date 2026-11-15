@@ -213,8 +213,6 @@ mod tests {
             safe_mode_atomic: Arc::new(AtomicBool::new(false)),
             active_tab_mirror: Arc::new(std::sync::Mutex::new(None)),
             token_store: TokenStore::new(),
-            input_capture_tx: None,
-            input_capture_wake: tze_hud_scene::render_wake::RenderWakeNotifier::default(),
         }))
     }
 
