@@ -759,7 +759,8 @@ fn geometry_pass_plan(
 #[derive(Debug)]
 pub(crate) struct ZoneSlotLayout {
     /// Publication indices sorted by the zone's ordering rule (alert-banner:
-    /// severity-descending, then recency; others: newest-first / reverse order).
+    /// severity-descending, then recency; others: unanswered questions first,
+    /// newest-first within the question and non-question groups).
     pub(crate) ordered_indices: Vec<usize>,
     /// Per-slot heights in the same order as `ordered_indices`.
     /// Two-line notifications produce a taller slot; all others use
@@ -788,7 +789,7 @@ impl ZoneSlotLayout {
     /// card is shown whole or not at all, so its buttons and dismiss control
     /// are never cut off (its publication stays active and appears once space
     /// frees up). Only the first slot may be clamped, when it alone is taller
-    /// than the zone, so the newest publication is never hidden.
+    /// than the zone, so the first prioritized publication is never hidden.
     pub(crate) fn iter_visible(&self, zone: Rect) -> impl Iterator<Item = (usize, Rect)> + '_ {
         /// Float slack so a slot ending exactly at the zone bottom still fits.
         const FIT_EPSILON_PX: f32 = 0.01;

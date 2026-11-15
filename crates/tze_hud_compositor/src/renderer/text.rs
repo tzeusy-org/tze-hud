@@ -355,7 +355,8 @@ impl super::Compositor {
             // Emit TextItems based on contention policy.
             //
             // Stack: each publication occupies a vertically-stacked slot.
-            //   For generic Stack zones: newest at top (slot 0 = newest).
+            //   Generic Stack zones: unanswered questions first, newest-first
+            //   within the question and non-question groups.
             //   For alert-banner zones: severity-descending (critical first),
             //   then recency-descending (newer first) within the same severity.
             //   Per-slot heights are computed via Self::per_slot_heights() and may

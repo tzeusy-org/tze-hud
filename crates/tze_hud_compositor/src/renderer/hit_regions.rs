@@ -303,7 +303,7 @@ impl Compositor {
 ///   `n_actions` is capped at `MAX_NOTIFICATION_ACTIONS`.
 ///
 /// Tab order within a slot: dismiss button first, then actions left-to-right.
-/// Slots are ordered top-to-bottom (slot 0 = newest, matching rendering order).
+/// Slots follow the shared zone priority order from top to bottom, matching rendering.
 ///
 /// # Called by
 ///
