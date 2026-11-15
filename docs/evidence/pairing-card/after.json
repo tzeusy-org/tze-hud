@@ -1,0 +1,343 @@
+{
+  "source_head": "273bf18d0e3a8c4a1fd2942f8f477d82051e18d8",
+  "source": "production scene startup and actual windowed GPU build/capture, Mesa llvmpipe",
+  "synthetic_owner_only_models": true,
+  "binary_sha256": "a7271e8b27dbe5f5e42e20c0e2b0f983a2ed6dde0f187a34dbf6d871ede5d1e3",
+  "source_tracked_files_unchanged_throughout": true,
+  "dimensions": [
+    1920,
+    1080
+  ],
+  "monitor_scale": 1,
+  "ui_scale": 1,
+  "capture_at_ms": 1000,
+  "owner_before": "MISSING: actual owner BEFORE requires displaying the standalone pairing card on the current Windows build. Synthetic fixtures are not an owner BEFORE.",
+  "owner_acceptance": "hud-h51u7.8.6 OPEN/unwaived",
+  "limits": "No listeners, actual pairing codes, runtime state changes, agent publications, owner-host screenshot, Windows rendering or owner visual acceptance. Buttons omitted under original explicit no-input-model design.",
+  "frames": [
+    {
+      "fixture": "examples/render_artifacts/fixtures/pairing-card.json",
+      "file": "pairing-card--tonal-glass.png",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "273bf18d0e3a8c4a1fd2942f8f477d82051e18d8",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "ca4529ea2981352aa2e9aacff815edf8892d8fe28ae7d6288ef8be88c885a572",
+        "config_sha256": "982ba33f4dc725ad33cf94723f5fa3780323efb837b4c9564659f149eeae1304",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1616.571461,
+        "fixture": "examples/render_artifacts/fixtures/pairing-card.json",
+        "fixture_sha256": "48b1d8aa99e962b257c589cde11e65d4772ef8d34423ec460820aca7fe0c0317",
+        "messages_applied": 0,
+        "output": "test_results/pairing-card-after/273bf18d0e3a/pairing-card--tonal-glass.png",
+        "owner_only_system_card": true,
+        "pipeline": "windowed build/capture",
+        "png_bytes": 81191,
+        "png_sha256": "a22f70f5ef76263c8694cb12d07158c98d1079082e9d09700921e9d723cc0aae",
+        "resolved_tokens_sha256": "c1aab3fbdf8e53a81201527ac809853b8aef6e29575733f80bc11cf4849ceba9",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "fixture": "examples/render_artifacts/fixtures/pairing-card.json",
+      "file": "pairing-card--classic.png",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "273bf18d0e3a8c4a1fd2942f8f477d82051e18d8",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "ca4529ea2981352aa2e9aacff815edf8892d8fe28ae7d6288ef8be88c885a572",
+        "config_sha256": "982ba33f4dc725ad33cf94723f5fa3780323efb837b4c9564659f149eeae1304",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1633.7249840000002,
+        "fixture": "examples/render_artifacts/fixtures/pairing-card.json",
+        "fixture_sha256": "48b1d8aa99e962b257c589cde11e65d4772ef8d34423ec460820aca7fe0c0317",
+        "messages_applied": 0,
+        "output": "test_results/pairing-card-after/273bf18d0e3a/pairing-card--classic.png",
+        "owner_only_system_card": true,
+        "pipeline": "windowed build/capture",
+        "png_bytes": 84785,
+        "png_sha256": "2c2fc06606c6de2dcddbc8dd048d0af80b2e9e4615ce6902ad5328447d93e8da",
+        "resolved_tokens_sha256": "c6c1a96203f5b7cbfe65d4ef4a2d4e44fc34b9e05eea922aff53d256cf4c3e68",
+        "theme": "classic",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "fixture": "examples/render_artifacts/fixtures/pairing-card.json",
+      "file": "pairing-card--blueprint.png",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "273bf18d0e3a8c4a1fd2942f8f477d82051e18d8",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "ca4529ea2981352aa2e9aacff815edf8892d8fe28ae7d6288ef8be88c885a572",
+        "config_sha256": "982ba33f4dc725ad33cf94723f5fa3780323efb837b4c9564659f149eeae1304",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1632.96197,
+        "fixture": "examples/render_artifacts/fixtures/pairing-card.json",
+        "fixture_sha256": "48b1d8aa99e962b257c589cde11e65d4772ef8d34423ec460820aca7fe0c0317",
+        "messages_applied": 0,
+        "output": "test_results/pairing-card-after/273bf18d0e3a/pairing-card--blueprint.png",
+        "owner_only_system_card": true,
+        "pipeline": "windowed build/capture",
+        "png_bytes": 78957,
+        "png_sha256": "13cb632bd61286bc46dfc243300daa0d528ede170e263501a802b574f6a4d33c",
+        "resolved_tokens_sha256": "aede338eb2073f76bbf86aa6992f9c1aaccfe47ad356980d4a685b331292552e",
+        "theme": "blueprint",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "fixture": "examples/render_artifacts/fixtures/pairing-card-warning.json",
+      "file": "pairing-card-warning--tonal-glass.png",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "273bf18d0e3a8c4a1fd2942f8f477d82051e18d8",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "ca4529ea2981352aa2e9aacff815edf8892d8fe28ae7d6288ef8be88c885a572",
+        "config_sha256": "982ba33f4dc725ad33cf94723f5fa3780323efb837b4c9564659f149eeae1304",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1628.020514,
+        "fixture": "examples/render_artifacts/fixtures/pairing-card-warning.json",
+        "fixture_sha256": "eef9fb73abf4387d8ee58cf52c99fbcab304c669276639afe76496469ef175f3",
+        "messages_applied": 0,
+        "output": "test_results/pairing-card-after/273bf18d0e3a/pairing-card-warning--tonal-glass.png",
+        "owner_only_system_card": true,
+        "pipeline": "windowed build/capture",
+        "png_bytes": 94012,
+        "png_sha256": "ef9fea4ebec374223161b7c43641f814abfaf4d36fd1f7568e97de83ec7f0dad",
+        "resolved_tokens_sha256": "c1aab3fbdf8e53a81201527ac809853b8aef6e29575733f80bc11cf4849ceba9",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "fixture": "examples/render_artifacts/fixtures/pairing-card-warning.json",
+      "file": "pairing-card-warning--classic.png",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "273bf18d0e3a8c4a1fd2942f8f477d82051e18d8",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "ca4529ea2981352aa2e9aacff815edf8892d8fe28ae7d6288ef8be88c885a572",
+        "config_sha256": "982ba33f4dc725ad33cf94723f5fa3780323efb837b4c9564659f149eeae1304",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1637.3064080000001,
+        "fixture": "examples/render_artifacts/fixtures/pairing-card-warning.json",
+        "fixture_sha256": "eef9fb73abf4387d8ee58cf52c99fbcab304c669276639afe76496469ef175f3",
+        "messages_applied": 0,
+        "output": "test_results/pairing-card-after/273bf18d0e3a/pairing-card-warning--classic.png",
+        "owner_only_system_card": true,
+        "pipeline": "windowed build/capture",
+        "png_bytes": 101734,
+        "png_sha256": "ffae000f1d9572cd75393e891d86d80480701d5072b361e4b76ececef11e4bc4",
+        "resolved_tokens_sha256": "c6c1a96203f5b7cbfe65d4ef4a2d4e44fc34b9e05eea922aff53d256cf4c3e68",
+        "theme": "classic",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "fixture": "examples/render_artifacts/fixtures/pairing-card-warning.json",
+      "file": "pairing-card-warning--blueprint.png",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "273bf18d0e3a8c4a1fd2942f8f477d82051e18d8",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "ca4529ea2981352aa2e9aacff815edf8892d8fe28ae7d6288ef8be88c885a572",
+        "config_sha256": "982ba33f4dc725ad33cf94723f5fa3780323efb837b4c9564659f149eeae1304",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1639.768646,
+        "fixture": "examples/render_artifacts/fixtures/pairing-card-warning.json",
+        "fixture_sha256": "eef9fb73abf4387d8ee58cf52c99fbcab304c669276639afe76496469ef175f3",
+        "messages_applied": 0,
+        "output": "test_results/pairing-card-after/273bf18d0e3a/pairing-card-warning--blueprint.png",
+        "owner_only_system_card": true,
+        "pipeline": "windowed build/capture",
+        "png_bytes": 91960,
+        "png_sha256": "a79a69cb4c851768ced85173b356fce5c6862511773ca3ebde25616571a83990",
+        "resolved_tokens_sha256": "aede338eb2073f76bbf86aa6992f9c1aaccfe47ad356980d4a685b331292552e",
+        "theme": "blueprint",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "fixture": "examples/render_artifacts/fixtures/system-toast.json",
+      "file": "system-toast--tonal-glass.png",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "273bf18d0e3a8c4a1fd2942f8f477d82051e18d8",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "ca4529ea2981352aa2e9aacff815edf8892d8fe28ae7d6288ef8be88c885a572",
+        "config_sha256": "982ba33f4dc725ad33cf94723f5fa3780323efb837b4c9564659f149eeae1304",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1617.502228,
+        "fixture": "examples/render_artifacts/fixtures/system-toast.json",
+        "fixture_sha256": "d350f061bc0798c7cac8cfbf8a82c96788f52320f09c01a898109ef8ba4bf84c",
+        "messages_applied": 0,
+        "output": "test_results/pairing-card-after/273bf18d0e3a/system-toast--tonal-glass.png",
+        "owner_only_system_card": true,
+        "pipeline": "windowed build/capture",
+        "png_bytes": 59977,
+        "png_sha256": "8a3218038266d93190ec34d6684f0d5a0192ed8131cf580cd9f095264b37629c",
+        "resolved_tokens_sha256": "c1aab3fbdf8e53a81201527ac809853b8aef6e29575733f80bc11cf4849ceba9",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "fixture": "examples/render_artifacts/fixtures/system-toast.json",
+      "file": "system-toast--classic.png",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "273bf18d0e3a8c4a1fd2942f8f477d82051e18d8",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "ca4529ea2981352aa2e9aacff815edf8892d8fe28ae7d6288ef8be88c885a572",
+        "config_sha256": "982ba33f4dc725ad33cf94723f5fa3780323efb837b4c9564659f149eeae1304",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1624.2576020000001,
+        "fixture": "examples/render_artifacts/fixtures/system-toast.json",
+        "fixture_sha256": "d350f061bc0798c7cac8cfbf8a82c96788f52320f09c01a898109ef8ba4bf84c",
+        "messages_applied": 0,
+        "output": "test_results/pairing-card-after/273bf18d0e3a/system-toast--classic.png",
+        "owner_only_system_card": true,
+        "pipeline": "windowed build/capture",
+        "png_bytes": 60891,
+        "png_sha256": "b9ee8d797d2e260083f08dbf5d6a142b643a2012b8feb49485edb987a308efe8",
+        "resolved_tokens_sha256": "c6c1a96203f5b7cbfe65d4ef4a2d4e44fc34b9e05eea922aff53d256cf4c3e68",
+        "theme": "classic",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "fixture": "examples/render_artifacts/fixtures/system-toast.json",
+      "file": "system-toast--blueprint.png",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "273bf18d0e3a8c4a1fd2942f8f477d82051e18d8",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "ca4529ea2981352aa2e9aacff815edf8892d8fe28ae7d6288ef8be88c885a572",
+        "config_sha256": "982ba33f4dc725ad33cf94723f5fa3780323efb837b4c9564659f149eeae1304",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "elapsed_ms": 1619.674068,
+        "fixture": "examples/render_artifacts/fixtures/system-toast.json",
+        "fixture_sha256": "d350f061bc0798c7cac8cfbf8a82c96788f52320f09c01a898109ef8ba4bf84c",
+        "messages_applied": 0,
+        "output": "test_results/pairing-card-after/273bf18d0e3a/system-toast--blueprint.png",
+        "owner_only_system_card": true,
+        "pipeline": "windowed build/capture",
+        "png_bytes": 58657,
+        "png_sha256": "38a56804efd3da790fb5cf0a93d637fef7600f71e58886817b73c25cfda4ef87",
+        "resolved_tokens_sha256": "aede338eb2073f76bbf86aa6992f9c1aaccfe47ad356980d4a685b331292552e",
+        "theme": "blueprint",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    }
+  ]
+}
