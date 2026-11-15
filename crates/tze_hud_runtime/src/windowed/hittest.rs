@@ -313,6 +313,19 @@ impl WinitApp {
             .flatten()
     }
 
+    /// Local move-pill target, even when the element body is click-through.
+    pub(super) fn drag_handle_hover_target(&self) -> Option<SceneId> {
+        (!self.state.cursor_left_window)
+            .then(|| {
+                self.state
+                    .pipeline
+                    .hit_test_snapshot
+                    .load()
+                    .drag_handle_hover_target(self.state.cursor_x, self.state.cursor_y)
+            })
+            .flatten()
+    }
+
     /// Lock-free view of what the cursor currently hovers or would capture.
     pub(super) fn cursor_entry_signature(&self) -> CursorEntrySignature {
         let (x, y) = (self.state.cursor_x, self.state.cursor_y);
@@ -333,6 +346,7 @@ impl WinitApp {
                     .is_some_and(|r| r.contains_point(x, y)),
             grip: self.resize_grip_hover_target(),
             close_target: self.close_hover_target(),
+            drag_handle: self.drag_handle_hover_target(),
             widget_regions: self
                 .state
                 .widget_hover_trackers
@@ -663,20 +677,68 @@ mod tests {
         tile.bounds.y = 330.0;
 
         let stale_snapshot = crate::pipeline::HitTestSnapshot::from_scene(&scene);
-        assert!(
-            !stale_snapshot.hit_test_drag_handle(800.0, 330.0),
-            "pre-refresh snapshot still carries the previous frame's drag-handle bounds"
-        );
 
         compositor.prime_markdown_cache(&scene);
         compositor.prime_truncation_cache(&scene);
         compositor.render_frame(&mut scene, &surface);
         refresh_interaction_hit_regions_after_render(&compositor, &mut scene, &surface);
         let refreshed_snapshot = crate::pipeline::HitTestSnapshot::from_scene(&scene);
-
+        let grip = scene
+            .overlay
+            .drag_handle_hit_regions
+            .iter()
+            .find(|handle| handle.element_id == tile_id)
+            .unwrap()
+            .bounds;
+        let grip_center = (grip.x + grip.width / 2.0, grip.y + grip.height / 2.0);
+        assert!(grip.y + grip.height < scene.tiles[&tile_id].bounds.y);
         assert!(
-            refreshed_snapshot.hit_test_drag_handle(800.0, 330.0),
+            !stale_snapshot.hit_test_drag_handle(grip_center.0, grip_center.1),
+            "pre-refresh snapshot still carries the previous frame's drag-handle bounds"
+        );
+        assert!(
+            refreshed_snapshot.hit_test_drag_handle(grip_center.0, grip_center.1),
             "snapshot built after the windowed post-render refresh must match the newly displayed drag-handle geometry"
+        );
+
+        // Body hover follows the front tile, independently of grip capture.
+        let rear = scene.tiles[&tile_id].clone();
+        let front_lease = scene.grant_lease("front-agent", 60_000);
+        let front_bounds = tze_hud_scene::Rect::new(
+            rear.bounds.x + 100.0,
+            rear.bounds.y + 40.0,
+            rear.bounds.width - 100.0,
+            rear.bounds.height - 40.0,
+        );
+        let front_id = scene
+            .create_tile(
+                rear.tab_id,
+                "front-agent",
+                front_lease,
+                front_bounds,
+                rear.z_order + 1,
+            )
+            .unwrap();
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
+        compositor.render_frame(&mut scene, &surface);
+        refresh_interaction_hit_regions_after_render(&compositor, &mut scene, &surface);
+        let overlap = crate::pipeline::HitTestSnapshot::from_scene(&scene);
+        let (x, y) = (front_bounds.x + 20.0, front_bounds.y + 80.0);
+        assert_eq!(
+            overlap.hit_test(x, y).unwrap().tile_id_bytes,
+            front_id.to_bytes_le()
+        );
+        assert!(!overlap.hit_test_drag_handle(x, y));
+        assert_eq!(
+            overlap.drag_handle_hover_target(x, y),
+            Some(front_id),
+            "overlapping body hover must reveal the front tile's pill"
+        );
+        assert_eq!(
+            overlap.drag_handle_hover_target(rear.bounds.x + 20.0, y),
+            Some(tile_id),
+            "the uncovered rear body still reveals its own pill"
         );
 
         // Use the actual renderer's Zone handle, not a tile-shaped synthetic hit.
@@ -729,6 +791,41 @@ mod tests {
             tze_hud_scene::DragHandleElementKind::Zone
         );
         assert!(!scene.tiles.contains_key(&zone_id));
+        let snapshot = crate::pipeline::HitTestSnapshot::from_scene(&scene);
+        let body_x = handle.element_bounds.unwrap().x + 40.0;
+        let body_y = handle.element_bounds.unwrap().y + 40.0;
+        assert_eq!(
+            snapshot.drag_handle_hover_target(body_x, body_y),
+            Some(zone_id)
+        );
+        let card = scene
+            .overlay
+            .notification_geometry
+            .iter()
+            .find(|card| card.zone_name == "notifications")
+            .unwrap()
+            .bounds;
+        let gap_x = handle.bounds.x + handle.bounds.width / 2.0;
+        let gap_y = (handle.bounds.y + handle.bounds.height + card.y) / 2.0;
+        assert_eq!(
+            snapshot.drag_handle_hover_target(gap_x, gap_y),
+            Some(zone_id),
+            "moving across the gap from card to grip keeps the pill visible"
+        );
+        assert!(
+            !snapshot.hit_test_drag_handle(gap_x, gap_y),
+            "the hover corridor adds no pointer capture"
+        );
+        assert_eq!(
+            snapshot
+                .drag_handle_hover_target(card.x + card.width / 2.0, card.y + card.height + 20.0),
+            None,
+            "empty logical zone below the painted stack has no hover pill"
+        );
+        assert!(
+            !snapshot.hit_test_drag_handle(body_x, body_y),
+            "body hover adds no capture"
+        );
         let controls = scene.overlay.zone_hit_regions.clone();
         assert_eq!(controls.len(), 2, "dismiss and action were generated");
         let tile_bounds = scene.tiles[&tile_id].bounds;

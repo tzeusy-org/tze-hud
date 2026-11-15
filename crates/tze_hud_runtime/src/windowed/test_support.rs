@@ -357,6 +357,7 @@ pub(super) fn make_windowed_keyboard_test_app(
         surface_ui: Default::default(),
         resize_grip_hover_state: Arc::new(StdMutex::new(None)),
         tile_close_hover_state: Arc::new(StdMutex::new(None)),
+        drag_handle_hover_state: Arc::new(StdMutex::new(None)),
         cursor_left_window: false,
         composer_visual_layout: Arc::new(StdMutex::new(None)),
         portal_projection_driver: crate::portal::PortalDriver::new(portals),

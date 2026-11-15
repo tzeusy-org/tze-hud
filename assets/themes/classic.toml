@@ -267,3 +267,12 @@
 "size.status.icon" = "14"
 "size.status.divider" = "14"
 "size.status.entry_max" = "240"
+
+# Hover-only runtime move affordance
+"size.drag.handle_width" = "32"
+"size.drag.handle_height" = "4"
+"size.drag.hit_height" = "12"
+"size.drag.resize_target" = "24"
+"opacity.drag.hover" = "0.5"
+"opacity.drag.active" = "1"
+"opacity.drag.highlight" = "0.9"

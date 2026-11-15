@@ -84,8 +84,8 @@ use winit::window::{Fullscreen, Window, WindowAttributes, WindowId};
 
 use crate::scene_startup::run_scene_startup;
 use tze_hud_compositor::{
-    Compositor, CompositorSurface, FocusRingOwnerHandle, LocalComposerStateHandle,
-    ResizeGripHoverHandle, TileCloseHoverHandle, WindowSurface,
+    Compositor, CompositorSurface, DragHandleHoverHandle, FocusRingOwnerHandle,
+    LocalComposerStateHandle, ResizeGripHoverHandle, TileCloseHoverHandle, WindowSurface,
 };
 use tze_hud_config::resolve_runtime_widget_asset_store;
 use tze_hud_input::{
@@ -614,6 +614,7 @@ struct WindowedRuntimeState {
     /// button the compositor shows (hud-jm8nq.11). Written each `about_to_wait`
     /// from the polled cursor; cloned from `compositor.tile_close_hover_state`.
     tile_close_hover_state: TileCloseHoverHandle,
+    drag_handle_hover_state: DragHandleHoverHandle,
     /// True after `CursorLeft` until the next `CursorMoved`: the pointer is
     /// outside the window, so no tile is hovered.
     cursor_left_window: bool,
@@ -930,6 +931,7 @@ impl WinitApp {
         // close button (hud-jm8nq.11). Same per-frame + latest-wins cadence;
         // an unchanged target costs the compositor nothing.
         self.push_tile_close_hover();
+        self.push_drag_handle_hover();
         // Retry any keyboard events that were deferred because the scene lock
         // was busy during dispatch (hud-2fz34).  Runs after composer flush so
         // deferred keystrokes re-enter the same path as fresh ones.
@@ -1512,6 +1514,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         self.state.focus_ring_owner_state = Arc::clone(&compositor.focus_ring_owner_state);
         self.state.resize_grip_hover_state = Arc::clone(&compositor.resize_grip_hover_state);
         self.state.tile_close_hover_state = Arc::clone(&compositor.tile_close_hover_state);
+        self.state.drag_handle_hover_state = Arc::clone(&compositor.drag_handle_hover_state);
         // Reverse channel: read the compositor's per-frame wrapped-line layout for
         // soft-wrap vertical caret movement (hud-21o6x).
         self.state.composer_visual_layout = Arc::clone(&compositor.composer_visual_layout);
@@ -3446,6 +3449,7 @@ impl WindowedRuntime {
             // Placeholder; replaced in resumed() with the compositor's Arc (hud-wgiys).
             resize_grip_hover_state: Arc::new(StdMutex::new(None)),
             tile_close_hover_state: Arc::new(StdMutex::new(None)),
+            drag_handle_hover_state: Arc::new(StdMutex::new(None)),
             cursor_left_window: false,
             // Placeholder; replaced in resumed() with the compositor's Arc (hud-21o6x).
             composer_visual_layout: Arc::new(StdMutex::new(None)),

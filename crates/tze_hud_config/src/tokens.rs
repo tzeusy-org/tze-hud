@@ -676,6 +676,42 @@ pub static CANONICAL_TOKENS: &[CanonicalToken] = &[
         description: "Status pill fraction of its tooltip canvas",
         default_value: "0.32258065",
     },
+    // Runtime drag affordances
+    CanonicalToken {
+        key: "size.drag.handle_width",
+        description: "Move pill width (dp)",
+        default_value: "32",
+    },
+    CanonicalToken {
+        key: "size.drag.handle_height",
+        description: "Move pill height (dp)",
+        default_value: "4",
+    },
+    CanonicalToken {
+        key: "size.drag.hit_height",
+        description: "Move pill hit row height (dp)",
+        default_value: "12",
+    },
+    CanonicalToken {
+        key: "size.drag.resize_target",
+        description: "Pip resize hit target (dp)",
+        default_value: "24",
+    },
+    CanonicalToken {
+        key: "opacity.drag.hover",
+        description: "Move pill opacity while its element is hovered",
+        default_value: "0.5",
+    },
+    CanonicalToken {
+        key: "opacity.drag.active",
+        description: "Move pill opacity while pressed or dragged",
+        default_value: "1",
+    },
+    CanonicalToken {
+        key: "opacity.drag.highlight",
+        description: "Active element outline opacity",
+        default_value: "0.9",
+    },
     // Stroke
     CanonicalToken {
         key: "stroke.border.width",

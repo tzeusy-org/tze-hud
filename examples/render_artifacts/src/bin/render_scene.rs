@@ -32,7 +32,7 @@ const LOCAL_IDENTITY: &str = "offline-render-scene-not-a-paired-credential";
 const HELP: &str = "Usage: render-scene (--fixture FILE | --widget BUNDLE --params JSON) --output PNG\n\
     [--config TOML (fixture mode)] [--theme tonal-glass|classic|blueprint] [--tokens TOML]\n\
     [--width PX] [--height PX]\n\
-    [--capture-at-ms MS]\n\
+    [--capture-at-ms MS] [--drag-hover-at X,Y (fixture only)]\n\
 Scene defaults: 1920x1080, tonal-glass, fixture checkpoint at 250ms (explicit 0ms is the first frame).\n\
 Capture bounds: 1..8192 per axis, <=16M pixels; checkpoint <=5000ms.\n\
 Output must not exist. JSON manifest is printed to stdout; compile time is separate.";
@@ -48,6 +48,7 @@ struct Args {
     width: u32,
     height: u32,
     capture_at_ms: u64,
+    drag_hover_at: Option<[f32; 2]>,
     output: PathBuf,
 }
 
@@ -67,6 +68,7 @@ fn parse_args(values: impl IntoIterator<Item = String>) -> Result<Option<Args>> 
         width: 1920,
         height: 1080,
         capture_at_ms: DEFAULT_SCENE_CAPTURE_MS,
+        drag_hover_at: None,
         output: PathBuf::new(),
     };
     let mut seen = std::collections::HashSet::new();
@@ -98,6 +100,12 @@ fn parse_args(values: impl IntoIterator<Item = String>) -> Result<Option<Args>> 
             "--width" => args.width = value.parse()?,
             "--height" => args.height = value.parse()?,
             "--capture-at-ms" => args.capture_at_ms = value.parse()?,
+            "--drag-hover-at" => {
+                let (x, y) = value
+                    .split_once(',')
+                    .ok_or_else(|| error("drag hover needs X,Y"))?;
+                args.drag_hover_at = Some([x.parse()?, y.parse()?]);
+            }
             "--output" => args.output = value.into(),
             _ => return Err(error(format!("unknown argument {flag}; use --help"))),
         }
@@ -128,6 +136,20 @@ fn validate_args(args: &Args) -> Result<()> {
         return Err(error(
             "dimensions must be positive, <=8192 per axis and <=16M pixels",
         ));
+    }
+    if let Some([x, y]) = args.drag_hover_at {
+        if args.fixture.is_none()
+            || !x.is_finite()
+            || !y.is_finite()
+            || x < 0.0
+            || y < 0.0
+            || x >= args.width as f32
+            || y >= args.height as f32
+        {
+            return Err(error(
+                "drag hover belongs to fixture mode and must be inside the viewport",
+            ));
+        }
     }
     if args.capture_at_ms > 5000 {
         return Err(error("capture checkpoint exceeds 5000ms"));
@@ -448,7 +470,19 @@ async fn render_fixture(args: &Args, raw: &RawConfig) -> Result<(CapturedFrame, 
     let mut scene = handle.lock().await;
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
-    let build = compositor.build_windowed_frame(&mut scene, args.width, args.height);
+    let mut build = compositor.build_windowed_frame(&mut scene, args.width, args.height);
+    let mut drag_handle_hovered = false;
+    if let Some([x, y]) = args.drag_hover_at {
+        // Authoring intent only: resolve against the actual frame snapshot,
+        // using the same hover mirror as the runtime. No OS input is injected.
+        compositor.populate_zone_hit_regions(&mut scene, args.width as f32, args.height as f32);
+        let target =
+            tze_hud_runtime::HitTestSnapshot::from_scene(&scene).drag_handle_hover_target(x, y);
+        drag_handle_hovered = target.is_some();
+        *compositor.drag_handle_hover_state.lock().unwrap() = target;
+        compositor.drain_local_composer_and_needs_render();
+        build = compositor.build_windowed_frame(&mut scene, args.width, args.height);
+    }
     let frame = compositor.capture_windowed_frame(
         &build,
         &FrameTarget::primary(args.width, args.height),
@@ -456,7 +490,7 @@ async fn render_fixture(args: &Args, raw: &RawConfig) -> Result<(CapturedFrame, 
     )?;
     Ok((
         frame,
-        json!({"pipeline":"windowed build/capture","fixture":path,"fixture_sha256":hash(&bytes),"messages_applied":messages.len(),"checkpoint":"after all ordered messages; latest-wins per surface","capture_at_ms":args.capture_at_ms,"adapter":adapter}),
+        json!({"pipeline":"windowed build/capture","fixture":path,"fixture_sha256":hash(&bytes),"messages_applied":messages.len(),"checkpoint":"after all ordered messages; latest-wins per surface","capture_at_ms":args.capture_at_ms,"drag_hover_at":args.drag_hover_at,"drag_handle_hovered":drag_handle_hovered,"adapter":adapter}),
     ))
 }
 
@@ -676,6 +710,7 @@ mod tests {
             width: 252,
             height: 96,
             capture_at_ms: 0,
+            drag_hover_at: None,
             output: output.clone(),
         };
         for (width, height) in [(0, 1), (1, 0), (8193, 1), (8192, 8192)] {
@@ -908,6 +943,31 @@ mod tests {
         let settled_manifest = execute(&settled_args).await.unwrap();
         let settled_bytes = fs::read(&settled_args.output).unwrap();
         let settled = image::load_from_memory(&settled_bytes).unwrap().to_rgba8();
+        let hover_args = Args {
+            drag_hover_at: Some([1500.0, 100.0]),
+            output: dir.join("notification-hover.png"),
+            ..settled_args.clone()
+        };
+        let hover_manifest = execute(&hover_args).await.unwrap();
+        assert_eq!(hover_manifest["drag_handle_hovered"], true);
+        let hovered = image::open(&hover_args.output).unwrap().to_rgba8();
+        let grip_ink = (39..52)
+            .flat_map(|y| (1640..1680).map(move |x| (x, y)))
+            .filter(|&(x, y)| hovered.get_pixel(x, y) != settled.get_pixel(x, y))
+            .count();
+        assert!(
+            grip_ink > 20,
+            "actual rounded hover pill changes the grip row pixels"
+        );
+        for point in [[f32::NAN, 0.0], [-1.0, 0.0], [1920.0, 100.0]] {
+            assert!(
+                validate_args(&Args {
+                    drag_hover_at: Some(point),
+                    ..hover_args.clone()
+                })
+                .is_err()
+            );
+        }
         assert_eq!(first_manifest["capture_at_ms"], 0);
         assert_eq!(settled_manifest["capture_at_ms"], DEFAULT_SCENE_CAPTURE_MS);
         assert_eq!(settled_manifest["messages_applied"], 4);

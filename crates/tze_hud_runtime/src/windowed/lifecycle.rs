@@ -2286,6 +2286,13 @@ impl WinitApp {
         }
     }
 
+    /// Publish only the element identity; repeated motion inside it stays quiet.
+    pub(super) fn push_drag_handle_hover(&self) {
+        if let Ok(mut slot) = self.state.drag_handle_hover_state.lock() {
+            *slot = self.drag_handle_hover_target();
+        }
+    }
+
     pub(super) fn drain_input_capture_commands(&mut self) {
         while let Ok(command) = self.state.input_capture_rx.try_recv() {
             self.state.pending_input_capture_commands.push_back(command);

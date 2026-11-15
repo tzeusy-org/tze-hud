@@ -58,9 +58,6 @@ pub const DRAG_Z_ORDER_BOOST: u32 = 0x1000;
 /// Must be ≥ 1.0; the compositor clamps the result to 1.0.
 pub const DRAG_OPACITY_BOOST: f32 = 1.0;
 
-/// Width of the 2px highlight border applied during active drag.
-pub const DRAG_HIGHLIGHT_BORDER_PX: f32 = 2.0;
-
 /// Phase of a per-device drag recognizer.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DragPhase {

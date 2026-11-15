@@ -653,3 +653,10 @@ DWM transparency, multiple monitors and DPI acceptance remain separate.
 An original scenario failure is preserved if its failure screenshot also
 fails (`diagnostic_error`). Desktop captures check GDI results and release
 their owned DCs and bitmap on error.
+
+
+Offline `render-scene --fixture FILE --drag-hover-at X,Y` renders a move-pill
+hover at a display-relative point through the actual frame snapshot and runtime
+hover mirror. It injects no OS input, starts no listener and changes no owner
+settings. The manifest records the point and whether it resolved to a draggable
+element. Use real gesture checks separately to establish input behavior.

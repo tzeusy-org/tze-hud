@@ -764,6 +764,16 @@ async fn idle_render_gate_renders_for_composer_echo_and_caret_blink() {
     *compositor.tile_close_hover_state.lock().unwrap() = None;
     assert!(compositor.drain_local_composer_and_needs_render());
     assert!(!compositor.drain_local_composer_and_needs_render());
+
+    *compositor.drag_handle_hover_state.lock().unwrap() = Some(tile_id);
+    assert!(compositor.drain_local_composer_and_needs_render());
+    assert!(
+        !compositor.drain_local_composer_and_needs_render(),
+        "same element remains idle"
+    );
+    *compositor.drag_handle_hover_state.lock().unwrap() = None;
+    assert!(compositor.drain_local_composer_and_needs_render());
+    assert!(!compositor.drain_local_composer_and_needs_render());
 }
 
 #[test]

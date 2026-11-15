@@ -214,6 +214,7 @@ impl WindowedRuntimeState {
             surface_ui: Default::default(),
             resize_grip_hover_state: Arc::new(StdMutex::new(None)),
             tile_close_hover_state: Arc::new(StdMutex::new(None)),
+            drag_handle_hover_state: Arc::new(StdMutex::new(None)),
             cursor_left_window: false,
             composer_visual_layout: Arc::new(StdMutex::new(None)),
             portal_projection_driver: crate::portal::PortalDriver::new(portals),
@@ -7601,6 +7602,44 @@ mod tests {
         step(&mut harness.app, 450.0, false, Some(tile_b), true);
         step(&mut harness.app, 450.0, true, None, true);
         step(&mut harness.app, 10.0, true, None, false);
+
+        // A passthrough body exposes the move pill without capturing the body
+        // or emitting input. Only entering/leaving changes the wake signature.
+        let (mut scene, tile, _, _) =
+            super::super::test_support::scene_with_drag_handle_tile(600.0, 200.0, 300.0, 200.0);
+        scene.tiles.get_mut(&tile).unwrap().input_mode = tze_hud_scene::InputMode::Passthrough;
+        scene.overlay.drag_handle_hit_regions[0].element_bounds = Some(scene.tiles[&tile].bounds);
+        harness.app.state.pipeline.hit_test_snapshot.store(Arc::new(
+            crate::pipeline::HitTestSnapshot::from_scene(&scene),
+        ));
+        harness.app.state.cursor_x = 700.0;
+        harness.app.state.cursor_y = 300.0;
+        harness.app.state.cursor_left_window = false;
+        let signature = harness.app.cursor_entry_signature();
+        assert_eq!(signature.drag_handle, Some(tile));
+        assert!(!signature.capture);
+        assert_eq!(harness.app.cursor_entry_turn(), CursorEntryTurn::FullTurn);
+        harness.app.push_drag_handle_hover();
+        assert_eq!(
+            *harness.app.state.drag_handle_hover_state.lock().unwrap(),
+            Some(tile)
+        );
+        assert!(wake.finish_main_work(wake.main_work_checkpoint()));
+        let before = wake.compositor().checkpoint();
+        harness.app.state.cursor_x += 10.0;
+        assert!(matches!(
+            harness.app.cursor_entry_turn(),
+            CursorEntryTurn::Quiet { next: None }
+        ));
+        assert_eq!(wake.compositor().checkpoint(), before);
+        harness.app.state.cursor_left_window = true;
+        assert_eq!(harness.app.cursor_entry_turn(), CursorEntryTurn::FullTurn);
+        harness.app.push_drag_handle_hover();
+        assert_eq!(
+            *harness.app.state.drag_handle_hover_state.lock().unwrap(),
+            None
+        );
+        assert!(wake.finish_main_work(wake.main_work_checkpoint()));
     }
 
     /// The device-event wiring: only mouse motion ticks, and arming/disarming

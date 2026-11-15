@@ -17,15 +17,77 @@
 //! - `collect_drag_handle_entries` — build the full `Vec<DragHandleEntry>` for
 //!   the current frame covering tiles and zones (widgets get none).
 //! - `drag_highlight_cmds` — SDF border commands for the active-drag highlight.
-//! - `append_drag_handle_vertices` — emit GPU vertices for all drag handles.
+//! - `drag_pill_cmds` — hover-only SDF move pills.
+//! - `append_drag_handle_vertices` — pip resize dots.
 
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::*;
 
 use super::Compositor;
 use super::draw_cmds::DragHandleEntry;
-use super::token_colors::resolve_resize_grip_tokens;
+use super::token_colors::{parse_hex_color, resolve_resize_grip_tokens};
 use crate::pipeline::{RectVertex, RoundedRectDrawCmd, rect_vertices};
+use tze_hud_config::tokens::{CANONICAL_TOKENS, DesignTokenMap, parse_numeric, px_scale};
+
+/// Resolved component roles. Defaults live only in the canonical token table.
+struct DragHandleStyle {
+    width: f32,
+    height: f32,
+    hit_height: f32,
+    gap: f32,
+    resize_target: f32,
+    radius: f32,
+    color: Rgba,
+    hover_opacity: f32,
+    active_opacity: f32,
+    highlight: Rgba,
+    highlight_width: f32,
+    highlight_radius: f32,
+}
+
+impl DragHandleStyle {
+    fn resolve(tokens: &DesignTokenMap) -> Self {
+        let canonical = |key| {
+            CANONICAL_TOKENS
+                .iter()
+                .find(|t| t.key == key)
+                .expect("drag role must be canonical")
+                .default_value
+        };
+        let number = |key| {
+            tokens
+                .get(key)
+                .and_then(|v| parse_numeric(v))
+                .filter(|v| *v >= 0.0)
+                .or_else(|| parse_numeric(canonical(key)))
+                .expect("canonical drag number")
+        };
+        let color = |key| {
+            tokens
+                .get(key)
+                .and_then(|v| parse_hex_color(v))
+                .or_else(|| parse_hex_color(canonical(key)))
+                .expect("canonical drag color")
+        };
+        let dp = |key| number(key) * px_scale(tokens);
+        let mut highlight = color("color.primary");
+        highlight.a *= number("opacity.drag.highlight").clamp(0.0, 1.0);
+        Self {
+            width: dp("size.drag.handle_width"),
+            height: dp("size.drag.handle_height"),
+            hit_height: dp("size.drag.hit_height"),
+            gap: dp("space.s"),
+            resize_target: dp("size.drag.resize_target"),
+            radius: dp("shape.full"),
+            color: color("color.on_surface.variant"),
+            hover_opacity: number("opacity.drag.hover").clamp(0.0, 1.0),
+            active_opacity: number("opacity.drag.active").clamp(0.0, 1.0),
+            highlight,
+            highlight_width: dp("stroke.border.width"),
+            highlight_radius: dp("shape.l"),
+        }
+    }
+}
 
 impl Compositor {
     fn scene_id_hex(id: SceneId) -> String {
@@ -48,29 +110,23 @@ impl Compositor {
         Rect::new(x, y, w, h)
     }
 
-    fn drag_handle_bounds(
-        element_bounds: Rect,
-        style: DragHandleStyle,
-        scale: f32,
-        sw: f32,
-        sh: f32,
-    ) -> Rect {
-        let w = (style.width_dp * scale).max(1.0).min(sw.max(1.0));
-        let h = (style.height_dp * scale).max(1.0).min(sh.max(1.0));
+    fn drag_handle_bounds(element_bounds: Rect, style: &DragHandleStyle, sw: f32, sh: f32) -> Rect {
+        let w = style.width.max(1.0).min(sw.max(1.0));
+        let h = style.hit_height.max(1.0).min(sh.max(1.0));
         let x = (element_bounds.x + (element_bounds.width - w) * 0.5).clamp(0.0, (sw - w).max(0.0));
-        let y = (element_bounds.y - h * 0.5).clamp(0.0, (sh - h).max(0.0));
+        let y = (element_bounds.y - h - style.gap).clamp(0.0, (sh - h).max(0.0));
         Rect::new(x, y, w, h)
     }
 
-    /// The pip resize grip: a square the move handle's width (at most half
+    /// The pip resize grip: a token-sized square (at most half
     /// the element), inside the element's `(left, top)` corner.
     fn resize_grip_bounds(
         element_bounds: Rect,
         (left, top): (bool, bool),
-        style: DragHandleStyle,
-        scale: f32,
+        style: &DragHandleStyle,
     ) -> Rect {
-        let side = (style.width_dp * scale)
+        let side = style
+            .resize_target
             .min(element_bounds.width * 0.5)
             .min(element_bounds.height * 0.5)
             .max(1.0);
@@ -93,7 +149,7 @@ impl Compositor {
         sw: f32,
         sh: f32,
     ) -> Vec<DragHandleEntry> {
-        let style = DragHandleStyle::default();
+        let style = DragHandleStyle::resolve(&self.token_map);
         let scale = tze_hud_config::tokens::px_scale(&self.token_map);
         let mut entries: Vec<DragHandleEntry> = Vec::new();
 
@@ -127,20 +183,18 @@ impl Compositor {
                     bounds,
                     element_bounds: tile.bounds,
                     interaction_id,
-                    style,
                     is_header_band: true,
                     resize_grip: None,
                 });
                 continue;
             }
-            let bounds = Self::drag_handle_bounds(tile.bounds, style, scale, sw, sh);
+            let bounds = Self::drag_handle_bounds(tile.bounds, &style, sw, sh);
             entries.push(DragHandleEntry {
                 element_id: tile.id,
                 element_kind: DragHandleElementKind::Tile,
                 bounds,
                 element_bounds: tile.bounds,
                 interaction_id,
-                style,
                 is_header_band: false,
                 resize_grip: None,
             });
@@ -208,7 +262,7 @@ impl Compositor {
             } else {
                 element_bounds_zone
             };
-            let bounds = Self::drag_handle_bounds(element_bounds_zone, style, scale, sw, sh);
+            let bounds = Self::drag_handle_bounds(element_bounds_zone, &style, sw, sh);
             let id_hex = Self::scene_id_hex(zone_def.id);
             entries.push(DragHandleEntry {
                 element_id: zone_def.id,
@@ -216,7 +270,6 @@ impl Compositor {
                 bounds,
                 element_bounds: element_bounds_zone,
                 interaction_id: format!("drag-handle:{id_hex}"),
-                style,
                 is_header_band: false,
                 resize_grip: None,
             });
@@ -241,10 +294,9 @@ impl Compositor {
                 entries.push(DragHandleEntry {
                     element_id: zone_def.id,
                     element_kind: DragHandleElementKind::Zone,
-                    bounds: Self::resize_grip_bounds(element_bounds_zone, corner, style, scale),
+                    bounds: Self::resize_grip_bounds(element_bounds_zone, corner, &style),
                     element_bounds: element_bounds_zone,
                     interaction_id: format!("{RESIZE_GRIP_PREFIX}{id_hex}"),
-                    style,
                     is_header_band: false,
                     resize_grip: Some(corner),
                 });
@@ -257,7 +309,7 @@ impl Compositor {
         entries
     }
 
-    /// The active-drag highlight: a `DRAG_HIGHLIGHT_BORDER_PX` inside border
+    /// The active-drag highlight: a token-driven inside border
     /// on the dragged element (occupied slots for notification stacks), drawn just before
     /// the drag-handle pass (so above widgets). Per the drag-to-reposition
     /// spec: no drop shadows, scale pulses, or animated transitions.
@@ -266,13 +318,7 @@ impl Compositor {
         scene: &SceneGraph,
         handles: &[DragHandleEntry],
     ) -> Vec<RoundedRectDrawCmd> {
-        // White at 0.9 alpha: visible on light and dark backgrounds.
-        const HIGHLIGHT: Rgba = Rgba {
-            r: 1.0,
-            g: 1.0,
-            b: 1.0,
-            a: 0.9,
-        };
+        let style = DragHandleStyle::resolve(&self.token_map);
         handles
             .iter()
             // The pip's grip shares its element with the move handle: one
@@ -301,16 +347,73 @@ impl Compositor {
                         bounds.height = card.y + card.height - bounds.y;
                     }
                 }
-                Some(self.border_only_cmd(
-                    bounds,
-                    0.0,
-                    tze_hud_input::DRAG_HIGHLIGHT_BORDER_PX,
-                    HIGHLIGHT,
-                ))
+                Some(
+                    self.border_only_cmd(
+                        bounds,
+                        style
+                            .highlight_radius
+                            .min(bounds.width * 0.5)
+                            .min(bounds.height * 0.5),
+                        style.highlight_width,
+                        style.highlight,
+                    ),
+                )
             })
             .collect()
     }
 
+    /// A single SDF pill, shown by element hover or an active press/drag. The
+    /// full portal band retains its input precedence but never paints a slab.
+    pub(super) fn drag_pill_cmds(
+        &self,
+        scene: &SceneGraph,
+        handles: &[DragHandleEntry],
+    ) -> Vec<RoundedRectDrawCmd> {
+        let style = DragHandleStyle::resolve(&self.token_map);
+        handles
+            .iter()
+            .filter_map(|entry| {
+                if entry.resize_grip.is_some() {
+                    return None;
+                }
+                let local = scene
+                    .overlay
+                    .chrome_states
+                    .get(&entry.interaction_id)
+                    .copied()
+                    .unwrap_or_default();
+                let active = local.pressed || scene.is_drag_active(entry.element_id);
+                if !active && !local.hovered && self.drag_handle_hover != Some(entry.element_id) {
+                    return None;
+                }
+                let width = style.width.min(entry.bounds.width);
+                let height = style.height.min(entry.bounds.height);
+                let row = if entry.is_header_band {
+                    style.hit_height.min(entry.bounds.height)
+                } else {
+                    entry.bounds.height
+                };
+                let mut color = style.color;
+                color.a *= if active {
+                    style.active_opacity
+                } else {
+                    style.hover_opacity
+                };
+                Some(RoundedRectDrawCmd {
+                    x: entry.bounds.x + (entry.bounds.width - width) * 0.5,
+                    y: entry.bounds.y + (row - height) * 0.5,
+                    width,
+                    height,
+                    radius: style.radius.min(width * 0.5).min(height * 0.5),
+                    color: self.gpu_color(color),
+                    border: None,
+                    clip: None,
+                })
+            })
+            .collect()
+    }
+
+    /// The pip's existing resize dot mark is independent of the move pill.
     pub(super) fn append_drag_handle_vertices(
         &self,
         scene: &SceneGraph,
@@ -320,101 +423,29 @@ impl Compositor {
         sh: f32,
     ) {
         for entry in handles {
-            let local_state = scene
+            let Some(corner) = entry.resize_grip else {
+                continue;
+            };
+            let local = scene
                 .overlay
                 .chrome_states
                 .get(&entry.interaction_id)
                 .copied()
                 .unwrap_or_default();
-            let is_active_drag = scene.is_drag_active(entry.element_id);
-            let opacity = if local_state.hovered || local_state.pressed || is_active_drag {
-                entry.style.opacity_active
-            } else {
-                entry.style.opacity_idle
-            }
-            .clamp(0.0, 1.0);
-
-            // Header-band handles are invisible (hud-643dv): the client draws the
-            // header chrome, so the band paints no grip fill/glyph of its own — it
-            // only contributes the active-drag highlight border
-            // (`drag_highlight_cmds`). Painting a
-            // translucent slab over the whole header would double-draw the client
-            // header and look wrong.
-            if entry.is_header_band {
-                continue;
-            }
-
-            // The pip's resize grip draws exactly like a portal tile's: the
-            // `portal.window.resize_grip.*` dot mark (no fill), in its corner,
-            // hover-tinted while hovered, pressed or dragging.
-            if let Some(corner) = entry.resize_grip {
-                let tokens = resolve_resize_grip_tokens(&self.token_map);
-                let side = tokens
-                    .size_px
-                    .min(entry.bounds.width)
-                    .min(entry.bounds.height);
-                let color = self.gpu_color_raw(
-                    tokens.mark_color(local_state.hovered || local_state.pressed || is_active_drag),
-                );
-                for dot in Self::resize_grip_dot_rects(entry.bounds, side, corner) {
-                    if dot.width > 0.0 {
-                        vertices.extend_from_slice(&rect_vertices(
-                            dot.x, dot.y, dot.width, dot.height, sw, sh, color,
-                        ));
-                    }
-                }
-                continue;
-            }
-
-            let mut base = entry.style.color;
-            base.a = (base.a * opacity).clamp(0.0, 1.0);
-            vertices.extend_from_slice(&rect_vertices(
-                entry.bounds.x,
-                entry.bounds.y,
-                entry.bounds.width,
-                entry.bounds.height,
-                sw,
-                sh,
-                self.gpu_color(base),
+            let tokens = resolve_resize_grip_tokens(&self.token_map);
+            let side = tokens
+                .size_px
+                .min(entry.bounds.width)
+                .min(entry.bounds.height);
+            let color = self.gpu_color_raw(tokens.mark_color(
+                local.hovered || local.pressed || scene.is_drag_active(entry.element_id),
             ));
-
-            match entry.style.grip_pattern {
-                DragHandleGripPattern::Dots => {
-                    let dot = (entry.bounds.height * 0.35).max(1.0);
-                    let gap = (dot * 0.6).max(1.0);
-                    let total_w = dot * 3.0 + gap * 2.0;
-                    let start_x = entry.bounds.x + (entry.bounds.width - total_w) * 0.5;
-                    let y = entry.bounds.y + (entry.bounds.height - dot) * 0.5;
-                    let grip = Rgba::new(base.r, base.g, base.b, (base.a * 0.9).clamp(0.0, 1.0));
-                    for idx in 0..3 {
-                        vertices.extend_from_slice(&rect_vertices(
-                            start_x + idx as f32 * (dot + gap),
-                            y,
-                            dot,
-                            dot,
-                            sw,
-                            sh,
-                            self.gpu_color(grip),
-                        ));
-                    }
-                }
-                DragHandleGripPattern::Bar => {
-                    let bar_w = (entry.bounds.width * 0.5).max(2.0);
-                    let bar_h = (entry.bounds.height * 0.2).max(1.0);
-                    let x = entry.bounds.x + (entry.bounds.width - bar_w) * 0.5;
-                    let y = entry.bounds.y + (entry.bounds.height - bar_h) * 0.5;
-                    let grip = Rgba::new(base.r, base.g, base.b, (base.a * 0.9).clamp(0.0, 1.0));
+            for dot in Self::resize_grip_dot_rects(entry.bounds, side, corner) {
+                if dot.width > 0.0 {
                     vertices.extend_from_slice(&rect_vertices(
-                        x,
-                        y,
-                        bar_w,
-                        bar_h,
-                        sw,
-                        sh,
-                        self.gpu_color(grip),
+                        dot.x, dot.y, dot.width, dot.height, sw, sh, color,
                     ));
                 }
-                DragHandleGripPattern::None => {}
             }
         }
     }

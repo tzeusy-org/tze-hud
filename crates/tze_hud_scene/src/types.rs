@@ -1813,17 +1813,6 @@ pub enum ZoneMediaType {
     SolidColor,
 }
 
-/// Visual pattern rendered inside a drag handle affordance.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub enum DragHandleGripPattern {
-    /// Render three small grip dots.
-    Dots,
-    /// Render a thin horizontal grip bar.
-    Bar,
-    /// Render no interior grip decoration.
-    None,
-}
-
 /// Design token key for the portal header-band drag-handle height (hud-643dv).
 ///
 /// The runtime resolves this from the display token map; when absent the
@@ -1858,39 +1847,6 @@ pub const PORTAL_TEXT_MIN_FONT_PX_DEFAULT: f32 = 9.0;
 /// large text grows on a grown portal so a huge window does not produce
 /// absurdly large glyphs.
 pub const PORTAL_TEXT_MAX_FONT_PX_DEFAULT: f32 = 48.0;
-
-/// Design-token bundle for runtime drag handle visuals.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-pub struct DragHandleStyle {
-    /// Base fill color.
-    pub color: Rgba,
-    /// Opacity while idle (no hover/press).
-    pub opacity_idle: f32,
-    /// Opacity while hovered or pressed.
-    pub opacity_active: f32,
-    /// Handle width in density-independent pixels.
-    pub width_dp: f32,
-    /// Handle height in density-independent pixels.
-    pub height_dp: f32,
-    /// Corner radius in pixels.
-    pub border_radius: f32,
-    /// Grip decoration style.
-    pub grip_pattern: DragHandleGripPattern,
-}
-
-impl Default for DragHandleStyle {
-    fn default() -> Self {
-        Self {
-            color: Rgba::new(1.0, 1.0, 1.0, 1.0),
-            opacity_idle: 0.4,
-            opacity_active: 1.0,
-            width_dp: 24.0,
-            height_dp: 8.0,
-            border_radius: 4.0,
-            grip_pattern: DragHandleGripPattern::Dots,
-        }
-    }
-}
 
 /// Rendering policy — how content is presented in the zone.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
