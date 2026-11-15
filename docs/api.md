@@ -1092,10 +1092,16 @@ not fit on the display is refused); "Clears after" (Never, 5 s ... 1 h)
 caps each publication at that long after it was published, including what
 shows now, unless the agent asked for less. Both are saved into the
 widget's own `[[tabs.widgets]]` entry with the file's comments kept; when the
-save fails the change lasts the session and the row says so. A
-`[displays."<key>"]` table's zones show read-only until the Layout row can
-edit them (`hud-vniri.8`). This read-only assignment does not prevent live zone
-placement: drag an existing zone grip to move the whole zone for this runtime
+save fails the change lasts the session and the row says so. The
+Layout card also gives each zone a display choice. Choose a connected monitor
+by its current key to move the zone on the next frame and save it under
+`[displays."<key>"]`, keeping the file's comments and other zone assignments.
+"Primary (default)" removes the explicit binding; a named primary monitor
+keeps its physical key. Missing or retired bindings remain labelled unavailable,
+and a monitor unplugged before an edit is applied is refused rather than
+redirecting the edit to another screen. If saving fails, the live change lasts
+until restart and the row explains why; without a config file it is session-only.
+You can also drag an existing zone grip to move the whole zone for this runtime
 session. The shown `pip` zone also has a resize grip in its corner facing the
 display centre (diagonal resize cursor): dragging it scales the zone with its
 width/height ratio pinned and the opposite corner fixed, kept on screen and no

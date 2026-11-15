@@ -33,7 +33,7 @@ pub use agents_file::{
 pub use allow::{Grant, allow_to_permissions, validate_allow_entry, with_grant};
 pub use config_write::{
     ConfigWriteError, RuntimeUpdate, TokenUpdate, WidgetUpdate, check_token_update,
-    is_writable_token, set_design_tokens, set_runtime, set_widget,
+    is_writable_token, set_design_tokens, set_runtime, set_widget, set_zone_display,
 };
 pub use loader::{
     DEFAULT_FPS, DEFAULT_GRPC_PORT, DEFAULT_LOG_LEVEL, DEFAULT_MCP_PORT, LOG_LEVELS, MAX_FPS,

@@ -1,9 +1,9 @@
 //! Layout: where each widget sits and how long its content stays up, both
 //! live and saved to its `[[tabs.widgets]]` entry, and which zones a
-//! `[displays.<NAME>]` table sends to another monitor (read-only until
-//! monitor names are stable).
+//! `[displays."<key>"]` table sends to another monitor.
 
-use std::sync::Arc;
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex as StdMutex};
 
 use tokio::sync::Mutex;
 use tze_hud_config::WidgetUpdate;
@@ -11,8 +11,9 @@ use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::render_wake::RenderWakeNotifier;
 use tze_hud_scene::types::GeometryPolicy;
 
+use super::super::displays::DisplayControl;
 use super::super::row::{BoxFuture, Control, Edit, Row, Section};
-use super::super::runtime::WidgetWriter;
+use super::super::runtime::{DisplayWriter, WidgetWriter};
 
 /// "Clears after" choices, in ms (`None`: never).
 const CLEAR_CHOICES: [Option<u64>; 8] = [
@@ -32,8 +33,12 @@ pub(crate) struct LayoutSection {
     /// Saves a widget's entry; `None`: no config file, changes last the
     /// session.
     save: Option<WidgetWriter>,
-    /// `[displays.<NAME>]` zone lists, as the HUD started.
-    displays: Vec<(String, Vec<String>)>,
+    displays: Option<DisplayControl>,
+    save_display: Option<DisplayWriter>,
+    main_wake: RenderWakeNotifier,
+    /// Keys offered by the last rendered rows; hotplug may reorder the live
+    /// list before an edit arrives, so an index must keep its original meaning.
+    display_options: StdMutex<HashMap<String, Vec<Option<String>>>>,
 }
 
 /// One widget as the rows need it.
@@ -48,18 +53,24 @@ impl LayoutSection {
     const PREFIX: &'static str = "layout.";
     const GEOMETRY: &'static str = ".geometry";
     const CLEAR: &'static str = ".clear";
+    const ZONE: &'static str = "layout.zone.";
 
     pub(crate) fn new(
         scene: Arc<Mutex<SceneGraph>>,
         render_wake: RenderWakeNotifier,
         save: Option<WidgetWriter>,
-        displays: Vec<(String, Vec<String>)>,
+        displays: Option<DisplayControl>,
+        save_display: Option<DisplayWriter>,
+        main_wake: RenderWakeNotifier,
     ) -> Self {
         Self {
             scene,
             render_wake,
             save,
             displays,
+            save_display,
+            main_wake,
+            display_options: StdMutex::default(),
         }
     }
 
@@ -264,19 +275,67 @@ impl Section for LayoutSection {
                     ]),
                 );
             }
-            for (display, zones) in &self.displays {
-                rows.push(
-                    Row::new(
-                        format!("{}display.{display}", Self::PREFIX),
-                        format!("Zones on {display}"),
-                        Control::ReadOnly {
-                            text: zones.join(", "),
-                            mono: true,
-                        },
-                    )
-                    .detail("Waits for stable monitor names; set in [displays] for now")
-                    .keywords(&["monitor", "display", "screen", "zones"]),
-                );
+            if let Some(displays) = &self.displays {
+                let (configured, monitors, topology) = displays.snapshot();
+                let connected: Vec<_> = monitors
+                    .iter()
+                    .map(|monitor| (monitor.key.as_str(), monitor.base.as_deref()))
+                    .collect();
+                let mut zones: Vec<_> = self
+                    .scene
+                    .lock()
+                    .await
+                    .zone_registry
+                    .zones
+                    .keys()
+                    .cloned()
+                    .collect();
+                zones.sort();
+                let mut rendered = HashMap::new();
+                for zone in zones {
+                    let mut keys: Vec<_> = std::iter::once(None)
+                        .chain(monitors.iter().map(|monitor| Some(monitor.key.clone())))
+                        .collect();
+                    let mut options: Vec<_> = std::iter::once("Primary (default)".to_owned())
+                        .chain(
+                            monitors
+                                .iter()
+                                .enumerate()
+                                .map(|(i, monitor)| monitor.label(i)),
+                        )
+                        .collect();
+                    let selected = configured.get(&zone).map_or(0, |key| {
+                        tze_hud_config::displays::match_display_key(key, &connected)
+                            .map(|index| index + 1)
+                            .unwrap_or_else(|| {
+                                keys.push(Some(key.clone()));
+                                options.push(format!("Unavailable · {key}"));
+                                options.len() - 1
+                            })
+                    });
+                    // Bind the row's option indexes to the topology it drew.
+                    // A queued edit of a replaced row then fails closed even
+                    // if a refresh ran before its background apply started.
+                    let id = format!("{}{zone}.{topology}", Self::ZONE);
+                    rendered.insert(id.clone(), keys);
+                    rows.push(
+                        Row::new(
+                            id,
+                            format!("{zone} display"),
+                            Control::Choice { selected, options },
+                        )
+                        .detail(if self.save_display.is_some() {
+                            "Applies live · Saved to config"
+                        } else {
+                            "Applies live · No config file; lasts until restart"
+                        })
+                        .keywords(&["monitor", "display", "screen", "zones"]),
+                    );
+                }
+                *self
+                    .display_options
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = rendered;
             }
             rows
         })
@@ -286,6 +345,37 @@ impl Section for LayoutSection {
         Box::pin(async move {
             let described = format!("{edit:?}");
             let unsupported = || format!("{row} does not support {described}");
+            if let Some(zone_row) = row.strip_prefix(Self::ZONE) {
+                let Edit::Choose(index) = edit else {
+                    return Err(unsupported());
+                };
+                let key = self
+                    .display_options
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .get(row)
+                    .and_then(|options| options.get(index))
+                    .cloned()
+                    .ok_or("Display choices changed; choose again")?;
+                let (zone, topology) = zone_row
+                    .rsplit_once('.')
+                    .ok_or("Display choices changed; choose again")?;
+                let topology = topology
+                    .parse()
+                    .map_err(|_| "Display choices changed; choose again")?;
+                let displays = self
+                    .displays
+                    .as_ref()
+                    .ok_or("Display choices unavailable")?;
+                if displays.assign(zone, key.as_deref(), topology)? {
+                    self.main_wake.notify();
+                }
+                if let Some(save) = &self.save_display {
+                    save(zone, key.as_deref())
+                        .map_err(|error| format!("Applied until restart; not saved: {error}"))?;
+                }
+                return Ok(());
+            }
             let rest = row.strip_prefix(Self::PREFIX).ok_or_else(unsupported)?;
             if let Some(name) = rest.strip_suffix(Self::GEOMETRY) {
                 let text = match &edit {

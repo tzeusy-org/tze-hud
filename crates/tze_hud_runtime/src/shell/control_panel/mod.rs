@@ -38,6 +38,7 @@
 pub(crate) mod agents;
 pub(crate) mod chords;
 pub(crate) mod connect;
+mod displays;
 mod pause;
 pub(crate) mod row;
 pub(crate) mod runtime;
@@ -55,6 +56,7 @@ use tze_hud_scene::render_wake::RenderWakeNotifier;
 
 pub(crate) use agents::AgentControl;
 pub(crate) use connect::ConnectControl;
+pub(crate) use displays::MonitorChoice;
 pub(crate) use pause::PauseControl;
 pub(crate) use row::Section;
 pub(crate) use runtime::RuntimeControl;
@@ -159,6 +161,7 @@ struct Shared {
 #[derive(Clone)]
 pub(crate) struct ControlPanelHandle {
     shared: Arc<Shared>,
+    pub(crate) displays: Option<displays::DisplayControl>,
 }
 
 impl ControlPanelHandle {
@@ -390,10 +393,9 @@ pub(crate) fn default_sections(deps: &ControlPanelDeps) -> Vec<Box<dyn Section>>
             Arc::clone(&deps.scene),
             deps.render_wake.clone(),
             deps.runtime.as_ref().and_then(|r| r.write_widget.clone()),
-            deps.runtime
-                .as_ref()
-                .map(|r| r.displays.clone())
-                .unwrap_or_default(),
+            deps.runtime.as_ref().map(|r| r.displays.clone()),
+            deps.runtime.as_ref().and_then(|r| r.write_display.clone()),
+            deps.main_wake.clone(),
         )),
         Box::new(sections::InputSection::new(
             deps.chords.clone(),
@@ -433,6 +435,10 @@ pub(crate) fn spawn_control_panel(
 ) -> ControlPanelHandle {
     let (tx, mut rx) = mpsc::unbounded_channel();
     let handle = ControlPanelHandle {
+        displays: deps
+            .runtime
+            .as_ref()
+            .map(|runtime| runtime.displays.clone()),
         shared: Arc::new(Shared {
             model: RwLock::new((0, None, Default::default())),
             closed_notice: RwLock::new((0, None)),
