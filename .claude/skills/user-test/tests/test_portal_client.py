@@ -354,6 +354,27 @@ def test_hook_lifecycle_over_real_mcp_surface(tmp_path):
         assert (tombstone.parent / "marker.lock").exists()  # lock identity survives expiry
 
 
+def test_hook_parallel_tool_updates_queue_instead_of_dropping(tmp_path):
+    # Parallel tools fire their Post hooks together; the second must wait for
+    # the in-flight delivery rather than lose its update (hud-x38zn.8).
+    with HookHarness(tmp_path / "parallel") as h:
+        h.boot()
+        h.event("PreToolUse", tool_use_id="ok", tool_name="Bash")
+        h.event("PreToolUse", tool_use_id="bad", tool_name="Bash")
+        h.block_text = "Bash: completed"
+        first = h.launch(h.payload("PostToolUse", tool_use_id="ok", tool_name="Bash"))
+        assert h.received.wait(2)
+        second = h.launch(h.payload("PostToolUseFailure", tool_use_id="bad", tool_name="Bash"))
+        time.sleep(0.2)  # well past the old 50 ms admission window
+        h.release.set()
+        h.finish(first)
+        h.finish(second)
+        h.wait_idle()
+        contents = [p.get("content") for p in h.publications()]
+        assert contents.count("Bash: completed") == 1
+        assert contents.count("Bash: failed") == 1
+
+
 def test_hook_subprocess_replay_prompt_races_and_reaping(tmp_path):
     import fcntl
     with HookHarness(tmp_path / "ordering") as h:

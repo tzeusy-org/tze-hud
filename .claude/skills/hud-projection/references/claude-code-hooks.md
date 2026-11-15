@@ -193,8 +193,12 @@ bounded expiry cleanup. Lock files remain to preserve their inode domain.
 
 Marker admission is at most 5 ms and never covers network I/O. The independent
 atomic marker records the prompt before Claude's next work. A separate delivery
-lock admits ordinary publishers for at most 50 ms. One supervised HTTP child gets
-350 ms per request and a 1.0 s total watchdog; SessionEnd has 1.2 s total. The
+lock serializes publishers. Off-prompt publishers (async tool/Stop hooks and the
+prompt's background status child) queue for it for up to 750 ms, so parallel
+tools' simultaneous updates are delivered in turn rather than dropped. Once
+admitted, one supervised HTTP child gets 350 ms per request and a 1.0 s
+watchdog, keeping the whole job under the 2 s hook timeout. SessionEnd waits
+and delivers within one 1.2 s total. The
 living supervisor kills/reaps its known child on timeout, errors or catchable
 SIGTERM before releasing its delivery lock. The child also arms a default-action
 real-time timer for the remaining absolute budget before network I/O and inherits
