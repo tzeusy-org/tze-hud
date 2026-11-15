@@ -7,6 +7,8 @@ use std::sync::{Arc, Mutex};
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct MonitorChoice {
     pub key: String,
+    /// Model+serial alias only when the all-connected matcher resolves it to
+    /// this monitor, even if other connected hardware has no usable overlay.
     pub base: Option<String>,
     pub primary: bool,
 }

@@ -1843,12 +1843,7 @@ async fn poc_panel_layout_moves_widgets_and_saves_their_entry() {
     cfg.config_toml = Some(production.clone());
     cfg.config_file_path = Some(config.display().to_string());
     let mut poc = Poc::boot_from(cfg.clone(), None).await;
-    let monitors = [
-        ("MONITOR1", "DEL0001-PRIMARY", 0.0, true),
-        ("MONITOR2", "DEL0002-LEFT", -1920.0, false),
-        ("MONITOR3", "DEL0003-RIGHT", 1920.0, false),
-    ]
-    .map(|(name, key, x, primary)| {
+    let monitor = |name: &str, key: &str, x: f32, primary: bool| {
         (
             tze_hud_compositor::DisplayRect {
                 name: name.into(),
@@ -1857,7 +1852,12 @@ async fn poc_panel_layout_moves_widgets_and_saves_their_entry() {
             },
             key.to_owned(),
         )
-    });
+    };
+    let monitors = [
+        monitor("MONITOR1", "DEL0001-PRIMARY", 0.0, true),
+        monitor("MONITOR2", "DEL0002-LEFT", -1920.0, false),
+        monitor("MONITOR3", "DEL0003-RIGHT", 1920.0, false),
+    ];
     poc.hud.set_display_topology(monitors.to_vec());
     poc.open_panel().await;
     let saved = || std::fs::read_to_string(&config).expect("config");
@@ -2075,6 +2075,105 @@ async fn poc_panel_layout_moves_widgets_and_saves_their_entry() {
         restarted.hud.zone_display_placement("alert-banner").0,
         Some(left)
     );
+    drop(restarted);
+
+    // Overlay availability must never change a base alias's hardware
+    // ambiguity. Drive the real adoption/resolver/publisher before reading
+    // actual panel rows and compositor placement (review P2 hud-ysdn7).
+    let alias = "DEL41A2-SAME";
+    let a = "DEL41A2-SAME@PORT-A";
+    let b = "DEL41A2-SAME@PORT-B";
+    let primary = "DEL0001-PRIMARY";
+    for (case, hardware, secondary_overlays, expected) in [
+        (
+            "duplicate hardware with only primary overlaid",
+            vec![
+                monitor("MONITOR1", a, 0.0, true),
+                monitor("MONITOR2", b, 1920.0, false),
+            ],
+            vec![],
+            None,
+        ),
+        (
+            "duplicate hardware with one missing secondary overlay",
+            vec![
+                monitor("MONITOR1", primary, 0.0, true),
+                monitor("MONITOR2", a, -1920.0, false),
+                monitor("MONITOR3", b, 1920.0, false),
+            ],
+            vec!["MONITOR2"],
+            None,
+        ),
+        (
+            "unique base alias resolves to its available secondary",
+            vec![
+                monitor("MONITOR1", primary, 0.0, true),
+                monitor("MONITOR2", a, -1920.0, false),
+            ],
+            vec!["MONITOR2"],
+            Some(left),
+        ),
+    ] {
+        let production = format!(
+            "{PRODUCTION_CONFIG}\n[displays.\"{alias}\"]\nzones = [\"subtitle\"] # Keep raw alias\n"
+        );
+        std::fs::write(&config, &production).unwrap();
+        let mut cfg = runtime_config();
+        cfg.config_toml = Some(production.clone());
+        cfg.config_file_path = Some(config.display().to_string());
+        let mut poc = Poc::boot_from(cfg, None).await;
+        poc.hud.set_display_topology(hardware);
+        poc.hud.retain_display_overlays(&secondary_overlays);
+        poc.open_panel().await;
+        poc.wait_for(case, |hud| hud.control_panel_zone_row("subtitle").is_some())
+            .await;
+        assert_eq!(
+            poc.hud.zone_display_placement("subtitle").0,
+            expected,
+            "{case}: authoritative rendering"
+        );
+        let row = poc.hud.control_panel_zone_row("subtitle").unwrap();
+        let PanelControl::Choice(label) = row.control else {
+            panic!("zone choice")
+        };
+        if expected.is_none() {
+            assert_eq!(
+                label,
+                format!("Unavailable · {alias}"),
+                "{case}: row agrees with all-connected resolution"
+            );
+        } else {
+            assert!(
+                label.contains(a) && !label.contains("Unavailable"),
+                "{case}: {label}"
+            );
+        }
+        assert_eq!(
+            saved(),
+            production,
+            "discovery never rewrites a saved alias"
+        );
+        if secondary_overlays.is_empty() || expected.is_some() {
+            continue;
+        }
+        // Only live overlays are selectable. The exact qualified A key is
+        // saved and placed; absent-overlay B never appears in the cycle.
+        for (key, placement) in [
+            (None, None),
+            (Some(primary), None),
+            (Some(a), Some(left)),
+            (None, None),
+        ] {
+            poc.click(&row.id).await;
+            poc.wait_for("only available overlays are chosen and saved", |hud| {
+                zone_choice(hud, key)
+                    && assignment(&saved(), "subtitle").as_deref() == key
+                    && hud.zone_display_placement("subtitle").0 == placement
+            })
+            .await;
+            assert_ne!(assignment(&saved(), "subtitle").as_deref(), Some(b));
+        }
+    }
 }
 
 /// Appearance (T11 CP-5, hud-h51u7.5): the theme and any token change the

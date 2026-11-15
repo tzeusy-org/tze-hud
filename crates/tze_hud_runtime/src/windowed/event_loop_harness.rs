@@ -690,8 +690,8 @@ impl HeadlessEventLoopHarness {
             keyed.push(KeyedMonitor {
                 name: monitor.name,
                 key: DisplayKey {
+                    base: key.split_once('@').map(|(base, _)| base.to_owned()),
                     key,
-                    base: None,
                     stable: true,
                 },
             });
@@ -706,6 +706,18 @@ impl HeadlessEventLoopHarness {
         self.app.state.primary_monitor = Some(primary.clone());
         self.app.publish_displays_for(&primary, &secondaries);
         self.display_fixture = Some((primary, secondaries));
+    }
+
+    /// Restrict the fixture's secondary overlay plan without removing any
+    /// connected hardware keys. This models primary-only modes or a failed
+    /// sibling overlay; `set_display_topology` restores the complete plan.
+    pub fn retain_display_overlays(&mut self, secondary_names: &[&str]) {
+        let (primary, secondaries) = self
+            .display_fixture
+            .as_mut()
+            .expect("display topology fixture");
+        secondaries.retain(|monitor| secondary_names.contains(&monitor.name.as_str()));
+        self.app.publish_displays_for(primary, secondaries);
     }
 
     /// Observe the compositor's actual shared placement (None means primary),

@@ -1552,6 +1552,15 @@ impl super::WinitApp {
             .as_ref()
             .and_then(|panel| panel.displays.as_ref())
         {
+            // Validate aliases against all connected hardware before limiting
+            // choices to usable overlays. A missing sibling overlay must not
+            // make an ambiguous model+serial alias look unique in the panel.
+            let connected: Vec<_> = self
+                .state
+                .display_keys
+                .iter()
+                .map(|monitor| (monitor.key.key.as_str(), monitor.key.base.as_deref()))
+                .collect();
             displays.publish_monitors(
                 status
                     .iter()
@@ -1568,7 +1577,14 @@ impl super::WinitApp {
                                 .display_keys
                                 .iter()
                                 .find(|monitor| monitor.name == display.name)
-                                .and_then(|monitor| monitor.key.base.clone()),
+                                .and_then(|monitor| monitor.key.base.as_deref())
+                                .filter(|base| {
+                                    tze_hud_config::displays::match_display_key(base, &connected)
+                                        .is_some_and(|index| {
+                                            self.state.display_keys[index].name == display.name
+                                        })
+                                })
+                                .map(str::to_owned),
                             primary: display.primary,
                         })
                     })
