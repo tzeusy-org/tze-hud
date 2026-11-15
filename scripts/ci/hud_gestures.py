@@ -1021,6 +1021,7 @@ def held_press_on_retired_card(run: Run, key: str, retire: Callable[[], None], w
     the retired publication's press must send nothing."""
     open_card(run, key)
     run.point(f"zone:notification-area/{key}/0")
+    run.settle()  # the hover frame first, so only the press can satisfy the next settle
     run.mark()
     run.inj.button(True)
     run.step("button down (held)")
