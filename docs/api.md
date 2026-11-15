@@ -1076,6 +1076,8 @@ remain click-through. Hover is local and repaints only on entry/exit, with no
 polling deadline or agent event. Active drag uses the semantic primary outline,
 `stroke.border.width` and `shape.l`. All sizes follow monitor scale × `ui.scale`.
 The pip resize target and its existing corner dot mark remain separate.
+Overlapping element bodies reveal the frontmost element's pill; this hover
+selection does not change existing grip capture precedence.
 Typing four numbers and Enter moves or resizes it at once (a box that does
 not fit on the display is refused); "Clears after" (Never, 5 s ... 1 h)
 caps each publication at that long after it was published, including what

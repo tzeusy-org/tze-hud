@@ -701,6 +701,46 @@ mod tests {
             "snapshot built after the windowed post-render refresh must match the newly displayed drag-handle geometry"
         );
 
+        // Body hover follows the front tile, independently of grip capture.
+        let rear = scene.tiles[&tile_id].clone();
+        let front_lease = scene.grant_lease("front-agent", 60_000);
+        let front_bounds = tze_hud_scene::Rect::new(
+            rear.bounds.x + 100.0,
+            rear.bounds.y + 40.0,
+            rear.bounds.width - 100.0,
+            rear.bounds.height - 40.0,
+        );
+        let front_id = scene
+            .create_tile(
+                rear.tab_id,
+                "front-agent",
+                front_lease,
+                front_bounds,
+                rear.z_order + 1,
+            )
+            .unwrap();
+        compositor.prime_markdown_cache(&scene);
+        compositor.prime_truncation_cache(&scene);
+        compositor.render_frame(&mut scene, &surface);
+        refresh_interaction_hit_regions_after_render(&compositor, &mut scene, &surface);
+        let overlap = crate::pipeline::HitTestSnapshot::from_scene(&scene);
+        let (x, y) = (front_bounds.x + 20.0, front_bounds.y + 80.0);
+        assert_eq!(
+            overlap.hit_test(x, y).unwrap().tile_id_bytes,
+            front_id.to_bytes_le()
+        );
+        assert!(!overlap.hit_test_drag_handle(x, y));
+        assert_eq!(
+            overlap.drag_handle_hover_target(x, y),
+            Some(front_id),
+            "overlapping body hover must reveal the front tile's pill"
+        );
+        assert_eq!(
+            overlap.drag_handle_hover_target(rear.bounds.x + 20.0, y),
+            Some(tile_id),
+            "the uncovered rear body still reveals its own pill"
+        );
+
         // Use the actual renderer's Zone handle, not a tile-shaped synthetic hit.
         use super::super::test_support::{make_test_zone, make_windowed_keyboard_test_app};
         use tze_hud_input::{FocusManager, InputProcessor, PointerEventKind};

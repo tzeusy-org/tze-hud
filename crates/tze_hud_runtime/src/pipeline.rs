@@ -196,8 +196,11 @@ impl HitTestSnapshot {
     /// entries do not independently expose a move pill. The content stays
     /// passthrough: capture still uses only `hit_test_drag_handle`.
     pub fn drag_handle_hover_target(&self, x: f32, y: f32) -> Option<tze_hud_scene::SceneId> {
+        // Chrome entries follow paint order; only body hover traverses them
+        // front to back. Grip capture retains its existing ordering.
         self.drag_handles
             .iter()
+            .rev()
             .find(|h| h.resize_cursor.is_none() && h.hover_bounds.contains_point(x, y))
             .map(|h| h.element_id)
     }
