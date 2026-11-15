@@ -82,6 +82,3 @@ pub use pipeline::{
     STAGE5_BUDGET_US,
 };
 pub use shell::chrome::{ChromeState, collect_diagnostic};
-pub use shell::freeze::{
-    EnqueueResult, FreezeQueue, MutationTrafficClass, QueuedMutation, classify_mutation_batch,
-};
