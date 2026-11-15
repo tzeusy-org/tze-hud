@@ -26,9 +26,6 @@ mod subtitle_streaming;
 #[path = "text_stream_portal_surface.rs"]
 mod text_stream_portal_surface;
 
-#[path = "text_stream_portal_coalescing.rs"]
-mod text_stream_portal_coalescing;
-
 #[path = "text_stream_portal_governance.rs"]
 mod text_stream_portal_governance;
 

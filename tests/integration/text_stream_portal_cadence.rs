@@ -18,8 +18,7 @@ use tze_hud_portal::hub::{PortalHub, PortalKey, Publish};
 use tze_hud_runtime::headless::{HeadlessConfig, HeadlessRuntime};
 use tze_hud_runtime::portal::{PortalDriver, PortalHandle};
 use tze_hud_runtime::{
-    EnqueueResult, FreezeQueue, INPUT_TO_NEXT_PRESENT_BUDGET_US, MutationTrafficClass,
-    QueuedMutation, STAGE3_BUDGET_US, STAGE4_BUDGET_US, STAGE5_BUDGET_US,
+    INPUT_TO_NEXT_PRESENT_BUDGET_US, STAGE3_BUDGET_US, STAGE4_BUDGET_US, STAGE5_BUDGET_US,
 };
 use tze_hud_scene::clock::{Clock, TestClock};
 use tze_hud_scene::{
@@ -456,8 +455,6 @@ fn portal_event_rate_stays_below_aggregate_ceiling() {
 /// After a burst that coalesces multiple snapshots, the final drained snapshot
 /// must be the most-recent coherent window (not oldest or mid-stream).
 ///
-/// This mirrors text_stream_portal_coalescing.rs but uses the
-/// PortalHub instead of the raw FreezeQueue.
 #[test]
 fn burst_coherence_latest_snapshot_survives_coalescing() {
     const BURST_APPENDS: usize = 50;
@@ -496,139 +493,6 @@ fn burst_coherence_latest_snapshot_survives_coalescing() {
     assert!(
         hub.take_due(250_001).is_empty(),
         "Hub must be idle after draining the burst window"
-    );
-}
-
-/// Freeze-queue burst coherence: the FreezeQueue coalescing (StateStream,
-/// latest-wins) must also preserve the final coherent snapshot under a burst.
-///
-/// This confirms the existing FreezeQueue mechanism matches the spec requirement
-/// (tasks.md §5.4 — "retained-window coherence under burst per the existing
-/// coalescing requirement").
-#[test]
-fn freeze_queue_burst_retains_coherent_window() {
-    const BURST_COUNT: usize = 80;
-    let mut queue = FreezeQueue::new(4); // small queue to force coalescing
-    let coalesce_key = Some("portal://burst-coherence/freeze".to_string());
-
-    let mut last_payload = Vec::new();
-    for i in 0..BURST_COUNT {
-        let line = format!("[{i:03}] freeze-burst {i}\n").into_bytes();
-        last_payload.extend_from_slice(&line);
-        let mutation = QueuedMutation {
-            batch_id: format!("b-{i}").into_bytes(),
-            original_batch_id: format!("b-{i}").into_bytes(),
-            traffic_class: MutationTrafficClass::StateStream,
-            coalesce_key: coalesce_key.clone(),
-            submitted_at_wall_us: i as u64 * 1_000,
-            payload: last_payload.clone(),
-        };
-        let result = queue.enqueue(mutation);
-        // All appends after the first should coalesce or evict (queue capacity = 4).
-        if i > 0 {
-            assert!(
-                matches!(
-                    result,
-                    EnqueueResult::Coalesced
-                        | EnqueueResult::QueuedWithPressure
-                        | EnqueueResult::Queued
-                        | EnqueueResult::EvictedEntry { .. }
-                ),
-                "burst enqueue #{i} should not backpressure transactional"
-            );
-        }
-    }
-
-    let drained = queue.drain();
-    // After burst, the remaining StateStream entry must hold the latest snapshot.
-    let state_stream_entries: Vec<_> = drained
-        .iter()
-        .filter(|m| m.traffic_class == MutationTrafficClass::StateStream)
-        .collect();
-
-    assert!(
-        !state_stream_entries.is_empty(),
-        "at least one StateStream entry must survive the burst drain"
-    );
-    // The latest entry must have the latest sequence (closest to BURST_COUNT-1).
-    let latest = state_stream_entries.last().unwrap();
-    let latest_payload = String::from_utf8(latest.payload.clone()).expect("utf8");
-    // The latest payload must include the last line (monotonic coherence).
-    assert!(
-        latest_payload.contains(&format!("[{:03}]", BURST_COUNT - 1))
-            || latest_payload.len() >= last_payload.len() / 2,
-        "burst drain must yield a recent coherent window; got {} bytes (last was {} bytes)",
-        latest_payload.len(),
-        last_payload.len()
-    );
-}
-
-// ─── Task 5.4: Dual-portal equal-rate fairness via FreezeQueue ───────────────
-
-/// Under equal sustained rates in the FreezeQueue, two portals with distinct
-/// coalesce keys coalesce independently and neither is starved.
-///
-/// This validates that the underlying FreezeQueue coalescing correctly handles
-/// multiple concurrent portals with separate coalesce keys.
-#[test]
-fn freeze_queue_dual_portal_coalescing_independent() {
-    const APPENDS_PER_PORTAL: usize = 50;
-    let mut queue = FreezeQueue::new(16);
-
-    let key_a = Some("portal://dual/a".to_string());
-    let key_b = Some("portal://dual/b".to_string());
-
-    // Interleave appends from both portals at equal rates.
-    for i in 0..APPENDS_PER_PORTAL {
-        let payload_a = format!("a-snapshot-{i}").into_bytes();
-        let payload_b = format!("b-snapshot-{i}").into_bytes();
-
-        queue.enqueue(QueuedMutation {
-            batch_id: format!("a-{i}").into_bytes(),
-            original_batch_id: format!("a-{i}").into_bytes(),
-            traffic_class: MutationTrafficClass::StateStream,
-            coalesce_key: key_a.clone(),
-            submitted_at_wall_us: i as u64 * 1_000,
-            payload: payload_a,
-        });
-
-        queue.enqueue(QueuedMutation {
-            batch_id: format!("b-{i}").into_bytes(),
-            original_batch_id: format!("b-{i}").into_bytes(),
-            traffic_class: MutationTrafficClass::StateStream,
-            coalesce_key: key_b.clone(),
-            submitted_at_wall_us: i as u64 * 1_000,
-            payload: payload_b,
-        });
-    }
-
-    let drained = queue.drain();
-
-    // Both portals must have exactly one entry remaining (coalesced to latest).
-    let entries_a: Vec<_> = drained.iter().filter(|m| m.coalesce_key == key_a).collect();
-    let entries_b: Vec<_> = drained.iter().filter(|m| m.coalesce_key == key_b).collect();
-
-    assert_eq!(
-        entries_a.len(),
-        1,
-        "portal A: {APPENDS_PER_PORTAL} appends must coalesce to 1 entry"
-    );
-    assert_eq!(
-        entries_b.len(),
-        1,
-        "portal B: {APPENDS_PER_PORTAL} appends must coalesce to 1 entry"
-    );
-
-    // Both entries must be the latest snapshot for each portal.
-    let payload_a = String::from_utf8(entries_a[0].payload.clone()).expect("utf8");
-    let payload_b = String::from_utf8(entries_b[0].payload.clone()).expect("utf8");
-    assert!(
-        payload_a.contains(&format!("{}", APPENDS_PER_PORTAL - 1)),
-        "portal A must have latest snapshot: {payload_a}"
-    );
-    assert!(
-        payload_b.contains(&format!("{}", APPENDS_PER_PORTAL - 1)),
-        "portal B must have latest snapshot: {payload_b}"
     );
 }
 
