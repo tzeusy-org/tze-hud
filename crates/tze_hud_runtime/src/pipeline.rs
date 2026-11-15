@@ -68,6 +68,9 @@ pub struct TileBoundsEntry {
 /// One runtime chrome drag-handle entry in the hit-test snapshot.
 #[derive(Clone, Debug)]
 pub struct DragHandleBoundsEntry {
+    /// Draggable owner and its drawn content bounds; hover never expands capture.
+    pub element_id: tze_hud_scene::SceneId,
+    pub element_bounds: Rect,
     /// Display-space drag-handle bounds.
     pub bounds: Rect,
     /// For the pip resize grip, the diagonal resize cursor of its corner.
@@ -108,11 +111,50 @@ impl HitTestSnapshot {
             .drag_handle_hit_regions
             .iter()
             .filter(|region| region.hit_region.accepts_pointer)
-            .map(|region| DragHandleBoundsEntry {
-                bounds: region.bounds,
-                resize_cursor: region
-                    .resize_grip
-                    .map(tze_hud_input::PortalCursor::for_grip_corner),
+            .map(|region| {
+                // Notifications occupy admitted card slots, not the entire
+                // logical zone. Reuse the actual painted rectangles without
+                // changing the drag recognizer's existing movement bounds.
+                let notification_zone = scene.zone_by_id(region.element_id).filter(|z| {
+                    scene
+                        .zone_registry
+                        .active_publishes
+                        .get(&z.name)
+                        .is_some_and(|records| {
+                            records.iter().any(|r| {
+                                matches!(r.content, tze_hud_scene::ZoneContent::Notification(_))
+                            })
+                        })
+                });
+                let element_bounds = notification_zone
+                    .map(|zone| {
+                        scene
+                            .overlay
+                            .notification_geometry
+                            .iter()
+                            .filter(|card| card.zone_name == zone.name)
+                            .map(|card| card.bounds)
+                            .reduce(|a, b| {
+                                let x = a.x.min(b.x);
+                                let y = a.y.min(b.y);
+                                Rect::new(
+                                    x,
+                                    y,
+                                    (a.x + a.width).max(b.x + b.width) - x,
+                                    (a.y + a.height).max(b.y + b.height) - y,
+                                )
+                            })
+                            .unwrap_or(region.bounds)
+                    })
+                    .unwrap_or_else(|| region.element_bounds.unwrap_or(region.bounds));
+                DragHandleBoundsEntry {
+                    element_id: region.element_id,
+                    element_bounds,
+                    bounds: region.bounds,
+                    resize_cursor: region
+                        .resize_grip
+                        .map(tze_hud_input::PortalCursor::for_grip_corner),
+                }
             })
             .collect();
         Self {
@@ -145,6 +187,19 @@ impl HitTestSnapshot {
             .iter()
             .find(|t| t.dismissible && t.bounds.contains_point(x, y))?;
         tze_hud_scene::SceneId::from_bytes_le(&entry.tile_id_bytes)
+    }
+
+    /// Draggable element under the pointer, including its grip. Resize-only
+    /// entries do not independently expose a move pill. The content stays
+    /// passthrough: capture still uses only `hit_test_drag_handle`.
+    pub fn drag_handle_hover_target(&self, x: f32, y: f32) -> Option<tze_hud_scene::SceneId> {
+        self.drag_handles
+            .iter()
+            .find(|h| {
+                h.resize_cursor.is_none()
+                    && (h.bounds.contains_point(x, y) || h.element_bounds.contains_point(x, y))
+            })
+            .map(|h| h.element_id)
     }
 
     /// Test whether a display-space point hits any runtime drag handle.

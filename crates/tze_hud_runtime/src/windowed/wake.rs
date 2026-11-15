@@ -36,6 +36,8 @@ pub(super) struct CursorEntrySignature {
     pub(super) grip: Option<tze_hud_scene::SceneId>,
     /// Dismissible tile whose viewer close button the cursor is over.
     pub(super) close_target: Option<tze_hud_scene::SceneId>,
+    /// Element whose hover-only move pill should show, independent of capture.
+    pub(super) drag_handle: Option<tze_hud_scene::SceneId>,
     /// Number of widget hover regions containing the cursor.
     pub(super) widget_regions: u32,
 }

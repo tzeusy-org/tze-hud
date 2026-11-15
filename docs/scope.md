@@ -534,6 +534,11 @@ source links when implementation changes the status.
   the shared pill rectangle to its assigned display while retaining the
   original region's layout capacity. Its owner signoff remains in
   `hud-h51u7.4.6`.
+  Move handles use a semantic, hover-only rounded pill (`hud-h51u7.4.5`), with
+  local element-hover feedback that preserves passthrough and quiet idle. The
+  current widget Layout placement and portal band input contracts remain; the
+  pip resize mark is separate. Its Windows owner signoff stays in
+  `hud-h51u7.4.6`.
   The gauge is restyled as the Tonal Glass ring in source (`hud-h51u7.8.1`);
   its Windows owner signoff (`hud-h51u7.8.6`) is outstanding.
   Progress and status are restyled in source as a label/readout card and a

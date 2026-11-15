@@ -1063,6 +1063,17 @@ in the config file or the launch arguments and restart), and the version.
 The Layout card shows, per widget, its box as percentages of the display
 ("4%, 8% · 18×12%": x, y, width×height) and how long its content stays up.
 Widgets draw no drag handle; this box is how the owner places them.
+Move handles for draggable tiles, portal frames and primary zones are hidden
+until the pointer enters the element or its handle. They draw a 32×4 dp rounded
+pill in the theme's `color.on_surface.variant` role at `opacity.drag.hover`;
+pressing or dragging uses `opacity.drag.active` and keeps the pill visible after
+the pointer leaves. A 12 dp hit row contains the small pill. Portal header bands
+keep their full input area and yield to header controls. Notification hover uses
+the painted stack, including gaps, rather than empty logical zone space; bodies
+remain click-through. Hover is local and repaints only on entry/exit, with no
+polling deadline or agent event. Active drag uses the semantic primary outline,
+`stroke.border.width` and `shape.l`. All sizes follow monitor scale × `ui.scale`.
+The pip resize target and its existing corner dot mark remain separate.
 Typing four numbers and Enter moves or resizes it at once (a box that does
 not fit on the display is refused); "Clears after" (Never, 5 s ... 1 h)
 caps each publication at that long after it was published, including what

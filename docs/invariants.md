@@ -218,6 +218,12 @@ the default in-session; fresh bootstrap retains IDs and starts with defaults.
 Regression owners (existing parents extended, Tests: +0 ~6 -0):
 
 - Runtime [`windowed_post_render_refresh_updates_drag_handles_before_snapshot`](../crates/tze_hud_runtime/src/windowed/hittest.rs): actual rendered handle, runtime drag and refreshed grip/X/action translation.
+- Hover-only move pills: the same post-render parent checks painted notification
+  hover bounds without body capture; `armed_cursor_entry_never_wakes_compositor_until_hover_changes`
+  exercises passthrough entry/exit and unchanged-target quiet turns. Compositor
+  `drag_handle_opacity_switches_to_active_on_hover_state`, `drag_visual_feedback_applied_during_active_drag`
+  and `idle_render_gate_renders_for_composer_echo_and_caret_blink` cover semantic
+  geometry, active feedback and one-frame mirror invalidation.
 - Runtime [`header_band_anchor_is_the_frame_and_band_drag_is_position_only`](../crates/tze_hud_runtime/src/windowed/portal.rs): Tile controls and Zone deferred terminal, replacement, cancellation and no persistence/event.
 - Runtime [`action_button_hover_and_press_are_local_and_frame_only_on_change`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs): moved four-action controls, lifetime and epoch accounting.
 - Runtime [`bootstrap_round_trip_reuses_ids_across_restart`](../crates/tze_hud_runtime/src/element_store.rs): clear/republish retains placement; restart restores defaults without new saved overrides.

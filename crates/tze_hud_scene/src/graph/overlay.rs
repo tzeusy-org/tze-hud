@@ -114,7 +114,7 @@ pub struct RuntimeOverlayState {
     ///
     /// Written by the input processor on DragActivated and cleared on
     /// DragReleased / DragCancelled. Read by the compositor to apply v1-
-    /// compatible visual feedback (z-order boost, opacity, 2px highlight border).
+    /// compatible visual feedback (z-order boost, opacity, token-driven outline).
     ///
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]

@@ -601,7 +601,8 @@ impl Compositor {
         let drag_handles = self.collect_drag_handle_entries(scene, sw, sh);
         let mut drag_handle_vertices: Vec<RectVertex> = Vec::new();
         self.append_drag_handle_vertices(scene, &drag_handles, &mut drag_handle_vertices, sw, sh);
-        let drag_highlight_cmds = self.drag_highlight_cmds(scene, &drag_handles);
+        let mut drag_highlight_cmds = self.drag_highlight_cmds(scene, &drag_handles);
+        drag_highlight_cmds.extend(self.drag_pill_cmds(scene, &drag_handles));
 
         // ── Widget texture sync: rasterize dirty SVGs BEFORE frame acquisition.
         // SVG rasterization can be slow; if a resize event arrives while we hold
@@ -1327,7 +1328,8 @@ impl Compositor {
         let drag_handles = self.collect_drag_handle_entries(scene, sw, sh);
         let mut drag_handle_vertices: Vec<RectVertex> = Vec::new();
         self.append_drag_handle_vertices(scene, &drag_handles, &mut drag_handle_vertices, sw, sh);
-        let drag_highlight_cmds = self.drag_highlight_cmds(scene, &drag_handles);
+        let mut drag_highlight_cmds = self.drag_highlight_cmds(scene, &drag_handles);
+        drag_highlight_cmds.extend(self.drag_pill_cmds(scene, &drag_handles));
 
         // ── Widget texture sync before frame acquisition (same as windowed path).
         self.sync_widget_textures(scene, self.degradation_level);

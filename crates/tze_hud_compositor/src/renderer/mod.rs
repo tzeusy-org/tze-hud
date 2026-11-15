@@ -105,6 +105,9 @@ pub type ResizeGripHoverHandle = Arc<StdMutex<Option<SceneId>>>;
 /// close button the compositor should show (hud-jm8nq.11). Same latest-wins
 /// overwrite-and-read contract as [`ResizeGripHoverHandle`].
 pub type TileCloseHoverHandle = Arc<StdMutex<Option<SceneId>>>;
+
+/// Local pointer target for the hover-only move pill, including passthrough zones.
+pub type DragHandleHoverHandle = Arc<StdMutex<Option<SceneId>>>;
 use image_cache::ImageTextureEntry;
 use image_cache::apply_composer_slot;
 pub use image_cache::{
@@ -609,6 +612,9 @@ pub struct Compositor {
     /// Most-recently drained close-button hover target for this frame. `Some(tile)`
     /// draws that tile's close button and registers its hit region.
     pub(crate) tile_close_hover: Option<SceneId>,
+    /// Latest-wins draggable element under the runtime cursor; independent of capture.
+    pub drag_handle_hover_state: DragHandleHoverHandle,
+    pub(crate) drag_handle_hover: Option<SceneId>,
     /// Most-recently drained local composer state for this frame.
     ///
     /// Populated by draining `local_composer_state` at frame start.
@@ -1015,6 +1021,8 @@ impl Compositor {
             resize_grip_hover: None,
             tile_close_hover_state: Arc::new(StdMutex::new(None)),
             tile_close_hover: None,
+            drag_handle_hover_state: Arc::new(StdMutex::new(None)),
+            drag_handle_hover: None,
             local_composer: None,
             composer_caret_blink_start: std::time::Instant::now(),
             composer_caret_rendered_phase: None,
@@ -1363,6 +1371,8 @@ impl Compositor {
             resize_grip_hover: None,
             tile_close_hover_state: Arc::new(StdMutex::new(None)),
             tile_close_hover: None,
+            drag_handle_hover_state: Arc::new(StdMutex::new(None)),
+            drag_handle_hover: None,
             local_composer: None,
             composer_caret_blink_start: std::time::Instant::now(),
             composer_caret_rendered_phase: None,
@@ -1817,6 +1827,9 @@ impl Compositor {
         if let Ok(slot) = self.tile_close_hover_state.lock() {
             self.tile_close_hover = *slot;
         }
+        if let Ok(slot) = self.drag_handle_hover_state.lock() {
+            self.drag_handle_hover = *slot;
+        }
         new_draft
     }
 
@@ -1852,6 +1865,7 @@ impl Compositor {
         let previous_focus_ring_owner = self.focus_ring_owner;
         let previous_resize_grip_hover = self.resize_grip_hover;
         let previous_tile_close_hover = self.tile_close_hover;
+        let previous_drag_handle_hover = self.drag_handle_hover;
         let draft_applied = self.drain_local_composer_state();
         let is_active = self.local_composer.is_some() && !self.notification_keyboard_active;
         // The caret only changes pixels when its phase flips; between toggles an
@@ -1868,6 +1882,7 @@ impl Compositor {
             || was_active != is_active
             || caret_toggled
             || previous_tile_close_hover != self.tile_close_hover
+            || previous_drag_handle_hover != self.drag_handle_hover
             || focus_or_grip_changed(
                 previous_focus_ring_owner,
                 self.focus_ring_owner,

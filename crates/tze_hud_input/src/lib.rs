@@ -112,9 +112,9 @@ use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::{ElementStore, ElementType, HitResult, NodeData, SceneId, ZoneInteractionKind};
 
 pub use drag::{
-    DEFAULT_SNAP_GRID_PCT, DRAG_HIGHLIGHT_BORDER_PX, DRAG_OPACITY_BOOST, DRAG_Z_ORDER_BOOST,
-    DeviceDragState, DragConfig, DragEventOutcome, DragPhase, LONG_PRESS_MOVEMENT_TOLERANCE_DP,
-    LONG_PRESS_POINTER_THRESHOLD_MS, LONG_PRESS_TOUCH_THRESHOLD_MS,
+    DEFAULT_SNAP_GRID_PCT, DRAG_OPACITY_BOOST, DRAG_Z_ORDER_BOOST, DeviceDragState, DragConfig,
+    DragEventOutcome, DragPhase, LONG_PRESS_MOVEMENT_TOLERANCE_DP, LONG_PRESS_POINTER_THRESHOLD_MS,
+    LONG_PRESS_TOUCH_THRESHOLD_MS,
 };
 pub use tze_hud_scene::DragHandleElementKind;
 

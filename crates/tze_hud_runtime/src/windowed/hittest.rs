@@ -313,6 +313,19 @@ impl WinitApp {
             .flatten()
     }
 
+    /// Local move-pill target, even when the element body is click-through.
+    pub(super) fn drag_handle_hover_target(&self) -> Option<SceneId> {
+        (!self.state.cursor_left_window)
+            .then(|| {
+                self.state
+                    .pipeline
+                    .hit_test_snapshot
+                    .load()
+                    .drag_handle_hover_target(self.state.cursor_x, self.state.cursor_y)
+            })
+            .flatten()
+    }
+
     /// Lock-free view of what the cursor currently hovers or would capture.
     pub(super) fn cursor_entry_signature(&self) -> CursorEntrySignature {
         let (x, y) = (self.state.cursor_x, self.state.cursor_y);
@@ -333,6 +346,7 @@ impl WinitApp {
                     .is_some_and(|r| r.contains_point(x, y)),
             grip: self.resize_grip_hover_target(),
             close_target: self.close_hover_target(),
+            drag_handle: self.drag_handle_hover_target(),
             widget_regions: self
                 .state
                 .widget_hover_trackers
@@ -729,6 +743,30 @@ mod tests {
             tze_hud_scene::DragHandleElementKind::Zone
         );
         assert!(!scene.tiles.contains_key(&zone_id));
+        let snapshot = crate::pipeline::HitTestSnapshot::from_scene(&scene);
+        let body_x = handle.element_bounds.unwrap().x + 40.0;
+        let body_y = handle.element_bounds.unwrap().y + 40.0;
+        assert_eq!(
+            snapshot.drag_handle_hover_target(body_x, body_y),
+            Some(zone_id)
+        );
+        let card = scene
+            .overlay
+            .notification_geometry
+            .iter()
+            .find(|card| card.zone_name == "notifications")
+            .unwrap()
+            .bounds;
+        assert_eq!(
+            snapshot
+                .drag_handle_hover_target(card.x + card.width / 2.0, card.y + card.height + 20.0),
+            None,
+            "empty logical zone below the painted stack has no hover pill"
+        );
+        assert!(
+            !snapshot.hit_test_drag_handle(body_x, body_y),
+            "body hover adds no capture"
+        );
         let controls = scene.overlay.zone_hit_regions.clone();
         assert_eq!(controls.len(), 2, "dismiss and action were generated");
         let tile_bounds = scene.tiles[&tile_id].bounds;
