@@ -569,3 +569,38 @@ async fn status_bar_long_value_is_ellipsized_not_wrapped() {
         "status values stay on one line"
     );
 }
+
+/// hud-iicg5: a RenderingPolicy colour taken from a design token draws as the
+/// hex the token declares, the same as the compositor's own token fallback.
+#[tokio::test]
+async fn status_bar_token_policy_backdrop_draws_its_declared_hex() {
+    let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(1920, 1080).await);
+    compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
+    let mut tokens = compositor.token_map.clone();
+    tokens.insert("color.surface.container.low".into(), "#336699".into());
+    tokens.insert("opacity.surface".into(), "1.0".into());
+    compositor.set_token_map(tokens.clone());
+    let mut policy = RenderingPolicy::default();
+    tze_hud_config::policy_builder::apply_token_defaults_for_zone(
+        "status-bar",
+        &mut policy,
+        &tokens,
+    );
+    policy.backdrop_radius = Some(0.0);
+    let mut scene = scene_with_entries(policy, &[("k", "v")]);
+    let card = card_for(&compositor, &scene).unwrap().rect;
+    compositor.prime_markdown_cache(&scene);
+    compositor.prime_truncation_cache(&scene);
+    compositor.render_frame_headless(&mut scene, &surface);
+    let pixels = surface.read_pixels(&compositor.device);
+    // Bottom-left inside the card: below the row's glyphs, inside the hairline.
+    let (x, y) = ((card.x + 3.0) as u32, (card.y + card.height - 3.0) as u32);
+    let o = ((y * 1920 + x) * 4) as usize;
+    let got = [pixels[o], pixels[o + 1], pixels[o + 2]];
+    for (channel, (g, want)) in got.iter().zip([0x33u8, 0x66, 0x99]).enumerate() {
+        assert!(
+            g.abs_diff(want) <= 2,
+            "channel {channel}: drew {got:02x?}, token declares #336699"
+        );
+    }
+}
