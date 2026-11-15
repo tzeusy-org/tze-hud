@@ -111,11 +111,9 @@ async fn production_config_boots_with_builtin_widget_bundles() {
         .text_color
         .expect("notification-area text_color must be populated");
 
-    let expected = (
-        232.0f32 / 255.0f32,
-        235.0f32 / 255.0f32,
-        240.0f32 / 255.0f32,
-    );
+    // Scene colours are linear; the token hex is sRGB.
+    let linear = |v: f32| ((v / 255.0 + 0.055) / 1.055).powf(2.4);
+    let expected = (linear(232.0), linear(235.0), linear(240.0));
     let eps = 1e-3f32;
     assert!(
         (text_color.r - expected.0).abs() < eps

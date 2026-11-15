@@ -314,17 +314,18 @@ mod tests {
             .rendering_policy
             .text_color
             .expect("subtitle zone should have token-derived text_color");
-        // #AABBCC → R=0xAA/255≈0.667, G=0xBB/255≈0.733, B=0xCC/255≈0.8
+        // #AABBCC is sRGB; scene colours are linear.
+        let linear = |v: u8| ((v as f32 / 255.0 + 0.055) / 1.055).powf(2.4);
         assert!(
-            (text_color.r - 0xAA as f32 / 255.0).abs() < 1e-3,
+            (text_color.r - linear(0xAA)).abs() < 1e-3,
             "text_color.r should match #AABBCC red component"
         );
         assert!(
-            (text_color.g - 0xBB as f32 / 255.0).abs() < 1e-3,
+            (text_color.g - linear(0xBB)).abs() < 1e-3,
             "text_color.g should match #AABBCC green component"
         );
         assert!(
-            (text_color.b - 0xCC as f32 / 255.0).abs() < 1e-3,
+            (text_color.b - linear(0xCC)).abs() < 1e-3,
             "text_color.b should match #AABBCC blue component"
         );
     }
