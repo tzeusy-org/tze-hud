@@ -1102,7 +1102,7 @@ impl HeadlessEventLoopHarness {
 
     /// Build a harness around an inert-but-real `WinitApp`.
     #[cfg(test)]
-    pub(super) fn new() -> Self {
+    pub(crate) fn new() -> Self {
         HeadlessEventLoopHarness {
             app: WinitApp {
                 state: WindowedRuntimeState::new_headless(),
@@ -1112,6 +1112,27 @@ impl HeadlessEventLoopHarness {
             clipboard: Arc::default(),
             effects: Arc::default(),
         }
+    }
+
+    /// Drive the actual topology adoption/status publisher without OS windows.
+    #[cfg(test)]
+    pub(crate) fn publish_display_fixture(
+        &mut self,
+        configured: std::collections::HashMap<String, String>,
+        names: &[&str],
+    ) {
+        let primary = super::displays::MonitorSpec {
+            name: names[0].into(),
+            x: 0,
+            y: 0,
+            width: 1920,
+            height: 1080,
+            scale: 1.0,
+        };
+        self.app.state.zone_displays = configured;
+        self.app
+            .adopt_display_keys(super::displays::key_monitors(names, &[]), &[]);
+        self.app.publish_displays(&primary);
     }
 
     /// Install a single-tab scene containing a focused composer region and seed

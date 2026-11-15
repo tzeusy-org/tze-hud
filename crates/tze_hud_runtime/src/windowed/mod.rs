@@ -221,7 +221,7 @@ mod test_support;
 mod event_loop_harness;
 
 pub use self::config::{Relaunch, WindowedConfig, WindowedQuiescentEfficiencyConfig};
-#[cfg(feature = "test-harness")]
+#[cfg(any(test, feature = "test-harness"))]
 pub use self::event_loop_harness::HeadlessEventLoopHarness;
 use self::hittest::{refresh_interaction_hit_regions_after_render, sync_scene_display_area};
 use self::input_dispatch::{

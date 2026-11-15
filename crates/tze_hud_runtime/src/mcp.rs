@@ -1171,6 +1171,15 @@ mod tests {
 
     #[tokio::test(start_paused = true)]
     async fn admin_status_has_every_key_and_no_secrets() {
+        let raw_legacy = r"  \\.\dIsPlAy6  ";
+        let mut harness = crate::windowed::HeadlessEventLoopHarness::new();
+        harness.publish_display_fixture(
+            std::collections::HashMap::from([
+                ("subtitle".into(), raw_legacy.into()),
+                ("pip".into(), "DEL41A2-MISSING".into()),
+            ]),
+            &["PRIMARY", "DISPLAY6"],
+        );
         let src = admin_source(std::env::temp_dir().join("tze_hud_no_such.log"));
         let r = handle_admin(
             crate::http::AdminRoute::Status,
@@ -1210,6 +1219,24 @@ mod tests {
         assert_eq!(v["tailnet_inbound"]["state"], "blocked");
         assert_eq!(v["tailnet_inbound"]["reason"], "no_allow_rule");
         assert!(v["tailnet_inbound"]["fix"].is_string(), "{text}");
+        assert_eq!(v["displays"][0]["key"], "PRIMARY");
+        assert_eq!(v["displays"][0]["zones"], serde_json::json!([]));
+        assert_eq!(
+            v["unplaced_zones"],
+            serde_json::json!([
+                {"zone":"pip", "display":"DEL41A2-MISSING", "reason":"not_connected"},
+                {"zone":"subtitle", "display":raw_legacy, "reason":"legacy_key"},
+            ])
+        );
+        // The observation remains admin-only, even with legacy config present.
+        let denied = handle_admin(
+            crate::http::AdminRoute::Status,
+            &admin_get("/admin/status", Some("star-psk")),
+            &src,
+        )
+        .await;
+        assert_eq!(denied.status, 403);
+        crate::operator::status::set_displays(Vec::new(), Vec::new());
         if cfg!(target_os = "linux") {
             assert!(
                 v["cpu_pct_2s"].is_number() && v["cpu_pct_avg"].is_number(),
