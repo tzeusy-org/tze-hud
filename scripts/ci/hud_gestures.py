@@ -985,9 +985,10 @@ def scenario_foreign_publisher(run: Run) -> None:
     """hud-bz9bv.6 AC10: another authenticated agent's same-key replace and
     keyed or whole clear never touch A's card, and A's answer routes only to A."""
     key, zone = "gesture-foreign", "zone:notification-area"
-    # Both cards must fit the zone at tier L's 600 px screen, or the stack's
-    # visibility bound hides one, which is not a replace: A's card has one
-    # action and the foreign card none. Cards are told apart by action labels.
+    # Both cards must fit the zone on the smallest harness display (tier L's
+    # Xvfb reported 800x600, a 180 px zone), or the stack's visibility bound
+    # hides one, which is not a replace: A's card has one action and the
+    # foreign card none. Cards are told apart by action labels.
     mine, theirs = ["First"], []
     open_card(run, key, actions=[{"label": "First", "callback_id": f"{key}-first"}])
     foreign = {"surface": zone, "key": key, "ttl_ms": 0, "content": {"body": "Foreign gesture check"}}
@@ -1005,7 +1006,8 @@ def scenario_foreign_publisher(run: Run) -> None:
         foreign_call(run, "hud_clear", {"surface": zone})
         run.expect("a foreign whole-zone clear removes only its own cards", lambda st: keyed_cards(st, key) == [mine])
         run.observe_for("and A's card stays, unanswered", lambda st: keyed_cards(st, key) == [mine]
-                        and notification_entry(st, key)["chosen"] is None, 0.3)
+                        and all(c.get("chosen") is None for c in st.get("notifications") or []
+                                if c.get("key") == key and c.get("state") != "exiting"), 0.3)
     finally:
         run.foreign.call("hud_clear", {"surface": zone})
     run.click(f"{zone}/{key}/0")
@@ -1023,6 +1025,9 @@ def held_press_on_retired_card(run: Run, key: str, retire: Callable[[], None], w
     run.inj.button(True)
     run.step("button down (held)")
     try:
+        # The pressed visual draws a frame: the HUD has handled the press on
+        # A's card before the MCP call can retire it.
+        run.settle()
         retire()
         run.settle()
     finally:
@@ -1031,7 +1036,8 @@ def held_press_on_retired_card(run: Run, key: str, retire: Callable[[], None], w
         run.step("button up")
     run.observe_for(f"releasing after {what} activates nothing",
                     lambda st: all(c.get("chosen") is None for c in st.get("notifications") or []), 0.5)
-    if items := run.inputs():
+    # Wait out a late stale activation rather than reading the queue once.
+    if items := run.inputs(wait_ms=500):
         raise ScenarioFailed(f"releasing after {what} sends nothing", {"items": items, "status": run.status()})
 
 
