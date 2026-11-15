@@ -1051,6 +1051,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         if displays::take_dirty(&self.state.displays_dirty) {
             self.sync_displays(event_loop);
         }
+        self.sync_zone_assignments();
         self.refresh_cursor_position_from_os();
         self.drain_input_capture_commands();
         self.synthesize_left_release_if_physically_up();

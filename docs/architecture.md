@@ -88,7 +88,15 @@ write; delayed admission retains that deadline in the scheduled mutation. Neithe
 path retimes existing content, and changing the default does not wake rendering.
 The
 Layout card edits widget instances in the scene and their `[[tabs.widgets]]`
-entries (`tze_hud_config::set_widget`); the Input card's chord changes go
+entries (`tze_hud_config::set_widget`). Its zone-to-monitor choices share a
+private [`DisplayControl`](../crates/tze_hud_runtime/src/shell/control_panel/displays.rs)
+with the main thread: topology publication supplies selectable overlay keys
+and only aliases the all-connected hardware matcher resolves uniquely; owner
+edits coalesce until the next event-loop turn, and the existing display publisher
+updates the compositor layout, scales and operator status without hardware
+rediscovery. `set_zone_display` uses the same serialized atomic config writer
+and retains comments; a failed save keeps the live change for this session.
+The Input card's chord changes go
 through [`ChordControl`](../crates/tze_hud_runtime/src/shell/control_panel/chords.rs)
 to the Windows hotkey thread. The Appearance and Advanced tokens cards, and
 edits to `[design_tokens]` in the config file (watched by

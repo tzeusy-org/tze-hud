@@ -1826,17 +1826,39 @@ async fn poc_panel_connect_prompt_pairs_an_agent() {
 /// Layout (T11, hud-vniri.7): a widget is moved by typing its box and its
 /// content limit is chosen, both live in the scene and saved into its own
 /// `[[tabs.widgets]]` entry with the owner's comments kept; a box off the
-/// display is refused and changes nothing.
+/// display is refused and changes nothing. Zone monitor choices (hud-vniri.8)
+/// move the compositor's live target and save exact keys/comments, survive a
+/// restart, refuse stale topology and report session-only save failures.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn poc_panel_layout_moves_widgets_and_saves_their_entry() {
     use tze_hud_compositor::PanelControl;
     use tze_hud_scene::types::GeometryPolicy;
     let dir = tempfile::tempdir().expect("scratch dir");
     let config = dir.path().join("tze_hud.toml");
-    std::fs::write(&config, PRODUCTION_CONFIG).expect("config copy");
+    let production = format!(
+        "{PRODUCTION_CONFIG}\n# Zone routes kept by Layout edits\n[displays.\"DEL0002-LEFT\"]\nzones = [\"subtitle\", \"alert-banner\"] # Keep the other route\n"
+    );
+    std::fs::write(&config, &production).expect("config copy");
     let mut cfg = runtime_config();
+    cfg.config_toml = Some(production.clone());
     cfg.config_file_path = Some(config.display().to_string());
-    let mut poc = Poc::boot_from(cfg, None).await;
+    let mut poc = Poc::boot_from(cfg.clone(), None).await;
+    let monitor = |name: &str, key: &str, x: f32, primary: bool| {
+        (
+            tze_hud_compositor::DisplayRect {
+                name: name.into(),
+                rect: tze_hud_scene::Rect::new(x, 0.0, 1920.0, 1080.0),
+                primary,
+            },
+            key.to_owned(),
+        )
+    };
+    let monitors = [
+        monitor("MONITOR1", "DEL0001-PRIMARY", 0.0, true),
+        monitor("MONITOR2", "DEL0002-LEFT", -1920.0, false),
+        monitor("MONITOR3", "DEL0003-RIGHT", 1920.0, false),
+    ];
+    poc.hud.set_display_topology(monitors.to_vec());
     poc.open_panel().await;
     let saved = || std::fs::read_to_string(&config).expect("config");
     let row = "layout.main-gauge.geometry";
@@ -1856,7 +1878,7 @@ async fn poc_panel_layout_moves_widgets_and_saves_their_entry() {
             .is_some_and(|d| d.contains("fit on the display"))
     })
     .await;
-    assert_eq!(saved(), PRODUCTION_CONFIG, "nothing written");
+    assert_eq!(saved(), production, "nothing written");
 
     poc.hud.panel_type("4 8 18 12");
     poc.hud.panel_press("Enter");
@@ -1878,7 +1900,7 @@ async fn poc_panel_layout_moves_widgets_and_saves_their_entry() {
         out.contains("# MCP widget_name: \"main-gauge\""),
         "comments kept"
     );
-    let before: toml::Value = PRODUCTION_CONFIG.parse().unwrap();
+    let before: toml::Value = production.parse().unwrap();
     let after: toml::Value = out.parse().unwrap();
     let other_widgets = |config: &toml::Value| {
         config["tabs"][0]["widgets"]
@@ -1902,6 +1924,256 @@ async fn poc_panel_layout_moves_widgets_and_saves_their_entry() {
             && saved().contains("auto_clear_ms = 5000")
     })
     .await;
+
+    // The actual panel event/task, main-thread pending drain and compositor
+    // DisplayLayout move the zone without a restart or a fabricated renderer.
+    let left = monitors[1].0.rect;
+    let right = monitors[2].0.rect;
+    assert_eq!(poc.hud.zone_display_placement("subtitle").0, Some(left));
+    let assignment = |text: &str, zone: &str| {
+        let raw = toml::from_str(text).expect("saved config parses");
+        tze_hud_config::displays::zone_display_assignments(&raw)
+            .get(zone)
+            .cloned()
+    };
+    let zone_choice = |hud: &HeadlessEventLoopHarness, key: Option<&str>| {
+        hud.control_panel_zone_row("subtitle").is_some_and(|item| {
+            matches!(item.control, PanelControl::Choice(ref value) if match key {
+                Some(key) => value.contains(key) && !value.contains("Unavailable"),
+                None => value == "Primary (default)",
+            })
+        })
+    };
+    poc.hud.panel_type("subtitle");
+    poc.wait_for("the zone's current monitor shows in search", |hud| {
+        hud.control_panel_zone_row("subtitle").is_some_and(|item| {
+            matches!(item.control, PanelControl::Choice(ref value) if value.contains("DEL0002-LEFT"))
+        }) && hud.control_panel_row("layout.main-gauge.geometry").is_none()
+    }).await;
+    let zone_row = poc.hud.control_panel_zone_row("subtitle").unwrap().id;
+    poc.click(&zone_row).await; // left → right
+    poc.wait_for(
+        "zone moves live and saves the exact right-hand key",
+        |hud| {
+            hud.zone_display_placement("subtitle").0 == Some(right)
+                && assignment(&saved(), "subtitle").as_deref() == Some("DEL0003-RIGHT")
+                && zone_choice(hud, Some("DEL0003-RIGHT"))
+        },
+    )
+    .await;
+    assert_eq!(
+        assignment(&saved(), "alert-banner").as_deref(),
+        Some("DEL0002-LEFT")
+    );
+    assert!(saved().contains("# Zone routes kept by Layout edits"));
+    assert!(saved().contains("# Keep the other route"));
+    let generation = poc.hud.zone_display_placement("subtitle").1;
+    for _ in 0..10 {
+        poc.hud.tick();
+    }
+    assert_eq!(
+        poc.hud.zone_display_placement("subtitle").1,
+        generation,
+        "one edit is consumed once"
+    );
+
+    poc.hud.panel_press("ArrowRight"); // right → default primary, keyboard path
+    poc.wait_for(
+        "primary default removes the binding live and on disk",
+        |hud| {
+            hud.zone_display_placement("subtitle").0.is_none()
+                && assignment(&saved(), "subtitle").is_none()
+                && zone_choice(hud, None)
+        },
+    )
+    .await;
+    poc.click(&zone_row).await; // default → named physical primary
+    poc.wait_for("physical primary is distinct from the default", |hud| {
+        hud.zone_display_placement("subtitle").0.is_none()
+            && assignment(&saved(), "subtitle").as_deref() == Some("DEL0001-PRIMARY")
+            && zone_choice(hud, Some("DEL0001-PRIMARY"))
+    })
+    .await;
+    poc.click(&zone_row).await; // primary → left
+    poc.wait_for("left is selected again", |hud| {
+        hud.zone_display_placement("subtitle").0 == Some(left)
+            && assignment(&saved(), "subtitle").as_deref() == Some("DEL0002-LEFT")
+            && zone_choice(hud, Some("DEL0002-LEFT"))
+    })
+    .await;
+
+    // An edit sent from the old topology cannot redirect its option index
+    // after unplug; an unavailable saved binding remains visible and unchanged.
+    let before_unplug = saved();
+    poc.hud
+        .set_display_topology(vec![monitors[0].clone(), monitors[2].clone()]);
+    poc.hud.control_panel_click(&zone_row);
+    poc.wait_for("unplugged assignment stays visible as unavailable", |hud| {
+        hud.control_panel_zone_row("subtitle").is_some_and(|item| {
+            item.id != zone_row && matches!(item.control, PanelControl::Choice(ref value) if value == "Unavailable · DEL0002-LEFT")
+        })
+    }).await;
+    assert_eq!(
+        saved(),
+        before_unplug,
+        "stale row never writes a different monitor"
+    );
+    assert!(poc.hud.zone_display_placement("subtitle").0.is_none());
+    poc.hud.set_display_topology(monitors.to_vec());
+    poc.wait_for("replug restores the saved physical target", |hud| {
+        hud.zone_display_placement("subtitle").0 == Some(left)
+            && hud.control_panel_zone_row("subtitle").is_some_and(|item| {
+                matches!(item.control, PanelControl::Choice(ref value) if value.contains("DEL0002-LEFT") && !value.contains("Unavailable"))
+            })
+    }).await;
+
+    // Save failure does not undo live placement, and is explicit in the row.
+    let original_permissions = std::fs::metadata(&config).unwrap().permissions();
+    let mut readonly = original_permissions.clone();
+    readonly.set_readonly(true);
+    std::fs::set_permissions(&config, readonly).unwrap();
+    let zone_row = poc.hud.control_panel_zone_row("subtitle").unwrap().id;
+    poc.click(&zone_row).await;
+    poc.wait_for(
+        "read-only save leaves the zone live with an honest error",
+        |hud| {
+            hud.zone_display_placement("subtitle").0 == Some(right)
+                && hud
+                    .control_panel_zone_row("subtitle")
+                    .and_then(|item| item.detail)
+                    .is_some_and(|detail| {
+                        detail.contains("not saved")
+                            && detail.contains(&config.display().to_string())
+                    })
+        },
+    )
+    .await;
+    assert_eq!(saved(), before_unplug, "read-only file untouched");
+    std::fs::set_permissions(&config, original_permissions).unwrap();
+    poc.click(&zone_row).await; // right → default, then named primary → left → right
+    poc.wait_for("default saved after permissions restored", |hud| {
+        assignment(&saved(), "subtitle").is_none() && zone_choice(hud, None)
+    })
+    .await;
+    for key in ["DEL0001-PRIMARY", "DEL0002-LEFT", "DEL0003-RIGHT"] {
+        poc.click(&zone_row).await;
+        poc.wait_for("new choice saves after a failure", |hud| {
+            assignment(&saved(), "subtitle").as_deref() == Some(key) && zone_choice(hud, Some(key))
+        })
+        .await;
+    }
+    drop(poc);
+    cfg.config_toml = Some(saved());
+    let mut restarted = Poc::boot_from(cfg, None).await;
+    restarted.hud.set_display_topology(monitors.to_vec());
+    assert_eq!(
+        restarted.hud.zone_display_placement("subtitle").0,
+        Some(right),
+        "restart keeps saved placement"
+    );
+    assert_eq!(
+        restarted.hud.zone_display_placement("alert-banner").0,
+        Some(left)
+    );
+    drop(restarted);
+
+    // Overlay availability must never change a base alias's hardware
+    // ambiguity. Drive the real adoption/resolver/publisher before reading
+    // actual panel rows and compositor placement (review P2 hud-ysdn7).
+    let alias = "DEL41A2-SAME";
+    let a = "DEL41A2-SAME@PORT-A";
+    let b = "DEL41A2-SAME@PORT-B";
+    let primary = "DEL0001-PRIMARY";
+    for (case, hardware, secondary_overlays, expected) in [
+        (
+            "duplicate hardware with only primary overlaid",
+            vec![
+                monitor("MONITOR1", a, 0.0, true),
+                monitor("MONITOR2", b, 1920.0, false),
+            ],
+            vec![],
+            None,
+        ),
+        (
+            "duplicate hardware with one missing secondary overlay",
+            vec![
+                monitor("MONITOR1", primary, 0.0, true),
+                monitor("MONITOR2", a, -1920.0, false),
+                monitor("MONITOR3", b, 1920.0, false),
+            ],
+            vec!["MONITOR2"],
+            None,
+        ),
+        (
+            "unique base alias resolves to its available secondary",
+            vec![
+                monitor("MONITOR1", primary, 0.0, true),
+                monitor("MONITOR2", a, -1920.0, false),
+            ],
+            vec!["MONITOR2"],
+            Some(left),
+        ),
+    ] {
+        let production = format!(
+            "{PRODUCTION_CONFIG}\n[displays.\"{alias}\"]\nzones = [\"subtitle\"] # Keep raw alias\n"
+        );
+        std::fs::write(&config, &production).unwrap();
+        let mut cfg = runtime_config();
+        cfg.config_toml = Some(production.clone());
+        cfg.config_file_path = Some(config.display().to_string());
+        let mut poc = Poc::boot_from(cfg, None).await;
+        poc.hud.set_display_topology(hardware);
+        poc.hud.retain_display_overlays(&secondary_overlays);
+        poc.open_panel().await;
+        poc.wait_for(case, |hud| hud.control_panel_zone_row("subtitle").is_some())
+            .await;
+        assert_eq!(
+            poc.hud.zone_display_placement("subtitle").0,
+            expected,
+            "{case}: authoritative rendering"
+        );
+        let row = poc.hud.control_panel_zone_row("subtitle").unwrap();
+        let PanelControl::Choice(label) = row.control else {
+            panic!("zone choice")
+        };
+        if expected.is_none() {
+            assert_eq!(
+                label,
+                format!("Unavailable · {alias}"),
+                "{case}: row agrees with all-connected resolution"
+            );
+        } else {
+            assert!(
+                label.contains(a) && !label.contains("Unavailable"),
+                "{case}: {label}"
+            );
+        }
+        assert_eq!(
+            saved(),
+            production,
+            "discovery never rewrites a saved alias"
+        );
+        if secondary_overlays.is_empty() || expected.is_some() {
+            continue;
+        }
+        // Only live overlays are selectable. The exact qualified A key is
+        // saved and placed; absent-overlay B never appears in the cycle.
+        for (key, placement) in [
+            (None, None),
+            (Some(primary), None),
+            (Some(a), Some(left)),
+            (None, None),
+        ] {
+            poc.click(&row.id).await;
+            poc.wait_for("only available overlays are chosen and saved", |hud| {
+                zone_choice(hud, key)
+                    && assignment(&saved(), "subtitle").as_deref() == key
+                    && hud.zone_display_placement("subtitle").0 == placement
+            })
+            .await;
+            assert_ne!(assignment(&saved(), "subtitle").as_deref(), Some(b));
+        }
+    }
 }
 
 /// Appearance (T11 CP-5, hud-h51u7.5): the theme and any token change the

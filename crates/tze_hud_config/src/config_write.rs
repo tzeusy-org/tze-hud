@@ -545,9 +545,220 @@ pub fn set_widget(
     )
 }
 
+/// Move one zone to an exact display key, or remove its assignment so it uses
+/// the primary display. Other zones, tables and comments are retained; writes
+/// use the same serialized atomic replacement as the other panel settings.
+pub fn set_zone_display(
+    config_path: &Path,
+    zone: &str,
+    display: Option<&str>,
+) -> Result<(), ConfigWriteError> {
+    edit_with(
+        config_path,
+        |src| apply_zone_display(src, zone, display),
+        |from, to| std::fs::rename(from, to),
+    )
+}
+
+fn apply_zone_display(
+    src: &str,
+    zone: &str,
+    display: Option<&str>,
+) -> Result<String, ConfigWriteError> {
+    let invalid = |expected: &str, got: &str| ConfigWriteError::InvalidValue {
+        key: "displays".into(),
+        expected: expected.into(),
+        got: got.into(),
+    };
+    if !tze_hud_scene::types::ZoneRegistry::with_defaults()
+        .zones
+        .contains_key(zone)
+    {
+        return Err(invalid("a known zone", zone));
+    }
+    if let Some(key) = display
+        && (key.trim().is_empty() || crate::displays::is_legacy_display_key(key))
+    {
+        return Err(invalid("a current nonlegacy display key", key));
+    }
+    // Refuse malformed source rather than replacing a table of another kind.
+    toml::from_str::<RawConfig>(src).map_err(|e| ConfigWriteError::Parse(e.to_string()))?;
+    let mut doc = parse_document(src)?;
+    if display.is_some() || doc.contains_key("displays") {
+        let displays = doc
+            .entry("displays")
+            .or_insert_with(|| Item::Table(Table::new()))
+            .as_table_like_mut()
+            .ok_or_else(|| ConfigWriteError::Parse("[displays] is not a table".into()))?;
+        for (key, table) in displays.iter_mut() {
+            if Some(key.get()) == display {
+                continue;
+            }
+            // An empty display table is legal and has no assignment to remove.
+            if let Some(zones) = table
+                .as_table_like_mut()
+                .and_then(|table| table.get_mut("zones"))
+                .and_then(Item::as_array_mut)
+            {
+                remove_zone(zones, zone);
+            }
+        }
+        if let Some(key) = display {
+            let table = displays
+                .entry(key)
+                .or_insert_with(|| Item::Table(Table::new()))
+                .as_table_like_mut()
+                .ok_or_else(|| {
+                    ConfigWriteError::Parse("display assignment is not a table".into())
+                })?;
+            let zones = table
+                .entry("zones")
+                .or_insert_with(|| Item::Value(Value::Array(toml_edit::Array::new())))
+                .as_array_mut()
+                .ok_or_else(|| ConfigWriteError::Parse("display zones is not an array".into()))?;
+            if !zones.iter().any(|value| value.as_str() == Some(zone)) {
+                zones.push(zone);
+            }
+        }
+    }
+    let out = keep_line_endings(src, doc.to_string());
+    let raw: RawConfig =
+        toml::from_str(&out).map_err(|e| ConfigWriteError::Parse(e.to_string()))?;
+    let mut errors = Vec::new();
+    crate::displays::validate_displays(&raw, &mut errors);
+    if let Some(error) = errors.into_iter().next() {
+        return Err(invalid(&error.expected, &error.got));
+    }
+    Ok(out)
+}
+
+/// Comments before/after a removed array value still belong to the owner.
+/// Carry its decoration to the following value, or to the array's trailing
+/// space when it was last, instead of discarding it with the zone name.
+fn remove_zone(zones: &mut toml_edit::Array, zone: &str) {
+    let mut index = 0;
+    while index < zones.len() {
+        if zones.get(index).and_then(Value::as_str) != Some(zone) {
+            index += 1;
+            continue;
+        }
+        let removed = zones.remove(index);
+        let decoration = format!(
+            "{}{}",
+            removed
+                .decor()
+                .prefix()
+                .and_then(|s| s.as_str())
+                .unwrap_or(""),
+            removed
+                .decor()
+                .suffix()
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+        );
+        if let Some(next) = zones.get_mut(index) {
+            let prefix = format!(
+                "{decoration}{}",
+                next.decor().prefix().and_then(|s| s.as_str()).unwrap_or("")
+            );
+            next.decor_mut().set_prefix(prefix);
+        } else {
+            zones.set_trailing(format!(
+                "{decoration}{}",
+                zones.trailing().as_str().unwrap_or("")
+            ));
+        }
+        if zones.is_empty() {
+            zones.set_trailing_comma(false);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn zone_display_moves_are_atomic_and_keep_comments() {
+        let src = "# my HUD\n[runtime]\nfps = 60 # keep\n\n# left screen\n[displays.\"DEL1234-LEFT\"]\nzones = [\n  # keep zone note\n  \"subtitle\",\n  \"alert-banner\", # alert note\n] # routing note\n\n# right screen\n[displays.\"DEL1234-RIGHT\"]\nzones = [\"notification-area\"] # right note\n";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("tze_hud.toml");
+        for source in [src.to_owned(), src.replace('\n', "\r\n")] {
+            std::fs::write(&path, &source).unwrap();
+            set_zone_display(&path, "subtitle", Some("DEL1234-RIGHT")).unwrap();
+            let moved = std::fs::read_to_string(&path).unwrap();
+            let raw: RawConfig = toml::from_str(&moved).unwrap();
+            let assigned = crate::displays::zone_display_assignments(&raw);
+            assert_eq!(assigned["subtitle"], "DEL1234-RIGHT");
+            assert_eq!(assigned["alert-banner"], "DEL1234-LEFT");
+            assert_eq!(assigned["notification-area"], "DEL1234-RIGHT");
+            for note in [
+                "# my HUD",
+                "# keep",
+                "# left screen",
+                "# keep zone note",
+                "# alert note",
+                "# routing note",
+                "# right screen",
+                "# right note",
+            ] {
+                assert!(moved.contains(note), "lost {note}: {moved}");
+            }
+            assert_eq!(moved.contains("\r\n"), source.contains("\r\n"));
+            set_zone_display(&path, "subtitle", Some("DEL1234-RIGHT")).unwrap();
+            assert_eq!(
+                std::fs::read_to_string(&path).unwrap(),
+                moved,
+                "repeat is byte-identical"
+            );
+            set_zone_display(&path, "subtitle", Some("ACM5678@P0011")).unwrap();
+            let created = std::fs::read_to_string(&path).unwrap();
+            assert_eq!(
+                crate::displays::zone_display_assignments(&toml::from_str(&created).unwrap())["subtitle"],
+                "ACM5678@P0011"
+            );
+            set_zone_display(&path, "subtitle", None).unwrap();
+            let primary = std::fs::read_to_string(&path).unwrap();
+            assert!(
+                !crate::displays::zone_display_assignments(&toml::from_str(&primary).unwrap())
+                    .contains_key("subtitle")
+            );
+            for (zone, key) in [
+                ("unknown-zone", Some("DEL1234-RIGHT")),
+                ("subtitle", Some("")),
+                ("subtitle", Some("display6")),
+            ] {
+                assert!(set_zone_display(&path, zone, key).is_err());
+                assert_eq!(
+                    std::fs::read_to_string(&path).unwrap(),
+                    primary,
+                    "invalid edit writes nothing"
+                );
+            }
+        }
+        // Removing the only item must retain its comment and valid TOML.
+        let alone =
+            "[displays.\"DEL1234-LEFT\"]\nzones = [\n # keep when empty\n \"subtitle\",\n]\n";
+        let empty = apply_zone_display(alone, "subtitle", None).unwrap();
+        assert!(empty.contains("# keep when empty"));
+        assert!(toml::from_str::<RawConfig>(&empty).is_ok());
+        for source in [
+            "[displays.\"DEL1234-EMPTY\"]\n",
+            "displays = { 'DEL1234-EMPTY' = {} }\n",
+        ] {
+            let added = apply_zone_display(source, "subtitle", Some("DEL1234-EMPTY")).unwrap();
+            let raw = toml::from_str(&added).unwrap();
+            assert_eq!(
+                crate::displays::zone_display_assignments(&raw)["subtitle"],
+                "DEL1234-EMPTY"
+            );
+        }
+        assert!(apply_zone_display("[displays.bad]\nzones = 1\n", "subtitle", None).is_err());
+        assert!(matches!(
+            set_zone_display(&dir.path().join("missing.toml"), "subtitle", None),
+            Err(ConfigWriteError::NotFound(_))
+        ));
+    }
 
     /// A runtime edit that starts while a token edit is mid-save still lands,
     /// and the owner's comments survive (one writer at a time).

@@ -281,6 +281,11 @@ pub struct HeadlessEventLoopHarness {
     /// (`open <path>`, `firewall <action> <ports>`, `autostart <on>`),
     /// recorded instead of done.
     effects: Arc<std::sync::Mutex<Vec<String>>>,
+    /// Already accepted overlay geometry, substituting for OS windows only.
+    display_fixture: Option<(
+        super::displays::MonitorSpec,
+        Vec<super::displays::MonitorSpec>,
+    )>,
 }
 
 impl HeadlessEventLoopHarness {
@@ -318,6 +323,10 @@ impl HeadlessEventLoopHarness {
         );
         let raw: Option<tze_hud_config::raw::RawConfig> =
             cfg.config_toml.as_deref().map(toml::from_str).transpose()?;
+        state.zone_displays = raw
+            .as_ref()
+            .map(tze_hud_config::displays::zone_display_assignments)
+            .unwrap_or_default();
         let global_tokens = match &raw {
             Some(raw) => {
                 let config_parent = cfg
@@ -531,6 +540,7 @@ impl HeadlessEventLoopHarness {
             grpc_addr: Some(grpc_addr),
             clipboard,
             effects,
+            display_fixture: None,
         })
     }
 
@@ -645,6 +655,81 @@ impl HeadlessEventLoopHarness {
             }
             tze_hud_compositor::PanelBody::Empty(_) => None,
         }
+    }
+
+    /// The current topology's zone choice as actually published by the panel.
+    pub fn control_panel_zone_row(&self, zone: &str) -> Option<tze_hud_compositor::PanelItem> {
+        let displays = self.app.state.control_panel.as_ref()?.displays.as_ref()?;
+        let topology = displays.snapshot().2;
+        self.control_panel_row(&format!("layout.zone.{zone}.{topology}"))
+    }
+
+    /// Inject accepted monitor keys/overlay geometry, bypassing OS identity
+    /// discovery and window creation. The real topology adoption and publisher
+    /// feed the panel, status and compositor's shared DisplayLayout. Subsequent
+    /// ticks run the same pending-assignment drain as `about_to_wait`.
+    pub fn set_display_topology(
+        &mut self,
+        monitors: Vec<(tze_hud_compositor::DisplayRect, String)>,
+    ) {
+        use super::displays::{KeyedMonitor, MonitorSpec};
+        use super::monitor_identity::DisplayKey;
+        assert_eq!(monitors.iter().filter(|(m, _)| m.primary).count(), 1);
+        let mut keyed = Vec::new();
+        let mut primary = None;
+        let mut secondaries = Vec::new();
+        for (monitor, key) in monitors {
+            let spec = MonitorSpec {
+                name: monitor.name.clone(),
+                x: monitor.rect.x as i32,
+                y: monitor.rect.y as i32,
+                width: monitor.rect.width as u32,
+                height: monitor.rect.height as u32,
+                scale: 1.0,
+            };
+            keyed.push(KeyedMonitor {
+                name: monitor.name,
+                key: DisplayKey {
+                    base: key.split_once('@').map(|(base, _)| base.to_owned()),
+                    key,
+                    stable: true,
+                },
+            });
+            if monitor.primary {
+                primary = Some(spec);
+            } else {
+                secondaries.push(spec);
+            }
+        }
+        let primary = primary.expect("one primary");
+        self.app.adopt_display_keys(keyed, &[]);
+        self.app.state.primary_monitor = Some(primary.clone());
+        self.app.publish_displays_for(&primary, &secondaries);
+        self.display_fixture = Some((primary, secondaries));
+    }
+
+    /// Restrict the fixture's secondary overlay plan without removing any
+    /// connected hardware keys. This models primary-only modes or a failed
+    /// sibling overlay; `set_display_topology` restores the complete plan.
+    pub fn retain_display_overlays(&mut self, secondary_names: &[&str]) {
+        let (primary, secondaries) = self
+            .display_fixture
+            .as_mut()
+            .expect("display topology fixture");
+        secondaries.retain(|monitor| secondary_names.contains(&monitor.name.as_str()));
+        self.app.publish_displays_for(primary, secondaries);
+    }
+
+    /// Observe the compositor's actual shared placement (None means primary),
+    /// and its publication generation, without constructing GPU surfaces.
+    pub fn zone_display_placement(&self, zone: &str) -> (Option<tze_hud_scene::Rect>, u64) {
+        let targets = self
+            .app
+            .state
+            .display_targets
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        (targets.layout.zone_display_rect(zone), targets.generation)
     }
 
     /// The open control panel's Connect an agent card, if it is showing.
@@ -860,6 +945,11 @@ impl HeadlessEventLoopHarness {
     /// call again.
     pub fn tick(&mut self) -> bool {
         self.app.sync_design_tokens();
+        if let Some((primary, secondaries)) = &self.display_fixture {
+            self.app.sync_zone_assignments_for(primary, secondaries);
+        } else {
+            self.app.sync_zone_assignments();
+        }
         let settled = !self.app.settle_scene_work().is_deferred();
         let (width, height) = (
             self.app.state.config.window.width as f32,
@@ -1111,6 +1201,7 @@ impl HeadlessEventLoopHarness {
             grpc_addr: None,
             clipboard: Arc::default(),
             effects: Arc::default(),
+            display_fixture: None,
         }
     }
 

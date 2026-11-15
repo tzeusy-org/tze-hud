@@ -1385,6 +1385,41 @@ impl super::WinitApp {
         });
     }
 
+    /// Apply the panel's latest assignment edit on the main thread. The
+    /// existing geometry/key snapshot is enough; no hardware query is needed.
+    pub(super) fn sync_zone_assignments(&mut self) {
+        let Some(primary) = self.state.primary_monitor.clone() else {
+            return;
+        };
+        let specs: Vec<_> = self
+            .state
+            .secondaries
+            .iter()
+            .map(|s| s.spec.clone())
+            .collect();
+        self.sync_zone_assignments_for(&primary, &specs);
+    }
+
+    pub(super) fn sync_zone_assignments_for(
+        &mut self,
+        primary: &MonitorSpec,
+        specs: &[MonitorSpec],
+    ) {
+        let Some(configured) = self
+            .state
+            .control_panel
+            .as_ref()
+            .and_then(|panel| panel.displays.as_ref())
+            .and_then(|displays| displays.take_pending())
+        else {
+            return;
+        };
+        self.state.zone_displays = configured;
+        self.state.zone_targets =
+            resolve_zone_displays(&self.state.zone_displays, &self.state.display_keys);
+        self.publish_displays_for(primary, specs);
+    }
+
     pub(super) fn publish_displays(&mut self, primary: &MonitorSpec) {
         let specs: Vec<MonitorSpec> = self
             .state
@@ -1392,7 +1427,13 @@ impl super::WinitApp {
             .iter()
             .map(|s| s.spec.clone())
             .collect();
-        let layout = display_layout(primary, &specs, &self.state.zone_targets);
+        self.publish_displays_for(primary, &specs);
+    }
+
+    /// Shared by real window publication and the GPU-free event-loop harness;
+    /// `specs` is the already accepted overlay plan, never fresh OS discovery.
+    pub(super) fn publish_displays_for(&mut self, primary: &MonitorSpec, specs: &[MonitorSpec]) {
+        let layout = display_layout(primary, specs, &self.state.zone_targets);
         let zones_on = |name: &str| -> Vec<String> {
             let mut zones: Vec<String> = self
                 .state
@@ -1505,8 +1546,53 @@ impl super::WinitApp {
                 states
             }));
         }
+        if let Some(displays) = self
+            .state
+            .control_panel
+            .as_ref()
+            .and_then(|panel| panel.displays.as_ref())
+        {
+            // Validate aliases against all connected hardware before limiting
+            // choices to usable overlays. A missing sibling overlay must not
+            // make an ambiguous model+serial alias look unique in the panel.
+            let connected: Vec<_> = self
+                .state
+                .display_keys
+                .iter()
+                .map(|monitor| (monitor.key.key.as_str(), monitor.key.base.as_deref()))
+                .collect();
+            displays.publish_monitors(
+                status
+                    .iter()
+                    .filter_map(|display| {
+                        if tze_hud_config::displays::is_legacy_display_key(&display.key)
+                            || display.key.trim().is_empty()
+                        {
+                            return None;
+                        }
+                        Some(crate::shell::control_panel::MonitorChoice {
+                            key: display.key.clone(),
+                            base: self
+                                .state
+                                .display_keys
+                                .iter()
+                                .find(|monitor| monitor.name == display.name)
+                                .and_then(|monitor| monitor.key.base.as_deref())
+                                .filter(|base| {
+                                    tze_hud_config::displays::match_display_key(base, &connected)
+                                        .is_some_and(|index| {
+                                            self.state.display_keys[index].name == display.name
+                                        })
+                                })
+                                .map(str::to_owned),
+                            primary: display.primary,
+                        })
+                    })
+                    .collect(),
+            );
+        }
         crate::operator::status::set_displays(status, unplaced);
-        self.publish_display_scales(primary, &specs);
+        self.publish_display_scales(primary, specs);
         {
             let mut targets = self
                 .state
