@@ -1067,7 +1067,9 @@ Move handles for draggable tiles, portal frames and primary zones are hidden
 until the pointer enters the element or its handle. They draw a 32×4 dp rounded
 pill in the theme's `color.on_surface.variant` role at `opacity.drag.hover`;
 pressing or dragging uses `opacity.drag.active` and keeps the pill visible after
-the pointer leaves. A 12 dp hit row contains the small pill. Portal header bands
+the pointer leaves. A 12 dp hit row contains the small pill, separated from the
+card by `space.s` (8 dp); the continuous hover envelope includes that gap without
+capturing it. The row clamps to the display edges. Portal header bands
 keep their full input area and yield to header controls. Notification hover uses
 the painted stack, including gaps, rather than empty logical zone space; bodies
 remain click-through. Hover is local and repaints only on entry/exit, with no

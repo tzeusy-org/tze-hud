@@ -34,6 +34,7 @@ struct DragHandleStyle {
     width: f32,
     height: f32,
     hit_height: f32,
+    gap: f32,
     resize_target: f32,
     radius: f32,
     color: Rgba,
@@ -75,6 +76,7 @@ impl DragHandleStyle {
             width: dp("size.drag.handle_width"),
             height: dp("size.drag.handle_height"),
             hit_height: dp("size.drag.hit_height"),
+            gap: dp("space.s"),
             resize_target: dp("size.drag.resize_target"),
             radius: dp("shape.full"),
             color: color("color.on_surface.variant"),
@@ -112,7 +114,7 @@ impl Compositor {
         let w = style.width.max(1.0).min(sw.max(1.0));
         let h = style.hit_height.max(1.0).min(sh.max(1.0));
         let x = (element_bounds.x + (element_bounds.width - w) * 0.5).clamp(0.0, (sw - w).max(0.0));
-        let y = (element_bounds.y - h * 0.5).clamp(0.0, (sh - h).max(0.0));
+        let y = (element_bounds.y - h - style.gap).clamp(0.0, (sh - h).max(0.0));
         Rect::new(x, y, w, h)
     }
 

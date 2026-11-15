@@ -535,7 +535,8 @@ source links when implementation changes the status.
   original region's layout capacity. Its owner signoff remains in
   `hud-h51u7.4.6`.
   Move handles use a semantic, hover-only rounded pill (`hud-h51u7.4.5`), with
-  local element-hover feedback that preserves passthrough and quiet idle. The
+  a separate row above content and continuous local hover feedback that preserves
+  passthrough and quiet idle. The
   current widget Layout placement and portal band input contracts remain; the
   pip resize mark is separate. Its Windows owner signoff stays in
   `hud-h51u7.4.6`.

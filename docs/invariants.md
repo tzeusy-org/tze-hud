@@ -219,7 +219,8 @@ Regression owners (existing parents extended, Tests: +0 ~6 -0):
 
 - Runtime [`windowed_post_render_refresh_updates_drag_handles_before_snapshot`](../crates/tze_hud_runtime/src/windowed/hittest.rs): actual rendered handle, runtime drag and refreshed grip/X/action translation.
 - Hover-only move pills: the same post-render parent checks painted notification
-  hover bounds without body capture; `armed_cursor_entry_never_wakes_compositor_until_hover_changes`
+  hover bounds and the card-to-grip gap without body/corridor capture;
+  `armed_cursor_entry_never_wakes_compositor_until_hover_changes`
   exercises passthrough entry/exit and unchanged-target quiet turns. Compositor
   `drag_handle_opacity_switches_to_active_on_hover_state`, `drag_visual_feedback_applied_during_active_drag`
   and `idle_render_gate_renders_for_composer_echo_and_caret_blink` cover semantic

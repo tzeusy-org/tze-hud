@@ -68,13 +68,25 @@ pub struct TileBoundsEntry {
 /// One runtime chrome drag-handle entry in the hit-test snapshot.
 #[derive(Clone, Debug)]
 pub struct DragHandleBoundsEntry {
-    /// Draggable owner and its drawn content bounds; hover never expands capture.
+    /// Draggable owner and its hover envelope, including the gap to its grip.
+    /// This does not expand pointer capture or the recognizer's movement bounds.
     pub element_id: tze_hud_scene::SceneId,
-    pub element_bounds: Rect,
+    pub hover_bounds: Rect,
     /// Display-space drag-handle bounds.
     pub bounds: Rect,
     /// For the pip resize grip, the diagonal resize cursor of its corner.
     pub resize_cursor: Option<tze_hud_input::PortalCursor>,
+}
+
+fn enclosing_rect(a: Rect, b: Rect) -> Rect {
+    let x = a.x.min(b.x);
+    let y = a.y.min(b.y);
+    Rect::new(
+        x,
+        y,
+        (a.x + a.width).max(b.x + b.width) - x,
+        (a.y + a.height).max(b.y + b.height) - y,
+    )
 }
 
 impl HitTestSnapshot {
@@ -134,22 +146,13 @@ impl HitTestSnapshot {
                             .iter()
                             .filter(|card| card.zone_name == zone.name)
                             .map(|card| card.bounds)
-                            .reduce(|a, b| {
-                                let x = a.x.min(b.x);
-                                let y = a.y.min(b.y);
-                                Rect::new(
-                                    x,
-                                    y,
-                                    (a.x + a.width).max(b.x + b.width) - x,
-                                    (a.y + a.height).max(b.y + b.height) - y,
-                                )
-                            })
+                            .reduce(enclosing_rect)
                             .unwrap_or(region.bounds)
                     })
                     .unwrap_or_else(|| region.element_bounds.unwrap_or(region.bounds));
                 DragHandleBoundsEntry {
                     element_id: region.element_id,
-                    element_bounds,
+                    hover_bounds: enclosing_rect(element_bounds, region.bounds),
                     bounds: region.bounds,
                     resize_cursor: region
                         .resize_grip
@@ -189,16 +192,13 @@ impl HitTestSnapshot {
         tze_hud_scene::SceneId::from_bytes_le(&entry.tile_id_bytes)
     }
 
-    /// Draggable element under the pointer, including its grip. Resize-only
+    /// Draggable element under the pointer, including the gap to its grip. Resize-only
     /// entries do not independently expose a move pill. The content stays
     /// passthrough: capture still uses only `hit_test_drag_handle`.
     pub fn drag_handle_hover_target(&self, x: f32, y: f32) -> Option<tze_hud_scene::SceneId> {
         self.drag_handles
             .iter()
-            .find(|h| {
-                h.resize_cursor.is_none()
-                    && (h.bounds.contains_point(x, y) || h.element_bounds.contains_point(x, y))
-            })
+            .find(|h| h.resize_cursor.is_none() && h.hover_bounds.contains_point(x, y))
             .map(|h| h.element_id)
     }
 

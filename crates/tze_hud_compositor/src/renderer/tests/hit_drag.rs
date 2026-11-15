@@ -959,6 +959,8 @@ async fn drag_handle_opacity_switches_to_active_on_hover_state() {
             assert_eq!(cmds.len(), 1);
             let pill = &cmds[0];
             assert_eq!((pill.width, pill.height), (32.0 * scale, 4.0 * scale));
+            assert_eq!(handle.bounds.y, 140.0 - (12.0 + 8.0) * scale);
+            assert_eq!(pill.y, 140.0 - 16.0 * scale);
             assert!(pill.radius >= pill.height / 2.0, "SDF pill corners");
             assert_eq!(pill.color[3], 0.5);
             assert!(handle.bounds.contains_point(pill.x, pill.y));

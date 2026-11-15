@@ -677,19 +677,27 @@ mod tests {
         tile.bounds.y = 330.0;
 
         let stale_snapshot = crate::pipeline::HitTestSnapshot::from_scene(&scene);
-        assert!(
-            !stale_snapshot.hit_test_drag_handle(800.0, 330.0),
-            "pre-refresh snapshot still carries the previous frame's drag-handle bounds"
-        );
 
         compositor.prime_markdown_cache(&scene);
         compositor.prime_truncation_cache(&scene);
         compositor.render_frame(&mut scene, &surface);
         refresh_interaction_hit_regions_after_render(&compositor, &mut scene, &surface);
         let refreshed_snapshot = crate::pipeline::HitTestSnapshot::from_scene(&scene);
-
+        let grip = scene
+            .overlay
+            .drag_handle_hit_regions
+            .iter()
+            .find(|handle| handle.element_id == tile_id)
+            .unwrap()
+            .bounds;
+        let grip_center = (grip.x + grip.width / 2.0, grip.y + grip.height / 2.0);
+        assert!(grip.y + grip.height < scene.tiles[&tile_id].bounds.y);
         assert!(
-            refreshed_snapshot.hit_test_drag_handle(800.0, 330.0),
+            !stale_snapshot.hit_test_drag_handle(grip_center.0, grip_center.1),
+            "pre-refresh snapshot still carries the previous frame's drag-handle bounds"
+        );
+        assert!(
+            refreshed_snapshot.hit_test_drag_handle(grip_center.0, grip_center.1),
             "snapshot built after the windowed post-render refresh must match the newly displayed drag-handle geometry"
         );
 
@@ -757,6 +765,17 @@ mod tests {
             .find(|card| card.zone_name == "notifications")
             .unwrap()
             .bounds;
+        let gap_x = handle.bounds.x + handle.bounds.width / 2.0;
+        let gap_y = (handle.bounds.y + handle.bounds.height + card.y) / 2.0;
+        assert_eq!(
+            snapshot.drag_handle_hover_target(gap_x, gap_y),
+            Some(zone_id),
+            "moving across the gap from card to grip keeps the pill visible"
+        );
+        assert!(
+            !snapshot.hit_test_drag_handle(gap_x, gap_y),
+            "the hover corridor adds no pointer capture"
+        );
         assert_eq!(
             snapshot
                 .drag_handle_hover_target(card.x + card.width / 2.0, card.y + card.height + 20.0),

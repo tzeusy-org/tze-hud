@@ -951,7 +951,7 @@ mod tests {
         let hover_manifest = execute(&hover_args).await.unwrap();
         assert_eq!(hover_manifest["drag_handle_hovered"], true);
         let hovered = image::open(&hover_args.output).unwrap().to_rgba8();
-        let grip_ink = (53..66)
+        let grip_ink = (39..52)
             .flat_map(|y| (1640..1680).map(move |x| (x, y)))
             .filter(|&(x, y)| hovered.get_pixel(x, y) != settled.get_pixel(x, y))
             .count();
