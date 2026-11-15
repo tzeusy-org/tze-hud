@@ -1,0 +1,250 @@
+{
+  "source_head": "a51c14db3bc64ec7fbe97ea7884989ef54e65d36",
+  "source": "production scene startup and actual windowed GPU build/capture, Mesa llvmpipe",
+  "fixture": ".claude/skills/user-test/scripts/drag-handle-restyle-test.json",
+  "fixture_sha256": "16a1abc802e2c67318d3745f63c81579ab21c6484a7dc5375451f865f33c939c",
+  "binary_sha256": "3dc9df3a0dc71627a4f5d424100436b1cf0f2eb03278641681a3e6f50a6a82b8",
+  "source_tracked_files_unchanged_throughout": true,
+  "dimensions": [
+    1920,
+    1080
+  ],
+  "monitor_scale": 1,
+  "ui_scale": 1,
+  "capture_at_ms": 1000,
+  "hover_method": "offline actual frame snapshot + local runtime mirror; no OS input injected",
+  "limits": "Owner BEFORE is 3840x2160 on build24818c39 with unknown selected theme/DPI; AFTER is1920x1080 software GPU. No pixel parity or Windows owner visual acceptance claim.",
+  "frames": [
+    {
+      "file": "after--tonal-glass--idle.png",
+      "state": "idle",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "a51c14db3bc64ec7fbe97ea7884989ef54e65d36",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "f77409b45c4c0d349e4783754ff937fb797e8051da1c988e468dd83a94ff6ada",
+        "config_sha256": "982ba33f4dc725ad33cf94723f5fa3780323efb837b4c9564659f149eeae1304",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "drag_handle_hovered": false,
+        "drag_hover_at": null,
+        "elapsed_ms": 1621.598121,
+        "fixture": ".claude/skills/user-test/scripts/drag-handle-restyle-test.json",
+        "fixture_sha256": "16a1abc802e2c67318d3745f63c81579ab21c6484a7dc5375451f865f33c939c",
+        "messages_applied": 2,
+        "output": "test_results/drag-handles-after/a51c14db3bc6/after--tonal-glass--idle.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 72467,
+        "png_sha256": "a10d1db8c172609ff94a4c51c2cbdaa30c25f65e99181700b975076b43312661",
+        "resolved_tokens_sha256": "0eafbef17a24d3fb7df4147b289302d18971aab883fd629eeedd57ca13be3bd7",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--tonal-glass--hover.png",
+      "state": "hover",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "a51c14db3bc64ec7fbe97ea7884989ef54e65d36",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "f77409b45c4c0d349e4783754ff937fb797e8051da1c988e468dd83a94ff6ada",
+        "config_sha256": "982ba33f4dc725ad33cf94723f5fa3780323efb837b4c9564659f149eeae1304",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "drag_handle_hovered": true,
+        "drag_hover_at": [
+          1500.0,
+          100.0
+        ],
+        "elapsed_ms": 1623.150248,
+        "fixture": ".claude/skills/user-test/scripts/drag-handle-restyle-test.json",
+        "fixture_sha256": "16a1abc802e2c67318d3745f63c81579ab21c6484a7dc5375451f865f33c939c",
+        "messages_applied": 2,
+        "output": "test_results/drag-handles-after/a51c14db3bc6/after--tonal-glass--hover.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 72535,
+        "png_sha256": "f1f00f45a789df423be9fc0a1ac2e28864069cbeca84f857fef8d992001d341c",
+        "resolved_tokens_sha256": "0eafbef17a24d3fb7df4147b289302d18971aab883fd629eeedd57ca13be3bd7",
+        "theme": "tonal-glass",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--classic--idle.png",
+      "state": "idle",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "a51c14db3bc64ec7fbe97ea7884989ef54e65d36",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "f77409b45c4c0d349e4783754ff937fb797e8051da1c988e468dd83a94ff6ada",
+        "config_sha256": "982ba33f4dc725ad33cf94723f5fa3780323efb837b4c9564659f149eeae1304",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "drag_handle_hovered": false,
+        "drag_hover_at": null,
+        "elapsed_ms": 1626.0373530000002,
+        "fixture": ".claude/skills/user-test/scripts/drag-handle-restyle-test.json",
+        "fixture_sha256": "16a1abc802e2c67318d3745f63c81579ab21c6484a7dc5375451f865f33c939c",
+        "messages_applied": 2,
+        "output": "test_results/drag-handles-after/a51c14db3bc6/after--classic--idle.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 71881,
+        "png_sha256": "dd09cf701a8e35b8891518428c9e2bc714864bc21517a94d97e1378519aa81a7",
+        "resolved_tokens_sha256": "b038944aae4e6ec2453e8fdfe4a88b8833301f7510365e9818fb34ebdc873acd",
+        "theme": "classic",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--classic--hover.png",
+      "state": "hover",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "a51c14db3bc64ec7fbe97ea7884989ef54e65d36",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "f77409b45c4c0d349e4783754ff937fb797e8051da1c988e468dd83a94ff6ada",
+        "config_sha256": "982ba33f4dc725ad33cf94723f5fa3780323efb837b4c9564659f149eeae1304",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "drag_handle_hovered": true,
+        "drag_hover_at": [
+          1500.0,
+          100.0
+        ],
+        "elapsed_ms": 1627.388541,
+        "fixture": ".claude/skills/user-test/scripts/drag-handle-restyle-test.json",
+        "fixture_sha256": "16a1abc802e2c67318d3745f63c81579ab21c6484a7dc5375451f865f33c939c",
+        "messages_applied": 2,
+        "output": "test_results/drag-handles-after/a51c14db3bc6/after--classic--hover.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 71951,
+        "png_sha256": "874464ba2e1aab118199a90b242c717c530edd8b60fa4af32fc9916c79e9f738",
+        "resolved_tokens_sha256": "b038944aae4e6ec2453e8fdfe4a88b8833301f7510365e9818fb34ebdc873acd",
+        "theme": "classic",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--blueprint--idle.png",
+      "state": "idle",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "a51c14db3bc64ec7fbe97ea7884989ef54e65d36",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "f77409b45c4c0d349e4783754ff937fb797e8051da1c988e468dd83a94ff6ada",
+        "config_sha256": "982ba33f4dc725ad33cf94723f5fa3780323efb837b4c9564659f149eeae1304",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "drag_handle_hovered": false,
+        "drag_hover_at": null,
+        "elapsed_ms": 1626.706481,
+        "fixture": ".claude/skills/user-test/scripts/drag-handle-restyle-test.json",
+        "fixture_sha256": "16a1abc802e2c67318d3745f63c81579ab21c6484a7dc5375451f865f33c939c",
+        "messages_applied": 2,
+        "output": "test_results/drag-handles-after/a51c14db3bc6/after--blueprint--idle.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 71529,
+        "png_sha256": "5a115dca3d0aa2b24106fd0d0f9ffe6f66c3415c9276a06ff2cbc39b91e9d971",
+        "resolved_tokens_sha256": "dc0cf3f2e1c8e5d925f8eacdbec5508a20c3313108808c38c39f5ae08eb907a3",
+        "theme": "blueprint",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    },
+    {
+      "file": "after--blueprint--hover.png",
+      "state": "hover",
+      "manifest": {
+        "adapter": {
+          "backend": "Vulkan",
+          "device_type": "Cpu",
+          "driver": "llvmpipe",
+          "driver_info": "Mesa 26.0.8-1ubuntu0.3 (LLVM 21.1.8)",
+          "name": "llvmpipe (LLVM 21.1.8, 256 bits)"
+        },
+        "alpha": "straight sRGB RGBA: decode GPU sRGB attachment, unpremultiply linear RGB, encode sRGB; alpha0 transparent black",
+        "capture_at_ms": 1000,
+        "checkout_head_at_invocation": "a51c14db3bc64ec7fbe97ea7884989ef54e65d36",
+        "checkpoint": "after all ordered messages; latest-wins per surface",
+        "compiled_example_source_sha256": "f77409b45c4c0d349e4783754ff937fb797e8051da1c988e468dd83a94ff6ada",
+        "config_sha256": "982ba33f4dc725ad33cf94723f5fa3780323efb837b4c9564659f149eeae1304",
+        "config_source": null,
+        "dimensions": [
+          1920,
+          1080
+        ],
+        "drag_handle_hovered": true,
+        "drag_hover_at": [
+          1500.0,
+          100.0
+        ],
+        "elapsed_ms": 1625.4901080000002,
+        "fixture": ".claude/skills/user-test/scripts/drag-handle-restyle-test.json",
+        "fixture_sha256": "16a1abc802e2c67318d3745f63c81579ab21c6484a7dc5375451f865f33c939c",
+        "messages_applied": 2,
+        "output": "test_results/drag-handles-after/a51c14db3bc6/after--blueprint--hover.png",
+        "pipeline": "windowed build/capture",
+        "png_bytes": 71598,
+        "png_sha256": "746c05d19801b99625908be207d5d3987af9d72ba44bf8ee02ea785f6503b188",
+        "resolved_tokens_sha256": "dc0cf3f2e1c8e5d925f8eacdbec5508a20c3313108808c38c39f5ae08eb907a3",
+        "theme": "blueprint",
+        "timing_scope": "inside execute including validation/startup/raster/capture/encode/write; use external wall time for full invocation, exclude compilation"
+      }
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "captured_at": "2026-11-15T00:53:02.893569+00:00",
+  "source": "paired owner own-frame admin screenshot",
+  "build": "24818c39c44dba4ffbe596aa1edc92d849f893d9",
+  "fixture": ".claude/skills/user-test/scripts/drag-handle-restyle-test.json",
+  "fixture_sha256": "16a1abc802e2c67318d3745f63c81579ab21c6484a7dc5375451f865f33c939c",
+  "file": "before-owner.png",
+  "png_sha256": "ad7b656954a53d4e60b6920a562b015f44ada388e61069253f3c10913f1a946d",
+  "dimensions": [
+    3840,
+    2160
+  ],
+  "publish": [
+    {
+      "expires_in_ms": 15000,
+      "ok": true
+    },
+    {
+      "expires_in_ms": 15000,
+      "ok": true
+    }
+  ],
+  "settings_changed": false,
+  "input_read_or_acknowledged": false,
+  "cleanup": "finite15sTTLexpiry only; no shared clear",
+  "theme": "existing owner choice, unknown",
+  "scale": "existing owner choice, unknown"
+}
