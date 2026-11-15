@@ -973,10 +973,9 @@ def scenario_stack_trim(run: Run) -> None:
     """hud-ljhku.5 R5.2/R5.3: six cards, one an unanswered question; the question is kept.
 
     The trim spares the question and removes the oldest status card, whose
-    publisher gets one displaced receipt. A full five-card stack is taller
-    than the notification zone (30% of the display), so the kept question,
-    the oldest card, can sit below the drawn cards; it is checked visible
-    and answerable once the newer status cards leave.
+    publisher gets one displaced receipt. The kept question must remain
+    visible and answerable during the burst, while the newer cards are
+    still in the full stack at the production zone height.
     """
     question = "gesture-trim-question"
     open_card(run, question)
@@ -989,17 +988,16 @@ def scenario_stack_trim(run: Run) -> None:
             [("displaced", statuses[0], "zone:notification-area")]:
         raise ScenarioFailed("one displaced receipt, for the oldest status card",
                              {"items": items, "status": run.status()})
-    run.expect("newest status cards drawn, trimmed one gone", lambda s: bool(
-        notification_entry(s, statuses[-1]) and notification_entry(s, statuses[0]) is None))
+    run.expect("kept question visible in the full stack", lambda s: bool(
+        (card := notification_entry(s, question)) and card["state"] != "exiting"
+        and notification_entry(s, statuses[0]) is None))
+    run.settle()
+    run.click(f"zone:notification-area/{question}/0")
+    take_card_answer(run, question, f"{question}-first")
     for key in statuses[1:]:
         is_error, reply = run.smoke.call("hud_clear", {"surface": "zone:notification-area", "key": key})
         if is_error:
             raise ScenarioFailed(f"hud_clear {key} refused", {"code": reply.get("code")})
-    run.expect("kept question drawn", lambda s: bool(
-        (card := notification_entry(s, question)) and card["state"] != "exiting"))
-    run.settle()
-    run.click(f"zone:notification-area/{question}/0")
-    take_card_answer(run, question, f"{question}-first")
 
 
 def scenario_card_link(run: Run) -> None:

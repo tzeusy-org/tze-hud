@@ -837,7 +837,8 @@ async fn check_notification_action_row(margin: Option<f32>) {
         .to_vec();
     // Zone: x = 0.6 * 1280, y = 0, w = 0.35 * 1280, h = 0.8 * 720.
     let (zx, zy, zw, zh) = (768.0_f32, 0.0_f32, 448.0_f32, 576.0_f32);
-    let layout = compositor.zone_slot_layout("notification-area", &publishes, &policy, zh, zw);
+    let layout =
+        compositor.zone_slot_layout(&scene, "notification-area", &publishes, &policy, zh, zw);
     let cards: Vec<(usize, f32, f32)> = layout
         .iter_visible(Rect::new(zx, zy, zw, zh))
         .map(|(i, c)| (i, c.y, c.height))

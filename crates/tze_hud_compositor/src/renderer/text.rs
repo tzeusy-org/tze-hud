@@ -222,7 +222,7 @@ impl super::Compositor {
 
             match zone_def.contention_policy {
                 ContentionPolicy::Stack { .. } => {
-                    let layout = self.zone_slot_layout(zone_name, publishes, policy, zh, zw);
+                    let layout = self.zone_slot_layout(scene, zone_name, publishes, policy, zh, zw);
                     for (pub_idx, card) in layout.iter_visible(Rect::new(zx, zy, zw, zh)) {
                         if let ZoneContent::StreamText(text) = &publishes[pub_idx].content {
                             items.push(Self::zone_stream_text_item(
@@ -355,7 +355,8 @@ impl super::Compositor {
             // Emit TextItems based on contention policy.
             //
             // Stack: each publication occupies a vertically-stacked slot.
-            //   For generic Stack zones: newest at top (slot 0 = newest).
+            //   Generic Stack zones: unanswered questions first, newest-first
+            //   within the question and non-question groups.
             //   For alert-banner zones: severity-descending (critical first),
             //   then recency-descending (newer first) within the same severity.
             //   Per-slot heights are computed via Self::per_slot_heights() and may
@@ -370,7 +371,7 @@ impl super::Compositor {
                 ContentionPolicy::Stack { .. } => {
                     // Slot geometry is computed once by zone_slot_layout and shared
                     // with render_zone_content / collect_all_rounded_rect_cmds (hud-qlerb).
-                    let layout = self.zone_slot_layout(zone_name, publishes, policy, zh, zw);
+                    let layout = self.zone_slot_layout(scene, zone_name, publishes, policy, zh, zw);
                     // Cards and alert banners take every size and colour from
                     // their `NotificationStyle` (hud-h51u7.4.1, hud-h51u7.4.2).
                     let style = NotificationStyle::for_zone(zone_name, zone_tokens, policy);

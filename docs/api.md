@@ -61,8 +61,12 @@ notification stack trims its oldest card that is not an unanswered question
 (a live card with a callback action and no accepted answer; answered and
 URL-only cards are not questions). Only a stack of nothing but questions drops
 its oldest question, and an arriving non-question at such a stack is itself the
-card trimmed. The rule is the same on MCP and gRPC admission. `busy:true`
-appears only when another agent currently occupies a single-occupant zone.
+card trimmed. The rule is the same on MCP and gRPC admission. Regular
+notification stacks present unanswered questions first, newest-first within
+the question and other-card groups, so a retained question stays reachable
+during a burst. Answered, expired and URL-only cards have no question priority;
+alert banners keep their severity ordering. `busy:true` appears only when
+another agent currently occupies a single-occupant zone.
 MCP accepts lists omit `static_image`: resource upload is on gRPC. Strings with
 an explicit positive byte limit appear as `string<=N`; others as `string`. Numeric discovery hints use JSON `number` with the
 declared bounds (for example `number 0..1`); admission still enforces finite f32.
