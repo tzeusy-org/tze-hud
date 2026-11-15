@@ -138,7 +138,11 @@ pub(super) fn system_card_layout(
     let title = TypeRole::resolve(tokens, "headline.s", false);
     let body = TypeRole::resolve(tokens, "body.m", false);
     let meta = TypeRole::resolve(tokens, "system_card.metadata", false);
-    let value = TypeRole::resolve(tokens, "label.m", true);
+    let value = TypeRole {
+        size: TypeRole::resolve(tokens, "label.m", true).size,
+        family: FontFamily::SystemMonospace,
+        ..meta
+    };
     let mut code = TypeRole::resolve(tokens, "code.display", true);
     let primary = color(tokens, "color.on_surface");
     let muted = color(tokens, "color.on_surface.variant");

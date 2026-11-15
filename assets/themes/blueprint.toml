@@ -285,3 +285,14 @@
 "size.status.icon" = "14"
 "size.status.divider" = "14"
 "size.status.entry_max" = "240"
+
+# Owner-only pairing card and toast; shared geometry, semantic theme surfaces/type.
+"size.system_card.width" = "440"
+"space.system_card.padding" = "28"
+"space.system_card.group_gap" = "20"
+"space.system_card.row_gap" = "6"
+"size.system_card.metadata_key" = "72"
+"opacity.system_card" = "0.96"
+"type.system_card.metadata.size" = "13"
+"type.system_card.metadata.line_height" = "20"
+"type.system_card.metadata.weight" = "400"
