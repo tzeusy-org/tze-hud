@@ -3192,8 +3192,8 @@ mod tests {
     }
 
     /// A profile swap (changing only the portal-scoped keys) reskins the resolved
-    /// markdown tokens on the next resolve — the propagation the AC requires
-    ///. Distinct portal values yield distinct resolved colors.
+    /// markdown tokens on the next resolve — the propagation the AC requires.
+    /// Distinct portal values yield distinct resolved colors.
     #[test]
     fn portal_transcript_profile_swap_reskins_markdown_tokens() {
         let mut profile_a = HashMap::new();

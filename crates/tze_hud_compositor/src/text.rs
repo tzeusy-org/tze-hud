@@ -27,8 +27,8 @@
 //!
 //! - `Clip` — the `TextBounds` rectangle hard-clips rendered glyphs.
 //! - `Ellipsis` — measured word-boundary truncation with the ellipsis glyph
-//!   included in the shaped-width budget, implemented in [`crate::overflow`]
-//!. Grapheme-cluster fallback applies when no word boundary
+//!   included in the shaped-width budget, implemented in [`crate::overflow`].
+//!   Grapheme-cluster fallback applies when no word boundary
 //!   fits.  Whole-line vertical visibility is enforced: no partially clipped
 //!   glyph rows.
 
@@ -456,8 +456,8 @@ enum TextLayer {
 /// bounded `TextItem` in the render path).
 ///
 /// [`Wrap::WordOrGlyph`] wraps at word boundaries **and** falls back to breaking
-/// a single token at the glyph level when that token is wider than the line box
-///. Plain [`Wrap::Word`] would leave such an unbreakable token on one
+/// a single token at the glyph level when that token is wider than the line box.
+/// Plain [`Wrap::Word`] would leave such an unbreakable token on one
 /// over-long line whose tail is then clipped away by the box scissor — the owner
 /// could type a 200-char run of `asdasd…` and never see the end. `WordOrGlyph` is
 /// a strict superset of `Word` (identical for text that already fits), so this is
@@ -2487,8 +2487,8 @@ fn intersect_clip_box(a: ClipBox, b: ClipBox) -> ClipBox {
 /// the pre-promotion behavior byte-for-byte. When `Some`, the part region is the
 /// per-part containment envelope that keeps one part's content (e.g. an
 /// overlong transcript) from painting over a sibling part's region (e.g. the
-/// composer strip) — the render-side meaning of "one scene node per part"
-///. The part region is a *clip* envelope only; it deliberately does
+/// composer strip) — the render-side meaning of "one scene node per part".
+/// The part region is a *clip* envelope only; it deliberately does
 /// **not** alter the wrap/truncation measure (`bounds_width`), so the
 /// shaped-buffer and truncation caches stay keyed exactly as before (PR #1007
 /// perf invariant).

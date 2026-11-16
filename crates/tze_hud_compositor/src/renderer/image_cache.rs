@@ -297,8 +297,8 @@ pub(crate) fn composer_scroll_offset(
 ///
 /// One of two profiles is active per frame:
 /// - **Single-line** (`wrap == false`, max-lines token = 1): the draft is laid
-///   out on one unwrapped line and slides horizontally so the caret stays visible
-///. `h_scroll_px` / `content_width` drive it; the vertical fields
+///   out on one unwrapped line and slides horizontally so the caret stays visible.
+///   `h_scroll_px` / `content_width` drive it; the vertical fields
 ///   stay at their one-line defaults.
 /// - **Multi-line** (`wrap == true`, max-lines token > 1): the draft wraps within
 ///   the composer width, the box grows upward to `visible_lines`, and past the
@@ -510,8 +510,8 @@ impl super::Compositor {
     ///
     /// Sourced from the resolved `DisplayProfile::max_truncation_input_bytes`
     /// (see `tze_hud_config`), this bounds the bytes a single uncached
-    /// truncation may shape before the viewport-adjacent-window fallback engages
-    ///. The value is retained on the compositor so it is
+    /// truncation may shape before the viewport-adjacent-window fallback engages.
+    /// The value is retained on the compositor so it is
     /// re-applied across any later [`Compositor::init_text_renderer`] call, and
     /// forwarded immediately to the subtitle measurement and live truncation
     /// caches when the rasterizer is already initialized.

@@ -898,8 +898,8 @@ impl HotkeyResizeDir {
 
 /// Which axis (or axes) a hotkey resize step grows/shrinks.
 ///
-/// The symmetric Ctrl+`+`/`-` chord resizes [`Both`](Self::Both) axes at once
-///. The directional Ctrl+Shift+Arrow chord resizes a single
+/// The symmetric Ctrl+`+`/`-` chord resizes [`Both`](Self::Both) axes at once.
+/// The directional Ctrl+Shift+Arrow chord resizes a single
 /// axis so a keyboard viewer — and the autopilot live-verify harness — can drive
 /// a **width-only** whole-portal resize without pointer injection. Width is the
 /// text-wrap axis the compositor reads from `TextMarkdownNode::bounds.width`, so

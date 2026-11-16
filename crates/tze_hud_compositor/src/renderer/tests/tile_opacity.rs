@@ -873,8 +873,8 @@ async fn hud_tfm3p_flow_offsets_resolve_without_a_text_rasterizer() {
     );
 }
 
-/// A non-rounded `SolidColor` node fill must be scaled by the whole-tile fade
-///. Before the fix it was painted at `sc.color.a` regardless of tile
+/// A non-rounded `SolidColor` node fill must be scaled by the whole-tile fade.
+/// Before the fix it was painted at `sc.color.a` regardless of tile
 /// opacity — the same divergence fixed for portal backgrounds.
 #[tokio::test]
 async fn hud_b0x0m_solid_color_node_fill_scaled_by_tile_opacity() {

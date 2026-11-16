@@ -823,8 +823,8 @@ impl ComposerDraft {
         }
     }
 
-    /// Move the caret to an absolute byte offset, collapsing any selection
-    ///. Used by visual-line vertical movement, which computes a target
+    /// Move the caret to an absolute byte offset, collapsing any selection.
+    /// Used by visual-line vertical movement, which computes a target
     /// byte from the compositor's wrapped-line layout. The byte is clamped to
     /// `text.len()` and snapped down to a char boundary so a stale layout can
     /// never place the caret mid-character.
@@ -1088,8 +1088,8 @@ fn grapheme_count(s: &str) -> usize {
 }
 
 /// Byte offset of the `col`-th grapheme boundary within the line `[line_start,
-/// line_end)`, clamped to `line_end` when the line is shorter than `col`
-///. Used to land a vertical move at the goal column.
+/// line_end)`, clamped to `line_end` when the line is shorter than `col`.
+/// Used to land a vertical move at the goal column.
 fn byte_at_grapheme_col(text: &str, line_start: usize, line_end: usize, col: usize) -> usize {
     let line = &text[line_start..line_end];
     let mut offset = 0usize;
@@ -1562,8 +1562,8 @@ impl ComposerDraftManager {
         }
     }
 
-    /// Update the wrapped-line layout used for visual-row vertical caret movement
-    ///. Called by the runtime each time it observes a fresh layout
+    /// Update the wrapped-line layout used for visual-row vertical caret movement.
+    /// Called by the runtime each time it observes a fresh layout
     /// from the compositor (before dispatching an ArrowUp/ArrowDown). `None`
     /// clears it (no multi-line composer active), reverting to hard-newline
     /// vertical movement.

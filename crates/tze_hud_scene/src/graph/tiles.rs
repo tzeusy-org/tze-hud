@@ -541,8 +541,8 @@ impl SceneGraph {
         self.overlay.tile_composer_nodes.insert(tile_id, node_id);
     }
 
-    /// Detach and drop the tile's derived composer hit-region node, if any
-    ///. Removes it from `nodes`, its parent's `children`, the
+    /// Detach and drop the tile's derived composer hit-region node, if any.
+    /// Removes it from `nodes`, its parent's `children`, the
     /// hit-region local-state map, and the tile→node mapping. Safe to call when no
     /// derived node exists (or it was already removed with a prior root subtree).
     pub(crate) fn detach_tile_composer_node(&mut self, tile_id: SceneId) {

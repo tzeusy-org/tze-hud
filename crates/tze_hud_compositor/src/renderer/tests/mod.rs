@@ -63,8 +63,8 @@ fn should_skip_gpu_tests() -> bool {
 /// exactly this way: the render-path regression tests that would have caught
 /// it (`markdown_primer_landing_converges_on_render_path_hud_u4lq2`,
 /// `reused_compositor_across_scenes_lands_markdown_primer_hud_u4lq2`) silently
-/// no-op'd in a no-GPU sandbox; only CI's GPU/llvmpipe lane actually ran them
-///. `require_gpu!` now `eprintln!`s a loud, greppable
+/// no-op'd in a no-GPU sandbox; only CI's GPU/llvmpipe lane actually ran them.
+/// `require_gpu!` now `eprintln!`s a loud, greppable
 /// `"SKIPPED (no GPU)"` marker — carrying the exact call-site location and
 /// this running count — on every skip, so `grep -c "SKIPPED (no GPU)"` over
 /// captured test output tells a contributor exactly how many render-path

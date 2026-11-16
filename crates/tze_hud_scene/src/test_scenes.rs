@@ -1088,8 +1088,8 @@ impl TestSceneRegistry {
 
     /// `overlay_passthrough_regions` — chrome overlay with mixed passthrough / capture regions.
     ///
-    /// Validates the hit-test pipeline: chrome-first, z-descending, reverse tree order per
-    ///. Passthrough tiles let pointer events fall through.
+    /// Validates the hit-test pipeline: chrome-first, z-descending, reverse tree order per.
+    /// Passthrough tiles let pointer events fall through.
     fn build_overlay_passthrough_regions(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
         let mut graph = self.new_graph(clock);
 

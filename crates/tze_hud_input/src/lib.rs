@@ -915,8 +915,8 @@ impl InputProcessor {
     /// leaves a `ScrolledBack` viewport undisturbed when ordinary content
     /// grows, this is for a deliberate LOCAL action — the viewer
     /// typing into or submitting their own composer — where staying scrolled
-    /// away from the tail would strand them from their own live input
-    ///. No-op if the tile has no tracked scroll state.
+    /// away from the tail would strand them from their own live input.
+    /// No-op if the tile has no tracked scroll state.
     pub fn reset_tile_scroll_to_tail(&mut self, tile_id: SceneId, scene: &mut SceneGraph) -> bool {
         let changed = self.scroll_state.reset_to_tail(tile_id);
         if changed {
@@ -5145,8 +5145,8 @@ mod tests {
     /// runtime was incorrectly conditioned on `outcome != Unchanged` to decide
     /// whether to block the agent path.  For an all-control-char clipboard
     /// payload the sanitised string is empty, so `paste("")` returns
-    /// `EditOutcome::Unchanged` — but the event MUST still not reach the agent
-    ///. The fix adds an unconditional early-return whenever
+    /// `EditOutcome::Unchanged` — but the event MUST still not reach the agent.
+    /// The fix adds an unconditional early-return whenever
     /// `is_composer_active()` is true, regardless of outcome.
     ///
     /// This test verifies:

@@ -2203,8 +2203,8 @@ pub struct DragHandleHitRegion {
     /// legacy small centered grip.  A band spans a large area that legitimately
     /// overlaps interactive controls (e.g. the minimize button), so — unlike the
     /// grip — it yields to any `accepts_pointer` HitRegionNode under the point:
-    /// the band drags empty header space but a control on the band still wins
-    ///. Legacy grips leave this `false` and keep their original
+    /// the band drags empty header space but a control on the band still wins.
+    /// Legacy grips leave this `false` and keep their original
     /// chrome-priority precedence.
     #[serde(default)]
     pub is_header_band: bool,

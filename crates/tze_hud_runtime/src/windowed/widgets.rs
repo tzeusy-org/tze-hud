@@ -26,8 +26,8 @@ use crate::widget_hover::{
 /// `Some(text)` supplies non-chat composers with their own hint copy.
 const COMPOSER_DEFAULT_PLACEHOLDER: &str = "Type a message…";
 
-/// Window-space anchor rect for the OS IME candidate window, in physical pixels
-///. `x`/`y` is the caret's top-left; `height` is the caret
+/// Window-space anchor rect for the OS IME candidate window, in physical pixels.
+/// `x`/`y` is the caret's top-left; `height` is the caret
 /// line height. Width is a fixed 1px (the caret is a thin vertical bar).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct ImeCaretAnchor {

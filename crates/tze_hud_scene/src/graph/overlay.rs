@@ -232,8 +232,8 @@ pub struct RuntimeOverlayState {
     /// Ephemeral: skipped during serialization.
     #[serde(skip, default)]
     pub tile_composer_interactions: HashMap<SceneId, HitRegionNode>,
-    /// The scene node id currently synthesized for each tile's composer interaction
-    ///. Maps host tile id → the derived hit-region node's id.
+    /// The scene node id currently synthesized for each tile's composer interaction.
+    /// Maps host tile id → the derived hit-region node's id.
     ///
     /// Written by the composer-interaction reattach path
     /// (`SceneGraph::ensure_tile_composer_node`) so a stale derived node can be

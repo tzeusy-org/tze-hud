@@ -704,8 +704,8 @@ async fn display_tile_scroll_offset_snaps_headless_and_settles_windowed() {
 
 /// `publish_displayed_scroll_offsets` records exactly the offset the renderer
 /// draws with (`display_tile_scroll_offset`) into the scene so the live
-/// hit-test path agrees with the rendered rows during a smoothed scroll
-///. When smoothing is disabled (headless/snap) it clears any
+/// hit-test path agrees with the rendered rows during a smoothed scroll.
+/// When smoothing is disabled (headless/snap) it clears any
 /// published overrides so hit-testing falls back to the authoritative offset.
 #[tokio::test]
 async fn publish_displayed_scroll_offsets_mirrors_smoother_and_clears_headless() {

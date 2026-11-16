@@ -109,8 +109,8 @@ pub struct McpServerConfig {
 /// * `scene`           — shared scene graph for MCP tool dispatch.
 /// * `config`          — MCP server configuration (bind addresses, agents).
 /// * `shutdown`        — token that stops the accept loops when triggered.
-/// * `portals` — optional shared portal hub and clock
-///. When `Some`, MCP calls this hub directly; the winit driver shares the same state and clock.
+/// * `portals` — optional shared portal hub and clock.
+/// When `Some`, MCP calls this hub directly; the winit driver shares the same state and clock.
 ///
 /// # Returns
 ///
