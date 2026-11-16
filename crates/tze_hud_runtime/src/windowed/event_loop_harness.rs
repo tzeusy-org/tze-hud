@@ -2559,7 +2559,12 @@ mod tests {
             counters
         );
         let versions = runtime.frames.last_rendered();
-        *runtime.compositor.focus_ring_owner_state.lock().unwrap() = Some(SceneId::new());
+        *runtime.compositor.focus_ring_owner_state.lock().unwrap() =
+            Some(tze_hud_compositor::renderer::FocusRingOwner {
+                tab_id: SceneId::new(),
+                tile_id: SceneId::new(),
+                node_id: None,
+            });
         assert!(
             runtime.turn(false),
             "local-only feedback requests an ordinary attempt"
@@ -7467,6 +7472,16 @@ mod tests {
             main_work_before,
             "a held scene lock must cause no periodic retry wakes"
         );
+        let compositor_before = harness.app.state.wake.compositor().checkpoint();
+        for _ in 0..2 {
+            assert!(!harness.tick());
+            assert_eq!(harness.offscreen_work_counts(), (0, 0));
+            assert_eq!(harness.frame_turn.last_rendered(), (u64::MAX, u64::MAX));
+            assert_eq!(
+                harness.app.state.wake.compositor().checkpoint(),
+                compositor_before
+            );
+        }
         drop(held);
 
         let deadline = Instant::now() + Duration::from_secs(1);
@@ -7477,6 +7492,18 @@ mod tests {
             );
             std::thread::yield_now();
         }
+        while harness.app.state.wake.compositor().checkpoint() == compositor_before {
+            assert!(
+                Instant::now() < deadline,
+                "frame turn resumes on availability, never a polling cadence"
+            );
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            harness.app.state.wake.compositor().checkpoint(),
+            compositor_before + 1,
+            "two busy turns share one compositor availability wake"
+        );
         harness.app.settle_scene_work();
 
         let shared = harness.app.state.shared_state.blocking_lock();
