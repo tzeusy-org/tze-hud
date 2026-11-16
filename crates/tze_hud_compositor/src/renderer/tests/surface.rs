@@ -496,7 +496,25 @@ async fn test_new_headless_with_force_software_env_var() {
     }
     let result = {
         let _gpu = GPU_INIT_MUTEX.lock().await;
-        Compositor::new_headless(64, 64).await
+        let result = Compositor::new_headless(64, 64).await;
+        if let Ok(compositor) = &result {
+            let mut limits = compositor.device.limits();
+            let max_dimension = limits.max_texture_dimension_2d;
+            // Raising only the texture bound must preserve every other
+            // downlevel compatibility limit on the actual requested device.
+            limits.max_texture_dimension_2d =
+                wgpu::Limits::downlevel_defaults().max_texture_dimension_2d;
+            assert_eq!(limits, wgpu::Limits::downlevel_defaults());
+            for (width, height) in [(max_dimension + 1, 1), (1, max_dimension + 1)] {
+                let rejected = Compositor::new_headless(width, height).await;
+                let Err(CompositorError::DeviceCreation(message)) = rejected else {
+                    panic!("dimensions beyond the actual texture limit must be rejected");
+                };
+                assert!(message.contains(&format!("{width}x{height}")));
+                assert!(message.contains(&format!("<= {max_dimension}")));
+            }
+        }
+        result
     };
     unsafe {
         std::env::remove_var("HEADLESS_FORCE_SOFTWARE");

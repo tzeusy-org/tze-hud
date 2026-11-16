@@ -901,18 +901,29 @@ impl Compositor {
         let (_instance, adapter) = selected_adapter.ok_or(CompositorError::NoAdapter)?;
         let adapter_info = CompositorAdapterInfo::from(adapter.get_info());
 
+        // Keep downlevel compatibility, but allow offscreen frames at the
+        // adapter's native texture size, as the windowed device does.
+        let mut required_limits = wgpu::Limits::downlevel_defaults();
+        required_limits.max_texture_dimension_2d = adapter.limits().max_texture_dimension_2d;
         let (device, queue) = adapter
             .request_device(
                 &wgpu::DeviceDescriptor {
                     label: Some("tze_hud_compositor"),
                     required_features: wgpu::Features::empty(),
-                    required_limits: wgpu::Limits::downlevel_defaults(),
+                    required_limits,
                     memory_hints: wgpu::MemoryHints::default(),
                 },
                 None,
             )
             .await
             .map_err(|e| CompositorError::DeviceCreation(e.to_string()))?;
+
+        let max_dimension = device.limits().max_texture_dimension_2d;
+        if width > max_dimension || height > max_dimension {
+            return Err(CompositorError::DeviceCreation(format!(
+                "headless dimensions {width}x{height} exceed this device's {max_dimension}px per-axis texture limit; reduce width and height to <= {max_dimension}"
+            )));
+        }
 
         let pipeline = Self::create_pipeline(&device);
         let clear_pipeline =
