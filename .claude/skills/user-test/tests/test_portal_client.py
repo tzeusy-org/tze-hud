@@ -894,6 +894,7 @@ class UsageHarness(HookHarness):
         self.registration_thread = None
         self.worker_script = USAGE
         self.hold_timeout = 5
+        self.prewarmed = []
 
     def track_wrapper_children(self):
         # Pin each detached helper and foreground sleep before real exec. The
@@ -948,6 +949,17 @@ class UsageHarness(HookHarness):
         self.env["PATH"] = str(commands) + os.pathsep + self.env["PATH"]
 
     def __exit__(self, *args):
+        # An unused prepared child has not entered main or touched usage state.
+        # Closing its private gate releases it; kill only this owned child if
+        # startup itself stalls, so a failed assertion cannot leave it behind.
+        for process, channel in self.prewarmed:
+            channel.close()
+            try:
+                process.communicate(timeout=2)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.communicate(timeout=2)
+        self.prewarmed.clear()
         try:
             super().__exit__(*args)
         finally:
@@ -1030,14 +1042,55 @@ class UsageHarness(HookHarness):
         return {"rate_limits": {"five_hour": {"used_percentage": pct, "resets_at": reset or self.reset}},
                 "context_window": {"used_percentage": 99}, "private_unknown": "discard-this-synthetic-text"}
 
+    def _spawn(self, argv, **kwargs):
+        return subprocess.Popen(argv, cwd=self.home, env=self.env, stdin=subprocess.PIPE,
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, **kwargs)
+
+    def prewarm(self, count):
+        # Prepare imports before the held-owner interleaving, rather than
+        # spending its lease on seven more interpreters. Each release enters
+        # the unchanged main with cached imports and the real one-second timer;
+        # stdin, state locks, HTTP and ACK persistence remain inside that budget.
+        # Cold-start and cancellation parents continue to use normal launches.
+        # The gate is closed before main and cannot extend the delivery lease.
+        prepare = ("import runpy,socket,sys\nfrom pathlib import Path\n"
+                   "sys.path.insert(0, str(Path(sys.argv[1]).resolve().parents[2] / 'user-test' / 'scripts'))\n"
+                   "import hud_env,publish_widget_batch\n"
+                   "entry = runpy.run_path(sys.argv[1])['main']\n"
+                   "with socket.socket(fileno=int(sys.argv[2])) as gate:\n"
+                   "    gate.sendall(b'+')\n"
+                   "    start = gate.recv(1) == b'+'\n"
+                   "sys.argv = [sys.argv[1]]\n"
+                   "if start: entry()\n")
+        for _ in range(count):
+            channel, child_channel = socket.socketpair()
+            try:
+                process = self._spawn([sys.executable, "-c", prepare, str(USAGE),
+                                       str(child_channel.fileno())],
+                                      pass_fds=(child_channel.fileno(),))
+            except BaseException:
+                channel.close()
+                raise
+            finally:
+                child_channel.close()
+            self.prewarmed.append((process, channel))
+            channel.settimeout(2)
+            assert channel.recv(1) == b"+", "owned usage child did not prepare"
+
     def launch(self, payload):
         raw = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
-        p = subprocess.Popen([sys.executable, str(USAGE)], cwd=self.home, env=self.env,
-                             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if self.prewarmed:
+            p, channel = self.prewarmed[0]
+        else:
+            p, channel = self._spawn([sys.executable, str(USAGE)]), None
         p.started = time.monotonic()
         p.stdin.write(raw)
         p.stdin.close()
         p.stdin = None
+        if channel is not None:
+            with channel:
+                channel.sendall(b"+")
+            self.prewarmed.pop(0)
         return p
 
     def finish(self, process, expected=0):
@@ -1110,6 +1163,10 @@ def test_usage_metric_steps_new_window_and_unavailable(tmp_path):
 def test_usage_concurrent_claim_and_obsolete_ack_preserve_desire(tmp_path):
     import fcntl
     with UsageHarness(tmp_path / "concurrent") as h:
+        # Scheduling seven more cold interpreters after the first send could
+        # exhaust its real deadline before this test reached ACK persistence.
+        # Keep that deadline real, but prepare this first burst before starting it.
+        h.prewarm(8)
         h.block_text = f'41% · resets {time.strftime("%H:%M", time.gmtime(h.reset))}'
         first = h.launch(h.payload())
         assert h.received.wait(1)
