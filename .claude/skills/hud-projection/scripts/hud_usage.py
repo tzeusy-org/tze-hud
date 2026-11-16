@@ -18,10 +18,6 @@ import stat
 import sys
 import time
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "user-test" / "scripts"))
-import hud_env
-import publish_widget_batch
-
 INPUT_LIMIT = 65536
 STATE_LIMIT = 2048
 BUDGET = 1.0
@@ -174,6 +170,8 @@ def validate_key(value):
 
 def deliver(metadata, endpoint, token, widget, deadline):
     # Initial request and at most one newest-desire catch-up, never a retry.
+    import publish_widget_batch
+
     with lock(metadata.directory / "delivery.lock"):
         for _ in range(2):
             with lock(metadata.directory / "state.lock"):
@@ -218,6 +216,8 @@ def handle(payload, deadline):
     widget = os.environ.get("HUD_USAGE_WIDGET", "usage")
     if not re.fullmatch(r"[A-Za-z0-9_-]{1,64}", widget):
         return
+    import hud_env
+
     endpoint = hud_env.adapter_endpoint()
     token = hud_env.adapter_key(endpoint)
     # The credential is used only by this process/client; only a domain hash is
@@ -236,8 +236,8 @@ def handle(payload, deadline):
 
 
 def main():
-    # Detached POSIX host only. The default-action timer also bounds DNS,
-    # trickling HTTP bodies, stdin, admission and cleanup with one total budget.
+    # Detached POSIX host only. One default-action timer bounds application
+    # imports, DNS, trickling HTTP bodies, stdin, admission and cleanup.
     if os.name != "posix":
         return
     with open(os.devnull, "w") as sink, contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
@@ -247,6 +247,7 @@ def main():
             deadline = time.monotonic() + BUDGET
             signal.signal(signal.SIGALRM, signal.SIG_DFL)
             signal.setitimer(signal.ITIMER_REAL, BUDGET)
+            sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "user-test" / "scripts"))
             raw = sys.stdin.buffer.read(INPUT_LIMIT + 1)
             if len(raw) > INPUT_LIMIT:
                 return

@@ -1437,6 +1437,43 @@ def test_usage_wrapper_stdout_and_detached_cancellation(tmp_path):
 
 def test_usage_failures_are_silent_private_bounded_and_event_driven(tmp_path):
     import fcntl
+    with UsageHarness(tmp_path / "imports") as h:
+        # Exercise real application imports under the original process timer.
+        # A timeout before transport must leave the same input eligible later.
+        imports = h.home / "imports"
+        imports.mkdir()
+        marker = imports / "entered"
+        original_pythonpath = h.env.get("PYTHONPATH")
+        for index, module in enumerate(("hud_env", "publish_widget_batch")):
+            marker.unlink(missing_ok=True)
+            (imports / "sitecustomize.py").write_text(
+                "import sys, time\n"
+                "class SlowImport:\n"
+                "    def find_spec(self, fullname, path=None, target=None):\n"
+                f"        if fullname == {module!r}:\n"
+                f"            with open({str(marker)!r}, 'w') as out:\n"
+                "                out.write(fullname)\n"
+                "            time.sleep(1.5)\n"
+                "sys.meta_path.insert(0, SlowImport())\n")
+            h.env["PYTHONPATH"] = str(imports) + (
+                os.pathsep + original_pythonpath if original_pythonpath else "")
+            payload = h.payload(41 + index)
+            process = h.launch(payload)
+            try:
+                h.finish(process, expected=-signal.SIGALRM)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                    process.communicate(timeout=2)
+                if original_pythonpath is None:
+                    h.env.pop("PYTHONPATH")
+                else:
+                    h.env["PYTHONPATH"] = original_pythonpath
+            assert marker.read_text() == module
+            assert len(h.records) == index
+            h.replay(payload)
+            assert len(h.records) == index + 1
+            assert h.state()["ack"]["key"] == [h.reset, 41 + index]
     with UsageHarness(tmp_path / "failures") as h:
         h.env["HUD_USAGE_WIDGET"] = "../unsafe"
         h.replay(h.payload())
