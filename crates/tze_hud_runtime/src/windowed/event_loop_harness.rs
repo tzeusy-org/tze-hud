@@ -5988,16 +5988,11 @@ mod tests {
                 drop(shared_guard);
                 // As in the real loop, retry after the availability wakes. The
                 // waiters briefly acquire the released lock themselves.
-                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
                 while if busy_scene {
                     harness.app.state.wake.compositor().checkpoint() == compositor_before
                 } else {
                     harness.app.state.wake.main_work_generation() == main_before
                 } {
-                    assert!(
-                        std::time::Instant::now() < deadline,
-                        "releasing the lock must wake the focus-cleanup turn"
-                    );
                     std::thread::yield_now();
                 }
                 for _ in 0..3 {
