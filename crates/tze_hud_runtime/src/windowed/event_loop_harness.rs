@@ -941,8 +941,9 @@ impl HeadlessEventLoopHarness {
         let runtime = crate::headless::HeadlessRuntime::new(crate::headless::HeadlessConfig {
             width: self.app.state.config.window.width,
             height: self.app.state.config.window.height,
+            grpc_port: 0,
+            agents: self.app.state.config.agents.load().as_ref().clone(),
             config_toml: self.app.state.config.config_toml.clone(),
-            ..Default::default()
         })
         .await?;
         let mut compositor = runtime.compositor;
