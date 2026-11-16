@@ -1,6 +1,6 @@
 use super::*;
 
-// ── Portal per-node streaming-reveal tracking (hud-tbdfx) ────────────────────
+// ── Portal per-node streaming-reveal tracking ────────────────────
 //
 // These tests exercise `update_portal_tile_reveals`, which keys reveal state per
 // `(tile, markdown-node)` so the tracker is robust to which node in a portal
@@ -12,7 +12,7 @@ use super::*;
 // (node ids stay stable across "frames", exactly as the resident bridge's
 // in-place content updates do).
 
-/// hud-tbdfx helper: `TextMarkdown` node-data for a portal transcript node.
+/// helper: `TextMarkdown` node-data for a portal transcript node.
 fn portal_reveal_md_data(
     content: &str,
     color_runs: Box<[tze_hud_scene::types::TextColorRun]>,
@@ -31,7 +31,7 @@ fn portal_reveal_md_data(
     })
 }
 
-/// hud-tbdfx helper: create a scrollable (portal) tile with a non-markdown
+/// helper: create a scrollable (portal) tile with a non-markdown
 /// container root, returning `(tile_id, root_id)`.
 fn portal_reveal_tile(scene: &mut SceneGraph) -> (SceneId, SceneId) {
     let tab_id = scene.create_tab("test", 0).unwrap();
@@ -67,7 +67,7 @@ fn portal_reveal_tile(scene: &mut SceneGraph) -> (SceneId, SceneId) {
     (tile_id, root_id)
 }
 
-/// hud-tbdfx helper: add a markdown child node under `parent_id` and return its
+/// helper: add a markdown child node under `parent_id` and return its
 /// stable id.
 fn portal_reveal_add_md(
     scene: &mut SceneGraph,
@@ -93,7 +93,7 @@ fn portal_reveal_add_md(
     id
 }
 
-/// hud-tbdfx (red-first): a portal tile whose *first eligible* markdown node
+/// (red-first): a portal tile whose *first eligible* markdown node
 /// changes between frames must NOT start a spurious word-by-word reveal of
 /// already-settled content.
 ///
@@ -104,7 +104,7 @@ fn portal_reveal_add_md(
 /// plain-text; when the draft node's runs flipped it from eligible to skipped,
 /// the tracked text swapped from the short draft to the long history and was
 /// mistaken for growth → the whole history re-revealed (~0.5s/word). Per-node
-/// keying (hud-tbdfx) diffs each node only against its own prior snapshot.
+/// keying diffs each node only against its own prior snapshot.
 #[tokio::test]
 async fn test_portal_reveal_node_flip_does_not_spuriously_reveal() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
@@ -181,7 +181,7 @@ async fn test_portal_reveal_node_flip_does_not_spuriously_reveal() {
     );
 }
 
-/// hud-tbdfx (red-first): in a batched multi-node update where exactly one node
+/// (red-first): in a batched multi-node update where exactly one node
 /// grows, only THAT node's appended suffix fades — the other nodes stay settled,
 /// and the fade starts at the common prefix of the grown node's own prior text.
 ///
@@ -236,7 +236,7 @@ async fn test_portal_reveal_batched_multinode_reveals_only_grown_node() {
     );
 }
 
-/// hud-tbdfx regression guard: a single-node genuine append still reveals its
+/// regression guard: a single-node genuine append still reveals its
 /// appended suffix (per-node keying must not disable legitimate reveals).
 #[tokio::test]
 async fn test_portal_reveal_single_node_append_still_reveals() {
@@ -284,7 +284,7 @@ async fn test_portal_reveal_single_node_append_still_reveals() {
     );
 }
 
-/// hud-g8xpg (review follow-up, red-first): when a portal tile carries two
+/// (review follow-up, red-first): when a portal tile carries two
 /// eligible markdown nodes with the SAME plain-text and only one of them is
 /// revealing, the fade must route by node identity — the settled sibling with
 /// identical text must stay fully opaque, not inherit the revealing node's
@@ -386,7 +386,7 @@ async fn test_portal_reveal_identical_text_nodes_do_not_cross_fade() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Multi-node portal-part layout (hud-s4lrw)
+// Multi-node portal-part layout
 //
 // The compositor consumes the first-class `PortalSurface` descriptor (PR #1092)
 // and renders each declared part node distinctly: only the `Transcript` part
@@ -491,7 +491,7 @@ fn portal_part_index_classifies_parts_and_falls_back() {
 /// A surface whose parts are all geometry-only (no materialized nodes) produces
 /// no text-part index, so overflow/clip treatment keeps the legacy tile-level
 /// fallback rather than using a spurious empty map. Its display translation is
-/// separately resolved from the declared part bounds (hud-yrcev).
+/// separately resolved from the declared part bounds.
 #[test]
 fn portal_part_index_none_when_no_materialized_nodes() {
     use tze_hud_scene::types::{PortalPart, PortalPartKind, PortalSurface};
@@ -530,12 +530,12 @@ fn portal_part_index_none_when_no_materialized_nodes() {
 /// `PortalSurface` per part: a portal tile whose root is the transcript node and
 /// whose child is a bounded composer node, both `Ellipsis`, at-tail.
 ///
-/// Asserts the two render-side promotion invariants (hud-s4lrw):
+/// Asserts the two render-side promotion invariants:
 /// 1. **Per-part overflow scope** — only the declared `Transcript` part gets the
 ///    tail-anchored viewport; the `Composer` part (same overflow mode) stays
 ///    head-anchored, so a bounded composer never inherits the transcript's
 ///    tail-follow. This is what unblocks a precisely-bounded composer color run
-///    (hud-9gyao) instead of a whole-tile zero-length sentinel.
+///    instead of a whole-tile zero-length sentinel.
 /// 2. **Per-part clip containment** — the transcript's tall content is clipped
 ///    to its own 150px band, NOT the full 200px tile, so it can never paint over
 ///    the composer strip beneath it. The composer is clipped to its own band.
@@ -686,8 +686,8 @@ async fn portal_surface_renders_parts_with_per_part_scope_and_clip() {
     );
 }
 
-/// End-to-end (software-GPU) proof of the container-part scope propagation
-/// (hud-s4lrw, PR #1099 Codex P2): a `Transcript` part whose `node` is a
+/// End-to-end (software-GPU) proof of container-part scope propagation:
+/// a `Transcript` part whose `node` is a
 /// `SolidColor` *container* scopes its whole subtree. The transcript's actual
 /// text lives in a `TextMarkdown` **child** that is not itself a declared part;
 /// it must still tail-anchor and clip to the transcript band by inheriting the

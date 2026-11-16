@@ -212,7 +212,7 @@ mod tests {
     /// under live leases in any state, active, suspended or orphaned; zone and
     /// widget publications with or without a lease, or orphaned with their
     /// session; scheduled publishes), reports a revoke per lease, and
-    /// leaves another agent's content alone (hud-vniri.6, invariant §3).
+    /// leaves another agent's content alone.
     #[test]
     fn reclaim_agent_clears_everything_it_holds_and_nothing_else() {
         let (mut scene, tab) = scene_with_gauge(ContentionPolicy::Stack { max_depth: 4 });

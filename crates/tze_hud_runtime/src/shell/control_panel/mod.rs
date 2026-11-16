@@ -1,4 +1,4 @@
-//! HUD control panel (T11, hud-vniri): one scrollable pane of glass for every
+//! HUD control panel (T11): one scrollable pane of glass for every
 //! HUD setting, opened by a global chord.
 //!
 //! ## Shape

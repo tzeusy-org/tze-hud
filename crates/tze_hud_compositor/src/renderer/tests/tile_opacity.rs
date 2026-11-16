@@ -1,6 +1,6 @@
 use super::*;
 
-// ─── hud-w41ef: portal tile backdrop fades as one unit (no see-through on a ──
+// ───: portal tile backdrop fades as one unit (no see-through on a ──
 // geometry change that exposes tile-backdrop-only regions) ───────────────────
 
 /// Build a scrollable (portal-like) TextMarkdown tile with an OPAQUE background,
@@ -35,8 +35,8 @@ fn w41ef_portal_tile(scene: &mut SceneGraph, bounds: Rect, node_bounds: Rect) ->
     tile_id
 }
 
-/// Regression for hud-w41ef: when a portal tile's opaque body is faded (§6.3
-/// portal transition opacity, or any tile opacity < 1), the whole tile MUST fade
+/// When a portal tile's opaque body is faded (portal transition opacity,
+/// or any tile opacity < 1), the whole tile MUST fade
 /// as one unit. Before the fix, the flat tile backdrop (`tile_background_color`)
 /// and the tile text honoured the fade but the content-node background
 /// (`tm.background` painted in `render_node`) did not — so a region covered only
@@ -51,7 +51,7 @@ fn w41ef_portal_tile(scene: &mut SceneGraph, bounds: Rect, node_bounds: Rect) ->
 /// but `render_frame_headless` always uses the blending pipeline, so a readback
 /// composites the two overlapping backdrop quads instead of letting the last
 /// write win — it cannot represent the live REPLACE alpha. The generated
-/// backdrop colors, however, are blend-independent (hud-w41ef).
+/// backdrop colors, however, are blend-independent.
 #[tokio::test]
 async fn hud_w41ef_portal_content_background_scaled_by_tile_opacity() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
@@ -92,7 +92,7 @@ async fn hud_w41ef_portal_content_background_scaled_by_tile_opacity() {
         )
         .unwrap();
 
-    // Half-fade the whole tile (deterministic stand-in for a §6.3 portal fade).
+    // Half-fade the whole tile (deterministic stand-in for a portal fade).
     scene.tiles.get_mut(&tile_id).unwrap().opacity = 0.5;
     let tile = scene.tiles.get(&tile_id).unwrap().clone();
 
@@ -657,7 +657,7 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
         );
     }
     // The pointer leaves. Hover is pointer state: it survives a re-render of the
-    // same composer node (hud-1dnk5.19), so clear it before the collapsed render.
+    // same composer node, so clear it before the collapsed render.
     scene
         .hit_region_states
         .get_mut(&composer_id)
@@ -734,8 +734,8 @@ async fn hud_w41ef_portal_backdrop_opaque_after_resize_grow_no_fade() {
     }
 }
 
-// ─── hud-b0x0m: every tile node fill type fades with the tile, not just the ──
-// portal TextMarkdown background fixed in hud-w41ef. Draw-list-level assertions
+// ─── Every tile node fill type fades with the tile, not just the ──
+// portal TextMarkdown background. Draw-list-level assertions
 // (not pixel readback): the live overlay geometry pass uses the REPLACE
 // clear_pipeline while render_frame_headless always blends, so a readback cannot
 // represent live overlay alpha — but the generated fill colors are
@@ -766,16 +766,16 @@ fn b0x0m_tile_with_root(
 }
 
 /// `prime_vertical_flow_layout` must resolve flow offsets even when
-/// `init_text_renderer` has never been called (hud-tfm3p review of hud-9gopx).
+/// `init_text_renderer` has never been called (review of ).
 ///
-/// hud-9gopx swapped this function from unconditionally building a fresh
+/// swapped this function from unconditionally building a fresh
 /// `bundled_font_system()` to measuring against `self.text_rasterizer`'s own
 /// `FontSystem` — gating the ENTIRE resolve on `self.text_rasterizer.is_some()`.
 /// That silently dropped flow-stacking for every `VerticalFlow` child (not just
 /// text — `SolidColor` / `StaticImage` / `HitRegion` children read
-/// `tile_flow_offsets` too, per hud-pd9bp) whenever no rasterizer had been
+/// `tile_flow_offsets` too) whenever no rasterizer had been
 /// initialized yet, even though non-text children never needed a `FontSystem` at
-/// all — a real regression versus the pre-hud-9gopx baseline, which ran
+/// all — a real regression versus the previous baseline, which ran
 /// regardless of rasterizer state. `make_compositor_and_surface` deliberately
 /// does NOT call `init_text_renderer` (only production runtime setup and a
 /// handful of text-specific tests do), so this fixture already exercises the
@@ -873,9 +873,9 @@ async fn hud_tfm3p_flow_offsets_resolve_without_a_text_rasterizer() {
     );
 }
 
-/// A non-rounded `SolidColor` node fill must be scaled by the whole-tile fade
-/// (hud-b0x0m). Before the fix it was painted at `sc.color.a` regardless of tile
-/// opacity — the same divergence hud-w41ef fixed for portal backgrounds.
+/// A non-rounded `SolidColor` node fill must be scaled by the whole-tile fade.
+/// Before the fix it was painted at `sc.color.a` regardless of tile
+/// opacity — the same divergence fixed for portal backgrounds.
 #[tokio::test]
 async fn hud_b0x0m_solid_color_node_fill_scaled_by_tile_opacity() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
@@ -924,7 +924,7 @@ async fn hud_b0x0m_solid_color_node_fill_scaled_by_tile_opacity() {
 }
 
 /// A rounded `SolidColor` node (painted via the SDF rounded-rect pass, not the
-/// flat vertex pass) must also fade with the tile (hud-b0x0m).
+/// flat vertex pass) must also fade with the tile.
 #[tokio::test]
 async fn hud_b0x0m_rounded_solid_color_scaled_by_tile_opacity() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
@@ -968,8 +968,8 @@ async fn hud_b0x0m_rounded_solid_color_scaled_by_tile_opacity() {
 }
 
 /// A `StaticImage` textured quad's tint alpha must be scaled by the FULL tile
-/// fade — `tile_effective_opacity`, which includes the §6.3 portal-transition
-/// component — not just `effective_tile_opacity` (hud-b0x0m).
+/// fade — `tile_effective_opacity`, which includes the portal-transition
+/// component — not just `effective_tile_opacity`.
 #[tokio::test]
 async fn hud_b0x0m_static_image_tint_scaled_by_tile_opacity() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
@@ -1001,7 +1001,7 @@ async fn hud_b0x0m_static_image_tint_scaled_by_tile_opacity() {
         }),
     );
 
-    // Drive the §6.3 portal-transition component specifically (NOT tile.opacity):
+    // Drive the portal-transition component specifically (NOT tile.opacity):
     // leave tile.opacity = 1.0 and pin a deterministic portal fade at 0.5. This is
     // the exact case the old code missed — it used `effective_tile_opacity`
     // (tile.opacity + drag = 1.0 here) and ignored the portal fade, so the image
@@ -1037,7 +1037,7 @@ async fn hud_b0x0m_static_image_tint_scaled_by_tile_opacity() {
     );
 }
 
-// ─── hud-dat3x: tile text honours whole-tile opacity ─────────────────────────
+// ───: tile text honours whole-tile opacity ─────────────────────────
 // A tile whose opacity is driven to 0 (the exemplar minimize path calls
 // `update_tile_opacity(0.0)`) hides its solid-color backdrop via the quad path,
 // but text was collected at full opacity — leaving floating glyphs on screen.
@@ -1136,19 +1136,19 @@ async fn hud_dat3x_full_tile_opacity_renders_text_opaque() {
     );
 }
 
-/// A portal fading IN (durable `tile.opacity == 1`, TRANSIENT §6.3 animation
+/// A portal fading IN (durable `tile.opacity == 1`, TRANSIENT animation
 /// opacity pinned at ~0) must STILL collect and shape its text — only the item
 /// alpha rides the transient fade to ~0. The skip-shaping optimization gates on
 /// the DURABLE scene-level `tile.opacity` only; gating it on the combined value
 /// would defer the warm-up shape into the middle of the animation, forcing a
-/// re-shape hitch when the tile crosses the visibility threshold (hud-991cj
+/// re-shape hitch when the tile crosses the visibility threshold (
 /// steady-state reuse). This is the inverse of the durable-minimize skip.
 #[tokio::test]
 async fn hud_dat3x_transient_portal_fade_still_shapes_text() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
     let (scene, tile_id) = dat3x_markdown_tile_scene("hello transcript", 1.0);
 
-    // Pin the §6.3 portal fade at ~0 while leaving tile.opacity = 1.0.
+    // Pin the portal fade at ~0 while leaving tile.opacity = 1.0.
     // `duration_ms: 0` makes `current_opacity_eased` return `target_opacity`.
     compositor.portal_tile_anim_states.insert(
         tile_id,

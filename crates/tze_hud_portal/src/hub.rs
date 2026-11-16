@@ -1549,7 +1549,7 @@ mod tests {
     }
 
     /// The owner's Clear reclaims all of one agent's portals, like a viewer
-    /// dismiss, and nobody else's (hud-vniri.6).
+    /// dismiss, and nobody else's.
     #[test]
     fn reclaim_agent_reclaims_only_that_agents_portals() {
         let mut hub = PortalHub::default();

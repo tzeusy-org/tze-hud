@@ -545,7 +545,7 @@ impl TestSceneRegistry {
             name: "overlapping_tiles_zorder",
             description: "Three tiles with deliberately overlapping bounds and distinct \
                           z-orders (1, 2, 3). Validates z-order composition: higher z-order \
-                          must occlude lower z-order tiles per scene-graph/spec.md §3.",
+                          must occlude lower z-order tiles.",
             expected_tab_count: 1,
             expected_tile_count: 3,
             has_hit_regions: false,
@@ -728,8 +728,7 @@ impl TestSceneRegistry {
         let spec = SceneSpec {
             name: "tab_switch",
             description: "Two tabs: Tab A has 1 tile, Tab B has 2 tiles. Active tab is B. \
-                          Validates tab isolation: z_orders are per-tab, not global. \
-                          Per scene-graph/spec.md §2 (Tab[0-256]).",
+                          Validates tab isolation: z_orders are per-tab, not global.",
             expected_tab_count: 2,
             expected_tile_count: 3,
             has_hit_regions: false,
@@ -789,14 +788,13 @@ impl TestSceneRegistry {
 
         // Leave lease in ACTIVE state — test callers drive the ACTIVE→EXPIRED transition
         // by calling expire_leases(now_ms) with now_ms > granted_at_ms + 1
-        // (lease-governance/spec.md lines 10-25).
 
         let spec = SceneSpec {
             name: "lease_expiry",
             description: "One tile with a 1ms TTL lease (ACTIVE state at build time). \
                           Call expire_leases(now_ms) with now_ms past the TTL to drive the \
                           ACTIVE→EXPIRED transition and remove the tile. Validates the \
-                          ACTIVE→EXPIRED state machine per lease-governance/spec.md §1.",
+                          ACTIVE→EXPIRED state machine.",
             expected_tab_count: 1,
             expected_tile_count: 1,
             has_hit_regions: false,
@@ -808,8 +806,7 @@ impl TestSceneRegistry {
 
     /// `input_highlight` — tile with a HitRegionNode accepting focus and pointer events.
     ///
-    /// Validates the focus tree (per-tab, at most one focus owner) and focus cycling
-    /// per input-model/spec.md lines 11-22 and 78-89.
+    /// Validates the focus tree (per-tab, at most one focus owner) and focus cycling.
     fn build_input_highlight(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
         let mut graph = self.new_graph(clock);
 
@@ -875,8 +872,7 @@ impl TestSceneRegistry {
             name: "input_highlight",
             description: "Background tile plus an interactive tile with a HitRegionNode \
                           (accepts_focus=true, accepts_pointer=true). Validates the focus \
-                          tree (per-tab, ≤1 owner) and focus cycling per \
-                          input-model/spec.md lines 11-22 and 78-89.",
+                          tree (per-tab, ≤1 owner) and focus cycling.",
             expected_tab_count: 1,
             expected_tile_count: 2,
             has_hit_regions: true,
@@ -887,7 +883,7 @@ impl TestSceneRegistry {
     }
 
     /// `coalesced_dashboard` — 12 tiles with sequential mutations demonstrating state-stream
-    /// coalescing. Validates atomic batch semantics per scene-graph/spec.md lines 142-157.
+    /// coalescing. Validates atomic batch semantics.
     fn build_coalesced_dashboard(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
         let mut graph = self.new_graph(clock);
 
@@ -970,8 +966,7 @@ impl TestSceneRegistry {
             name: "coalesced_dashboard",
             description: "12-tile dashboard (4 cols × 3 rows) representing live metrics. \
                           Demonstrates the state-stream coalescing path: rapid sequential \
-                          set_tile_root calls on many tiles. Per scene-graph/spec.md §5 \
-                          (atomic batch, lines 142-157).",
+                          set_tile_root calls on many tiles.",
             expected_tab_count: 1,
             expected_tile_count: 12,
             has_hit_regions: false,
@@ -1093,8 +1088,8 @@ impl TestSceneRegistry {
 
     /// `overlay_passthrough_regions` — chrome overlay with mixed passthrough / capture regions.
     ///
-    /// Validates the hit-test pipeline: chrome-first, z-descending, reverse tree order per
-    /// input-model/spec.md line 264. Passthrough tiles let pointer events fall through.
+    /// Validates the hit-test pipeline: chrome-first, z-descending, reverse tree order.
+    /// Passthrough tiles let pointer events fall through.
     fn build_overlay_passthrough_regions(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
         let mut graph = self.new_graph(clock);
 
@@ -1196,8 +1191,7 @@ impl TestSceneRegistry {
             name: "overlay_passthrough_regions",
             description: "Content tile (z=1, Capture) beneath a full-screen passthrough \
                           overlay (z=20, Passthrough) with a small capture widget (z=30). \
-                          Validates hit-test pipeline: chrome-first, z-descending, \
-                          per input-model/spec.md line 264.",
+                          Validates the chrome-first, z-descending hit-test pipeline.",
             expected_tab_count: 1,
             expected_tile_count: 3,
             has_hit_regions: true,
@@ -1220,9 +1214,9 @@ impl TestSceneRegistry {
     ///
     /// Validates:
     /// - V1 Success Criterion: Live Multi-Agent Presence
-    /// - Thesis 2: The lease model works (lease reclaim on reconnect)
-    /// - Thesis 3: Multiple agents coexist (disconnect/reconnect does not affect others)
-    /// - validation-framework spec §Test Scene Registry lines 160-172
+    /// - Lease reclaim on reconnect
+    /// - Disconnect/reconnect does not affect other agents
+    /// - validation-framework Test Scene Registry
     fn build_disconnect_reclaim_multiagent(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
         // Use a TestClock fixed at `clock.0` so that lease-expiry checks
         // compare against the scene's construction timestamp rather than the real system
@@ -1349,8 +1343,7 @@ impl TestSceneRegistry {
             description: "Three agents (agent.one, agent.two, agent.three) each hold tiles simultaneously. \
                  agent.one has two tiles; agent.two and agent.three each have one. \
                  All start Active. Used to test disconnect/reconnect reclaim without disrupting \
-                 other agents. Validates V1 thesis: multi-agent coexistence and lease reclaim. \
-                 Per validation-framework spec §Test Scene Registry lines 160-172.",
+                 other agents. Validates multi-agent coexistence and lease reclaim.",
             expected_tab_count: 1,
             expected_tile_count: 4, // 2 + 1 + 1
             has_hit_regions: false,
@@ -1416,8 +1409,7 @@ impl TestSceneRegistry {
             name: "chatty_dashboard_touch",
             description: "50 hit-region tiles in a 5×10 grid, each ready for high-frequency \
                           touch/pointer input injection. Validates the input drain budget: \
-                          hit-test for 50 tiles must complete in <100µs per \
-                          input-model/spec.md line 264.",
+                          hit-test for 50 tiles must complete in <100µs.",
             expected_tab_count: 1,
             expected_tile_count: 50,
             has_hit_regions: true,
@@ -1430,7 +1422,7 @@ impl TestSceneRegistry {
     /// `zone_publish_subtitle` — tile publishing to the subtitle zone.
     ///
     /// Renamed from `zone_test` in the canonical scene list. Validates zone registry
-    /// operations and tile-to-zone mapping per scene-graph/spec.md lines 198-200.
+    /// operations and tile-to-zone mapping.
     fn build_zone_publish_subtitle(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
         let mut graph = self.new_graph(clock);
 
@@ -1498,7 +1490,7 @@ impl TestSceneRegistry {
             description: "One tile publishing StreamText to the subtitle zone \
                           (EdgeAnchored bottom, 80% width, LatestWins contention, \
                           max_publishers=1). Validates zone registry + tile-to-zone \
-                          mapping per scene-graph/spec.md lines 198-200.",
+                          mapping.",
             expected_tab_count: 1,
             expected_tile_count: 1,
             has_hit_regions: false,
@@ -1580,8 +1572,7 @@ impl TestSceneRegistry {
             name: "zone_reject_wrong_type",
             description: "Zone 'typed_zone' accepts only ZoneMediaType::StreamText. \
                           Injecting a KeyValuePairs or Notification payload must be \
-                          rejected with a type-mismatch error. Per scene-graph/spec.md \
-                          lines 198-200 (type validation).",
+                          rejected with a type-mismatch error.",
             expected_tab_count: 1,
             expected_tile_count: 1,
             has_hit_regions: false,
@@ -1594,7 +1585,6 @@ impl TestSceneRegistry {
     /// `zone_conflict_two_publishers` — 2 agents publishing to the same zone with
     /// LatestWins contention policy.
     ///
-    /// Per scene-graph/spec.md lines 185-196.
     fn build_zone_conflict_two_publishers(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
         let mut graph = self.new_graph(clock);
 
@@ -1668,8 +1658,7 @@ impl TestSceneRegistry {
             name: "zone_conflict_two_publishers",
             description: "Two agents (pub_a at z=1, pub_b at z=2) each publishing to \
                           'shared_banner' zone with LatestWins contention. \
-                          pub_b's content wins; pub_a's publish is evicted. \
-                          Per scene-graph/spec.md lines 185-196.",
+                          pub_b's content wins; pub_a's publish is evicted.",
             expected_tab_count: 1,
             expected_tile_count: 2,
             has_hit_regions: false,
@@ -1682,7 +1671,7 @@ impl TestSceneRegistry {
     /// `zone_orchestrate_then_publish` — orchestrated zone publish sequence:
     /// zone is registered, then content is published to it in order.
     ///
-    /// Validates the full zone publish lifecycle per scene-graph/spec.md lines 185-200.
+    /// Validates the full zone publish lifecycle.
     fn build_zone_orchestrate_then_publish(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
         let mut graph = self.new_graph(clock);
 
@@ -1811,8 +1800,7 @@ impl TestSceneRegistry {
             name: "zone_orchestrate_then_publish",
             description: "Three zones registered in orchestration order (alert_banner, \
                           notification_area, status_bar) each with a tile publishing to it. \
-                          Validates the full zone publish lifecycle per \
-                          scene-graph/spec.md lines 185-200.",
+                          Validates the full zone publish lifecycle.",
             expected_tab_count: 1,
             expected_tile_count: 3,
             has_hit_regions: false,
@@ -1826,7 +1814,7 @@ impl TestSceneRegistry {
     ///
     /// One agent registers as a zone publisher; then its lease enters Disconnected state.
     /// After the grace period the lease is cleaned up, removing the tile from the zone's
-    /// visual footprint. Per lease-governance/spec.md lines 132-155.
+    /// visual footprint.
     fn build_zone_disconnect_cleanup(&self, clock: ClockMs) -> (SceneGraph, SceneSpec) {
         let mut graph = self.new_graph(clock);
 
@@ -1927,8 +1915,7 @@ impl TestSceneRegistry {
             name: "zone_disconnect_cleanup",
             description: "Zone publisher (agent.zone_pub) disconnects at clock.0, entering \
                           the 30,000ms grace period. After grace period, the lease + tile \
-                          are cleaned up, clearing the zone's visual footprint. \
-                          Per lease-governance/spec.md lines 132-155.",
+                          are cleaned up, clearing the zone's visual footprint.",
             expected_tab_count: 1,
             expected_tile_count: 2,
             has_hit_regions: false,

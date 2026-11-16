@@ -12,7 +12,7 @@ use tze_hud_scene::SceneId;
 
 /// The outcome of hitting a display-space point against the scene graph.
 ///
-/// Hit-test traversal order per spec lines 263-265:
+/// Hit-test traversal order:
 /// 1. Chrome layer first (always wins)
 /// 2. Content tiles by z-order descending
 /// 3. Within a tile, nodes in reverse tree order (last child first)
@@ -39,7 +39,7 @@ pub enum HitTestResult {
 
 /// Resolved routing target for an event after hit-test.
 ///
-/// Produced by the event router (spec §Requirement: Event Routing Resolution,
+/// Produced by the event router (Requirement: Event Routing Resolution,
 /// lines 315-317).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub enum RouteTarget {
@@ -60,7 +60,7 @@ pub enum RouteTarget {
 
 /// A per-node local state update, produced by Stage 2 (Local Feedback).
 ///
-/// Spec §Requirement: Local Feedback Rendering via SceneLocalPatch (line 197).
+/// Local Feedback Rendering via SceneLocalPatch.
 /// Applied by the compositor in Stage 4 without lease validation or budget
 /// checks.
 ///
@@ -70,7 +70,6 @@ pub enum RouteTarget {
 /// - `focused` — set on focus acquisition, cleared on focus loss
 ///
 /// `rollback=true` signals a 100ms reverse animation on agent explicit rejection
-/// (spec §Local Feedback Rollback on Agent Rejection).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct LocalStateUpdate {
     /// The node whose local state changed.
@@ -121,7 +120,7 @@ impl LocalStateUpdate {
 /// A per-tile scroll offset update, produced by Stage 2.
 ///
 /// Carries the **absolute** post-update scroll offset for the tile, per
-/// spec §Local Feedback Rendering via SceneLocalPatch:
+/// Local Feedback Rendering via SceneLocalPatch:
 /// `ScrollOffsetUpdate(tile_id, offset_x, offset_y)`.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScrollOffsetUpdate {

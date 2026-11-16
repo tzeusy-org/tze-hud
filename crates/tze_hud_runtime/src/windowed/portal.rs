@@ -193,7 +193,7 @@ pub(super) struct DragReleasedData {
     namespace: String,
     /// Final whole-portal member bounds, including the grabbed tile; empty
     /// for single tiles. [`write_member_geometry_overrides`] owns the id-keyed
-    /// persistence contract for shared namespaces (hud-8vejp).
+    /// persistence contract for shared namespaces.
     group_members: Vec<(tze_hud_scene::SceneId, tze_hud_scene::types::Rect)>,
 }
 
@@ -223,7 +223,7 @@ pub(super) struct PortalResizePointerOutcome {
     /// Display height at the time of the event.
     pub(super) display_h: f32,
     /// Whether this step should durably persist each member's geometry override
-    /// to the element store (hud-8vejp). Set only on the terminal PointerUp so
+    /// to the element store. Set only on the terminal PointerUp so
     /// the disk write fires once per gesture; intermediate down/move steps keep
     /// the group coherent via the in-session lock without touching disk.
     pub(super) persist: bool,
@@ -591,7 +591,7 @@ fn move_drag_tile(scene: &mut SceneGraph, id: SceneId, x: f32, y: f32) -> bool {
 /// `min_*` values are from the portal tokens and serve as the floor (a portal
 /// can always be grown to at least the minimum size even if the lease limit is
 /// somehow smaller — the lease limit is not allowed to shrink a portal below the
-/// token minimum, per §6b design intent).
+/// token minimum, design intent).
 ///
 /// ## Why `display_w`, not `display_w − tile.x`
 ///
@@ -631,7 +631,7 @@ fn compute_portal_max_dims(
     (max_w, max_h)
 }
 
-// ── Portal-group resolution (hud-fb3en) ──────────────────────────────────────
+// ── Portal-group resolution ──────────────────────────────────────
 
 /// A resolved portal group: the constituent scene tiles that move and resize as
 /// one coherent unit.
@@ -694,7 +694,7 @@ pub(super) fn resolve_portal_group(
 
     // Largest-area lease member is the frame/anchor (ties → lowest id). Delegated
     // to the scene-crate resolver so the frame pick is a single source of truth
-    // shared with the compositor's header-band drag handle (hud-643dv).
+    // shared with the compositor's header-band drag handle.
     let anchor_id = scene.portal_anchor_tile(member_tile_id)?;
     let anchor_bounds = scene.tiles.get(&anchor_id)?.bounds;
 
@@ -789,7 +789,7 @@ fn scale_portal_members(
 /// compositor wraps `TextMarkdownNode` text to `node.bounds.width` (the layout
 /// column in `TextItem::from_text_markdown_cached` / `from_text_markdown_node`),
 /// so without this the transcript/composer text keeps its attach-time wrap width
-/// and does not re-flow to the resized pane (hud-rpmwt). Font size is untouched —
+/// and does not re-flow to the resized pane. Font size is untouched —
 /// text reflows to the new width, it does not zoom.
 fn scale_tile_node_tree(
     scene: &mut tze_hud_scene::graph::SceneGraph,
@@ -824,7 +824,7 @@ fn scale_tile_node_tree(
 }
 
 /// Scale a tile's first-class [`PortalSurface`] part bounds in lock-step with a
-/// whole-portal resize (hud-s4lrw).
+/// whole-portal resize.
 ///
 /// `PortalPart::bounds` is tile-local surface geometry — the per-part clip band
 /// the compositor uses to keep one part's content (e.g. an overlong transcript)
@@ -858,7 +858,7 @@ fn scale_portal_surface_parts(
 }
 
 /// Write a durable `Relative` geometry override into the element store for each
-/// `(SceneId, rect)` member, keyed by its stable scene id (hud-8vejp).
+/// `(SceneId, rect)` member, keyed by its stable scene id.
 ///
 /// Shared by the whole-portal resize persist path
 /// ([`WinitApp::persist_portal_member_overrides`]) and the whole-portal drag
@@ -907,7 +907,7 @@ fn commit_portal_group_resize(
     // Whole-portal WIDTH ratio — the single deterministic ratio the spec mandates
     // for text scaling (never anisotropic): the viewer-local per-tile font-scale
     // multiplier accumulates this factor across resize steps so transcript and
-    // composer text grow/shrink with the portal (hud-ovjxu.1). Applied per member
+    // composer text grow/shrink with the portal. Applied per member
     // below (gated on a real change); the compositor clamps the effective font to
     // the token-defined legible min/max at render, never mutating the
     // adapter-published `font_size_px`.
@@ -930,7 +930,7 @@ fn commit_portal_group_resize(
         // `TextMarkdownNode::bounds.width` — re-resolves to the new pane. Use
         // each tile's OWN size ratio (not the whole-portal ratio) so the nodes
         // track exactly the tile they live in. Without this the frame scales but
-        // the transcript/composer text stays wrapped at the old width (hud-rpmwt).
+        // the transcript/composer text stays wrapped at the old width.
         if let Some(old) = old_tile_bounds {
             let node_r_w = if old.width > 0.0 {
                 new_bounds.width / old.width
@@ -946,7 +946,7 @@ fn commit_portal_group_resize(
                 scale_tile_node_tree(scene, tile_id, node_r_w, node_r_h);
                 // Keep any first-class portal-surface part bounds in lock-step
                 // with the re-flowed node tree so the compositor's per-part clip
-                // band stays aligned at the new geometry (hud-s4lrw). No-op for
+                // band stays aligned at the new geometry. No-op for
                 // legacy raw-tile portals with no surface descriptor.
                 scale_portal_surface_parts(scene, tile_id, node_r_w, node_r_h);
             }
@@ -954,11 +954,11 @@ fn commit_portal_group_resize(
         // The viewer now owns this member's geometry: take authority so an
         // adapter republishing its stale client-side layout on the next content
         // publish or drag cannot stomp the member back and fracture the portal
-        // group (hud-lyqun). Viewer-driven resize writes `tile.bounds` directly
+        // group. Viewer-driven resize writes `tile.bounds` directly
         // (above), so this only gates adapter-originated `UpdateTileBounds`.
         scene.lock_viewer_geometry(tile_id);
         // Accumulate the whole-portal width ratio into this member's viewer-local
-        // font-scale (hud-ovjxu.1). Gated on a real ratio so a clamped-at-boundary
+        // font-scale. Gated on a real ratio so a clamped-at-boundary
         // press does not drift the scale. Uniform across members (all get the same
         // portal ratio) so text stays consistent portal-wide.
         if (font_ratio - 1.0).abs() > f32::EPSILON {
@@ -987,7 +987,7 @@ fn commit_portal_group_resize(
 
 /// Translate a whole portal group by `(dx, dy)` when the viewer drags one of its
 /// constituent surfaces, preserving the group's relative layout and taking
-/// viewer geometry authority over every member (hud-lyqun).
+/// viewer geometry authority over every member.
 ///
 /// A text-stream portal is N independent tiles (frame + scrollable panes + drag
 /// shield). Before this, the chrome drag handler moved only the single grabbed
@@ -1036,7 +1036,7 @@ fn translate_portal_group_on_drag(
     // scene.version — a translation changes no content and no size, so the
     // compositor's version-gated markdown/truncation caches must NOT re-prime.
     // Bumping version here forced a full per-frame re-hash/re-shape and made the
-    // live drag low-fps / flickery (hud-uyhpn). #986 group coherence and #989
+    // live drag low-fps / flickery. #986 group coherence and #989
     // resize reflow both key off size and are unaffected.
     scene.bump_geometry_epoch();
     true
@@ -1046,14 +1046,14 @@ fn translate_portal_group_on_drag(
 ///
 /// Called from [`WinitApp::enqueue_pointer_event`] while the scene lock is held.
 /// Drives `PortalResizeState` through the pointer-down / pointer-move / pointer-up
-/// lifecycle for resize affordances (§6b.1 pointer resize scenario).
+/// lifecycle for resize affordances.
 ///
 /// On **PointerDown**: resolves the portal from the tile UNDER THE POINTER
 /// (falling back to the focused tile only when the pointer is over no tile) and
 /// hit-tests its resize affordances.  Resolving from the pointer rather than the
 /// focused tile is deliberate: the initiating click-to-focus moves focus onto
 /// the non-scrollable frame under the affordance corner, so a focus-gated resize
-/// never starts under real OS pointer input (hud-yno2r).  If the pointer lands on
+/// never starts under real OS pointer input. If the pointer lands on
 /// an affordance, starts the gesture and returns a [`PortalResizePointerOutcome`]
 /// with the initial snapshot so the caller can apply local bounds and broadcast
 /// the geometry event.
@@ -1133,7 +1133,7 @@ pub(super) fn apply_portal_resize_pointer_event(
             // *focused* tile being scrollable therefore made whole-portal
             // resize inert under real OS pointer input: the focus the gate
             // required had already been pulled off the scrollable pane by the
-            // initiating click (hud-yno2r). Mirror the whole-portal move path
+            // initiating click. Mirror the whole-portal move path
             // (`translate_portal_group_on_drag`), which resolves the group from
             // the tile under the pointer and gates portal-ness across the whole
             // group rather than the focused tile. Fall back to the focused tile
@@ -1542,7 +1542,7 @@ impl WinitApp {
     /// Persist a durable, id-keyed geometry override for each `(SceneId, rect)`
     /// pair and flush the element store to disk on a background thread.
     ///
-    /// Used by the whole-portal resize path (hud-8vejp) to give every group
+    /// Used by the whole-portal resize path to give every group
     /// member its own durable override after a viewer resize — the drag path
     /// persists inline in [`Self::persist_drag_release`]. `rect` is absolute
     /// display-pixel bounds; it is normalised to a `Relative` policy against the
@@ -1588,7 +1588,7 @@ impl WinitApp {
     /// Called from `about_to_wait` after composer-draft flush.  Drives
     /// `PortalDriver::drain` which calls
     /// `InputProcessor::notify_tile_content_appended` for every `RenderPortal`
-    /// drain record that carries append geometry (spec §3.2 / §3.3).
+    /// drain record that carries append geometry.
     ///
     /// Uses `try_lock` on the shared scene to avoid blocking the main thread.
     /// If the scene lock is busy, returns [`PortalProjectionDrain::Deferred`]
@@ -1613,7 +1613,7 @@ impl WinitApp {
         let scene_changed =
             scene.version != scene_version_before || scene.geometry_epoch != geometry_epoch_before;
         // The driver activates a tab when a cooperative portal needs to render
-        // and none was active (hud-obw3q). Keep the lock-free keyboard-dispatch
+        // and none was active. Keep the lock-free keyboard-dispatch
         // mirror in sync so keyboard routing targets the newly active tab.
         if scene.active_tab != tab_id {
             state.refresh_active_tab_mirror(&scene);
@@ -1717,7 +1717,7 @@ impl WinitApp {
     ///
     /// Looks up the currently focused tile in `tab_id`. If the focused tile is
     /// a portal tile (has a registered scroll config), applies the resize step
-    /// locally (local-first per §6b.2), updates the scene tile bounds, and
+    /// locally (local-first ), updates the scene tile bounds, and
     /// broadcasts an `ElementRepositionedEvent` on the `SCENE_TOPOLOGY` channel
     /// via `element_repositioned_tx` so gRPC subscribers receive the updated
     /// portal geometry (relative %).
@@ -1732,9 +1732,9 @@ impl WinitApp {
     /// symmetric Ctrl+`+`/`-` chord, or
     /// [`Width`](tze_hud_input::HotkeyResizeAxis::Width) /
     /// [`Height`](tze_hud_input::HotkeyResizeAxis::Height) for the directional
-    /// Ctrl+Shift+Arrow chord (hud-csrmf). A width step reflows the transcript
+    /// Ctrl+Shift+Arrow chord. A width step reflows the transcript
     /// text (it changes the wrap column) and takes the viewer-geometry-lock, so
-    /// it drives the dynamic hud-rpmwt reconcile-on-republish path without pointer
+    /// it drives the dynamic reconcile-on-republish path without pointer
     /// injection.
     pub(super) fn apply_portal_resize_hotkey(
         &mut self,
@@ -1772,7 +1772,7 @@ impl WinitApp {
             }
             // Resolve the whole portal (frame anchor + constituent surfaces)
             // that owns the focused surface, so the step scales the unit rather
-            // than the single focused tile (hud-fb3en).
+            // than the single focused tile.
             let Some(group) = resolve_portal_group(&scene, focused_tile_id) else {
                 return false;
             };
@@ -1842,11 +1842,11 @@ impl WinitApp {
         };
 
         // Local-first feedback: scale every constituent surface immediately in
-        // the scene (same frame, no adapter roundtrip) per §6b.2 /
-        // local-feedback-first, preserving relative layout around the top-left
+        // the scene (same frame, no adapter roundtrip), preserving relative layout
+        // around the top-left
         // anchor. `commit_portal_group_resize` bumps `scene.version` once when
         // the geometry actually changes, so the compositor re-primes the
-        // truncation cache at the new geometry (hud-ghhxa — spec §6b.3) without
+        // truncation cache at the new geometry without
         // churning at a clamped boundary.
         let members = {
             let Some(state) = spin_acquire(&self.state.shared_state, INTERACTION_LOCK_BUDGET)
@@ -1895,12 +1895,12 @@ mod tests {
     /// No resize floor: the grip tests below pass their own minimum.
     const NO_RESIZE_MIN: (f32, f32) = (0.0, 0.0);
 
-    // ── Drag-to-move: long-press drag moves a text stream portal tile [hud-9yfce] ──
+    // ── Drag-to-move: long-press drag moves a text stream portal tile ──
 
     /// A long-press drag on a tile's drag handle must move the tile's bounds and
     /// return a `DragReleasedData` payload when the pointer is released.
     ///
-    /// Acceptance criteria for hud-9yfce:
+    /// Acceptance criteria
     /// - `Moved` outcome during pointer-move updates `tile.bounds` immediately.
     /// - `Released` outcome on pointer-up produces persist data.
     /// - Click-focus is unaffected: a short tap (no long-press) produces no move.
@@ -2347,7 +2347,7 @@ mod tests {
             tile.bounds.y, 300.0,
             "tile Y must not change after a tap on the drag handle"
         );
-        // The handle's own hover/press feedback repaints (hud-paslt), but a
+        // The handle's own hover/press feedback repaints, but a
         // quick tap never enters drag feedback.
         assert!(!scene.is_drag_active(tile_id));
         let result_down = processor.process(&down, &mut scene);
@@ -2768,7 +2768,7 @@ mod tests {
 
     /// gesture_active() is true during the drag, making adapter publishes
     /// rejectable — the primary reason this code path must exist in production
-    /// (hud-o0st9 acceptance criterion: gesture_active becomes reachable).
+    /// (acceptance criterion: gesture_active becomes reachable).
     #[test]
     fn gesture_active_is_true_during_pointer_drag() {
         let (mut scene, tab_id, tile_id, fm) = portal_scene_with_focus();
@@ -2870,7 +2870,7 @@ mod tests {
         );
     }
 
-    // ── Lease-bound maxima (hud-kgu8u / hud-zleu2) ───────────────────────────
+    // ── Lease-bound maxima  ───────────────────────────
 
     /// Portal resize gesture respects the lease-bound maximum:
     /// dragging the right edge beyond the lease limit is clamped to the limit.
@@ -2964,13 +2964,13 @@ mod tests {
         );
     }
 
-    // ── portal_resize_states map pruning (hud-kgu8u) ─────────────────────────
+    // ── portal_resize_states map pruning ─────────────────────────
 
-    // ── scene.version increment on pointer-drag resize (hud-g1hij) ───────────
+    // ── scene.version increment on pointer-drag resize ───────────
 
     /// A pointer-drag resize (on_pointer_move → GestureUpdate) increments
     /// `scene.version` exactly once when the tile bounds change, matching the
-    /// hotkey resize path (hud-ghhxa / hud-g1hij).
+    /// hotkey resize path.
     ///
     /// Regression test — the 20Hz re-prime cadence gate in
     /// `prime_truncation_cache` is keyed on `scene.version`; if the drag path
@@ -3063,7 +3063,7 @@ mod tests {
         );
     }
 
-    // ── Whole-portal resize (hud-fb3en) ──────────────────────────────────────
+    // ── Whole-portal resize ──────────────────────────────────────
 
     /// Relative geometry of a surface `b` expressed as fractions of the frame
     /// `f`: (x offset, y offset, width, height) all divided by the frame rect.
@@ -3085,7 +3085,7 @@ mod tests {
             && (a.3 - b.3).abs() < 1e-3
     }
 
-    /// Core hud-fb3en regression: focusing the composer and pressing Ctrl+= must
+    /// Core regression: focusing the composer and pressing Ctrl+= must
     /// grow the WHOLE portal — every constituent surface scales together,
     /// preserving relative layout, anchored top-left — not just the focused
     /// pane. The far-corner drag shield must NOT move.
@@ -3171,7 +3171,7 @@ mod tests {
         );
     }
 
-    // ── Directional (Ctrl+Shift+Arrow) whole-portal WIDTH resize (hud-csrmf) ──
+    // ── Directional (Ctrl+Shift+Arrow) whole-portal WIDTH resize ──
 
     /// Attach a tile-filling `TextMarkdown` root node to `tile_id` at
     /// `local_bounds`, so a node-tree scale (the compositor's wrap-width source)
@@ -3222,7 +3222,7 @@ mod tests {
     /// (a) Ctrl+Shift+ArrowRight width resize scales the whole-portal tile bounds
     /// AND the node tree along WIDTH ONLY, takes viewer geometry authority over
     /// every member, and leaves height untouched. Width is the text-wrap axis, so
-    /// this is exactly what drives the dynamic hud-rpmwt re-wrap without pointer
+    /// this is exactly what drives the dynamic re-wrap without pointer
     /// injection.
     #[test]
     fn ctrl_shift_arrow_width_resize_scales_whole_portal_and_locks() {
@@ -3292,7 +3292,7 @@ mod tests {
         );
 
         // Viewer geometry authority taken over every member so a republish cannot
-        // stomp them back (hud-lyqun) — the precondition the reconcile fix needs.
+        // stomp them back — the precondition the reconcile fix needs.
         for id in [frame_id, transcript_id, composer_id] {
             let shared = app.state.shared_state.try_lock().unwrap();
             let scene = shared.scene.try_lock().unwrap();
@@ -3305,7 +3305,7 @@ mod tests {
 
     /// (b) After a Ctrl+Shift+ArrowLeft width shrink, an adapter content republish
     /// with STALE attach-time node bounds must be reconciled to the narrower pane
-    /// — the exact hud-rpmwt reconcile-on-republish path, now reached via the
+    /// — the exact reconcile-on-republish path, now reached via the
     /// keyboard width chord instead of a pointer drag.
     #[test]
     fn ctrl_shift_arrow_width_resize_then_republish_reconciles_to_narrower_pane() {
@@ -3463,7 +3463,7 @@ mod tests {
             .unwrap_or(false)
     }
 
-    /// hud-8vejp: a whole-portal resize must write a durable per-member geometry
+    /// a whole-portal resize must write a durable per-member geometry
     /// override for EVERY constituent surface — not just one namespace/drag
     /// member — so `list_elements` reports `has_user_override=true` for all of
     /// them (the override key is `has_user_override = geometry_override.is_some()`).
@@ -3510,7 +3510,7 @@ mod tests {
         }
     }
 
-    /// hud-8vejp: a whole-portal drag-move must write a durable per-member
+    /// a whole-portal drag-move must write a durable per-member
     /// override for EVERY member (a portal's tiles share one namespace, so the
     /// legacy namespace-matched persist reached only one). Drives the real
     /// capture (`translate_portal_group_on_drag` + `resolve_portal_group`) and
@@ -3746,7 +3746,7 @@ mod tests {
         );
     }
 
-    /// hud-yno2r regression (deterministic): whole-portal pointer resize must
+    /// regression (deterministic): whole-portal pointer resize must
     /// start from the frame's bottom-right affordance even when keyboard focus
     /// is NOT on a scrollable pane.
     ///
@@ -3914,7 +3914,7 @@ mod tests {
         commit_portal_group_resize(scene, &group, old_rect, snapshot);
     }
 
-    /// hud-s4lrw unit: `scale_portal_surface_parts` scales every part's
+    /// unit: `scale_portal_surface_parts` scales every part's
     /// tile-local bounds by the per-axis ratio, and is a no-op when the tile has
     /// no first-class surface.
     #[test]
@@ -3953,7 +3953,7 @@ mod tests {
 
         scale_portal_surface_parts(&mut scene, tile, 2.0, 0.5);
         let parts = &scene.overlay.portal_surfaces.get(&tile).unwrap().parts;
-        // Transcript part: x,w ×2.0 ; y,h ×0.5.
+        // Transcript part: x,w ×2.0; y,h ×0.5.
         assert_eq!(parts[0].bounds.x, 20.0);
         assert_eq!(parts[0].bounds.y, 10.0);
         assert_eq!(parts[0].bounds.width, 200.0);
@@ -3964,7 +3964,7 @@ mod tests {
         assert_eq!(parts[1].bounds.height, 25.0);
     }
 
-    /// hud-s4lrw integration: a whole-portal resize scales the host tile's
+    /// integration: a whole-portal resize scales the host tile's
     /// first-class `PortalSurface` part bounds in lock-step with the re-flowed
     /// node tree, so the compositor's per-part clip band stays aligned at the new
     /// geometry ("overflow invariants hold at all geometries").
@@ -4025,7 +4025,7 @@ mod tests {
         );
     }
 
-    /// hud-rpmwt core: after a whole-portal resize the transcript/composer text
+    /// core: after a whole-portal resize the transcript/composer text
     /// must re-resolve to the NEW pane geometry, not stay wrapped at the
     /// attach-time width. The compositor wraps `TextMarkdownNode` text to the
     /// node's own `bounds.width` (tile-local, see
@@ -4036,7 +4036,7 @@ mod tests {
     /// `TextItem` layout width track the resized pane, at the draw-item seam.
     #[test]
     fn whole_portal_resize_accumulates_font_scale_by_width_ratio() {
-        // hud-ovjxu.1: whole-portal resize records a viewer-local per-tile font
+        // whole-portal resize records a viewer-local per-tile font
         // scale = the portal WIDTH ratio, uniform across every member, and
         // accumulates across steps. Bumps scene.version exactly once per step so
         // text re-shapes at most once per commit.
@@ -4206,10 +4206,10 @@ mod tests {
         );
     }
 
-    /// hud-rpmwt live-repro core: after a whole-portal resize, an ADAPTER
+    /// live-repro core: after a whole-portal resize, an ADAPTER
     /// content republish must NOT snap the transcript back to its stale
     /// attach-time wrap width. The resize scales `tile.bounds` + the node tree
-    /// and takes viewer geometry authority (hud-lyqun). But a republish replaces
+    /// and takes viewer geometry authority. But a republish replaces
     /// the whole node tree via `set_tile_root`, and the compositor wraps
     /// `TextMarkdownNode` text to `node.bounds.width` and clips to `tile.bounds`.
     /// An adapter that republishes its stale (config-width) node bounds would
@@ -4383,7 +4383,7 @@ mod tests {
         );
     }
 
-    /// hud-lyqun core: dragging one constituent surface of a text-stream portal
+    /// core: dragging one constituent surface of a text-stream portal
     /// must translate the WHOLE portal by the same delta — every member moves
     /// together preserving relative layout, the far-corner drag shield stays
     /// parked, and every moved member takes viewer geometry authority.
@@ -4458,7 +4458,7 @@ mod tests {
         );
     }
 
-    /// hud-uyhpn core: a multi-frame drag-move is a POSITION-ONLY mutation. It
+    /// core: a multi-frame drag-move is a POSITION-ONLY mutation. It
     /// must NOT bump `scene.version` (the sentinel the compositor's markdown /
     /// truncation caches gate on) — otherwise every pointer delta invalidates the
     /// content-shaped caches and forces a full re-hash / re-shape per frame, the
@@ -4542,7 +4542,7 @@ mod tests {
         );
     }
 
-    /// hud-uyhpn: the single-tile (non-portal) move fallback is also position-only
+    /// the single-tile (non-portal) move fallback is also position-only
     /// — it must advance `geometry_epoch`, not `scene.version`.
     #[test]
     fn single_tile_move_fallback_is_position_only() {
@@ -4589,7 +4589,7 @@ mod tests {
         );
     }
 
-    /// hud-643dv: the runtime header-band drag handle targets the portal FRAME
+    /// the runtime header-band drag handle targets the portal FRAME
     /// (the largest-area lease member), and a drag originating from that anchor —
     /// exactly what the band produces — moves the whole group position-only
     /// (leverages the #991 geometry-epoch path: no `scene.version` bump).
@@ -5382,7 +5382,7 @@ mod tests {
         );
     }
 
-    /// hud-lyqun regression: resize the whole portal, THEN drag it — the group
+    /// regression: resize the whole portal, THEN drag it — the group
     /// must stay coherent (relative layout preserved) rather than fracturing.
     #[test]
     fn resize_then_drag_keeps_portal_group_coherent() {
@@ -5438,7 +5438,7 @@ mod tests {
         );
     }
 
-    /// hud-lyqun proof: after a whole-portal resize, an adapter republishing its
+    /// proof: after a whole-portal resize, an adapter republishing its
     /// stale client-side member layout (via `update_tile_bounds`) CANNOT move any
     /// member — the group cannot be fractured.
     #[test]
@@ -5501,7 +5501,7 @@ mod tests {
         ));
     }
 
-    // ── Composer pointer caret hit-test + drag-select (hud-etrs0) ───────────
+    // ── Composer pointer caret hit-test + drag-select ───────────
 
     /// Includes the full-display-vs-origin regression and both clamp directions.
     #[test]

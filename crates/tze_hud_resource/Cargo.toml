@@ -6,7 +6,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-# BLAKE3 content addressing (RFC 0011 §1.1, §12)
+# BLAKE3 content addressing
 blake3 = { workspace = true }
 
 # Image decode for validation (IMAGE_PNG, IMAGE_JPEG, IMAGE_RGBA8)

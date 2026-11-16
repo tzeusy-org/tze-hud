@@ -1,7 +1,7 @@
 //! Tile-background color constants, zone ordering and free color helpers.
 //!
-//! Moved from `renderer.rs` banners 1–3 by Step R-1 of the renderer module split
-//! (hud-fgryk).  No logic was changed; only visibility modifiers were added where
+//! Moved from `renderer.rs` banners 1–3 by Step R-1 of the renderer module split.
+//! No logic was changed; only visibility modifiers were added where
 //! Rust's module-privacy rules require them.
 
 use std::collections::HashMap;
@@ -9,9 +9,9 @@ use tze_hud_config::tokens::px_scale;
 
 use tze_hud_scene::types::*;
 
-/// Adaptive mid-drag re-truncation cadence thresholds (hud-3to8i).
+/// Adaptive mid-drag re-truncation cadence thresholds.
 ///
-/// # Cadence contract (hud-ghhxa — spec §6b.3)
+/// # Cadence contract
 ///
 /// When a portal tile's bounds change rapidly (resize hotkey repeat, or
 /// pointer-drag resize gesture), the scene version increments on every change
@@ -94,7 +94,6 @@ pub(super) const BORDER_DEFAULT_FALLBACK: Rgba = Rgba {
 /// Default tile background color for `TextMarkdown` tiles (linear sRGB) used
 /// when the `color.tile.background.text_markdown` design token is absent.
 ///
-/// Per spec §Canonical Token Schema:
 ///   color.tile.background.text_markdown → #6C6C88 → (0.15, 0.15, 0.25) linear
 ///
 /// Note: the sRGB hex for linear (0.15, 0.15, 0.25) is #6C6C88, not #636380.
@@ -109,7 +108,6 @@ pub(super) const TILE_BG_TEXT_MARKDOWN: Rgba = Rgba {
 /// Default tile background color for `StaticImage` tiles (linear sRGB) used
 /// when the `color.tile.background.static_image` design token is absent.
 ///
-/// Per spec §Canonical Token Schema:
 ///   color.tile.background.static_image → #373737 → (0.05, 0.05, 0.05)
 pub(super) const TILE_BG_STATIC_IMAGE: Rgba = Rgba {
     r: 0.05,
@@ -122,7 +120,6 @@ pub(super) const TILE_BG_STATIC_IMAGE: Rgba = Rgba {
 /// (linear sRGB) used when the `color.tile.background.default` design token
 /// is absent.
 ///
-/// Per spec §Canonical Token Schema:
 ///   color.tile.background.default → #505073 → (0.1, 0.1, 0.2)
 pub(super) const TILE_BG_DEFAULT: Rgba = Rgba {
     r: 0.1,
@@ -153,7 +150,7 @@ pub(super) fn srgb_to_linear(c: f32) -> f32 {
 
 /// Returns `true` if the zone name is an alert-banner zone.
 ///
-/// Per spec §V1 Component Type Definitions: the alert-banner zone name is
+/// the alert-banner zone name is
 /// `"alert-banner"`. It sorts by severity, grows to its banners and reads the
 /// alert roles (`NotificationStyle::for_zone`).
 #[inline]
@@ -273,7 +270,7 @@ pub(super) fn resolve_border_default_color(token_map: &HashMap<String, String>) 
 /// the provided `fallback` constant when the key is absent or cannot be parsed
 /// as a valid hex color.
 ///
-/// Accepted keys (per §Canonical Token Schema):
+/// Accepted keys (Token Schema):
 ///   - `"text_markdown"` → fallback `TILE_BG_TEXT_MARKDOWN` (#636380)
 ///   - `"static_image"`  → fallback `TILE_BG_STATIC_IMAGE`  (#373737)
 ///   - `"default"`       → fallback `TILE_BG_DEFAULT`        (#505073)
@@ -339,7 +336,7 @@ pub(super) fn resolve_scroll_indicator_tokens(
     }
 }
 
-/// Resolve `JumpToLatestTokens` from the compositor token map (hud-9ci61).
+/// Resolve `JumpToLatestTokens` from the compositor token map.
 ///
 /// Keys follow the portal token namespace (`portal.jump_to_latest.*`). Falls
 /// back to `JumpToLatestTokens::default()` for any missing or unparsable
@@ -386,7 +383,7 @@ pub(super) fn resolve_jump_to_latest_tokens(
         * px_scale(token_map);
 
     // Unread-count badge text color: "portal.jump_to_latest.text_color" as
-    // #RRGGBB[AA] (hud-g1ena.3). `JumpToLatestTokens::text_*` carry STRAIGHT
+    // #RRGGBB[AA]. `JumpToLatestTokens::text_*` carry STRAIGHT
     // (non-linear) sRGB components — matching the struct's `color_*` default
     // convention — so `parse_hex_color`'s linear output is converted back with
     // `linear_to_srgb` before storage; the badge builder then encodes to sRGB u8
@@ -458,7 +455,7 @@ pub(super) fn resolve_transcript_max_measure_px(token_map: &HashMap<String, Stri
 ///
 /// The keyboard focus ring is drawn by [`Compositor::render_node`] around the
 /// focused `HitRegionNode` so a keyboard-only viewer can always see where focus
-/// landed (RFC 0004 §5.6). Color and width are token-driven — never hardcoded in
+/// landed. Color and width are token-driven — never hardcoded in
 /// the compositor — with defaults mirrored from `tze_hud_input`'s
 /// [`DEFAULT_FOCUS_RING_COLOR`](tze_hud_input::DEFAULT_FOCUS_RING_COLOR) /
 /// [`DEFAULT_FOCUS_RING_WIDTH_PX`](tze_hud_input::DEFAULT_FOCUS_RING_WIDTH_PX)
@@ -742,7 +739,7 @@ pub(super) fn resolve_tile_spacing_tokens(
 const SECTION_GAP_DEFAULT_PX: f32 = 8.0;
 
 /// Resolve the inter-child vertical-flow gap (px) from the compositor token map
-/// (hud-pd9bp): the `portal.spacing.section_gap_px` handshake token
+/// the `portal.spacing.section_gap_px` handshake token
 /// (`PortalPartTokens::section_gap_px`), used as the gap between stacked
 /// `NodeLayout::VerticalFlow` children. Missing, unparseable, non-finite, or
 /// negative values fall back to [`SECTION_GAP_DEFAULT_PX`]. Unlike the
@@ -878,8 +875,7 @@ pub(super) struct ComposerOverlayTokens {
     /// Caret glyph foreground color (sRGB u8).
     ///
     /// Sourced from `portal.composer.caret_color` so a profile can accent the
-    /// caret independently of the composer text color (hud-khfgx,
-    /// vd-caret-selection-placeholder-not-tokenized). Defaults to the composer
+    /// caret independently of the composer text color. Defaults to the composer
     /// text color, so the default profile's caret is visually unchanged. Stored in
     /// sRGB u8 to match [`StyledRunItem::color`], the same encoding as the text
     /// pipeline's other foreground runs.
@@ -887,8 +883,7 @@ pub(super) struct ComposerOverlayTokens {
     /// Empty-draft placeholder text color (sRGB u8).
     ///
     /// Sourced from `portal.composer.placeholder_color` so a profile can tune the
-    /// dimmed hint shown when the draft is empty (hud-evk0j,
-    /// vd-caret-selection-placeholder-not-tokenized). Defaults to a dimmed slate
+    /// dimmed hint shown when the draft is empty. Defaults to a dimmed slate
     /// (`#6B7689`, mirroring the config-crate token default) so an empty prompt
     /// reads as a hint distinct from live draft text. Stored in sRGB u8 to match
     /// [`TextItem::color`], the same encoding as the text pipeline's foreground.
@@ -900,14 +895,14 @@ pub(super) struct ComposerOverlayTokens {
     /// Font size in pixels.
     pub(super) font_size_px: f32,
     /// Maximum number of text lines the composer box grows to before it scrolls
-    /// internally (hud-nx7yq.1).
+    /// internally.
     ///
-    /// `1` selects the single-line horizontal caret-follow profile (hud-zlfi4);
+    /// `1` selects the single-line horizontal caret-follow profile;
     /// `> 1` selects the multi-line wrap-and-grow profile. Sourced from the
     /// `portal.composer.max_lines` token; defaults to
     /// [`COMPOSER_OVERLAY_DEFAULT_MAX_LINES`].
     pub(super) max_lines: u32,
-    /// Vertical anchoring of the composer input box within its region (hud-nottc).
+    /// Vertical anchoring of the composer input box within its region.
     ///
     /// - [`ComposerVerticalAnchor::Bottom`] (default) — the input box pins to the
     ///   BOTTOM edge of the region and grows UPWARD (the bottom-chat composer strip,
@@ -921,7 +916,7 @@ pub(super) struct ComposerOverlayTokens {
     /// Sourced from the `portal.composer.anchor` token (`"top"` / `"bottom"`);
     /// defaults to `Bottom` so every existing bottom-strip profile is unchanged.
     pub(super) anchor: ComposerVerticalAnchor,
-    /// Caret quad stroke width in physical px (hud-hxhnt finding 2).
+    /// Caret quad stroke width in physical px.
     ///
     /// The composer caret renders as a thin, zero-width-relative-to-text
     /// vertical quad (`Compositor::append_composer_caret_vertices`) instead of an
@@ -936,7 +931,7 @@ pub(super) struct ComposerOverlayTokens {
     /// region edge and the draft text, applied uniformly on every side.
     ///
     /// This is the composer's slice of the shared `portal.spacing.content_inset_px`
-    /// token (hud-ar10c): the compositor's composer geometry
+    /// token: the compositor's composer geometry
     /// (`composer_input_box` box padding, the caret-follow window width, the draft
     /// `pixel_x`/clip, and the viewer-echo zone width) all resolve their inset from
     /// here instead of a hardcoded literal. Defaults to
@@ -947,7 +942,7 @@ pub(super) struct ComposerOverlayTokens {
     pub(super) content_inset_px: f32,
 }
 
-/// Vertical anchoring of the composer input box within its region (hud-nottc).
+/// Vertical anchoring of the composer input box within its region.
 ///
 /// The composer draft echo shares one layout core (`composer_input_box`) between
 /// two profiles; this parameter selects which edge the box pins to. See
@@ -964,7 +959,7 @@ pub(crate) enum ComposerVerticalAnchor {
 const COMPOSER_OVERLAY_DEFAULT_FONT_SIZE_PX: f32 = 16.0;
 
 /// Default composer max-line bound: the box grows to at most this many wrapped
-/// lines, then scrolls internally (design proposal default, hud-nx7yq.1). A small
+/// lines, then scrolls internally (design proposal default). A small
 /// bound so a tall draft cannot swallow the transcript pane.
 const COMPOSER_OVERLAY_DEFAULT_MAX_LINES: u32 = 6;
 
@@ -976,7 +971,7 @@ const COMPOSER_OVERLAY_DEFAULT_MAX_LINES: u32 = 6;
 /// exactly (no visual regression).
 const COMPOSER_OVERLAY_DEFAULT_CONTENT_INSET_PX: f32 = 6.0;
 
-/// Default composer caret quad width in physical px (hud-hxhnt finding 2): a
+/// Default composer caret quad width in physical px: a
 /// conventional thin text-caret stroke.
 const COMPOSER_OVERLAY_DEFAULT_CARET_WIDTH_PX: f32 = 1.5;
 
@@ -1017,7 +1012,7 @@ pub(super) fn resolve_composer_overlay_tokens(
 
     // Caret glyph color (default: the composer text color, so the default profile
     // is visually unchanged; a profile may accent the caret independently).
-    // hud-khfgx: `portal.composer.caret_color`, same `#RRGGBB[AA]` format.
+    // `portal.composer.caret_color`, same `#RRGGBB[AA]` format.
     let to_srgb_u8 = |v: f32| (linear_to_srgb(v.clamp(0.0, 1.0)) * 255.0 + 0.5) as u8;
     let to_alpha_u8 = |v: f32| (v.clamp(0.0, 1.0) * 255.0 + 0.5) as u8;
     let caret_color: [u8; 4] = resolve_token_color(token_map, "portal.composer.caret_color")
@@ -1039,7 +1034,7 @@ pub(super) fn resolve_composer_overlay_tokens(
 
     // Empty-draft placeholder color (default: dimmed slate #6B7689, mirroring the
     // config-crate token default so the placeholder reads as a hint distinct from
-    // live draft text). hud-evk0j: `portal.composer.placeholder_color`, same
+    // live draft text).: `portal.composer.placeholder_color`, same
     // `#RRGGBB[AA]` format as the other composer tokens.
     let placeholder_color: [u8; 4] =
         resolve_token_color(token_map, "portal.composer.placeholder_color")
@@ -1145,7 +1140,7 @@ pub(super) fn resolve_composer_overlay_tokens(
 mod tests {
     use super::*;
 
-    // ── Vertical-flow gap token (hud-pd9bp) ───────────────────────────────────
+    // ── Vertical-flow gap token ───────────────────────────────────
 
     fn token_map(pairs: &[(&str, &str)]) -> HashMap<String, String> {
         pairs
@@ -1186,7 +1181,7 @@ mod tests {
 
     /// The jump-to-latest pill FILL must render the same intended color whether it
     /// comes from the built-in default or from an explicitly-set token carrying the
-    /// same hex — the color-space parity hud-25pee restores.
+    /// same hex — the color-space parity restores.
     ///
     /// Both feed `color_*` into `gpu_color_raw`, which assumes LINEAR input. The
     /// token-set path parses `#4A5568` through `parse_hex_color` (sRGB→linear); the

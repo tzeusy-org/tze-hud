@@ -1,6 +1,6 @@
 use super::*;
 
-// ── Zone interaction hit region tests (hud-ltgk.4) ────────────────────────
+// ── Zone interaction hit region tests ────────────────────────
 //
 // These tests verify `populate_zone_hit_regions`: the pure-geometry path that
 // computes dismiss (×) and action button pixel bounds for Stack zone
@@ -386,7 +386,7 @@ async fn zone_hit_populate_clears_on_repeated_calls() {
     );
 }
 
-/// hud-643dv: a portal frame tile (largest-area member of a scrollable lease)
+/// a portal frame tile (largest-area member of a scrollable lease)
 /// gets a full-width HEADER-BAND drag handle (Windows-titlebar), while the panes
 /// keep the legacy centered grip. The band height is token-driven with a sane
 /// default consistent with the exemplar header height.
@@ -458,7 +458,7 @@ async fn portal_frame_gets_full_width_header_band_handle() {
     );
 }
 
-/// hud-ovjxu.1: the compositor applies the tile's viewer-local font-scale
+/// the compositor applies the tile's viewer-local font-scale
 /// multiplier, clamped to the token-default legible range, when resolving a
 /// portal text node's effective font. GPU only builds the compositor (no readback).
 #[tokio::test]
@@ -862,7 +862,7 @@ async fn drag_handle_hit_test_wins_on_passthrough_tile() {
 ///
 /// Verifies that the per-frame drag-handle population retains only the keys
 /// that are still present in the current `drag_handle_hit_regions` set —
-/// the zero-allocation `iter().any()` retain used after [hud-tdtr7] must
+/// the zero-allocation `iter().any()` retain must
 /// have identical semantics to the previous `HashSet`-based approach.
 #[tokio::test]
 async fn chrome_states_stale_entries_pruned_on_repopulate() {
@@ -997,7 +997,7 @@ async fn drag_handle_opacity_switches_to_active_on_hover_state() {
     assert_eq!(pill.color, [1.0, 0.0, 0.0, 0.75]);
 }
 
-// ─── Drag visual feedback tests [hud-bs2q.5] ─────────────────────────────
+// ─── Drag visual feedback tests ─────────────────────────────
 
 /// Active drag retains the pill without pointer hover, adds one token-driven
 /// SDF border and preserves group z-order/geometry without changing the scene.
@@ -1279,7 +1279,7 @@ async fn drag_visual_feedback_applied_during_active_drag() {
     }
 }
 
-// ─── Drag z-order + opacity boost unit tests [hud-17c8p] ─────────────────
+// ─── Drag z-order + opacity boost unit tests ─────────────────
 
 /// A tile in the `Activated` drag phase MUST be sorted last (highest
 /// effective z-order, front-most) among tiles, regardless of its declared
@@ -1501,7 +1501,7 @@ async fn tile_close_button_draw_and_hit_region_share_token_geometry() {
 /// `runtime.px_scale`: at 1.5 and 1.875 px per dp every dismiss and action
 /// region's top and height (so the stack slot pitch), and the dismiss
 /// button's size and right inset, are exactly that multiple of their 1x
-/// values (hud-h51u7.3 AC1,
+/// values (AC1,
 /// AC3). A zone on a secondary monitor uses that monitor's scale. Pure
 /// geometry: runs without a GPU.
 #[test]

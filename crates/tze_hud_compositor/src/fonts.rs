@@ -95,7 +95,7 @@
 //! font system comes from `LANG`, else (Windows) the user default locale,
 //! normalized to cosmic-text's Han keys ([`normalize_locale`]), so kanji take
 //! Japanese forms on a Japanese system. No font is bundled for this (the
-//! hud-1sycn evaluation keeps fonts system-sourced); widget SVG text keeps
+//! evaluation keeps fonts system-sourced); widget SVG text keeps
 //! the bundled faces.
 //!
 //! # Licenses
@@ -1083,7 +1083,7 @@ mod tests {
 
         assert!(wait_and_install(&mut fallback, &mut fs));
         assert_eq!(wakes.load(std::sync::atomic::Ordering::SeqCst), 1);
-        // S1: after the install, no shaped glyph is .notdef.
+        // S1: after the install, no shaped glyph is.notdef.
         let after = shaped(&mut fs, text);
         assert!(after.iter().all(|(_, g)| *g != 0), "{after:?}");
         let families: HashSet<&str> = after.iter().map(|(f, _)| f.as_str()).collect();

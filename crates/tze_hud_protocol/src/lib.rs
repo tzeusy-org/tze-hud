@@ -24,7 +24,7 @@ pub mod token;
 pub mod proto {
     tonic::include_proto!("tze_hud.protocol.v1");
 
-    /// Generated types for the bidirectional streaming session protocol (RFC 0005).
+    /// Generated types for the bidirectional streaming session protocol.
     pub mod session {
         tonic::include_proto!("tze_hud.protocol.v1.session");
     }

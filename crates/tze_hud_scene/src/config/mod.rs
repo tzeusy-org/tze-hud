@@ -1,8 +1,6 @@
 //! Configuration loader trait for v1.
 //!
-//! Encodes the configuration specification from
-//! `configuration/spec.md §Requirement: TOML Configuration Format`
-//! and related requirements.  This module defines **only** the trait contract
+//! This module defines the configuration loader trait contract
 //! and supporting types — no implementation is provided here.
 
 pub mod agents;
@@ -17,7 +15,7 @@ pub use hotkey::{ChordRole, Hotkey, HotkeyKey, HotkeyParseError, HudChords};
 
 /// Stable configuration error codes.
 ///
-/// From spec §Requirement: Structured Validation Error Collection.
+/// Used when collecting structured configuration validation errors.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum ConfigErrorCode {
     ParseError,
@@ -56,7 +54,7 @@ pub enum ConfigErrorCode {
 
 /// A single structured validation error.
 ///
-/// From spec §Requirement: Structured Validation Error Collection.
+/// Used when collecting structured configuration validation errors.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ConfigError {
     pub code: ConfigErrorCode,
@@ -82,7 +80,6 @@ pub struct ParseError {
 
 /// Default per-surface bound on the bytes a single uncached truncation may
 /// shape before the compositor's viewport-adjacent-window fallback engages
-/// (spec.md §324/§331).
 ///
 /// This mirrors `tze_hud_compositor::overflow::DEFAULT_MAX_TRUNCATION_INPUT_BYTES`:
 /// the compositor's `TruncationCache` falls back to this same value when no
@@ -93,7 +90,7 @@ pub const DEFAULT_MAX_TRUNCATION_INPUT_BYTES: u32 = 4096;
 
 /// A resolved display profile with its budget values.
 ///
-/// From spec §Requirement: Display Profile full-display and related.
+/// From Requirement: Display Profile full-display and related.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct DisplayProfile {
     pub name: String,
@@ -119,7 +116,6 @@ pub struct DisplayProfile {
     /// Per-surface bound on the bytes a single uncached truncation may shape
     /// before the compositor's viewport-adjacent-window fallback restricts the
     /// shaped input to a viewport-adjacent window of whole source lines
-    /// (spec.md §324/§331).
     ///
     /// Both built-in profiles use [`DEFAULT_MAX_TRUNCATION_INPUT_BYTES`].
     pub max_truncation_input_bytes: u32,

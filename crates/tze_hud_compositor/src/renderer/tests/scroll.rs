@@ -108,7 +108,7 @@ async fn test_ensure_icon_texture_unresolved_token_cleared_after_set_token_map()
     let _ = std::fs::remove_file(&svg_path);
 }
 
-// ─── Scroll-offset text rendering (hud-w5ih) ────────────────────────────
+// ─── Scroll-offset text rendering ────────────────────────────
 
 /// `collect_text_items` applies the tile scroll offset to `TextItem` pixel
 /// positions so text glyphs track the scrolled content.
@@ -120,8 +120,7 @@ async fn test_ensure_icon_texture_unresolved_token_cleared_after_set_token_map()
 /// `(node_x, node_y)` in a tile scrolled by `(scroll_x, scroll_y)` must
 /// produce a `TextItem` whose `pixel_x`/`pixel_y` subtract the scroll offset.
 ///
-/// Spec refs: hud-w5ih Bounded Transcript Viewport requirement; RFC 0013
-/// Transcript Interaction Contract (local-first scroll).
+/// Scrolling updates the bounded transcript viewport before agent dispatch.
 #[tokio::test]
 async fn test_collect_text_items_applies_tile_scroll_offset() {
     // This test needs no GPU — `collect_text_items` is a pure CPU path.
@@ -282,7 +281,7 @@ async fn test_collect_text_items_applies_tile_scroll_offset() {
     );
 }
 
-/// hud-g1ena.3: the jump-to-latest pill MAY carry the ambient unread count.
+/// the jump-to-latest pill MAY carry the ambient unread count.
 /// `collect_jump_to_latest_badge_item` yields a centered, clipped count
 /// `TextItem` only when the pill would show (content overflows + scrolled away)
 /// AND the tile carries a nonzero, non-redacted unread count; it returns `None`
@@ -633,7 +632,7 @@ async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
     );
 }
 
-// ─── Smooth scroll / animated follow-tail (hud-bq0gl.10) ─────────────────
+// ─── Smooth scroll / animated follow-tail ─────────────────
 
 /// `display_tile_scroll_offset` snaps to the raw scene offset in headless mode
 /// so deterministic golden tests are unaffected, and a freshly-observed tile in
@@ -641,7 +640,7 @@ async fn jump_to_latest_badge_gates_on_scroll_and_unread_count() {
 /// (no initial jump) once `update_scroll_smoothing` has run.
 ///
 /// This pins the wiring contract for the smooth-scroll path: the scene's offset
-/// remains the authoritative target (RFC 0013 §3.2 — user scroll authoritative),
+/// remains the authoritative user-scroll target,
 /// and the smoother never introduces a jump on first sight. Easing dynamics are
 /// covered exhaustively by the pure `easing::ScrollSmoother` unit tests.
 #[tokio::test]
@@ -705,8 +704,8 @@ async fn display_tile_scroll_offset_snaps_headless_and_settles_windowed() {
 
 /// `publish_displayed_scroll_offsets` records exactly the offset the renderer
 /// draws with (`display_tile_scroll_offset`) into the scene so the live
-/// hit-test path agrees with the rendered rows during a smoothed scroll
-/// (hud-3lynp). When smoothing is disabled (headless/snap) it clears any
+/// hit-test path agrees with the rendered rows during a smoothed scroll.
+/// When smoothing is disabled (headless/snap) it clears any
 /// published overrides so hit-testing falls back to the authoritative offset.
 #[tokio::test]
 async fn publish_displayed_scroll_offsets_mirrors_smoother_and_clears_headless() {
@@ -856,8 +855,8 @@ async fn scrolled_portal_output_tile_clips_geometry_outside_viewport() {
         )
         .unwrap();
 
-    // Settle the §6.3 portal fade-in before probing. A freshly-created scrollable
-    // tile begins a fade-in animation, and since hud-b0x0m every node fill (incl.
+    // Settle the portal fade-in before probing. A freshly-created scrollable
+    // tile begins a fade-in animation, and since every node fill (incl.
     // this SolidColor pane) honours the tile fade — so at t=0 the pane fill renders
     // translucent and composites toward the frame behind it. This test is about
     // geometry clipping, not the transition, so warm one frame to register the
@@ -986,7 +985,7 @@ async fn scrolled_rounded_solid_preserves_original_shape_with_viewport_clip() {
 /// translates its document rows, never its frame, pane fills, header, or INPUT /
 /// OUTPUT labels. This reproduces the live post-resize failure where the
 /// `PortalSurface` carries geometry-only parts because its regenerated inline
-/// subtree has no stable node IDs (hud-yrcev).
+/// subtree has no stable node IDs.
 ///
 /// The draw-list assertions exercise the rounded frame/pane path; the text-item
 /// assertions exercise the glyph path. Keeping both in one post-resize scene
@@ -1566,7 +1565,7 @@ async fn test_collect_text_items_zero_scroll_unchanged() {
 /// At-tail Ellipsis tiles: `collect_text_items` must produce `TailAnchored`
 /// viewport, and the truncation cache must hit (not miss) after priming.
 ///
-/// **Bug context (hud-lu50e):** `prime_truncation_cache` primed
+/// **Bug context:** `prime_truncation_cache` primed
 /// `TailAnchored` entries for at-tail tiles, but `collect_text_items_from_node`
 /// always built items with the constructor-default `HeadAnchored` viewport.
 /// `prepare_text_items` keyed the cache lookup on `item.viewport`, so the
@@ -1770,7 +1769,7 @@ async fn test_collect_text_items_at_tail_ellipsis_uses_tail_anchored_viewport() 
     );
 }
 
-// ── Zone StreamText tail-anchored truncation (hud-gxz0x) ──────────────────
+// ── Zone StreamText tail-anchored truncation ──────────────────
 
 /// Helper: register a `LatestWins` StreamText zone covering the whole display
 /// with the given `overflow` / `stream_tail_anchored` policy, publish `content`,

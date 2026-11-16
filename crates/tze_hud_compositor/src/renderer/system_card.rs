@@ -1,4 +1,4 @@
-//! Runtime system card and toast chrome (hud-i2e10.4).
+//! Runtime system card and toast chrome.
 //!
 //! A centred card (pairing code + address) or a bottom-centre toast, drawn
 //! above all other content, including the safe-mode overlay, from

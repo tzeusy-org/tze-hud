@@ -2,7 +2,7 @@
 //!
 //! Moved from `renderer/mod.rs` (the "Zone rendering" and "Zone layout"
 //! clusters, formerly ~L6381–7083 at plan date) by Step R-7 of the renderer
-//! module split (hud-fgryk).  No logic was changed; only visibility modifiers
+//! module split. No logic was changed; only visibility modifiers
 //! were added where Rust's module-privacy rules require them (listed in the
 //! PR body).
 //!
@@ -64,7 +64,7 @@ impl Compositor {
     /// layer order: Background → (tiles) → Content → Chrome.
     ///
     /// No per-content-type color branching — all visual properties come from
-    /// `RenderingPolicy` fields (spec §Refactoring note, §Default Zone Rendering).
+    /// `RenderingPolicy` fields.
     #[cfg(test)]
     pub(super) fn render_zone_content(
         &self,
@@ -158,7 +158,7 @@ impl Compositor {
             match zone_def.contention_policy {
                 ContentionPolicy::Stack { .. } => {
                     // Slot geometry is computed once by zone_slot_layout and shared
-                    // with collect_text_items / collect_all_rounded_rect_cmds (hud-qlerb).
+                    // with collect_text_items / collect_all_rounded_rect_cmds.
                     let layout = self.zone_slot_layout(scene, zone_name, publishes, policy, h, w);
 
                     for (pub_idx, card) in layout.iter_visible(Rect::new(x, y, w, h)) {
@@ -207,7 +207,7 @@ impl Compositor {
                             ZoneContent::Notification(n) => {
                                 // The card or banner style's urgency tone
                                 // (semantic container roles).
-                                // Per spec: urgency >3 clamped to 3 (critical).
+                                // urgency >3 clamped to 3 (critical).
                                 // Respect policy.backdrop contract: only emit a backdrop (and
                                 // border) when a backdrop is enabled; skip entirely when None.
                                 policy.backdrop.map(|_| {
@@ -248,7 +248,7 @@ impl Compositor {
 
                         // Action buttons are SDF commands drawn after the backdrop
                         // (`collect_all_rounded_rect_cmds`): a flat fill here would
-                        // sit under a rounded Chrome-layer backdrop (hud-paslt).
+                        // sit under a rounded Chrome-layer backdrop.
 
                         // Notification icon: emit a textured draw command for the icon
                         // left-aligned inside the slot, vertically centred.
@@ -339,7 +339,7 @@ impl Compositor {
                         ZoneContent::Notification(n) => {
                             // The card or banner style's urgency tone
                             // (semantic container roles).
-                            // Per spec: urgency >3 clamped to 3 (critical).
+                            // urgency >3 clamped to 3 (critical).
                             // Respect policy.backdrop contract: only emit a backdrop (and
                             // border) when a backdrop is enabled; skip entirely when None.
                             policy.backdrop.map(|_| {
@@ -609,7 +609,7 @@ impl Compositor {
     /// This is the single authoritative computation for zone slot geometry.
     /// All frame-path consumers (`collect_text_items`, `render_zone_content`,
     /// `collect_all_rounded_rect_cmds`) call this method instead of duplicating
-    /// the slot-height/offset/ordering logic inline (hud-qlerb).
+    /// the slot-height/offset/ordering logic inline.
     ///
     /// # Parameters
     /// - `zone_name` — used to distinguish alert-banner zones (severity sort

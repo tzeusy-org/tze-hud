@@ -1,4 +1,4 @@
-//! Session resume token management (RFC 0005 §6.1–6.6).
+//! Session resume token management.
 //!
 //! # Overview
 //!
@@ -15,7 +15,7 @@
 //! - **opaque** — random 16-byte (UUIDv7) values,
 //! - **single-use** — consumed on first successful resume attempt,
 //! - **bound** to `agent_id` — cannot be used by a different agent,
-//! - **in-memory only** — not persisted across process restarts (RFC 0005 §6.6).
+//! - **in-memory only** — not persisted across process restarts.
 //!
 //! [`TokenStore`] is intentionally `Send + Sync` so it can live inside a
 //! `tokio::sync::Mutex<SharedState>`.
@@ -55,7 +55,7 @@ impl ResumeEntry {
     }
 }
 
-/// In-memory store for pending session resume tokens (RFC 0005 §6.1).
+/// In-memory store for pending session resume tokens.
 ///
 /// All tokens are cleared when the runtime process restarts because this
 /// store is never persisted to disk.
@@ -193,7 +193,7 @@ pub enum ResumeError {
 }
 
 impl ResumeError {
-    /// The `SessionError.code` string sent to the client (RFC 0005 §6.2, §6.5).
+    /// The `SessionError.code` string sent to the client.
     pub fn error_code(&self) -> &'static str {
         match self {
             Self::TokenNotFound => "SESSION_GRACE_EXPIRED",

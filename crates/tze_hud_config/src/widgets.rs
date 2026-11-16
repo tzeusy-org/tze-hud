@@ -1,8 +1,6 @@
 //! Widget bundle and instance configuration validation.
 //!
-//! Implements the widget-system configuration requirements from
-//! `configuration/spec.md §Requirement: Widget Bundle Configuration` and
-//! `configuration/spec.md §Requirement: Widget Instance Configuration`.
+//! Validates widget bundle paths and widget instance parameters.
 //!
 //! ## Error codes produced
 //!
@@ -22,11 +20,6 @@
 //! **skipped** because there is no meaningful base to resolve them against
 //! (the runtime's `scan_bundle_dirs` handles absent directories gracefully).
 //!
-//! ## Spec references
-//!
-//! - configuration/spec.md §Widget Bundle Configuration
-//! - configuration/spec.md §Widget Instance Configuration
-//! - configuration/spec.md §Capability Vocabulary (publish_widget:)
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -637,7 +630,7 @@ mod tests {
     /// WHEN [widget_bundles].paths contains a relative path AND config_parent is None
     /// THEN no error is produced (path is unresolvable without a base; runtime handles it).
     ///
-    /// Regression test for hud-hecz: production.toml uses `../../../assets/widget_bundles`
+    /// production.toml uses `../../../assets/widget_bundles`
     /// which is relative to the config file's parent directory. When config is inlined via
     /// `include_str!` in tests, `config_parent` is `None`, so the path cannot be meaningfully
     /// resolved from CWD. The validator must skip the check rather than reporting a spurious

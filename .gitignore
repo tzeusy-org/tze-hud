@@ -51,7 +51,7 @@ hud-w5pct/
 docs/operations/private/
 .claude/skills/user-test/target.env
 
-# Isolated worker target dir (hud-nottc)
+# Isolated worker target dir
 /target-nottc/
 
 # Local setup artifacts — local config + secrets.

@@ -1,4 +1,4 @@
-//! Owner visibility (T11, hud-vniri.4): the human can hide whole surface
+//! Owner visibility (T11): the human can hide whole surface
 //! classes for the session. Hidden content is not drawn, catches no pointer
 //! input and holds no keyboard focus; leases, publications and agents are
 //! untouched, and agents are not told. The set lives in the runtime overlay

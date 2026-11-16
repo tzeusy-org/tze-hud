@@ -255,7 +255,7 @@ async fn test_stack_slot_layout_five_notifications_distinct_y() {
         layer_attachment: LayerAttachment::Chrome,
     });
 
-    // Publish 5 notifications (oldest to newest: "N1" .. "N5").
+    // Publish 5 notifications (oldest to newest: "N1".. "N5").
     for i in 1..=5 {
         scene
             .publish_to_zone(
@@ -638,8 +638,8 @@ async fn test_stack_slot_clips_at_zone_boundary() {
 /// emitted, stopping at the first that doesn't; only a first slot taller than
 /// the zone is clamped.
 ///
-/// This is a GPU-free unit test pinning the shared slot-geometry computation
-/// introduced in hud-qlerb. Geometry correctness is guaranteed by
+/// This GPU-free unit test pins the shared slot-geometry computation.
+/// Geometry correctness is guarded by
 /// test_stack_slot_clips_at_zone_boundary (integration) and this test (unit).
 #[test]
 fn test_zone_slot_layout_iter_visible_clips_and_clamps() {
@@ -871,7 +871,7 @@ async fn test_merge_by_key_latest_value_wins_for_duplicate_keys() {
     );
 }
 
-// ── StatusBar icon layout tests [hud-x2v1.2] ─────────────────────────────
+// ── StatusBar icon layout tests ─────────────────────────────
 
 /// `key_icon_map` non-empty → per-entry TextItems; icon-mapped entries have
 /// text `pixel_x` inset by `ICON_SIZE_PX + ICON_TEXT_GAP_PX`.

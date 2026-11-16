@@ -25,8 +25,7 @@ pub const CURRENT_CONFIG_SCHEMA_VERSION: u32 = 1;
 
 /// Maximum config schema version this runtime can load. A config declaring a
 /// `schema_version` greater than this fails closed with
-/// `CONFIG_SCHEMA_VERSION_UNSUPPORTED` (configuration spec §Config Schema Version
-/// and Compatibility Policy).
+/// `CONFIG_SCHEMA_VERSION_UNSUPPORTED`.
 pub const MAX_SUPPORTED_CONFIG_SCHEMA_VERSION: u32 = 1;
 
 // ─── TzeHudConfig ─────────────────────────────────────────────────────────────
@@ -78,7 +77,7 @@ impl ConfigLoader for TzeHudConfig {
         let mut errors: Vec<ConfigError> = Vec::new();
 
         // ── (0) schema_version gate (precedes field-level validation) ─────────
-        // Spec §Config Schema Version and Compatibility Policy: absent → current
+        // Config Schema Version and Compatibility Policy: absent → current
         // (back-compatible default); within range → proceed; newer than the
         // runtime's max supported version → fail closed naming the range. An
         // unsupported schema means we cannot reliably interpret the rest of the
@@ -115,8 +114,8 @@ impl ConfigLoader for TzeHudConfig {
         }
 
         // ── (2) [runtime] present and profile set ─────────────────────────────
-        // Spec §Minimal Valid Configuration: a minimal valid config MUST have
-        // a [runtime] section with a `profile` field (RFC 0006 §2.1, §2.4).
+        // Minimal Valid Configuration: a minimal valid config MUST have
+        // a [runtime] section with a `profile` field.
         let profile_str = match self.raw.runtime.as_ref() {
             None => {
                 errors.push(ConfigError {

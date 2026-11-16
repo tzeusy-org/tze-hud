@@ -26,7 +26,7 @@ pub(super) enum ComposerTargetLookup {
 
 /// Return a 64-byte-bounded preview of `s` for use in `tracing` fields.
 ///
-/// Mirrors the inline `char_log_preview` block introduced in PR #768 (hud-60hgf)
+/// Mirrors the inline `char_log_preview` block introduced in PR #768
 /// for `raw.character`. Reused here to bound all unbounded string fields in
 /// debug-level tracing callsites (key names, namespaces, character payloads).
 ///
@@ -103,7 +103,7 @@ pub(super) fn keyboard_key_identity(raw_key_code: &str, raw_key: &str) -> String
     }
 }
 
-/// Resolve a directional whole-portal resize chord (Ctrl+Shift+Arrow, hud-csrmf).
+/// Resolve a directional whole-portal resize chord (Ctrl+Shift+Arrow).
 ///
 /// Returns the `(direction, axis)` pair for the arrow chords, or `None` for any
 /// other key or modifier combination:
@@ -136,8 +136,7 @@ fn directional_portal_resize(
     }
 }
 
-/// Whether a key event is the bare Tab / Shift+Tab focus-traversal chord
-/// (hud-v0cal).
+/// Whether a key event is the bare Tab / Shift+Tab focus-traversal chord.
 ///
 /// `true` only for `Tab` with no Ctrl / Alt / Meta held — the exact chord that
 /// drives keyboard focus traversal.  Shift is allowed (Shift+Tab = reverse
@@ -171,7 +170,7 @@ fn chrome_shortcut(raw: &RawKeyDownEvent) -> Option<ChromeShortcut> {
     }
 }
 
-/// Translate an RFC 0004 default keyboard binding into the platform-neutral
+/// Translate an default keyboard binding into the platform-neutral
 /// command vocabulary. Composer editing and shell-reserved shortcuts are
 /// intercepted before this helper is called.
 fn keyboard_command(
@@ -245,7 +244,7 @@ enum ShellShortcutOutcome {
 }
 
 /// A raw keyboard event deferred from the winit event-loop thread because the
-/// shared-state or scene Tokio mutex was busy at dispatch time (hud-2fz34).
+/// shared-state or scene Tokio mutex was busy at dispatch time.
 ///
 /// Stored in `WindowedRuntimeState::pending_keyboard_events` and retried once
 /// per `about_to_wait` iteration via `drain_pending_keyboard_events`, matching
@@ -257,7 +256,7 @@ pub(super) enum PendingKeyboardEvent {
     Character(RawCharacterEvent),
 }
 
-/// Outcome of a Tab / Shift+Tab keyboard focus-traversal attempt (hud-v0cal).
+/// Outcome of a Tab / Shift+Tab keyboard focus-traversal attempt.
 ///
 /// `Done` — the traversal ran (the FocusManager cycle advanced, or was empty)
 /// and the Tab event was consumed.
@@ -270,7 +269,7 @@ pub(super) enum TabFocusOutcome {
     Busy,
 }
 
-/// Outcome of an Escape-clear attempt on a composer-less focus stop (hud-k6yvb).
+/// Outcome of an Escape-clear attempt on a composer-less focus stop.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum EscapeClearOutcome {
     /// Focus was released (a node/tile owner was cleared).
@@ -349,7 +348,7 @@ fn restore_front_requeued_event(
     true
 }
 
-/// Bounded FIFO keyboard event drain helper (hud-dwcr7).
+/// Bounded FIFO keyboard event drain helper.
 ///
 /// Calls `dispatch` at most `limit` times — where `limit` is the queue length
 /// at the drain call-site, computed once by the caller.  Each call to `dispatch`
@@ -362,7 +361,7 @@ fn restore_front_requeued_event(
 ///   front (so no later event can overtake it).
 ///
 /// The `limit` bound (`for _ in 0..limit`, **not** `while !queue.is_empty()`) is
-/// the primary fix for the hud-dwcr7 livelock: events that arrive *during* the
+/// the primary fix for the livelock: events that arrive *during* the
 /// drain — pushed by inner dispatch or from the OS event path — are deferred to the
 /// *next* `about_to_wait` cycle rather than processed in the same pass.  Without
 /// the bound, a producer that continuously enqueues events could prevent the drain
@@ -370,7 +369,7 @@ fn restore_front_requeued_event(
 /// dispatch storm.
 ///
 /// Extracted from `drain_pending_keyboard_events` so the bounding invariant is
-/// independently testable without a full `WinitApp` state machine (hud-b09ag).
+/// independently testable without a full `WinitApp` state machine.
 fn drain_keyboard_queue_bounded<F>(limit: usize, mut dispatch: F)
 where
     F: FnMut() -> ControlFlow<()>,
@@ -383,12 +382,11 @@ where
 }
 
 impl WinitApp {
-    /// Snap the input-pane history's scroll offset back to the tail
-    /// (hud-qbcp8).
+    /// Snap the input-pane history's scroll offset back to the tail.
     ///
     /// Called on every accepted composer keystroke: unlike ordinary content
     /// growth (which deliberately leaves a `ScrolledBack` viewport alone, spec
-    /// §3.3), a viewer who is actively typing into their own composer should
+    /// ), a viewer who is actively typing into their own composer should
     /// not be stranded scrolled away from their own live draft. No-op (and no
     /// scene write) once the tile is already at the tail.
     pub(super) fn reset_input_history_scroll_to_tail(&mut self, tile_id: tze_hud_scene::SceneId) {
@@ -404,8 +402,7 @@ impl WinitApp {
     // ── Keyboard drain helpers ────────────────────────────────────────────
 
     /// Execute a shell-reserved shortcut locally before any portal/composer or
-    /// focused-agent route (RFC 0007 §2.3; input-model Event Routing
-    /// Resolution). Tab shortcuts update the authoritative scene and its
+    /// focused-agent route. Tab shortcuts update the authoritative scene and its
     /// lock-free event-loop mirror. Other reserved chords (for example
     /// Ctrl+Shift+M) are consumed without any action.
     ///
@@ -506,7 +503,7 @@ impl WinitApp {
     /// contract where dropped delivery is an infrastructure gap, not a
     /// data-loss policy.
     ///
-    /// # Composer interception (§4.4)
+    /// # Composer interception
     ///
     /// When a composer region is focused (`accepts_composer_input = true`), the
     /// event is first offered to the `ComposerDraftManager` via
@@ -519,12 +516,12 @@ impl WinitApp {
     /// capture, the FIFO ordering guard, and the active-tab availability check —
     /// then delegates the actual routing to [`Self::dispatch_key_down_event_inner`].
     ///
-    /// FIFO ordering invariant (hud-2fz34): when events are already queued in
+    /// FIFO ordering invariant: when events are already queued in
     /// `pending_keyboard_events`, a freshly-arriving Stage-1 event must NOT jump
     /// ahead of them, so it is appended to the queue and processed later by
     /// `drain_pending_keyboard_events`.  The drain calls the *inner* directly
     /// (bypassing this guard) so a queued event is actually consumed instead of
-    /// being rotated to the back forever (the livelock fixed in hud-dwcr7).
+    /// being rotated to the back forever.
     pub(super) fn dispatch_key_down_event(&mut self, raw: &RawKeyDownEvent) {
         // ── Priority 1: Safe-mode capture ─────────────────────────────────
         // (See the inner fn / historical comments for the full precedence
@@ -550,7 +547,7 @@ impl WinitApp {
                 .push_back(PendingKeyboardEvent::KeyDown(raw.clone()));
             return;
         }
-        // Resolve the active tab via the lock-free mirror (hud-dwcr7).
+        // Resolve the active tab via the lock-free mirror.
         // None = mirror momentarily busy → defer to the next about_to_wait.
         let Some(active_tab) = self.active_tab_for_keyboard_dispatch() else {
             self.state
@@ -567,7 +564,7 @@ impl WinitApp {
     /// already resolved, and by `drain_pending_keyboard_events` for queued
     /// events.  This MUST NOT re-apply the FIFO guard (`pending_keyboard_events`
     /// non-empty), since the drain processes the queue in order and a guard here
-    /// would rotate the front event to the back forever (hud-dwcr7 livelock).
+    /// would rotate the front event to the back forever (livelock).
     ///
     /// `active_tab` is the value already read from the mirror: `Some(tab)` to
     /// route, `None` to drop (no active tab → no composer / agent target).
@@ -653,7 +650,7 @@ impl WinitApp {
         };
 
         {
-            // ── Priority 4: Portal resize hotkey intercept (§6b.2) ────────
+            // ── Priority 4: Portal resize hotkey intercept ────────
             //
             // Ctrl+`+`/Ctrl+`=` (grow) and Ctrl+`-` (shrink) resize the
             // focused portal tile.  The hotkey is focus-scoped: only the
@@ -668,7 +665,7 @@ impl WinitApp {
             // Resolve the resize direction from the logical key first, then fall
             // back to the **physical** KeyCode. The logical match is fragile
             // under Ctrl on Windows (winit may not resolve bare `=`/`-`/`+`, and
-            // `+` needs Shift), which is the root cause of hud-v4k1h — the
+            // `+` needs Shift), which is the root cause of — the
             // physical fallback (`Equal`/`Minus`/numpad) makes the chord
             // deterministic regardless of layout or held modifiers.
             if let Some(dir) = HotkeyResizeDir::from_key(&raw.key, raw.modifiers.ctrl)
@@ -677,7 +674,7 @@ impl WinitApp {
                 if self.apply_portal_resize_hotkey(tab_id, dir, HotkeyResizeAxis::Both) {
                     // Remember this chord so its matching `KeyUp` is swallowed by
                     // the key-up fallback instead of resizing a second time
-                    // (hud-v4k1h: live Windows can deliver key-up-only streams, so
+                    // (live Windows can deliver key-up-only streams, so
                     // the key-up path also resizes — this dedup keeps a normal
                     // down/up pair to exactly one resize).
                     self.state
@@ -693,10 +690,10 @@ impl WinitApp {
             }
             // ── Priority 4b: Directional whole-portal resize (Ctrl+Shift+Arrow) ─
             //
-            // A per-axis whole-portal resize affordance (hud-csrmf): Ctrl+Shift+
+            // A per-axis whole-portal resize affordance: Ctrl+Shift+
             // Left/Right steps WIDTH, Up/Down steps HEIGHT. It takes the same
             // viewer-geometry-lock as the pointer-drag and Ctrl+`+`/`-` paths, so
-            // a width step reflows the transcript and drives the dynamic hud-rpmwt
+            // a width step reflows the transcript and drives the dynamic
             // reconcile-on-republish path WITHOUT pointer injection — the axis the
             // autopilot live-verify needs on a multi-monitor console where the
             // 22px pointer resize handle is unreachable.
@@ -753,14 +750,11 @@ impl WinitApp {
             Ok(false) => {}
         }
 
-        // ── Keyboard focus traversal: Tab / Shift+Tab (hud-v0cal) ─────────
+        // ── Keyboard focus traversal: Tab / Shift+Tab ─────────
         //
         // Tab advances keyboard focus to the next focusable affordance and
         // Shift+Tab to the previous one, so the composer (and any focusable
-        // region) is reachable WITHOUT a pointer — the no-pointer surfaces this
-        // contract targets (smart glasses / Mobile Presence Node).  Spec change
-        // `portal-composer-interaction-completeness`, "Transcript Interaction
-        // Contract", scenario "composer is focusable without a pointer".
+        // region) is reachable without a pointer.
         //
         // Scoping precedence: this runs AFTER the safe-mode capture (outer fn),
         // the shell/chrome-reserved set, and the portal-resize hotkey, and
@@ -835,7 +829,7 @@ impl WinitApp {
                     // Escape on a composer-less focus stop (a focusable node with
                     // no composer sibling, or a tile-level stop) clears focus so
                     // the keyboard user is never stranded on a control they cannot
-                    // type into — a later Tab re-enters the cycle (hud-k6yvb).
+                    // type into — a later Tab re-enters the cycle.
                     if is_escape_key(&raw.key, &raw.key_code) {
                         let command =
                             keyboard_command(raw, self.state.focus_manager.current_owner(tab_id))
@@ -865,7 +859,7 @@ impl WinitApp {
             }
         }
 
-        // ── Composer draft intercept (§4.4) ──────────────────────────────
+        // ── Composer draft intercept ──────────────────────────────
         if self.state.input_processor.is_composer_active() {
             if is_escape_key(&raw.key, &raw.key_code)
                 && !raw.modifiers.ctrl
@@ -913,7 +907,7 @@ impl WinitApp {
                 }
                 ComposerTargetLookup::Unavailable => None,
             };
-            // Soft-wrap vertical caret movement (hud-21o6x): for ArrowUp/ArrowDown,
+            // Soft-wrap vertical caret movement: for ArrowUp/ArrowDown,
             // hand the input layer the compositor's latest wrapped-line layout so
             // the caret can step between visual rows. Read the reverse channel only
             // for the vertical keys (avoids cloning the layout on every keystroke);
@@ -935,7 +929,7 @@ impl WinitApp {
             // first. The input layer then consumes the keystroke (and, for cut,
             // deletes the selection), so it never leaks to the agent. Clipboard
             // write is a no-op off Windows; an empty selection writes nothing
-            // (hud-hxhnt). Ctrl+Alt is excluded so it cannot shadow AltGr.
+            //. Ctrl+Alt is excluded so it cannot shadow AltGr.
             if raw.modifiers.ctrl
                 && !raw.modifiers.alt
                 && matches!(raw.key_code.as_str(), "KeyC" | "KeyX")
@@ -945,7 +939,7 @@ impl WinitApp {
                 }
             }
             // Capture the input-started-at instant for local-ack latency
-            // measurement on the composer keystroke path (hud-r3ax6 / hud-o9ybl).
+            // measurement on the composer keystroke path.
             let composer_input_started = Instant::now();
             let (consumed, outcome) = self.state.input_processor.route_key_down_to_composer(
                 &raw.key_code,
@@ -977,11 +971,11 @@ impl WinitApp {
                     key_code = %str_preview(&raw.key_code),
                     "composer: KeyDown consumed by draft manager"
                 );
-                // Push updated draft snapshot for local echo rendering (hud-r3ax6).
+                // Push updated draft snapshot for local echo rendering.
                 // Guard: do NOT push after a terminal outcome — clear must win.
                 if !key_down_is_terminal {
                     self.push_local_composer_echo(composer_input_started);
-                    // hud-qbcp8: typing should not leave the input-pane history
+                    // typing should not leave the input-pane history
                     // scrolled away from the viewer's own live draft.
                     if let Some(tile_id) = history_tile_id {
                         self.reset_input_history_scroll_to_tail(tile_id);
@@ -993,7 +987,7 @@ impl WinitApp {
 
         let focus_owner = self.state.focus_manager.current_owner(tab_id).clone();
 
-        // ── Platform-neutral command dispatch (RFC 0004 §10) ─────────────
+        // ── Platform-neutral command dispatch ─────────────
         // Composer editing and portal-control compatibility have already had
         // first refusal above. Ordinary focused elements receive the abstract
         // command rather than a device-specific raw key.
@@ -1032,7 +1026,7 @@ impl WinitApp {
         // Build a namespace-resolver closure: given a tile_id, return its
         // agent namespace from the scene.  A Cell is used to propagate a
         // lock-busy signal out of the closure so the caller can defer the
-        // event (hud-2fz34).
+        // event.
         let ns_lock_busy = std::cell::Cell::new(false);
         let namespace_fn = |tile_id: tze_hud_scene::SceneId| -> Option<String> {
             match self.namespace_for_keyboard_tile(tile_id) {
@@ -1065,7 +1059,7 @@ impl WinitApp {
     }
 
     /// Advance keyboard focus by one step for a Tab / Shift+Tab key-down
-    /// (hud-v0cal) and broadcast the resulting focus transition.
+    /// and broadcast the resulting focus transition.
     ///
     /// Drives [`tze_hud_input::InputProcessor::navigate_focus`] — the no-pointer
     /// analogue of the pointer click-to-focus path — so the composer (and any
@@ -1353,9 +1347,9 @@ impl WinitApp {
         TabFocusOutcome::Done
     }
 
-    /// Escape recovery for a composer-less focus stop (hud-k6yvb): a focusable
+    /// Escape recovery for a composer-less focus stop: a focusable
     /// node whose tile has no composer, or a tile-level stop. It delivers the
-    /// RFC 0004 CANCEL command to the current owner before clearing focus to
+    /// CANCEL command to the current owner before clearing focus to
     /// `None`, so a keyboard user is never stranded on a control they cannot
     /// type into; a subsequent Tab re-enters the cycle at the first stop.
     ///
@@ -1703,7 +1697,7 @@ impl WinitApp {
                 .push_back(PendingKeyboardEvent::KeyUp(raw.clone()));
             return;
         }
-        // Resolve the active tab via the lock-free mirror (hud-dwcr7).
+        // Resolve the active tab via the lock-free mirror.
         let Some(active_tab) = self.active_tab_for_keyboard_dispatch() else {
             self.state
                 .pending_keyboard_events
@@ -1715,7 +1709,7 @@ impl WinitApp {
 
     /// FIFO-ordered inner routing for a key-up event.  See
     /// [`Self::dispatch_key_down_event_inner`] for why this MUST NOT re-apply
-    /// the FIFO guard (hud-dwcr7 livelock).
+    /// the FIFO guard (livelock).
     pub(super) fn dispatch_key_up_event_inner(
         &mut self,
         raw: &RawKeyUpEvent,
@@ -1767,7 +1761,7 @@ impl WinitApp {
         // global shell-owned key sequence above.
         let Some(tab_id) = active_tab else { return };
 
-        // ── Keyboard focus traversal: swallow the matching Tab KeyUp (hud-v0cal) ──
+        // ── Keyboard focus traversal: swallow the matching Tab KeyUp ──
         //
         // A bare Tab / Shift+Tab KeyDown is unconditionally consumed by focus
         // traversal in `dispatch_key_down_event_inner` (never forwarded as raw
@@ -1808,7 +1802,7 @@ impl WinitApp {
             return;
         }
 
-        // ── Portal resize hotkey: KeyUp fallback (hud-v4k1h) ──────────────
+        // ── Portal resize hotkey: KeyUp fallback ──────────────
         //
         // On live Windows, SendInput-driven Ctrl chords can deliver ONLY the
         // `KeyUp` for `=`/`-`/`+` (the `KeyDown` never arrives while Ctrl is
@@ -1849,7 +1843,7 @@ impl WinitApp {
             return;
         }
         // Directional Ctrl+Shift+Arrow whole-portal resize: same KeyUp fallback as
-        // the Ctrl+`+`/`-` chord (hud-csrmf), so a SendInput-driven release-only
+        // the Ctrl+`+`/`-` chord, so a SendInput-driven release-only
         // stream still resizes. Gated on `!is_composer_active()` to mirror the
         // key-down intercept (never steal composer word/line-select).
         if !self.state.input_processor.is_composer_active()
@@ -1910,7 +1904,7 @@ impl WinitApp {
     /// When safe mode is active, character events (including paste and IME commits)
     /// are dropped so agents never receive character input while chrome owns input.
     ///
-    /// # Composer interception (§4.1)
+    /// # Composer interception
     ///
     /// When a composer region is focused, the character is routed into the
     /// `ComposerDraftManager` draft buffer instead of being forwarded to the
@@ -1941,7 +1935,7 @@ impl WinitApp {
                 .push_back(PendingKeyboardEvent::Character(raw.clone()));
             return;
         }
-        // Resolve the active tab via the lock-free mirror (hud-dwcr7).
+        // Resolve the active tab via the lock-free mirror.
         let Some(active_tab) = self.active_tab_for_keyboard_dispatch() else {
             self.state
                 .pending_keyboard_events
@@ -1953,7 +1947,7 @@ impl WinitApp {
 
     /// FIFO-ordered inner routing for a character event.  See
     /// [`Self::dispatch_key_down_event_inner`] for why this MUST NOT re-apply
-    /// the FIFO guard (hud-dwcr7 livelock).
+    /// the FIFO guard (livelock).
     pub(super) fn dispatch_character_event_inner(
         &mut self,
         raw: &RawCharacterEvent,
@@ -2030,17 +2024,16 @@ impl WinitApp {
             }
         }
 
-        // ── Composer draft intercept (§4.4) ──────────────────────────────
+        // ── Composer draft intercept ──────────────────────────────
         //
-        // Spec §4.4: NO character input reaches the agent while a composer
+        // 4.4: NO character input reaches the agent while a composer
         // region is focused — regardless of what route_character_to_composer
         // returns.  In particular, when the clipboard text is ENTIRELY control
         // characters, route_character_to_composer sanitises it to an empty
         // string and paste("") returns EditOutcome::Unchanged (nothing was
         // mutated in the draft).  Without an unconditional early-return here,
         // the Unchanged case would fall through to the agent dispatch path
-        // below, leaking input to the agent while the composer is focused
-        // (hud-60hgf).
+        // below, leaking input to the agent while the composer is focused.
         if self.state.input_processor.is_composer_active() {
             let history_tile_id = match self.composer_target_for_tab(tab_id) {
                 ComposerTargetLookup::Ready(tile_id) => Some(tile_id),
@@ -2053,7 +2046,7 @@ impl WinitApp {
                 ComposerTargetLookup::Unavailable => None,
             };
             // Capture the input-started-at instant for local-ack latency
-            // measurement (hud-r3ax6 / hud-o9ybl).
+            // measurement.
             let composer_input_started = Instant::now();
             let outcome = self
                 .state
@@ -2071,7 +2064,7 @@ impl WinitApp {
                     "composer: Character consumed by draft manager"
                 );
                 // Push the updated draft snapshot for local echo rendering
-                // (hud-r3ax6).  This is the Stage 2 "local feedback" path;
+                //. This is the Stage 2 "local feedback" path;
                 // no adapter round-trip.
                 self.push_local_composer_echo(composer_input_started);
                 if let Some(tile_id) = history_tile_id {
@@ -2083,13 +2076,13 @@ impl WinitApp {
                 // empty, or the paste arrived while the composer was at
                 // capacity and already at its limit).  No echo push needed.
                 // Unconditional early-return below ensures the event still
-                // never reaches the agent path (§4.4).
+                // never reaches the agent path.
                 tracing::debug!(
                     character = %char_log_preview,
                     "composer: Character absorbed (Unchanged — all-control or no-op paste); not forwarded to agent (§4.4)"
                 );
             }
-            // §4.4 hard gate: the composer is active, so we MUST NOT fall
+            // hard gate: the composer is active, so we MUST NOT fall
             // through to the agent dispatch path below under any outcome.
             return;
         }
@@ -2127,7 +2120,7 @@ impl WinitApp {
     }
 
     /// Retry keyboard events that were deferred in the previous iteration(s)
-    /// because the active-tab mirror was momentarily busy (hud-2fz34).
+    /// because the active-tab mirror was momentarily busy.
     ///
     /// Called from `about_to_wait` once per event-loop iteration, matching the
     /// `drain_portal_projection` sibling pattern.  Each event is popped
@@ -2135,7 +2128,7 @@ impl WinitApp {
     /// **inner** dispatch fns (`dispatch_*_event_inner`), NOT the public
     /// Stage-1 entry.
     ///
-    /// This bypass is the fix for the hud-dwcr7 livelock: the public entry
+    /// This bypass is the fix for the livelock: the public entry
     /// re-queues any event when the queue is non-empty (the FIFO guard).  If the
     /// drain called the public entry, a freshly-popped event would see the
     /// remaining queued events and immediately re-queue itself to the back —
@@ -2156,7 +2149,7 @@ impl WinitApp {
         // Drain at most the number of events that were pending at entry so we
         // don't loop forever if a genuine lock-busy defer re-grows the queue
         // (e.g. the agent-routing namespace try_lock inside an inner fn).
-        // The bound lives inside `drain_keyboard_queue_bounded` (hud-b09ag).
+        // The bound lives inside `drain_keyboard_queue_bounded`.
         let limit = self.state.pending_keyboard_events.len();
         drain_keyboard_queue_bounded(limit, || {
             // Resolve the active tab before popping: if the mirror is busy, stop
@@ -2172,7 +2165,7 @@ impl WinitApp {
             // Route through the inner fns (no FIFO guard) — see the doc comment.
             // Calling the public entry here would re-queue the just-popped event
             // (the remaining queue is non-empty), rotating front→back forever
-            // (the hud-dwcr7 livelock).
+            // (the livelock).
             match event {
                 PendingKeyboardEvent::KeyDown(raw) => {
                     self.dispatch_key_down_event_inner(&raw, active_tab)
@@ -2198,7 +2191,7 @@ impl WinitApp {
     }
 
     /// Read the active tab without blocking the event-loop thread on the scene
-    /// mutex (hud-2fz34, hud-dwcr7).
+    /// mutex.
     ///
     /// Returns:
     /// - `None` — the (tiny, dedicated) mirror lock was momentarily contended;
@@ -2213,7 +2206,7 @@ impl WinitApp {
     /// under sustained gRPC portal streaming that lock is held across mutation
     /// batches, so the old try_lock kept failing and every composer keystroke
     /// deferred — freezing the local echo and violating the "Local feedback
-    /// first" doctrine + the 4 ms input-to-local-ack budget.  Composer
+    /// first" rule + the 4 ms input-to-local-ack budget. Composer
     /// keystroke echo (the composer intercept in `dispatch_key_down_event`)
     /// depends only on the lock-free `InputProcessor` plus this `tab_id`, so
     /// removing the scene-lock dependency here fully unblocks it.
@@ -2236,7 +2229,7 @@ impl WinitApp {
     }
 
     /// Try to read the agent namespace for a keyboard tile without blocking the
-    /// event-loop thread (hud-2fz34).
+    /// event-loop thread.
     ///
     /// Returns:
     /// - `None` — shared-state or scene lock is busy; caller must defer to the
@@ -2276,7 +2269,7 @@ impl WinitApp {
         };
 
         // The focus manager's active tab holds the authoritative FocusOwner.
-        // For a composer region the owner is FocusOwner::Node { tile_id, .. };
+        // For a composer region the owner is FocusOwner::Node { tile_id,.. };
         // from the tile_id we can look up the agent namespace.
         let Some(tile_id) = self.state.focus_manager.current_owner(tab_id).tile_id() else {
             return ComposerTargetLookup::Unavailable;
@@ -2443,7 +2436,7 @@ mod tests {
         );
     }
 
-    /// hud-v0cal: the bare Tab / Shift+Tab focus-traversal chord is recognised,
+    /// the bare Tab / Shift+Tab focus-traversal chord is recognised,
     /// and the modifier-laden Tab variants (shell-reserved Ctrl+Tab, OS Alt/Meta
     /// window switchers) are NOT — for BOTH the key-down intercept and the key-up
     /// swallow, which share this predicate.
@@ -2746,7 +2739,7 @@ mod tests {
         );
 
         // The matching KeyUp for a KeyDown that already resized must be swallowed
-        // by the dedup set, NOT applied as a second resize (hud-v4k1h).
+        // by the dedup set, NOT applied as a second resize.
         dispatch_ctrl_key_up(&mut app, "Equal", "=", false, 2);
         let after_equal_release = bounds(&app);
         assert_eq!(
@@ -2785,7 +2778,7 @@ mod tests {
         );
     }
 
-    /// hud-02sp5: focus acquired via keyboard Tab traversal (no pointer) must
+    /// focus acquired via keyboard Tab traversal (no pointer) must
     /// enable the same keyboard operations as click-to-focus. A keyboard-only
     /// viewer (Mobile Presence Node / glasses) Tabs onto the portal composer and
     /// then the Ctrl+= resize chord must resolve and resize the focused portal —
@@ -2857,7 +2850,7 @@ mod tests {
 
         // Bare Tab (no modifiers) advances focus onto the composer — the
         // no-pointer analogue of a click. This is the wiring proven by
-        // hud-v0cal (PR #980); here we assert it unlocks the resize chord.
+        // (PR #980); here we assert it unlocks the resize chord.
         app.dispatch_key_down_event_inner(
             &RawKeyDownEvent {
                 key_code: "Tab".to_string(),
@@ -2901,7 +2894,7 @@ mod tests {
         );
     }
 
-    /// Regression for hud-v4k1h: on live Windows the OS (SendInput) can deliver
+    /// On live Windows the OS (SendInput) can deliver
     /// ONLY the `KeyUp` for the Equal/Minus chord — the `KeyDown` never arrives
     /// while Ctrl is held. A key-down-only resize intercept therefore silently
     /// does nothing. The key-up fallback in `dispatch_key_up_event_inner` must
@@ -3295,7 +3288,7 @@ mod tests {
         );
     }
 
-    /// hud-k6yvb: Escape on a composer-less focus stop (a focusable node whose
+    /// Escape on a composer-less focus stop (a focusable node whose
     /// tile has no composer) clears focus to None — the keyboard user is never
     /// stranded — and broadcasts a FocusLost for the released node.
     #[test]
@@ -3378,7 +3371,7 @@ mod tests {
     }
 
     /// Typing into the composer while the input-pane history is scrolled back
-    /// must snap the history's scroll offset back to the tail (hud-qbcp8:
+    /// must snap the history's scroll offset back to the tail (:
     /// "don't strand the viewer scrolled-up" while they're actively drafting).
     #[test]
     fn typing_while_scrolled_back_resets_history_scroll_to_tail() {
@@ -3451,7 +3444,7 @@ mod tests {
 
     /// Streamed agent output re-renders the portal while the viewer drafts.
     /// The composer keeps focus and the unsent draft across that re-render, and
-    /// typing continues into the same draft (hud-1dnk5.19).
+    /// typing continues into the same draft.
     #[test]
     fn streamed_output_keeps_the_focused_draft() {
         use tze_hud_input::{FocusManager, InputProcessor, RawCharacterEvent};
@@ -3812,7 +3805,7 @@ mod tests {
         );
 
         // The first reply is now native scene history. The composer keeps focus
-        // across that re-render (hud-1dnk5.19), so the viewer types the next
+        // across that re-render, so the viewer types the next
         // reply without clicking again, then submits it after scrolling back.
         let tail_after_first = {
             let shared = app.state.shared_state.try_lock().unwrap();

@@ -80,6 +80,8 @@ jobs:
         run: bash scripts/ci/check_untracked_evidence.sh
       - name: Check tracked files carry no host identifiers
         run: python3 scripts/ci/check_host_identifiers.py
+      - name: Check current source references
+        run: python3 scripts/ci/check_current_references.py
       - uses: dtolnay/rust-toolchain@stable
         with:
           toolchain: "1.88"
@@ -121,11 +123,11 @@ jobs:
   # ── Lint: Linux all-targets, then the cfg(windows) crates ──────────────────
   #
   # The Linux pass never compiles #[cfg(target_os = "windows")] code;
-  # hud-53s6m found a real clippy::io_other_error regression in
-  # element_store.rs's Windows-only MoveFileExW path that slipped through that
+  # A clippy::io_other_error regression in element_store.rs's Windows-only
+  # MoveFileExW path slipped through that
   # gap (PR #1042). The cross-target pass typechecks only (blake3's portable
   # backend, no MinGW, no linking) and is scoped to the crates confirmed
-  # (hud-fsfkx) to cross-compile clippy-clean: tze_hud_runtime,
+  # to cross-compile clippy-clean: tze_hud_runtime,
   # tze_hud_compositor, tze_hud_config. Several workspace members pull in
   # Linux-only windowing deps, so `--workspace --target …-windows-gnu` is not
   # used. A crate that grows cfg(windows) code joins the -p list.

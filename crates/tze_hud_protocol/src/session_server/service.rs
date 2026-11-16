@@ -48,7 +48,7 @@ pub struct HudSessionImpl {
     pub(super) budget_enforcer: Option<SharedMutationBudgetEnforcer>,
     /// Bounded never-drop sender for transactional degradation notices.
     pub degradation_notices: super::DegradationNoticeSender,
-    /// Traffic-class-aware sender for runtime-injected input event batches (hud-i6yd.6).
+    /// Traffic-class-aware sender for runtime-injected input event batches.
     ///
     /// Carries `(namespace, EventBatch)` tuples. Each session handler subscribes
     /// and delivers the batch only if `namespace` matches its own namespace AND the
@@ -59,7 +59,7 @@ pub struct HudSessionImpl {
     /// state-stream variants use bounded broadcast delivery.
     pub input_event_tx: super::InputEventSender,
 
-    /// Broadcast sender for `ElementRepositionedEvent` notifications (hud-bs2q.6).
+    /// Broadcast sender for `ElementRepositionedEvent` notifications.
     ///
     /// Emitted after drag completion (geometry_override persisted) and after
     /// reset-to-default (geometry_override cleared). Each session handler subscribes
@@ -206,7 +206,7 @@ impl HudSessionImpl {
     }
 
     /// Broadcast an `ElementRepositionedEvent` to all active sessions subscribed
-    /// to `SCENE_TOPOLOGY` (hud-bs2q.6).
+    /// to `SCENE_TOPOLOGY`.
     ///
     /// Called after:
     /// - Drag completion: `geometry_override` has been persisted.
@@ -226,7 +226,7 @@ impl HudSessionImpl {
     }
 
     /// Reset an element's user geometry override to the fallback position and
-    /// broadcast an `ElementRepositionedEvent` to subscribed agents (hud-bs2q.6).
+    /// broadcast an `ElementRepositionedEvent` to subscribed agents.
     ///
     /// This is the programmatic path for "reset-to-default". The visual entry
     /// point (right-click context menu / tap button on the drag handle) calls

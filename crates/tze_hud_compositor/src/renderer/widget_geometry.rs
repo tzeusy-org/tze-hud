@@ -2,7 +2,7 @@
 //!
 //! Moved from `renderer/mod.rs` (the "Widget/drag geometry" cluster,
 //! formerly ~L7084–7345 at plan date) by Step R-8 of the renderer module
-//! split (hud-fgryk).  No logic was changed; only the `pub(super)` visibility
+//! split. No logic was changed; only the `pub(super)` visibility
 //! modifier was added to `collect_drag_handle_entries` and
 //! `append_drag_handle_vertices` so that `hit_regions.rs` can call them.
 //!
@@ -101,7 +101,7 @@ impl Compositor {
 
     /// Clamp a display-space rect so it stays fully on screen without changing
     /// its top-left anchoring (used for the header-band drag handle, which is the
-    /// frame's top strip — not centered like the grip). hud-643dv.
+    /// frame's top strip — not centered like the grip)..
     fn clamp_rect_to_display(r: Rect, sw: f32, sh: f32) -> Rect {
         let x = r.x.clamp(0.0, sw.max(0.0));
         let y = r.y.clamp(0.0, sh.max(0.0));
@@ -155,7 +155,7 @@ impl Compositor {
 
         // Portal frame tiles get a full-width HEADER BAND drag handle instead of
         // the small centered grip — the whole top strip drags like a Windows
-        // titlebar (hud-643dv). The band height is token-driven; the anchor set
+        // titlebar. The band height is token-driven; the anchor set
         // comes from the shared structural portal-group resolution so only the
         // frame/anchor tile (not the panes) gets the band.
         let band_h = self

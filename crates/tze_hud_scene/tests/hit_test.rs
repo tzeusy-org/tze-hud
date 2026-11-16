@@ -118,8 +118,8 @@ fn passthrough_when_no_active_tab() {
 
 // ─── Widget passthrough hit-test ─────────────────────────────────────────────
 //
-// Widget tiles MUST default to input_mode = Passthrough per widget-system/spec.md
-// §Requirement: Widget Input Mode. Input events landing on a widget tile's
+// Widget tiles MUST default to input_mode = Passthrough per
+//: Widget Input Mode. Input events landing on a widget tile's
 // geometry MUST pass through to the next tile in z-order.
 
 #[test]
@@ -161,7 +161,7 @@ fn widget_passthrough_skips_to_agent_tile_below() {
 
     // Widget tile: overlaps agent tile, z=20, Passthrough (widget default).
     // Bounds: (250, 150, 700×500) — reaches past agent tile.
-    // No interactive nodes (per spec, widgets are display-only).
+    // No interactive nodes (, widgets are display-only).
     let widget_tile = scene
         .create_tile(
             tab_id,

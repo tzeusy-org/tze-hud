@@ -1,16 +1,10 @@
-//! Vertical-flow layout resolution for stacked child nodes (hud-txkbh).
+//! Vertical-flow layout resolution for stacked child nodes.
 //!
-//! The compositor plots every node at its own explicit `bounds.y`; there is no
-//! flow/stack layout. This module supplies the general capability to STACK a
-//! parent's children vertically: measure each child's wrapped rendered height and
-//! position the next child directly below it plus a gap. It exists so a publisher
-//! that cannot measure wrapped text — notably the projection layer, which would
-//! emit one transcript node per conversational turn but has no font metrics — can
-//! leave child vertical positions unresolved and have the *runtime* compute the
-//! stack. Layout runs in the runtime/compositor, never in the model
-//! (LLM-out-of-frame-loop), and the inter-child gap is supplied by the caller
-//! from a design token (e.g. `PortalPartTokens::section_gap_px`) — this module
-//! never invents spacing.
+//! `NodeLayout::VerticalFlow` stacks a parent's children by their measured
+//! wrapped height plus the caller-supplied gap. Absolute-layout nodes keep their
+//! explicit `bounds.y`. The compositor resolves the offsets before geometry and
+//! text rendering, so publishers need no font metrics to position stacked text.
+//! Layout stays in the runtime/compositor; spacing comes from design tokens.
 //!
 //! It is split into a pure geometry core ([`stack_offsets`] / [`flow_total_height`],
 //! no fonts, unit-testable in isolation) and a measurement bridge
@@ -20,15 +14,12 @@
 //!
 //! [`FlowChild::content_mode`] selects which render path a child is measured
 //! against, and the "measured == painted" claim above is scoped accordingly
-//! (hud-3xdlf, hud-ysyis) — see [`FlowContentMode`] for what each of the three
+//! See [`FlowContentMode`] for what each of the three
 //! modes does and does not account for, mirroring the render path's own
 //! `markdown_node_has_pixel_runs` fork (`renderer/text.rs`) one level up.
 //!
-//! This is the reusable resolution engine only. Wiring the resolved offsets into
-//! the render sites and exposing a per-node layout mode on the scene/wire schema
-//! are separate integration steps; the per-turn transcript split that would drive
-//! this in production is gated on the Phase-1 Promotion Evidence Gate
-//! (text-stream-portals §Phase-1 Promotion Evidence Gate).
+//! `Compositor::prime_vertical_flow_layout` calls this resolver before the frame
+//! geometry and text passes consume the resolved offsets.
 
 use std::collections::HashMap;
 
@@ -66,33 +57,32 @@ pub(crate) enum FlowContentMode<'a> {
     /// matching what actually paints), heading `size_scale` spans shape at
     /// their real (taller) per-span metrics, and the token-resolved
     /// `parsed.line_height_multiplier` is used instead of the plain-text
-    /// constant (hud-3xdlf). This is the path the intended per-turn transcript
+    /// constant. This is the path the intended per-turn transcript
     /// split (hud-uym23) will use for the common (unattributed) case once wired.
     Markdown {
         /// The resolved token set for this content's markdown surface — used to
         /// parse ONLY on the cache-miss fallback, and to derive the margin
         /// line-height (which equals `parsed.line_height_multiplier`).
         tokens: &'a MarkdownTokens,
-        /// The commit-time cached parse of `content` (hud-5wx09), when the render
+        /// The commit-time cached parse of `content`, when the render
         /// path's `MarkdownCache` already holds it. `Some` → measured via
         /// [`crate::text::measure_markdown_content_height_cached`] with ZERO
         /// per-frame parse; `None` (cold-frame miss, or a caller with no cache)
         /// → the re-parsing [`crate::text::measure_markdown_content_height`]
         /// fallback. On unchanged content the commit-time prime guarantees `Some`,
-        /// so the steady-state per-frame parse cost is zero (the spec MUST).
+        /// so the steady-state per-frame parse cost is zero.
         cached: Option<&'a ParsedMarkdown>,
     },
     /// Markdown SOURCE carrying at least one pixel-bearing `color_run` (e.g.
-    /// the hud-26869 per-turn role-attribution span) — measured via
+    /// the per-turn role-attribution span) — measured via
     /// [`crate::text::measure_raw_content_height`], which reproduces
     /// [`crate::text::TextItem::from_text_markdown_node`]'s RAW-content
     /// shaping: `content` is measured EXACTLY as given (markdown syntax NOT
     /// stripped — stripping would shift bytes and invalidate the color run's
     /// pinned offsets), at the node's own `font_family`, using the DEFAULT
     /// line-height multiplier unconditionally (that render constructor has no
-    /// access to a parsed `MarkdownTokens` either, by design — hud-ysyis).
-    /// Attributed transcript turns (the real per-turn-attribution content
-    /// hud-26869 ships) take this branch, not [`Self::Markdown`].
+    /// access to parsed `MarkdownTokens`). Attributed transcript turns take
+    /// this branch rather than [`Self::Markdown`].
     RawWithColorRuns,
 }
 
@@ -159,8 +149,7 @@ pub(crate) fn flow_total_height(heights: &[f32], gap: f32) -> f32 {
 /// Measure the rendered height (px) of one flowed child's wrapped content at its
 /// `wrap_width`, dispatching on [`FlowChild::content_mode`] to the render
 /// path's OWN shaping for that content kind — see [`FlowContentMode`] for
-/// exactly what "measured == painted" covers on each branch (hud-3xdlf,
-/// hud-ysyis).
+/// exactly what "measured == painted" covers on each branch.
 ///
 /// - [`FlowContentMode::PlainText`] — via [`composer_wrap_line_widths`]:
 ///   height = `wrapped_line_count * (font_size_px * LINE_HEIGHT_MULTIPLIER) +
@@ -186,7 +175,7 @@ pub(crate) fn measure_child_height(font_system: &mut FontSystem, child: &FlowChi
     let wrap_width = child.wrap_width.max(1.0);
     let content_height = match child.content_mode {
         FlowContentMode::Markdown { tokens, cached } => match cached {
-            // Cache HIT (hud-5wx09): measure the commit-time cached parse — the
+            // Cache HIT: measure the commit-time cached parse — the
             // frame path performs no markdown parsing.
             Some(parsed) => measure_markdown_content_height_cached(
                 font_system,
@@ -239,14 +228,13 @@ pub(crate) fn measure_child_height(font_system: &mut FontSystem, child: &FlowChi
 /// path applies ([`text_content_box_margins`]): the wrap width is the content box
 /// `bounds.width - 2*margin_x` (NOT the raw bounds width) and the vertical padding
 /// is `2*margin_y`, so the measured row height equals the painted row height
-/// (hud-yfj8u fidelity — the render path and this measurement share one margin
-/// formula and cannot drift).
+/// because the render path and this measurement share one margin formula.
 ///
 /// `markdown_tokens` is the caller's resolved token set for the common
 /// (non-attributed) markdown case; `flow_child_height` selects which render
 /// path a `TextMarkdown` child is measured against by mirroring the SAME
 /// `markdown_node_has_pixel_runs` fork the render path itself applies
-/// (`renderer/text.rs`) — see [`FlowContentMode`] (hud-ysyis). This includes
+/// (`renderer/text.rs`) — see [`FlowContentMode`]. This includes
 /// the MARGIN computation, not just the text-height measurement: the raw
 /// (color-run-bearing) branch derives its margin `line_height` from the
 /// DEFAULT multiplier (matching `from_text_markdown_node`, which has no token
@@ -317,20 +305,18 @@ fn flow_child_height(
 /// via the render path's shared content-box margin formula, so nothing is
 /// invented here.
 ///
-/// This is the compositor-side pre-pass. Substituting the resolved y at the
-/// render geometry sites (and GPU pixel verification of the stacked result) is
-/// the remaining integration step, deferred to a live-hardware evidence bead per
-/// the hud-yfj8u live-verify scope.
+/// The compositor-side pre-pass stores these offsets for geometry and text
+/// rendering. Children absent from the map retain their explicit vertical origin.
 ///
 /// `markdown_tokens` is the caller's resolved token set for the tile's markdown
 /// surface (the SAME set that would be passed to `parse_markdown_subset` /
 /// `resolve_portal_tokens` for these nodes) — threaded down to
 /// [`flow_child_height`] so a `TextMarkdown` child without pixel-bearing
-/// `color_runs` measures against the real tokens (hud-ysyis) rather than the
+/// `color_runs` measures against the real tokens rather than the
 /// plain-text fallback this pre-pass previously used unconditionally.
 ///
 /// `parsed_by_id` maps a child `SceneId` to the commit-time cached
-/// [`ParsedMarkdown`] the render path already produced (hud-5wx09). On a HIT the
+/// [`ParsedMarkdown`] the render path already produced. On a HIT the
 /// markdown height is measured from that cached parse with ZERO per-frame parsing
 /// (text-stream-portals: "per-frame flow measurement MUST consume the commit-time
 /// cached parsed representation … MUST NOT re-parse"); a MISS (cold first frame /
@@ -359,7 +345,7 @@ pub fn resolve_tile_flow_offsets(
             .iter()
             .map(|child| {
                 // The commit-time cached parse for this child, when the render
-                // MarkdownCache already holds its content (hud-5wx09). Keyed by
+                // MarkdownCache already holds its content. Keyed by
                 // the child's own SceneId, so the correct portal/generic token
                 // scope is already baked in (the caller built the map from
                 // node_key_cache). `None` for a cache miss or a non-markdown child.
@@ -475,7 +461,7 @@ mod tests {
         );
     }
 
-    // ── Markdown measurement bridge (hud-3xdlf) ───────────────────────────────
+    // ── Markdown measurement bridge ───────────────────────────────
     //
     // These cover the three divergences the bead closed: stripped-vs-raw source
     // (different wrap/line count), heading `size_scale` (taller lines, not a
@@ -765,11 +751,11 @@ mod tests {
         }
     }
 
-    // ── Raw-content (color-run) measurement mode (hud-ysyis) ──────────────────
+    // ── Raw-content (color-run) measurement mode ──────────────────
     //
     // Mirrors the render path's `markdown_node_has_pixel_runs` fork
     // (`renderer/text.rs`): a `TextMarkdownNode` WITH pixel-bearing
-    // `color_runs` (e.g. hud-26869 per-turn role attribution) bypasses
+    // `color_runs` (e.g. per-turn role attribution) bypasses
     // `from_text_markdown_cached` and paints via `from_text_markdown_node` on
     // RAW, un-stripped content — so it must be MEASURED on that same raw
     // basis, not the parsed/stripped one `FlowContentMode::Markdown` uses.
@@ -778,7 +764,7 @@ mod tests {
     fn measure_child_height_raw_mode_does_not_strip_markdown_syntax() {
         // Content whose markdown syntax bytes are the difference between
         // wrapping to 1 line and 2 at this width (same fixture shape as the
-        // hud-3xdlf strips-vs-raw test, but this time asserting RawWithColorRuns
+        // strips-vs-raw test, but this time asserting RawWithColorRuns
         // matches the RAW (longer) wrap, not the stripped one.
         let mut fs = crate::fonts::bundled_font_system();
         let tokens = MarkdownTokens::default();
@@ -1013,7 +999,7 @@ mod tests {
         );
     }
 
-    // ── Cache-backed measurement: zero per-frame parse (hud-5wx09) ─────────────
+    // ── Cache-backed measurement: zero per-frame parse ─────────────
 
     fn md_content(node: &Node) -> &str {
         match &node.data {
@@ -1059,7 +1045,7 @@ mod tests {
         assert_eq!(
             crate::markdown::PARSE_MARKDOWN_SUBSET_CALLS.with(|c| c.get()),
             0,
-            "cache-hit flow measurement MUST perform zero markdown parses per frame (spec MUST)"
+            "cache-hit flow measurement MUST perform zero markdown parses per frame"
         );
     }
 
@@ -1102,12 +1088,12 @@ mod tests {
         );
     }
 
-    // ── Font-system sensitivity (hud-tfm3p review of hud-9gopx) ────────────────
+    // ── Font-system sensitivity ───────────────────────────────────────
     //
-    // hud-9gopx swapped the caller (`prime_vertical_flow_layout`) from
-    // constructing a fresh `bundled_font_system()` every frame to measuring
-    // against the render rasterizer's OWN persistent `FontSystem` (reachable via
-    // the new `TextRasterizer::font_system_mut()`), so agent-uploaded fonts
+    // The caller (`prime_vertical_flow_layout`) measures against the render
+    // rasterizer's own persistent `FontSystem` rather than constructing a fresh
+    // `bundled_font_system()` every frame. `TextRasterizer::font_system_mut()`
+    // exposes that font system, so agent-uploaded fonts
     // (loaded into that same `FontSystem` via `load_font_bytes`) are reflected in
     // flow heights. The claimed no-regression basis is that `TextRasterizer::with_font_config`
     // seeds `font_system` from the SAME `bundled_font_system()` call the old code

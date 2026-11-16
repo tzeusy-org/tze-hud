@@ -1,6 +1,6 @@
 //! # Zone Ontology Integration Tests
 //!
-//! Tests for the four-level zone model per scene-graph/spec.md §Requirement: Zone Registry (line 185).
+//! Tests for the four-level zone model Zone Registry (line 185).
 //!
 //! ## Four-level zone ontology
 //!
@@ -1249,8 +1249,6 @@ fn exemplar_status_bar_lease_expiry_isolation() {
 //   accepted_media_types: [KeyValuePairs]  (StatusBar content)
 //   layer_attachment: Chrome
 //
-// Spec references: openspec/changes/exemplar-status-bar/spec.md
-// Task references: openspec/changes/exemplar-status-bar/tasks.md §2
 
 /// Build a SceneGraph pre-loaded with the default v1 zone registry
 /// (status-bar, notification-area, subtitle, pip, ambient-background, alert-banner).
@@ -1275,7 +1273,7 @@ fn status_bar_entry(key: &str, value: &str) -> ZoneContent {
 
 #[test]
 fn exemplar_status_bar_three_agents_coexist() {
-    // [hud-t1in.2]: MergeByKey — three distinct keys must coexist.
+    // MergeByKey — three distinct keys must coexist.
     let mut scene = make_scene_with_defaults();
 
     scene
@@ -1338,7 +1336,7 @@ fn exemplar_status_bar_three_agents_coexist() {
 
 #[test]
 fn exemplar_status_bar_key_update_replaces() {
-    // [hud-t1in.2]: MergeByKey — same key replaces previous value.
+    // MergeByKey — same key replaces previous value.
     let mut scene = make_scene_with_defaults();
 
     scene
@@ -1394,15 +1392,14 @@ fn exemplar_status_bar_key_update_replaces() {
 // ── Test 3: Key removal via empty-string value ────────────────────────────────
 //
 // Scenario: an agent previously published a "weather" key.  It now re-publishes
-// the same merge_key with an empty string value.  Per the empty-value-removal
-// convention (openspec/changes/exemplar-status-bar/design.md), the scene graph
+// the same merge_key with an empty string value. The scene graph
 // MUST store the updated record (MergeByKey replacement) and the entry value
 // MUST be an empty string.  The compositor is responsible for skipping empty-
 // valued entries when rendering.
 
 #[test]
 fn exemplar_status_bar_key_removal_empty_value() {
-    // [hud-t1in.2]: MergeByKey — empty-value publish is stored; compositor skip convention.
+    // MergeByKey — empty-value publish is stored; compositor skip convention.
     let mut scene = make_scene_with_defaults();
 
     // Initial publish with a visible value.
@@ -1459,7 +1456,7 @@ fn exemplar_status_bar_key_removal_empty_value() {
 
 #[test]
 fn exemplar_status_bar_key_removal_ttl_expiry() {
-    // [hud-t1in.2]: MergeByKey — TTL expiry removes the publication.
+    // MergeByKey — TTL expiry removes the publication.
     use std::sync::Arc;
     use tze_hud_scene::TestClock;
 
@@ -1523,7 +1520,6 @@ fn exemplar_status_bar_key_removal_ttl_expiry() {
 
 // ── Test 5: Max keys eviction — 33rd distinct key evicts the oldest ────────────
 //
-// Spec: openspec/changes/exemplar-status-bar/tasks.md §2.5
 //   "publish 33 distinct merge_keys to status-bar zone (max_keys: 32);
 //    assert oldest key evicted and 32 keys remain"
 //
@@ -1533,7 +1529,7 @@ fn exemplar_status_bar_key_removal_ttl_expiry() {
 
 #[test]
 fn exemplar_status_bar_max_keys_eviction() {
-    // [hud-6v0t]: MergeByKey max_keys=32 — 33rd distinct key evicts oldest.
+    // MergeByKey max_keys=32 — 33rd distinct key evicts oldest.
     let mut scene = make_scene_with_defaults();
 
     // Publish 32 distinct keys — all must succeed.  key-00 is inserted first
@@ -1603,7 +1599,7 @@ fn exemplar_status_bar_max_keys_eviction() {
 
 #[test]
 fn exemplar_status_bar_rapid_updates_coalesce_to_latest() {
-    // [hud-t1in.2]: MergeByKey — rapid same-key updates coalesce to latest value.
+    // MergeByKey — rapid same-key updates coalesce to latest value.
     let mut scene = make_scene_with_defaults();
 
     // Rapid-fire 50 updates with the same key from the same agent.
@@ -1813,10 +1809,6 @@ mod proptests {
 
 // ─── Ambient-background TTL semantics ────────────────────────────────────────
 //
-// Spec: openspec/changes/exemplar-ambient-background/specs/exemplar-ambient-background/spec.md
-// Requirement "Ambient Background TTL Semantics"
-// Design: openspec/changes/exemplar-ambient-background/design.md — Decision 4
-//   "TTL semantics: 0 = persistent until replaced"
 //
 // The ambient-background zone uses contention_policy: Replace and
 // auto_clear_ms: None (no zone-level auto-clear).
@@ -1877,7 +1869,7 @@ fn make_ambient_scene(start_us: u64) -> (SceneGraph, std::sync::Arc<tze_hud_scen
 
 #[test]
 fn ambient_background_auto_clear_ms_is_none() {
-    // [hud-gwhr.3]: ambient-background zone must have auto_clear_ms: None so
+    // ambient-background zone must have auto_clear_ms: None so
     // that zero-TTL publications persist indefinitely.
     let registry = tze_hud_scene::types::ZoneRegistry::with_defaults();
     let zone = registry
@@ -1900,7 +1892,7 @@ fn ambient_background_auto_clear_ms_is_none() {
 
 #[test]
 fn test_ambient_background_zero_ttl_persists() {
-    // [hud-gwhr.3]: Zero TTL must persist; ambient-background has no auto-clear.
+    // Zero TTL must persist; ambient-background has no auto-clear.
     let (mut scene, clock) = make_ambient_scene(1_000_000); // t=1 s
 
     // Publish with ttl_us == 0: maps to expires_at_wall_us: None.
@@ -1959,7 +1951,7 @@ fn test_ambient_background_zero_ttl_persists() {
 
 #[test]
 fn test_ambient_background_omitted_ttl_persists() {
-    // [hud-gwhr.3]: Omitting TTL defaults to persistent (same as ttl_us: 0).
+    // Omitting TTL defaults to persistent (same as ttl_us: 0).
     let (mut scene, clock) = make_ambient_scene(1_000_000);
 
     // Publish without specifying any expiry — same as ttl_us not provided.
@@ -2002,7 +1994,7 @@ fn test_ambient_background_omitted_ttl_persists() {
 
 #[test]
 fn test_ambient_background_nonzero_ttl_expires() {
-    // [hud-gwhr.3]: Non-zero TTL expires; ambient-background reverts to clear.
+    // Non-zero TTL expires; ambient-background reverts to clear.
     let start_us = 1_000_000u64; // t=1 s
     let ttl_us = 2_000_000u64; // 2 s TTL
     let expiry_us = start_us + ttl_us; // t=3 s
@@ -2076,7 +2068,7 @@ fn test_ambient_background_nonzero_ttl_expires() {
 
 #[test]
 fn test_ambient_background_ttl_expiry_then_republish() {
-    // [hud-gwhr.3]: After TTL expiry, ambient-background accepts a new persistent publish.
+    // After TTL expiry, ambient-background accepts a new persistent publish.
     let start_us = 1_000_000u64;
     let ttl_us = 2_000_000u64;
     let expiry_us = start_us + ttl_us;

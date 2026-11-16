@@ -1,15 +1,12 @@
 //! Dashboard tile HitRegionNode input capture, local feedback, and focus cycling tests.
 //!
-//! Implements acceptance criteria for `hud-i6yd.5` (tasks 7, 9 from
-//! openspec/changes/exemplar-dashboard-tile/tasks.md):
-//!
-//! **Task 7 — Input Capture and Local Feedback:**
+//! Input capture and local feedback:
 //! - PointerDown at Refresh bounds → NodeHit with interaction_id="refresh-button"
 //! - pressed=true set within p99 < 4ms of PointerDownEvent (headless synthetic injection)
 //! - hovered set on PointerEnter, cleared on PointerLeave for both buttons
 //! - PointerUp with release_on_up=true clears pressed and releases pointer capture
 //!
-//! **Task 9 — Focus Cycling:**
+//! Focus cycling:
 //! - Focus ring rendered when focus transfers to HitRegionNode via Tab or click
 //! - Tab cycles focus Refresh → Dismiss
 //! - Shift+Tab cycles reverse (Dismiss → Refresh)
@@ -18,9 +15,6 @@
 //!
 //! All tests are headless Layer 0: no display server or GPU required.
 //!
-//! Source: openspec/changes/exemplar-dashboard-tile/specs/exemplar-dashboard-tile/spec.md
-//!         §Requirement: HitRegionNode Local Feedback (lines 118-138)
-//!         §Requirement: Focus Cycling Between Buttons (lines 166-182)
 
 use tze_hud_input::{
     CaptureReleasedReason, CommandAction, CommandProcessor, CommandSource, FocusLostReason,
@@ -29,7 +23,7 @@ use tze_hud_input::{
 };
 use tze_hud_scene::{HitRegionNode, Node, NodeData, Rect, SceneGraph, SceneId, SolidColorNode};
 
-// ── Dashboard tile geometry (from spec.md lines 5-11) ──────────────────────────
+// ── Dashboard tile geometry ──────────────────────────
 //
 // Tile bounds:    (50, 50, 400, 300) in display space
 // Refresh button: bounds (16, 256, 176, 36) — tile-local
@@ -175,7 +169,7 @@ fn raw_command(action: CommandAction) -> RawCommandEvent {
 
 // ── Task 7: Input Capture and Local Feedback ───────────────────────────────────
 
-/// Spec §Requirement: HitRegionNode Local Feedback, Scenario: Button pressed state on pointer down
+/// HitRegionNode Local Feedback, Scenario: Button pressed state on pointer down
 ///
 /// WHEN a PointerDownEvent lands on the "Refresh" HitRegionNode
 /// THEN the runtime SHALL set pressed = true on that node within p99 < 4ms
@@ -216,7 +210,7 @@ fn pointer_down_at_refresh_returns_node_hit_with_refresh_interaction_id() {
     );
 }
 
-// ─── Timing-assertion gate (hud-94vm5) ───────────────────────────────────────
+// ─── Timing-assertion gate ───────────────────────────────────────
 
 /// Returns `true` when wall-clock / p99 latency hard assertions should run.
 ///
@@ -229,7 +223,7 @@ fn perf_assert_enabled() -> bool {
         .unwrap_or(false)
 }
 
-/// Spec §Requirement: HitRegionNode Local Feedback, Scenario: Button pressed state on pointer down
+/// HitRegionNode Local Feedback, Scenario: Button pressed state on pointer down
 ///
 /// local_ack_us (time from event arrival to pressed=true) must be within p99 < 4ms.
 /// This is a headless Layer 0 performance test injecting synthetic PointerDown.
@@ -286,7 +280,7 @@ fn pressed_state_set_within_4ms_p99_on_refresh() {
     durations.sort_unstable();
     let p99 = durations[98]; // 99th percentile of 100 samples
 
-    // Timing assertion: gated — wall-clock budget.  (hud-94vm5)
+    // Timing assertion: gated — wall-clock budget.
     if perf_assert_enabled() {
         assert!(
             p99 < ack_budget,
@@ -303,7 +297,7 @@ fn pressed_state_set_within_4ms_p99_on_refresh() {
     }
 }
 
-/// Spec §Requirement: HitRegionNode Local Feedback, Scenario: Button hovered state on pointer enter
+/// HitRegionNode Local Feedback, Scenario: Button hovered state on pointer enter
 ///
 /// WHEN the pointer enters the bounds of the "Dismiss" HitRegionNode
 /// THEN the runtime SHALL set hovered = true and apply the default hover visual
@@ -358,7 +352,7 @@ fn hover_state_set_on_pointer_enter_dismiss() {
     );
 }
 
-/// Spec §Requirement: HitRegionNode Local Feedback, Scenario: Button hovered state on pointer enter (Refresh)
+/// HitRegionNode Local Feedback, Scenario: Button hovered state on pointer enter (Refresh)
 #[test]
 fn hover_state_set_on_pointer_enter_refresh() {
     let (mut scene, _tab_id, _tile_id, refresh_id, dismiss_id) = setup_dashboard_tile_scene();
@@ -397,7 +391,7 @@ fn hover_state_set_on_pointer_enter_refresh() {
     );
 }
 
-/// Spec §Requirement: HitRegionNode Local Feedback — hover cleared on leave
+/// HitRegionNode Local Feedback — hover cleared on leave
 ///
 /// After hovering over Refresh, moving the pointer away must clear hovered=false.
 #[test]
@@ -447,7 +441,7 @@ fn hover_cleared_on_pointer_leave_refresh() {
     );
 }
 
-/// Spec §Requirement: HitRegionNode Local Feedback — hover cleared on leave (Dismiss)
+/// HitRegionNode Local Feedback — hover cleared on leave (Dismiss)
 #[test]
 fn hover_cleared_on_pointer_leave_dismiss() {
     let (mut scene, _tab_id, _tile_id, _refresh_id, dismiss_id) = setup_dashboard_tile_scene();
@@ -493,7 +487,7 @@ fn hover_cleared_on_pointer_leave_dismiss() {
     );
 }
 
-/// Spec §Requirement: HitRegionNode Local Feedback, Scenario: PointerUp clears pressed and releases capture
+/// HitRegionNode Local Feedback, Scenario: PointerUp clears pressed and releases capture
 ///
 /// WHEN a PointerUpEvent occurs while the "Refresh" button has pressed=true
 /// and release_on_up=true
@@ -628,7 +622,7 @@ fn pointer_up_clears_pressed_and_releases_capture_on_dismiss() {
 
 // ── Task 9: Focus Cycling ──────────────────────────────────────────────────────
 
-/// Spec §Requirement: Focus Cycling Between Buttons, Scenario: Tab advances Refresh → Dismiss
+/// Focus Cycling Between Buttons, Scenario: Tab advances Refresh → Dismiss
 ///
 /// WHEN the "Refresh" HitRegionNode has focus and the user presses Tab
 /// THEN focus SHALL transfer to the "Dismiss" HitRegionNode, dispatching
@@ -709,7 +703,7 @@ fn tab_advances_focus_from_refresh_to_dismiss() {
     );
 }
 
-/// Spec §Requirement: Focus Cycling Between Buttons, Scenario: Tab wraps Dismiss → Refresh
+/// Focus Cycling Between Buttons, Scenario: Tab wraps Dismiss → Refresh
 ///
 /// WHEN the "Dismiss" HitRegionNode has focus and the user presses Tab
 /// THEN focus SHALL wrap to the "Refresh" HitRegionNode
@@ -763,7 +757,7 @@ fn tab_wraps_focus_from_dismiss_back_to_refresh() {
     assert_eq!(gained_ev.node_id, Some(refresh_id));
 }
 
-/// Spec §Requirement: Focus Cycling Between Buttons, Scenario: Shift+Tab reverses cycling
+/// Focus Cycling Between Buttons, Scenario: Shift+Tab reverses cycling
 ///
 /// Shift+Tab cycles Dismiss → Refresh (NAVIGATE_PREV).
 #[test]
@@ -813,7 +807,7 @@ fn shift_tab_cycles_focus_dismiss_to_refresh() {
     assert_eq!(gained_ev.node_id, Some(refresh_id));
 }
 
-/// Spec §Requirement: Focus Cycling Between Buttons, Scenario: Shift+Tab wraps Refresh → Dismiss
+/// Focus Cycling Between Buttons, Scenario: Shift+Tab wraps Refresh → Dismiss
 #[test]
 fn shift_tab_wraps_refresh_to_dismiss() {
     let (scene, tab_id, tile_id, refresh_id, dismiss_id) = setup_dashboard_tile_scene();
@@ -841,7 +835,7 @@ fn shift_tab_wraps_refresh_to_dismiss() {
     assert_eq!(gained_ev.node_id, Some(dismiss_id));
 }
 
-/// Spec §Requirement: Focus Ring Visual Indication
+/// Focus Ring Visual Indication
 ///
 /// WHEN focus transfers to the "Refresh" HitRegionNode via Tab key or click
 /// THEN the runtime SHALL produce a FocusRingUpdate with bounds at the node's
@@ -885,7 +879,7 @@ fn focus_ring_bounds_computed_in_display_space_for_refresh() {
     );
 }
 
-/// Spec §Requirement: Focus Ring Visual Indication — Tab also produces ring update
+/// Focus Ring Visual Indication — Tab also produces ring update
 #[test]
 fn focus_ring_produced_on_tab_navigation_to_dismiss() {
     let (scene, tab_id, tile_id, refresh_id, _dismiss_id) = setup_dashboard_tile_scene();
@@ -917,7 +911,7 @@ fn focus_ring_produced_on_tab_navigation_to_dismiss() {
     );
 }
 
-/// Spec §Requirement: Focus Cycling Between Buttons, Scenario: Pointer-free activation
+/// Focus Cycling Between Buttons, Scenario: Pointer-free activation
 ///
 /// BOTH HitRegionNodes must be reachable and activatable without pointer
 /// (NAVIGATE_NEXT + ACTIVATE dispatches same callback as click).
@@ -1019,7 +1013,7 @@ fn both_buttons_reachable_and_activatable_via_navigate_next_and_activate() {
     );
 }
 
-/// Spec §Requirement: Focus Cycling Between Buttons, Scenario: Focus events dispatched
+/// Focus Cycling Between Buttons, Scenario: Focus events dispatched
 ///
 /// FocusGainedEvent and FocusLostEvent must be dispatched on every focus transition,
 /// including click-to-focus.
@@ -1127,7 +1121,7 @@ fn tab_from_dismiss_crosses_to_next_tile() {
     assert_eq!(gained_ns, "other-agent");
 }
 
-/// Spec §Requirement: Focus Cycling Between Buttons, Scenario: Pointer-free activation via keyboard
+/// Focus Cycling Between Buttons, Scenario: Pointer-free activation via keyboard
 ///
 /// Validates that both buttons can be activated via keyboard (NAVIGATE_NEXT + ACTIVATE)
 /// without using a pointer, and that the interaction_ids are correct.

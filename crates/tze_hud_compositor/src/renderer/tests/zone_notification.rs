@@ -1,6 +1,6 @@
 use super::*;
 
-// ── RenderingPolicy-driven zone rendering tests [hud-sc0a.8] ─────────────
+// ── RenderingPolicy-driven zone rendering tests ─────────────
 
 /// Subtitle with outline: when outline_color + outline_width are set in
 /// RenderingPolicy, collect_text_items produces a TextItem with non-None
@@ -332,7 +332,7 @@ async fn test_zone_subtitle_pill_layout_and_streaming() {
     }
 }
 
-/// Render-branch regression guard (hud-9v3t6): a portal carrying a *zero-length
+/// Render-branch regression guard: a portal carrying a *zero-length
 /// lifecycle sentinel* color run must still take the cached/styled markdown
 /// render path, NOT the lossy `from_text_markdown_node` / `strip_markdown_v1`
 /// path.
@@ -697,7 +697,7 @@ async fn notification_actions_layout_matches_hit_regions() {
     }
 }
 
-/// hud-mskx5: a notification with actions reserves its button row in the
+/// a notification with actions reserves its button row in the
 /// slot height, so stacked one- and two-line notifications draw their text
 /// strictly above their buttons; a notification without actions keeps its
 /// text-only height.
@@ -724,7 +724,7 @@ async fn check_notification_action_row(margin: Option<f32>) {
         margin_horizontal: margin,
         ..Default::default()
     };
-    // Every card metric is token-derived (hud-h51u7.4.1).
+    // Every card metric is token-derived.
     let style = NotificationStyle::resolve(&HashMap::new(), &policy);
     let card_inset = style.padding_h;
     assert_eq!(
@@ -973,7 +973,7 @@ async fn check_notification_action_row(margin: Option<f32>) {
     }
 }
 
-/// Pixel check (hud-paslt): on a rounded Chrome-layer card the action button
+/// Pixel check: on a rounded Chrome-layer card the action button
 /// reads as a button over the card fill rather than vanishing under it, and
 /// hovering it brightens it with no agent round trip.
 #[tokio::test]
@@ -1302,7 +1302,7 @@ async fn test_notification_area_does_not_use_severity_tokens() {
 
 // ── Notification urgency tone tests ──────────────────────────────────────
 
-/// Urgency tones (hud-h51u7.4.1): 0 and 1 the notification containers
+/// Urgency tones: 0 and 1 the notification containers
 /// (equal by default), 2 the caution container, 3 (and anything above,
 /// clamped) the error container, each under its own hairline role; a token
 /// restyles the card (sRGB hex decoded to linear) at `opacity.notification`.
@@ -1362,7 +1362,7 @@ fn test_notification_urgency_color_tokens() {
 
 /// notification-area card fill opacity: an explicit zone
 /// `backdrop_opacity` keeps precedence; otherwise the card takes
-/// `opacity.notification` (hud-h51u7.4.1).
+/// `opacity.notification`.
 #[tokio::test]
 async fn test_notification_area_backdrop_opacity() {
     let (compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);
@@ -1742,7 +1742,7 @@ async fn test_alert_banner_transparent_roles_draw_no_border_or_mark() {
 /// The card hairline is its urgency tone's outline role: neutral cards
 /// `color.notification.outline`, urgency 2
 /// `color.notification.caution.outline`, urgency 3
-/// `color.notification.error.outline` (hud-h51u7.4.1).
+/// `color.notification.error.outline`.
 #[tokio::test]
 async fn test_notification_area_border_uses_border_default_token() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(1280, 720).await);

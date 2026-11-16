@@ -3,7 +3,7 @@
 //!
 //! Moved from `renderer.rs` banner 5 (`// ─── Image fit mode UV calculations ───`)
 //! and the animation-state block that immediately follows it, by Step R-1 of
-//! the renderer module split (hud-fgryk).  No logic was changed; only visibility
+//! the renderer module split. No logic was changed; only visibility
 //! modifiers were added where Rust's module-privacy rules require them.
 //!
 //! Animation-state types (`ZoneAnimationState`, `PublicationAnimationState`,
@@ -194,11 +194,6 @@ impl ZoneAnimationState {
     /// during an active fade-out, the fade-out is cancelled and a fade-in begins
     /// from the current composite opacity (not from zero).  This prevents blank
     /// frames during rapid replacement.
-    ///
-    /// Per spec §Subtitle Contention Policy — Latest Wins, Transition interrupt
-    /// semantics note: "the fade-out MUST be cancelled immediately and the new
-    /// content MUST begin its transition_in_ms fade-in from the current composite
-    /// opacity (not from zero)."
     #[cfg(test)]
     pub(crate) fn fade_in_from(duration_ms: u32, from_opacity: f32) -> Self {
         Self::fade_in_from_at(duration_ms, from_opacity, std::time::Instant::now())
@@ -281,7 +276,7 @@ impl ZoneAnimationState {
 
     /// Compute the current interpolated opacity with an easing curve applied.
     ///
-    /// Used by the portal tile transition path (hud-bq0gl.10) so collapse/expand
+    /// Used by the portal tile transition path so collapse/expand
     /// fades accelerate/decelerate instead of ramping linearly. Zone subtitle
     /// fades use [`current_opacity_at`](Self::current_opacity_at) with their captured
     /// theme curve. This explicit portal sampler applies its curve only once.
@@ -540,7 +535,7 @@ impl StreamRevealState {
     ///
     /// `true` while the word-by-word reveal is still progressing; `false` once
     /// every segment is visible (or there are no breakpoints). The idle render
-    /// gate (hud-ilivg) treats an in-progress reveal as a reason to keep
+    /// gate treats an in-progress reveal as a reason to keep
     /// rendering so the animation never freezes mid-reveal.
     #[inline]
     pub(crate) fn is_revealing(&self) -> bool {
@@ -573,7 +568,7 @@ impl StreamRevealState {
 /// segment's alpha from `0 → 1` across its dwell window. Already-revealed
 /// segments render at full opacity; not-yet-revealed segments render fully
 /// transparent (alpha `0`), so the reveal still advances word-by-word while the
-/// active word *fades* rather than snaps (hud-bl7yi, deliverable #1/#3).
+/// active word *fades* rather than snaps.
 ///
 /// All offsets are byte offsets into [`Self::plain_text`] — the markdown
 /// *plain-text* (post-strip) string the renderer actually lays out, so they line
@@ -764,7 +759,7 @@ mod tests {
 
     #[test]
     fn stream_reveal_is_revealing_tracks_progress() {
-        // The idle render gate (hud-ilivg) treats a reveal as in-flight only
+        // The idle render gate treats a reveal as in-flight only
         // while breakpoint segments remain. Empty breakpoints reveal instantly
         // (never in flight); a non-empty reveal is in flight until fully revealed.
         let key = PubKey::new();
@@ -809,7 +804,7 @@ mod tests {
         assert!((s.opacity_at(Easing::EaseInOut.apply(1.0)) - 1.0).abs() < EPS);
         // EaseInOut is symmetric → midpoint equals linear midpoint (0.5)...
         assert!((s.opacity_at(Easing::EaseInOut.apply(0.5)) - 0.5).abs() < EPS);
-        // ...but off-center it diverges from the linear ramp.
+        //...but off-center it diverges from the linear ramp.
         let linear_quarter = s.opacity_at(0.25);
         let eased_quarter = s.opacity_at(Easing::EaseInOut.apply(0.25));
         assert!(

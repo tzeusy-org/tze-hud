@@ -1,4 +1,4 @@
-//! Abstract command input model per RFC 0004 §10.
+//! Abstract command input model.
 //!
 //! Implements:
 //! - `CommandAction`       — seven abstract commands (NAVIGATE_NEXT, …, SCROLL_DOWN)
@@ -8,13 +8,13 @@
 //! - `CommandDispatch`     — routing descriptor for the owning agent
 //! - `CommandProcessor`    — maps raw commands to `CommandDispatch` + ACTIVATE local feedback
 //!
-//! # Transactional semantics (spec line 379)
+//! # Transactional semantics
 //! `CommandInputEvent` is a **transactional** event. It MUST NEVER be coalesced
 //! or dropped under backpressure. The event batching layer (bead rig-gnjc) is
 //! responsible for honouring this; this module marks all command events with
 //! `is_transactional: true` in `CommandDispatch`.
 //!
-//! # ACTIVATE local feedback (spec lines 389–391)
+//! # ACTIVATE local feedback
 //! When `action == CommandAction::Activate`, the processor:
 //! 1. Sets `pressed = true` on the focused `HitRegionNode` via `SceneGraph`
 //!    (same as `PointerDownEvent` in Stage 2).
@@ -22,18 +22,13 @@
 //!    compositor thread can apply the `SceneLocalPatch`.
 //!    Latency budget: `input_to_local_ack` p99 < 4ms (same as pointer).
 //!
-//! # NAVIGATE_NEXT with no focus (spec lines 323–326)
+//! # NAVIGATE_NEXT with no focus
 //! When `action == CommandAction::NavigateNext` and focus is `FocusOwner::None`,
 //! `CommandProcessor::process` returns `None` (no dispatch). The caller is
 //! responsible for first driving `FocusManager::navigate_next` to advance focus
 //! to the first focusable element, then calling `process` again with the updated
 //! `FocusOwner` so routing can proceed for the newly focused element.
 //!
-//! # Spec refs
-//! - Lines 378–380: Command Input Model
-//! - Lines 383–385: D-pad maps to NAVIGATE_NEXT
-//! - Lines 389–391: ACTIVATE Local Feedback
-//! - Lines 411–413: Pointer-Free Navigation
 
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
@@ -44,7 +39,7 @@ use crate::focus_tree::FocusOwner;
 
 // ─── Command action ────────────────────────────────────────────────────────────
 
-/// Seven abstract command actions (spec line 378).
+/// Seven abstract command actions.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CommandAction {
     /// Move focus to the next focusable element in tab order.
@@ -66,7 +61,6 @@ pub enum CommandAction {
 // ─── Command source ────────────────────────────────────────────────────────────
 
 /// The physical or virtual input device class that generated this command
-/// (spec line 379).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum CommandSource {
     /// Generated from a physical keyboard (Tab, Enter, Escape, Arrow keys, …).
@@ -101,7 +95,7 @@ pub struct RawCommandEvent {
 
 // ─── Agent-facing event ────────────────────────────────────────────────────────
 
-/// Agent-facing `CommandInputEvent` as defined in spec line 379.
+/// Agent-facing command input event.
 ///
 /// Carries all required fields: tile_id, node_id, interaction_id,
 /// timestamp_mono_us, device_id, action, source.
@@ -203,7 +197,7 @@ impl CommandProcessor {
             })
             .unwrap_or_default();
 
-        // ── ACTIVATE local feedback (spec lines 389–391) ──────────────────
+        // ── ACTIVATE local feedback ──────────────────
         let activate_pressed_state = event.action == CommandAction::Activate;
         if activate_pressed_state {
             if let Some(nid) = node_id {
@@ -289,7 +283,7 @@ mod tests {
         }
     }
 
-    // ── Spec scenario (line 384): D-pad NAVIGATE_NEXT dispatches CommandInputEvent ──
+    // ── D-pad NAVIGATE_NEXT dispatches CommandInputEvent ──
 
     /// WHEN glasses temple D-pad down button pressed with focus on HitRegionNode
     /// THEN runtime dispatches CommandInputEvent(action=NAVIGATE_NEXT, source=DPAD).
@@ -315,7 +309,7 @@ mod tests {
         assert!(dispatch.is_transactional);
     }
 
-    // ── Spec scenario (line 395): ACTIVATE produces pressed state ────────────
+    // ── ACTIVATE produces pressed state ────────────
 
     /// WHEN CommandInputEvent(action=ACTIVATE) arrives for a focused HitRegionNode
     /// THEN runtime sets pressed=true on the node in the same frame.
@@ -567,7 +561,7 @@ mod tests {
         );
     }
 
-    // ── Pointer-free navigation (spec lines 411–413) ─────────────────────────
+    // ── Pointer-free navigation ─────────────────────────
 
     /// All pointer interactions are achievable via command input.
     /// This test verifies click (ACTIVATE), context (CONTEXT), scroll (SCROLL_UP/DOWN),

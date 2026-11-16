@@ -1,4 +1,4 @@
-//! HUD control panel chrome (hud-vniri.2).
+//! HUD control panel chrome.
 //!
 //! The panel is runtime chrome like the system card: the runtime pushes a
 //! platform-neutral [`ControlPanelModel`] through

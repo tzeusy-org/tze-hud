@@ -1,4 +1,4 @@
-//! Safe-mode chrome overlay for the windowed frame path (hud-jm8nq.10).
+//! Safe-mode chrome overlay for the windowed frame path.
 //!
 //! While safe mode is active the runtime paints a full-surface dim plus a top
 //! banner bar above everything else, so the human can see the HUD is paused.

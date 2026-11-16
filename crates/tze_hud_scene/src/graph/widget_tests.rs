@@ -210,7 +210,6 @@ fn widget_publish_f32_nan_rejected() {
 }
 
 /// WHEN a string value is submitted for an f32 parameter THEN type mismatch error.
-/// Source: widget-system/spec.md §Requirement: Widget Parameter Validation (type safety).
 #[test]
 fn widget_publish_f32_type_mismatch_rejected() {
     let (mut scene, _tab) = scene_with_gauge(ContentionPolicy::LatestWins);
@@ -229,7 +228,6 @@ fn widget_publish_f32_type_mismatch_rejected() {
 }
 
 /// WHEN an enum value outside allowed_values is submitted THEN invalid value error.
-/// Source: widget-system/spec.md §Requirement: Widget Parameter Validation (enum constraint).
 #[test]
 fn widget_publish_enum_out_of_allowed_values_rejected() {
     let (mut scene, _tab) = scene_with_gauge(ContentionPolicy::LatestWins);
@@ -419,7 +417,6 @@ fn widget_publish_nonexistent_widget_rejected() {
 // ── Widget registry unit tests ─────────────────────────────────────────────
 
 /// WHEN a widget definition is registered THEN it can be retrieved by id.
-/// Source: widget-system/spec.md §Requirement: Widget Registry.
 #[test]
 fn widget_registry_register_and_retrieve_definition() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
@@ -554,7 +551,6 @@ fn widget_registry_occupancy_unknown_instance_returns_none() {
 /// LatestWins: WHEN one publication is active THEN effective_params = that
 /// publication's params merged over schema defaults.
 ///
-/// Source: widget-system/spec.md §Requirement: Widget Contention.
 #[test]
 fn widget_occupancy_latest_wins_merges_over_defaults() {
     let (mut scene, tab_id) = scene_with_gauge(ContentionPolicy::LatestWins);
@@ -651,7 +647,6 @@ fn widget_occupancy_latest_wins_uses_most_recent() {
 /// Stack: WHEN three publishes arrive THEN effective_params reflects the
 /// top-of-stack (most recent) publication merged over defaults.
 ///
-/// Source: widget-system/spec.md §Requirement: Widget Contention (Stack).
 #[test]
 fn widget_occupancy_stack_uses_top_of_stack() {
     let (mut scene, tab_id) = scene_with_gauge(ContentionPolicy::Stack { max_depth: 5 });
@@ -739,7 +734,6 @@ fn widget_occupancy_stack_top_after_depth_cap() {
 /// MergeByKey: WHEN two different-keyed publications are active THEN
 /// effective_params merges both over defaults.
 ///
-/// Source: widget-system/spec.md §Requirement: Widget Contention (MergeByKey).
 #[test]
 fn widget_occupancy_merge_by_key_merges_all_keys_over_defaults() {
     let (mut scene, tab_id) = scene_with_gauge(ContentionPolicy::MergeByKey { max_keys: 8 });
@@ -860,7 +854,6 @@ fn widget_occupancy_merge_by_key_updated_key_reflects_latest_value() {
 /// Replace: WHEN a publication is active THEN effective_params = that
 /// publication's params only (no defaults for missing keys).
 ///
-/// Source: widget-system/spec.md §Requirement: Widget Contention (Replace).
 #[test]
 fn widget_occupancy_replace_no_default_fallback_for_missing_keys() {
     let (mut scene, tab_id) = scene_with_gauge(ContentionPolicy::Replace);
@@ -1002,7 +995,6 @@ fn widget_registry_snapshot_includes_all_types_and_instances() {
 // ── Widget contention policy tests ─────────────────────────────────────────
 
 /// LatestWins: WHEN two publishes arrive THEN only the latest is retained.
-/// Source: widget-system/spec.md §Requirement: Widget Contention.
 #[test]
 fn widget_contention_latest_wins_replaces_previous() {
     let (mut scene, _tab) = scene_with_gauge(ContentionPolicy::LatestWins);
@@ -1082,7 +1074,6 @@ fn widget_contention_replace_retains_only_latest() {
 }
 
 /// Stack: WHEN max_depth=3 and 4 publishes arrive THEN oldest is evicted.
-/// Source: widget-system/spec.md §Requirement: Widget Contention (Stack depth cap).
 #[test]
 fn widget_contention_stack_evicts_oldest_at_max_depth() {
     let (mut scene, _tab) = scene_with_gauge(ContentionPolicy::Stack { max_depth: 3 });
@@ -1168,7 +1159,6 @@ fn widget_contention_stack_max_depth_zero_discards_all() {
 
 /// MergeByKey: WHEN same key is published twice THEN the record is replaced.
 /// WHEN a different key is published THEN both records coexist.
-/// Source: widget-system/spec.md §Requirement: Widget Contention (MergeByKey).
 #[test]
 fn widget_contention_merge_by_key_replaces_same_key() {
     let (mut scene, _tab) = scene_with_gauge(ContentionPolicy::MergeByKey { max_keys: 8 });
@@ -1240,7 +1230,6 @@ fn widget_contention_merge_by_key_replaces_same_key() {
 /// WHEN drain_expired_widget_publications is called before any expiry time
 /// has elapsed THEN no publications are removed.
 ///
-/// Source: widget-system/spec.md §Requirement: Expiration Policy.
 #[test]
 fn widget_ttl_publication_not_expired_before_deadline() {
     let (mut scene, _tab, _clock) = scene_with_gauge_and_clock(ContentionPolicy::LatestWins);
@@ -1274,7 +1263,6 @@ fn widget_ttl_publication_not_expired_before_deadline() {
 /// WHEN drain_expired_widget_publications is called after the expiry time
 /// has elapsed THEN the publication is removed.
 ///
-/// Source: widget-system/spec.md §Requirement: Expiration Policy.
 #[test]
 fn widget_ttl_publication_expires_after_deadline() {
     let (mut scene, _tab, clock) = scene_with_gauge_and_clock(ContentionPolicy::LatestWins);
@@ -1310,7 +1298,6 @@ fn widget_ttl_publication_expires_after_deadline() {
 /// WHEN drain_expired_widget_publications removes all publications from a
 /// widget THEN the active_publishes entry is cleaned up (no empty Vec left).
 ///
-/// Source: widget-system/spec.md §Requirement: Expiration Policy.
 #[test]
 fn widget_ttl_empty_entry_cleaned_up_after_expiry() {
     let (mut scene, _tab, clock) = scene_with_gauge_and_clock(ContentionPolicy::LatestWins);
@@ -1343,7 +1330,6 @@ fn widget_ttl_empty_entry_cleaned_up_after_expiry() {
 /// WHEN a publication with no expiry and one with an expiry coexist (Stack
 /// policy) THEN only the expired publication is removed.
 ///
-/// Source: widget-system/spec.md §Requirement: Expiration Policy.
 #[test]
 fn widget_ttl_only_expired_publication_removed_when_mixed() {
     let (mut scene, _tab, clock) =
@@ -1405,7 +1391,6 @@ fn widget_ttl_only_expired_publication_removed_when_mixed() {
 /// WHEN drain_expired_widget_publications removes a publication THEN the
 /// scene version is incremented.
 ///
-/// Source: widget-system/spec.md §Requirement: Expiration Policy.
 #[test]
 fn widget_ttl_expiry_bumps_scene_version() {
     let (mut scene, _tab, clock) = scene_with_gauge_and_clock(ContentionPolicy::LatestWins);
@@ -1438,7 +1423,6 @@ fn widget_ttl_expiry_bumps_scene_version() {
 /// WHEN drain_expired_widget_publications is called with no publications
 /// THEN it returns 0 and does not panic.
 ///
-/// Source: widget-system/spec.md §Requirement: Expiration Policy.
 #[test]
 fn widget_ttl_drain_with_no_publications_is_noop() {
     let (mut scene, _tab, _clock) = scene_with_gauge_and_clock(ContentionPolicy::LatestWins);

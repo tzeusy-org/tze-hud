@@ -1,6 +1,6 @@
 //! Subscription filtering integration tests.
 //!
-//! Tests category-to-capability mapping from session-protocol/spec.md lines 445-452,
+//! Tests category-to-capability mapping,
 //! mandatory subscription enforcement, and event batch variant filtering.
 //!
 //! These are integration-level tests that exercise the subscriptions module
@@ -19,7 +19,7 @@ use tze_hud_protocol::subscriptions::{
 
 // ─── Category-to-capability mapping ─────────────────────────────────────────
 
-/// SCENE_TOPOLOGY → read_scene_topology (spec lines 445-452).
+/// SCENE_TOPOLOGY → read_scene_topology.
 #[test]
 fn scene_topology_requires_read_scene_topology_capability() {
     // Without capability: denied

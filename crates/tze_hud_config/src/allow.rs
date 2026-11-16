@@ -170,7 +170,7 @@ mod tests {
     }
 
     /// Withdrawing a class `*` covered spells out the rest; granting adds the
-    /// class entry; single-surface entries survive both (hud-vniri.6).
+    /// class entry; single-surface entries survive both.
     #[test]
     fn grants_toggle_whole_classes_and_expand_star() {
         let v = |xs: &[&str]| xs.iter().map(|s| s.to_string()).collect::<Vec<_>>();

@@ -117,7 +117,7 @@ async fn send_auth_failed(
 /// The owner's Unpair swaps the live directory, then closes the agent's
 /// registered sessions under the state lock this runs under. So a handshake
 /// either registers first, and is closed, or sees the swapped directory here
-/// and is refused: none slips between the two (hud-vniri.6).
+/// and is refused: none slips between the two.
 fn register_if_paired(
     st: &mut SharedState,
     namespace: &str,
@@ -186,7 +186,7 @@ pub(super) async fn handle_session_init(
     };
     let granted_capabilities = identity.permissions;
 
-    // ── Step 3: Subscription filtering (RFC 0005 §7.1) ──────────────────────
+    // ── Step 3: Subscription filtering ──────────────────────
     // Mandatory categories are always active; gated categories need the
     // matching permission from the agent's `allow` list.
     let sub_result =
@@ -304,7 +304,7 @@ pub(super) async fn handle_session_init(
 }
 
 /// Handle a `SessionResume` message — the first message on a reconnecting stream
-/// within the grace period (RFC 0005 §6.2–6.4).
+/// within the grace period.
 ///
 /// # Protocol contract
 ///
@@ -329,7 +329,7 @@ pub(super) async fn handle_session_resume(
         resource_budget,
         budget_enforcer,
     } = ctx;
-    // Re-authentication is required on resume (RFC 0005 §6.2).
+    // Re-authentication is required on resume.
     let identity = match identify_session(agents, resume.auth_credential.as_ref(), &resume.agent_id)
     {
         Ok(identity) => identity,
@@ -371,7 +371,7 @@ pub(super) async fn handle_session_resume(
     // Step 3: Build restored session.
     let session_uuid = uuid::Uuid::now_v7();
     let namespace = identity.agent_id.clone();
-    // Issue a fresh single-use token for the resumed session (RFC 0005 §6.3).
+    // Issue a fresh single-use token for the resumed session.
     let new_resume_token = uuid::Uuid::now_v7().as_bytes().to_vec();
     let scene_session_id = tze_hud_scene::SceneId::from_uuid(session_uuid);
     let resource_budget = resource_budget.clone();

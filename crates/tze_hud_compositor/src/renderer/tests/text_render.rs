@@ -2,7 +2,7 @@ use super::*;
 
 // ── Text rendering pixel tests ────────────────────────────────────────────
 //
-// These tests validate acceptance criteria 1–4 from hud-pmkf:
+// These tests validate acceptance criteria 1–4
 //  1. publish_to_zone with StreamText → visible text at zone geometry.
 //  2. TextMarkdownNode renders text (some non-background pixels in text area).
 //  3. Overflow Clip and Ellipsis modes: glyphs stay within TextBounds.
@@ -290,7 +290,7 @@ async fn test_zone_stream_text_renders_visible_text() {
 
 /// Zone ShortTextWithIcon/Notification publish renders visible text at zone geometry.
 ///
-/// Acceptance criterion for hud-lh3w: publish_to_zone with
+/// Publishing to a zone with
 /// `ZoneContent::Notification(NotificationPayload)` produces a `TextItem` in
 /// `collect_text_items` and causes bright glyph pixels to appear in the zone
 /// geometry area.
@@ -377,7 +377,7 @@ async fn test_zone_notification_renders_visible_text() {
 
 /// Zone StatusBar (KeyValuePairs) publish renders visible text at zone geometry.
 ///
-/// Acceptance criteria for hud-6at1:
+/// Acceptance criteria
 ///   1. `publish_to_zone` with `ZoneContent::StatusBar` produces a `TextItem` in
 ///      `collect_text_items`.
 ///   2. The key-value pairs are rendered as text at the zone geometry position.
@@ -560,7 +560,7 @@ async fn font_tokens_select_role_families_and_rebuild_only_on_change() {
 }
 
 /// Single-line Ellipsis labels in boxes shorter than one line height still
-/// render, and replacing their content changes the pixels (hud-pcscu).
+/// render, and replacing their content changes the pixels.
 ///
 /// The Presence Card sizes its labels to the glyphs, not the 1.4x line height:
 /// 20 px name in a 26 px box, 13 px status in 18 px, 11 px eyebrow in 12 px.
@@ -687,7 +687,7 @@ async fn ellipsis_labels_shorter_than_a_line_render_and_update() {
 }
 
 /// A live `font.sans` change re-rasterizes an already drawn widget with the
-/// new face (hud-8cg0j): no stale raster from a cache or the clean texture.
+/// new face: no stale raster from a cache or the clean texture.
 #[tokio::test]
 async fn font_sans_change_rerasterizes_published_widget_text() {
     let (mut compositor, mut surface) = require_gpu!(make_compositor_and_surface(256, 128).await);

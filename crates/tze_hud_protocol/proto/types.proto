@@ -5,14 +5,14 @@ package tze_hud.protocol.v1;
 // ─── Identity Types ───────────────────────────────────────────────────────────
 
 // A scene-object identifier: 16-byte little-endian UUIDv7.
-// All-zero bytes represent the null/absent sentinel (RFC 0001 §1.1).
+// All-zero bytes represent the null/absent sentinel.
 // Wire format: raw 16 bytes (little-endian UUID byte order).
 message SceneIdProto {
   bytes bytes = 1;  // exactly 16 bytes
 }
 
 // A content-addressed resource identifier: raw 32-byte BLAKE3 hash.
-// Wire format: raw 32 bytes — never hex-encoded (RFC 0001 §1.1).
+// Wire format: raw 32 bytes — never hex-encoded.
 message ResourceIdProto {
   bytes bytes = 1;  // exactly 32 bytes
 }
@@ -43,7 +43,7 @@ message NodeProto {
     HitRegionNodeProto hit_region = 12;
     StaticImageNodeProto static_image = 13;
   }
-  // Inline child subtree (hud-ga4md). Recursive: each child MAY carry its own
+  // Inline child subtree. Recursive: each child MAY carry its own
   // `children`. Empty (the default) = a flat single-node root — BYTE-COMPATIBLE
   // with the pre-children wire, so existing publishers are unaffected. When a
   // tile root arrives with inline children, the runtime materializes the whole
@@ -51,10 +51,10 @@ message NodeProto {
   // body (transcript + head-anchored composer + INPUT band as separate nodes)
   // rides a single coalescible StateStream update instead of a per-node `AddNode`
   // fan-out that would flip the batch Transactional and break latest-wins
-  // coalescing on the hot transcript-republish path (hud-mzk74). Field 2 is
+  // coalescing on the hot transcript-republish path. Field 2 is
   // stable and MUST NOT be renumbered.
   repeated NodeProto children = 2;
-  // How this node positions its direct children (hud-yfj8u). UNSPECIFIED (the
+  // How this node positions its direct children. UNSPECIFIED (the
   // default, 0) = Absolute — each child drawn at its own explicit `bounds.y`,
   // BYTE-COMPATIBLE with the pre-layout wire so existing publishers are
   // unaffected. VERTICAL_FLOW asks the runtime to stack the children (measure
@@ -64,7 +64,7 @@ message NodeProto {
   NodeLayoutProto layout = 3;
 }
 
-// How a NodeProto lays out its direct children (hud-yfj8u). Additive and
+// How a NodeProto lays out its direct children. Additive and
 // default-off: UNSPECIFIED maps to Absolute (historical behavior).
 enum NodeLayoutProto {
   NODE_LAYOUT_PROTO_UNSPECIFIED   = 0;  // absent = Absolute (byte-compatible default)
@@ -202,7 +202,7 @@ message UpdateNodeContentMutation {
 //   - Non-empty (16 bytes): the node is inserted as a child of that parent.
 //     Use MutationResult.created_ids or the tile root node ID from a snapshot.
 //
-// Byte order: parent_id uses the same big-endian RFC 4122 wire encoding as
+// Byte order: parent_id uses the same big-endian wire encoding as
 // tile_id and all other SceneId bytes fields in MutationProto (i.e. the raw
 // uuid::Uuid::as_bytes() encoding, NOT the little-endian NodeProto.id encoding).
 // Use MutationResult.created_ids to obtain parent node IDs in the correct order.
@@ -234,7 +234,7 @@ message UpdateTileInputModeMutation {
 
 // Register or replace local-first scroll config for a tile. Enables
 // adapter-driven scroll via SetScrollOffsetMutation. Renderer/coalescer
-// plumbing shipped in hud-w5ih (PR #489); this is the session-protocol
+// plumbing shipped in (PR #489); this is the session-protocol
 // exposure of that surface.
 message RegisterTileScrollMutation {
   bytes tile_id        = 1;
@@ -301,7 +301,7 @@ message StatusBarPayload {
 
 // Content-addressed static image reference (field 5 in ZoneContent oneof).
 // `resource_id` is the 32-byte BLAKE3 hash identifying a resource uploaded via
-// ResourceUploadStart (RFC 0011).
+// ResourceUploadStart.
 message StaticImageRef {
   bytes resource_id = 1;  // 32-byte BLAKE3 content hash (ResourceIdProto.bytes); MUST NOT be empty
 }

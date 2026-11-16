@@ -12,16 +12,16 @@
 //! # Software GPU
 //!
 //! `HeadlessRuntime::new` respects the `HEADLESS_FORCE_SOFTWARE` environment
-//! variable (spec line 409).  When set to `1`, wgpu adapter selection uses
+//! variable.  When set to `1`, wgpu adapter selection uses
 //! `force_fallback_adapter = true` (llvmpipe on Linux, WARP on Windows).
 //!
 //! # Session Limits & Hot-Connect
 //!
-//! Per spec Requirement: Session Limits (line 355): headless mode still runs
+//! Requirement: Session Limits (line 355): headless mode still runs
 //! the gRPC session server — agents connect normally, session limits are
 //! enforced identically.
 //!
-//! Per spec Requirement: Hot-Connect (line 346): agents connecting to headless
+//! Requirement: Hot-Connect (line 346): agents connecting to headless
 //! runtime receive the full scene snapshot (handled by `HudSessionImpl`).
 //!
 //! # grpc_port = 0
@@ -166,7 +166,7 @@ pub struct HeadlessRuntime {
     _runtime_widget_store: Option<RuntimeWidgetStore>,
     /// Actual input samples; response context exists only for applied batches.
     pending_input_latency: PendingInputLatencySamples,
-    /// Broadcast sender for batch-correlated present acknowledgments (hud-91uu6).
+    /// Broadcast sender for batch-correlated present acknowledgments.
     ///
     /// When set, `render_frame` drains the scene's present-ack queue after each
     /// presented frame and emits a [`FramePresented`] pairing the applied
@@ -184,7 +184,7 @@ impl HeadlessRuntime {
     /// Create a new headless runtime.
     ///
     /// Respects `HEADLESS_FORCE_SOFTWARE=1` — when set, the wgpu adapter
-    /// selection uses `force_fallback_adapter = true` (spec line 211).
+    /// selection uses `force_fallback_adapter = true`.
     ///
     /// If `config.config_toml` is provided, the runtime builds an immutable
     /// `RuntimeContext` from the loaded config (profile budgets). If config is
@@ -211,7 +211,7 @@ impl HeadlessRuntime {
         compositor.set_resident_ledger(runtime_context.resident_ledger.clone());
         // Apply the resolved per-surface truncation-input bound so the
         // viewport-adjacent-window fallback engages at the operator-configured
-        // threshold rather than the compositor's built-in default (hud-59p2z).
+        // threshold rather than the compositor's built-in default.
         compositor.set_max_truncation_input_bytes(
             runtime_context.profile.max_truncation_input_bytes as usize,
         );
@@ -338,7 +338,7 @@ impl HeadlessRuntime {
     }
 
     /// Wire a `FramePresented` broadcast sender so the render loop emits
-    /// batch-correlated present acknowledgments (hud-91uu6).
+    /// batch-correlated present acknowledgments.
     ///
     /// Pass `HudSessionImpl::frame_presented_tx.clone()` to deliver present acks
     /// to gRPC agents subscribed to TELEMETRY_FRAMES, or a standalone sender in
@@ -434,7 +434,7 @@ impl HeadlessRuntime {
                 let stage1_us = s1_start.elapsed().as_micros() as u64;
 
                 // Stage 2: Local Feedback (load ArcSwap snapshot — no mutex)
-                // Per spec §3.2: Stage 2 reads the snapshot published after Stage 4 of the
+                // Stage 2 reads the snapshot published after Stage 4 of the
                 // *previous* frame. It must not publish a new snapshot (that is Stage 4's job).
                 let s2_start = Instant::now();
                 let _snap_ref = self.pipeline.hit_test_snapshot.load();
@@ -521,7 +521,7 @@ impl HeadlessRuntime {
         let frame_time_us = frame_start.elapsed().as_micros() as u64;
         let degradation_work_time_us = degradation_work_start.elapsed().as_micros() as u64;
 
-        // ── Batch-correlated present acknowledgment (hud-91uu6) ───────────────
+        // ── Batch-correlated present acknowledgment ───────────────
         // Successful local GPU work drains pending internal batch ids even when
         // no sender/subscriber is attached. An explicitly wired optional sender
         // pairs them with the frame number and emitter wall-clock; the headless
@@ -592,7 +592,7 @@ impl HeadlessRuntime {
         telemetry.mutations_applied = compositor_telemetry.mutations_applied;
         telemetry.hit_region_updates = compositor_telemetry.hit_region_updates;
         telemetry.widget_rasterized = compositor_telemetry.widget_rasterized;
-        // Propagate commit-time markdown prime cost (hud-380dl).
+        // Propagate commit-time markdown prime cost.
         // Non-zero only when scene.version changed this frame (new/changed content
         // required a parse pass); zero on steady-state frames (cache hit, no work).
         telemetry.markdown_prime_us = markdown_prime_us;
@@ -637,17 +637,17 @@ impl HeadlessRuntime {
     ///
     /// Returns RGBA8 data (width × height × 4 bytes).  Blocks until GPU is idle.
     ///
-    /// Per spec line 208: "pixel readback MUST be on-demand via copy_texture_to_buffer."
+    /// Per: "pixel readback MUST be on-demand via copy_texture_to_buffer."
     pub fn read_pixels(&self) -> Vec<u8> {
         self.surface.read_pixels(&self.compositor.device)
     }
 
     /// Start the gRPC server in the background, serving the HudSession streaming service.
     ///
-    /// Per spec Requirement: Session Limits (line 355): headless runtime still
+    /// Requirement: Session Limits (line 355): headless runtime still
     /// runs the gRPC server — agents connect normally.
     ///
-    /// Per spec Requirement: Hot-Connect (line 346): the `HudSessionImpl` sends
+    /// Requirement: Hot-Connect (line 346): the `HudSessionImpl` sends
     /// a full scene snapshot to each agent on connect.
     ///
     /// Returns the server task handle.  The caller must retain it to keep the
@@ -1425,7 +1425,7 @@ mod tests {
         );
 
         // Verify alpha channel is 255 (fully opaque clear color).
-        // RGBA8 layout: [R, G, B, A, R, G, B, A, ...]
+        // RGBA8 layout: [R, G, B, A, R, G, B, A,...]
         let alpha_nonopaque = pixels.chunks(4).any(|px| px[3] != 255);
         assert!(
             !alpha_nonopaque,
@@ -1509,8 +1509,8 @@ mod tests {
     /// token-driven properties (e.g. severity colors for alert-banner) are
     /// resolved at render time rather than falling back to hardcoded constants.
     ///
-    /// Regression test for hud-kz2l: HeadlessRuntime was not calling
-    /// run_scene_startup, so design tokens were never applied even when
+    /// HeadlessRuntime must call
+    /// run_scene_startup so design tokens are applied when
     /// config_toml with [design_tokens] was supplied.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn test_design_tokens_applied_when_config_toml_provided() {

@@ -14,8 +14,7 @@
 //! 4. If loading succeeds but the widget type name duplicates an already-loaded
 //!    bundle, reject the new bundle with `WIDGET_BUNDLE_DUPLICATE_TYPE`.
 //!
-//! Source: widget-system/spec.md §Requirement: Widget Asset Bundle Format,
-//!         §Requirement: SVG Layer Parameter Bindings.
+//!: SVG Layer Parameter Bindings.
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -77,7 +76,6 @@ pub enum BundleScanResult {
 ///   placeholders in SVG files.  Pass an empty map when no token substitution
 ///   is needed.
 ///
-/// Source: widget-system/spec.md §Requirement: Widget Asset Bundle Format.
 pub fn scan_bundle_dirs(
     bundle_roots: &[PathBuf],
     tokens: &HashMap<String, String>,
@@ -200,8 +198,7 @@ pub fn load_bundle_dir_with_tokens(
 ///
 /// Returns the resolved SVG bytes (post token substitution) on success.
 ///
-/// Source: widget-system/spec.md §Requirement: Widget Asset Bundle Format,
-///         §Requirement: Runtime Widget SVG Registration.
+///: Runtime Widget SVG Registration.
 pub fn validate_runtime_svg_registration(
     definition: &WidgetDefinition,
     widget_type_id: &str,
@@ -863,7 +860,6 @@ fn invalid_hover_rect(path_str: &str, detail: &str) -> BundleError {
 
 /// Resolve and validate all bindings for a single layer.
 ///
-/// Source: widget-system/spec.md §Requirement: SVG Layer Parameter Bindings.
 fn resolve_bindings(
     raw_bindings: &[RawBinding],
     svg_file: &str,
@@ -1176,7 +1172,6 @@ fn parse_hex_color(text: &str) -> Option<tze_hud_scene::types::Rgba> {
 /// - start with a lowercase ASCII letter (`a`–`z`),
 /// - contain only lowercase ASCII letters, ASCII digits, or hyphens (`-`).
 ///
-/// Source: scene-graph/spec.md §Widget Type Identifier.
 pub(crate) fn is_valid_widget_type_id(id: &str) -> bool {
     let mut chars = id.chars();
     match chars.next() {

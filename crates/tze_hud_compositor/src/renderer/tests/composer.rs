@@ -1,6 +1,6 @@
 use super::*;
 
-// ── hud-r3ax6: composer echo local render tests ───────────────────────────
+// ──: composer echo local render tests ───────────────────────────
 
 /// `LocalComposerStateHandle` slot semantics:
 ///
@@ -149,7 +149,7 @@ async fn local_composer_text_item_uses_hit_region_bounds() {
         .expect("focused composer HitRegion must produce a text item");
 
     // The composer echo is confined to a single input-line strip pinned to the
-    // BOTTOM of the composer region (hud-2zsbf): the full HitRegion can span the
+    // BOTTOM of the composer region: the full HitRegion can span the
     // whole portal (click-anywhere-to-focus), so the rendered draft must not
     // stretch across it. Strip height = font_line_height + 2*margin
     // = 16*1.4 + 12 = 34.4; strip_y = region.y + (region.height - strip_height)
@@ -184,7 +184,7 @@ async fn local_composer_text_item_uses_hit_region_bounds() {
     );
 }
 
-/// hud-evk0j: an EMPTY composer draft with a placeholder hint renders that hint
+/// an EMPTY composer draft with a placeholder hint renders that hint
 /// dimmed from `portal.composer.placeholder_color`, and the placeholder vanishes
 /// the instant the draft is non-empty (or the composer carries no placeholder).
 ///
@@ -343,14 +343,14 @@ async fn composer_placeholder_renders_only_when_draft_empty() {
     );
 }
 
-/// Regression (hud-2zsbf + hud-n0x4u): mirror the resident portal — a FULL-TILE
+/// Regression (+ ): mirror the resident portal — a FULL-TILE
 /// composer HitRegion (as `resident_grpc::render_batch` publishes via
 /// `local_bounds_for_state`) with a long unbreakable draft. The draft MUST NOT
 /// "extend forever" horizontally past the region's right edge, and MUST be
 /// bottom-anchored (caret line in the bottom input strip), not laid as a
-/// full-width line across the portal TOP (the live hud-2zsbf P1).
+/// full-width line across the portal TOP (the live P1).
 ///
-/// Under break-anywhere wrap (hud-n0x4u) the 200-char token no longer stays one
+/// Under break-anywhere wrap the 200-char token no longer stays one
 /// clipped line — it wraps at the glyph level into a bottom-anchored multi-line
 /// box so every character stays visible. This test therefore guards the
 /// horizontal no-overflow + bottom-anchoring invariants, not a single-line
@@ -453,9 +453,9 @@ async fn composer_echo_confined_to_bottom_strip_full_tile_hitregion() {
     let strip_height = 16.0 * crate::text::LINE_HEIGHT_MULTIPLIER + 12.0;
     let strip_top = (300.0 - strip_height) as usize; // ≈ 265
 
-    // The core hud-2zsbf P1 was HORIZONTAL: the draft "extended forever" as a
+    // The core P1 was HORIZONTAL: the draft "extended forever" as a
     // full-width unwrapped line spilling past the region's right edge. Under
-    // break-anywhere wrap (hud-n0x4u) an unbreakable 200-char token is no longer
+    // break-anywhere wrap an unbreakable 200-char token is no longer
     // one over-long clipped line — it wraps at the glyph level into a bottom-
     // anchored multi-line box so every character stays visible — but the
     // horizontal clip must STILL hold: nothing past the region interior right
@@ -488,7 +488,7 @@ async fn composer_echo_confined_to_bottom_strip_full_tile_hitregion() {
     );
 }
 
-/// Repro (hud-nottc): a WRAPPED multi-line draft in a SHORT composer pane (the
+/// Repro: a WRAPPED multi-line draft in a SHORT composer pane (the
 /// exemplar's top input strip) must keep its glyphs — including the caret on the
 /// last visual line — CONFINED to the composer region, not clipped away or laid
 /// outside it. The live P1 was the blinking caret showing at the portal's
@@ -601,7 +601,7 @@ async fn composer_wrapped_draft_stays_in_short_pane_headless() {
     );
 }
 
-/// Repro (hud-2zsbf): a composer draft wider than the box must be CLIPPED to the
+/// Repro: a composer draft wider than the box must be CLIPPED to the
 /// composer interior — no glyph pixels may appear to the RIGHT of the box edge.
 ///
 /// This renders through the full headless GPU pipeline (the same
@@ -769,7 +769,7 @@ fn caret_blink_phase_square_wave() {
 /// et al: tile at `(20, 30, 200, 120)`, HitRegion at `(12, 16, 140, 72)` — so
 /// `region.x == 38` and `region.y == 46` with the default `content_inset_px`
 /// (6.0), giving deterministic expected caret pixel coordinates across the
-/// hud-hxhnt regression tests below.
+/// regression tests below.
 fn composer_caret_test_scene() -> (SceneGraph, SceneId, SceneId) {
     let mut scene = SceneGraph::new(320.0, 200.0);
     let tab_id = scene.create_tab("test", 0).unwrap();
@@ -822,7 +822,7 @@ fn composer_caret_test_scene() -> (SceneGraph, SceneId, SceneId) {
     (scene, tile_id, hit_id)
 }
 
-/// hud-hxhnt finding 2 (gate a): the rendered/measured draft text must NEVER
+/// finding 2 (gate a): the rendered/measured draft text must NEVER
 /// contain the `▌` (U+258C) caret glyph any more — the caret is a chrome-layer
 /// quad now, not an inserted character — regardless of blink phase. This is the
 /// core "no jitter" guarantee: if the glyph were still inserted, toggling it
@@ -884,7 +884,7 @@ async fn composer_draft_text_never_contains_caret_glyph() {
     );
 }
 
-/// hud-hxhnt finding 2 (gate b): the caret renders as a zero-width-relative
+/// finding 2 (gate b): the caret renders as a zero-width-relative
 /// vertical QUAD at the shaped caret-x, emitted by
 /// `append_composer_caret_vertices` — the same primitive/pass as the focus ring.
 /// Uses an EMPTY draft so the expected caret x is deterministic (no font-metric
@@ -1104,7 +1104,7 @@ async fn composer_preedit_drawn_underlined_at_caret() {
     assert!(verts.is_empty());
 }
 
-/// hud-hxhnt finding 2 (gate c): the selection highlight `StyledRunItem` byte
+/// finding 2 (gate c): the selection highlight `StyledRunItem` byte
 /// range is the RAW `[min(cursor, anchor), max(cursor, anchor))` range — no
 /// +3-byte caret-glyph shift, since the caret is no longer inserted into the
 /// display string.
@@ -1181,7 +1181,7 @@ async fn composer_selection_styled_run_uses_raw_byte_offsets() {
     );
 }
 
-/// hud-hxhnt finding 1 (gate d): the SINGLE-LINE composer profile must now also
+/// finding 1 (gate d): the SINGLE-LINE composer profile must now also
 /// publish a one-row `ComposerVisualLayout` (previously only the multi-line
 /// profile did), so the runtime's pointer hit-test can use real glyph geometry
 /// instead of a linear byte-fraction guess for single-line composers too.
@@ -1248,7 +1248,7 @@ async fn single_line_composer_publishes_visual_layout() {
     );
 }
 
-// ─── Horizontal caret-follow (hud-zlfi4) ─────────────────────────────────────
+// ─── Horizontal caret-follow ─────────────────────────────────────
 //
 // `composer_scroll_offset` is the pure, GPU-free core of the composer's
 // horizontal caret-follow: given a caret x and full draft width (both measured
@@ -1440,7 +1440,7 @@ fn caret_follow_degenerate_inputs_are_safe() {
     );
 }
 
-// ─── Multi-line composer wrap / growth / vscroll (hud-nx7yq.1) ────────────────
+// ─── Multi-line composer wrap / growth / vscroll ────────────────
 //
 // CPU-only tests over the pure layout core: how many lines the box shows, how far
 // it scrolls vertically to keep the caret line visible, the upward-grown box
@@ -1622,7 +1622,7 @@ fn multiline_input_box_clamped_to_region() {
     assert!(box_rect.y >= region.y - 0.01, "top not above the region");
 }
 
-/// hud-nottc: with the TOP anchor the composer input box pins to the region TOP
+/// with the TOP anchor the composer input box pins to the region TOP
 /// (the pane content origin) and grows DOWNWARD as `visible_lines` rises, so the
 /// caret rests at the pane top-left when the draft is empty and the top edge
 /// never moves when the first glyph is typed. Contrast the Bottom anchor, which
@@ -1686,7 +1686,7 @@ fn top_anchored_input_box_pins_to_region_top_and_grows_down() {
 }
 
 /// `portal.composer.anchor` selects the composer vertical anchor; the default is
-/// `Bottom` so every existing bottom-chat-strip profile is unchanged (hud-nottc).
+/// `Bottom` so every existing bottom-chat-strip profile is unchanged.
 #[test]
 fn composer_anchor_token_resolves() {
     use std::collections::HashMap;
@@ -1723,7 +1723,7 @@ fn composer_anchor_token_resolves() {
     );
 }
 
-/// hud-6ti2z: the non-composer tile-render spacing literals (code-panel backdrop
+/// the non-composer tile-render spacing literals (code-panel backdrop
 /// margins, glyphon-unavailable text fallback inset, unregistered-image
 /// placeholder margin) resolve from their own `portal.spacing.*` tokens. Defaults
 /// MUST equal the historical inline literals (8.0 / 4.0 / 2.0 / 4.0) so the
@@ -1793,7 +1793,7 @@ fn tile_spacing_tokens_resolve_default_override_and_reject() {
     }
 }
 
-/// hud-nottc live P1 (round 5): with the TOP anchor the composer caret must
+/// live P1 (round 5): with the TOP anchor the composer caret must
 /// render at the input pane's top-left CONTENT ORIGIN when the draft is EMPTY
 /// (region top + margin — NOT the window's (0,0) top-left, NOT the region
 /// bottom), and it must NOT teleport when the first glyph is typed. Asserts the
@@ -1919,7 +1919,7 @@ async fn top_anchored_empty_caret_sits_at_pane_origin_no_teleport() {
     );
 }
 
-// ─── Caret stays in the box for a short composer pane (hud-nottc) ─────────────
+// ─── Caret stays in the box for a short composer pane ─────────────
 
 /// `composer_region_fit_lines` reports how many text lines a region interior fits.
 #[test]
@@ -1936,7 +1936,7 @@ fn composer_region_fit_lines_computes_capacity() {
     assert_eq!(image_cache::composer_region_fit_lines(60.0, 0.0, m), 1);
 }
 
-/// Regression for hud-nottc: a wrapped draft in a SHORT composer pane must keep
+/// A wrapped draft in a short composer pane must keep
 /// the caret line inside the visible box. Bounding growth + scroll only by the
 /// `max_lines` token (not the region capacity) left the caret clipped OUTSIDE the
 /// box — the top-left-caret live symptom. Bounding by the region fit keeps it in.
@@ -2000,7 +2000,7 @@ fn multiline_max_lines_token_default_and_clamp() {
     assert_eq!(resolve_composer_overlay_tokens(&m0).max_lines, 6);
 }
 
-/// hud-ar10c: the composer content inset is token-driven via
+/// the composer content inset is token-driven via
 /// `portal.spacing.content_inset_px`. The resolver defaults to 6.0 (the historical
 /// `COMPOSER_TEXT_MARGIN` literal, so the default profile is unchanged), parses a
 /// finite non-negative override, and rejects malformed / negative / non-finite
@@ -2086,7 +2086,7 @@ fn composer_content_inset_token_drives_box_geometry() {
 
 /// The default `ComposerLayout` is the inert single-line profile, so a frame with
 /// no active composer (or an unmeasured one) never wraps or scrolls — preserving
-/// the hud-zlfi4 single-line behavior exactly.
+/// the single-line behavior exactly.
 #[test]
 fn multiline_default_layout_is_single_line() {
     let d = ComposerLayout::default();
@@ -2097,7 +2097,7 @@ fn multiline_default_layout_is_single_line() {
     assert_eq!(d.total_lines, 1.0);
 }
 
-// ─── Transcript turn separators (hud-nx7yq.4) ────────────────────────────────
+// ─── Transcript turn separators ────────────────────────────────
 
 /// A divider rect is placed on each thematic-break line, centred vertically and
 /// spanning the node width, at the newline-counted y-offset.
@@ -2171,7 +2171,7 @@ fn portal_divider_canonical_tokens_reach_markdown_tokens() {
 }
 
 /// Turn-divider (`---` thematic-break) quads emitted by `render_node` must track
-/// the tile's display scroll offset exactly like the text glyphs do (hud-6n9iv):
+/// the tile's display scroll offset exactly like the text glyphs do:
 /// at a nonzero scroll the divider's pixel-top must equal its unscrolled top
 /// minus the offset, and a divider scrolled above the tile top must be clipped
 /// to the tile bounds (never painted outside the pane, matching the text viewport
@@ -2293,7 +2293,7 @@ async fn transcript_divider_rects_track_tile_scroll_offset() {
 
     // Whole-portal resize: the divider must ride the SAME scaled line pitch the
     // glyphs are laid out with, so it stays glued to its entries instead of
-    // detaching further down the transcript (hud-6n9iv). At a >1 font scale the
+    // detaching further down the transcript. At a >1 font scale the
     // (line_index + 0.5) * line_height offset grows, so the unscrolled divider
     // top must move DOWN relative to the default-scale position. If the divider
     // ignored the scale (used the raw `tm.font_size_px`) the two would be equal —

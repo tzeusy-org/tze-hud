@@ -4086,6 +4086,11 @@ async fn hud_publish_in_safe_mode_returns_safe_mode_active() {
         let (release_tx, release_rx) = std::sync::mpsc::sync_channel(0);
         let requesting = Arc::clone(&server);
         let request = std::thread::spawn(move || {
+            // With one registered dispatch, tracing can cache another test
+            // thread's disabled interest while it registers this callsite.
+            // Keep a second dispatch alive so interest remains thread-local.
+            let _cache_anchor =
+                tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default());
             tracing::subscriber::with_default(
                 PortalLockWait {
                     entered: entered_tx,

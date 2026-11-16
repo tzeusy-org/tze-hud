@@ -1,6 +1,6 @@
 //! Subtitle streaming breakpoint reveal — gRPC and MCP publish path verification.
 //!
-//! Implements acceptance criteria for `hud-hzub.4`:
+//! Implements acceptance criteria
 //! - Breakpoints are gRPC-only (the MCP surface has no breakpoints field)
 //! - gRPC zone `Publish` with stream_text + breakpoints: breakpoints forwarded to compositor
 //! - Stream-text without breakpoints reveals full text immediately
@@ -28,10 +28,6 @@
 //! All tests are headless (no display server required).
 //! Each test continuously owns a kernel-assigned listener through runtime startup.
 //!
-//! Spec: openspec/changes/exemplar-subtitle/specs/exemplar-subtitle/spec.md
-//!   §Subtitle Streaming Word-by-Word Reveal
-//!   §Subtitle Contention Policy — Latest Wins
-//!   §Subtitle MCP Test Fixtures
 
 use std::net::SocketAddr;
 
@@ -47,7 +43,7 @@ use tokio::{net::TcpListener, task::JoinHandle};
 use tokio_stream::StreamExt;
 
 // ─── Shared gRPC session harness ─────────────────────────────────────────────
-// Selectively re-uses now_wall_us() from the shared harness (hud-ls5pz).
+// Selectively re-uses now_wall_us() from the shared harness.
 // The AgentSession in this file is intentionally minimal (no namespace /
 // lease_id_bytes) because zone-publish-only tests don't need those fields.
 // The shared connect_agent() requires full-session semantics; this file keeps
@@ -199,7 +195,7 @@ async fn zone_publish_stream_text(
 
 /// gRPC zone `Publish` with stream_text + breakpoints forwards breakpoints to the compositor.
 ///
-/// Spec §"Stream-text with breakpoints reveals word-by-word":
+/// "Stream-text with breakpoints reveals word-by-word":
 /// "The compositor MUST reveal the text progressively: first "The", then
 ///  "The quick", then "The quick brown", then "The quick brown fox"."
 ///
@@ -267,7 +263,7 @@ async fn test_grpc_zone_publish_with_breakpoints_forwarded()
 
 /// gRPC zone `Publish` with empty breakpoints list reveals full text immediately.
 ///
-/// Spec §"Stream-text without breakpoints reveals all at once":
+/// "Stream-text without breakpoints reveals all at once":
 /// "THEN the compositor MUST display the full text immediately (no progressive reveal)."
 #[tokio::test]
 async fn test_grpc_zone_publish_empty_breakpoints_reveals_immediately()
@@ -297,7 +293,7 @@ async fn test_grpc_zone_publish_empty_breakpoints_reveals_immediately()
 
 /// Replacement during streaming cancels the in-progress reveal — latest-wins semantics.
 ///
-/// Spec §"Replacement during streaming cancels reveal":
+/// "Replacement during streaming cancels reveal":
 /// "THEN the compositor MUST cancel the in-progress reveal and display the new content."
 ///
 /// At the scene layer: publishing a second content replaces the first record (LatestWins),
@@ -349,7 +345,7 @@ async fn test_grpc_zone_publish_replacement_cancels_breakpoints()
 
 /// gRPC path delivers the same breakpoint behavior as MCP path.
 ///
-/// Spec §Subtitle Streaming Word-by-Word Reveal, Epic API coverage:
+/// Subtitle Streaming Word-by-Word Reveal, Epic API coverage:
 /// "MCP (JSON-RPC guest path) and gRPC (protobuf resident path) must produce identical visual results."
 ///
 /// Verification: publish via gRPC with the same payload as subtitle-streaming.json fixture,
@@ -394,8 +390,8 @@ async fn test_grpc_zone_publish_breakpoints_match_mcp_behavior()
 ///
 /// This verifies the internal metadata used by MCP hud_surfaces.
 ///
-/// Spec §Subtitle Contention Policy — Latest Wins.
-/// Spec §Subtitle MCP Test Fixtures — zone_name: "subtitle".
+/// Subtitle Contention Policy — Latest Wins.
+/// Subtitle MCP Test Fixtures — zone_name: "subtitle".
 #[tokio::test]
 async fn test_grpc_list_zones_subtitle_metadata() -> Result<(), Box<dyn std::error::Error>> {
     let (runtime, _server_handle, _addr) = start_runtime_with_subtitle_zone().await?;

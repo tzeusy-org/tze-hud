@@ -1234,7 +1234,7 @@ def scenario_portal_reading(run: Run) -> None:
     run.expect("selection cleared", on(s, lambda p: p["selection_chars"] == 0))
 
     # Real link handoffs last: the browser can take the foreground late
-    # (hud-xq14t), so nothing but state reads follows a launch.
+    # , so nothing but state reads follows a launch.
     time.sleep(0.7)  # past the double-click interval
     run.glide(x, a)
     run.click()
@@ -2120,7 +2120,7 @@ def run_scenarios(run: Run, names: list[str]) -> list[dict]:
             result.update(outcome="FAIL", step=failure.step, last=failure.last)
         except Refused as err:
             # Keep every earlier outcome: the timeline and summary must not
-            # collapse to 0/0 because a later guard refused (hud-xq14t).
+            # collapse to 0/0 because a later guard refused .
             result.update(outcome="FAIL", step=f"refused: {err}", last=None,
                           seconds=round(time.monotonic() - started, 2))
             results.append(result)
@@ -2194,7 +2194,7 @@ def main(argv: list[str] | None = None) -> int:
                                and ((n in overlay_names) == (args.window_mode == "overlay"))]
     # Real link handoffs ("portal-reading", "card-link") can let a browser take
     # the foreground seconds later (Edge first-run UI covered the HUD for every
-    # later scenario, hud-xq14t), so they run after everything else that
+    # later scenario, ), so they run after everything else that
     # injects input. "restart" replaces the HUD and only uses MCP; it stays last.
     # Before those, required scenarios run first in the fresh HUD and
     # informational ones follow in the same boot. A list naming the other window

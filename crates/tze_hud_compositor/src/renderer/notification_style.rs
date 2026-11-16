@@ -1,4 +1,4 @@
-//! The notification card's one resolved style (hud-h51u7.4.1, Tonal Glass).
+//! The notification card's resolved Tonal Glass style.
 //!
 //! Every size, colour and opacity a `notification-area` card draws with comes
 //! from here, read from design tokens: the card's own roles
@@ -14,7 +14,7 @@
 //! and hit testing cannot drift. The only literals are the canonical defaults
 //! in `tze_hud_config`, used when a token is absent.
 //!
-//! Alert banners (`alert-banner`, hud-h51u7.4.2) are the same card drawn
+//! Alert banners (`alert-banner`) are the same card drawn
 //! from their own roles (`color.alert.*`, `color.on_alert.*`,
 //! `opacity.alert`, `space.alert.*`, `type.alert.*`, corners from
 //! `shape.alert` via the policy) and add an outer inset

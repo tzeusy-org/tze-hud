@@ -1287,7 +1287,7 @@ pub(super) fn focus_window_for_text_input(window: &Window) {
             // receives mouse input (mouse is routed via SetCapture, which does
             // not require keyboard focus) but NO WindowEvent::KeyboardInput —
             // typing and focus-scoped hotkeys (Ctrl+/-) are dead even though the
-            // composer is focused at the scene level (hud-dwcr7).
+            // composer is focused at the scene level.
             //
             // The standard Win32 workaround is to temporarily attach this
             // thread's input queue to the current foreground window's thread.
@@ -1529,7 +1529,7 @@ pub(super) fn spin_acquire<T>(
     }
 }
 
-/// [`spin_acquire`] plus interaction-feedback miss telemetry (hud-uyhpn).
+/// [`spin_acquire`] plus interaction-feedback miss telemetry.
 ///
 /// Identical acquisition semantics to [`spin_acquire`], but on a budget timeout
 /// (the guaranteed-feedback gesture is about to drop a scene update) it bumps
@@ -1570,7 +1570,7 @@ pub(super) fn spin_acquire_recording<'a, T>(
 /// portal frame's resize affordance.
 ///
 /// The resize case MUST mirror [`super::portal::apply_portal_resize_pointer_event`]'s
-/// pointer-down path (hud-yno2r): the gesture is resolved from the tile UNDER THE
+/// pointer-down path: the gesture is resolved from the tile UNDER THE
 /// POINTER — not the focused tile — and starts for a portal *frame*: the topmost
 /// hit tile that is itself scrollable (raw-tile portal) OR that spatially
 /// contains a scrollable same-namespace constituent surface (the non-scrollable
@@ -1617,7 +1617,7 @@ pub(super) fn pointer_down_starts_guaranteed_feedback_gesture(
 }
 
 /// Convert a pointer event's window-space `(x, y)` into coordinates local to
-/// `tile_id`'s bounds (hud-etrs0 composer hit-test). Falls back to the raw
+/// `tile_id`'s bounds (composer hit-test). Falls back to the raw
 /// pointer coordinates when the tile is not currently in the scene (e.g. a
 /// drag that outlives the tile it started on).
 fn tile_local_pointer_xy(
@@ -2116,7 +2116,7 @@ pub(super) fn notification_exit_ms(
 
 impl WinitApp {
     /// Best-effort per-frame reconvergence of the lock-free `active_tab_mirror`
-    /// from the authoritative scene (hud-dwcr7).  Non-blocking: uses `try_lock`
+    /// from the authoritative scene. Non-blocking: uses `try_lock`
     /// on both the shared-state and scene mutexes and silently skips this frame
     /// if either is busy.  This is a safety net — the mirror is primarily kept
     /// fresh at the point of each active_tab change — so it must never stall the
@@ -2135,7 +2135,7 @@ impl WinitApp {
     /// portal clear removed. A composer on that tile is blurred and its local
     /// echo cleared; otherwise the compositor keeps blinking a caret for a
     /// composer that no longer exists, presenting a frame per blink on an
-    /// otherwise idle HUD (hud-oyo7k).
+    /// otherwise idle HUD.
     /// Non-blocking: skips this frame if the scene lock is busy.
     pub(super) fn clear_focus_on_removed_tile(&mut self) {
         let composer_lost = {
@@ -2163,7 +2163,7 @@ impl WinitApp {
     }
 
     /// Publish the active tab's current keyboard-focus owner to the compositor's
-    /// chrome-layer focus-ring pass (hud-k6yvb).
+    /// chrome-layer focus-ring pass.
     ///
     /// Maps the `FocusManager` owner to a [`FocusRingOwner`]: a focusable node
     /// (`Some(node_id)`) or a tile-level stop (`None`). `FocusOwner::None` and
@@ -2229,7 +2229,7 @@ impl WinitApp {
     }
 
     /// Publish the portal tile whose bottom-right resize corner the pointer is
-    /// over to the compositor's grip pass (hud-wgiys).
+    /// over to the compositor's grip pass.
     ///
     /// Per-frame + latest-wins, exactly like [`WinitApp::push_focus_ring_owner`]:
     /// the compositor swaps that tile's resize-grip mark to `hover_color` and
@@ -2245,7 +2245,7 @@ impl WinitApp {
     }
 
     /// Publish the tile under the pointer to the compositor so it shows that
-    /// tile's viewer close button (hud-jm8nq.11).
+    /// tile's viewer close button.
     ///
     /// Resolved from the polled cursor and the lock-free hit-test snapshot, so
     /// it works in passthrough overlay mode (where the OS delivers no pointer
@@ -2430,7 +2430,7 @@ impl WinitApp {
         }
         // The press already ended: `synthesize_left_release_if_physically_up`
         // saw the button up before this event arrived and sent the Up. A
-        // second Up would repeat the release (hud-z21e9).
+        // second Up would repeat the release.
         if !self.state.left_button_down {
             return;
         }
@@ -2543,7 +2543,7 @@ impl WinitApp {
     }
 
     /// Map a composer-node-local pointer position to a draft byte offset
-    /// (hud-etrs0 pointer caret hit-test). `tile_local_x`/`tile_local_y` are
+    /// (pointer caret hit-test). `tile_local_x`/`tile_local_y` are
     /// pointer coordinates already converted to the owning tile's local space
     /// (see `tile_local_pointer_xy`); this clamps them into the node's bounds
     /// before hit-testing. Returns `None` when `node_id` does not resolve to a
@@ -2551,7 +2551,7 @@ impl WinitApp {
     ///
     /// Prefers the real glyph-geometry hit-test: `byte_at_point` against the
     /// wrapped visual-row layout the compositor already publishes for
-    /// ArrowUp/ArrowDown (`self.state.composer_visual_layout`, hud-21o6x).
+    /// ArrowUp/ArrowDown (`self.state.composer_visual_layout`).
     /// That layout is measured with the composer's content x origin inset by
     /// `portal.spacing.content_inset_px`, so the node-local x is de-inset to
     /// match before the lookup. Mirrors the arrow-key path's freshness guard
@@ -2561,20 +2561,20 @@ impl WinitApp {
     /// The node-local `local_y` is passed straight through: `byte_at_point` maps
     /// it to a visual row via the input-box geometry the compositor publishes in
     /// the same layout (bottom-anchored short box on a tall projection portal,
-    /// hud-lw60x), and `node_h` serves only as the even-split fallback height
+    /// ), and `node_h` serves only as the even-split fallback height
     /// when no geometry is present.
     ///
     /// Falls back to the previous linear `(local_x / node_width) *
     /// text_byte_len` proportion when there is no fresh layout — the
     /// single-line composer profile (`portal.composer.max_lines == 1`,
-    /// hud-zlfi4) never publishes one, and a multi-line composer may not have
+    /// ) never publishes one, and a multi-line composer may not have
     /// one yet on the first frame after focus gain.
     ///
     /// `layout.h_scroll_px` is folded back into the de-inset screen-space x
-    /// before the lookup (hud-uui70): the single-line profile's `glyph_x`
+    /// before the lookup: the single-line profile's `glyph_x`
     /// table is measured in UNSCROLLED draft space
     /// (`TextRasterizer::measure_composer_single_line_layout`), but once a
-    /// long draft triggers caret-follow horizontal scroll (hud-zlfi4) the
+    /// long draft triggers caret-follow horizontal scroll the
     /// on-screen glyphs are shifted left by `h_scroll_px` — the inverse of
     /// the chrome-layer caret quad's `caret_x - h_scroll_px`
     /// (`append_composer_caret_vertices`) and `composer_ime_caret_anchor`'s
@@ -2624,7 +2624,7 @@ impl WinitApp {
             return Some(layout.byte_at_point(text_x, local_y, node_h));
         }
 
-        // Fallback: the pre-hud-etrs0 crude linear proportion.
+        // Fallback: the previous crude linear proportion.
         let frac = (local_x / node_w) as f64;
         Some((frac * draft_text_len.unwrap_or(0) as f64).round() as usize)
     }
@@ -2632,7 +2632,7 @@ impl WinitApp {
     /// Handle one pointer event: local feedback, drags and agent dispatch.
     ///
     /// In overlay mode, dynamically toggles cursor hittest based on whether the
-    /// cursor is inside any active hit-region (spec §Overlay click-through, line 181):
+    /// cursor is inside any active hit-region:
     /// - Inside a hit-region → `set_cursor_hittest(true)` (window captures events).
     /// - Outside all hit-regions → `set_cursor_hittest(false)` (events pass through).
     pub(super) fn enqueue_pointer_event(&mut self, kind: PointerEventKind) {
@@ -2641,7 +2641,7 @@ impl WinitApp {
         }
         if self.state.context_menu_press.is_some() {
             // The context menu owns the pointer; a retained Move is moot and
-            // must not keep the deferred-work wake alive (hud-65gpz).
+            // must not keep the deferred-work wake alive.
             self.state.pending_pointer_move = false;
             return;
         }
@@ -2690,7 +2690,7 @@ impl WinitApp {
         self.tick_widget_hover_tracking();
 
         // Also feed the InputProcessor for local feedback (Stage 2).
-        // This happens synchronously on the main thread per spec §Stage 2.
+        // This happens synchronously on the main thread per Stage 2.
         let input_started_at = Instant::now();
         let pointer_event = PointerEvent {
             x,
@@ -2715,13 +2715,13 @@ impl WinitApp {
         let portal_resize_outcome: Option<PortalResizePointerOutcome>;
         // Flag set when a composer focus-lost transition is detected inside the
         // locked block below; consumed after the lock is released to call
-        // clear_local_composer_echo() without a borrow conflict (hud-r3ax6).
+        // clear_local_composer_echo() without a borrow conflict.
         let mut composer_focus_lost = false;
         // Flag set when a pointer caret placement / drag-select mutates the
         // composer draft selection inside the locked block below; consumed
         // after the lock is released to push the updated echo to the
         // compositor (which renders caret/selection from the local echo slot,
-        // not the input processor) without a borrow conflict (hud-etrs0).
+        // not the input processor) without a borrow conflict.
         let mut composer_selection_changed = false;
         let mut take_text_focus = false;
         let mut reading_effect = None;
@@ -2771,7 +2771,7 @@ impl WinitApp {
         // borrow of `self` is released at the end of this if-let/else — the
         // post-lock section below needs `&mut self` (drag-release persist,
         // composer-echo clear).
-        // The interaction-feedback miss counter (hud-uyhpn) is bumped inside
+        // The interaction-feedback miss counter is bumped inside
         // `spin_acquire_recording`, which wraps `spin_acquire` and — on a budget
         // timeout during a guaranteed-feedback gesture — records the dropped scene
         // update. Kept in the `if`-scrutinee position (not a named `let`) so the
@@ -2808,7 +2808,7 @@ impl WinitApp {
                 // broadcast FocusGainedEvent / FocusLostEvent to agents via
                 // dispatch_focus_event on the input_event_tx channel.
                 // Resolve the tab that should receive focus for this pointer
-                // event.  Click-to-focus is per-tab (RFC 0004 §1.1/§1.2), so the
+                // event. Click-to-focus is per-tab, so the
                 // authoritative tab is the one that OWNS the tile under the
                 // pointer — not the global `active_tab`.  A resident gRPC /
                 // projection session (e.g. a text-stream portal) creates tiles
@@ -2816,7 +2816,7 @@ impl WinitApp {
                 // tab carries no widgets boot with `active_tab == None`, and
                 // tab activation can otherwise drift; in either case keying focus
                 // off the stale/absent global `active_tab` silently drops focus
-                // acquisition (hud-dwcr7).  Pointer-down on a tile therefore
+                // acquisition. Pointer-down on a tile therefore
                 // activates that tile's tab so focus + keyboard routing (which
                 // reads `active_tab`) target the surface the operator clicked.
                 if pointer_event.kind == PointerEventKind::Down {
@@ -2833,7 +2833,7 @@ impl WinitApp {
                                     scene.active_tab = Some(hit_tab);
                                 }
                                 // Keep the lock-free keyboard-dispatch mirror in
-                                // sync with the tab we just activated (hud-dwcr7).
+                                // sync with the tab we just activated.
                                 state.refresh_active_tab_mirror(&scene);
                                 tracing::debug!(
                                     tab_id = ?hit_tab,
@@ -2903,12 +2903,12 @@ impl WinitApp {
                     dispatch_focus_event(&self.state.input_event_tx, transition);
                 }
 
-                // ── Composer pointer-selection routing (§4.1 / hud-083az, hud-etrs0) ──
+                // ── Composer pointer-selection routing  ──
                 // On pointer-Down, if a composer region is focused and the hit
                 // landed on that same node, position the draft cursor via a
                 // real glyph-geometry hit-test (`byte_at_point`, backed by the
                 // wrapped visual-row layout the compositor already publishes
-                // for ArrowUp/ArrowDown — hud-21o6x), falling back to the
+                // for ArrowUp/ArrowDown — ), falling back to the
                 // previous linear (local_x / node_width) * text_len
                 // approximation when no layout is available yet (single-line
                 // composer profile, or the first frame after focus). See
@@ -3016,12 +3016,12 @@ impl WinitApp {
                 // managed zone interaction element (e.g. a notification dismiss
                 // button).  Dismiss actions are applied synchronously here so the
                 // stale affordance disappears before the next rendered frame —
-                // satisfying the "local feedback first" doctrine.
+                // satisfying the "local feedback first" rule.
                 //
                 // Callback and human-X events enter their publisher's retained
                 // MCP input lane; notification tokens are delivered unlocked.
                 //
-                // Button semantics (hud-z21e9): a release activates an
+                // Button semantics: a release activates an
                 // affordance only when the press began on that same
                 // affordance, so a release that lands elsewhere (the cursor
                 // moved, or a press that started off the button) never fires
@@ -3107,7 +3107,7 @@ impl WinitApp {
                                 // Local feedback first: snap the tile's
                                 // viewport back to the tail synchronously, in
                                 // the same pointer-up dispatch that produced
-                                // the hit — no adapter roundtrip (hud-9ci61).
+                                // the hit — no adapter roundtrip.
                                 let changed = self
                                     .state
                                     .input_processor
@@ -3187,7 +3187,7 @@ impl WinitApp {
                     self.state.primary_drag_gesture = None;
                 }
 
-                // ── Pointer-affordance portal resize (§6b.1) ─────────────────
+                // ── Pointer-affordance portal resize ─────────────────
                 // Hit-test the focused portal's resize affordance strip on every
                 // pointer event.  On PointerDown inside an affordance, starts the
                 // drag gesture (gesture_active = true → adapter publishes blocked).
@@ -3276,7 +3276,7 @@ impl WinitApp {
             self.perform_reading_effect(effect);
         }
 
-        // A busy scene lock must not lose hover/hit-test (hud-65gpz): retain the
+        // A busy scene lock must not lose hover/hit-test: retain the
         // Move and replay it at the then-current cursor when the lock frees.
         // Any processed pointer event subsumes a retained Move.
         if pointer_processed {
@@ -3314,7 +3314,7 @@ impl WinitApp {
         // intermediate (move) and final (up) geometry changes.  GestureStarted
         // (down) events are also emitted so adapters can observe gesture
         // lifecycle.  Fire-and-forget (best-effort coalescible state-stream
-        // delivery per §6b.4).
+        // delivery ).
         if let Some(outcome) = portal_resize_outcome {
             self.finish_portal_resize_members(
                 &outcome.members,
@@ -3325,9 +3325,9 @@ impl WinitApp {
         }
 
         // Post-lock: clear local composer echo if composer focus was lost inside
-        // the shared_state lock scope above (hud-r3ax6). A stale pointer
+        // the shared_state lock scope above. A stale pointer
         // drag-select anchor from that same composer must not leak into
-        // whatever region focuses next (hud-etrs0).
+        // whatever region focuses next.
         if composer_focus_lost {
             self.clear_local_composer_echo();
             self.state.composer_pointer_drag_anchor = None;
@@ -3335,13 +3335,12 @@ impl WinitApp {
             // A pointer caret placement or drag-select changed the draft
             // selection; publish the refreshed snapshot so the compositor
             // renders the new caret/highlight on the next frame rather than
-            // leaving it stale until the next keystroke (hud-etrs0, §4.1
-            // local-feedback-first).
+            // leaving it stale until the next keystroke.
             self.push_local_composer_echo(input_started_at);
         }
 
         // Update the OS resize/move cursor to reflect the affordance under the
-        // pointer (hud-g5yu1).  Runs after the gesture state machines above so
+        // pointer. Runs after the gesture state machines above so
         // `active_edge`/`drag_active` reflect the event we just processed; the
         // CursorIconTracker suppresses redundant winit calls on the move stream.
         self.update_portal_cursor_icon();
@@ -3352,7 +3351,7 @@ impl WinitApp {
     /// Applies the offset locally (< 4ms p99 path) and, if the tile owner is
     /// subscribed, dispatches a `ScrollOffsetChangedEvent` to the agent via the
     /// `INPUT_EVENTS` channel. A busy scene lock retains the delta instead of
-    /// dropping it (hud-65gpz); it applies, in order, on the next successful
+    /// dropping it; it applies, in order, on the next successful
     /// lock via one coalesced availability wake.
     /// `delta_y` is in `step` units (hud-ljhku.13); the target sizes lines
     /// and pages when the delta applies.
@@ -3408,7 +3407,7 @@ impl WinitApp {
         Some(true)
     }
 
-    /// Retry pointer input a busy scene lock deferred (hud-65gpz): retained
+    /// Retry pointer input a busy scene lock deferred: retained
     /// wheel deltas first (they arrived at their own positions), then one
     /// Move at the current cursor. True when either reached the scene.
     pub(super) fn drain_retained_pointer_input(&mut self) -> bool {
@@ -3422,7 +3421,7 @@ impl WinitApp {
     }
 }
 
-/// One wheel delta retained across a busy scene lock (hud-65gpz).
+/// One wheel delta retained across a busy scene lock.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct RetainedScroll {
     pub(super) x: f32,
@@ -3474,7 +3473,6 @@ impl WinitApp {
     /// Check the `FrameReadySignal` and present the frame if the compositor
     /// has signalled one.
     ///
-    /// Per spec §Compositor Thread Ownership (line 54-55):
     /// "WHEN a frame is ready for presentation THEN the compositor thread MUST
     /// signal the main thread via FrameReadySignal, and only the main thread
     /// SHALL call surface.present()."
@@ -4045,7 +4043,7 @@ mod tests {
     /// hard-block — once a holder outlasts the budget.  This is what keeps a
     /// dragged window tracking the pointer instead of jumping in bursts, and a
     /// `Ctrl+`/`-` resize landing the same frame, without ever freezing the UI
-    /// thread on a pathological lock holder (hud-0xudd).  Deliberately a plain
+    /// thread on a pathological lock holder. Deliberately a plain
     /// `#[test]` (no runtime) to also assert it works off the async runtime.
     #[test]
     fn spin_acquire_waits_out_brief_holder_but_yields_on_overrun() {
@@ -4107,7 +4105,7 @@ mod tests {
     use tze_hud_input::{FocusManager, InputProcessor, PointerEventKind};
 
     /// Retained wheel input keeps order across positions, sums a burst at one
-    /// position, and stays bounded however long the lock is held (hud-65gpz).
+    /// position, and stays bounded however long the lock is held.
     #[test]
     fn retained_scroll_coalesces_bursts_and_stays_bounded() {
         use super::{RETAINED_SCROLL_MAX, RetainedScroll, retain_scroll};
@@ -4452,7 +4450,7 @@ mod tests {
         );
     }
 
-    /// hud-yno2r: the pre-lock guaranteed-feedback predicate must also fire when
+    /// the pre-lock guaranteed-feedback predicate must also fire when
     /// the pointer is on the resize corner of a NON-scrollable portal *frame*
     /// that contains scrollable panes — the first-class / multi-surface layout.
     /// Before the fix this keyed off the focused tile being scrollable, so a
@@ -4495,7 +4493,7 @@ mod tests {
         );
     }
 
-    /// hud-yno2r regression (end-to-end): drive the *full* pointer pipeline
+    /// regression (end-to-end): drive the *full* pointer pipeline
     /// (`WinitApp::enqueue_pointer_event`) so click-to-focus and the resize
     /// handler run in their real order on one pointer-down — the coverage the
     /// live OS-injection sweep found was missing.
@@ -4724,7 +4722,7 @@ mod tests {
     /// portal, or the lease expires) must blur the composer and clear the
     /// local echo. Otherwise the compositor keeps a caret blinking for a
     /// composer that no longer exists and presents a frame per blink on an
-    /// otherwise idle HUD (hud-oyo7k).
+    /// otherwise idle HUD.
     #[test]
     fn removing_focused_composer_tile_clears_local_echo() {
         use tze_hud_input::{FocusManager, InputProcessor};
@@ -4972,7 +4970,7 @@ mod tests {
         );
         // The compositor renders the caret/selection from the local echo slot,
         // not the input processor, so the pointer caret must be published there
-        // too (hud-etrs0 local-feedback-first) or the visible caret stays stale
+        // too (local-feedback-first) or the visible caret stays stale
         // until the next keystroke.
         let echo = app
             .state
@@ -5007,7 +5005,7 @@ mod tests {
              the new pointer position"
         );
         // The drag-extended selection must also reach the local echo slot so
-        // the highlight repaints live during the drag (hud-etrs0), not only
+        // the highlight repaints live during the drag, not only
         // after a later keystroke.
         let echo = app
             .state
@@ -5042,10 +5040,10 @@ mod tests {
         );
     }
 
-    /// hud-uui70: the single-line profile's `glyph_x` table is measured in
-    /// UNSCROLLED draft space (`measure_composer_single_line_layout`); once a
-    /// long draft triggers caret-follow horizontal scroll (`h_scroll_px`,
-    /// hud-zlfi4), `composer_pointer_byte_offset` must fold that scroll back
+    /// The single-line profile's `glyph_x` table is measured in
+    /// unscrolled draft space (`measure_composer_single_line_layout`); once a
+    /// long draft triggers caret-follow horizontal scroll (`h_scroll_px`),
+    /// `composer_pointer_byte_offset` must fold that scroll back
     /// into the de-inset screen-space x before consulting the glyph table —
     /// otherwise a click's screen x is looked up directly against unscrolled
     /// draft coordinates and lands on the WRONG byte.
@@ -5055,7 +5053,7 @@ mod tests {
     /// 20.0` (`input_box: None`, matching what the single-line profile
     /// actually publishes). A click at node-local x=26 de-insets to
     /// screen-space text_x=20:
-    /// - WITHOUT the h_scroll correction (the pre-hud-uui70 bug), 20 is
+    /// - WITHOUT the h_scroll correction (the previous bug), 20 is
     ///   nearest to byte 2 (glyph x=15, distance 5) — the exact wrong byte
     ///   the sibling multi-line test's row 0 also resolves to at this same
     ///   pixel, proving this is a real, distinct mismatch and not a fixture

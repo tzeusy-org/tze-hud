@@ -18,19 +18,11 @@
 //!
 //! ## Bundle errors
 //!
-//! Per widget-system/spec.md §Widget Asset Bundle Format: "A rejected bundle
+//! "A rejected bundle
 //! MUST NOT prevent other valid bundles from loading; the runtime SHALL log
 //! the error and continue."  Bundle load errors are logged at WARN level and
 //! do not abort startup.
 //!
-//! ## Spec references
-//!
-//! - widget-system/spec.md §Requirement: Widget Registry
-//! - widget-system/spec.md §Requirement: Widget Asset Bundle Format
-//! - widget-system/spec.md §Requirement: Widget Instance Lifecycle
-//! - widget-system/spec.md §Requirement: Widget Contention and Governance
-//! - configuration/spec.md §Requirement: Widget Bundle Configuration
-//! - configuration/spec.md §Requirement: Widget Instance Configuration
 
 use std::collections::HashMap;
 use std::path::Path;
@@ -83,7 +75,7 @@ const BUILTIN_BUNDLES: &[(&str, BundleFiles)] = &[
 ///    (needed to bind widget instances to tab IDs).
 /// 5. Creates `WidgetInstance` records for each `[[tabs.widgets]]` entry.
 ///
-/// Errors are logged at WARN level but never abort startup (spec §Widget
+/// Errors are logged at WARN level but never abort startup (Widget
 /// Asset Bundle Format).
 ///
 /// # Arguments
@@ -97,7 +89,7 @@ const BUILTIN_BUNDLES: &[(&str, BundleFiles)] = &[
 ///   found in this map, the function will attempt to pre-create the tab.
 /// - `token_map`: Global design token map for `{{token.key}}` placeholder resolution
 ///   in widget SVG files. Pass an empty map when no design tokens are configured.
-///   Per component-shape-language/spec.md §SVG Token Placeholder Resolution: global
+///   global
 ///   bundles resolve against the global token map.
 ///
 /// SVG asset from a loaded widget bundle: `(widget_type_id, svg_filename, svg_bytes)`.
@@ -116,8 +108,7 @@ pub fn bundle_roots(raw: &RawConfig, config_parent: Option<&Path>) -> Vec<std::p
 
 /// Every bundle: the on-disk ones under `roots`, then each built-in that no
 /// on-disk bundle overrides, with `{{token.key}}` placeholders resolved
-/// against `token_map` (component-shape-language §SVG Token Placeholder
-/// Resolution: global bundles resolve against the global token map).
+/// against the global `token_map`.
 fn scan_all_bundles(
     roots: &[std::path::PathBuf],
     token_map: &HashMap<String, String>,

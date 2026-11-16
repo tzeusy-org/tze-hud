@@ -164,7 +164,7 @@ impl SceneGraph {
         }
     }
 
-    // ─── Portal frame / header-band resolution (hud-643dv) ───────────────
+    // ─── Portal frame / header-band resolution ───────────────
     //
     // Shared structural portal-group resolution used by BOTH the compositor
     // (to place the header-band drag handle on the frame tile) and the runtime
@@ -204,7 +204,7 @@ impl SceneGraph {
     /// exemplar creates a capture-backstop tile with IDENTICAL bounds to the
     /// frame, and a plain largest-area pick tie-breaks onto whichever was created
     /// first (the backstop, via monotonic ids), stranding the band on an
-    /// invisible tile whose node tree lacks the header controls (hud-cpjqe).
+    /// invisible tile whose node tree lacks the header controls.
     /// Falls back to [`Self::portal_anchor_tile`] only if every member is
     /// passthrough (degenerate — should not happen for a real portal).
     pub fn portal_band_anchor_tile(&self, tile_id: SceneId) -> Option<SceneId> {
@@ -232,7 +232,7 @@ impl SceneGraph {
     /// declared for a tile: the declared `Header` part carries real surface-local
     /// bounds (even when its backing `node` is empty), so hit-testing keys off the
     /// surface descriptor rather than inferring a top strip from raw sibling tiles
-    /// (hud-m4xay F5 — finishing the promotion's renderer/interaction residual).
+    /// (F5 — finishing the promotion's renderer/interaction residual).
     ///
     /// For portals that have NOT declared a surface (the retained raw-tile escape
     /// hatch), it falls back to the legacy heuristic: a "portal" is any lease group
@@ -240,10 +240,10 @@ impl SceneGraph {
     /// `translate_portal_group_on_drag` uses), a single scrollable tile qualifies
     /// as a degenerate one-member portal, and the band is the top `band_h` strip of
     /// the frame/anchor tile — the visible frame, never an equal-bounds passthrough
-    /// capture-backstop (hud-cpjqe). Anchors already covered by a declared surface
+    /// capture-backstop. Anchors already covered by a declared surface
     /// are not double-emitted.
     ///
-    /// Used by the compositor to emit the header-band drag handle (hud-643dv).
+    /// Used by the compositor to emit the header-band drag handle.
     /// Returned sorted by anchor id so handle ordering is deterministic.
     pub fn portal_header_band_anchors(&self, band_h: f32) -> Vec<(SceneId, Rect)> {
         let mut out: Vec<(SceneId, Rect)> = Vec::new();
@@ -277,7 +277,7 @@ impl SceneGraph {
                 continue;
             }
             // Anchor on the VISIBLE frame, not an equal-bounds passthrough
-            // capture-backstop (hud-cpjqe).
+            // capture-backstop.
             if let Some(anchor) = self.portal_band_anchor_tile(*id) {
                 if !covered.contains(&anchor) {
                     anchors.insert(anchor);
@@ -316,13 +316,12 @@ impl SceneGraph {
     /// Returns [`HitResult::Passthrough`] when no tile covers the point.
     ///
     /// # Performance
-    /// Pure geometry — no GPU involvement.  Target: < 100 µs for 50 tiles
-    ///.
+    /// Pure geometry — no GPU involvement.  Target: < 100 µs for 50 tiles.
     pub fn hit_test(&self, x: f32, y: f32) -> HitResult {
         // ── Chrome drag-handle hit regions (global, chrome-priority) ────────
         for region in &self.overlay.drag_handle_hit_regions {
             if region.hit_region.accepts_pointer && region.bounds.contains_point(x, y) {
-                // Header-band handles (hud-643dv) span the whole top strip of a
+                // Header-band handles span the whole top strip of a
                 // portal frame and legitimately overlap interactive controls
                 // (minimize, reply). Windows-titlebar semantics: a control on the
                 // band wins; the band drags only empty header space. A band
@@ -391,7 +390,7 @@ impl SceneGraph {
                 continue; // Skip passthrough tiles per spec.
             }
             // Displayed (smoothed/lagged) offset during an in-flight scroll
-            // animation; authoritative offset otherwise (hud-3lynp).
+            // animation; authoritative offset otherwise.
             let (scroll_x, scroll_y) = self.effective_tile_scroll_offset_local(tile.id);
             let local_x = x - tile.bounds.x;
             let local_y = y - tile.bounds.y;
@@ -580,7 +579,7 @@ impl SceneGraph {
     }
 
     /// True when a header-band drag handle should yield the point to an
-    /// interactive control beneath it (hud-643dv).
+    /// interactive control beneath it.
     ///
     /// Probes the band's frame tile (`region.element_id`) for an `accepts_pointer`
     /// HitRegionNode under `(x, y)` and yields ONLY when that node's bounds fit

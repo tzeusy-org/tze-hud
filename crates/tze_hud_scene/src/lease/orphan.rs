@@ -6,7 +6,7 @@
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
-/// Reconnect grace period (ms). Spec: "default 30,000 ms" (line 133).
+/// Default reconnect grace period: 30,000 ms.
 pub const DEFAULT_GRACE_PERIOD_MS: u64 = 30_000;
 
 // ─── TileVisualHint ──────────────────────────────────────────────────────────
@@ -27,7 +27,7 @@ pub enum TileVisualHint {
     #[default]
     None,
     /// Agent is disconnected; tile is frozen at last state.
-    /// Displayed within 1 frame of `disconnect` (spec line 133).
+    /// Displayed within 1 frame of `disconnect`.
     DisconnectionBadge,
     /// Tile content is stale because the controlling lease is ORPHANED;
     /// new publishes to this tile's zone are rejected.

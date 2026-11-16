@@ -15,9 +15,9 @@
 #   everything, so the capture baseline and idle trend stay complete.
 #   Graduated gesture scenarios (GESTURES_REQUIRED) fail windows-build in its
 #   last step, after every upload, so a required failure on main withholds the
-#   `dev` prerelease; other scenarios stay informational (hud-ljhku.16).
+#   `dev` prerelease; other scenarios stay informational .
 #   Informational: omit merge_group while this check is not required. Restore
-#   merge_group in the same hud-bstmy.8.8 change that makes it required.
+#   merge_group in the same change that makes it required.
 #   Docs-only PR/main updates skip; tag and manual runs are unaffected.
 #   Non-tag events use release-dev; v* tags keep the full release profile.
 # release — signs the exe with minisign (secret MINISIGN_SECRET_KEY; public key
@@ -183,7 +183,7 @@ jobs:
       # PR citing 10 consecutive main run ids where it PASSed (per scenario,
       # from the gestures artifact, not the job conclusion); one that flakes
       # leaves at once by a PR citing the failing run, never by a retry.
-      # Graduated 2026-11-15: overlay-pointer, tray (hud-ljhku.16 PR).
+      # Graduated 2026-11-15: overlay-pointer, tray.
       # continue-on-error keeps the uploads running; "Required gesture verdict"
       # fails the job afterwards, fail-closed if this step never set its output.
       # Required scenarios run first within each HUD boot, but the timeout is

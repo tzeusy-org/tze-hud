@@ -12,7 +12,7 @@
 //! - [`WindowSurface`] — window-backed surface via `wgpu::Surface`.
 //!   Reserved for windowed mode; windowed rendering is post-vertical-slice.
 //!
-//! Per runtime-kernel/spec.md Requirement: Compositor Surface Trait (line 364)
+//! Compositor Surface Trait (line 364)
 //! the surface is abstracted behind `CompositorSurface` with `acquire_frame()`,
 //! `present()`, and `size()`.  `CompositorFrame` bundles the `TextureView` with
 //! an ownership guard so the `SurfaceTexture` lives until after `present()`.
@@ -33,7 +33,7 @@ use std::any::Any;
 ///
 /// Bundling the pending texture and the "encode in progress" marker under ONE
 /// mutex is what closes the acquire→submit vs present/reconfigure race
-/// (Bug B Layer-2, hud-hj0xb). The previous design used a separate
+/// (Bug B Layer-2). The previous design used a separate
 /// `AtomicBool` checked *before* the pending-texture lock was taken, leaving a
 /// check-then-act (TOCTOU) gap: the main thread could observe `encoding=false`,
 /// then — before it acquired the lock — the compositor could begin the next
@@ -92,9 +92,8 @@ impl Drop for EncodingGuard {
 /// the guard is a `()` no-op.  For `WindowSurface` it would hold the
 /// `wgpu::SurfaceTexture`.
 ///
-/// Per runtime-kernel/spec.md: "CompositorFrame MUST bundle the TextureView
-/// with an ownership guard (_guard: Box<dyn Any + Send>) to keep the
-/// SurfaceTexture alive until after present()." (line 364)
+/// Bundles the TextureView with an ownership guard to keep the SurfaceTexture
+/// alive until after present().
 pub struct CompositorFrame {
     /// Render target for this frame.
     pub(crate) view: wgpu::TextureView,
@@ -252,7 +251,6 @@ impl SurfaceRecoveryState {
 /// (display-connected).  The compositor uses this trait exclusively — no
 /// `if headless { … } else { … }` branches in the frame pipeline.
 ///
-/// Per runtime-kernel/spec.md Requirement: Compositor Surface Trait (line 364):
 /// - `acquire_frame()` → `Option<CompositorFrame>` containing the `TextureView`,
 ///   or `None` if the frame should be skipped (e.g., after a double swapchain-
 ///   acquire failure). Callers MUST skip rendering and signal frame-skip telemetry
@@ -275,7 +273,7 @@ pub trait CompositorSurface: Send + 'static {
 
     /// Present (flip/submit) the current frame.
     ///
-    /// For `HeadlessSurface` this is a no-op per spec line 199.
+    /// For `HeadlessSurface` this is a no-op.
     /// For a real surface this submits the frame to the display.
     ///
     /// **MUST be called on the main thread** (macOS/Metal requirement).
@@ -292,7 +290,7 @@ pub trait CompositorSurface: Send + 'static {
 /// Wraps a `wgpu::Surface` created from a `winit::window::Window`. Used by
 /// `WindowedRuntime` to display rendered frames on a real screen.
 ///
-/// ## Thread model (spec §Compositor Thread Ownership, line 46)
+/// ## Thread model
 /// - `acquire_frame()` is called on the **compositor thread** — it calls
 ///   `surface.get_current_texture()` to obtain the next swapchain image.
 ///   The acquired `SurfaceTexture` is stored in `pending_texture` so the main
@@ -325,7 +323,7 @@ pub struct WindowSurface {
     /// by a single mutex.
     ///
     /// This is the swapchain-ownership mutex the acquire→submit critical
-    /// section is serialized against (Bug B Layer-2, hud-hj0xb). Folding both
+    /// section is serialized against (Bug B Layer-2). Folding both
     /// the pending texture and the encoding marker under one lock — rather than
     /// a separate `AtomicBool` checked before the lock — is what makes the
     /// main-thread present and the compositor reconfigure unable to destroy a
@@ -609,7 +607,7 @@ impl WindowSurface {
         device.poll(wgpu::Maintain::Wait);
 
         // Serialize against the compositor's acquire→submit critical section
-        // (Bug B Layer-2, hud-hj0xb). `reconfigure()` runs on the compositor
+        // (Bug B Layer-2). `reconfigure()` runs on the compositor
         // thread at the top of the frame loop, but `Surface::configure()` below
         // destroys every outstanding swapchain image. If a previous frame's
         // submit were still in flight (e.g. the main-thread present had not yet
@@ -682,7 +680,7 @@ impl WindowSurface {
     /// `FrameReadySignal`. Returns `true` if a texture was presented, `false`
     /// if no texture was pending.
     ///
-    /// ## Serialization (Bug B Layer-2, hud-hj0xb)
+    /// ## Serialization (Bug B Layer-2)
     /// The take+present is performed *while holding the swapchain mutex*, and
     /// the wait for the compositor's encode→submit to finish happens under that
     /// same lock via the condvar. This is the fix for the acquire→submit race:
@@ -992,7 +990,7 @@ impl CompositorSurface for WindowSurface {
 
         // Mark the encode→submit critical section open BEFORE creating the
         // TextureView and while still holding the lock. This is the acquire
-        // half of the serialization (hud-hj0xb): present_pending_texture() and
+        // half of the serialization: present_pending_texture() and
         // reconfigure() both check `encoding` under this same lock and wait on
         // the condvar, so neither can destroy the SurfaceTexture while the
         // compositor holds a TextureView referencing it.
@@ -1022,7 +1020,7 @@ impl CompositorSurface for WindowSurface {
                         .create_view(&wgpu::TextureViewDescriptor::default());
                     // Store the SurfaceTexture so the main thread can present
                     // it. Do NOT box it inside CompositorFrame._guard — that
-                    // would drop it (without calling .present()) when the frame
+                    // would drop it (without calling.present()) when the frame
                     // is dropped on the compositor thread, discarding the
                     // rendered frame.
                     slot.pending = Some(surface_texture);
@@ -1072,9 +1070,9 @@ impl CompositorSurface for WindowSurface {
 /// Headless offscreen surface for testing and CI.
 ///
 /// Satisfies:
-/// - runtime-kernel/spec.md Requirement: Headless Mode (line 198)
-/// - validation-framework/spec.md Requirement: DR-V2 (line 186)
-/// - validation-framework/spec.md Requirement: DR-V6 (line 238)
+/// - Requirement: Headless Mode
+/// - Requirement: DR-V2
+/// - Requirement: DR-V6
 pub struct HeadlessSurface {
     pub(crate) texture: wgpu::Texture,
     /// Retained view ownership; frame acquisition creates its own render view.
@@ -1161,7 +1159,7 @@ impl HeadlessSurface {
     /// Read back pixels from the buffer. Returns RGBA8 data.
     /// This is a blocking call (waits for GPU to finish).
     ///
-    /// Per runtime-kernel/spec.md line 208: pixel readback is on-demand via
+    /// pixel readback is on-demand via
     /// `copy_texture_to_buffer`.
     pub fn read_pixels(&self, device: &wgpu::Device) -> Vec<u8> {
         let buffer_slice = self.output_buffer.slice(..);
@@ -1196,7 +1194,7 @@ impl HeadlessSurface {
 ///
 /// - `acquire_frame()` creates a new `TextureView` from the offscreen texture; guard is `()`.
 ///   Always returns `Some` — headless surfaces never fail to acquire a frame.
-/// - `present()` is a no-op (spec line 199: "Headless surface present() MUST be a no-op").
+/// - `present()` is a no-op ("Headless surface present() MUST be a no-op").
 /// - `size()` returns `(width, height)`.
 impl CompositorSurface for HeadlessSurface {
     fn acquire_frame(&self) -> Option<CompositorFrame> {
@@ -1214,7 +1212,7 @@ impl CompositorSurface for HeadlessSurface {
         })
     }
 
-    /// No-op — headless mode does not present to a display (spec line 199).
+    /// No-op — headless mode does not present to a display.
     fn present(&self) {}
 
     fn size(&self) -> (u32, u32) {
@@ -1256,7 +1254,7 @@ mod tests {
         let take = || unpack_resize(pending.swap(0, std::sync::atomic::Ordering::AcqRel));
         request(3862, 2182);
         let first = take();
-        // ... compositor reconfigures to `first`; meanwhile the re-fit lands:
+        //... compositor reconfigures to `first`; meanwhile the re-fit lands:
         request(3840, 2160);
         assert_eq!(first, Some((3862, 2182)));
         assert_eq!(take(), Some((3840, 2160)));
@@ -1424,7 +1422,7 @@ mod tests {
     ///
     /// The real double-failure path is covered by the fix at surface.rs
     /// `Err(e2)` arm: it returns `None` instead of `panic!`. This test
-    /// documents that contract and ensures it compiles correctly. [hud-lnjs4]
+    /// documents that contract and ensures it compiles correctly.
     #[test]
     fn test_acquire_frame_double_failure_returns_none_no_panic() {
         // A mock surface that always returns None from acquire_frame,
@@ -1631,7 +1629,7 @@ mod tests {
     }
 
     /// Concurrent reconfigure/present vs encode→submit must never destroy a
-    /// surface texture that an in-flight frame still references. [hud-hj0xb]
+    /// surface texture that an in-flight frame still references.
     ///
     /// This is the regression test for Bug B Layer-2: before the fix, the
     /// main-thread present checked an `AtomicBool` *before* taking the
@@ -1695,7 +1693,7 @@ mod tests {
     }
 
     /// A present that races an in-progress encode MUST block until the encode's
-    /// guard drops, never taking the texture early. [hud-hj0xb]
+    /// guard drops, never taking the texture early.
     #[test]
     fn test_present_blocks_until_encoding_completes() {
         let harness = Arc::new(SwapchainHarness::new());

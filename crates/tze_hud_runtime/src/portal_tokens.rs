@@ -9,7 +9,7 @@ mod tests {
     use tze_hud_config::resolve_portal_tokens;
     use tze_hud_portal::tokens::PortalVisualTokens;
 
-    /// Single-source-of-truth assertion (hud-dcynv): `PortalVisualTokens::default()` now
+    /// Single-source-of-truth assertion: `PortalVisualTokens::default()` now
     /// derives from `tze_hud_config::PortalPartTokens::default()` via
     /// `portal_visual_tokens_from_part_tokens`, so both sides MUST agree exactly.
     ///
@@ -114,7 +114,7 @@ mod tests {
         // PortalVisualTokens -- it is resolved + applied compositor-side
         // (`portal.composer.at_capacity_color` -> `composer_draft_base_color`),
         // and its non-zero-alpha default is asserted in tze_hud_config's
-        // portal_tokens tests (hud-9gyao).
+        // portal_tokens tests.
     }
 
     /// Profile override propagates end-to-end through the canonical conversion chain.

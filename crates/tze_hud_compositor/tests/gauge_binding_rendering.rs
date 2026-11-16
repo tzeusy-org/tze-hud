@@ -1,4 +1,4 @@
-//! Binding and rendering tests for all four gauge parameter types [hud-6oa4].
+//! Binding and rendering tests for all four gauge parameter types.
 //!
 //! These tests verify that every gauge parameter type produces the correct SVG
 //! attribute mutation via the compositor's binding pipeline, and that contention
@@ -24,9 +24,6 @@
 //!
 //! ## Sources
 //!
-//! - widget-system/spec.md §Requirement: SVG Layer Parameter Bindings
-//! - widget-system/spec.md §Requirement: Widget Parameter Interpolation
-//! - openspec/changes/exemplar-gauge-widget/tasks.md §6, §8
 //! - assets/widget_bundles/gauge/ (shipped ring: `contention::shipped_gauge_ring_*`)
 
 use std::collections::HashMap;
@@ -505,7 +502,7 @@ mod contention {
 
     /// Load the production gauge bundle and register it in a fresh `SceneGraph`.
     ///
-    /// Returns `(scene, tab_id)` ready for `publish_to_widget("gauge", ...)` calls.
+    /// Returns `(scene, tab_id)` ready for `publish_to_widget("gauge",...)` calls.
     fn scene_with_production_gauge() -> (SceneGraph, tze_hud_scene::types::SceneId) {
         let bundle = shipped_ring();
 

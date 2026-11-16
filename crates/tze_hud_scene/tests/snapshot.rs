@@ -1,9 +1,5 @@
 //! Integration tests for deterministic scene snapshots.
 //!
-//! Tests implement acceptance criteria from rig-bav0 per scene-graph/spec.md
-//! §"Scene Snapshot Serialization" (line 276) and WHEN/THEN scenarios
-//! (lines 281–285, 338, 329, 347, 365).
-//!
 //! ## Acceptance criteria verified
 //! - Snapshot determinism: serialize same scene twice, assert byte equality and BLAKE3 equality
 //! - Round-trip: deserialize → re-serialize → assert byte equality
@@ -45,7 +41,7 @@ fn simple_scene() -> SceneGraph {
     g
 }
 
-// ── Scenario: Snapshot determinism (spec line 281) ────────────────────────────
+// ── Scenario: Snapshot determinism ────────────────────────────
 
 /// WHEN two snapshots are taken of identical empty or populated scene state
 /// THEN both MUST produce identical serialization bytes and identical BLAKE3 checksums
@@ -243,7 +239,7 @@ fn snapshot_includes_zone_publications_not_effective_geometry() {
     let json = snap.to_json().unwrap();
     assert!(
         !json.contains("effective_geometry"),
-        "snapshot JSON MUST NOT contain effective_geometry (post-v1 per spec line 360)"
+        "snapshot JSON MUST NOT contain effective_geometry"
     );
 
     // Zone types must be present for scenes that register zones

@@ -57,14 +57,14 @@ fn should_skip_gpu_tests() -> bool {
 /// Process-wide count of GPU-gated tests that hit `require_gpu!`'s early
 /// return (no wgpu adapter available, or `TZE_HUD_SKIP_GPU_TESTS=1`).
 ///
-/// Without this, a skipped test reports as an ordinary `test ... ok` in
+/// Without this, a skipped test reports as an ordinary `test... ok` in
 /// `cargo test` output — indistinguishable from a test that actually
 /// exercised the render path. PR #1148's RefCell double-borrow panic escaped
 /// exactly this way: the render-path regression tests that would have caught
 /// it (`markdown_primer_landing_converges_on_render_path_hud_u4lq2`,
 /// `reused_compositor_across_scenes_lands_markdown_primer_hud_u4lq2`) silently
-/// no-op'd in a no-GPU sandbox; only CI's GPU/llvmpipe lane actually ran them
-/// (hud-7o3rw). `require_gpu!` now `eprintln!`s a loud, greppable
+/// no-op'd in a no-GPU sandbox; only CI's GPU/llvmpipe lane actually ran them.
+/// `require_gpu!` now `eprintln!`s a loud, greppable
 /// `"SKIPPED (no GPU)"` marker — carrying the exact call-site location and
 /// this running count — on every skip, so `grep -c "SKIPPED (no GPU)"` over
 /// captured test output tells a contributor exactly how many render-path
@@ -82,7 +82,7 @@ static GPU_SKIP_COUNT: std::sync::atomic::AtomicUsize = std::sync::atomic::Atomi
 /// adapter found or `TZE_HUD_SKIP_GPU_TESTS=1`) — by default `cargo test`
 /// then reports the test as an ordinary `ok`, identical to a test that ran
 /// the real render path. To make that gap visible instead of silent
-/// (hud-7o3rw), the `None` arm first prints a `"SKIPPED (no GPU)"` marker
+///, the `None` arm first prints a `"SKIPPED (no GPU)"` marker
 /// carrying the exact `require_gpu!` call site (`file!()`/`line!()` resolve
 /// to the *invocation* site here, not this macro definition, so each call
 /// site gets its own precise, independently-greppable location) and the

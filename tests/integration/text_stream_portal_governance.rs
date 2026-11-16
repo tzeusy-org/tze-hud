@@ -1,9 +1,9 @@
-//! Text stream portal governance and shell-isolation validation (hud-t98e.4).
+//! Text stream portal governance and shell-isolation validation.
 //!
 //! Focus: lease lifecycle, safe-mode behavior, and shell isolation
 //! constraints for the phase-0 raw-tile portal pilot.
 //!
-//! The second half of this file (hud-8z3w3, RFC 0013 §7.2 promotion) mirrors
+//! The second half of this file mirrors
 //! every governance contract above over the promoted first-class `PortalSurface`
 //! attached to the same host tile — proving lease ownership, safe mode,
 //! dismissal, and orphan handling hold UNCHANGED on the first-class surface,
@@ -309,9 +309,9 @@ fn shell_dismiss_override_removes_portal_tile() {
     );
 }
 
-// ─── First-class PortalSurface governance parity (hud-8z3w3) ──────────────────
+// ─── First-class PortalSurface governance parity ──────────────────
 //
-// The RFC 0013 §7.2 promotion replaces the ad-hoc raw-tile assembly with a
+// The promotion replaces the ad-hoc raw-tile assembly with a
 // single first-class `PortalSurface` overlay descriptor keyed by the host tile
 // id. Promotion must not add or relax governance: every contract asserted above
 // on the RAW-TILE path must hold UNCHANGED once a first-class surface is

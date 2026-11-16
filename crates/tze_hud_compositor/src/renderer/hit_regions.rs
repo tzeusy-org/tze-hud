@@ -2,7 +2,7 @@
 //!
 //! Moved from `renderer/mod.rs` (the "Hit regions" cluster,
 //! formerly ~L7346–7899 at plan date) by Step R-8 of the renderer module
-//! split (hud-fgryk).  No logic was changed; only the `pub(super)` visibility
+//! split. No logic was changed; only the `pub(super)` visibility
 //! modifier was added to `populate_drag_handle_hit_regions_from` and
 //! `collect_context_menu` so that callers in sibling modules can
 //! access them.
@@ -16,7 +16,7 @@
 //! - `populate_zone_hit_regions` — recompute zone interaction hit regions
 //!   (dismiss and action buttons) for the current frame. Also recomputes the
 //!   runtime "jump to latest" pill hit region for scrolled-back portal tiles
-//!   (hud-9ci61) via `populate_jump_to_latest_hit_regions`.
+//!   via `populate_jump_to_latest_hit_regions`.
 
 use std::collections::HashMap;
 
@@ -70,7 +70,7 @@ impl Compositor {
         prune_chrome_states(scene);
     }
 
-    // ── Chrome context menu rendering (hud-zc7f) ─────────────────────────────
+    // ── Chrome context menu rendering ─────────────────────────────
 
     /// Resolve the single-item menu once for this frame. Its one action rect is
     /// also its painted footprint and OS capture region; no invisible padding
@@ -226,7 +226,7 @@ impl Compositor {
             };
         }
 
-        // ── Jump-to-latest pill hit region (hud-9ci61) ───────────────────────
+        // ── Jump-to-latest pill hit region ───────────────────────
         // Foreground drawing and hit targets share exposed pieces. A higher
         // card's body must cover both, including while drag changes its order.
         let indicator = resolve_scroll_indicator_tokens(&self.token_map);
@@ -260,7 +260,7 @@ impl Compositor {
             }
         }
 
-        // ── Viewer close button hit region (hud-jm8nq.11) ────────────────────
+        // ── Viewer close button hit region ────────────────────
         // Only the hovered tile has a button, at the exact bounds the renderer
         // draws (`tile_close_button_bounds`). Pointer-up on it dismisses the
         // tile locally; the agent never sees the press.

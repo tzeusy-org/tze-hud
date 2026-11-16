@@ -37,13 +37,13 @@ fn make_batch(agent: &str, mutations: Vec<SceneMutation>) -> MutationBatch {
     }
 }
 
-// ─── RFC 0001 §3.1 — Atomic batch mutations ──────────────────────────────────
+// ─── — Atomic batch mutations ──────────────────────────────────
 
 /// WHEN an agent submits a batch of 5 mutations and mutation 3 has invalid bounds
 /// THEN the runtime MUST reject the entire batch (all 5 mutations) and report
 /// the error at mutation_index=2
 #[test]
-fn spec_all_or_nothing_batch_rejection() {
+fn all_or_nothing_batch_rejection() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
     let lease_id = scene.grant_lease("agent", 60_000);
@@ -117,7 +117,7 @@ fn spec_all_or_nothing_batch_rejection() {
 /// WHEN an agent submits a batch with 1001 mutations
 /// THEN the runtime MUST reject with BatchSizeExceeded { max: 1000, got: 1001 }
 #[test]
-fn spec_batch_size_exceeded() {
+fn batch_size_exceeded() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
     let lease_id = scene.grant_lease("agent", 60_000);
@@ -155,7 +155,7 @@ fn spec_batch_size_exceeded() {
 /// mismatch at the type level is impossible (the field is used but not cross-validated
 /// against the gRPC session here since we're testing the in-process pipeline).
 #[test]
-fn spec_agent_namespace_from_session_context() {
+fn agent_namespace_from_session_context() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let _tab_id = scene.create_tab("Main", 0).unwrap();
 
@@ -165,13 +165,13 @@ fn spec_agent_namespace_from_session_context() {
     assert_eq!(batch.agent_namespace, "verified.agent");
 }
 
-// ─── RFC 0001 §3.2 — Five-stage validation ordering ─────────────────────────
+// ─── — Five-stage validation ordering ─────────────────────────
 
 /// WHEN an agent submits a mutation targeting a tile with an expired lease
 /// THEN the runtime MUST reject with LeaseExpired BEFORE evaluating budget or
 /// bounds checks.
 #[test]
-fn spec_lease_check_before_budget_check() {
+fn lease_check_before_budget_check() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
     let lease_id = scene.grant_lease("agent", 1);
@@ -219,7 +219,7 @@ fn spec_lease_check_before_budget_check() {
 /// tile's node tree
 /// THEN the runtime MUST reject the batch with CycleDetected
 #[test]
-fn spec_post_mutation_cycle_detected() {
+fn post_mutation_cycle_detected() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
     let lease_id = scene.grant_lease("agent", 60_000);
@@ -278,7 +278,7 @@ fn spec_post_mutation_cycle_detected() {
 /// bounds after batch
 /// THEN reject with ZOrderConflict
 #[test]
-fn spec_exclusive_z_order_conflict() {
+fn exclusive_z_order_conflict() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
     let lease_id = scene.grant_lease("agent", 60_000);
@@ -324,7 +324,7 @@ fn spec_exclusive_z_order_conflict() {
 
 /// Passthrough tiles do NOT participate in z-order conflict checks.
 #[test]
-fn spec_passthrough_tiles_exempt_from_z_order_conflict() {
+fn passthrough_tiles_exempt_from_z_order_conflict() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
     let lease_id = scene.grant_lease("agent", 60_000);
@@ -362,12 +362,12 @@ fn spec_passthrough_tiles_exempt_from_z_order_conflict() {
     );
 }
 
-// ─── RFC 0001 §3.5 — Concurrency / sequence numbers ─────────────────────────
+// ─── — Concurrency / sequence numbers ─────────────────────────
 
 /// WHEN agent A submits batches B1 and B2 in order
 /// THEN B1.sequence_number < B2.sequence_number
 #[test]
-fn spec_sequential_batch_ordering() {
+fn sequential_batch_ordering() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
     let lease_id = scene.grant_lease("agent", 60_000);
@@ -401,7 +401,7 @@ fn spec_sequential_batch_ordering() {
 
 /// Failed batches must NOT increment the sequence number.
 #[test]
-fn spec_rejected_batch_does_not_increment_sequence() {
+fn rejected_batch_does_not_increment_sequence() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
     let lease_id = scene.grant_lease("agent", 60_000);
@@ -460,13 +460,13 @@ fn spec_rejected_batch_does_not_increment_sequence() {
     );
 }
 
-// ─── RFC 0001 §3.4 — Structured error responses ──────────────────────────────
+// ─── — Structured error responses ──────────────────────────────
 
 /// WHEN a mutation fails bounds validation
 /// THEN the rejection MUST include mutation_index, code=BoundsInvalid,
 /// human-readable message, and context JSON with field, value, and constraint.
 #[test]
-fn spec_structured_validation_error_on_bounds_failure() {
+fn structured_validation_error_on_bounds_failure() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
     let lease_id = scene.grant_lease("agent", 60_000);
@@ -498,7 +498,7 @@ fn spec_structured_validation_error_on_bounds_failure() {
     let rej = result.rejection.unwrap();
     let err = &rej.errors[0];
 
-    // Required fields per RFC 0001 §3.4
+    // Required fields
     assert_eq!(err.mutation_index, Some(1), "error at mutation_index=1");
     assert_eq!(err.mutation_type, "CreateTile");
     assert_eq!(err.code, ValidationErrorCode::BoundsInvalid);
@@ -516,7 +516,7 @@ fn spec_structured_validation_error_on_bounds_failure() {
 
 /// BatchRejected carries batch_id matching the submitted batch.
 #[test]
-fn spec_batch_rejected_carries_batch_id() {
+fn batch_rejected_carries_batch_id() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     let tab_id = scene.create_tab("Main", 0).unwrap();
     let lease_id = scene.grant_lease("agent", 60_000);
@@ -756,7 +756,7 @@ mod proptest_batch_atomicity {
     }
 }
 
-// ─── Stage 1 lease validation gaps (hud-ugwr) ────────────────────────────────
+// ─── Stage 1 lease validation gaps ────────────────────────────────
 
 /// WHEN batch.lease_id references a nonexistent lease
 /// THEN Stage 1 MUST reject with LeaseNotFound BEFORE Stage 2 budget checks.

@@ -41,7 +41,7 @@ pub struct AgentRecord {
     /// `portal`, `admin`, or `*`.
     #[serde(default)]
     pub allow: Vec<String>,
-    /// When the agent was paired (RFC 3339), for the operator.
+    /// When the agent was paired, as a UTC `YYYY-MM-DDTHH:MM:SSZ` timestamp.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub paired_at: Option<String>,
 }
@@ -439,8 +439,7 @@ mod tests {
     }
 
     /// Panel and pairing edits keep the owner's comments and other agents'
-    /// tables, re-read the file each time, and validate before writing
-    /// (hud-vniri.6).
+    /// tables, re-read the file each time, and validate before writing.
     #[test]
     fn edits_keep_comments_and_other_agents() {
         let dir = tempfile::tempdir().unwrap();

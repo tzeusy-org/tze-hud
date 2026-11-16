@@ -15,7 +15,7 @@
 // in a DPI-unaware context, causing virtualised pixel dimensions (e.g. a
 // 2560×1440 display at 125% DPI reports 2048×1152 to the process).
 //
-// See: hud-22by — Overlay window doesn't cover full display at >100% DPI scaling
+// See: — Overlay window doesn't cover full display at >100% DPI scaling
 //
 // Git SHA embed:
 // Captures `git rev-parse --short HEAD` at build time and emits it as the
@@ -44,7 +44,7 @@ fn capture_git_sha(args: &[&str]) -> String {
 
 fn main() {
     // Emit the git SHA so the binary can include it in --version output.
-    // Re-run whenever HEAD changes (the .git/HEAD file is updated on every
+    // Re-run whenever HEAD changes (the.git/HEAD file is updated on every
     // commit, checkout, and merge).
     println!("cargo::rerun-if-changed=../../.git/HEAD");
     println!("cargo::rerun-if-changed=../../.git/refs");

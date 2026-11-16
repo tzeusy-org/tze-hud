@@ -22,8 +22,7 @@ fn default_clock() -> Arc<dyn Clock> {
     Arc::new(SystemClock::new())
 }
 
-/// Process-wide counter handing out unique [`SceneGraph::instance_id`] values
-/// (hud-u4lq2).
+/// Process-wide counter handing out unique [`SceneGraph::instance_id`] values.
 static NEXT_SCENE_INSTANCE_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
 
 /// Allocate a fresh, process-unique scene instance id.
@@ -50,7 +49,7 @@ pub struct SceneGraph {
     #[serde(skip, default = "default_clock")]
     clock: Arc<dyn Clock>,
     /// Process-unique identity of THIS in-memory `SceneGraph` object, distinct
-    /// from [`Self::version`] (hud-u4lq2).
+    /// from [`Self::version`].
     ///
     /// `version` is a per-instance mutation counter that restarts at 0 for
     /// every new `SceneGraph` — it is NOT a reliable "have I already seen this
@@ -96,7 +95,7 @@ pub struct SceneGraph {
     /// [`Self::version`] and keyed on content + size, never on x/y position.
     /// Bumping `version` on every drag-move pointer delta forced a full
     /// re-hash / re-shape per frame, which showed up live as low-fps, flickery
-    /// drag (hud-uyhpn).
+    /// drag.
     ///
     /// Instead the drag-move path calls [`Self::bump_geometry_epoch`], which
     /// advances this counter (re-arming the idle present-gate so the new
@@ -112,7 +111,7 @@ pub struct SceneGraph {
     /// Monotonically increasing sequence number assigned to each committed batch.
     ///
     /// Incremented by `SceneGraph::next_sequence_number` on every successful
-    /// [`crate::mutation::MutationBatch`] commit. Per RFC 0001 §3.5.
+    /// [`crate::mutation::MutationBatch`] commit.
     pub sequence_number: u64,
     /// Batches held until their `present_at` time (see [`timed`]).
     #[serde(skip, default)]
@@ -149,7 +148,7 @@ pub struct SceneGraph {
     /// if the ResourceId is not present in this map.
     ///
     /// Ephemeral: skipped during serialization (resources are in-memory only,
-    /// per RFC 0001 §2.4 and resource-store/spec.md §Requirement: V1 ephemerality).
+    /// and V1 ephemerality).
     #[serde(skip, default)]
     pub registered_resources: HashMap<ResourceId, u32>,
 
@@ -162,24 +161,24 @@ pub struct SceneGraph {
     pub overlay: RuntimeOverlayState,
 }
 
-/// Maximum number of tabs in a scene. RFC 0001 §2.1.
+/// Maximum number of tabs in a scene.
 pub const MAX_TABS: usize = 256;
 
-/// Maximum number of tiles per tab. RFC 0001 §2.1.
+/// Maximum number of tiles per tab.
 pub const MAX_TILES_PER_TAB: usize = 1024;
 
-/// Maximum number of nodes per tile. RFC 0001 §2.1.
+/// Maximum number of nodes per tile.
 pub const MAX_NODES_PER_TILE: usize = 64;
 
-/// Maximum name length for tabs, in UTF-8 bytes. RFC 0001 §2.2.
+/// Maximum name length for tabs, in UTF-8 bytes.
 pub const MAX_TAB_NAME_BYTES: usize = 128;
 
-/// Maximum content size for TextMarkdownNode, in UTF-8 bytes. RFC 0001 §2.4.
+/// Maximum content size for TextMarkdownNode, in UTF-8 bytes.
 pub const MAX_MARKDOWN_BYTES: usize = 65_535;
 
 /// The z-order threshold below which agent-owned tiles must fall.
 /// Tiles with z_order >= ZONE_TILE_Z_MIN are reserved for runtime-managed
-/// zone tiles. RFC 0001 §2.3.
+/// zone tiles.
 pub const ZONE_TILE_Z_MIN: u32 = 0x8000_0000;
 
 // ─── Contention policy helper ────────────────────────────────────────────────
@@ -310,7 +309,7 @@ impl SceneGraph {
         available
     }
 
-    // ─── Sequence number (RFC 0001 §3.5) ────────────────────────────────
+    // ─── Sequence number ────────────────────────────────
 
     /// Advance the sequence counter and return the new value.
     ///
@@ -321,7 +320,7 @@ impl SceneGraph {
         self.sequence_number
     }
 
-    // ─── Position-only geometry epoch (hud-uyhpn) ───────────────────────
+    // ─── Position-only geometry epoch ───────────────────────
 
     /// Signal a **position-only** geometry mutation (drag-move translation).
     ///
@@ -330,7 +329,7 @@ impl SceneGraph {
     /// [`Self::version`]. Because the compositor's markdown-parse and
     /// ellipsis-truncation caches are gated on `version` (content + size, never
     /// x/y), skipping the version bump means a smooth drag never triggers a
-    /// per-frame re-hash / re-shape — the low-fps drag fix for hud-uyhpn.
+    /// per-frame re-hash / re-shape during dragging.
     ///
     /// Use this ONLY for pure translations (bounds x/y change, width/height and
     /// content unchanged). Any mutation that changes size, content, or scene

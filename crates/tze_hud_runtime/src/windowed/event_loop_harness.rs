@@ -3,7 +3,7 @@
 //! Headless test harness that drives the runtime's real event/window
 //! state-machine — the code production runs inside winit's
 //! [`ApplicationHandler`] — with synthetic events, WITHOUT constructing a real
-//! `winit` window, a `wgpu` surface, or running the OS event loop (hud-nu0ea).
+//! `winit` window, a `wgpu` surface, or running the OS event loop.
 //!
 //! ## Why this exists
 //!
@@ -1803,7 +1803,7 @@ mod tests {
     }
 
     /// `/admin/status` `portals` and `idle_since_ms` read the state real frame
-    /// builds and the production input path leave behind (T13, hud-1dnk5.12).
+    /// builds and the production input path leave behind (T13).
     #[tokio::test]
     async fn admin_status_reports_rendered_portal_state() {
         use serde_json::Value;
@@ -2346,7 +2346,7 @@ mod tests {
         runtime.events.press_named_key("Enter");
         assert_eq!(launches(&runtime), 3);
 
-        // A stale OUTPUT selection never takes a composer Ctrl+C (hud-hxhnt):
+        // A stale OUTPUT selection never takes a composer Ctrl+C:
         // a primary press outside OUTPUT clears it, browser-style.
         std::thread::sleep(multi_click);
         pointer(&mut runtime, from, PointerEventKind::Down);
@@ -3475,7 +3475,7 @@ mod tests {
 
     /// A release that arrives after the press was already ended (the runtime
     /// saw the button physically up and synthesized the Up) must not repeat
-    /// the click: one press on Approve queues exactly one `approve` (hud-z21e9).
+    /// the click: one press on Approve queues exactly one `approve`.
     #[test]
     fn late_os_release_after_synthesized_up_queues_one_action() {
         let mut harness = approve_reject_notification_harness();
@@ -3526,7 +3526,7 @@ mod tests {
 
     /// Hovering and pressing an action button set its local feedback state
     /// with no agent round trip, and each change re-arms the idle gate once
-    /// (the geometry epoch) while an unchanged move does not (hud-paslt).
+    /// (the geometry epoch) while an unchanged move does not.
     #[test]
     fn action_button_hover_and_press_are_local_and_frame_only_on_change() {
         let mut harness = approve_reject_notification_harness();
@@ -4197,7 +4197,7 @@ mod tests {
 
     /// One click on Approve queues exactly one `approve` and dismisses the
     /// notification, so the click has an immediate visible result and a
-    /// second click has nothing to land on (hud-paslt).
+    /// second click has nothing to land on.
     #[test]
     fn action_click_queues_one_action_and_dismisses_the_notification() {
         // The existing real pointer route also owns local links, exact debounce
@@ -4868,7 +4868,7 @@ mod tests {
 
     /// A release activates an action only when the press began on that same
     /// button: pressing Approve and releasing over Reject, or pressing the
-    /// dismiss button, queues no action the user did not press (hud-z21e9).
+    /// dismiss button, queues no action the user did not press.
     #[test]
     fn release_activates_only_the_button_the_press_began_on() {
         let mut harness = approve_reject_notification_harness();
@@ -5152,7 +5152,7 @@ mod tests {
 
     /// A pointer press on a notification action button, dispatched through the
     /// real `lifecycle.rs` pointer-up path, queues the action for `hud_input`
-    /// and dismisses the answered notification (hud-paslt).
+    /// and dismisses the answered notification.
     #[test]
     fn pointer_up_on_action_enqueues_pending_action() {
         use tze_hud_scene::{
@@ -6100,7 +6100,7 @@ mod tests {
         (focused_tile, pointer_tile, rx)
     }
 
-    /// RFC 0007 §2.3 / system-shell "Tab Keyboard Shortcuts": the runtime
+    /// / system-shell "Tab Keyboard Shortcuts": the runtime
     /// consumes Ctrl+Tab before agent routing and changes the authoritative
     /// scene tab locally. Drive the real event-loop drain so this proves the
     /// production precedence seam, not only `shell::handle_shortcut` in
@@ -7256,7 +7256,7 @@ mod tests {
         }
     }
 
-    /// RFC 0004 §10 production proof: keyboard is a concrete pointer-free
+    /// production proof: keyboard is a concrete pointer-free
     /// command source, not merely a library/test fixture. Drive the real pending
     /// keyboard drain and require ACTIVATE to emerge on the runtime broadcast.
     #[test]
@@ -7308,7 +7308,7 @@ mod tests {
         );
     }
 
-    /// RFC 0004 §5.7/§10.3: PageDown is focus-routed command input, not a
+    /// PageDown is focus-routed command input, not a
     /// pointer-position scroll. The focused tile must receive both local scroll
     /// feedback and the command even when the cursor rests over another tile.
     #[test]
@@ -7440,7 +7440,7 @@ mod tests {
         );
     }
 
-    /// A busy scene lock never loses pointer input (hud-65gpz): the Move and
+    /// A busy scene lock never loses pointer input: the Move and
     /// the wheel delta that arrive while an agent holds the scene both take
     /// effect once it frees, through the one coalesced availability wake and
     /// no periodic retry while held.
@@ -7534,7 +7534,7 @@ mod tests {
     /// A Move retained across a busy lock is dropped, not kept as deferred
     /// work, once a context-menu press owns the pointer; otherwise the free
     /// lock's availability wake would fire every turn while the button is
-    /// held (hud-65gpz).
+    /// held.
     #[test]
     fn held_scene_lock_retained_move_yields_to_context_menu_press() {
         let mut harness = HeadlessEventLoopHarness::new();
@@ -7736,7 +7736,7 @@ mod tests {
     }
 
     /// Composer-less Escape retains the existing focus-recovery behavior while
-    /// also delivering the RFC 0004 CANCEL command to the owner that had focus.
+    /// also delivering the CANCEL command to the owner that had focus.
     #[test]
     fn real_keyboard_drain_dispatches_cancel_before_focus_owner_is_lost() {
         let mut harness = HeadlessEventLoopHarness::new();
@@ -7771,7 +7771,7 @@ mod tests {
         assert_eq!(command.node_id, node_id.as_uuid().as_bytes());
     }
 
-    /// hud-nu0ea headline: the keyboard-drain full path runs end-to-end through
+    /// headline: the keyboard-drain full path runs end-to-end through
     /// production dispatch — NOT a reconstructed closure.
     ///
     /// A focused composer plus a pile of queued character events is drained by
@@ -8202,7 +8202,7 @@ mod tests {
 
     /// A quit must leave winit's loop without another OS message: winit on
     /// Windows checks `exit()` only after the wait that follows
-    /// `about_to_wait`, so the exit must also stop that wait (hud-gr6jp).
+    /// `about_to_wait`, so the exit must also stop that wait.
     #[test]
     fn shutdown_leaves_the_event_loop_without_waiting_for_a_message() {
         use std::cell::RefCell;

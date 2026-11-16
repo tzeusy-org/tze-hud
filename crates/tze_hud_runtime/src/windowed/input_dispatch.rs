@@ -184,7 +184,7 @@ pub(super) fn dispatch_keyboard_event(
 
 /// Broadcast an abstract command produced by the production input adapter.
 ///
-/// Command events are transactional RFC 0004 input events. They use the same
+/// Command events are transactional input events. They use the same
 /// namespace-addressed `INPUT_EVENTS` channel as keyboard and pointer input;
 /// the session handler applies the capability/subscription filter.
 pub(super) fn dispatch_command_event(
@@ -267,7 +267,7 @@ pub(super) fn dispatch_command_event(
 ///
 /// Focus lost is dispatched first (if present) so the agent that relinquished
 /// focus receives its event before the newly-focused agent receives its gained
-/// event, preserving the ordering guarantee in RFC 0004 §8.4.
+/// event, preserving the ordering guarantee
 ///
 /// Focus events use the durable transactional lane. A send with no connected
 /// session has no destination and is ignored.
@@ -286,7 +286,7 @@ pub(super) fn dispatch_focus_event(
     use tze_hud_input::{FocusLostReason, FocusSource};
     use tze_hud_protocol::proto::input_envelope::Event as InputEvent;
 
-    // ── FocusLostEvent (dispatched first per RFC 0004 §8.4) ─────────────────
+    // ── FocusLostEvent (dispatched first ) ─────────────────
     if let Some((lost_ev, namespace)) = transition.lost {
         let tile_id_bytes = lost_ev.tile_id.as_uuid().as_bytes().to_vec();
         let node_id_bytes = lost_ev
@@ -375,10 +375,8 @@ pub(super) fn dispatch_focus_event(
 ///
 /// **Throttling**: every `PointerMove` is forwarded as-is to all opted-in
 /// subscribers.  Subscribers that cannot tolerate the full rate should
-/// throttle on the receive side.  This matches the "ephemeral realtime"
-/// message class contract (RFC CLAUDE.md §Four Message Classes) and avoids
-/// imposing a specific rate budget on the dispatch path, which is on the
-/// Stage 2 hot path (< 500 µs p99 per engineering-bar.md §2).
+/// throttle on the receive side. This keeps ephemeral realtime dispatch free
+/// of receive-side rate limits on the Stage 2 hot path (< 500 µs p99).
 ///
 /// All other `AgentDispatchKind` values are silently ignored — only
 /// `PointerDown`, `PointerMove`, and `PointerUp` are dispatched here.
@@ -481,8 +479,8 @@ pub(super) fn dispatch_pointer_event(
 /// `extra_dispatches` (e.g. after `PointerUp` with `release_on_up=true`).
 ///
 /// `CaptureReleased` is a focus/lease lifecycle event, not a pointer event, so
-/// it belongs on the `FOCUS_EVENTS` channel (RFC 0004 §8.3, subscriptions.rs
-/// §`is_focus_variant`).  Agents that subscribe to `FOCUS_EVENTS` with the
+/// it belongs on the `FOCUS_EVENTS` channel (`subscriptions.rs::is_focus_variant`).
+/// Agents that subscribe to `FOCUS_EVENTS` with the
 /// `access_input_events` capability will receive it.
 ///
 /// Capture release uses the durable transactional lane.
@@ -558,7 +556,7 @@ pub(super) fn dispatch_capture_released_event(
 /// The scene tile bounds have already been updated locally (local-first feedback).
 /// This function notifies gRPC subscribers subscribed to `SCENE_TOPOLOGY` that
 /// the portal geometry has changed, using the same `ElementRepositionedEvent`
-/// that drag-reposition uses (§6b.4).
+/// that drag-reposition uses.
 ///
 /// Delivery is best-effort (fire-and-forget): errors (no receivers, channel
 /// lagged) are silently ignored.
@@ -627,7 +625,7 @@ pub(super) fn monotonic_us_since_start() -> MonoUs {
 }
 
 /// Map a winit `PhysicalKey` to the DOM `KeyboardEvent.code`-style string
-/// used by `RawKeyDownEvent.key_code` (RFC 0004 §7.4).
+/// used by `RawKeyDownEvent.key_code`.
 ///
 /// Returns the `KeyCode` variant name (e.g. `"KeyA"`, `"ShiftLeft"`,
 /// `"ArrowDown"`) for identified keys, and `"Unidentified"` for unknown ones.
@@ -640,7 +638,7 @@ pub(super) fn physical_key_to_key_code_str(key: &winit::keyboard::PhysicalKey) -
 }
 
 /// Map a winit logical `Key` to the DOM `KeyboardEvent.key`-style string
-/// used by `RawKeyDownEvent.key` and `RawKeyUpEvent.key` (RFC 0004 §7.4).
+/// used by `RawKeyDownEvent.key` and `RawKeyUpEvent.key`.
 ///
 /// For character keys this is the character itself (e.g. `"a"`, `"A"`, `"1"`).
 /// For named keys this is the `NamedKey` variant name (e.g. `"Enter"`,
@@ -687,7 +685,7 @@ pub(super) fn key_press_text(
     }
 }
 
-/// Convert winit's `ModifiersState` to `KeyboardModifiers` (RFC 0004 §7.4).
+/// Convert winit's `ModifiersState` to `KeyboardModifiers`.
 ///
 /// CapsLock and NumLock toggle states are not exposed by winit's
 /// `ModifiersState`; they default to `false` here. Full toggle-key tracking
@@ -949,7 +947,7 @@ mod tests {
     }
 
     /// `dispatch_pointer_event` must set `timestamp_mono_us > 0` for PointerDown,
-    /// PointerMove, and PointerUp (gap from hud-zffvp now closed).
+    /// PointerMove, and PointerUp (gap from now closed).
     #[test]
     fn dispatch_pointer_event_timestamp_mono_us_is_non_zero() {
         use tze_hud_input::AgentDispatchKind;

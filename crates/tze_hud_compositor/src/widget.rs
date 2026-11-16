@@ -1,8 +1,7 @@
 //! SVG rendering pipeline for widgets.
 //!
-//! This module implements the compositor's SVG rendering pipeline for widgets
-//! as specified in widget-system/spec.md §Requirement: Widget Compositor Rendering
-//! and §Requirement: Widget Parameter Interpolation.
+//! This module applies widget parameter bindings and interpolation before
+//! rasterizing SVG layers into textures for the compositor.
 //!
 //! ## Pipeline
 //!
@@ -1547,7 +1546,7 @@ fn html_unescape_text(value: &str) -> String {
 /// the attribute is inserted before the closing `>` or `/>`.
 ///
 /// For the synthetic `text-content` target attribute, the text node content of
-/// the element is replaced (spec §Requirement: SVG Layer Parameter Bindings).
+/// the element is replaced.
 ///
 /// # Limitations
 ///
@@ -1810,7 +1809,7 @@ pub(crate) fn interpolate_param(
                 ca.a + (cb.a - ca.a) * t,
             ))
         }
-        // String and enum snap to new value immediately (spec §Widget Parameter Interpolation)
+        // String and enum snap to new value immediately
         _ => new.clone(),
     }
 }
@@ -2656,7 +2655,7 @@ fn composite_layer(base: &mut Option<tiny_skia::Pixmap>, layer: RasterizedSvgLay
 ///
 /// ## Performance contract
 ///
-/// Per widget-system/spec.md §Requirement: Widget Compositor Rendering:
+/// Widget Compositor Rendering:
 /// re-rasterization MUST complete in < 2ms for a 512×512 widget on reference
 /// hardware.  This function is the hot path that must satisfy that budget.
 ///
@@ -2811,7 +2810,7 @@ pub fn rasterize_widget_render_plan(
 
 // ─── WidgetRenderer (GPU state) ───────────────────────────────────────────────
 
-/// Precomputed, scene-free draw geometry for a single widget instance (hud-uyhpn).
+/// Precomputed, scene-free draw geometry for a single widget instance.
 ///
 /// Produced by [`WidgetRenderer::collect_widget_draw_quads`] under the scene lock
 /// and consumed by [`WidgetRenderer::composite_prepared`] after the lock drops.
@@ -3477,7 +3476,7 @@ impl WidgetRenderer {
         }
     }
 
-    /// Precompute the per-instance draw geometry for the widget pass (hud-uyhpn).
+    /// Precompute the per-instance draw geometry for the widget pass.
     ///
     /// This is the scene-reading half of [`Self::composite_widgets`]: it resolves
     /// each drawable instance's pixel origin from the registry (instance geometry
@@ -3527,7 +3526,7 @@ impl WidgetRenderer {
         quads
     }
 
-    /// Draw precomputed widget quads into an already-open render pass (hud-uyhpn).
+    /// Draw precomputed widget quads into an already-open render pass.
     ///
     /// The scene-free counterpart to [`Self::composite_widgets`]: it looks up each
     /// quad's cached texture entry (compositor-owned, not scene state), pixel-snaps
@@ -4531,8 +4530,8 @@ mod tests {
                     40,
                 )
                 .expect("bound nested primitives should rasterize");
-                // Anonymous .5, unbound named .8, replaced outer, replaced
-                // inner .5, and local .8. This expected alpha is independent
+                // Anonymous.5, unbound named.8, replaced outer, replaced
+                // inner.5, and local.8. This expected alpha is independent
                 // of the render-plan implementation and the authored outer.
                 let expected_alpha = (255.0f32 * 0.5 * 0.8 * replacement * 0.5 * 0.8).round();
                 for (x, y) in [(8, 8), (40, 8)] {
@@ -5185,11 +5184,10 @@ mod tests {
 
     // ── Reference gauge rasterization tests ──────────────────────────────────
     //
-    // Acceptance criterion 8 (hud-mim2.7): Compositor renders reference gauge
+    // Acceptance criterion 8: Compositor renders reference gauge
     // correctly. The fill.svg from the gauge fixture is rasterized with specific
     // parameter values and the pixel output is validated for correctness.
     //
-    // Source: widget-system/spec.md §Deliverable 10 (Reference gauge widget bundle test fixture)
 
     /// Return the content of the reference gauge fill.svg fixture.
     fn reference_gauge_fill_svg() -> &'static str {
@@ -5248,7 +5246,6 @@ mod tests {
     /// WHEN the reference gauge fill.svg is parsed with default parameters
     /// THEN resvg parses it without error and produces non-trivial pixel output.
     ///
-    /// Source: widget-system/spec.md §Deliverable 10 — reference gauge fixture.
     #[test]
     fn reference_gauge_fill_svg_parses_and_rasterizes() {
         let svg = reference_gauge_fill_svg();
@@ -5275,7 +5272,6 @@ mod tests {
     /// the bar extends from y=10 to y=110. The pixel at (50, 60) — center of bar
     /// at mid-height — should be the blue fill color.
     ///
-    /// Source: widget-system/spec.md §Requirement: SVG Layer Parameter Bindings (linear mapping).
     #[test]
     fn reference_gauge_bar_half_full_renders_blue_in_fill_region() {
         // Apply level=100 (50% fill height), blue fill, empty label, info indicator.

@@ -6,7 +6,7 @@
 //!
 //! ## Spec alignment
 //!
-//! Per `timing-model/spec.md` §Injectable Clock (lines 313–324):
+//! Clock injection:
 //!
 //! - The [`Clock`] trait exposes **only** `now_us()` and `monotonic_us()`.
 //!   No mutation methods (`advance`, `set`) are part of the trait — these are
@@ -92,7 +92,7 @@ impl Default for SystemClock {
 impl Clock for SystemClock {
     fn now_us(&self) -> u64 {
         // Clamp to 1 so that 0 is never returned. Zero is the spec-defined
-        // "not set" sentinel (spec lines 68-70) and MUST NOT be returned by
+        // "not set" sentinel and MUST NOT be returned by
         // production implementations. A system clock before UNIX_EPOCH is
         // pathological; returning 1 is safer than panicking or silently
         // emitting the forbidden sentinel.

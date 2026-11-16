@@ -19,7 +19,7 @@
 //! (`TZE_HUD_TEST_BUDGET_SLACK`, default 20×) that absorbs debug builds and
 //! llvmpipe on CI.
 //!
-//! ## Timing-assertion quarantine (hud-1aswu.3)
+//! ## Timing-assertion quarantine
 //!
 //! Wall-clock / p99 latency assertions are **gated** behind the
 //! `TZE_HUD_PERF_ASSERT=1` environment variable so they never block the
@@ -56,7 +56,7 @@ use tze_hud_scene::types::{
 };
 use tze_hud_telemetry::LatencyBucket;
 
-// ─── Timing-assertion gate (hud-1aswu.3) ─────────────────────────────────────
+// ─── Timing-assertion gate ─────────────────────────────────────
 
 /// Returns `true` when wall-clock / p99 latency hard assertions should run.
 ///
@@ -131,7 +131,7 @@ async fn test_frame_time_p99_within_budget() {
     );
 
     // Timing assertion: gated — wall-clock budget that would flake on
-    // shared CI runners.  Set TZE_HUD_PERF_ASSERT=1 to enable.  (hud-1aswu.3)
+    // shared CI runners. Set TZE_HUD_PERF_ASSERT=1 to enable.
     if perf_assert_enabled() {
         let p99 = summary
             .frame_time
@@ -226,7 +226,7 @@ async fn test_input_to_local_ack_p99_within_budget() {
         hit_test_latency.record(hit_test_us);
     }
 
-    // Timing assertion: gated — wall-clock budget.  (hud-1aswu.3)
+    // Timing assertion: gated — wall-clock budget.
     if perf_assert_enabled() {
         input_to_local_ack
             .assert_p99_under(budget_us)
@@ -675,7 +675,7 @@ async fn test_hit_test_p99_within_budget() {
         };
         hit_test_latency.record(hit_test_us);
     }
-    // Timing assertion: gated — wall-clock budget.  (hud-1aswu.3)
+    // Timing assertion: gated — wall-clock budget.
     if perf_assert_enabled() {
         hit_test_latency
             .assert_p99_under(budget_us)
@@ -742,7 +742,7 @@ fn test_transaction_validation_p99_within_budget() {
         assert!(result.applied, "batch {i} should have applied");
     }
 
-    // Timing assertion: gated — wall-clock budget.  (hud-1aswu.3)
+    // Timing assertion: gated — wall-clock budget.
     if perf_assert_enabled() {
         validation_bucket
             .assert_p99_under(budget_us)
@@ -761,7 +761,7 @@ fn test_transaction_validation_p99_within_budget() {
 ///
 /// The test creates `UPLOAD_ROUNDS` tiles with fresh `SolidColor` nodes (CPU proxy
 /// for GPU texture upload). 100 samples so nearest-rank p99 drops one outlier
-/// instead of being the max, plus 5 unrecorded warm-up rounds (hud-srnr5).
+/// instead of being the max, plus 5 unrecorded warm-up rounds.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn test_texture_upload_p99_within_budget() {
     /// Reference texture upload budget (µs) per tile creation on target hardware.
@@ -901,7 +901,7 @@ async fn test_texture_upload_p99_within_budget() {
     }
 
     // Timing assertion: gated — wall-clock budget that caused the
-    // recurring flake hud-1aswu.3 on the blocking test-unit lane.
+    // recurring flake on the blocking test-unit lane.
     // Set TZE_HUD_PERF_ASSERT=1 to enable hard p99 assertion on a reference host.
     if perf_assert_enabled() {
         let p99 = upload_bucket
@@ -927,7 +927,7 @@ async fn test_texture_upload_p99_within_budget() {
 /// > calls for tile nodes (solid color, text, image), encode alpha-blend passes for
 /// > transparent tiles, and encode the chrome layer.
 ///
-/// Text rasterization was added in hud-pmkf (PR#233) but no automated benchmark
+/// Text rasterization was added in (PR#233) but no automated benchmark
 /// validated the budget. This test fills that gap.
 ///
 /// ## Scene
@@ -1047,7 +1047,7 @@ async fn test_stage6_render_encode_p99_within_budget() {
         "expected {FRAME_COUNT} stage6 samples"
     );
 
-    // ── Budget assertion — gated (hud-1aswu.3) ───────────────────────────────
+    // ── Budget assertion — gated ───────────────────────────────
     // Set TZE_HUD_PERF_ASSERT=1 to enable the hard p99 assertion on a reference
     // host.  On the standard test-unit CI lane (shared runners) the timing
     // assertion is skipped; only the structural sample-count assertion above runs.

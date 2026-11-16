@@ -1,4 +1,4 @@
-//! Focus tree per RFC 0004 §1.1–§1.4.
+//! Per-tab focus ownership and bounded history.
 //!
 //! Each tab maintains an independent focus tree. At most one focus owner exists
 //! per tab. This module owns the data structure; `FocusManager` owns the
@@ -16,9 +16,6 @@
 //! - `FocusTree::history` is a bounded stack (max depth: `HISTORY_DEPTH`) of
 //!   previously focused elements, used for fallback on destruction.
 //!
-//! Spec refs:
-//! - Lines 11-13 (Focus Tree Structure)
-//! - Lines 57-58 (Focus Transfer on Destruction)
 
 use std::collections::VecDeque;
 use tze_hud_scene::SceneId;
@@ -26,7 +23,7 @@ use tze_hud_scene::SceneId;
 /// Maximum depth of per-tab focus history for fallback-on-destruction.
 pub const HISTORY_DEPTH: usize = 8;
 
-/// The current owner of focus in a tab (RFC 0004 §1.1).
+/// The current owner of focus in a tab.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum FocusOwner {
     /// No element is focused.
@@ -64,7 +61,7 @@ impl FocusOwner {
     }
 }
 
-/// Per-tab focus state (RFC 0004 §1.1).
+/// Per-tab focus state.
 ///
 /// Maintained entirely in memory. Not persisted; survives tab switches by
 /// virtue of each tab having its own `FocusTree` in `FocusManager`.
@@ -74,7 +71,7 @@ pub struct FocusTree {
     pub current: FocusOwner,
     /// Bounded history of prior focus owners (newest at back).
     ///
-    /// Used for fallback when the focused tile/node is destroyed (spec line 57).
+    /// Used for fallback when the focused tile/node is destroyed.
     /// Implemented as a `VecDeque` for O(1) front-eviction when the bound is hit.
     history: VecDeque<FocusOwner>,
 }
@@ -110,7 +107,7 @@ impl FocusTree {
     /// Returns the most-recent prior focus owner (if any).
     ///
     /// Used when the current focus owner is destroyed to fall back to the
-    /// previous element (spec lines 57-58).
+    /// previous element.
     pub fn previous(&self) -> Option<&FocusOwner> {
         self.history.back()
     }

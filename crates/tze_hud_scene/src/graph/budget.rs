@@ -240,7 +240,7 @@ impl SceneGraph {
                     descendants,
                 } => {
                     // SetTileRoot replaces the entire tree, so count new tree size.
-                    // With an inline subtree (hud-ga4md) the root plus every fresh
+                    // With an inline subtree the root plus every fresh
                     // descendant counts against the per-tile node budget.
                     let new_count = Self::fresh_batch_node_count(node)
                         .saturating_add(u32::try_from(descendants.len()).unwrap_or(u32::MAX));

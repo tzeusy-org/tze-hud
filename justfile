@@ -79,6 +79,10 @@ untracked-evidence:
 host-identifiers:
     python3 scripts/ci/check_host_identifiers.py
 
+# Reject retired design citations while preserving historical measurement data.
+current-references:
+    python3 scripts/ci/check_current_references.py
+
 # cargo check: fast compilation gate (no codegen)
 check:
     {{cargo}} check --workspace
@@ -295,4 +299,4 @@ dev-run dev_dir host="":
 # Excluded by design: the Windows-only jobs (windows.yml) and weekly perf lanes.
 # Boot and pixel-readback tests run in the CI test job; focused recipes remain local.
 # Runs in CI job order: static, clippy (which subsumes `check`), then tests.
-ci: untracked-evidence host-identifiers fmt dev-mode-guard deps-unused cargo-deny test-python clippy clippy-windows-gnu test test-integration token-footprint production-boot canonical-app-boot
+ci: untracked-evidence host-identifiers current-references fmt dev-mode-guard deps-unused cargo-deny test-python clippy clippy-windows-gnu test test-integration token-footprint production-boot canonical-app-boot

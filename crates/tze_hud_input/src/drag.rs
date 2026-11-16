@@ -42,7 +42,7 @@ pub const LONG_PRESS_TOUCH_THRESHOLD_MS: u64 = 1000;
 
 /// Movement tolerance before long-press is cancelled (density-independent pixels).
 ///
-/// Per RFC 0004 §3.4 and issue scope: 10dp movement tolerance.
+/// and issue scope: 10dp movement tolerance.
 pub const LONG_PRESS_MOVEMENT_TOLERANCE_DP: f32 = 10.0;
 
 /// Default snap grid as a fraction of the display dimension (2% = 0.02).

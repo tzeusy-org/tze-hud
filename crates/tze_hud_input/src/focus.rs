@@ -1,4 +1,4 @@
-//! Focus manager per RFC 0004 §1.1–§1.4, §5.6.
+//! Focus manager.
 //!
 //! `FocusManager` is the authoritative runtime component for focus state. It:
 //! - Maintains one `FocusTree` per tab.
@@ -11,15 +11,6 @@
 //! - Provides focus ring metadata (node bounds) for the compositor.
 //! - Enforces focus isolation: queries are filtered by ownership.
 //!
-//! Spec refs:
-//! - Lines 11-13:  Focus Tree Structure
-//! - Lines 27-29:  Click-to-Focus Acquisition
-//! - Lines 42-44:  Programmatic Focus Request
-//! - Lines 57-58:  Focus Transfer on Destruction
-//! - Lines 67-69:  Focus Isolation Between Agents
-//! - Lines 79-81:  Focus Cycling
-//! - Lines 93-94:  Focus Events Dispatch
-//! - Lines 400-402: Focus Ring Visual Indication
 
 use std::collections::HashMap;
 use tze_hud_scene::{InputMode, NodeData, SceneGraph, SceneId};
@@ -28,7 +19,7 @@ use crate::focus_tree::{FocusOwner, FocusTree};
 
 // ─── Focus events ─────────────────────────────────────────────────────────────
 
-/// Why focus was gained (RFC 0004 §1.4).
+/// Why focus was gained.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FocusSource {
     /// Focus acquired by a pointer click.
@@ -41,7 +32,7 @@ pub enum FocusSource {
     CommandInput,
 }
 
-/// Why focus was lost (RFC 0004 §1.4).
+/// Why focus was lost.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum FocusLostReason {
     /// Pointer clicked somewhere else.
@@ -65,7 +56,7 @@ pub enum FocusLostReason {
 /// Emitted when a tile or node gains focus.
 ///
 /// The owning agent should receive this event before any triggering pointer
-/// event (spec line 32).
+/// event.
 #[derive(Clone, Debug)]
 pub struct FocusGainedEvent {
     pub tile_id: SceneId,
@@ -85,7 +76,7 @@ pub struct FocusLostEvent {
 
 // ─── Programmatic request / response ─────────────────────────────────────────
 
-/// Agent request to programmatically acquire focus (RFC 0004 §1.2).
+/// Agent request to programmatically acquire focus.
 #[derive(Clone, Debug)]
 pub struct FocusRequest {
     /// The tile the agent owns.
@@ -112,7 +103,7 @@ pub enum FocusResult {
 
 // ─── Focus ring metadata (compositor surface) ─────────────────────────────────
 
-/// Bounds and style metadata for focus ring rendering (RFC 0004 §5.6).
+/// Bounds and style metadata for focus ring rendering.
 ///
 /// The compositor renders this in the chrome layer, above all agent content.
 /// Default style: 2px solid ring, system accent color, ≥3:1 contrast ratio.
@@ -182,7 +173,7 @@ impl FocusManager {
 
     /// Called when the user switches from `from_tab` to `to_tab`.
     ///
-    /// Per spec lines 21-22: focus state is preserved on suspension without
+    /// Per: focus state is preserved on suspension without
     /// emitting FocusLostEvent on the suspended tab. The target tab's existing
     /// focus is restored without emitting FocusGainedEvent.
     ///
@@ -198,7 +189,7 @@ impl FocusManager {
         self.compute_ring_update(to_tab, scene)
     }
 
-    // ─── Click-to-focus (spec lines 27-29) ─────────────────────────────
+    // ─── Click-to-focus ─────────────────────────────
 
     /// Called when a pointer down event hits a node or tile.
     ///
@@ -216,7 +207,7 @@ impl FocusManager {
             if tile.tab_id != tab_id {
                 return FocusTransition::default();
             }
-            // Passthrough tiles do not acquire focus (spec line 37).
+            // Passthrough tiles do not acquire focus.
             if tile.input_mode == InputMode::Passthrough {
                 return FocusTransition::default();
             }
@@ -258,7 +249,7 @@ impl FocusManager {
         )
     }
 
-    // ─── Programmatic focus request (spec lines 42-44) ──────────────────
+    // ─── Programmatic focus request ──────────────────
 
     /// Handle a programmatic focus request from an agent.
     ///
@@ -342,7 +333,7 @@ impl FocusManager {
         (FocusResult::Granted, transition)
     }
 
-    // ─── Focus cycling (spec lines 79-81) ───────────────────────────────
+    // ─── Focus cycling ───────────────────────────────
 
     /// Advance focus to the next focusable element in z-order (NAVIGATE_NEXT).
     ///
@@ -427,7 +418,7 @@ impl FocusManager {
     }
 
     /// Clear keyboard focus on `tab_id` to [`FocusOwner::None`] via a
-    /// runtime-initiated command (hud-k6yvb).
+    /// runtime-initiated command.
     ///
     /// This is the Escape recovery for a focus stop that has no composer to fall
     /// back into (a tile-level stop, or a focusable node whose tile carries no
@@ -453,7 +444,7 @@ impl FocusManager {
         }
     }
 
-    // ─── Destruction fallback (spec lines 57-58) ────────────────────────
+    // ─── Destruction fallback ────────────────────────
 
     /// Called when a tile is destroyed. If the destroyed tile holds focus,
     /// focus falls back to the previously focused element.
@@ -547,7 +538,7 @@ impl FocusManager {
         transition
     }
 
-    // ─── Focus isolation (spec lines 67-69) ─────────────────────────────
+    // ─── Focus isolation ─────────────────────────────
 
     /// Returns the current focus owner visible to `namespace`.
     ///
@@ -707,7 +698,7 @@ impl CycleStep {
     }
 }
 
-/// Build the ordered focus cycle for a tab (spec lines 79-81).
+/// Build the ordered focus cycle for a tab.
 ///
 /// Order: tiles by z_order ascending (lowest first), within each tile
 /// depth-first left-to-right tree order of HitRegionNodes with accepts_focus=true.
@@ -974,7 +965,7 @@ mod tests {
         node_id
     }
 
-    // ── Escape recovery: clear-to-no-focus then Tab re-enters (hud-k6yvb) ──
+    // ── Escape recovery: clear-to-no-focus then Tab re-enters ──
 
     #[test]
     fn clear_focus_releases_and_tab_reenters_cycle() {
@@ -1304,7 +1295,7 @@ mod tests {
         assert_eq!(ns, "agent-a");
     }
 
-    /// Owner hiding (hud-vniri.4): a hidden tile loses focus to the next shown
+    /// Owner hiding: a hidden tile loses focus to the next shown
     /// tile in history and Tab skips it, without telling its agent.
     #[test]
     fn hidden_tile_loses_focus_and_leaves_the_cycle() {
@@ -1538,7 +1529,7 @@ mod tests {
         let mut fm = FocusManager::new();
         fm.add_tab(tab_id);
 
-        // Set initial focus to N2 (per scenario in spec line 84).
+        // Set initial focus to N2.
         fm.on_click(tab_id, t1, Some(n2), &scene);
         assert_eq!(
             fm.trees[&tab_id].current().clone(),
@@ -1573,7 +1564,7 @@ mod tests {
         );
     }
 
-    /// hud-02sp5: a portal frame tile mixes genuinely-interactive controls
+    /// a portal frame tile mixes genuinely-interactive controls
     /// (collapse / composer / reply) with pointer-only drag & resize handles.
     /// Tab traversal must stop on the interactive controls in depth-first
     /// left-to-right order, Shift+Tab must reverse that order, and the
@@ -1821,7 +1812,7 @@ mod tests {
         assert!((b.height - 30.0).abs() < 0.001);
     }
 
-    // ── Tab switch (spec lines 21-22) ────────────────────────────────────
+    // ── Tab switch ────────────────────────────────────
 
     #[test]
     fn test_tab_switch_preserves_focus_without_events() {

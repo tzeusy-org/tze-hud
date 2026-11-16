@@ -1,8 +1,6 @@
 //! # E12.2 Session Lifecycle Integration Tests
 //!
-//! End-to-end integration tests for the session lifecycle state machine per
-//! the validation-framework spec (Requirement: Test Scene Registry, lines 160-172)
-//! and the session-protocol spec (Requirement: Session Lifecycle State Machine).
+//! End-to-end integration tests for the session lifecycle state machine.
 //!
 //! ## What is tested
 //!
@@ -46,8 +44,7 @@ use tze_hud_scene::{
 
 /// A single recorded state transition for the audit trail.
 ///
-/// Serialises to JSON to satisfy the "session state transition log" artifact
-/// requirement from rig-7vnh spec.
+/// Serializes to JSON for the session state transition log artifact.
 #[derive(Debug, Clone, serde::Serialize)]
 struct TransitionEntry {
     step: &'static str,
@@ -604,7 +601,7 @@ fn test_reconnect_after_grace_period_expiry_clears_state() {
 
 /// Verifies that safe mode entry suspends all active leases simultaneously,
 /// within the one-frame (16.6ms) budget (pure logic, no rendering).
-/// Validates: RFC 0008 §3.3, §3.4.
+/// Validates:.
 #[test]
 fn test_safe_mode_suspends_all_leases() {
     let clock = Arc::new(TestClock::new(0));
@@ -761,7 +758,7 @@ fn test_safe_mode_exit_resumes_leases_and_accepts_mutations() {
     );
 
     // TTL check: the lease's remaining TTL must still be positive
-    // (suspension pauses TTL clock per RFC 0008 §4.3)
+    // (suspension pauses TTL clock )
     let lease = &scene.leases[&lease_id];
     assert!(
         lease.ttl_remaining_at_suspend_ms.is_some() || lease.ttl_ms > 0,
@@ -790,7 +787,7 @@ fn test_safe_mode_exit_resumes_leases_and_accepts_mutations() {
 ///
 /// Both leases are standard leases with Manual renewal policy. Safe mode exit
 /// resumes all suspended leases, including the pre-frozen one — this models
-/// "safe mode cancels active freeze" per RFC 0008 §3.4.
+/// "safe mode cancels active freeze".
 #[test]
 fn test_freeze_plus_safe_mode_interaction() {
     let clock = Arc::new(TestClock::new(0));
@@ -927,9 +924,8 @@ fn test_freeze_plus_safe_mode_interaction() {
 /// The other two must be unaffected throughout.
 ///
 /// Validates:
-/// - V1 Success Criterion - Live Multi-Agent Presence (validation-framework spec line 313-320)
-/// - disconnect_reclaim_multiagent scene definition (spec line 160-172)
-/// - Thesis 3: Multiple agents coexist
+/// - V1 Success Criterion - Live Multi-Agent Presence
+/// - disconnect_reclaim_multiagent scene definition
 #[test]
 fn test_disconnect_reclaim_multiagent_scene() {
     let registry = TestSceneRegistry::new();
@@ -1109,8 +1105,7 @@ fn test_disconnect_reclaim_multiagent_scene() {
 
 // ─── Test 8: Zero resource footprint after disconnect + expiry ────────────────
 
-/// Validates the "zero post-disconnect footprint" requirement from the soak and
-/// leak test spec (validation-framework spec lines 307-310).
+/// Validates zero post-disconnect resource footprint.
 ///
 /// After an agent disconnects and its grace period expires, every resource
 /// it owned must be cleaned up: no tiles, no nodes, no hit-region states.
@@ -1541,7 +1536,7 @@ fn make_stream_text_zone(name: &str) -> tze_hud_scene::types::ZoneDefinition {
 /// Verifies that tiles owned by an orphaned lease receive the DisconnectionBadge
 /// visual hint when `disconnect_lease` is called.
 ///
-/// Spec line 133: "Disconnection badge MUST appear within 1 frame."
+///: "Disconnection badge MUST appear within 1 frame."
 /// This test validates the scene-data side of the contract (the compositor
 /// reads `tile.visual_hint` to decide what to render).
 #[test]
@@ -1592,7 +1587,7 @@ fn test_disconnection_badge_set_on_orphan() {
         "tile_b must have DisconnectionBadge after disconnect"
     );
 
-    // Reconnect: badge must clear (spec line 141: within 1 frame)
+    // Reconnect: badge must clear (within 1 frame)
     clock.advance(5_000);
     scene
         .reconnect_lease(&lease_id, clock.now_millis())
@@ -1621,7 +1616,7 @@ fn test_disconnection_badge_set_on_orphan() {
 
 /// Verifies that zone publications from an expired lease are cleared.
 ///
-/// Spec §Requirement: Lease Revocation Clears Zone Publications (lines 235–242):
+/// Lease Revocation Clears Zone Publications:
 /// "When a lease is REVOKED or EXPIRED, all zone publications made under that
 /// lease MUST be immediately cleared from the zone registry."
 #[test]
@@ -1704,7 +1699,6 @@ fn test_zone_publications_cleared_on_lease_expiry() {
 
 /// Verifies that zone publishes from an orphaned namespace are rejected.
 ///
-/// Spec lines 231–233 (adapted to orphan state):
 /// "WHEN a lease is ORPHANED THEN existing zone publications remain visible
 /// with a staleness/disconnection indicator but no new publishes are accepted."
 #[test]
@@ -1840,7 +1834,7 @@ fn test_zone_publish_rejected_when_lease_orphaned() {
 
 // ─── Test 15: Grace period precision ─────────────────────────────────────────
 
-/// Spec §Grace Period Precision (lines 147–154): the runtime MUST NOT
+/// Grace Period Precision: the runtime MUST NOT
 /// prematurely expire the grace period; an agent can reconnect at 29,950ms.
 #[test]
 fn test_grace_period_precision_reconnect_at_29950ms() {
@@ -1856,7 +1850,7 @@ fn test_grace_period_precision_reconnect_at_29950ms() {
     // Reconnect at 29,950ms — must succeed
     scene
         .reconnect_lease(&lease_id, 29_950)
-        .expect("reconnect at 29,950ms must succeed (spec lines 152-154)");
+        .expect("reconnect at 29,950ms must succeed");
     assert_eq!(
         scene.leases[&lease_id].state,
         LeaseState::Active,
@@ -1868,7 +1862,7 @@ fn test_grace_period_precision_reconnect_at_29950ms() {
 
 /// Verifies that `revoke_lease` clears zone publications from that namespace.
 ///
-/// Spec §Requirement: Lease Revocation Clears Zone Publications (lines 235–242).
+/// Lease Revocation Clears Zone Publications.
 #[test]
 fn test_zone_publications_cleared_on_revoke_lease() {
     use tze_hud_scene::types::ZoneContent;
@@ -1924,7 +1918,7 @@ fn test_zone_publications_cleared_on_revoke_lease() {
 
 /// Verifies that the TTL clock continues running while a lease is ORPHANED.
 ///
-/// Spec line 133: "TTL clock MUST continue running during the grace period."
+///: "TTL clock MUST continue running during the grace period."
 /// This is distinct from SUSPENDED, where the TTL clock is paused.
 #[test]
 fn test_ttl_continues_during_orphan_state() {
