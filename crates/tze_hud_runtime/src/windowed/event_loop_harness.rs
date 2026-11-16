@@ -164,6 +164,7 @@ impl WindowedRuntimeState {
             static_hit_regions: Vec::new(),
             widget_hover_trackers: HashMap::new(),
             pending_widget_svgs: Vec::new(),
+            startup_diagnostics: None,
             text_fit: Default::default(),
             modifiers: winit::keyboard::ModifiersState::empty(),
             primary_monitor: None,
@@ -372,6 +373,7 @@ impl HeadlessEventLoopHarness {
         // GPU-free: measure with the production tokens the compositor would use.
         state.text_fit.set_tokens(global_tokens.clone());
         let mcp_config = crate::mcp::McpServerConfig {
+            startup: None,
             text_fit: Some(Arc::clone(&state.text_fit) as Arc<dyn tze_hud_scene::TextFit>),
             appearance: None,
             publication_defaults: state.live.publication_defaults.clone(),

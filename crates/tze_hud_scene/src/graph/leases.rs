@@ -417,7 +417,11 @@ impl SceneGraph {
     /// The terminal state a lease is due for at `now`, or `None` if it is not yet
     /// expired. Used by the whole-scene sweep and the scoped expiry fixture
     /// so both apply the same TTL / grace / suspension predicate.
-    fn lease_terminal_state(lease: &Lease, now: u64, max_suspend_ms: u64) -> Option<LeaseState> {
+    pub(super) fn lease_terminal_state(
+        lease: &Lease,
+        now: u64,
+        max_suspend_ms: u64,
+    ) -> Option<LeaseState> {
         // TTL-expired active/orphaned leases
         if (lease.state == LeaseState::Active || lease.state == LeaseState::Orphaned)
             && lease.is_expired(now)

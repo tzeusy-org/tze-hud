@@ -16,6 +16,7 @@ pub mod perf_budget;
 pub mod portal_reading;
 pub mod publication_defaults;
 pub mod render_wake;
+pub mod startup_diagnostics;
 pub mod svg_tokens;
 #[cfg(any(test, feature = "test-support"))]
 pub mod test_scenes;

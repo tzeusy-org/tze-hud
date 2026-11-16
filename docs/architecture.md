@@ -116,6 +116,24 @@ admin-authorized `/admin/*` outside the five MCP tools. Installation, firewall,
 restart and signed-update semantics belong in the
 [Windows runbook](operations/windows-install.md), not in agent payloads.
 
+**Operator diagnostics.** [`graph/holdings`](../crates/tze_hud_scene/src/graph/holdings.rs)
+visits borrowed ownership metadata beside the scene's real publication, lease,
+scheduled-batch and orphan owners. `PortalHub::visit_holdings` exposes only live
+authenticated keys and reclaim metadata. Neither reader copies payloads or runs
+cleanup. Runtime [`operator/diagnostics`](../crates/tze_hud_runtime/src/operator/diagnostics.rs)
+collects them through separate nonblocking locks into the bounded admin-only
+projection; ordinary agent discovery stays unchanged.
+
+The widget loader captures typed failures in its existing scan, and
+`scene_startup` carries them beside SVG assets. The font builder retains its
+actual load/fallback observations in `TextRasterizer`; the compositor getter
+supplies the first configured initialization to one runtime `StartupDiagnostics`.
+That state freezes after fonts finish, independently of global log suppression.
+Missing producers and lock contention are qualified explicitly. The existing
+`hud_admin.py doctor` curates the authenticated status metadata into a validated
+3072-byte result envelope while retaining its owned-child deadlines, cleanup and
+first-failure diagnosis. This path adds no sampler, persistence or render wake.
+
 **Windows desktop presence.** The existing hidden top-level display-watcher
 window/thread owns the tray icon, native menu, Explorer restart recovery and
 WTS session notifications. [`displays`](../crates/tze_hud_runtime/src/windowed/displays.rs)

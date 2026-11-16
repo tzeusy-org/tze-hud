@@ -49,6 +49,16 @@ row test, and `integration::poc_panel_runtime_rows_apply_save_and_stage_a_restar
 cover saved/default source, save-first failure behavior and both live server
 bridges. Source tests are distinct from Windows owner interaction evidence.
 
+Admin `holdings`/`warnings` are content-free observations of existing owners.
+Their independent nonblocking snapshots cannot renew, apply or sweep retained
+content, advance portal liveness, consume input or wake rendering. Busy/missing
+sources and omissions are explicit; due retained records remain `cleanup_due`
+until normal cleanup. This cross-agent metadata remains behind `admin_guard`,
+separate from ordinary `hud_surfaces` and agent snapshots. Existing admin-status
+and authenticated HTTP publish/readback tests cover privacy, expiry and bounds;
+startup warning and doctor tests cover actual producers and bounded consumption.
+These observations make no claim about owner visual acceptance or pixels.
+
 ## 2. Three message classes, kept distinct
 
 Transactional (create, lease, release: reliable, ordered, acknowledged),

@@ -559,6 +559,15 @@ impl super::Compositor {
         }
     }
 
+    /// Diagnostics from the actual currently initialized configured font system.
+    /// Runtime startup freezes its own first configured result; later theme rebuilds
+    /// do not turn this into a retained warning history.
+    pub fn startup_font_warnings(
+        &self,
+    ) -> Option<&tze_hud_scene::startup_diagnostics::StartupWarnings> {
+        self.text_rasterizer.as_ref().map(|r| r.font_warnings())
+    }
+
     /// The family each font role currently resolves to, or `None` before the
     /// text renderer is initialized.
     #[cfg(test)]

@@ -171,6 +171,8 @@ pub(crate) const TOKEN_FONT_SERIF: &str = "font.serif";
 /// because that is the existing channel into the compositor.
 pub const RUNTIME_FONTS_DIR_KEY: &str = "runtime.fonts_dir";
 
+use tze_hud_scene::startup_diagnostics::StartupWarnings;
+
 // ── Configuration ─────────────────────────────────────────────────────────────
 
 /// Which family each font role uses, plus where operator font files live.
@@ -265,29 +267,57 @@ fn build_font_system_with_locale(
     config: &FontConfig,
     locale: String,
 ) -> (FontSystem, ResolvedFonts) {
+    let (system, resolved, _) = build_font_system_diagnostics_with_locale(config, locale);
+    (system, resolved)
+}
+
+pub(crate) fn build_font_system_with_diagnostics(
+    config: &FontConfig,
+) -> (FontSystem, ResolvedFonts, StartupWarnings) {
+    build_font_system_diagnostics_with_locale(config, locale())
+}
+
+fn build_font_system_diagnostics_with_locale(
+    config: &FontConfig,
+    locale: String,
+) -> (FontSystem, ResolvedFonts, StartupWarnings) {
+    let mut warnings = StartupWarnings::default();
     let mut db = fontdb::Database::new();
     for bytes in BUNDLED_FACES.iter().copied() {
         db.load_font_source(fontdb::Source::Binary(Arc::new(bytes)));
     }
     if let Some(dir) = &config.fonts_dir {
-        load_fonts_dir(&mut db, dir);
+        load_fonts_dir(&mut db, dir, &mut warnings);
     }
 
     let resolved = ResolvedFonts {
-        sans: resolve_role(&mut db, config.sans.as_deref(), "sans", DEFAULT_SANS_FAMILY),
-        mono: resolve_role(&mut db, config.mono.as_deref(), "mono", DEFAULT_MONO_FAMILY),
+        sans: resolve_role(
+            &mut db,
+            config.sans.as_deref(),
+            "sans",
+            DEFAULT_SANS_FAMILY,
+            &mut warnings,
+        ),
+        mono: resolve_role(
+            &mut db,
+            config.mono.as_deref(),
+            "mono",
+            DEFAULT_MONO_FAMILY,
+            &mut warnings,
+        ),
         serif: resolve_role(
             &mut db,
             config.serif.as_deref(),
             "serif",
             DEFAULT_SERIF_FAMILY,
+            &mut warnings,
         ),
     };
     db.set_sans_serif_family(resolved.sans.clone());
     db.set_monospace_family(resolved.mono.clone());
     db.set_serif_family(resolved.serif.clone());
 
-    (new_font_system(db, locale), resolved)
+    (new_font_system(db, locale), resolved, warnings)
 }
 
 /// cosmic-text caches monospace faces with a rayon `par_iter` at construction.
@@ -421,10 +451,11 @@ fn is_font_file(path: &Path) -> bool {
 
 /// Load every font file directly inside `dir` (missing dir is not an error:
 /// the runtime only names one that exists, but a stale token may not).
-fn load_fonts_dir(db: &mut fontdb::Database, dir: &Path) {
+fn load_fonts_dir(db: &mut fontdb::Database, dir: &Path, warnings: &mut StartupWarnings) {
     let entries = match std::fs::read_dir(dir) {
         Ok(entries) => entries,
         Err(e) => {
+            warnings.font("FONT_DIRECTORY_UNREADABLE", "fonts-dir".into(), None);
             warn_once(
                 &format!("dir:{}", dir.display()),
                 || tracing::warn!(dir = %dir.display(), error = %e, "fonts dir unreadable; skipped"),
@@ -438,10 +469,8 @@ fn load_fonts_dir(db: &mut fontdb::Database, dir: &Path) {
         .collect();
     paths.sort(); // deterministic face order
     let before = db.len();
-    for path in &paths {
-        if let Err(e) = db.load_font_file(path) {
-            tracing::warn!(file = %path.display(), error = %e, "font file unreadable; skipped");
-        }
+    for (index, path) in paths.iter().enumerate() {
+        load_configured_font_file(db, path, index, warnings);
     }
     tracing::info!(
         dir = %dir.display(),
@@ -451,11 +480,24 @@ fn load_fonts_dir(db: &mut fontdb::Database, dir: &Path) {
     );
 }
 
+fn load_configured_font_file(
+    db: &mut fontdb::Database,
+    path: &Path,
+    index: usize,
+    warnings: &mut StartupWarnings,
+) {
+    if let Err(e) = db.load_font_file(path) {
+        warnings.font("FONT_FILE_UNREADABLE", format!("font-file:{index}"), None);
+        tracing::warn!(file = %path.display(), error = %e, "font file unreadable; skipped");
+    }
+}
+
 fn resolve_role(
     db: &mut fontdb::Database,
     requested: Option<&str>,
     role: &'static str,
-    default: &str,
+    default: &'static str,
+    warnings: &mut StartupWarnings,
 ) -> String {
     let Some(requested) = requested else {
         return default.to_owned();
@@ -469,6 +511,7 @@ fn resolve_role(
             return found;
         }
     }
+    warnings.font("FONT_FAMILY_FALLBACK", role.into(), Some(default));
     warn_once(&format!("{role}:{requested}"), || {
         tracing::warn!(
             role,
@@ -1394,7 +1437,22 @@ mod tests {
             sans: Some("No Such Family 1f3a".into()),
             ..Default::default()
         };
-        let (mut fs, resolved) = build_font_system(&config);
+        let (mut fs, resolved, warnings) = build_font_system_with_diagnostics(&config);
+        assert_eq!(warnings.items().len(), 1);
+        assert_eq!(warnings.items()[0].code, "FONT_FAMILY_FALLBACK");
+        assert_eq!(warnings.items()[0].subject.as_deref(), Some("sans"));
+        assert_eq!(warnings.items()[0].fallback, Some(DEFAULT_SANS_FAMILY));
+        let (_, _, repeated) = build_font_system_with_diagnostics(&config);
+        assert_eq!(
+            warnings.items(),
+            repeated.items(),
+            "global log suppression must not suppress runtime diagnostics"
+        );
+        assert!(
+            !serde_json::to_string(warnings.items())
+                .unwrap()
+                .contains("No Such Family")
+        );
         assert_eq!(resolved, ResolvedFonts::default());
         assert!(
             faces_used(&mut fs, Family::SansSerif, "Hi")
@@ -1416,7 +1474,16 @@ mod tests {
             fonts_dir: Some(dir.clone()),
             ..Default::default()
         };
-        let (fs, resolved) = build_font_system(&config);
+        let (mut fs, resolved, mut warnings) = build_font_system_with_diagnostics(&config);
+        assert!(warnings.items().is_empty());
+        load_configured_font_file(fs.db_mut(), &dir.join("absent.ttf"), 7, &mut warnings);
+        assert_eq!(warnings.items()[0].code, "FONT_FILE_UNREADABLE");
+        assert_eq!(warnings.items()[0].subject.as_deref(), Some("font-file:7"));
+        assert!(
+            !serde_json::to_string(warnings.items())
+                .unwrap()
+                .contains(dir.to_str().unwrap())
+        );
         std::fs::remove_dir_all(&dir).ok();
         assert_eq!(resolved.sans, "DejaVu Serif");
         assert_eq!(fs.db().faces().count(), BUNDLED_FONT_FACE_COUNT + 1);
@@ -1431,7 +1498,10 @@ mod tests {
             fonts_dir: Some(PathBuf::from("/nonexistent/tze_hud/fonts")),
             ..Default::default()
         };
-        let (fs, resolved) = build_font_system(&config);
+        let (fs, resolved, warnings) = build_font_system_with_diagnostics(&config);
+        assert_eq!(warnings.items().len(), 1);
+        assert_eq!(warnings.items()[0].code, "FONT_DIRECTORY_UNREADABLE");
+        assert_eq!(warnings.items()[0].subject.as_deref(), Some("fonts-dir"));
         assert_eq!(resolved, ResolvedFonts::default());
         assert_eq!(fs.db().faces().count(), BUNDLED_FONT_FACE_COUNT);
     }

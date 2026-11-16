@@ -82,11 +82,24 @@ pub fn scan_bundle_dirs(
     bundle_roots: &[PathBuf],
     tokens: &HashMap<String, String>,
 ) -> Vec<BundleScanResult> {
+    scan_bundle_dirs_with_diagnostics(bundle_roots, tokens).0
+}
+
+/// The same scan, retaining bounded safe metadata for the operator diagnostic.
+/// No second filesystem pass or parsing of log output is involved.
+pub fn scan_bundle_dirs_with_diagnostics(
+    bundle_roots: &[PathBuf],
+    tokens: &HashMap<String, String>,
+) -> (
+    Vec<BundleScanResult>,
+    tze_hud_scene::startup_diagnostics::StartupWarnings,
+) {
+    let mut warnings = tze_hud_scene::startup_diagnostics::StartupWarnings::default();
     let mut results: Vec<BundleScanResult> = Vec::new();
     // Track registered names to detect duplicates.
     let mut registered: HashMap<String, PathBuf> = HashMap::new();
 
-    for root in bundle_roots {
+    for (root_index, root) in bundle_roots.iter().enumerate() {
         let read_dir = match std::fs::read_dir(root) {
             Ok(rd) => rd,
             Err(e) => {
@@ -95,11 +108,15 @@ pub fn scan_bundle_dirs(
                     error = %e,
                     "widget bundle root not readable, skipping"
                 );
+                warnings.widget(
+                    "WIDGET_BUNDLE_ROOT_UNREADABLE",
+                    format!("root:{root_index}"),
+                );
                 continue;
             }
         };
 
-        for entry in read_dir.flatten() {
+        for (bundle_index, entry) in read_dir.flatten().enumerate() {
             let path = entry.path();
             if !path.is_dir() {
                 continue; // skip non-directory entries
@@ -116,6 +133,10 @@ pub fn scan_bundle_dirs(
                             new_path: path.display().to_string(),
                         };
                         tracing::warn!(wire_code = err.wire_code(), "{}", err);
+                        warnings.widget(
+                            err.wire_code(),
+                            format!("root:{root_index}/bundle:{bundle_index}"),
+                        );
                         results.push(BundleScanResult::Err(err));
                         continue;
                     }
@@ -127,6 +148,10 @@ pub fn scan_bundle_dirs(
                     );
                 }
                 BundleScanResult::Err(err) => {
+                    warnings.widget(
+                        err.wire_code(),
+                        format!("root:{root_index}/bundle:{bundle_index}"),
+                    );
                     tracing::warn!(
                         wire_code = err.wire_code(),
                         path = %path.display(),
@@ -139,7 +164,7 @@ pub fn scan_bundle_dirs(
         }
     }
 
-    results
+    (results, warnings)
 }
 
 /// Load a single bundle directory with no token substitution.
