@@ -25,6 +25,7 @@ use crate::operator::status::{UnplacedReason, UnplacedZone};
 use tze_hud_compositor::{DisplayLayout, DisplayRect, FrameTarget, WindowSurface};
 use tze_hud_config::displays::{is_legacy_display_key, normalize_display_key};
 use tze_hud_scene::Rect;
+use winit::dpi::PhysicalSize;
 use winit::event_loop::ActiveEventLoop;
 use winit::monitor::MonitorHandle;
 use winit::window::{Window, WindowAttributes, WindowId, WindowLevel};
@@ -629,20 +630,21 @@ pub(super) fn secondary_index(secondaries: &[SecondaryDisplay], id: WindowId) ->
     secondaries.iter().position(|s| s.window.id() == id)
 }
 
-/// The monitor-native size an overlay keeps across a DPI change: its own
-/// monitor's. Only the registered primary window takes the primary's size; a
-/// window not registered yet (a secondary still being created) gets none, and
-/// the display sync fits it once it is registered.
+/// Resolve a DPI event only against registered windows, using native physical
+/// dimensions without applying the scale factor again. A creation-time event
+/// may arrive before registration; leave its writer default alone, then let
+/// display sync fit that window once it is registered.
 pub(super) fn scale_change_target<'a>(
-    secondary: Option<&'a MonitorSpec>,
-    is_primary_window: bool,
-    primary: Option<&'a MonitorSpec>,
-) -> Option<&'a MonitorSpec> {
-    match secondary {
-        Some(spec) => Some(spec),
-        None if is_primary_window => primary,
-        None => None,
-    }
+    window_id: WindowId,
+    primary: Option<(WindowId, &'a MonitorSpec)>,
+    secondaries: impl IntoIterator<Item = (WindowId, &'a MonitorSpec)>,
+) -> Option<PhysicalSize<u32>> {
+    primary
+        .into_iter()
+        .chain(secondaries)
+        .find_map(|(id, spec)| {
+            (id == window_id).then_some(PhysicalSize::new(spec.width, spec.height))
+        })
 }
 
 /// Final swapchain outcomes: successful secondary present and deferred encodes.
@@ -1880,30 +1882,6 @@ pub(super) fn spawn_display_change_watcher(dirty: DisplaysDirty, wake: impl Fn()
 mod tests {
     use super::*;
 
-    /// Mixed DPI: each overlay keeps its own monitor's physical rectangle
-    /// through a scale change, and an unregistered window never takes the
-    /// primary's.
-    #[test]
-    fn scale_change_targets_own_monitor_never_primary_for_unknown_window() {
-        let primary = MonitorSpec {
-            scale: 1.0,
-            width: 1920,
-            height: 1080,
-            ..spec("PRIMARY", 0, 0)
-        };
-        let secondary = spec("HIDPI", 1920, 0);
-        assert_eq!(
-            scale_change_target(Some(&secondary), false, Some(&primary)),
-            Some(&secondary)
-        );
-        assert_eq!(
-            scale_change_target(None, true, Some(&primary)),
-            Some(&primary)
-        );
-        assert_eq!(scale_change_target(None, false, Some(&primary)), None);
-        assert_eq!(scale_change_target(None, true, None), None);
-    }
-
     fn spec(name: &str, x: i32, y: i32) -> MonitorSpec {
         MonitorSpec {
             name: name.into(),
@@ -2352,6 +2330,102 @@ mod tests {
     /// The sizes Windows left the overlays at during the owner's replug.
     #[test]
     fn overlay_geometry_and_visibility_recovery() {
+        // DPI labels describe the layout; the requested dimensions are always
+        // native physical pixels, including at 150% and 200% scaling.
+        let primary_id = WindowId::from(1);
+        let secondary_150_id = WindowId::from(2);
+        let secondary_200_id = WindowId::from(3);
+        let unknown_id = WindowId::from(4);
+        let primary = MonitorSpec {
+            width: 1920,
+            height: 1080,
+            scale: 1.0,
+            ..spec("DPI100", 0, 0)
+        };
+        let secondary_150 = MonitorSpec {
+            width: 2560,
+            height: 1440,
+            scale: 1.5,
+            ..spec("DPI150", 1920, 0)
+        };
+        let secondary_200 = MonitorSpec {
+            scale: 2.0,
+            ..spec("DPI200", -3840, 0)
+        };
+        let registered_primary = Some((primary_id, &primary));
+        let secondaries = [
+            (secondary_150_id, &secondary_150),
+            (secondary_200_id, &secondary_200),
+        ];
+        for (id, expected) in [
+            (primary_id, PhysicalSize::new(1920, 1080)),
+            (secondary_150_id, PhysicalSize::new(2560, 1440)),
+            (secondary_200_id, PhysicalSize::new(3840, 2160)),
+        ] {
+            assert_eq!(
+                scale_change_target(id, registered_primary, secondaries),
+                Some(expected)
+            );
+        }
+        assert_eq!(
+            scale_change_target(unknown_id, registered_primary, secondaries),
+            None,
+            "an unknown or stale ID must not resize another overlay"
+        );
+        // The same creation-time ID receives no override until it is actually
+        // registered, then resolves to its own monitor rather than the primary.
+        assert_eq!(
+            scale_change_target(secondary_200_id, registered_primary, [secondaries[0]]),
+            None
+        );
+        assert_eq!(
+            scale_change_target(secondary_200_id, registered_primary, secondaries),
+            Some(PhysicalSize::new(3840, 2160))
+        );
+        for (primary_window, primary_spec) in [
+            (None, Some(&primary)),
+            (Some(primary_id), None),
+            (None, None),
+        ] {
+            let registered_primary = primary_window.zip(primary_spec);
+            assert_eq!(
+                scale_change_target(primary_id, registered_primary, secondaries),
+                None,
+                "primary geometry alone or primary identity alone is insufficient"
+            );
+            assert_eq!(
+                scale_change_target(secondary_150_id, registered_primary, secondaries),
+                Some(PhysicalSize::new(2560, 1440)),
+                "a registered secondary does not require a primary record"
+            );
+        }
+        // Display sync first catches the surface up to the current window,
+        // then the existing recovery plan corrects logical-size creation drift.
+        for (monitor, logical_size, native_size) in [
+            (&primary, (1920, 1080), (1920, 1080)),
+            (&secondary_150, (1707, 960), (2560, 1440)),
+            (&secondary_200, (1920, 1080), (3840, 2160)),
+        ] {
+            let position = (monitor.x, monitor.y);
+            if logical_size != native_size {
+                assert_eq!(
+                    overlay_refit(Some(position), logical_size, monitor),
+                    Some((position, native_size))
+                );
+                assert_eq!(
+                    overlay_recovery(false, Some(position), logical_size, monitor),
+                    OverlayRecovery::Refit(position, native_size)
+                );
+            }
+            assert_eq!(overlay_refit(Some(position), native_size, monitor), None);
+            assert_eq!(
+                overlay_recovery(false, Some(position), native_size, monitor),
+                OverlayRecovery::Matched,
+                "native geometry converges without more work at DPI {}",
+                monitor.scale
+            );
+        }
+
         let d8 = spec("DISPLAY8", 17, -2160);
         assert_eq!(overlay_refit(Some((17, -2160)), (3840, 2160), &d8), None);
         for drifted in [(3862, 2182), (237, 39)] {

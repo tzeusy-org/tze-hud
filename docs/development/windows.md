@@ -219,6 +219,19 @@ prints redacted discovery information without launching another window.
   fighting it, logged as a warning). Explicit `--width`/`--height` gives a
   single window on the primary. Screenshot one monitor with
   `hud_admin.py screenshot --display N` (or `--all`).
+
+  Auto-sized overlays keep native physical dimensions across DPI changes; the
+  scale factor does not multiply those dimensions again. The production sizing
+  plan matches the event's registered window ID to that window's monitor. An
+  unknown ID leaves winit's size writer unchanged, even if a primary monitor
+  record exists; registration and the existing surface catch-up/refit sequence
+  reconcile creation-time drift. Already matched geometry requests no refit;
+  minimized no-activate restore remains separate from the five-per-ten-second
+  geometry budget. The `hud-670ds` unit proof covers DPI 1.0/1.5/2.0 and unequal
+  native rectangles through those production plans. It does not prove actual
+  `WM_DPICHANGED` delivery, OS acceptance of each request or owner mixed-DPI and
+  sleep/wake outcomes. Logical `ui.scale`, stable display-key acceptance and
+  those physical-owner checks retain their separate scope.
 - **Global chords.** Ctrl+Shift+F12 pauses agents and opens the control panel,
   Ctrl+Shift+F11 opens it with agents running, Ctrl+Shift+F10 shows a pairing
   code. They work without focusing the HUD; see `docs/api.md`.

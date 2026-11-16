@@ -2270,22 +2270,23 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 self.state
                     .displays_dirty
                     .store(true, std::sync::atomic::Ordering::Release);
-                let is_primary_window = self
-                    .state
-                    .window
-                    .as_ref()
-                    .is_some_and(|w| w.id() == window_id);
-                let spec = displays::scale_change_target(
-                    secondary.map(|i| &self.state.secondaries[i].spec),
-                    is_primary_window,
-                    self.state.primary_monitor.as_ref(),
+                let size = displays::scale_change_target(
+                    window_id,
+                    self.state
+                        .window
+                        .as_ref()
+                        .zip(self.state.primary_monitor.as_ref())
+                        .map(|(window, spec)| (window.id(), spec)),
+                    self.state
+                        .secondaries
+                        .iter()
+                        .map(|display| (display.window.id(), &display.spec)),
                 );
-                if let Some(spec) = spec
+                if let Some(size) = size
                     && self.state.effective_mode == WindowMode::Overlay
                     && self.state.config.overlay_auto_size
                 {
-                    let _ = inner_size_writer
-                        .request_inner_size(winit::dpi::PhysicalSize::new(spec.width, spec.height));
+                    let _ = inner_size_writer.request_inner_size(size);
                 }
             }
 

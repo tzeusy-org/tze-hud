@@ -513,8 +513,14 @@ source links when implementation changes the status.
   unverified (`hud-avr7s.4`).
   Token sizes are dp at each monitor's scale × `ui.scale`
   ([`set_px_scale`](../crates/tze_hud_config/src/tokens.rs), `hud-h51u7.3`).
-  Mixed-DPI window sizing (`hud-670ds`) remains open. The vision describes their
-  intended end state, not current deployment guarantees.
+  Auto-sized overlays request their own monitor's native physical dimensions
+  on DPI changes only for a registered window ID (`hud-670ds`); unknown IDs
+  receive no primary-size override. Registration, surface catch-up and existing
+  bounded refitting correct creation-time drift. The production membership and
+  recovery plans have unit coverage at DPI 1.0/1.5/2.0 with unequal native sizes;
+  this is the chosen pure-plan verification, not physical Windows mixed-DPI or
+  `WM_DPICHANGED` acceptance. Logical UI scaling and stable-key owner checks
+  remain separate; the vision is not a current deployment guarantee.
   Overlay sleep/wake recovery (`hud-jm8nq.25`) reports native visibility, iconic,
   topmost and DWM cloaking state per display, and requests no-activate reassertion
   on display/resume/power-on events or a status observation of drift. The decision
