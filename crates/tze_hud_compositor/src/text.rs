@@ -44,7 +44,7 @@ use tze_hud_scene::types::{
 };
 use wgpu::{Device, MultisampleState, Queue};
 
-use crate::fonts::{FontConfig, ResolvedFonts, build_font_system};
+use crate::fonts::{FontConfig, ResolvedFonts, build_font_system_with_diagnostics};
 use crate::overflow::{self, TruncationResult, TruncationViewport};
 
 /// Default line-height multiplier: `line_height_px = font_size_px × this`.
@@ -397,6 +397,7 @@ pub(crate) struct TextRasterizer {
     uploaded_fonts: Vec<([u8; 32], Arc<Vec<u8>>)>,
     /// Family each font role resolved to.
     resolved_fonts: ResolvedFonts,
+    font_warnings: tze_hud_scene::startup_diagnostics::StartupWarnings,
     /// Truncation result cache for `TextOverflow::Ellipsis` items.
     ///
     /// Keyed on `(content_hash, bounds_width, bounds_height, font_size_px,
@@ -746,7 +747,8 @@ impl TextRasterizer {
         font_config: &FontConfig,
     ) -> Self {
         let font_config = font_config.clone().normalized();
-        let (font_system, resolved_fonts) = build_font_system(&font_config);
+        let (font_system, resolved_fonts, font_warnings) =
+            build_font_system_with_diagnostics(&font_config);
 
         tracing::info!(
             font_face_count = font_system.db().faces().count(),
@@ -782,6 +784,7 @@ impl TextRasterizer {
             loaded_font_ids: HashSet::new(),
             uploaded_fonts: Vec::new(),
             resolved_fonts,
+            font_warnings,
             truncation_cache: TruncationCache::new(),
             shape_call_count: 0,
             shape_cache: HashMap::new(),
@@ -856,6 +859,10 @@ impl TextRasterizer {
     #[inline]
     pub(crate) fn resolved_fonts(&self) -> &ResolvedFonts {
         &self.resolved_fonts
+    }
+
+    pub(crate) fn font_warnings(&self) -> &tze_hud_scene::startup_diagnostics::StartupWarnings {
+        &self.font_warnings
     }
 
     /// Agent-uploaded fonts loaded so far, as `(resource_id, bytes)` in load

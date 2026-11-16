@@ -1790,7 +1790,10 @@ impl SceneGraph {
 }
 
 /// When `record` clears, given its widget's auto-clear limit.
-fn effective_expiry(record: &WidgetPublishRecord, auto_clear_ms: Option<u64>) -> Option<u64> {
+pub(super) fn effective_expiry(
+    record: &WidgetPublishRecord,
+    auto_clear_ms: Option<u64>,
+) -> Option<u64> {
     let limit = auto_clear_ms.map(|ms| {
         record
             .published_at_wall_us

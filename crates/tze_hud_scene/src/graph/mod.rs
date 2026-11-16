@@ -193,6 +193,7 @@ pub use agents::{AgentHoldings, AgentReclaim};
 pub use overlay::RuntimeOverlayState;
 
 pub mod budget;
+pub mod holdings;
 pub mod leases;
 pub mod node_tree;
 pub mod queries;

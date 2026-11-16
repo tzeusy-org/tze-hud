@@ -504,6 +504,68 @@ agents until one is paired.
   composer has focus treat `idle_since_ms >= 300` as settled.
   `GET /admin/status?cpu=0` answers at once with `cpu_pct_2s` null instead of
   sampling CPU for 2 s, for harnesses that poll status.
+  The additive `holdings` and `warnings` fields contain **admin-only,
+  content-free diagnostics**. They do not extend `hud_surfaces` or ordinary
+  agent discovery. Published text, notification titles/actions/keys, widget
+  parameters, transcript/input, session/lease IDs, credentials, paths and raw
+  configuration/error detail are excluded from these two fields.
+
+  `holdings` is `{state, sources, agents, omitted_agents, omitted_records,
+  omission_reasons}`. `state` is `complete`, `partial` or `unavailable`;
+  `sources.scene` is `available|busy|unavailable` and `sources.portals` also
+  permits `not_configured`. Each agent group is `{id, surfaces,
+  omitted_records}`; each surface row is `{surface, kind, phase,
+  expires_in_ms, expiry_kind, count}`. Full canonical addresses use
+  `zone:`, `widget:`, `tile:` or `portal:`. Owners come from retained records,
+  including agents removed from configuration. Accepted pending zone/widget
+  publications count; future tile creations do not. Runtime backing tiles
+  are excluded; authenticated hub portals count once. Identical metadata and
+  absolute deadlines coalesce into `count`; differing deadlines remain distinct
+  even when rounded remaining milliseconds match.
+
+  `phase` is `active|scheduled|suspended|orphaned|cleanup_due|unknown`.
+  `expiry_kind` is `content|lease|orphan_grace|suspension_limit|until_clear|
+  activity|idle_reclaim|unknown`. Finite remaining time uses the earliest
+  applicable production cleanup bound, with positive fractions rounded up to
+  milliseconds. Ties prefer content, lease, orphan grace, then suspension limit.
+  A retained record already due reports `cleanup_due` and zero until normal
+  cleanup removes it; status never sweeps, applies or renews content.
+  Suspended lease TTL is paused but its maximum suspension still applies.
+  Widget content clocks pause with widgets. Pending relative widget TTL,
+  auto-clear and implicit notification urgency TTL depend on actual application:
+  they report unknown content expiry until materialized, while independent
+  lease/origin bounds remain observable. A live portal reports activity-dependent
+  null expiry (`activity`), or `until_clear` for an indefinite hold. A finite
+  hold end is not a reclaim deadline. Actual degradation starts the finite
+  `idle_reclaim` bound, overriding holds and paused liveness.
+
+  Each source is sampled independently with immediate `try_lock`, releasing
+  the scene before reading the hub. Contention reports `busy`, never healthy
+  emptiness; counts for unreadable sources are null. This is not a transactional
+  cross-source snapshot. Retention is bounded to 64 owners and 256 rows, sorted
+  by owner/address/kind/phase/basis/absolute deadline. Owner IDs over 128 UTF-8
+  bytes and full surface IDs over 256 bytes are omitted whole. Compact encoded
+  `holdings` is at most 49,152 bytes; trimming counts original records, including
+  aggregate counts. Omission reasons are `cardinality|bytes|oversize_id|busy|
+  unavailable`. `omitted_agents` is exact within the bounded owner set, otherwise
+  null when distinct omitted owners cannot be counted. Groups without retained
+  rows are absent, with their omissions still reported.
+
+  `warnings` is `{state, items, truncated, omitted_events, omission_reasons}`.
+  State is `pending` until the first configured compositor font initialization
+  finishes, then `complete`; an absent/poisoned producer is `unavailable`.
+  Items are `{source, code, subject, fallback}`: `widget_bundle` failures from
+  the actual startup scan/instance creation, and `font` directory/file load or
+  requested-role fallback failures from the actual font builder. Codes are
+  fixed; subjects are safe configured ordinals or fixed font roles, and fallback
+  families are bundled defaults. Warnings are deduplicated per startup, capped
+  at 64 retained entries and 16,000 encoded bytes. Dropped warning *events* are
+  counted without claiming distinctness beyond that cap; reasons are
+  `cardinality|bytes`. Readiness is independent of truncation. Complete empty
+  warnings mean both producers finished; later theme changes do not rewrite
+  startup history. The combined encoded `{holdings,warnings}` is at most
+  65,536 bytes; existing unrelated status fields keep their contracts.
+
   `portals` (`null` before the windowed runtime starts or while the scene stays
   locked for 100 ms) is read-only portal UI state for out-of-process validation,
   one entry per portal: `s` (`portal:<id>`), `state`, `rect`, `display` (index

@@ -435,6 +435,9 @@ mod imp {
 /// What `/admin/status` reads from. Cheap to clone.
 #[derive(Clone)]
 pub struct StatusSource {
+    pub scene: Option<Arc<tokio::sync::Mutex<tze_hud_scene::SceneGraph>>>,
+    pub portals: Option<tze_hud_mcp::PortalHandle>,
+    pub startup: Option<crate::operator::diagnostics::StartupDiagnostics>,
     pub agents: SharedAgents,
     pub binds: Arc<Mutex<Vec<SocketAddr>>>,
     pub safe_mode: Arc<AtomicBool>,
@@ -514,7 +517,14 @@ impl StatusSource {
                 .unwrap_or_default(),
             None => Default::default(),
         };
+        let (holdings, warnings) = crate::operator::diagnostics::render(
+            self.scene.as_ref(),
+            self.portals.as_ref(),
+            self.startup.as_ref(),
+        );
         json!({
+            "holdings": holdings,
+            "warnings": warnings,
             "version": env!("CARGO_PKG_VERSION"),
             "sha": build.map_or("unknown", |b| b.sha.as_str()),
             "channel": build.map_or("local", |b| b.channel.as_str()),

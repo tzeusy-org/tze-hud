@@ -39,7 +39,9 @@ use tze_hud_config::raw::RawConfig;
 use tze_hud_config::widgets::{LoadedWidgetType, build_widget_instance, resolve_bundle_path};
 use tze_hud_scene::graph::SceneGraph;
 use tze_hud_scene::types::SceneId;
-use tze_hud_widget::loader::{BundleScanResult, load_bundle_from_files, scan_bundle_dirs};
+use tze_hud_widget::loader::{
+    BundleScanResult, load_bundle_from_files, scan_bundle_dirs_with_diagnostics,
+};
 
 // ─── Built-in bundles ─────────────────────────────────────────────────────────
 
@@ -120,8 +122,18 @@ fn scan_all_bundles(
     roots: &[std::path::PathBuf],
     token_map: &HashMap<String, String>,
 ) -> Vec<BundleScanResult> {
-    let mut scan_results = scan_bundle_dirs(roots, token_map);
-    for (name, files) in BUILTIN_BUNDLES {
+    scan_all_bundles_with_diagnostics(roots, token_map).0
+}
+
+fn scan_all_bundles_with_diagnostics(
+    roots: &[std::path::PathBuf],
+    token_map: &HashMap<String, String>,
+) -> (
+    Vec<BundleScanResult>,
+    tze_hud_scene::startup_diagnostics::StartupWarnings,
+) {
+    let (mut scan_results, mut warnings) = scan_bundle_dirs_with_diagnostics(roots, token_map);
+    for (builtin_index, (name, files)) in BUILTIN_BUNDLES.iter().enumerate() {
         let overridden = scan_results.iter().any(|r| match r {
             BundleScanResult::Ok(b) => b.definition.id == *name,
             BundleScanResult::Err(_) => false,
@@ -133,13 +145,13 @@ fn scan_all_bundles(
             );
             continue;
         }
-        scan_results.push(load_bundle_from_files(
-            &format!("builtin:{name}"),
-            files,
-            token_map,
-        ));
+        let result = load_bundle_from_files(&format!("builtin:{name}"), files, token_map);
+        if let BundleScanResult::Err(err) = &result {
+            warnings.widget(err.wire_code(), format!("builtin:{builtin_index}"));
+        }
+        scan_results.push(result);
     }
-    scan_results
+    (scan_results, warnings)
 }
 
 /// The SVGs of every loadable bundle with placeholders resolved against
@@ -163,15 +175,19 @@ pub fn widget_svg_assets(
     assets
 }
 
-pub fn init_widget_registry(
+pub(crate) fn init_widget_registry(
     scene: &mut SceneGraph,
     raw: &RawConfig,
     config_parent: Option<&Path>,
     tab_name_to_id: &HashMap<String, SceneId>,
     token_map: &HashMap<String, String>,
-) -> Vec<WidgetSvgAsset> {
+) -> (
+    Vec<WidgetSvgAsset>,
+    tze_hud_scene::startup_diagnostics::StartupWarnings,
+) {
     // Steps 1-2: on-disk bundles, then the built-ins they do not override.
-    let scan_results = scan_all_bundles(&bundle_roots(raw, config_parent), token_map);
+    let (scan_results, mut warnings) =
+        scan_all_bundles_with_diagnostics(&bundle_roots(raw, config_parent), token_map);
 
     // Step 3: Register each valid WidgetDefinition.
     // Track registered names to detect cross-dir duplicates (scan_bundle_dirs
@@ -180,11 +196,15 @@ pub fn init_widget_registry(
     let mut type_map: HashMap<String, LoadedWidgetType> = HashMap::new();
     let mut svg_assets: Vec<WidgetSvgAsset> = Vec::new();
 
-    for result in scan_results {
+    for (bundle_index, result) in scan_results.into_iter().enumerate() {
         match result {
             BundleScanResult::Ok(bundle) => {
                 let name = bundle.definition.id.clone();
                 if registered_names.contains_key(&name) {
+                    warnings.widget(
+                        "WIDGET_BUNDLE_DUPLICATE_TYPE",
+                        format!("bundle:{bundle_index}"),
+                    );
                     tracing::warn!(
                         widget_name = %name,
                         "widget_startup: duplicate widget type name across bundle roots; \
@@ -262,6 +282,7 @@ pub fn init_widget_registry(
                     id
                 }
                 Err(e) => {
+                    warnings.widget("WIDGET_STARTUP_TAB_FAILED", format!("tab:{tab_idx}"));
                     tracing::warn!(
                         tab_name = tab_name,
                         error = %e,
@@ -271,7 +292,15 @@ pub fn init_widget_registry(
                 }
             }
         } else {
-            // No widgets need this tab; skip instance creation.
+            // Preserve lazy tab creation, but retain why every configured
+            // declaration was rejected even when none can create this tab.
+            for (widget_idx, widget) in tab.widgets.iter().enumerate() {
+                let code = match widget.widget_type.as_deref() {
+                    None | Some("") => "WIDGET_STARTUP_MISSING_TYPE",
+                    _ => "WIDGET_STARTUP_TYPE_UNAVAILABLE",
+                };
+                warnings.widget(code, format!("tab:{tab_idx}/widget:{widget_idx}"));
+            }
             continue;
         };
 
@@ -279,6 +308,10 @@ pub fn init_widget_registry(
             let widget_type = match raw_widget.widget_type.as_deref() {
                 Some(t) if !t.is_empty() => t,
                 _ => {
+                    warnings.widget(
+                        "WIDGET_STARTUP_MISSING_TYPE",
+                        format!("tab:{tab_idx}/widget:{widget_idx}"),
+                    );
                     tracing::warn!(
                         tab_name = tab_name,
                         widget_idx = widget_idx,
@@ -290,6 +323,10 @@ pub fn init_widget_registry(
 
             // Check that the type is registered.
             if !type_map.contains_key(widget_type) {
+                warnings.widget(
+                    "WIDGET_STARTUP_TYPE_UNAVAILABLE",
+                    format!("tab:{tab_idx}/widget:{widget_idx}"),
+                );
                 tracing::warn!(
                     tab_name = tab_name,
                     widget_type = widget_type,
@@ -309,6 +346,10 @@ pub fn init_widget_registry(
                 scene.widget_registry.register_instance(instance);
                 total_instances += 1;
             } else {
+                warnings.widget(
+                    "WIDGET_STARTUP_INSTANCE_FAILED",
+                    format!("tab:{tab_idx}/widget:{widget_idx}"),
+                );
                 tracing::warn!(
                     tab_name = tab_name,
                     widget_type = widget_type,
@@ -325,7 +366,7 @@ pub fn init_widget_registry(
         "widget_startup: widget instance creation complete"
     );
 
-    svg_assets
+    (svg_assets, warnings)
 }
 
 // ─── Unit tests ───────────────────────────────────────────────────────────────
@@ -369,9 +410,72 @@ mod tests {
             },
         ] {
             let mut scene = SceneGraph::new(1920.0, 1080.0);
-            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
+            let (_, warnings) =
+                init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
+            assert_eq!(
+                warnings.items().len(),
+                usize::from(raw.widget_bundles.is_some())
+            );
+            if raw.widget_bundles.is_some() {
+                assert_eq!(warnings.items()[0].code, "WIDGET_BUNDLE_ROOT_UNREADABLE");
+                assert_eq!(warnings.items()[0].subject.as_deref(), Some("root:0"));
+            }
             assert_eq!(registered_types(&scene), expected);
         }
+        let mut raw: RawConfig = toml::from_str(
+            r#"
+            [[tabs]]
+            name="rejected-only"
+            [[tabs.widgets]]
+            widget_type="private-unavailable-widget-type"
+            [[tabs.widgets]]
+            instance_id="private-missing-widget-type"
+        "#,
+        )
+        .unwrap();
+        let roots = tempfile::tempdir().unwrap();
+        raw.widget_bundles = Some(RawWidgetBundles {
+            paths: (0..100)
+                .map(|n| {
+                    roots
+                        .path()
+                        .join(format!("private-nonexistent-root-{n}"))
+                        .to_string_lossy()
+                        .into_owned()
+                })
+                .collect(),
+        });
+        let mut scene = SceneGraph::new(1920.0, 1080.0);
+        let (_, warnings) =
+            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
+        assert_eq!(warnings.items().len(), 64);
+        assert_eq!(warnings.omitted_events(), 38); // 100 real roots + two rejected declarations
+        assert!(
+            scene.tabs.is_empty(),
+            "diagnostics must preserve lazy tab creation"
+        );
+        assert_eq!(registered_types(&scene), expected);
+        assert!(
+            !serde_json::to_string(warnings.items())
+                .unwrap()
+                .contains("private-")
+        );
+        let startup = crate::operator::diagnostics::StartupDiagnostics::new(warnings);
+        let (_, pending) = crate::operator::diagnostics::render(None, None, Some(&startup));
+        assert_eq!(pending["state"], "pending");
+        assert_eq!(pending["truncated"], true);
+        startup.finish_fonts(Default::default());
+        let (_, complete) = crate::operator::diagnostics::render(None, None, Some(&startup));
+        assert_eq!(complete["state"], "complete");
+        assert_eq!(complete["omitted_events"], 38);
+        assert!(serde_json::to_vec(&complete).unwrap().len() <= 16_000);
+        let (_, again) =
+            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
+        startup.finish_fonts(again);
+        assert_eq!(
+            crate::operator::diagnostics::render(None, None, Some(&startup)).1,
+            complete
+        );
     }
 
     /// WHEN an on-disk bundle has the same type name as a built-in THEN the
@@ -403,8 +507,17 @@ mod tests {
             }),
             ..RawConfig::default()
         };
+        std::fs::create_dir_all(root.join("private-broken-sibling")).unwrap();
         let mut scene = SceneGraph::new(1920.0, 1080.0);
-        init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
+        let (_, warnings) =
+            init_widget_registry(&mut scene, &raw, None, &HashMap::new(), &default_tokens());
+        assert_eq!(warnings.items().len(), 1);
+        assert_eq!(warnings.items()[0].code, "WIDGET_BUNDLE_NO_MANIFEST");
+        assert!(
+            !serde_json::to_string(warnings.items())
+                .unwrap()
+                .contains("private-broken-sibling")
+        );
         std::fs::remove_dir_all(&root).ok();
 
         assert_eq!(

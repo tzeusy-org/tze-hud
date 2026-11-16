@@ -44,6 +44,8 @@ use crate::threads::ShutdownToken;
 /// Created internally by the windowed runtime from `WindowedConfig` fields.
 #[derive(Debug, Clone)]
 pub struct McpServerConfig {
+    /// Actual once-per-runtime startup producers; absent means unavailable.
+    pub startup: Option<crate::operator::diagnostics::StartupDiagnostics>,
     /// The renderer's admission-time text measurement behind `clipped` in
     /// publish replies; `None` reports nothing.
     pub text_fit: Option<Arc<dyn tze_hud_scene::TextFit>>,
@@ -212,6 +214,9 @@ async fn start_mcp_http_server_inner(
         None => Arc::new(std::sync::Mutex::new(local_addrs.clone())),
     };
     let admin = Arc::new(StatusSource {
+        scene: Some(Arc::clone(&scene)),
+        portals: portals.clone(),
+        startup: config.startup.clone(),
         agents: config.agents.clone(),
         safe_mode: Arc::clone(&safe_mode),
         presents: config.presents.clone(),
@@ -755,6 +760,7 @@ mod tests {
 
     fn make_config(port: u16, psk: &str) -> McpServerConfig {
         McpServerConfig {
+            startup: None,
             text_fit: None,
             appearance: None,
             publication_defaults: Default::default(),
@@ -856,6 +862,9 @@ mod tests {
             perms(&["*"]),
         );
         StatusSource {
+            scene: None,
+            portals: None,
+            startup: None,
             appearance: None,
             agents: dir.shared(),
             binds: Arc::new(std::sync::Mutex::new(vec![
@@ -1188,7 +1197,15 @@ mod tests {
         )
         .await;
         let text = String::from_utf8(r.body).unwrap();
-        assert!(!text.contains("psk") || text.contains("\"id\""), "{text}");
+        for credential in ["root-psk", "star-psk"] {
+            assert!(!text.contains(credential), "{text}");
+            assert!(
+                !text.contains(
+                    &serde_json::to_string(&tze_hud_scene::config::hash_psk(credential)).unwrap()
+                ),
+                "{text}"
+            );
+        }
         let v: serde_json::Value = serde_json::from_str(&text).unwrap();
         for key in [
             "version",
@@ -1236,6 +1253,476 @@ mod tests {
         )
         .await;
         assert_eq!(denied.status, 403);
+        // Observe real publication/cleanup owners without renewing or sweeping.
+        use crate::operator::diagnostics::{self, StartupDiagnostics};
+        use tze_hud_portal::{PortalHub, PortalKey, PortalLimits, Publish};
+        use tze_hud_scene::clock::{Clock, TestClock};
+        use tze_hud_scene::mutation::{MutationBatch, SceneMutation};
+        use tze_hud_scene::{Rect, SceneId, ZoneContent};
+        let clock = Arc::new(TestClock::new(1_000));
+        let mut graph = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
+        let raw = toml::from_str(
+            r#"
+            [[tabs]]
+            name = "Main"
+            [[tabs.widgets]]
+            widget_type = "gauge"
+            instance_id = "diagnostic-gauge"
+        "#,
+        )
+        .unwrap();
+        let boot = crate::scene_startup::run_scene_startup(&raw, None, &mut graph, true);
+        let startup = StartupDiagnostics::new(boot.startup_warnings);
+        let pending = diagnostics::render(None, None, Some(&startup));
+        assert_eq!(pending.0["state"], "unavailable");
+        assert_eq!(pending.1["state"], "pending");
+        startup.finish_fonts(Default::default());
+        let complete = diagnostics::render(None, None, Some(&startup));
+        assert_eq!(complete.1["state"], "complete");
+        assert_eq!(complete.1["items"], serde_json::json!([]));
+        let private = "synthetic-private-content-params-and-transcript";
+        graph
+            .publish_to_zone(
+                "subtitle",
+                ZoneContent::StreamText(private.into()),
+                "removed-agent",
+                Some("synthetic-private-key".into()),
+                Some(clock.now_us() + 1_501),
+                None,
+            )
+            .unwrap();
+        let lease = graph.grant_lease("tile-owner", 100);
+        let tab = graph.active_tab.unwrap();
+        let tile = graph
+            .create_tile(
+                tab,
+                "tile-owner",
+                lease,
+                Rect::new(0.0, 0.0, 100.0, 100.0),
+                0,
+            )
+            .unwrap();
+        let backing = graph
+            .create_tile(
+                tab,
+                "tze_hud_portal_driver",
+                lease,
+                Rect::new(0.0, 0.0, 100.0, 100.0),
+                1,
+            )
+            .unwrap();
+        let zone_backing = graph
+            .create_tile(
+                tab,
+                "runtime-zone",
+                lease,
+                Rect::new(0.0, 0.0, 100.0, 100.0),
+                0,
+            )
+            .unwrap();
+        graph.tiles.get_mut(&zone_backing).unwrap().z_order = tze_hud_scene::types::ZONE_TILE_Z_MIN;
+        let portals =
+            tze_hud_mcp::PortalHandle::new(PortalHub::new(PortalLimits::default()), clock.clone());
+        let key = PortalKey::new("portal-owner", "reading");
+        portals
+            .hub
+            .lock()
+            .unwrap()
+            .publish_with_hold(
+                &key,
+                Publish {
+                    text: Some(private.into()),
+                    ..Default::default()
+                },
+                Some(0),
+                clock.now_us(),
+            )
+            .unwrap();
+        let scene = Arc::new(Mutex::new(graph));
+        let snapshot = || diagnostics::render(Some(&scene), Some(&portals), Some(&startup));
+        let rows = |value: &serde_json::Value| -> Vec<serde_json::Value> {
+            value["agents"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .flat_map(|agent| agent["surfaces"].as_array().unwrap().iter().cloned())
+                .collect()
+        };
+        let before = serde_json::to_value(&*scene.lock().await).unwrap();
+        let (observed, warnings) = snapshot();
+        assert_eq!(observed["state"], "complete");
+        assert_eq!(warnings["state"], "complete");
+        assert_eq!(rows(&observed).len(), 3);
+        let find = |value: &serde_json::Value, surface: &str| {
+            rows(value)
+                .into_iter()
+                .find(|row| row["surface"] == surface)
+                .unwrap()
+        };
+        assert_eq!(find(&observed, "zone:subtitle")["expires_in_ms"], 2);
+        assert_eq!(
+            find(&observed, &format!("tile:{tile}"))["expiry_kind"],
+            "lease"
+        );
+        assert_eq!(
+            find(&observed, "portal:reading")["expiry_kind"],
+            "until_clear"
+        );
+        assert!(!observed.to_string().contains(&backing.to_string()));
+        assert!(!observed.to_string().contains("runtime-zone"));
+        assert!(!observed.to_string().contains(private));
+        assert!(!observed.to_string().contains("synthetic-private-key"));
+        assert_eq!(snapshot().0, observed);
+        assert_eq!(serde_json::to_value(&*scene.lock().await).unwrap(), before);
+        assert_eq!(
+            portals
+                .hub
+                .lock()
+                .unwrap()
+                .get(&key)
+                .unwrap()
+                .unread_output_count(),
+            1
+        );
+        let scene_guard = scene.lock().await;
+        assert_eq!(snapshot().0["sources"]["scene"], "busy");
+        let hub_guard = portals.hub.lock().unwrap();
+        let busy = snapshot().0;
+        assert_eq!(busy["state"], "unavailable");
+        assert!(busy["omitted_records"].is_null());
+        drop(hub_guard);
+        drop(scene_guard);
+        clock.advance_us(1_501);
+        let due = find(&snapshot().0, "zone:subtitle");
+        assert_eq!(due["phase"], "cleanup_due");
+        assert_eq!(due["expires_in_ms"], 0);
+        scene.lock().await.drain_expired_zone_publications();
+        assert!(
+            !rows(&snapshot().0)
+                .iter()
+                .any(|row| row["surface"] == "zone:subtitle")
+        );
+        // The normal lease transition, not a synthetic observer timeout, bounds tiles.
+        scene
+            .lock()
+            .await
+            .suspend_lease(&lease, clock.now_millis())
+            .unwrap();
+        let suspended = find(&snapshot().0, &format!("tile:{tile}"));
+        assert_eq!(suspended["phase"], "suspended");
+        assert_eq!(suspended["expiry_kind"], "suspension_limit");
+        assert_eq!(
+            suspended["expires_in_ms"],
+            SceneGraph::DEFAULT_MAX_SUSPENSION_MS
+        );
+        // Degradation overrides an indefinite hold, including paused liveness.
+        portals.hub.lock().unwrap().degrade(&key, clock.now_us());
+        portals.hub.lock().unwrap().suspend_liveness(clock.now_us());
+        assert_eq!(
+            find(&snapshot().0, "portal:reading")["expiry_kind"],
+            "idle_reclaim"
+        );
+        clock.advance(30_000);
+        assert_eq!(
+            find(&snapshot().0, "portal:reading")["phase"],
+            "cleanup_due"
+        );
+        portals.hub.lock().unwrap().sweep(clock.now_us());
+        assert!(
+            !rows(&snapshot().0)
+                .iter()
+                .any(|row| row["kind"] == "portal")
+        );
+        portals
+            .hub
+            .lock()
+            .unwrap()
+            .publish(&key, Publish::default(), clock.now_us())
+            .unwrap();
+        assert_eq!(
+            find(&snapshot().0, "portal:reading")["expiry_kind"],
+            "activity"
+        );
+        // Relative widget lifetimes begin on actual application, and pause with
+        // widgets; an absolute deadline cannot hide an earlier auto-clear.
+        {
+            let mut s = scene.lock().await;
+            s.set_widget_auto_clear("diagnostic-gauge", Some(1_000));
+            s.schedule_batch(
+                clock.now_us() + 1_000,
+                MutationBatch {
+                    batch_id: SceneId::new(),
+                    agent_namespace: "scheduled-owner".into(),
+                    mutations: vec![SceneMutation::PublishToWidget {
+                        widget_name: "diagnostic-gauge".into(),
+                        params: Default::default(),
+                        merge_key: None,
+                        transition_ms: 0,
+                        ttl_us: Some(5_000_000),
+                        expires_at_wall_us: Some(clock.now_us() + 3_600_000_000),
+                    }],
+                    timing_hints: None,
+                    lease_id: None,
+                },
+            );
+        }
+        let pending = find(&snapshot().0, "widget:diagnostic-gauge");
+        assert_eq!(pending["phase"], "scheduled");
+        assert_eq!(pending["expiry_kind"], "unknown");
+        assert!(pending["expires_in_ms"].is_null());
+        clock.advance(10_000);
+        let applied = scene.lock().await.apply_due_batches();
+        assert!(applied[0].applied, "{:?}", applied[0]);
+        assert_eq!(
+            find(&snapshot().0, "widget:diagnostic-gauge")["expires_in_ms"],
+            1_000
+        );
+        scene.lock().await.pause_widget_ttls();
+        clock.advance(10_000);
+        assert_eq!(scene.lock().await.drain_expired_widget_publications(), 0);
+        let paused = find(&snapshot().0, "widget:diagnostic-gauge");
+        assert_eq!(paused["phase"], "suspended");
+        assert_eq!(paused["expiry_kind"], "unknown");
+        scene.lock().await.resume_widget_ttls();
+        clock.advance(1_000);
+        assert_eq!(
+            find(&snapshot().0, "widget:diagnostic-gauge")["phase"],
+            "cleanup_due"
+        );
+        assert_eq!(scene.lock().await.drain_expired_widget_publications(), 1);
+        // Lease TTL, orphan grace and private preclaim origin use the same
+        // production transitions as cleanup, including the TTL=0 discrepancy.
+        {
+            clock.set_us(clock.now_us().div_ceil(1000) * 1000);
+            let mut s = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
+            s.zone_registry = tze_hud_scene::ZoneRegistry::with_defaults();
+            let tab = s.create_tab("lifetimes", 0).unwrap();
+            let lease = s.grant_lease("leased", 40);
+            s.publish_to_zone_for_lease(
+                "subtitle",
+                ZoneContent::StreamText(private.into()),
+                "leased",
+                None,
+                Some(clock.now_us() + 40_000),
+                None,
+                vec![],
+                Some(lease),
+            )
+            .unwrap();
+            let expired = s.grant_lease("zero-ttl", 0);
+            let id = s
+                .create_tile(tab, "zero-ttl", expired, Rect::new(0.0, 0.0, 10.0, 10.0), 0)
+                .unwrap();
+            let mut values = Vec::new();
+            s.visit_holdings(|row| {
+                values.push((
+                    row.kind.to_owned(),
+                    row.id.to_owned(),
+                    row.phase.to_owned(),
+                    row.expiry_kind.to_owned(),
+                    row.deadline_wall_us,
+                ))
+            });
+            assert!(
+                values
+                    .iter()
+                    .any(|row| row.1 == id.to_string() && row.2 == "cleanup_due")
+            );
+            assert!(
+                values
+                    .iter()
+                    .any(|row| row.0 == "zone" && row.3 == "content")
+            ); // tie wins content
+            s.disconnect_lease(&lease, clock.now_millis()).unwrap();
+            s.leases.get_mut(&lease).unwrap().grace_period_ms = 2;
+            values.clear();
+            s.visit_holdings(|row| {
+                values.push((
+                    row.kind.to_owned(),
+                    row.id.to_owned(),
+                    row.phase.to_owned(),
+                    row.expiry_kind.to_owned(),
+                    row.deadline_wall_us,
+                ))
+            });
+            assert!(
+                values
+                    .iter()
+                    .any(|row| row.0 == "zone" && row.2 == "orphaned" && row.3 == "orphan_grace")
+            );
+            clock.advance(2);
+            s.expire_leases();
+            assert!(s.zone_registry.active_publishes.values().all(Vec::is_empty));
+            let origin = SceneId::new();
+            s.schedule_batch_for_origin(
+                clock.now_us(),
+                MutationBatch {
+                    batch_id: SceneId::new(),
+                    agent_namespace: "preclaim".into(),
+                    lease_id: None,
+                    timing_hints: None,
+                    mutations: vec![SceneMutation::PublishToZone {
+                        zone_name: "notification-area".into(),
+                        content: ZoneContent::Notification(tze_hud_scene::NotificationPayload {
+                            text: private.into(),
+                            ..Default::default()
+                        }),
+                        publish_token: tze_hud_scene::ZonePublishToken { token: vec![] },
+                        merge_key: None,
+                        expires_at_wall_us: None,
+                        content_classification: None,
+                        breakpoints: vec![],
+                        held: false,
+                    }],
+                },
+                Some(origin),
+            );
+            let mut pending = Vec::new();
+            s.visit_holdings(|row| {
+                pending.push((
+                    row.phase.to_owned(),
+                    row.expiry_kind.to_owned(),
+                    row.deadline_wall_us,
+                ))
+            });
+            assert_eq!(pending, vec![("scheduled".into(), "unknown".into(), None)]);
+            assert!(s.apply_due_batches()[0].applied);
+            assert!(s.orphan_publications(origin, clock.now_millis(), 1));
+            let shared = Arc::new(Mutex::new(s));
+            let observed = diagnostics::render(Some(&shared), None, None).0;
+            assert_eq!(
+                find(&observed, "zone:notification-area")["expiry_kind"],
+                "orphan_grace"
+            );
+            assert_eq!(
+                find(&observed, "zone:notification-area")["expires_in_ms"],
+                1
+            );
+            clock.advance(1);
+            assert_eq!(
+                find(
+                    &diagnostics::render(Some(&shared), None, None).0,
+                    "zone:notification-area"
+                )["phase"],
+                "cleanup_due"
+            );
+            shared.lock().await.expire_leases();
+            assert!(rows(&diagnostics::render(Some(&shared), None, None).0).is_empty());
+        }
+        // Exercise global bounds through authoritative accepted records, retaining
+        // exact record counts and whole identifiers under escaping-heavy bytes.
+        {
+            let mut s = scene.lock().await;
+            let template = s.zone_registry.zones["subtitle"].clone();
+            for n in 0..300 {
+                let mut zone = template.clone();
+                zone.name = format!("{n:03}{}", "\"".repeat(80));
+                let name = zone.name.clone();
+                s.register_zone(zone);
+                s.publish_to_zone(
+                    &name,
+                    ZoneContent::StreamText(private.into()),
+                    "bounded-owner",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+            }
+        }
+        let bounded = snapshot().0;
+        assert_eq!(bounded["state"], "partial");
+        assert!(serde_json::to_vec(&bounded).unwrap().len() <= 49_152);
+        let represented: u64 = rows(&bounded)
+            .iter()
+            .map(|row| row["count"].as_u64().unwrap())
+            .sum();
+        assert_eq!(
+            represented + bounded["omitted_records"].as_u64().unwrap(),
+            302
+        );
+        assert_eq!(bounded["omitted_agents"], 2); // portal/tile sort after bounded-owner
+        assert!(rows(&bounded).len() <= 256);
+        assert!(!bounded.to_string().contains(private));
+        // Separate owner cardinality, exact aggregate counts and whole-ID
+        // omissions from the byte case above. Only identical deadlines coalesce.
+        {
+            let mut s = SceneGraph::new_with_clock(1920.0, 1080.0, clock.clone());
+            s.zone_registry = tze_hud_scene::ZoneRegistry::with_defaults();
+            let template = s.zone_registry.zones["subtitle"].clone();
+            for n in 0..65 {
+                let mut zone = template.clone();
+                zone.name = format!("owner-zone-{n:03}");
+                let name = zone.name.clone();
+                s.register_zone(zone);
+                s.publish_to_zone(
+                    &name,
+                    ZoneContent::StreamText(private.into()),
+                    &format!("owner-{n:03}"),
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+            }
+            let shared = Arc::new(Mutex::new(s));
+            let limited = diagnostics::render(Some(&shared), None, None).0;
+            assert_eq!(limited["agents"].as_array().unwrap().len(), 64);
+            assert_eq!(limited["omitted_records"], 1);
+            assert!(limited["omitted_agents"].is_null()); // unseen distinct owners not counted
+            let mut s = shared.lock().await;
+            s.zone_registry.active_publishes.clear();
+            let mut zone = template.clone();
+            zone.name = "aggregate".into();
+            zone.contention_policy = tze_hud_scene::ContentionPolicy::Stack { max_depth: 8 };
+            zone.max_publishers = 8;
+            s.register_zone(zone);
+            for expiry in [10, 10, 20] {
+                s.publish_to_zone(
+                    "aggregate",
+                    ZoneContent::StreamText(private.into()),
+                    "retained",
+                    None,
+                    Some(clock.now_us() + expiry),
+                    None,
+                )
+                .unwrap();
+            }
+            let mut oversized = template.clone();
+            oversized.name = "x".repeat(252);
+            let name = oversized.name.clone();
+            s.register_zone(oversized);
+            s.publish_to_zone(
+                &name,
+                ZoneContent::StreamText(private.into()),
+                "retained",
+                None,
+                None,
+                None,
+            )
+            .unwrap();
+            drop(s);
+            let limited = diagnostics::render(Some(&shared), None, None).0;
+            let retained = &limited["agents"][0];
+            assert_eq!(retained["omitted_records"], 1);
+            assert_eq!(limited["omitted_records"], 1);
+            assert_eq!(limited["omitted_agents"], 0);
+            let aggregates = retained["surfaces"].as_array().unwrap();
+            assert_eq!(aggregates.len(), 2);
+            assert_eq!(
+                aggregates
+                    .iter()
+                    .map(|row| row["count"].as_u64().unwrap())
+                    .sum::<u64>(),
+                3
+            );
+            assert_eq!(aggregates[0]["count"], 2);
+            // Distinct sub-ms deadlines remain separate despite equal ceil-ms output.
+            assert_eq!(
+                aggregates[0]["expires_in_ms"],
+                aggregates[1]["expires_in_ms"]
+            );
+        }
         crate::operator::status::set_displays(Vec::new(), Vec::new());
         if cfg!(target_os = "linux") {
             assert!(
@@ -1444,6 +1931,7 @@ mod tests {
     async fn mcp_http_tools_list_on_every_listener() {
         let rig = crate::pairing::tests::rig();
         let config = McpServerConfig {
+            startup: None,
             text_fit: None,
             appearance: None,
             publication_defaults: Default::default(),
@@ -1614,6 +2102,7 @@ mod tests {
     async fn mcp_http_only_loopback_bind_failure_is_fatal() {
         let agents = tze_hud_scene::config::AgentDirectory::unrestricted("k").shared();
         let cfg = |addrs: [&str; 2]| McpServerConfig {
+            startup: None,
             text_fit: None,
             appearance: None,
             publication_defaults: Default::default(),
@@ -1723,6 +2212,11 @@ mod tests {
 
         // Seed the scene with a zone so hud_publish has somewhere to write.
         let scene = make_scene();
+        let rejected_root = tempfile::tempdir().unwrap();
+        let missing_root = rejected_root
+            .path()
+            .join("synthetic-private-missing-bundle-root");
+        let startup;
         {
             let mut s = scene.lock().await;
             s.zone_registry.zones.insert(
@@ -1749,7 +2243,7 @@ mod tests {
                     layer_attachment: LayerAttachment::Content,
                 },
             );
-            let raw: tze_hud_config::raw::RawConfig = toml::from_str(
+            let mut raw: tze_hud_config::raw::RawConfig = toml::from_str(
                 r#"
                 [[tabs]]
                 name = "Main"
@@ -1760,13 +2254,20 @@ mod tests {
             "#,
             )
             .unwrap();
-            crate::widget_startup::init_widget_registry(
+            raw.widget_bundles = Some(tze_hud_config::raw::RawWidgetBundles {
+                paths: vec![missing_root.to_string_lossy().into_owned()],
+            });
+            let (_, warnings) = crate::widget_startup::init_widget_registry(
                 &mut s,
                 &raw,
                 None,
                 &std::collections::HashMap::new(),
                 &tze_hud_config::themes::resolve_config_tokens(&Default::default()),
             );
+            startup = crate::operator::diagnostics::StartupDiagnostics::new(warnings);
+            let mut second = s.widget_registry.instances["motion-gauge"].clone();
+            second.instance_name = "second-gauge".into();
+            s.widget_registry.register_instance(second);
         }
 
         {
@@ -1776,6 +2277,19 @@ mod tests {
             s.register_zone(subtitle);
         }
         let mut config = make_config(0, "test-key");
+        let mut agents = tze_hud_scene::config::AgentDirectory::default();
+        agents.insert(
+            "first-agent",
+            tze_hud_scene::config::hash_psk("test-key"),
+            vec!["*".into(), "operator_admin".into()],
+        );
+        agents.insert(
+            "second-agent",
+            tze_hud_scene::config::hash_psk("second-key"),
+            vec!["*".into()],
+        );
+        config.agents = agents.shared();
+        config.startup = Some(startup);
         config.widget_transition_ms = tze_hud_config::tokens::resolve_motion_duration_ms(
             &std::collections::HashMap::from([("motion.state.ms".into(), "240".into())]),
             "motion.state.ms",
@@ -1872,6 +2386,67 @@ mod tests {
         );
         drop(scene_guard);
 
+        // Both identities enter via the authenticated HTTP producer, then the
+        // operator reads the same scene. Ordinary '*' permission cannot read it.
+        for body in [
+            r#"{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"zone:subtitle","content":"synthetic-private-second-zone"}},"id":9}"#,
+            r#"{"jsonrpc":"2.0","method":"tools/call","params":{"name":"hud_publish","arguments":{"surface":"widget:second-gauge","params":{"level":0.5,"label":"synthetic-private-widget-label"}}},"id":10}"#,
+        ] {
+            let response = http_post(addr, body, Some("second-key")).await;
+            assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+            assert!(response.contains(r#"\"ok\":true"#), "{response}");
+        }
+        let status = http_raw(
+            addr,
+            "GET /admin/status HTTP/1.0\r\nAuthorization: Bearer test-key\r\n\r\n",
+        )
+        .await;
+        assert!(status.starts_with("HTTP/1.1 200"), "{status}");
+        let status: serde_json::Value =
+            serde_json::from_str(status.split_once("\r\n\r\n").unwrap().1).unwrap();
+        let holdings = status["holdings"]["agents"].as_array().unwrap();
+        assert_eq!(holdings.len(), 2);
+        for (agent, widget) in [
+            ("first-agent", "widget:motion-gauge"),
+            ("second-agent", "widget:second-gauge"),
+        ] {
+            let rows = holdings.iter().find(|row| row["id"] == agent).unwrap()["surfaces"]
+                .as_array()
+                .unwrap();
+            assert!(rows.iter().any(|row| row["surface"] == widget));
+            assert!(rows.iter().any(|row| row["kind"] == "zone"));
+        }
+        assert_eq!(status["warnings"]["state"], "pending");
+        assert_eq!(
+            status["warnings"]["items"][0]["code"],
+            "WIDGET_BUNDLE_ROOT_UNREADABLE"
+        );
+        assert_eq!(status["warnings"]["items"][0]["subject"], "root:0");
+        let diagnostics =
+            serde_json::json!({"holdings":status["holdings"], "warnings":status["warnings"]})
+                .to_string();
+        for secret in [
+            "synthetic-private",
+            "hello from MCP",
+            "Continue?",
+            "CPU",
+            "test-key",
+            "second-key",
+        ] {
+            assert!(
+                !diagnostics.contains(secret),
+                "private detail in diagnostics: {secret}"
+            );
+        }
+        for (bearer, code) in [("second-key", "403"), ("invalid-key", "401")] {
+            let denied = http_raw(
+                addr,
+                &format!("GET /admin/status HTTP/1.0\r\nAuthorization: Bearer {bearer}\r\n\r\n"),
+            )
+            .await;
+            assert!(denied.starts_with(&format!("HTTP/1.1 {code}")), "{denied}");
+            assert!(!denied.contains("first-agent") && !denied.contains("holdings"));
+        }
         shutdown.trigger(crate::threads::ShutdownReason::Clean);
         handle.await.expect("task");
     }

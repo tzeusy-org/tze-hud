@@ -30,6 +30,8 @@ pub struct SceneStartupResult {
     pub global_tokens: DesignTokenMap,
     /// SVG assets from widget bundles for compositor registration.
     pub widget_svg_assets: Vec<crate::widget_startup::WidgetSvgAsset>,
+    /// Nonfatal diagnostics from the same widget loading pass, without paths/content.
+    pub startup_warnings: tze_hud_scene::startup_diagnostics::StartupWarnings,
 }
 
 /// Run scene startup against `scene`.
@@ -73,7 +75,7 @@ pub fn run_scene_startup(
     // and tile-creating mutations have an active tab from the start.
     let tab_map = bootstrap_config_tabs(scene, raw);
 
-    let widget_svg_assets =
+    let (widget_svg_assets, startup_warnings) =
         init_widget_registry(scene, raw, config_parent, &tab_map, &global_tokens);
 
     let mut zone_registry = ZoneRegistry::with_defaults();
@@ -90,6 +92,7 @@ pub fn run_scene_startup(
     SceneStartupResult {
         global_tokens,
         widget_svg_assets,
+        startup_warnings,
     }
 }
 

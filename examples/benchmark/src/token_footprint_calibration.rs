@@ -422,6 +422,7 @@ mod calibration {
 
     fn server_config() -> McpServerConfig {
         McpServerConfig {
+            startup: None,
             text_fit: None,
             publication_defaults: Default::default(),
             widget_transition_ms: tze_hud_config::tokens::resolve_motion_duration_ms(

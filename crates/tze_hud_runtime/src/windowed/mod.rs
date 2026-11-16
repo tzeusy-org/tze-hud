@@ -430,6 +430,7 @@ struct WindowedRuntimeState {
     /// Pending widget SVG assets to register with the compositor after
     /// `init_widget_renderer` is called. Consumed once during first `resumed()`.
     pending_widget_svgs: Vec<crate::widget_startup::WidgetSvgAsset>,
+    startup_diagnostics: Option<crate::operator::diagnostics::StartupDiagnostics>,
     /// MCP admission's text measurement (`clipped`); the compositor keeps it
     /// in step with what it draws once attached.
     text_fit: Arc<tze_hud_compositor::TextFitMeasurer>,
@@ -1457,6 +1458,12 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
         // looked up from the token map at render time rather than using hardcoded
         // constants. Later changes arrive through `appearance` (hud-h51u7.5).
         compositor.set_token_map(self.state.global_tokens.clone());
+        if let (Some(startup), Some(warnings)) = (
+            &self.state.startup_diagnostics,
+            compositor.startup_font_warnings(),
+        ) {
+            startup.finish_fonts(warnings.clone());
+        }
         compositor.attach_text_fit(Arc::clone(&self.state.text_fit));
         tracing::debug!(
             token_count = self.state.global_tokens.len(),
@@ -2779,6 +2786,7 @@ impl WindowedRuntime {
 
         let clock: Arc<dyn tze_hud_scene::Clock> = Arc::new(tze_hud_scene::SystemClock::new());
         let mut pending_widget_svgs: Vec<crate::widget_startup::WidgetSvgAsset> = Vec::new();
+        let mut startup_diagnostics = None;
         let (
             shared_scene,
             startup_compositor_tokens,
@@ -2824,6 +2832,9 @@ impl WindowedRuntime {
                 );
                 // Stash SVG assets for compositor registration after init_widget_renderer.
                 pending_widget_svgs = startup_result.widget_svg_assets;
+                startup_diagnostics = Some(crate::operator::diagnostics::StartupDiagnostics::new(
+                    startup_result.startup_warnings,
+                ));
                 startup_result.global_tokens
             } else {
                 // No config provided — bootstrap with canonical zone defaults (no token derivation).
@@ -3070,6 +3081,7 @@ impl WindowedRuntime {
             if let Some(ref rt) = network_rt {
                 // Same addresses as gRPC: loopback plus local Tailscale.
                 let mcp_config = McpServerConfig {
+                    startup: startup_diagnostics.clone(),
                     text_fit: Some(Arc::clone(&text_fit) as Arc<dyn tze_hud_scene::TextFit>),
                     appearance: Some(Arc::clone(&appearance)),
                     publication_defaults: live.publication_defaults.clone(),
@@ -3360,6 +3372,7 @@ impl WindowedRuntime {
             static_hit_regions: Vec::new(),
             widget_hover_trackers: std::collections::HashMap::new(),
             pending_widget_svgs,
+            startup_diagnostics,
             text_fit,
             modifiers: winit::keyboard::ModifiersState::empty(),
             primary_monitor: None,

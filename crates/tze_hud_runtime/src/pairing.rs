@@ -1681,6 +1681,7 @@ pub(crate) mod tests {
         let pairing = Arc::new(rig.pairing);
         let shutdown = crate::threads::ShutdownToken::new();
         let config = crate::mcp::McpServerConfig {
+            startup: None,
             text_fit: None,
             appearance: None,
             publication_defaults: Default::default(),
