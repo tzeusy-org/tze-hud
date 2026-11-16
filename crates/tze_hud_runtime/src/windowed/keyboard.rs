@@ -243,8 +243,9 @@ enum ShellShortcutOutcome {
     Busy,
 }
 
-/// A raw keyboard event deferred from the winit event-loop thread because the
-/// shared-state or scene Tokio mutex was busy at dispatch time.
+/// Keyboard work deferred from the winit event-loop thread because a required
+/// lock was busy. Post-edit history resets retain only the reset intent, since
+/// replaying their already accepted raw key would duplicate the draft or send.
 ///
 /// Stored in `WindowedRuntimeState::pending_keyboard_events` and retried once
 /// per `about_to_wait` iteration via `drain_pending_keyboard_events`, matching
@@ -254,6 +255,7 @@ pub(super) enum PendingKeyboardEvent {
     KeyDown(RawKeyDownEvent),
     KeyUp(RawKeyUpEvent),
     Character(RawCharacterEvent),
+    ResetInputHistory(tze_hud_scene::SceneId),
 }
 
 /// Outcome of a Tab / Shift+Tab keyboard focus-traversal attempt.
@@ -385,10 +387,11 @@ impl WinitApp {
     /// Snap the input-pane history's scroll offset back to the tail.
     ///
     /// Called on every accepted composer keystroke: unlike ordinary content
-    /// growth (which deliberately leaves a `ScrolledBack` viewport alone, spec
-    /// ), a viewer who is actively typing into their own composer should
-    /// not be stranded scrolled away from their own live draft. No-op (and no
-    /// scene write) once the tile is already at the tail.
+    /// growth (which deliberately leaves a `ScrolledBack` viewport alone), a
+    /// viewer actively typing into their own composer should not be stranded
+    /// away from their live draft. Busy locks retain the reset in the keyboard
+    /// FIFO without replaying the accepted edit. No-op (and no scene write)
+    /// once the tile is already at the tail.
     pub(super) fn reset_input_history_scroll_to_tail(&mut self, tile_id: tze_hud_scene::SceneId) {
         if let Ok(state) = self.state.shared_state.try_lock()
             && let Ok(mut scene) = state.scene.try_lock()
@@ -396,6 +399,10 @@ impl WinitApp {
             self.state
                 .input_processor
                 .reset_portal_input_scroll_to_tail(tile_id, &mut scene);
+        } else {
+            self.state
+                .pending_keyboard_events
+                .push_back(PendingKeyboardEvent::ResetInputHistory(tile_id));
         }
     }
 
@@ -2187,6 +2194,9 @@ impl WinitApp {
                 }
                 PendingKeyboardEvent::Character(raw) => {
                     self.dispatch_character_event_inner(&raw, active_tab)
+                }
+                PendingKeyboardEvent::ResetInputHistory(tile_id) => {
+                    self.reset_input_history_scroll_to_tail(tile_id)
                 }
             }
             // Inner dispatch can still defer the popped event if a required
@@ -4058,6 +4068,67 @@ mod tests {
             "accepted draft reset must survive both shared-state and scene contention"
         );
 
+        // Later raw text waits behind the retained reset and is accepted once,
+        // after the busy turn. The drain must stop rather than spin on the reset.
+        let draft_before_retry = app
+            .state
+            .input_processor
+            .composer_draft_snapshot()
+            .unwrap()
+            .0;
+        let scene_guard = scene_handle.try_lock().unwrap();
+        app.reset_input_history_scroll_to_tail(tile_id);
+        app.dispatch_character_event(&RawCharacterEvent {
+            character: "!".into(),
+            timestamp_mono_us: tze_hud_scene::MonoUs(8),
+        });
+        app.drain_pending_keyboard_events();
+        assert_eq!(
+            app.state
+                .input_processor
+                .composer_draft_snapshot()
+                .unwrap()
+                .0,
+            draft_before_retry
+        );
+        drop(scene_guard);
+        app.settle_scene_work();
+        assert!(app.state.pending_keyboard_events.is_empty());
+        assert_eq!(
+            app.state
+                .input_processor
+                .composer_draft_snapshot()
+                .unwrap()
+                .0,
+            format!("{draft_before_retry}!")
+        );
+
+        // A stale target has no editor or scene work to recover. It must leave
+        // no perpetually deferred reset and must not retarget the live portal.
+        let stale_tile = SceneId::new();
+        let pane_offsets = {
+            let scene = scene_handle.try_lock().unwrap();
+            (
+                scene.portal_input_scroll_offset(tile_id),
+                scene.tile_scroll_offset_local(tile_id),
+            )
+        };
+        let scene_guard = scene_handle.try_lock().unwrap();
+        app.reset_input_history_scroll_to_tail(stale_tile);
+        app.drain_pending_keyboard_events();
+        drop(scene_guard);
+        app.settle_scene_work();
+        assert!(app.state.pending_keyboard_events.is_empty());
+        let scene = scene_handle.try_lock().unwrap();
+        assert_eq!(
+            (
+                scene.portal_input_scroll_offset(tile_id),
+                scene.tile_scroll_offset_local(tile_id)
+            ),
+            pane_offsets
+        );
+        drop(scene);
+
         // A known portal whose hub is unavailable must not fall back to a raw
         // success echo. Register readiness before the refusal, as a real poll does.
         let limit = handle.hub.lock().unwrap().limits().input_item_bytes;
@@ -4099,6 +4170,24 @@ mod tests {
             !notified.as_mut().enable(),
             "refusal does not notify accepted input"
         );
+
+        // A tile may disappear before its retained reset reaches the scene.
+        // Recovery must finish without recreating the target or sending input.
+        let mut scene = scene_handle.try_lock().unwrap();
+        app.reset_input_history_scroll_to_tail(tile_id);
+        let namespace = scene.tiles[&tile_id].namespace.clone();
+        scene.delete_tile(tile_id, &namespace).unwrap();
+        drop(scene);
+        app.settle_scene_work();
+        assert!(app.state.pending_keyboard_events.is_empty());
+        assert!(
+            !scene_handle
+                .try_lock()
+                .unwrap()
+                .tiles
+                .contains_key(&tile_id)
+        );
+        assert!(!notified.as_mut().enable());
     }
 
     #[test]

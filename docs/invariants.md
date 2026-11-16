@@ -308,7 +308,9 @@ and [`hit_region_wire_cannot_enable_local_composer`](../crates/tze_hud_protocol/
 
 
 Native portal INPUT history and OUTPUT have independent local scroll tracking.
-Typing/submit resets only INPUT; appends retain the OUTPUT reading anchor and
+Typing/submit resets only INPUT. A busy scene/shared-state lock retains the
+post-edit reset in the existing keyboard FIFO; recovery neither replays the
+accepted edit nor sends a reply. Appends retain the OUTPUT reading anchor and
 fixed pane scissor. Bounds come from the actual full wrapped paint buffer, not
 combined raw newline counts. Unchanged measured layouts schedule no frame.
 The existing compositor regression
