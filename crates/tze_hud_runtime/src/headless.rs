@@ -493,23 +493,26 @@ impl HeadlessRuntime {
             },
             |compositor, scene, needs_render| {
                 debug_assert!(needs_render, "explicit readback always needs fresh pixels");
+                let snapshot_started = Instant::now();
                 let new_snap = HitTestSnapshot::from_scene(scene);
                 self.pipeline.hit_test_snapshot.store(Arc::new(new_snap));
+                let snapshot_us = snapshot_started.elapsed().as_micros() as u64;
                 let (telemetry, submitted) =
                     compositor.render_frame_headless_with_submission(scene, &self.surface);
+                let submitted_at = submitted.then(Instant::now);
                 crate::pipeline::FrameTurnBuild {
-                    work: telemetry,
+                    work: (telemetry, snapshot_us, submitted_at),
                     submitted,
                 }
             },
         );
         let (stage1_us, stage2_us, stage3_us, input_result, response) = turn.committed;
         let markdown_prime_us = turn.markdown_prime_us;
-        let stage4_us = turn.stage4_us;
+        let (compositor_telemetry, snapshot_us, submitted_at) =
+            turn.work.expect("headless renderer is attached");
+        let stage4_us = turn.stage4_us.saturating_add(snapshot_us);
         let stage5_us = 0;
         let frame_submitted = turn.submitted;
-        let compositor_telemetry = turn.work.expect("headless renderer is attached");
-        let submitted_at = frame_submitted.then(Instant::now);
         // Total frame time from Compositor covers encode + submit
         let stage6_us = compositor_telemetry.stage6_render_encode_us;
         let stage7_us = compositor_telemetry.stage7_gpu_submit_us;

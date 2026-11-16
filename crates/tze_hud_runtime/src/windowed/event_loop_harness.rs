@@ -256,6 +256,7 @@ pub struct HeadlessEventLoopHarness {
     )>,
     last_turn_submitted: bool,
     offscreen_work: (u64, u64),
+    offscreen_tokens_seen: u64,
     next_frame_wall_us: Option<u64>,
     next_animation_at: Option<std::time::Instant>,
     mcp_addr: Option<SocketAddr>,
@@ -324,6 +325,7 @@ impl HeadlessEventLoopHarness {
                         .text_fit
                         .register_widget_svg(widget_type, svg_file, svg);
                 }
+                state.pending_widget_svgs.extend(startup.widget_svg_assets);
                 startup.global_tokens
             }
             None => {
@@ -525,6 +527,7 @@ impl HeadlessEventLoopHarness {
             offscreen: None,
             last_turn_submitted: false,
             offscreen_work: (0, 0),
+            offscreen_tokens_seen: 0,
             next_frame_wall_us: None,
             next_animation_at: None,
             mcp_addr: Some(mcp_addr),
@@ -930,10 +933,15 @@ impl HeadlessEventLoopHarness {
     /// Attach a real offscreen compositor using the canonical headless factory.
     /// The temporary factory scene is discarded; every turn uses this harness's
     /// actual shared scene, injected clock and production portal/composer state.
+    /// Repeated calls retain the already attached backend and its frame ledger.
     pub async fn enable_offscreen_rendering(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if self.offscreen.is_some() {
+            return Ok(());
+        }
         let runtime = crate::headless::HeadlessRuntime::new(crate::headless::HeadlessConfig {
             width: self.app.state.config.window.width,
             height: self.app.state.config.window.height,
+            config_toml: self.app.state.config.config_toml.clone(),
             ..Default::default()
         })
         .await?;
@@ -943,23 +951,13 @@ impl HeadlessEventLoopHarness {
             self.app.state.pending_widget_svgs.drain(..),
         );
         compositor.set_token_map(self.app.state.global_tokens.clone());
-        let pending_echo = self
-            .app
-            .state
-            .local_composer_state
-            .lock()
-            .expect("composer echo")
-            .clone();
-        *compositor
-            .local_composer_state
-            .lock()
-            .expect("compositor echo") = pending_echo;
-        self.app.state.local_composer_state = Arc::clone(&compositor.local_composer_state);
-        self.app.state.focus_ring_owner_state = Arc::clone(&compositor.focus_ring_owner_state);
-        self.app.state.resize_grip_hover_state = Arc::clone(&compositor.resize_grip_hover_state);
-        self.app.state.tile_close_hover_state = Arc::clone(&compositor.tile_close_hover_state);
-        self.app.state.drag_handle_hover_state = Arc::clone(&compositor.drag_handle_hover_state);
-        self.app.state.composer_visual_layout = Arc::clone(&compositor.composer_visual_layout);
+        compositor.local_composer_state = Arc::clone(&self.app.state.local_composer_state);
+        compositor.focus_ring_owner_state = Arc::clone(&self.app.state.focus_ring_owner_state);
+        compositor.resize_grip_hover_state = Arc::clone(&self.app.state.resize_grip_hover_state);
+        compositor.tile_close_hover_state = Arc::clone(&self.app.state.tile_close_hover_state);
+        compositor.drag_handle_hover_state = Arc::clone(&self.app.state.drag_handle_hover_state);
+        compositor.composer_visual_layout = Arc::clone(&self.app.state.composer_visual_layout);
+        self.offscreen_tokens_seen = self.app.state.tokens_seen;
         self.offscreen = Some((compositor, runtime.surface));
         Ok(())
     }
@@ -996,11 +994,19 @@ impl HeadlessEventLoopHarness {
             self.app.state.config.window.height,
         );
         let Ok(state) = self.app.state.shared_state.try_lock() else {
+            self.app.schedule_shared_scene_availability_wake();
             return false;
         };
         let scene_arc = Arc::clone(&state.scene);
         drop(state);
         let Ok(mut scene) = scene_arc.try_lock() else {
+            let waiting_scene = Arc::clone(&scene_arc);
+            self.app
+                .state
+                .wake
+                .schedule_compositor_after_availability(move || {
+                    drop(waiting_scene.blocking_lock());
+                });
             return false;
         };
         let mut repaint = false;
@@ -1012,6 +1018,11 @@ impl HeadlessEventLoopHarness {
                         .safe_mode_atomic
                         .load(std::sync::atomic::Ordering::Acquire),
                 );
+                if self.offscreen_tokens_seen != self.app.state.tokens_seen {
+                    renderer.set_token_map(self.app.state.global_tokens.clone());
+                    self.offscreen_tokens_seen = self.app.state.tokens_seen;
+                    repaint = true;
+                }
                 (Some(renderer), Some(surface))
             }
             None => (None, None),
@@ -1291,6 +1302,7 @@ impl HeadlessEventLoopHarness {
             offscreen: None,
             last_turn_submitted: false,
             offscreen_work: (0, 0),
+            offscreen_tokens_seen: 0,
             next_frame_wall_us: None,
             next_animation_at: None,
             mcp_addr: None,
@@ -1524,6 +1536,13 @@ mod tests {
                     .is_none()
             );
         }
+        harness.enable_offscreen_rendering().await.unwrap();
+        assert!(harness.tick());
+        assert_eq!(
+            harness.offscreen_work_counts(),
+            (1, 1),
+            "repeated enable retains the existing backend and its ledger"
+        );
         {
             let mut scene = harness.scene();
             scene.zone_registry = tze_hud_scene::ZoneRegistry::with_defaults();
@@ -1575,6 +1594,18 @@ mod tests {
                     .is_none()
             );
         }
+        {
+            let mut scene = harness.scene();
+            scene
+                .zone_registry
+                .zones
+                .get_mut("subtitle")
+                .unwrap()
+                .rendering_policy
+                .transition_out_ms = Some(0);
+            scene.clear_zone_for_publisher("subtitle", "gate").unwrap();
+        }
+        assert!(harness.tick());
         {
             let mut scene = harness.scene();
             // Long content transition is an input fixture, not a gate timeout.

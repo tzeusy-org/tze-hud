@@ -122,6 +122,7 @@ impl FrameTurnState {
             .as_micros() as u64;
         let mut markdown_prime_us = 0;
         let mut submitted = false;
+        let mut needs_render = false;
         let work = compositor.as_mut().map(|renderer| {
             self.fallback_repaint_pending |= renderer.poll_font_fallback();
             let start = std::time::Instant::now();
@@ -131,7 +132,7 @@ impl FrameTurnState {
             let composer = renderer.drain_local_composer_and_needs_render();
             self.widget_repaint_pending &= scene.widgets_shown() && !scene.widget_time_paused();
             self.widget_repaint_pending |= renderer.widget_deadline_needs_render(scene);
-            let needs_render = frame_needs_render(
+            needs_render = frame_needs_render(
                 scene.version != self.last_rendered.0,
                 scene.geometry_epoch != self.last_rendered.1,
                 renderer.has_inflight_animation(scene),
@@ -148,24 +149,31 @@ impl FrameTurnState {
         });
         let versions = (scene.version, scene.geometry_epoch);
         self.record_submission(submitted, versions);
-        let next_wall_us = scene
-            .next_publication_expiry_wall_us()
-            .into_iter()
-            .chain(
-                compositor
-                    .as_ref()
-                    .and_then(|renderer| renderer.next_widget_deadline_wall_us(scene)),
-            )
-            .chain(scene.next_timed_content_wall_us())
-            .chain(
-                scene
-                    .next_lease_deadline_ms(SceneGraph::DEFAULT_MAX_SUSPENSION_MS)
-                    .map(|ms| ms.saturating_mul(1_000)),
-            )
-            .min();
-        let next_animation_at = compositor
-            .as_ref()
-            .and_then(|renderer| renderer.next_animation_deadline());
+        // A full windowed frame already schedules the following cadence turn.
+        // Avoid scanning all lease/content deadlines on every active frame.
+        let (next_wall_us, next_animation_at) = if needs_render {
+            (None, None)
+        } else {
+            let wall = scene
+                .next_publication_expiry_wall_us()
+                .into_iter()
+                .chain(
+                    compositor
+                        .as_ref()
+                        .and_then(|renderer| renderer.next_widget_deadline_wall_us(scene)),
+                )
+                .chain(scene.next_timed_content_wall_us())
+                .chain(
+                    scene
+                        .next_lease_deadline_ms(SceneGraph::DEFAULT_MAX_SUSPENSION_MS)
+                        .map(|ms| ms.saturating_mul(1_000)),
+                )
+                .min();
+            let animation = compositor
+                .as_ref()
+                .and_then(|renderer| renderer.next_animation_deadline());
+            (wall, animation)
+        };
         FrameTurnOutcome {
             committed,
             work,
