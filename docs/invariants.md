@@ -308,8 +308,12 @@ and [`hit_region_wire_cannot_enable_local_composer`](../crates/tze_hud_protocol/
 
 
 Native portal INPUT history and OUTPUT have independent local scroll tracking.
-Typing/submit resets only INPUT; appends retain the OUTPUT reading anchor and
-fixed pane scissor. Bounds come from the actual full wrapped paint buffer, not
+Typing/submit resets only INPUT. A busy scene/shared-state lock retains the
+post-edit reset in the existing keyboard FIFO; recovery neither replays the
+accepted edit nor sends a reply. Retained wheel input and keyboard work keep
+arrival order through the existing pointer FIFO, so a later wheel wins over
+an earlier reset and a later edit resets after an earlier wheel. Appends retain
+the OUTPUT reading anchor and fixed pane scissor. Bounds come from the actual full wrapped paint buffer, not
 combined raw newline counts. Unchanged measured layouts schedule no frame.
 The existing compositor regression
 [`expanded_portal_chrome_stays_fixed_while_document_content_scrolls_after_resize`](../crates/tze_hud_compositor/src/renderer/tests/scroll.rs)

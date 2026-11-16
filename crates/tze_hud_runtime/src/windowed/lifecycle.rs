@@ -3451,9 +3451,11 @@ impl WinitApp {
         let y = self.state.cursor_y;
         self.update_overlay_cursor_hittest();
 
-        // Behind a retained click, the wheel waits its turn, so
-        // the click hit-tests the content as it was when it was made.
-        if !self.state.pending_pointer_buttons.is_empty() {
+        // Earlier keyboard work and retained clicks keep their place ahead of
+        // this wheel, including a post-edit INPUT reset still awaiting the scene.
+        if !self.state.pending_keyboard_events.is_empty()
+            || !self.state.pending_pointer_buttons.is_empty()
+        {
             let scroll = RetainedScroll {
                 x,
                 y,
@@ -3490,7 +3492,9 @@ impl WinitApp {
             },
         );
         if self.apply_retained_scroll().is_none() {
-            self.schedule_shared_scene_availability_wake();
+            // A later key must see this wheel in the same arrival-order FIFO.
+            let deltas = std::mem::take(&mut self.state.pending_scroll);
+            self.retain_pointer(RetainedPointerEvent::Wheel(deltas));
         }
     }
 
