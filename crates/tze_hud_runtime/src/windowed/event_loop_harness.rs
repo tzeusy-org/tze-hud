@@ -7552,6 +7552,13 @@ mod tests {
         harness.app.state.cursor_y = 30.0;
         harness.app.enqueue_pointer_event(PointerEventKind::Down);
         harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        // Typing that follows the click waits behind it, even though the
+        // keyboard path itself is free.
+        let PendingKeyboardEvent::Character(typed) = character("x", 2_000) else {
+            unreachable!()
+        };
+        harness.app.dispatch_character_event(&typed);
+        assert_eq!(harness.app.state.pending_keyboard_events.len(), 1);
         // ...then the pointer leaves before the lock frees.
         harness.app.state.cursor_x = 900.0;
         harness.app.state.cursor_y = 900.0;
@@ -7562,7 +7569,14 @@ mod tests {
                 .state
                 .pending_pointer_buttons
                 .iter()
-                .map(|b| (b.kind.clone(), b.x, b.y))
+                .map(|b| match &b.event {
+                    crate::windowed::lifecycle::RetainedPointerEvent::Button {
+                        kind, x, y, ..
+                    } => {
+                        (kind.clone(), *x, *y)
+                    }
+                    other => panic!("only buttons were retained: {other:?}"),
+                })
                 .collect::<Vec<_>>(),
             vec![
                 (PointerEventKind::Down, 50.0, 30.0),
@@ -7583,6 +7597,7 @@ mod tests {
         harness.app.settle_scene_work();
 
         assert!(harness.app.state.pending_pointer_buttons.is_empty());
+        assert!(harness.app.state.pending_keyboard_events.is_empty());
         assert_eq!(
             (harness.app.state.cursor_x, harness.app.state.cursor_y),
             (900.0, 900.0),
@@ -7593,14 +7608,16 @@ mod tests {
             .filter_map(|(_, event)| match event {
                 ProtoInputEvent::FocusGained(_) => Some("focus"),
                 ProtoInputEvent::PointerDown(_) => Some("down"),
+                ProtoInputEvent::Character(_) => Some("char"),
                 _ => None,
             })
             .collect();
-        // The same agent-visible events as an uncontended click on this button.
+        // The same agent-visible events as an uncontended click on this
+        // button, and the key typed after it reaches the focus it gave.
         assert_eq!(
             kinds,
-            ["focus", "down"],
-            "the retained press focuses and reaches the button where it was made"
+            ["focus", "down", "char"],
+            "the retained press focuses the button where it was made, then the typing follows"
         );
         let shared = harness.app.state.shared_state.blocking_lock();
         let scene = shared.scene.blocking_lock();

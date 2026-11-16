@@ -541,7 +541,9 @@ impl WinitApp {
 
         // FIFO guard: if earlier events are still pending, queue this one
         // immediately so it cannot bypass them even when the lock is free.
-        if !self.state.pending_keyboard_events.is_empty() {
+        if !self.state.pending_keyboard_events.is_empty()
+            || !self.state.pending_pointer_buttons.is_empty()
+        {
             self.state
                 .pending_keyboard_events
                 .push_back(PendingKeyboardEvent::KeyDown(raw.clone()));
@@ -1691,7 +1693,9 @@ impl WinitApp {
 
         // FIFO guard: if earlier events are still pending, queue this one
         // immediately so it cannot bypass them even when the lock is free.
-        if !self.state.pending_keyboard_events.is_empty() {
+        if !self.state.pending_keyboard_events.is_empty()
+            || !self.state.pending_pointer_buttons.is_empty()
+        {
             self.state
                 .pending_keyboard_events
                 .push_back(PendingKeyboardEvent::KeyUp(raw.clone()));
@@ -1929,7 +1933,9 @@ impl WinitApp {
 
         // FIFO guard: if earlier events are still pending, queue this one
         // immediately so it cannot bypass them even when the lock is free.
-        if !self.state.pending_keyboard_events.is_empty() {
+        if !self.state.pending_keyboard_events.is_empty()
+            || !self.state.pending_pointer_buttons.is_empty()
+        {
             self.state
                 .pending_keyboard_events
                 .push_back(PendingKeyboardEvent::Character(raw.clone()));
@@ -2150,7 +2156,13 @@ impl WinitApp {
         // don't loop forever if a genuine lock-busy defer re-grows the queue
         // (e.g. the agent-routing namespace try_lock inside an inner fn).
         // The bound lives inside `drain_keyboard_queue_bounded`.
-        let limit = self.state.pending_keyboard_events.len();
+        // Keys queued after retained pointer input wait for it (hud-87xoh).
+        let queued = self.state.pending_keyboard_events.len();
+        let limit = self
+            .state
+            .pending_pointer_buttons
+            .front()
+            .map_or(queued, |front| front.keys_ahead.min(queued));
         drain_keyboard_queue_bounded(limit, || {
             // Resolve the active tab before popping: if the mirror is busy, stop
             // draining entirely to preserve strict FIFO order.  A later event
@@ -2188,6 +2200,8 @@ impl WinitApp {
                 ControlFlow::Continue(())
             }
         });
+        let drained = queued.saturating_sub(self.state.pending_keyboard_events.len());
+        self.note_keys_drained(drained);
     }
 
     /// Read the active tab without blocking the event-loop thread on the scene
