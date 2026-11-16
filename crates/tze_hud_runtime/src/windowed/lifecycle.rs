@@ -2668,7 +2668,14 @@ impl WinitApp {
 
     fn retain_pointer(&mut self, event: RetainedPointerEvent) {
         if self.state.pending_pointer_buttons.len() >= RETAINED_BUTTON_MAX {
-            self.state.pending_pointer_buttons.pop_front();
+            // Shed wheel input before any press or release.
+            let evict = self
+                .state
+                .pending_pointer_buttons
+                .iter()
+                .position(|r| matches!(r.event, RetainedPointerEvent::Wheel(_)))
+                .unwrap_or(0);
+            self.state.pending_pointer_buttons.remove(evict);
         }
         // Keys already waiting arrived first and replay first.
         let keys_ahead = self.state.pending_keyboard_events.len();
@@ -3447,13 +3454,28 @@ impl WinitApp {
         // Behind a retained click, the wheel waits its turn (hud-87xoh), so
         // the click hit-tests the content as it was when it was made.
         if !self.state.pending_pointer_buttons.is_empty() {
-            self.retain_pointer(RetainedPointerEvent::Wheel(RetainedScroll {
+            let scroll = RetainedScroll {
                 x,
                 y,
                 delta_x,
                 delta_y,
                 step,
-            }));
+            };
+            // Consecutive notches share one entry and coalesce there, so a
+            // burst of wheel input can never evict the click ahead of it.
+            let keys_ahead = self.state.pending_keyboard_events.len();
+            if let Some(RetainedButton {
+                keys_ahead: back_keys,
+                event: RetainedPointerEvent::Wheel(deltas),
+            }) = self.state.pending_pointer_buttons.back_mut()
+                && *back_keys == keys_ahead
+            {
+                retain_scroll(deltas, scroll);
+                return;
+            }
+            self.retain_pointer(RetainedPointerEvent::Wheel(
+                std::collections::VecDeque::from([scroll]),
+            ));
             return;
         }
 
@@ -3479,8 +3501,20 @@ impl WinitApp {
         if self.state.pending_scroll.is_empty() {
             return Some(false);
         }
+        self.apply_scroll_with(std::collections::VecDeque::new())
+    }
+
+    /// Apply retained wheel deltas, then `later` ones, under one scene lock.
+    /// None leaves both untouched for a retry.
+    fn apply_scroll_with(
+        &mut self,
+        later: std::collections::VecDeque<RetainedScroll>,
+    ) -> Option<bool> {
         let state = self.state.shared_state.try_lock().ok()?;
         let mut scene = state.scene.try_lock().ok()?;
+        for scroll in later {
+            retain_scroll(&mut self.state.pending_scroll, scroll);
+        }
         for retained in self.state.pending_scroll.drain(..) {
             if let Some(ev) = self.state.input_processor.process_wheel_event(
                 &tze_hud_input::ScrollEvent {
@@ -3521,12 +3555,11 @@ impl WinitApp {
                 }
             }
             let reached = match retained.event {
-                RetainedPointerEvent::Wheel(scroll) => {
-                    // Earlier wheel deltas are already ahead of it in
-                    // `pending_scroll`; joining them keeps their order.
-                    retain_scroll(&mut self.state.pending_scroll, scroll);
-                    let _ = self.apply_retained_scroll();
-                    true
+                RetainedPointerEvent::Wheel(deltas) => {
+                    // Earlier wheel deltas are already ahead of these in
+                    // `pending_scroll`; joining them keeps their order. A busy
+                    // lock keeps the entry, and what follows it, in place.
+                    self.apply_scroll_with(deltas).is_some()
                 }
                 RetainedPointerEvent::Button {
                     kind,
@@ -3564,6 +3597,11 @@ impl WinitApp {
             self.state.pending_pointer_buttons.pop_front();
             pressed = true;
         }
+        if pressed {
+            // Replay hit-tested at past positions and windows; re-derive
+            // overlay capture from the live pointer.
+            self.update_overlay_cursor_hittest();
+        }
         if pressed && self.state.pending_pointer_buttons.is_empty() {
             // Keys typed after the replayed pointer input follow it now.
             self.drain_pending_keyboard_events();
@@ -3595,8 +3633,9 @@ pub(super) enum RetainedPointerEvent {
         press_window: Option<winit::window::WindowId>,
         at: Instant,
     },
-    /// A wheel delta that arrived behind a retained press or release.
-    Wheel(RetainedScroll),
+    /// Wheel deltas that arrived behind a retained press or release,
+    /// coalesced as `pending_scroll` coalesces them.
+    Wheel(std::collections::VecDeque<RetainedScroll>),
 }
 
 /// Upper bound on retained presses and releases.

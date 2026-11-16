@@ -7532,6 +7532,55 @@ mod tests {
         );
     }
 
+    /// A wheel burst behind a retained click coalesces into one entry, so it
+    /// can neither evict the click nor overtake it (hud-87xoh).
+    #[test]
+    fn held_scene_lock_wheel_burst_waits_behind_click_without_evicting_it() {
+        use std::time::{Duration, Instant};
+
+        let mut harness = HeadlessEventLoopHarness::new();
+        let (_tile_id, _node_id, _rx) = install_button(&mut harness, false);
+        let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
+        let held = scene_handle.blocking_lock();
+        let main_work_before = harness.app.state.wake.main_work_generation();
+        harness.app.state.cursor_x = 50.0;
+        harness.app.state.cursor_y = 30.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Down);
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        for _ in 0..40 {
+            harness
+                .app
+                .enqueue_scroll_event(0.0, -10.0, tze_hud_input::WheelStep::Pixels);
+        }
+        let retained = &harness.app.state.pending_pointer_buttons;
+        assert_eq!(retained.len(), 3, "the burst shares one wheel entry");
+        assert!(matches!(
+            &retained[0].event,
+            crate::windowed::lifecycle::RetainedPointerEvent::Button {
+                kind: PointerEventKind::Down,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &retained[2].event,
+            crate::windowed::lifecycle::RetainedPointerEvent::Wheel(deltas) if deltas.len() == 1
+        ));
+        assert!(
+            harness.app.state.pending_scroll.is_empty(),
+            "wheel behind the click does not join the scroll ahead of it"
+        );
+        drop(held);
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while harness.app.state.wake.main_work_generation() == main_work_before {
+            assert!(Instant::now() < deadline, "release must wake the replay");
+            std::thread::yield_now();
+        }
+        harness.app.settle_scene_work();
+        assert!(harness.app.state.pending_pointer_buttons.is_empty());
+        assert!(harness.app.state.pending_scroll.is_empty());
+    }
+
     /// A click made while the scene lock is busy is not lost (hud-87xoh):
     /// the press and release retain their own positions and replay in order
     /// once the lock frees: the press focuses the button it was made on even
