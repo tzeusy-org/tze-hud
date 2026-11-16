@@ -345,6 +345,25 @@ impl ChromeCaptureLedger {
         self.prune();
     }
 
+    /// Between event-loop turns, discard desynchronized delivery history.
+    /// Installation and frame identities remain monotonic; every old press
+    /// stays cancelled, including a held press whose Up arrives later.
+    pub(super) fn recover(&mut self) -> bool {
+        if !self.faulted || !self.active.is_empty() {
+            return false;
+        }
+        self.fault();
+        self.completed.clear();
+        self.app_armed = None;
+        for install in &mut self.installs {
+            install.app = None;
+            install.permit = false;
+        }
+        self.faulted = false;
+        self.prune();
+        true
+    }
+
     fn prune(&mut self) {
         self.installs.retain(|s| {
             s.enabled
@@ -412,7 +431,7 @@ fn chrome_native_fault() {
     });
     if first {
         tracing::error!(
-            "notification capture history unavailable; notification actions disabled until restart"
+            "notification capture history unavailable; notification actions paused until resynchronized"
         );
     }
     if !wakes.is_empty() && CHROME_NATIVE_FAULT_NOTIFIED.with(|notified| !notified.replace(true)) {
@@ -770,6 +789,60 @@ fn native_chrome_permits(window: Option<winit::window::WindowId>) -> bool {
     {
         let _ = window;
         true
+    }
+}
+
+/// Hover needs an installed observer, not an already armed press. A missing
+/// or retired observer stays inert even after another window resynchronizes.
+fn native_chrome_available(window: Option<winit::window::WindowId>) -> bool {
+    #[cfg(all(test, not(target_os = "windows")))]
+    if !chrome_capture_under_test() {
+        return true;
+    }
+    #[cfg(any(target_os = "windows", test))]
+    {
+        !CHROME_NATIVE_FAULT.with(std::cell::Cell::get)
+            && CHROME_NATIVE_OWNER.with(|owner| {
+                owner.try_borrow().ok().is_some_and(|owner| {
+                    !owner.ledger.faulted
+                        && owner
+                            .ledger
+                            .installs
+                            .iter()
+                            .any(|install| install.enabled && Some(install.window) == window)
+                })
+            })
+    }
+    #[cfg(not(any(target_os = "windows", test)))]
+    {
+        let _ = window;
+        true
+    }
+}
+
+/// Only called at the between-turn settle boundary, after fault cancellation
+/// reached the scene. No native delivery or application edge may be in flight.
+fn native_chrome_recover() {
+    #[cfg(any(target_os = "windows", test))]
+    if CHROME_NATIVE_FAULT.with(std::cell::Cell::get) {
+        let recovered = CHROME_NATIVE_OWNER.with(|owner| {
+            let Ok(mut owner) = owner.try_borrow_mut() else {
+                return false;
+            };
+            owner.ledger.fault();
+            if !owner.fault_delivered || owner.app_edge.is_some() || !owner.ledger.recover() {
+                return false;
+            }
+            owner.fault_delivered = false;
+            true
+        });
+        if recovered {
+            CHROME_NATIVE_FAULT.with(|fault| fault.set(false));
+            CHROME_NATIVE_FAULT_NOTIFIED.with(|notified| notified.set(false));
+            tracing::info!(
+                "notification capture history resynchronized; notification actions restored"
+            );
+        }
     }
 }
 
@@ -2347,6 +2420,37 @@ impl WinitApp {
         self.state.window.is_none() || native_chrome_permits(self.state.press_window)
     }
 
+    fn notification_feedback_permitted(&self, down: bool) -> bool {
+        if down {
+            return self.notification_pointer_permitted();
+        }
+        if self
+            .state
+            .safe_mode_atomic
+            .load(std::sync::atomic::Ordering::Acquire)
+        {
+            return false;
+        }
+        let window = self
+            .state
+            .cursor_window
+            .or(self.state.press_window)
+            .or_else(|| self.state.window.as_ref().map(|window| window.id()));
+        #[cfg(test)]
+        if chrome_capture_under_test() {
+            return native_chrome_available(window);
+        }
+        self.state.window.is_none() || native_chrome_available(window)
+    }
+
+    pub(super) fn recover_chrome_capture(&mut self) {
+        if !self.state.input_processor.chrome_feedback_cancel_pending
+            && self.state.pending_pointer_buttons.is_empty()
+        {
+            native_chrome_recover();
+        }
+    }
+
     /// Route a delivered mouse edge through panel ownership and native chrome
     /// authorization before ordinary scene input.
     pub(super) fn handle_mouse_button(
@@ -2766,6 +2870,8 @@ impl WinitApp {
             // never merge into a multi-click they were not.
             timestamp: Some(at),
         };
+        self.state.input_processor.notification_actions_enabled =
+            self.notification_feedback_permitted(pointer_event.kind == PointerEventKind::Down);
         // Acquire the scene lock directly (without going through SharedState) so that
         // the main-thread input path does not contend with session handlers that hold
         // both the SharedState lock and the scene lock.

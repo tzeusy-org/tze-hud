@@ -650,7 +650,16 @@ The existing runtime `action_button_hover_and_press_are_local_and_frame_only_on_
 and `portal_resize_state_pruning_preserves_live_and_cleans_removed_tiles` parents
 cover the split-borrow lock miss and both busy owners.
 No new idle poll or timer is introduced. Ambiguous completed/active receipts,
-mismatched history or bounded-admission failure disable notification actions
-until a clean runtime restart. Valid reentrant histories may trigger that
-availability limit; its frequency has not been measured. Unrelated pointer input
-continues, and this source model does not replace held-press/release owner proof.
+mismatched history or bounded-admission failure pause notification actions.
+The existing between-turn settle boundary resynchronizes history only after
+cancellation reaches the scene, retained pointer edges drain while still inert,
+and no native delivery or application edge is active. It discards stale receipts,
+keeps all old presses cancelled and preserves monotonic installation/frame
+identities; a late Up cannot activate, including
+after reinstallation. A complete fresh press can act without restarting.
+Recovery neither installs a missing observer nor bypasses registration/receipt
+bounds. Faulted, unobserved and safe-mode notification buttons show no hover or
+press feedback; drag handles keep their independent feedback. Valid reentrant
+histories may trigger that availability limit; its frequency has not been
+measured. Unrelated pointer input continues, and this source model does not
+replace held-press/release owner proof.

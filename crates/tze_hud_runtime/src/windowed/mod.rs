@@ -923,6 +923,7 @@ impl WinitApp {
         self.drain_pending_keyboard_events();
         // Retry pointer input that found the scene lock busy.
         let retained_pointer_changed = self.drain_retained_pointer_input();
+        self.recover_chrome_capture();
         // Render the portals.
         // Must run AFTER composer flush so draft state is settled before portal
         // content is refreshed.  Uses try_lock on the scene to avoid blocking

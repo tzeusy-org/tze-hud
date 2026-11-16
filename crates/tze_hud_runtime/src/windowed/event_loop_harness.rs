@@ -3551,6 +3551,141 @@ mod tests {
     /// (the geometry epoch) while an unchanged move does not.
     #[test]
     fn action_button_hover_and_press_are_local_and_frame_only_on_change() {
+        // A capture fault and safe mode both make notification buttons inert.
+        // Inject only native receipt delivery; routing, feedback, cancellation
+        // and between-turn recovery below use the production implementations.
+        {
+            use crate::windowed::lifecycle::{ChromeAppEdge, ChromeCaptureTestScope};
+            use winit::event::MouseButton;
+
+            let mut missing = Vec::new();
+            for fault in [false, true] {
+                let mut harness = approve_reject_notification_harness();
+                let approve = harness.notification_action_center("approve").unwrap();
+                (harness.app.state.cursor_x, harness.app.state.cursor_y) = approve;
+                let window = winit::window::WindowId::from(7);
+                let native = ChromeCaptureTestScope::new(window);
+                harness.app.state.press_window = Some(window);
+                harness.app.state.cursor_window = Some(window);
+                let in_flight = if fault {
+                    let frame = native.begin(true);
+                    harness
+                        .app
+                        .handle_mouse_button(MouseButton::Left, true, window, None);
+                    native.complete(frame);
+                    assert!(chrome_state(&harness, "approve").pressed);
+                    assert!(harness.app.state.zone_press.is_some());
+                    let frame = native.begin(false);
+                    // An application edge without matching native history
+                    // faults while another native delivery is still active.
+                    drop(ChromeAppEdge::begin(winit::window::WindowId::from(8), true));
+                    assert!(!native.healthy());
+                    assert!(harness.tick());
+                    assert!(!native.healthy(), "in-flight history cannot recover");
+                    assert!(
+                        harness.app.state.zone_press.is_none(),
+                        "fault disarms the accepted press"
+                    );
+                    frame
+                } else {
+                    harness
+                        .app
+                        .state
+                        .safe_mode_atomic
+                        .store(true, std::sync::atomic::Ordering::Release);
+                    None
+                };
+                harness.app.enqueue_pointer_event(PointerEventKind::Move);
+                if chrome_state(&harness, "approve").hovered {
+                    missing.push((fault, "inert hover"));
+                }
+                let frame = native.begin(true);
+                harness
+                    .app
+                    .handle_mouse_button(MouseButton::Left, true, window, None);
+                native.complete(frame);
+                if chrome_state(&harness, "approve").pressed {
+                    missing.push((fault, "inert press"));
+                }
+                assert!(take_action_ids(&harness).is_empty());
+
+                if fault {
+                    native.complete(in_flight);
+                    let edge = ChromeAppEdge::begin(window, false);
+                    assert!(harness.tick());
+                    assert!(
+                        !native.healthy(),
+                        "an application edge cannot recover itself"
+                    );
+                    drop(edge);
+                    // Fault cancellation must reach the scene before recovery.
+                    harness.app.cancel_chrome_feedback();
+                    let shared = harness.shared_state();
+                    let held = shared.blocking_lock();
+                    for down in [true, false] {
+                        harness
+                            .app
+                            .handle_mouse_button(MouseButton::Left, down, window, None);
+                    }
+                    assert!(!harness.app.state.pending_pointer_buttons.is_empty());
+                    assert!(!harness.tick());
+                    assert!(!native.healthy(), "busy feedback cleanup stays fail-closed");
+                    drop(held);
+                    let deadline = std::time::Instant::now() + SCENE_WAIT;
+                    while !harness.tick() {
+                        assert!(std::time::Instant::now() < deadline);
+                        std::thread::yield_now();
+                    }
+                    assert!(harness.app.state.pending_pointer_buttons.is_empty());
+                    assert!(
+                        take_action_ids(&harness).is_empty(),
+                        "retained fault-era edges cannot activate"
+                    );
+                    if !native.healthy() {
+                        missing.push((fault, "between-turn recovery"));
+                    }
+                    assert_eq!(chrome_state(&harness, "approve"), Default::default());
+                } else {
+                    harness
+                        .app
+                        .state
+                        .safe_mode_atomic
+                        .store(false, std::sync::atomic::Ordering::Release);
+                }
+                // The cancelled/disabled press's Up cannot activate, even
+                // after recovery. Only a complete fresh press may act.
+                let frame = native.begin(false);
+                harness
+                    .app
+                    .handle_mouse_button(MouseButton::Left, false, window, None);
+                native.complete(frame);
+                assert!(take_action_ids(&harness).is_empty(), "late Up stays inert");
+                assert_eq!(harness.zone_publication_count("notification-area"), 1);
+                harness.app.state.cursor_window = Some(winit::window::WindowId::from(8));
+                harness.app.enqueue_pointer_event(PointerEventKind::Move);
+                assert_eq!(
+                    chrome_state(&harness, "approve"),
+                    Default::default(),
+                    "an unobserved window stays inert"
+                );
+                harness.app.state.cursor_window = Some(window);
+                for down in [true, false] {
+                    let frame = native.begin(down);
+                    harness
+                        .app
+                        .handle_mouse_button(MouseButton::Left, down, window, None);
+                    native.complete(frame);
+                }
+                harness.drain();
+                if take_action_ids(&harness) != ["approve"] {
+                    missing.push((fault, "fresh click after recovery"));
+                }
+            }
+            assert!(
+                missing.is_empty(),
+                "notification availability failures: {missing:?}"
+            );
+        }
         let mut harness = approve_reject_notification_harness();
         let approve = harness.notification_action_center("approve").unwrap();
         let reject = harness.notification_action_center("reject").unwrap();
@@ -4193,8 +4328,47 @@ mod tests {
             "completed plus active is ambiguous"
         );
         receipts.complete(active);
-        assert!(!receipts.permit(window), "ambiguity disables until restart");
+        assert!(
+            !receipts.permit(window),
+            "ambiguity disables until explicit recovery"
+        );
         assert!(receipts.install(window).is_none(), "no automatic rearm");
+        assert!(
+            receipts.recover(),
+            "between-turn recovery discards ambiguous history"
+        );
+        assert!(
+            !receipts.permit(window),
+            "recovery cannot authorize an old press"
+        );
+        let late = receipts.begin(install, false).unwrap();
+        assert!(late > active, "frame identities never rewind");
+        assert!(
+            !receipts.consume(window, false),
+            "held old Up stays cancelled"
+        );
+        receipts.complete(late);
+        receipts.retire(install);
+        let replacement = receipts.install(window).unwrap();
+        assert!(
+            replacement > install,
+            "reinstallation identities never rewind"
+        );
+        let late = receipts.begin(replacement, false).unwrap();
+        assert!(
+            !receipts.consume(window, false),
+            "reinstallation cannot arm an Up"
+        );
+        receipts.complete(late);
+        for down in [true, false] {
+            let edge = receipts.begin(replacement, down).unwrap();
+            assert!(
+                receipts.consume(window, down),
+                "fresh replacement click works"
+            );
+            receipts.complete(edge);
+        }
+        assert!(!receipts.recover(), "healthy recovery is a no-op");
 
         let mut receipts = ChromeCaptureLedger::default();
         let install = receipts.install(window).unwrap();
@@ -4207,6 +4381,13 @@ mod tests {
             "bounded receipt admission"
         );
         assert!(!receipts.consume(window, true));
+        assert!(
+            receipts.recover(),
+            "bounded receipt failure can resynchronize"
+        );
+        let down = receipts.begin(install, true).unwrap();
+        assert!(receipts.consume(window, true));
+        receipts.complete(down);
         let mut receipts = ChromeCaptureLedger::default();
         for _ in 0..64 {
             assert!(receipts.install(window).is_some());
@@ -4214,6 +4395,11 @@ mod tests {
         assert!(
             receipts.install(window).is_none(),
             "bounded installation admission"
+        );
+        assert!(receipts.recover());
+        assert!(
+            receipts.install(window).is_none(),
+            "recovery cannot bypass the installation bound"
         );
     }
 
