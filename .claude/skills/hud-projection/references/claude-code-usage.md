@@ -111,11 +111,12 @@ changes wait for the next genuine invocation. No daemon, heartbeat, polling,
 backoff, or retry loop runs. Delayed session snapshots can be older than each
 other; this does not establish global Claude snapshot order.
 
-One absolute 1.0 s default-action process timer covers input, admission,
-network/DNS/response, and cleanup after helper imports. HTTP uses only the
+One absolute 1.0 s default-action process timer is armed before helper-path
+resolution and application/client imports, then covers input, admission,
+network/DNS/response, and cleanup. HTTP uses only the
 remaining budget and responses are capped at 4 KiB. Admission and delivery locks
 never wait; only post-ACK state persistence can wait within that same timer. Interpreter
-startup, OS scheduling, filesystem stalls/uninterruptible syscalls, or stopped
+and standard-library bootstrap, OS scheduling, filesystem stalls/uninterruptible syscalls, or stopped
 processes do not establish an end-to-end hard real-time guarantee. Detached
 execution keeps these delays off existing stdout; actual owner-host latency
 still needs measurement. Failure produces no stdout/stderr; timeout termination
@@ -170,7 +171,8 @@ an unchanged acknowledged generation to republish; a distinct genuine
 percentage/window/clear transition supplies the next observation.
 
 The existing `test_portal_client.py` fixture uses docs-derived **synthetic** JSON
-and real helper/Bash subprocesses against a loopback fake HUD. It checks request
+and real helper/Bash subprocesses against a loopback fake HUD. It checks slow
+application imports against the original deadline and safe later invocation, request
 counts, finite metrics, raw-level/floor formatting, 80% caution, new windows,
 unavailable clear dedup, private bounded state, concurrent held ACK catch-up,
 lock freedom, lost ACK, post-client-death server commit, same-generation crash suppression, allowed late old publish/clear commits,

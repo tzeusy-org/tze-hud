@@ -310,7 +310,9 @@ source links when implementation changes the status.
 - **Five-hour usage gauge [Source; native acceptance pending].** The optional
   [status-line helper](../.claude/skills/hud-projection/references/claude-code-usage.md)
   publishes typed gauge parameters directly with zero model tokens and a silent,
-  detached one-second total work budget. It keeps bounded desired/attempt/ACK
+  detached one-second total work budget, including application/client imports.
+  Interpreter/bootstrap and host scheduling retain their documented limits.
+  It keeps bounded desired/attempt/ACK
   generations, one live delivery owner and no same-generation uncertain retry.
   Owner-approved option C permits a later distinct percentage/window/clear
   transition after ownership releases. Old server work can still overwrite a
