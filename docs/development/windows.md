@@ -544,6 +544,13 @@ mode validates the bundle and typed parameters, then uses the existing retained
 `classic` or `blueprint`; `--tokens FILE` reads a flat `[design_tokens]` TOML
 table, with an explicit `--theme` taking precedence over its selector. Positive
 `--width`/`--height` are bounded to 8192 per axis and 16M pixels total.
+GPU fixture mode additionally requires both dimensions to fit the selected
+adapter's texture capability, requested on the headless device alongside the
+other downlevel limits. A capable llvmpipe adapter supports 3840×2160 capture;
+unsupported dimensions fail before frame construction/capture with the actual
+per-axis limit and a request to reduce them. The manifest records the requested
+device's `max_texture_dimension_2d`. CPU widget mode keeps the bounds above and
+requires no GPU.
 
 Fixture mode also accepts `--config FILE` to capture a local owner configuration,
 including widget `initial_params`, through production scene startup. It validates

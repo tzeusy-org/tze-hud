@@ -34,7 +34,7 @@ const HELP: &str = "Usage: render-scene (--fixture FILE | --widget BUNDLE --para
     [--width PX] [--height PX]\n\
     [--capture-at-ms MS] [--drag-hover-at X,Y (fixture only)]\n\
 Scene defaults: 1920x1080, tonal-glass, fixture checkpoint at 250ms (explicit 0ms is the first frame).\n\
-Capture bounds: 1..8192 per axis, <=16M pixels; checkpoint <=5000ms.\n\
+Capture bounds: 1..8192 per axis, <=16M pixels; scenes also require device texture support; checkpoint <=5000ms.\n\
 Output must not exist. JSON manifest is printed to stdout; compile time is separate.";
 
 #[derive(Clone, Debug)]
@@ -432,6 +432,8 @@ async fn render_fixture(args: &Args, raw: &RawConfig) -> Result<(CapturedFrame, 
         ));
     }
     let adapter = json!({"name":adapter.name,"backend":adapter.backend,"device_type":adapter.device_type,"driver":adapter.driver,"driver_info":adapter.driver_info});
+    let device_limits =
+        json!({"max_texture_dimension_2d":compositor.device.limits().max_texture_dimension_2d});
     let format = wgpu::TextureFormat::Rgba8UnormSrgb;
     compositor.init_text_renderer(format);
     compositor.init_widget_renderer(format);
@@ -490,7 +492,7 @@ async fn render_fixture(args: &Args, raw: &RawConfig) -> Result<(CapturedFrame, 
     )?;
     Ok((
         frame,
-        json!({"pipeline":"windowed build/capture","fixture":path,"fixture_sha256":hash(&bytes),"messages_applied":messages.len(),"checkpoint":"after all ordered messages; latest-wins per surface","capture_at_ms":args.capture_at_ms,"drag_hover_at":args.drag_hover_at,"drag_handle_hovered":drag_handle_hovered,"adapter":adapter}),
+        json!({"pipeline":"windowed build/capture","fixture":path,"fixture_sha256":hash(&bytes),"messages_applied":messages.len(),"checkpoint":"after all ordered messages; latest-wins per surface","capture_at_ms":args.capture_at_ms,"drag_hover_at":args.drag_hover_at,"drag_handle_hovered":drag_handle_hovered,"adapter":adapter,"device_limits":device_limits}),
     ))
 }
 
@@ -1020,6 +1022,38 @@ mod tests {
                 "{title} must paint its card interior, not just text or unrelated chrome"
             );
         }
+        // GPU fixture bounds must cover ordinary 4K, beyond downlevel's
+        // 2048 texture default, while CPU widget mode keeps its own bounds.
+        let wide_widget = Args {
+            width: 4096,
+            height: 1,
+            output: dir.join("wide-widget.png"),
+            ..args.clone()
+        };
+        execute(&wide_widget).await.unwrap();
+        assert_eq!(
+            image::open(&wide_widget.output)
+                .unwrap()
+                .to_rgba8()
+                .dimensions(),
+            (4096, 1)
+        );
+        let scene_4k = Args {
+            width: 3840,
+            height: 2160,
+            output: dir.join("notification-4k.png"),
+            ..settled_args.clone()
+        };
+        let manifest_4k = execute(&scene_4k).await.expect("4K scene must capture");
+        let pixels_4k = image::open(&scene_4k.output).unwrap().to_rgba8();
+        assert_eq!(pixels_4k.dimensions(), (3840, 2160));
+        assert!(pixels_4k.pixels().any(|pixel| pixel[3] > 0));
+        assert!(
+            manifest_4k["device_limits"]["max_texture_dimension_2d"]
+                .as_u64()
+                .unwrap()
+                >= 3840
+        );
         // The task controller retains this fixture directory as evidence.
     }
 }
