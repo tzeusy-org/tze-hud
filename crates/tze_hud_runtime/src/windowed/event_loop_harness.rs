@@ -5979,10 +5979,25 @@ mod tests {
                 // Neither contention point may block the event loop or force cleanup.
                 let shared_guard = (!busy_scene).then(|| shared_handle.blocking_lock());
                 let scene_guard = busy_scene.then(|| scene_handle.blocking_lock());
+                let main_before = harness.app.state.wake.main_work_generation();
+                let compositor_before = harness.app.state.wake.compositor().checkpoint();
                 assert!(!harness.tick());
                 assert_retained_focus(&harness);
                 drop(scene_guard);
                 drop(shared_guard);
+                // As in the real loop, retry after the availability wakes. The
+                // waiters briefly acquire the released lock themselves.
+                let deadline = std::time::Instant::now() + std::time::Duration::from_secs(1);
+                while harness.app.state.wake.main_work_generation() == main_before
+                    || (busy_scene
+                        && harness.app.state.wake.compositor().checkpoint() == compositor_before)
+                {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "releasing the lock must wake the focus-cleanup turn"
+                    );
+                    std::thread::yield_now();
+                }
                 for _ in 0..3 {
                     assert!(harness.tick());
                     assert_eq!(
