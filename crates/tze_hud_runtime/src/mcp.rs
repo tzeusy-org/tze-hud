@@ -1200,7 +1200,9 @@ mod tests {
         for credential in ["root-psk", "star-psk"] {
             assert!(!text.contains(credential), "{text}");
             assert!(
-                !text.contains(&tze_hud_scene::config::hash_psk(credential)),
+                !text.contains(
+                    &serde_json::to_string(&tze_hud_scene::config::hash_psk(credential)).unwrap()
+                ),
                 "{text}"
             );
         }
