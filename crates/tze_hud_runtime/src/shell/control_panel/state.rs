@@ -1742,6 +1742,32 @@ mod tests {
             open.query, "MCP port",
             "Space in an automatically focused field keeps searching"
         );
+
+        // Once deliberately selected, a field edits at its local caret.
+        // These are panel keys and effects, rather than draft-helper calls.
+        let mut saved = Vec::new();
+        for (value, keys) in [
+            ("abcd", vec![PanelKey::Left]),
+            ("abcd", vec![PanelKey::Home]),
+            ("abcd", vec![PanelKey::Left, PanelKey::Delete]),
+            ("a👩‍💻e\u{301}z", vec![PanelKey::Left]),
+        ] {
+            let mut open = Open::new(PANEL);
+            let (_, nav) = shown(&mut open);
+            let field = PanelHitTarget::Row("network.mcp_port".into(), PanelPart::Body);
+            on_click(&mut open, &nav, &field, None);
+            on_text(&mut open, &nav, value);
+            for key in keys {
+                assert!(on_key(&mut open, &nav, key, None).is_empty());
+            }
+            on_text(&mut open, &nav, "X");
+            saved.push(on_key(&mut open, &nav, PanelKey::Enter, None));
+        }
+        assert_eq!(
+            saved,
+            ["abcXd", "Xabcd", "abcX", "a👩‍💻e\u{301}Xz"]
+                .map(|text| apply("network.mcp_port", Edit::Text(text.into())))
+        );
     }
 
     /// Empty sections are not listed; chips and Alt keys follow the listed
