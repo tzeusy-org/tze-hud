@@ -1496,9 +1496,25 @@ mod tests {
     #[tokio::test]
     async fn production_turn_skips_idle_and_renders_scene_changes_and_animation() {
         let _gpu = crate::test_support::lock_headless_runtime().await;
-        let mut harness = HeadlessEventLoopHarness::new();
-        harness.app.state.config.window.width = 320;
-        harness.app.state.config.window.height = 240;
+        let mut cfg = super::super::WindowedConfig::default();
+        cfg.window.width = 320;
+        cfg.window.height = 240;
+        cfg.config_toml = Some(
+            r#"
+            [[tabs]]
+            name = "gate"
+            [[tabs.widgets]]
+            instance_id = "gate-progress"
+            widget_type = "progress-bar"
+        "#
+            .into(),
+        );
+        let mut harness = HeadlessEventLoopHarness::with_network(
+            cfg,
+            Arc::new(tze_hud_scene::TestClock::new(1_000)),
+        )
+        .await
+        .unwrap();
         assert!(harness.tick());
         assert_eq!(harness.last_frame_submitted(), None);
         assert_eq!(harness.frame_turn.last_rendered(), (u64::MAX, u64::MAX));
@@ -1653,6 +1669,58 @@ mod tests {
                 .take_work_counts()
                 .is_some()
         );
+        {
+            let mut scene = harness.scene();
+            scene.clear_zone_for_publisher("subtitle", "gate").unwrap();
+        }
+        assert!(harness.tick());
+        assert!(harness.tick());
+        assert_eq!(harness.last_frame_submitted(), Some(false));
+        let before = harness.offscreen_work_counts();
+        let old_tokens = harness.offscreen.as_ref().unwrap().0.token_map.clone();
+        let appearance = Arc::clone(harness.app.state.appearance.as_ref().unwrap());
+        appearance
+            .apply(std::collections::HashMap::from([(
+                "theme".into(),
+                "blueprint".into(),
+            )]))
+            .await
+            .unwrap();
+        assert!(harness.tick());
+        assert_eq!(
+            harness.offscreen_work_counts(),
+            (before.0 + 1, before.1 + 1)
+        );
+        assert_eq!(
+            harness.offscreen.as_ref().unwrap().0.token_map,
+            harness.app.state.global_tokens
+        );
+        assert_ne!(harness.offscreen.as_ref().unwrap().0.token_map, old_tokens);
+        assert!(harness.tick());
+        assert_eq!(
+            harness.offscreen_work_counts(),
+            (before.0 + 1, before.1 + 1),
+            "live tokens repaint once then settle"
+        );
+        {
+            let mut scene = harness.scene();
+            scene
+                .publish_to_widget("gate-progress", Default::default(), "gate", None, 0, None)
+                .unwrap();
+        }
+        assert!(harness.tick());
+        let renderer = harness
+            .offscreen
+            .as_ref()
+            .unwrap()
+            .0
+            .widget_renderer()
+            .unwrap();
+        assert!(
+            renderer.texture_entry("gate-progress").is_some(),
+            "configured SVGs render on the actual harness scene"
+        );
+        assert!(renderer.raster_count("gate-progress") > 0);
     }
 
     /// Real frame builds and runtime accounting; only offscreen readback and
@@ -2489,6 +2557,25 @@ mod tests {
         assert_eq!(
             runtime.events.app.state.wake.counters().snapshot(),
             counters
+        );
+        let versions = runtime.frames.last_rendered();
+        *runtime.compositor.focus_ring_owner_state.lock().unwrap() = Some(SceneId::new());
+        assert!(
+            runtime.turn(false),
+            "local-only feedback requests an ordinary attempt"
+        );
+        assert_eq!(
+            runtime.frames.last_rendered(),
+            versions,
+            "failed attempt does not acknowledge feedback"
+        );
+        assert!(
+            runtime.turn(true),
+            "consumed local-only feedback must retry until submission succeeds"
+        );
+        assert!(
+            !runtime.turn(true),
+            "the successful local-feedback retry returns to idle"
         );
         // A submitted image can be reused by a later encode before the main
         // thread presents it. If that encode is still busy, consuming the ready
