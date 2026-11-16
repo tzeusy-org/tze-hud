@@ -58,7 +58,7 @@ proptest = "1"
 
 # Config
 toml = "0.8"
-# Config file watching for live [design_tokens] (hud-h51u7.5).
+# Config file watching for live [design_tokens] .
 notify = { version = "8", default-features = false }
 # Comment-preserving edits of tze_hud.toml (same major as `toml` 0.8).
 toml_edit = "0.22"
@@ -80,7 +80,7 @@ unicode-segmentation = "1"
 # fallback family (hud-ljhku.13). Already in the tree through cosmic-text.
 unicode-script = "0.5"
 # East-Asian Wide/Fullwidth + emoji classification for the runtime's wrapped-row
-# over-estimate (input-history tail seed, hud-kaw7z).
+# over-estimate (input-history tail seed, ).
 
 # Misc
 subtle = "2.5"

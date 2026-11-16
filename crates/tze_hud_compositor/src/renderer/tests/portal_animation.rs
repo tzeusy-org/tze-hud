@@ -3,7 +3,7 @@ use super::*;
 // ── Portal tile animation unit tests (CPU-only, no GPU required) ─────────
 //
 // These tests exercise the portal transition token wiring introduced in
-// hud-58rg1 (spec §6.3).  They are CPU-only: no wgpu adapter is requested
+//. They are CPU-only: no wgpu adapter is requested
 // so they run cleanly even in minimal CI containers.
 
 /// A scrollable tile that appears for the first time triggers a fade-in
@@ -142,7 +142,7 @@ async fn portal_tile_fade_out_starts_on_content_removal() {
 
 /// Interrupting a portal-tile fade-out with a restore must seed the new
 /// fade-in from the **eased (on-screen) opacity**, not the linear
-/// `current_opacity()` (hud-uir0w).
+/// `current_opacity()`.
 ///
 /// Portal tiles are *displayed* through the EaseInOut curve
 /// (`portal_tile_anim_opacity`). If the interrupt path seeded the fade-in from
@@ -205,7 +205,7 @@ async fn portal_tile_interrupt_seeds_fade_in_from_eased_opacity() {
     // `portal_tile_anim_opacity()` against the same live `Instant` a moment
     // later. At 25% of 60 s the eased fade-out moves < 2e-5/ms, so even tens of
     // milliseconds of scheduler delay on a loaded runner stay far under the 0.02
-    // assertion tolerance (a short 200 ms duration here would flake — hud-uir0w).
+    // assertion tolerance (a short 200 ms duration here would flake — ).
     let mut fade_out = ZoneAnimationState::fade_out(60_000);
     fade_out.transition_start =
         std::time::Instant::now() - std::time::Duration::from_millis(15_000);

@@ -77,7 +77,7 @@ pub const EXIT_DEADLINE: std::time::Duration = std::time::Duration::from_secs(5)
 /// Arm this after the runtime's threads have stopped, when only window, GPU
 /// and process teardown remain. Those run in drivers and Windows itself; on the
 /// owner's host one hung for minutes, holding the single-instance mutex that an
-/// update or installer waits on (hud-gr6jp). Terminating then is safe: no
+/// update or installer waits on. Terminating then is safe: no
 /// runtime work is left, and the OS reclaims the windows and GPU resources.
 pub fn arm_exit_deadline(deadline: std::time::Duration) {
     let spawned = std::thread::Builder::new()

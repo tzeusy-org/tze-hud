@@ -4,7 +4,6 @@
 //! the referenced `target_element` (SVG element ID) exists in the referenced
 //! SVG file.  This module scans an SVG document and collects all element IDs.
 //!
-//! Source: widget-system/spec.md §Requirement: SVG Layer Parameter Bindings.
 
 use std::collections::HashSet;
 

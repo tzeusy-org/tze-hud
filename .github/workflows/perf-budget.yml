@@ -66,13 +66,13 @@ jobs:
           .\scripts\ci\windows\run-quiescent-efficiency.ps1 `
             -ExePath target\release\tze_hud.exe `
             -OutputDir test_results\windows-performance-budget\quiescent-efficiency
-      # ── Cross-run telemetry trend (informational; hud-kkx15, hud-bp3c3) ──────
+      # ── Cross-run telemetry trend (informational) ─────────────────────
       #
       # The gate above is a hard PASS/FAIL against the checked-in baseline; it
       # does not retain prior numeric values, so within-budget drift is
       # invisible. This step surfaces the numeric deltas.
       #
-      # RETENTION/SCOPE POLICY (hud-bp3c3): the trend baseline is MAIN-PINNED,
+      # RETENTION/SCOPE POLICY : the trend baseline is MAIN-PINNED,
       # not branch-scoped. Every run compares against the budget-gate summary
       # published as an artifact by the latest SUCCESSFUL `main` run. This gives
       # a stable baseline immune to per-branch cache divergence — a PR no longer

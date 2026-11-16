@@ -1,4 +1,4 @@
-//! Phase-1 overflow and ellipsis contract (hud-5jbra.3, hud-pvoc1).
+//! Overflow and ellipsis behavior.
 //!
 //! # Contract
 //!
@@ -17,7 +17,7 @@
 //!    geometry changes; the per-frame render path consumes the already-truncated
 //!    string without reshaping.
 //!
-//! ## Viewport Anchoring (spec tasks 3.2 / 3.3, hud-pvoc1)
+//! ## Viewport Anchoring
 //!
 //! [`TruncationViewport`] selects between two viewport-anchor modes:
 //!
@@ -32,9 +32,9 @@
 //! [`truncate_for_ellipsis`] is unchanged (head-anchored).
 //! [`truncate_tail_anchored`] is the new entry point for tail-anchored truncation.
 //!
-//! ### Spec scenarios implemented (tasks 3.2 / 3.3 / 3.4)
+//! ### Viewport behavior
 //!
-//! **Scenario: append does not disturb a scrolled-back viewport (task 3.3)**
+//! **Scenario: append does not disturb a scrolled-back viewport**
 //!
 //! When the caller holds a fixed head-anchored viewport (scroll offset frozen),
 //! it calls [`truncate_for_ellipsis`] with the text visible in that window.
@@ -42,9 +42,9 @@
 //! because the first `max_lines` are determined solely by the current text, not
 //! future appends.  This is verified by the structural test
 //! `append_stability_truncation_prefix_unchanged` (original) and the more
-//! descriptive `head_anchored_append_stability_matches_prefix_truncation` (added in hud-pvoc1).
+//! descriptive `head_anchored_append_stability_matches_prefix_truncation`.
 //!
-//! **Scenario: follow-tail advances by whole lines (task 3.2)**
+//! **Scenario: follow-tail advances by whole lines**
 //!
 //! When the viewport is at the tail (no scroll-back), the caller uses
 //! [`truncate_tail_anchored`].  The function always shows the last `max_lines`
@@ -52,9 +52,6 @@
 //! by the exact number of new lines added — never producing a partially clipped
 //! line at the bottom.  This is verified by
 //! `follow_tail_advances_by_whole_lines`.
-//!
-//! Source: RFC 0013 §3.4 and §4.2, Phase-1 design §3, spec requirement
-//! "Transcript Overflow and Ellipsis Contract".
 //!
 //! # Complexity
 //!
@@ -107,7 +104,7 @@ pub struct TruncationResult {
 /// Viewport anchoring mode for transcript overflow.
 ///
 /// Controls which lines are shown when the full text has more layout runs than
-/// `max_lines` allows.  See module-level documentation for the spec contract.
+/// `max_lines` allows.  See module-level documentation for the truncation contract.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TruncationViewport {
     /// Show the **first** `max_lines` runs (head of content).
@@ -123,18 +120,17 @@ pub enum TruncationViewport {
 }
 
 /// Default byte threshold for the viewport-adjacent-window truncation fallback
-/// (`max_truncation_input_bytes`, spec.md §324/§331).
 ///
 /// When a single uncached truncation would shape an input larger than this many
 /// bytes, [`viewport_adjacent_input`] restricts the shaped input to a
 /// viewport-adjacent window of whole source lines instead of the full retained
 /// transcript. The 4096-byte default bounds work toward the Stage-5 Layout
-/// Resolve target (< 1 ms, `about/craft-and-care/engineering-bar.md` §2);
+/// Resolve target (< 1 ms);
 /// conformance still requires measurement of the actual workload.
 pub const DEFAULT_MAX_TRUNCATION_INPUT_BYTES: usize = 4096;
 
 /// Bounded whole-line overscan margin kept beyond the visible layout window when
-/// the viewport-adjacent-window fallback engages (spec.md §325).
+/// the viewport-adjacent-window fallback engages.
 ///
 /// Must be `>= 1`: the overscan guarantees the windowed input still produces
 /// strictly more layout runs than `max_lines`, so the truncation path engages
@@ -144,8 +140,8 @@ pub const TRUNCATION_OVERSCAN_LINES: usize = 8;
 
 /// Restrict `text` to a viewport-adjacent window of whole source lines when it
 /// exceeds `max_input_bytes`, so a single uncached truncation shapes a bounded
-/// input instead of the full retained transcript (spec.md §324/§331, the
-/// **viewport-adjacent-window fallback**).
+/// input instead of the full retained transcript. This is the
+/// **viewport-adjacent-window fallback**.
 ///
 /// This runs **before** shaping and does no shaping itself: it splits `text` on
 /// `'\n'` (the same paragraph/hard-wrap unit cosmic-text uses) and slices on
@@ -187,7 +183,7 @@ pub fn viewport_adjacent_input(
     overscan_lines: usize,
 ) -> &str {
     // Only engage above the configured byte bound: small windows shape within
-    // the Stage-5 budget and must measure the full committed input (spec §331).
+    // the Stage-5 budget and must measure the full committed input.
     if text.len() <= max_input_bytes {
         return text;
     }
@@ -380,7 +376,7 @@ pub fn truncate_for_ellipsis<'a>(
 
 /// Tail-anchored truncation: show the **last** `max_lines` whole lines of `text`.
 ///
-/// This is the entry point for the **follow-tail** scenario (spec task 3.2):
+/// This is the entry point for the **follow-tail** scenario:
 /// when the viewport is at the tail of a streaming transcript, appended content
 /// should always be visible.  The function shapes the full text, selects the
 /// last `max_lines` layout runs, and prepends an ellipsis to signal that leading
@@ -407,7 +403,7 @@ pub fn truncate_for_ellipsis<'a>(
 /// total visible line count is exactly `max_lines` (not `max_lines + 1`).
 /// Sets `was_truncated = true`.
 ///
-/// ## Degenerate `max_lines == 1` (hud-qoq52, option (b))
+/// ## Degenerate `max_lines == 1`
 ///
 /// With only one line slot, a dedicated `ELLIPSIS` line would leave no room for
 /// content — a bare `"…"` that shows nothing, defeating the purpose of a
@@ -485,7 +481,7 @@ pub(crate) fn truncate_tail_anchored<'a>(
     // The first visible run is runs[total_runs - (max_lines - 1)].
     // The last  visible run is runs[total_runs - 1].
     //
-    // ── Degenerate case: max_lines == 1 (DECISION — option (b), hud-qoq52) ───
+    // ── Degenerate case: max_lines == 1 (DECISION — option (b)) ───
     //
     // A follow-tail surface exists to show the NEWEST content line.  When only
     // one line slot is available, spending it on a bare "…" (showing no content
@@ -497,8 +493,7 @@ pub(crate) fn truncate_tail_anchored<'a>(
     // leading "…" marks that earlier lines — and possibly the head of this line
     // — were dropped) AND shows the newest content, on a single line.
     //
-    // Spec-compatibility (openspec/specs/text-stream-portals/spec.md, "Transcript
-    // Overflow and Ellipsis Contract"): the contract requires the omission signal
+    // Overflow requires the omission signal
     // and forbids partially clipped glyphs; it does NOT mandate the ellipsis on a
     // dedicated line.  The leading-ellipsis line satisfies both: it carries the
     // omission signal and is horizontally truncated to fit bounds_width with no
@@ -780,7 +775,7 @@ fn shape_runs<'a>(
 ///
 /// This is the shared body of Step 5 (head-anchored) / Step 5 (tail-anchored),
 /// which were previously byte-for-byte identical. The horizontal-overflow scan
-/// over **all** runs (not just the last) is the hud-so7zu fix; centralizing it
+/// over **all** runs (not just the last) is the fix; centralizing it
 /// here means that fix lives once.
 fn try_horizontal_truncate<'a>(
     shaped: &ShapedRuns,
@@ -797,7 +792,7 @@ fn try_horizontal_truncate<'a>(
 
     // Check ALL runs for horizontal overflow, not just the last one.
     // A long unbreakable token on any non-final line overflows horizontally
-    // and would be clipped by TextBounds without truncation (hud-so7zu).
+    // and would be clipped by TextBounds without truncation.
     // `None` (no overflow) → caller returns the original text unchanged.
     let overflow_idx = runs.iter().position(|run| run.1 > bounds_width)?;
 
@@ -837,7 +832,7 @@ fn try_horizontal_truncate<'a>(
 /// Compute the maximum number of whole lines that fit in `bounds_height`
 /// given `line_height`.
 ///
-/// A positive box shorter than one line still gets one line (hud-pcscu): the
+/// A positive box shorter than one line still gets one line: the
 /// line height includes leading, so a single-line label in a box sized to its
 /// glyphs (e.g. 20 px text in a 26 px box at the 1.4 multiplier) would
 /// otherwise truncate to nothing. The renderer clips that line to the box, as
@@ -1977,7 +1972,7 @@ mod tests {
     /// Canonical repro from the bug report: `'W'×30` in a `200px` box must yield
     /// at least one visible `W` cluster before the ellipsis, not bare `"…"`.
     ///
-    /// Source: issue hud-wq6qp — "Ellipsis grapheme fallback is dead code".
+    /// Source: issue — "Ellipsis grapheme fallback is dead code".
     ///
     /// Preconditions are measured at runtime so the test remains correct across
     /// environments with different default font metrics:
@@ -2347,7 +2342,7 @@ mod tests {
         );
     }
 
-    // ── RTL / bidi regression tests (hud-u7nyn) ──────────────────────────────
+    // ── RTL / bidi regression tests ──────────────────────────────
     //
     // These tests guard the fix for "Ellipsis truncation corrupts RTL text:
     // visual-order glyph offsets treated as logical".  cosmic-text outputs
@@ -2628,7 +2623,7 @@ mod tests {
     /// shows the LAST max_lines, not the first.  This is the follow-tail guarantee:
     /// every append produces a result ending with the newest content.
     ///
-    /// Spec task 3.2: "follow-tail advances by whole lines".
+    /// Follow-tail advances by whole lines.
     #[test]
     fn follow_tail_advances_by_whole_lines() {
         let mut fs = make_font_system();
@@ -2711,7 +2706,7 @@ mod tests {
         );
     }
 
-    /// Degenerate `max_lines == 1` (hud-qoq52, option (b)): a follow-tail box
+    /// Degenerate `max_lines == 1`: a follow-tail box
     /// with room for exactly one line must show the NEWEST line's content with
     /// an inline LEADING ellipsis — never a bare "…" that shows nothing.
     ///
@@ -2898,7 +2893,7 @@ mod tests {
     /// back).  This is the structural mirror of the scroll-layer task 3.3 test
     /// in tze_hud_input::scroll.
     ///
-    /// Spec task 3.3: "append stability for scrolled-back viewports".
+    /// Appends preserve a scrolled-back viewport.
     ///
     /// For the truncation layer: head-anchored truncation of `prefix` must
     /// produce the same result as head-anchored truncation of `prefix + suffix`.
@@ -2954,7 +2949,7 @@ mod tests {
         }
     }
 
-    // ── Task 3.2: property-based tests for truncate_tail_anchored (hud-347b4) ──
+    // ── Task 3.2: property-based tests for truncate_tail_anchored ──
     //
     // These proptests verify the core invariants of tail-anchored truncation
     // (1–3b share one generator and one proptest):
@@ -2981,7 +2976,7 @@ mod tests {
             ..proptest::test_runner::Config::default()
         })]
 
-        /// Invariants 1–3b over one multi-line generator (hud-347b4).
+        /// Invariants 1–3b over one multi-line generator.
         ///
         /// For `n_lines` distinct lines in a box `max_lines` lines tall:
         ///
@@ -3240,7 +3235,7 @@ mod tests {
         }
     }
 
-    // ── hud-so7zu: multi-line horizontal overflow check ───────────────────────
+    // ──: multi-line horizontal overflow check ───────────────────────
 
     /// A long unbreakable token on the FIRST line (not the last) must be
     /// truncated even when all lines fit vertically.
@@ -3417,7 +3412,7 @@ mod tests {
         );
     }
 
-    // ── Viewport-adjacent-window truncation fallback (spec.md §324/§331) ───────
+    // ── Viewport-adjacent-window truncation fallback ───────
 
     /// Build a multi-line transcript of `n_lines` lines, each tagged with its
     /// index so windowing mistakes (dropping the wrong lines) are observable.
@@ -3435,7 +3430,7 @@ mod tests {
     }
 
     /// Below the byte bound, the fallback is a no-op: the full input is returned
-    /// unchanged so truncation measures the full committed input (spec §331).
+    /// unchanged so truncation measures the full committed input.
     #[test]
     fn fallback_noop_below_bound() {
         let text = transcript(5); // well under 4 KiB

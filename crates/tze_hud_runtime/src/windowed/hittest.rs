@@ -275,7 +275,7 @@ impl WinitApp {
     /// Recompute whether raw mouse input is needed, reseed the quiet-check
     /// signature, and return the winit listen mode to apply if it changed.
     ///
-    /// Known limitation (accepted, hud-asw8c): winit emits `MouseMotion` only
+    /// Known limitation (accepted): winit emits `MouseMotion` only
     /// for relative mouse reports (`MOUSE_MOVE_RELATIVE`), so absolute-pointer
     /// devices (RDP sessions, VM tablets) never trigger entry detection; the
     /// old 30 Hz poll covered them. The target is a physical Windows desktop;
@@ -457,7 +457,7 @@ impl WinitApp {
     }
 
     /// The focused portal tile whose bottom-right resize corner the pointer is
-    /// currently over, if any (hud-wgiys).
+    /// currently over, if any.
     ///
     /// Drives the compositor's resize-grip hover swap: the grip glyph is anchored
     /// at the portal's bottom-right corner and reads as the `╲` resize handle, so
@@ -494,7 +494,7 @@ impl WinitApp {
     /// desktop owns the cursor) and resize/drag gestures never reach the
     /// runtime. ORing this into the overlay capture decision makes a focused
     /// portal's affordances behave like every other interactive region in
-    /// overlay mode (hud-adh61, follow-up to hud-g5yu1).
+    /// overlay mode.
     ///
     /// Note: the resize bands are scoped to the focused portal, but the
     /// drag-handle term is the snapshot-wide
@@ -518,7 +518,7 @@ impl WinitApp {
     }
 
     /// Update the OS cursor shape to reflect the portal resize/move affordance
-    /// under the pointer (hud-g5yu1).
+    /// under the pointer.
     ///
     /// Called on pointer events. Computes the desired [`PortalCursor`] from the
     /// focused portal's affordance hit-test, any active resize/drag gesture, and
@@ -1528,7 +1528,7 @@ mod tests {
 
     #[test]
     fn overlay_capture_includes_focused_portal_affordances() {
-        // hud-adh61: in overlay passthrough mode the focused portal's resize
+        // in overlay passthrough mode the focused portal's resize
         // bands + drag-handle must still capture, or the cursor shape never
         // shows and gestures never reach.
         let rect = PortalRect {

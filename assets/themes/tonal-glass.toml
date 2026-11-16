@@ -67,7 +67,7 @@
 
 # ── Type ────────────────────────────────────────────────────────────────────
 # Family names are free-form; a family that is not loaded falls back to the
-# renderer's default face (IBM Plex is bundled by hud-h51u7.2).
+# renderer's default face (IBM Plex is bundled by ).
 "font.sans"                        = "IBM Plex Sans"
 "font.mono"                        = "IBM Plex Mono"
 

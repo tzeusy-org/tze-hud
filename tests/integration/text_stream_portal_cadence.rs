@@ -1,4 +1,4 @@
-//! Text stream portal cadence harness (hud-5jbra.5).
+//! Text stream portal cadence harness.
 //!
 //! Verifies Section 5 of text-stream-portal-phase1:
 //!   - 5.1: dirty Hub portals drain together with per-portal render pacing
@@ -48,17 +48,17 @@ const BENCH_FRAME_COUNT: u64 = 200;
 /// times into seconds). The real performance guard is the Windows CI gate.
 const HEADLESS_FRAME_BUDGET_US: u64 = 250_000;
 
-/// p99 per-stage budgets (µs) from engineering-bar.md §2.
+/// p99 per-stage budgets (µs):
 /// Stage 3 (Mutation Intake) < 1ms, Stage 4 (Scene Commit) < 1ms,
 /// Stage 5 (Layout Resolve) < 1ms.
 const STAGE3_P99_BUDGET_US: u64 = STAGE3_BUDGET_US;
 const STAGE4_P99_BUDGET_US: u64 = STAGE4_BUDGET_US;
 const STAGE5_P99_BUDGET_US: u64 = STAGE5_BUDGET_US;
 
-/// Max aggregate event rate from engineering-bar.md §2: 1000 events/second.
+/// Max aggregate event rate: 1000 events/second.
 const MAX_AGGREGATE_EVENTS_PER_SEC: u64 = 1_000;
 
-// ─── Timing-assertion gate (hud-94vm5) ───────────────────────────────────────
+// ─── Timing-assertion gate ───────────────────────────────────────
 
 /// Returns `true` when wall-clock / p99 latency hard assertions should run.
 ///
@@ -227,7 +227,7 @@ async fn frame_budgets_hold_under_sustained_portal_stream() {
 
     // ── Budget assertions ──────────────────────────────────────────────────────
 
-    // Timing assertions: gated — wall-clock budgets.  (hud-94vm5)
+    // Timing assertions: gated — wall-clock budgets.
     // Set TZE_HUD_PERF_ASSERT=1 to enforce on a reference host.
     let p99_frame = summary.frame_time.p99().unwrap_or(0);
     if perf_assert_enabled() {
@@ -237,7 +237,7 @@ async fn frame_budgets_hold_under_sustained_portal_stream() {
              under sustained portal stream"
         );
 
-        // Per-stage p99 budget assertions (engineering-bar.md §2):
+        // Per-stage p99 budget assertions:
         // Stage 3 (Mutation Intake) < 1ms, Stage 4 (Scene Commit) < 1ms,
         // Stage 5 (Layout Resolve) < 1ms.
         // These are checked only when mutation frames were actually recorded.
@@ -618,7 +618,7 @@ async fn input_latency_not_degraded_under_portal_stream() {
 
     // Input to local ack p99 must be within budget when samples are available.
     //
-    // The locked Windows budget is ≤ 2 ms (engineering-bar.md §2). On headless
+    // The locked Windows budget is ≤ 2 ms. On headless
     // Linux CI with a software GPU (llvmpipe), frame times run 8–12× slower
     // than reference hardware; we use a generous 250 ms headless ceiling here
     // so the test is not flaky on CI while still catching catastrophic
@@ -638,7 +638,7 @@ async fn input_latency_not_degraded_under_portal_stream() {
         // Windows locked budget: ≤ 2 ms (enforced by the Windows CI gate).
         let headless_ack_budget_us = 250_000u64;
         let p99 = ack_bucket.p99().unwrap_or(0);
-        // Timing assertion: gated — wall-clock budget.  (hud-94vm5)
+        // Timing assertion: gated — wall-clock budget.
         if perf_assert_enabled() {
             assert!(
                 p99 <= headless_ack_budget_us,
@@ -677,7 +677,7 @@ async fn input_latency_not_degraded_under_portal_stream() {
     );
 }
 
-// ─── Task 2 (hud-zmt1a): Arrival→present latency measurement ─────────────────
+// ─── Task 2: Arrival→present latency measurement ─────────────────
 
 /// Per-append arrival→present elapsed measured via `Unit::at_us`.
 ///

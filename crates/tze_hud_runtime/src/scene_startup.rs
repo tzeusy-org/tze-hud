@@ -137,7 +137,6 @@ pub(crate) fn resolve_font_dir(tokens: &mut DesignTokenMap, config_parent: Optio
 /// Returns a map from tab name to its `SceneId` so widget instances can bind to
 /// the already-created tabs in the subsequent widget-registry step.
 ///
-/// Spec reference: configuration/spec.md §Tab Configuration Validation.
 fn bootstrap_config_tabs(
     scene: &mut tze_hud_scene::graph::SceneGraph,
     raw: &RawConfig,
@@ -533,12 +532,12 @@ default_tab = true
         assert!(!scene.widget_registry.reduce_motion);
     }
 
-    // ── Step 2.5: Config-declared tab bootstrap (hud-d5rcd) ───────────────────
+    // ── Step 2.5: Config-declared tab bootstrap ───────────────────
 
     /// WHEN a minimal valid config declares a single widget-less `[[tabs]]` with
     /// `default_tab = true` THEN that tab materializes in `scene.tabs` at startup
     /// and is set active — so tile-creating mutations succeed without a manual
-    /// `create_tab` (regression test for hud-d5rcd).
+    /// `create_tab`.
     #[test]
     fn widgetless_config_tab_materializes_and_is_active() {
         let toml_str = r##"

@@ -892,7 +892,7 @@ mod tests {
     }
 
     #[test]
-    fn spec_round_trips_and_rejects_non_loopback_or_odd_nonces() {
+    fn handoff_spec_round_trips_and_rejects_non_loopback_or_odd_nonces() {
         let spec = ChildSpec::parse("127.0.0.1:4242:abcdef0123456789").unwrap();
         assert_eq!(ChildSpec::parse(&spec.arg_value()).unwrap(), spec);
         for bad in [

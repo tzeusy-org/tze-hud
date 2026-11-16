@@ -145,7 +145,7 @@ mod tests {
 
     /// Pairing redeems and panel edits racing on one store lose nothing:
     /// every pair lands, the last allow list wins, the owner's comment
-    /// survives, and the live directory matches the file (hud-vniri.6).
+    /// survives, and the live directory matches the file.
     #[test]
     fn racing_writers_lose_nothing_and_keep_comments() {
         let dir = tempfile::tempdir().unwrap();
@@ -220,7 +220,7 @@ mod tests {
 
     /// A hand edit made while the HUD runs is neither lost by the next panel
     /// change nor invisible until one: reading the store picks it up and the
-    /// live directory follows (hud-vniri.6).
+    /// live directory follows.
     #[test]
     fn hand_edits_survive_panel_changes_and_reach_the_live_directory() {
         let dir = tempfile::tempdir().unwrap();

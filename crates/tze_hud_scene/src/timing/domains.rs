@@ -38,7 +38,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// # Zero semantics
 ///
-/// `WallUs(0)` means "not set" (spec lines 68–70).  Production clocks MUST NOT
+/// `WallUs(0)` means "not set".  Production clocks MUST NOT
 /// return 0.  Use [`WallUs::NOT_SET`] as the canonical sentinel.
 ///
 /// # Cross-domain assignment is a compile error

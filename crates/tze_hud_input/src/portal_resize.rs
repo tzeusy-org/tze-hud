@@ -1,16 +1,15 @@
 //! Portal window management — resize affordances, focus-scoped hotkeys,
 //! min/max clamping, and coalescible geometry snapshots.
 //!
-//! Implements §6b of `text-stream-portal-phase1/tasks.md` (amendment 2026-06-10):
 //!
-//! - §6b.1 Pointer-driven resize affordances on the portal frame (corner/edge
+//! - Pointer-driven resize affordances on the portal frame (corner/edge
 //!   capture regions, content layer) with local-first geometry feedback.
-//! - §6b.2 Focus-scoped resize hotkeys (Ctrl+`+`/`=` grow, Ctrl+`-` shrink)
+//! - Focus-scoped resize hotkeys (Ctrl+`+`/`=` grow, Ctrl+`-` shrink)
 //!   with token-defined step; unfocused portals never consume them.
-//! - §6b.3 Min/max clamping: legibility minimum from tokens; lease-bounds /
+//! - Min/max clamping: legibility minimum from tokens; lease-bounds /
 //!   scene-budget maximum passed by caller; no partially-clipped glyphs at any
 //!   intermediate geometry (the overflow contract is not relaxed during resize).
-//! - §6b.4 Coalescible state-stream geometry snapshots delivered to the
+//! - Coalescible state-stream geometry snapshots delivered to the
 //!   owning adapter; gesture is authoritative over adapter publishes until
 //!   gesture end.
 //!
@@ -35,7 +34,7 @@
 //!   The transport MAY deliver only the latest snapshot per adapter delivery
 //!   window (latest-wins).
 //!
-//! ## Input precedence order (§6b.2 + §6b.6 authority scenarios)
+//! ## Input precedence order
 //!
 //! The following priority order is enforced in `dispatch_key_down_event` (in
 //! `tze_hud_runtime::windowed`):
@@ -60,7 +59,7 @@
 
 use serde::{Deserialize, Serialize};
 
-// ─── Shell/chrome-reserved shortcut check (§6b.2) ────────────────────────────
+// ─── Shell/chrome-reserved shortcut check ────────────────────────────
 
 /// Classifier for shell/chrome-reserved keyboard shortcuts.
 ///
@@ -135,13 +134,13 @@ impl ShellReservedShortcut {
 /// tokens, and are passed into clamping helpers as arguments.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct PortalWindowTokens {
-    /// Legibility minimum width in pixels (§6b.3).
+    /// Legibility minimum width in pixels.
     pub min_width_px: f32,
-    /// Legibility minimum height in pixels (§6b.3).
+    /// Legibility minimum height in pixels.
     pub min_height_px: f32,
-    /// Pixels per Ctrl+`+`/`=`/`-` hotkey step (§6b.2).
+    /// Pixels per Ctrl+`+`/`=`/`-` hotkey step.
     pub resize_step_px: f32,
-    /// Width/height of the pointer capture region on frame edges/corners (§6b.1).
+    /// Width/height of the pointer capture region on frame edges/corners.
     pub affordance_px: f32,
 }
 
@@ -402,9 +401,9 @@ impl PortalRect {
 pub struct ResizeBounds {
     /// Resolved token bounds (min size, step, affordance).
     pub tokens: PortalWindowTokens,
-    /// Lease/scene-budget maximum portal width in pixels (§6b.3).
+    /// Lease/scene-budget maximum portal width in pixels.
     pub max_width_px: f32,
-    /// Lease/scene-budget maximum portal height in pixels (§6b.3).
+    /// Lease/scene-budget maximum portal height in pixels.
     pub max_height_px: f32,
     /// Display width in pixels (on-screen clamp).
     pub display_w: f32,
@@ -412,7 +411,7 @@ pub struct ResizeBounds {
     pub display_h: f32,
 }
 
-// ─── Coalescible geometry snapshot (§6b.4) ────────────────────────────────────
+// ─── Coalescible geometry snapshot ────────────────────────────────────
 
 /// Coalescible state-stream geometry snapshot delivered to the owning adapter.
 ///
@@ -424,7 +423,7 @@ pub struct ResizeBounds {
 /// active MUST be rejected; the snapshot is the authoritative geometry until
 /// gesture end.
 ///
-/// Spec §6b.4: "gesture remains authoritative over adapter publishes until
+/// "gesture remains authoritative over adapter publishes until
 /// gesture end."
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct GeometrySnapshot {
@@ -441,7 +440,7 @@ pub struct GeometrySnapshot {
     pub sequence: u64,
 }
 
-// ─── Pointer resize state machine (§6b.1) ─────────────────────────────────────
+// ─── Pointer resize state machine ─────────────────────────────────────
 
 /// Phase of the per-device pointer resize interaction.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -567,7 +566,7 @@ pub enum ResizeOutcome {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum GestureAuthorityError {
     /// A local resize gesture is currently active.  The adapter's geometry
-    /// publish is dropped; the gesture is authoritative (§6b.4).
+    /// publish is dropped; the gesture is authoritative.
     GestureActive,
     /// The epoch offered by the adapter is stale (the gesture epoch has
     /// advanced since the adapter sampled it, meaning a gesture started or
@@ -585,7 +584,7 @@ pub enum GestureAuthorityError {
 /// Use [`PortalResizeState::new`] to construct — `Default` is intentionally
 /// not derived to enforce explicit initialization with a valid `portal_id_hash`.
 ///
-/// ## Gesture-authority enforcement (§6b.4)
+/// ## Gesture-authority enforcement
 ///
 /// The `gesture_epoch` field provides a real enforcement point beyond the
 /// advisory `gesture_active()` flag.  The epoch monotonically increments on
@@ -641,7 +640,7 @@ impl PortalResizeState {
     /// adapter publishes, use [`accept_adapter_publish`].
     ///
     /// When this is true, the caller MUST reject adapter geometry publishes
-    /// (gesture is authoritative — §6b.4).
+    /// (gesture is authoritative — ).
     pub fn gesture_active(&self) -> bool {
         self.device_states
             .values()
@@ -678,7 +677,7 @@ impl PortalResizeState {
         self.gesture_epoch
     }
 
-    /// Enforcement point for adapter geometry publishes (§6b.4).
+    /// Enforcement point for adapter geometry publishes.
     ///
     /// Returns `Ok(())` if the publish may proceed; returns
     /// `Err(GestureAuthorityError)` if it must be dropped.
@@ -827,7 +826,7 @@ impl PortalResizeState {
     }
 }
 
-// ─── Focus-scoped hotkey resize (§6b.2) ──────────────────────────────────────
+// ─── Focus-scoped hotkey resize ──────────────────────────────────────
 
 /// Outcome of a hotkey resize event.
 #[derive(Clone, Debug, PartialEq)]
@@ -854,7 +853,7 @@ impl HotkeyResizeDir {
     /// `Some(Shrink)` for `"-"` **only when `ctrl` is true**,
     /// `None` for anything else or when `ctrl` is false.
     ///
-    /// Spec §6b.2: resize shortcuts are Ctrl-scoped. Bare `+`, `=`, and `-`
+    /// resize shortcuts are Ctrl-scoped. Bare `+`, `=`, and `-`
     /// (without Ctrl held) MUST NOT trigger a resize — they may be content input
     /// or other application shortcuts.
     pub fn from_key(key: &str, ctrl: bool) -> Option<Self> {
@@ -877,14 +876,14 @@ impl HotkeyResizeDir {
     /// resolve the logical key to bare `"="`/`"-"`/`"+"`, and `"+"` requires
     /// Shift on most layouts. The physical key position is stable regardless of
     /// keyboard layout or held modifiers, so resolving the resize direction from
-    /// the physical `KeyCode` makes `Ctrl+=`/`Ctrl+-` deterministic (root cause
-    /// of hud-v4k1h: Ctrl resize hotkeys had no visible effect on live Windows
-    /// because the logical-key match never fired).
+    /// the physical `KeyCode` makes `Ctrl+=`/`Ctrl+-` deterministic.
+    /// Matching only logical keys can leave Ctrl resize chords with no effect
+    /// on Windows.
     ///
     /// The `Equal` physical key carries both `=` and (shifted) `+`, so it maps
     /// to `Grow`; `Minus` maps to `Shrink`. The numpad `+`/`-` keys
     /// (`NumpadAdd`/`NumpadSubtract`) map the same way. Ctrl is still required,
-    /// matching the spec §6b.2 focus-scoped Ctrl-chord contract.
+    /// keeping the resize chord scoped to Ctrl and portal focus.
     pub fn from_key_code(key_code: &str, ctrl: bool) -> Option<Self> {
         if !ctrl {
             return None;
@@ -900,12 +899,12 @@ impl HotkeyResizeDir {
 /// Which axis (or axes) a hotkey resize step grows/shrinks.
 ///
 /// The symmetric Ctrl+`+`/`-` chord resizes [`Both`](Self::Both) axes at once
-/// (§6b.2). The directional Ctrl+Shift+Arrow chord (hud-csrmf) resizes a single
+///. The directional Ctrl+Shift+Arrow chord resizes a single
 /// axis so a keyboard viewer — and the autopilot live-verify harness — can drive
 /// a **width-only** whole-portal resize without pointer injection. Width is the
 /// text-wrap axis the compositor reads from `TextMarkdownNode::bounds.width`, so
 /// a width step is exactly what exercises the dynamic re-wrap / reconcile path
-/// (hud-rpmwt) on a multi-monitor console where the 22px pointer resize handle is
+/// on a multi-monitor console where the 22px pointer resize handle is
 /// not injector-reachable.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum HotkeyResizeAxis {
@@ -922,7 +921,7 @@ pub enum HotkeyResizeAxis {
 /// Apply a focus-scoped **symmetric** hotkey resize step to the current rect.
 ///
 /// Convenience wrapper over [`apply_hotkey_resize_axis`] with
-/// [`HotkeyResizeAxis::Both`] — the Ctrl+`+`/`-` chord (§6b.2). See that function
+/// [`HotkeyResizeAxis::Both`] — the Ctrl+`+`/`-` chord. See that function
 /// for the full argument and anchoring contract.
 pub fn apply_hotkey_resize(
     focused: bool,
@@ -951,7 +950,7 @@ pub fn apply_hotkey_resize(
 /// * `axis` — which axis/axes to step ([`HotkeyResizeAxis::Both`] for the
 ///   symmetric Ctrl+`+`/`-` chord; [`Width`](HotkeyResizeAxis::Width) /
 ///   [`Height`](HotkeyResizeAxis::Height) for the directional Ctrl+Shift+Arrow
-///   chord, hud-csrmf).
+///   chord).
 /// * `current_rect` — portal bounds before the step.
 /// * `bounds` — clamping bounds (tokens, max size, display size).
 /// * `state` — portal resize state (for sequence counter).
@@ -997,7 +996,7 @@ pub fn apply_hotkey_resize_axis(
     let new_h = (current_rect.height + h_delta).clamp(min_h, max_h);
 
     // Anchor the TOP-LEFT corner: the origin stays put and only width/height
-    // change, so grow/shrink extends toward the bottom-right (hud-v4k1h
+    // change, so grow/shrink extends toward the bottom-right (
     // follow-up). The earlier center-anchored behavior shifted the origin by
     // half the size delta, making the portal appear to grow radially in all
     // four directions, which was disorienting. `clamped()` below still nudges
@@ -1025,7 +1024,7 @@ pub fn apply_hotkey_resize_axis(
     HotkeyResizeOutcome::Applied { snapshot: snap }
 }
 
-// ─── Affordance hit test (§6b.1) ──────────────────────────────────────────────
+// ─── Affordance hit test ──────────────────────────────────────────────
 
 /// Determine which resize edge or corner a pointer position hits, given the
 /// portal rect and the affordance region width.
@@ -1438,7 +1437,7 @@ mod tests {
         };
         assert!(snap.rect.width > rect.width, "grow must increase width");
         assert!(snap.rect.height > rect.height, "grow must increase height");
-        // hud-v4k1h: top-left anchored — the origin must NOT move on grow, so
+        // top-left anchored — the origin must NOT move on grow, so
         // the portal extends toward the bottom-right rather than radially.
         assert_eq!(snap.rect.x, rect.x, "grow must keep the left edge anchored");
         assert_eq!(snap.rect.y, rect.y, "grow must keep the top edge anchored");
@@ -1552,7 +1551,7 @@ mod tests {
         );
     }
 
-    // ─── Directional (axis-specific) hotkey resize (hud-csrmf) ────────────
+    // ─── Directional (axis-specific) hotkey resize ────────────
 
     #[test]
     fn hotkey_width_axis_changes_width_only() {
@@ -1802,7 +1801,7 @@ mod tests {
             "Ctrl+Enter must return None"
         );
 
-        // Bare (no Ctrl): MUST NOT trigger resize regardless of key (§6b.2).
+        // Bare (no Ctrl): MUST NOT trigger resize regardless of key.
         assert_eq!(
             HotkeyResizeDir::from_key("+", false),
             None,
@@ -1822,7 +1821,7 @@ mod tests {
 
     #[test]
     fn hotkey_key_parser_from_key_code_is_layout_independent() {
-        // hud-v4k1h: the physical-KeyCode fallback must resolve the resize
+        // the physical-KeyCode fallback must resolve the resize
         // direction even when the logical key string never yields "="/"-"/"+"
         // (Ctrl held on Windows). Equal carries both '=' and shifted '+'.
         assert_eq!(
@@ -1850,7 +1849,7 @@ mod tests {
             None,
             "Ctrl+KeyA must return None (not a resize key)"
         );
-        // Bare (no Ctrl): physical fallback MUST also stay Ctrl-scoped (§6b.2),
+        // Bare (no Ctrl): physical fallback MUST also stay Ctrl-scoped,
         // otherwise pressing '=' as content would resize a focused portal.
         assert_eq!(
             HotkeyResizeDir::from_key_code("Equal", false),
@@ -1977,7 +1976,7 @@ mod tests {
         );
     }
 
-    // ─── Adapter authority (§6b.4) ────────────────────────────────────────
+    // ─── Adapter authority ────────────────────────────────────────
 
     /// During an active gesture, `gesture_active()` returns true, which the
     /// caller uses to reject adapter geometry publishes (advisory path).
@@ -2031,7 +2030,7 @@ mod tests {
     }
 
     /// `accept_adapter_publish` rejects during an active gesture, regardless
-    /// of epoch.  This is the real enforcement point (§6b.4).
+    /// of epoch.  This is the real enforcement point.
     #[test]
     fn accept_adapter_publish_rejected_during_gesture() {
         let mut state = PortalResizeState::new(0xdeadbeef);
@@ -2131,7 +2130,7 @@ mod tests {
         );
     }
 
-    // ─── Shell/chrome-reserved shortcut classifier (§6b.2) ───────────────
+    // ─── Shell/chrome-reserved shortcut classifier ───────────────
 
     #[test]
     fn shell_reserved_ctrl_tab_navigation() {

@@ -14,10 +14,10 @@ impl SceneGraph {
     /// Budget soft-limit threshold (80% of hard limit).
     pub const BUDGET_SOFT_LIMIT_PCT: f64 = 0.80;
 
-    /// Maximum leases across all agents in the entire runtime (spec §Lease Caps).
+    /// Maximum leases across all agents in the entire runtime.
     pub const MAX_RUNTIME_LEASES: usize = 64;
 
-    /// Maximum nodes per tile (spec §Lease Caps).
+    /// Maximum nodes per tile.
     pub const MAX_NODES_PER_TILE: u32 = 64;
 
     /// Grant a lease with a default (nil) session_id.
@@ -128,8 +128,8 @@ impl SceneGraph {
         for tile_id in orphaned_tiles {
             self.remove_tile_and_nodes(tile_id);
         }
-        // Spec §Requirement: Lease Revocation Clears Zone Publications
-        // (lines 235–242): clear this lease's publications on revocation.
+        // Lease Revocation Clears Zone Publications
+        //: clear this lease's publications on revocation.
         self.clear_publications_for_lease(lease_id);
         self.version += 1;
         Ok(())
@@ -226,11 +226,11 @@ impl SceneGraph {
 
     /// Mark a lease as disconnected (agent disconnect, enters grace period).
     ///
-    /// Spec §Orphan Handling Grace Period (lines 132–145):
+    /// Orphan Handling Grace Period:
     /// - Lease transitions ACTIVE → ORPHANED.
     /// - TTL clock continues running.
     /// - All tiles owned by this lease receive `TileVisualHint::DisconnectionBadge`
-    ///   (compositor must display the badge within 1 frame, spec line 133).
+    ///   (compositor must display the badge within 1 frame).
     pub fn disconnect_lease(&mut self, lease_id: &SceneId, now_ms: u64) -> Result<(), LeaseError> {
         let lease = self
             .leases
@@ -238,7 +238,7 @@ impl SceneGraph {
             .ok_or(LeaseError::LeaseNotFound(*lease_id))?;
         lease.disconnect(now_ms)?;
         // Set disconnection badge on all tiles owned by this lease.
-        // Compositor must render the badge within 1 frame (spec line 133).
+        // Compositor must render the badge within 1 frame.
         for tile in self.tiles.values_mut() {
             if tile.lease_id == *lease_id {
                 tile.visual_hint = crate::lease::TileVisualHint::DisconnectionBadge;
@@ -250,7 +250,7 @@ impl SceneGraph {
 
     /// Reconnect a disconnected lease (agent reconnect within grace period).
     ///
-    /// Spec §Orphan Handling Grace Period (lines 139–141):
+    /// Orphan Handling Grace Period:
     /// ORPHANED → ACTIVE; disconnection badges cleared within 1 frame.
     pub fn reconnect_lease(&mut self, lease_id: &SceneId, now_ms: u64) -> Result<(), LeaseError> {
         let lease = self
@@ -259,7 +259,7 @@ impl SceneGraph {
             .ok_or(LeaseError::LeaseNotFound(*lease_id))?;
         lease.reconnect(now_ms)?;
         // Clear disconnection badge on all tiles owned by this lease.
-        // Compositor must clear the badge within 1 frame (spec line 141).
+        // Compositor must clear the badge within 1 frame.
         for tile in self.tiles.values_mut() {
             if tile.lease_id == *lease_id {
                 tile.visual_hint = crate::lease::TileVisualHint::None;
@@ -467,8 +467,8 @@ impl SceneGraph {
             lease.state = terminal_state;
         }
 
-        // Spec §Requirement: Lease Revocation Clears Zone Publications
-        // (lines 235–242): When a lease is REVOKED or EXPIRED, all zone
+        // Lease Revocation Clears Zone Publications
+        //: When a lease is REVOKED or EXPIRED, all zone
         // publications made under that lease MUST be immediately cleared.
         // Widget publications are also cleared on lease expiry/revocation.
         if terminal_state.is_terminal() {

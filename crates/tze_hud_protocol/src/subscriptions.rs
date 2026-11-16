@@ -1,4 +1,4 @@
-//! Subscription category management for the session protocol (RFC 0005 §7).
+//! Subscription category management for the session protocol.
 //!
 //! # Overview
 //!
@@ -29,14 +29,14 @@
 //! - `INPUT_EVENTS` subscription: all other pointer, key, scroll,
 //!   command, and character events.
 //!
-//! Per-variant filtering preserves within-batch ordering (RFC 0004 §8.4).
+//! Per-variant filtering preserves within-batch ordering.
 //! An agent subscribed only to `input_events` receives pointer/key events but
 //! NOT focus events. An agent not subscribed to either receives no events
 //! from the batch (the batch is not delivered at all).
 
 use crate::proto::{EventBatch, InputEnvelope, input_envelope};
 
-/// Well-known subscription category names (RFC 0005 §7.1, RFC 0010 §1.2).
+/// Well-known subscription category names.
 pub mod category {
     /// Scene topology events: tile creation/deletion/update. Requires `read_scene_topology`.
     pub const SCENE_TOPOLOGY: &str = "SCENE_TOPOLOGY";
@@ -152,7 +152,7 @@ pub fn filter_subscriptions(
 /// Returns `true` if the given [`InputEnvelope`] variant is a focus event
 /// (must be filtered by the `FOCUS_EVENTS` subscription).
 ///
-/// Focus variants per RFC 0005 §7.1:
+/// Focus variants:
 /// - `FocusGainedEvent`
 /// - `FocusLostEvent`
 /// - `CaptureReleasedEvent`
@@ -178,10 +178,10 @@ pub fn is_input_variant(envelope: &InputEnvelope) -> bool {
 
 /// Filter an [`EventBatch`] based on the agent's active subscriptions.
 ///
-/// Per RFC 0005 §7.1:
+///
 /// - Focus variants are included only if the agent has `FOCUS_EVENTS` active.
 /// - Input variants are included only if the agent has `INPUT_EVENTS` active.
-/// - Within-batch ordering is preserved (RFC 0004 §8.4).
+/// - Within-batch ordering is preserved.
 ///
 /// Returns `Some(filtered_batch)` if any events remain after filtering, or
 /// `None` if all events were removed (the batch should not be sent at all).
@@ -286,7 +286,7 @@ mod tests {
     #[test]
     fn test_input_events_denied_without_capability() {
         // WHEN agent requests INPUT_EVENTS without access_input_events capability
-        // THEN subscription denied, listed in denied_subscriptions (spec lines 455-457)
+        // THEN subscription denied, listed in denied_subscriptions
         let result = filter_subscriptions(&["INPUT_EVENTS".to_string()], &[]);
         assert!(!result.active.contains(&"INPUT_EVENTS".to_string()));
         assert!(result.denied.contains(&"INPUT_EVENTS".to_string()));
@@ -312,7 +312,7 @@ mod tests {
     #[test]
     fn test_focus_events_filtered_when_no_focus_subscription() {
         // WHEN agent subscribed to input_events but not focus_events
-        // THEN agent receives pointer/key but NOT focus events (spec lines 481-483)
+        // THEN agent receives pointer/key but NOT focus events
         let subs = vec![category::INPUT_EVENTS.to_string()];
 
         let batch = EventBatch {

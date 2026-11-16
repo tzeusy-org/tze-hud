@@ -1,11 +1,11 @@
-//! Bidirectional streaming session server implementing RFC 0005.
+//! Bidirectional streaming session server implementing.
 //!
 //! This module provides `HudSessionImpl`, the server-side implementation of the
 //! `HudSession` gRPC service. It manages the bidirectional streaming session
 //! lifecycle: handshake, publication management, resource uploads, heartbeats,
 //! event dispatch, and reconnection.
 //!
-//! # Session Lifecycle State Machine (RFC 0005 §1.1)
+//! # Session Lifecycle State Machine
 //!
 //! ```text
 //! Connecting → Handshaking → Active → Disconnecting → Closed → Resuming
@@ -86,7 +86,7 @@ const HEARTBEAT_MISSED_THRESHOLD: u64 = 3;
 const DEFAULT_HEARTBEAT_TIMEOUT_MS: u64 =
     DEFAULT_HEARTBEAT_INTERVAL_MS * HEARTBEAT_MISSED_THRESHOLD;
 
-/// Default maximum sequence gap before SEQUENCE_GAP_EXCEEDED (RFC 0005 §2.3).
+/// Default maximum sequence gap before SEQUENCE_GAP_EXCEEDED.
 const DEFAULT_MAX_SEQUENCE_GAP: u64 = 100;
 
 // ─── Helper ─────────────────────────────────────────────────────────────────
@@ -322,7 +322,7 @@ impl HudSession for HudSessionImpl {
             // labeled block so no early exit can skip the cleanup below.
             let mut upload_worker = None;
             'active: {
-                // Transition: Handshaking/Resuming → Active (RFC 0005 §1.1)
+                // Transition: Handshaking/Resuming → Active
                 session.transition(SessionState::Active);
 
                 // Safe mode reaches this stream through the registry: it needs
@@ -382,10 +382,10 @@ impl HudSession for HudSessionImpl {
                 // ungraceful (agent dropped the connection without sending SessionClose).
                 //
                 // The loop also listens on `degradation_rx` for transactional DegradationNotice
-                // broadcasts (RFC 0005 §3.4). These are delivered unconditionally to all active
+                // broadcasts. These are delivered unconditionally to all active
                 // sessions regardless of subscription config and are never dropped.
                 loop {
-                    // Use heartbeat timeout for receive (RFC 0005 §1.6, §3.6)
+                    // Use heartbeat timeout for receive
                     let timeout_duration =
                         tokio::time::Duration::from_millis(DEFAULT_HEARTBEAT_TIMEOUT_MS);
 
@@ -410,7 +410,7 @@ impl HudSession for HudSessionImpl {
                             }
                         }
 
-                        // ── DegradationNotice broadcast (RFC 0005 §3.4, §7.1) ────
+                        // ── DegradationNotice broadcast ────
                         //
                         // Transactional — delivered unconditionally to all active sessions
                         // regardless of subscription config. Never dropped.
@@ -420,7 +420,7 @@ impl HudSession for HudSessionImpl {
                             }
                         }
 
-                        // ── Runtime-injected input EventBatch (hud-i6yd.6) ───────────
+                        // ── Runtime-injected input EventBatch ───────────
                         //
                         // The compositor input pipeline (Stage 2) assembles ClickEvent /
                         // CommandInputEvent batches for the owning agent and injects them
@@ -438,7 +438,7 @@ impl HudSession for HudSessionImpl {
                             }
                         }
 
-                        // ── ElementRepositionedEvent broadcast (hud-bs2q.6) ──────────
+                        // ── ElementRepositionedEvent broadcast ──────────
                         //
                         // Emitted after drag completion or reset-to-default. Delivered to
                         // agents subscribed to SCENE_TOPOLOGY (requires read_scene_topology).
@@ -449,7 +449,7 @@ impl HudSession for HudSessionImpl {
                             }
                         }
 
-                        // ── FramePresented broadcast (hud-91uu6) ─────────────────────
+                        // ── FramePresented broadcast ─────────────────────
                         //
                         // Batch-correlated present acknowledgment: pairs the accepted
                         // MutationBatch.batch_ids composited into a presented frame with
@@ -708,7 +708,7 @@ impl StreamSession {
     ) -> LoopAction {
         match msg_result {
             Ok(Ok(Some(msg))) => {
-                // Retransmit fast-path (RFC 0005 §5.3).
+                // Retransmit fast-path.
                 //
                 // For lease operations there is no batch_id correlation key;
                 // the client-side sequence number serves as the correlation key.
@@ -733,7 +733,7 @@ impl StreamSession {
                     return LoopAction::Continue;
                 }
 
-                // Validate client sequence number (RFC 0005 §2.3).
+                // Validate client sequence number.
                 // Skip validation for sequence 0 (unset) to allow legacy callers
                 // that don't set sequences. Sequence must be monotonically increasing
                 // starting at 2 (since 1 is the handshake message).
@@ -787,7 +787,7 @@ impl StreamSession {
                 LoopAction::Break
             }
             Err(_) => {
-                // Heartbeat timeout (RFC 0005 §1.6, §3.6)
+                // Heartbeat timeout
                 self.transition(SessionState::Closed);
                 LoopAction::Break
             }
@@ -863,7 +863,7 @@ impl StreamSession {
         }
     }
 
-    /// Handle a `DegradationNotice` broadcast result (RFC 0005 §3.4, §7.1).
+    /// Handle a `DegradationNotice` broadcast result.
     ///
     /// Transactional — delivered unconditionally to all active sessions.
     async fn on_degradation(
@@ -891,7 +891,7 @@ impl StreamSession {
         }
     }
 
-    /// Handle a runtime-injected input `EventBatch` broadcast result (hud-i6yd.6).
+    /// Handle a runtime-injected input `EventBatch` broadcast result.
     ///
     /// The compositor input pipeline assembles ClickEvent / CommandInputEvent batches
     /// for the owning agent. Only batches addressed to this session's namespace are
@@ -933,7 +933,7 @@ impl StreamSession {
         }
     }
 
-    /// Handle an `ElementRepositionedEvent` broadcast result (hud-bs2q.6).
+    /// Handle an `ElementRepositionedEvent` broadcast result.
     ///
     /// Emitted after drag completion or reset-to-default. Delivered to
     /// agents subscribed to SCENE_TOPOLOGY (requires read_scene_topology).
@@ -979,7 +979,7 @@ impl StreamSession {
         }
     }
 
-    /// Handle a `FramePresented` broadcast result (hud-91uu6).
+    /// Handle a `FramePresented` broadcast result.
     ///
     /// Batch-correlated present acknowledgment. Delivered to agents subscribed to
     /// TELEMETRY_FRAMES (requires the read_telemetry capability, enforced at
@@ -1029,7 +1029,7 @@ impl StreamSession {
     }
 }
 
-/// Maximum future schedule horizon in microseconds (RFC 0003 §3.5, default 5 minutes).
+/// Maximum future schedule horizon in microseconds (default 5 minutes).
 pub(super) const DEFAULT_MAX_FUTURE_SCHEDULE_US: u64 = 300_000_000;
 
 pub(super) fn capability_grant_covers(granted: &str, requested: &str) -> bool {

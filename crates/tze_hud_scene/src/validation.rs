@@ -1,6 +1,6 @@
 //! Validation errors for scene graph operations.
 //!
-//! # Structured batch errors (RFC 0001 §3.4)
+//! # Structured batch errors
 //!
 //! [`BatchRejected`] is the structured rejection response for a [`crate::mutation::MutationBatch`].
 //! It carries a [`BatchValidationError`] for each failing mutation, containing:
@@ -44,7 +44,7 @@ pub enum ValidationError {
     DuplicateDisplayOrder { order: u32 },
 
     /// An ID that must be unique appears more than once in the scene graph.
-    /// RFC 0001 §2.1: no TabId, TileId, or NodeId may appear more than once.
+    /// no TabId, TileId, or NodeId may appear more than once.
     #[error("duplicate id: {id}")]
     DuplicateId { id: SceneId },
 
@@ -52,14 +52,13 @@ pub enum ValidationError {
     InvalidField { field: String, reason: String },
 
     /// Tile bounds failed a spatial constraint (non-positive dimensions or out-of-display-area).
-    /// RFC 0001 §2.3.
     #[error("bounds out of range: {reason}")]
     BoundsOutOfRange { reason: String },
 
     #[error("budget exceeded: {resource}")]
     BudgetExceeded { resource: String },
 
-    /// A tile already has the maximum number of nodes (64 per RFC 0001 §2.1).
+    /// A tile already has the maximum number of nodes (64 ).
     #[error("node count exceeded for tile {tile_id}: has {current}, limit {limit}")]
     NodeCountExceeded {
         tile_id: SceneId,
@@ -68,7 +67,7 @@ pub enum ValidationError {
     },
 
     /// A mutation referenced a ResourceId that is not registered with the runtime.
-    /// RFC 0001 §2.4: StaticImageNode referencing unknown ResourceId.
+    /// StaticImageNode referencing unknown ResourceId.
     #[error("resource not found: {id}")]
     ResourceNotFound { id: ResourceId },
 
@@ -88,7 +87,7 @@ pub enum ValidationError {
     ZoneMaxKeysReached { zone: String, max: u32 },
 
     /// A mutation was rejected because the requesting agent does not own the target tile.
-    /// RFC 0001 §1.2: namespace isolation.
+    /// namespace isolation.
     #[error(
         "namespace mismatch: tile {tile_id} belongs to namespace '{tile_namespace}', not '{agent_namespace}'"
     )]
@@ -116,16 +115,16 @@ pub enum ValidationError {
     #[error("batch size exceeded: max {max}, got {got}")]
     BatchSizeExceeded { max: usize, got: usize },
 
-    // ── Lease-state zone-publish errors (spec §Zone Publish Requires Active Lease) ──
+    // ── Lease-state zone-publish errors ──
     /// Zone publish rejected: no active lease found for publisher namespace.
     ///
-    /// Spec line 214: "Missing lease MUST produce `LEASE_NOT_FOUND`".
+    ///: "Missing lease MUST produce `LEASE_NOT_FOUND`".
     #[error("zone publish rejected: lease not found for namespace '{namespace}'")]
     ZonePublishLeaseNotFound { namespace: String },
 
     /// Zone publish rejected: lease exists but is not in ACTIVE state.
     ///
-    /// Spec line 214: "inactive lease `LEASE_NOT_ACTIVE`".
+    ///: "inactive lease `LEASE_NOT_ACTIVE`".
     /// Covers other non-ACTIVE lease states not handled by specialized variants
     /// (for example, terminal states such as REVOKED, EXPIRED, RELEASED, DENIED).
     /// SUSPENDED and ORPHANED have dedicated variants (`ZonePublishSafeModeActive`,
@@ -135,19 +134,19 @@ pub enum ValidationError {
 
     /// Zone publish rejected: lease is SUSPENDED (safe mode active).
     ///
-    /// Spec line 227: "New zone publishes under the suspended lease MUST be
+    ///: "New zone publishes under the suspended lease MUST be
     /// rejected with `SAFE_MODE_ACTIVE`".
     #[error("zone publish rejected: safe mode active for lease '{namespace}'")]
     ZonePublishSafeModeActive { namespace: String },
 
     /// Zone publish rejected: lease is ORPHANED (agent disconnected).
     ///
-    /// Spec lines 231–233 (adapted to orphan): existing publications remain
+    /// Existing publications remain
     /// visible with stale badge; new publishes are rejected.
     #[error("zone publish rejected: lease for '{namespace}' is orphaned (agent disconnected)")]
     ZonePublishLeaseOrphaned { namespace: String },
 
-    // ── Widget publish errors (widget-system spec) ─────────────────────────────
+    // ── Widget publish errors ─────────────────────────────
     /// Widget publish rejected: widget instance not found in the registry.
     #[error("widget not found: '{name}'")]
     WidgetNotFound { name: String },
@@ -181,7 +180,7 @@ pub enum ValidationError {
     WidgetMaxPublishersReached { widget: String, max: u32 },
 }
 
-// ─── Stable error codes (RFC 0001 §3.4) ─────────────────────────────────────
+// ─── Stable error codes ─────────────────────────────────────
 
 /// Stable validation error codes. These are stable across minor versions and
 /// are the machine-readable discriminants in [`BatchValidationError`].
@@ -312,7 +311,7 @@ impl ValidationErrorCode {
     }
 }
 
-// ─── Structured per-mutation validation error (RFC 0001 §3.4) ───────────────
+// ─── Structured per-mutation validation error ───────────────
 
 /// Structured per-mutation validation error included in a [`BatchRejected`] response.
 ///
@@ -533,7 +532,7 @@ fn build_context_and_hint(
     }
 }
 
-// ─── BatchRejected (RFC 0001 §3.4) ───────────────────────────────────────────
+// ─── BatchRejected ───────────────────────────────────────────
 
 /// The structured rejection response for an atomic [`crate::mutation::MutationBatch`].
 ///

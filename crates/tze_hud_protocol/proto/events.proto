@@ -44,7 +44,7 @@ message ElementRepositionedEvent {
 // The input event messages below encode tile_id and node_id as raw 16-byte
 // UUIDv7 (bytes), matching the SceneId convention in types.proto.
 //
-// All hardware timestamps use the _mono_us suffix (monotonic domain per RFC 0005 §2.4).
+// All hardware timestamps use the _mono_us suffix (monotonic time).
 
 // Pointer move event (ephemeral realtime — may be coalesced/dropped under backpressure).
 message PointerMoveEvent {
@@ -225,7 +225,7 @@ message ScrollOffsetChangedEvent {
 }
 
 // Abstract command input event — transactional (never coalesced or dropped).
-// Delivers abstract navigational and activation commands per RFC 0004 §10.
+// Delivers abstract navigational and activation commands.
 enum CommandAction {
   COMMAND_ACTION_UNSPECIFIED  = 0;
   COMMAND_ACTION_NAVIGATE_NEXT  = 1;
@@ -257,13 +257,13 @@ message CommandInputEvent {
   CommandSource source          = 7;
 }
 
-// ─── Input Envelope and Event Batch (RFC 0004 §8.3, §8.4, §9.1) ───────────────
+// ─── Input Envelope and Event Batch ───────────────
 //
 // InputEnvelope is a oneof covering the input event types the runtime produces.
 // EventBatch groups per-frame events for a single agent on ServerMessage field 34.
 // Multiple input events within a single compositor frame are batched into a single
 // EventBatch and delivered as a single ServerMessage. Within a batch, events are
-// ordered by timestamp_mono_us ascending (RFC 0004 §8.4).
+// ordered by timestamp_mono_us ascending.
 //
 // NOTE: Fields 7-8 (DoubleClickEvent, ContextMenuEvent) were never defined; fields
 // 15-19 (gesture and IME composition events) were removed. Numbers below skip these
@@ -280,7 +280,7 @@ message InputEnvelope {
            "ime_composition_end";
 
   oneof event {
-    // Pointer events (RFC 0004 §9.1 field assignments)
+    // Pointer events
     PointerDownEvent        pointer_down         = 1;   // transactional
     PointerUpEvent          pointer_up           = 2;   // transactional
     PointerMoveEvent        pointer_move         = 3;   // ephemeral realtime
@@ -299,7 +299,7 @@ message InputEnvelope {
     FocusGainedEvent        focus_gained         = 13;  // transactional
     FocusLostEvent          focus_lost           = 14;  // transactional
 
-    // Capture events (FOCUS_EVENTS subscription category; RFC 0004 §8.3.1)
+    // Capture events (FOCUS_EVENTS subscription category; )
     CaptureReleasedEvent    capture_released     = 20;  // transactional
 
     // Scroll events
@@ -312,13 +312,13 @@ message InputEnvelope {
   }
 }
 
-// Per-frame event batch delivered on ServerMessage field 34 (RFC 0004 §8.4, RFC 0005 §3.1).
+// Per-frame event batch delivered on ServerMessage field 34.
 // All events in a batch are for the same agent session and frame.
-// Variants are filtered per RFC 0005 §7.1 before delivery (input_events vs. focus_events
+// Variants are filtered before delivery (input_events vs. focus_events
 // subscription categories).
 message EventBatch {
   uint64                  frame_number = 1;  // Compositor frame number (monotonically increasing)
-  uint64                  batch_ts_us  = 2;  // Batch assembly timestamp (wall-clock UTC µs; RFC 0003 §1.1)
+  uint64                  batch_ts_us  = 2;  // Batch assembly timestamp (wall-clock UTC µs; )
   repeated InputEnvelope  events       = 3;  // Ordered by timestamp_mono_us ascending
 }
 

@@ -11,7 +11,7 @@ independent agents (agent-weather, agent-power, agent-clock) publishing
 key-value entries with distinct merge keys. Validates merge-by-key contention,
 multi-agent coexistence, key replacement, empty-value removal, and TTL expiry.
 
-10-step sequence (as defined in spec §User-Test Scenario):
+10-step user-test sequence:
   Step 1  — agent-weather publishes merge_key "weather" → "72F Sunny"
   Step 2  — agent-power   publishes merge_key "battery" → "85%"
   Step 3  — agent-clock   publishes merge_key "time"    → "3:42 PM"

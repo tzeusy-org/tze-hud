@@ -29,7 +29,7 @@ class HudSessionStub(object):
     """─── Session Protocol ─────────────────────────────────────────────────────────
 
     Bidirectional streaming session protocol for resident agent <-> runtime
-    communication. Implements RFC 0005 (Session/Protocol).
+    communication.
 
     This replaces the unary-RPC model in SceneService with a single
     multiplexed bidirectional stream per agent.
@@ -58,7 +58,7 @@ class HudSessionServicer(object):
     """─── Session Protocol ─────────────────────────────────────────────────────────
 
     Bidirectional streaming session protocol for resident agent <-> runtime
-    communication. Implements RFC 0005 (Session/Protocol).
+    communication.
 
     This replaces the unary-RPC model in SceneService with a single
     multiplexed bidirectional stream per agent.
@@ -72,8 +72,8 @@ class HudSessionServicer(object):
 
     def Session(self, request_iterator, context):
         """Primary bidirectional session stream.
-        All session traffic (handshake, mutations, events, heartbeats,
-        lease management, subscriptions) flows over this single stream.
+        All session traffic (handshake, publications, uploads, events,
+        heartbeats and subscriptions) flows over this single stream.
         """
         context.set_code(grpc.StatusCode.UNIMPLEMENTED)
         context.set_details('Method not implemented!')
@@ -99,7 +99,7 @@ class HudSession(object):
     """─── Session Protocol ─────────────────────────────────────────────────────────
 
     Bidirectional streaming session protocol for resident agent <-> runtime
-    communication. Implements RFC 0005 (Session/Protocol).
+    communication.
 
     This replaces the unary-RPC model in SceneService with a single
     multiplexed bidirectional stream per agent.

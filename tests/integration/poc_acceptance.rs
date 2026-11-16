@@ -862,7 +862,7 @@ async fn poc_portal_attach_stream_reply_detach() {
     );
 }
 
-/// §10 / spec R5.1: the hide chord pressed while typing in a portal
+/// spec R5.1: the hide chord pressed while typing in a portal
 /// composer hides everything and blurs it, so keys can never reach a hidden
 /// surface; pressed while paused it hides and shows without leaving pause.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -1823,10 +1823,10 @@ async fn poc_panel_connect_prompt_pairs_an_agent() {
     assert!(!poc.hud.safe_mode_active());
 }
 
-/// Layout (T11, hud-vniri.7): a widget is moved by typing its box and its
+/// Layout (T11): a widget is moved by typing its box and its
 /// content limit is chosen, both live in the scene and saved into its own
 /// `[[tabs.widgets]]` entry with the owner's comments kept; a box off the
-/// display is refused and changes nothing. Zone monitor choices (hud-vniri.8)
+/// display is refused and changes nothing. Zone monitor choices
 /// move the compositor's live target and save exact keys/comments, survive a
 /// restart, refuse stale topology and report session-only save failures.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
@@ -2079,7 +2079,7 @@ async fn poc_panel_layout_moves_widgets_and_saves_their_entry() {
 
     // Overlay availability must never change a base alias's hardware
     // ambiguity. Drive the real adoption/resolver/publisher before reading
-    // actual panel rows and compositor placement (review P2 hud-ysdn7).
+    // actual panel rows and compositor placement (review P2 ).
     let alias = "DEL41A2-SAME";
     let a = "DEL41A2-SAME@PORT-A";
     let b = "DEL41A2-SAME@PORT-B";
@@ -2176,7 +2176,7 @@ async fn poc_panel_layout_moves_widgets_and_saves_their_entry() {
     }
 }
 
-/// Appearance (T11 CP-5, hud-h51u7.5): the theme and any token change the
+/// Appearance (T11 CP-5): the theme and any token change the
 /// tokens the HUD draws with on its next turn and are saved to
 /// `[design_tokens]` with the owner's comments kept; a token takes only a
 /// value of its kind; Reset all overrides removes every override, even one
@@ -2700,7 +2700,7 @@ async fn poc_override_notifies_the_agent() {
     );
 }
 
-/// §3: agents never learn the panel is open or what the owner hid. Every
+///: agents never learn the panel is open or what the owner hid. Every
 /// agent-visible answer (discovery, zone, widget and portal publishes, a
 /// resident tile claim's reply, and no unsolicited stream message before
 /// it) reads the same with the panel closed, open, with each surface class

@@ -1,11 +1,11 @@
-//! Best-effort file diagnostics for freeze investigation (hud-pi5wx).
+//! Best-effort file diagnostics for freeze investigation.
 //!
 //! The overlay launches via a scheduled task with **no stdout/stderr capture**
 //! (redirecting them breaks `WS_EX_NOREDIRECTIONBITMAP` transparency), so a
 //! `tracing` line emitted during a freeze is lost. This module appends
 //! diagnostics to a file instead, so a present-stall leaves a durable trail.
 //!
-//! Introduced during the hud-pi5wx present-stall investigation and kept as
+//! Introduced during the present-stall investigation and kept as
 //! permanent observability: a panic or stall on the compositor/render path
 //! would otherwise be invisible in the overlay deployment, leaving no trail to
 //! diagnose a freeze after the fact.

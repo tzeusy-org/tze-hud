@@ -40,7 +40,7 @@ async fn test_chrome_always_above_max_zorder_tile() {
     compositor.init_text_renderer(wgpu::TextureFormat::Rgba8UnormSrgb);
 
     // Agent tiles must use z_order < ZONE_TILE_Z_MIN (0x8000_0000); u32::MAX is
-    // reserved for runtime zone tiles (scene-graph/spec.md §Zone Layer Attachment).
+    // reserved for runtime zone tiles.
     use tze_hud_scene::types::ZONE_TILE_Z_MIN;
     let max_agent_z = ZONE_TILE_Z_MIN - 1; // 0x7FFF_FFFF
     let mut scene = SceneGraph::new(256.0, 256.0);
@@ -207,7 +207,7 @@ async fn test_chrome_always_above_max_zorder_tile() {
     }
 }
 
-/// hud-w5zon: the system card (backdrop AND text) is the last pass, above a
+/// the system card (backdrop AND text) is the last pass, above a
 /// max-z tile and the safe-mode overlay, so the pairing code stays readable.
 /// Pixel readback via the admin-capture seam (no swapchain, no deadlock).
 #[tokio::test]
@@ -297,7 +297,7 @@ async fn test_render_frame_via_compositor_surface_trait() {
     let (mut compositor, surface) = require_gpu!(make_compositor_and_surface(256, 256).await);
     let mut scene = SceneGraph::new(256.0, 256.0);
 
-    // Prime before render per the Stage-4 commit-time prime contract (hud-380dl / hud-v2z6u).
+    // Prime before render per the Stage-4 commit-time prime contract.
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
     // render_frame takes &dyn CompositorSurface — no special headless branch.
@@ -309,7 +309,7 @@ async fn test_render_frame_via_compositor_surface_trait() {
     assert_eq!(telemetry.tile_count, 0, "empty scene has no tiles");
 }
 
-/// hud-uyhpn lock-scope split: `build_windowed_frame` must produce the frame's
+/// lock-scope split: `build_windowed_frame` must produce the frame's
 /// scene geometry WITHOUT touching the surface, and `present_windowed_frame`
 /// must then consume that build to yield equivalent telemetry.
 ///
@@ -371,7 +371,7 @@ async fn build_windowed_frame_decoupled_from_surface_then_presents() {
         )
         .unwrap();
 
-    // Prime per the Stage-4 commit-time prime contract (hud-380dl / hud-v2z6u).
+    // Prime per the Stage-4 commit-time prime contract.
     compositor.prime_markdown_cache(&scene);
     compositor.prime_truncation_cache(&scene);
 
@@ -408,7 +408,7 @@ async fn build_windowed_frame_decoupled_from_surface_then_presents() {
 }
 
 /// An admin capture renders a built frame offscreen without acquiring or
-/// presenting anything, and returns the frame's pixels (hud-i2e10.8).
+/// presenting anything, and returns the frame's pixels.
 #[tokio::test]
 async fn capture_windowed_frame_reads_back_the_built_frame() {
     let (mut compositor, _surface) = require_gpu!(make_compositor_and_surface(320, 200).await);

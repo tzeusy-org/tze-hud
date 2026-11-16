@@ -1,4 +1,4 @@
-//! Keyboard focus-ring owner plumbing for the chrome-layer ring pass (hud-k6yvb).
+//! Keyboard focus-ring owner plumbing for the chrome-layer ring pass.
 //!
 //! The runtime's `FocusManager` owns keyboard focus; the compositor draws the
 //! ring. Node-level focus is visible to the compositor via
@@ -7,7 +7,7 @@
 //! cannot see it. Rather than special-case only what the scene exposes, the
 //! runtime plumbs the current focus owner here and the compositor draws the ring
 //! for ANY owner — tile-level or node, in any tile — in a single chrome-layer
-//! pass above all agent content (input-model §416).
+//! pass above all agent content (input-model ).
 
 use std::sync::{Arc, Mutex as StdMutex};
 

@@ -58,7 +58,7 @@ ignore = [
     { id = "RUSTSEC-2026-0206", reason = "Unmaintained rustybuzz via cosmic-text←glyphon (wgpu→Rust 1.88 co-pin, same chain as the paste/ttf-parser waivers) and via usvg←resvg. Shapes local fonts / bundled SVGs only. Tracked in hud-qrmw1; remove with the wgpu 28+ MSRV bump + resvg update." },
     # RUSTSEC-2026-0194 / RUSTSEC-2026-0195: quick-xml DoS (quadratic dup-attr
     # check; unbounded NsReader namespace allocation), fixed in >=0.41. Our
-    # DIRECT workspace dependency was bumped to 0.41 (2026-07-02, hud-sv7z2);
+    # DIRECT workspace dependency was bumped to 0.41 (2026-07-02, );
     # the ONLY remaining vulnerable instance is quick-xml@0.39.2 inside
     # `wayland-scanner`, a compile-time proc-macro (smithay-client-toolkit ←
     # sctk-adwaita ← winit 0.30) that parses the vendored Wayland protocol XML

@@ -500,7 +500,7 @@ async fn idle_with_notification_renders_only_at_fade() {
     assert_eq!(compositor.next_animation_deadline(), None);
 }
 
-/// Idle render gate — composer carve-out (hud-ilivg / hud-r3ax6).
+/// Idle render gate — composer carve-out.
 ///
 /// The local draft echo and the caret blink are driven off out-of-band state
 /// that never bumps `scene.version`. Before the idle gate the compositor thread
@@ -666,7 +666,7 @@ async fn idle_render_gate_renders_for_composer_echo_and_caret_blink() {
     assert!(!compositor.drain_local_composer_and_needs_render());
 
     // The viewer close-button hover target dirties the gate once per change and
-    // not while it stays put (hud-jm8nq.11: no per-frame redraw while idle).
+    // not while it stays put (no per-frame redraw while idle).
     *compositor.tile_close_hover_state.lock().unwrap() = Some(tile_id);
     assert!(compositor.drain_local_composer_and_needs_render());
     assert!(

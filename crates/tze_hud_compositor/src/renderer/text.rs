@@ -3,7 +3,7 @@
 //! Moved from `renderer/mod.rs` text-collection cluster (formerly ~L3546–4287
 //! pre-split), plus `collect_ellipsis_text_items_from_node` from the
 //! module-level helpers section, by Step R-4 of the renderer module split
-//! (hud-fgryk).  No logic was changed; only visibility modifiers were added
+//!. No logic was changed; only visibility modifiers were added
 //! where Rust's module-privacy rules require them (listed in the PR body).
 
 use std::collections::HashMap;
@@ -35,7 +35,7 @@ const DEFAULT_LINE_HEIGHT_MULTIPLIER: f32 = 1.4;
 /// emitting fully-transparent `TextItem`s.  This mirrors the quad/backdrop path
 /// (which paints nothing at a zero-alpha tile) so a minimized tile — opacity
 /// driven to 0 by `update_tile_opacity(0.0)` — leaves NO floating glyphs on
-/// screen (hud-dat3x).  Chosen well below one 8-bit alpha step (1/255 ≈ 0.0039)
+/// screen. Chosen well below one 8-bit alpha step (1/255 ≈ 0.0039)
 /// so any perceptible fraction still blends.
 pub(super) const TILE_TEXT_OPACITY_EPSILON: f32 = 1e-4;
 
@@ -119,7 +119,7 @@ impl super::Compositor {
     /// - `policy.stream_tail_anchored == Some(true)` →
     ///   [`TruncationViewport::TailAnchored`]: a streaming surface shows the
     ///   **newest** content (the tail), mirroring the transcript portal's
-    ///   follow-tail behaviour (spec §3.2).
+    ///   follow-tail behaviour.
     /// - otherwise → [`TruncationViewport::HeadAnchored`] (the default;
     ///   preserves the pre-existing behaviour for all zones that have not opted
     ///   in).
@@ -370,10 +370,10 @@ impl super::Compositor {
             match zone_def.contention_policy {
                 ContentionPolicy::Stack { .. } => {
                     // Slot geometry is computed once by zone_slot_layout and shared
-                    // with render_zone_content / collect_all_rounded_rect_cmds (hud-qlerb).
+                    // with render_zone_content / collect_all_rounded_rect_cmds.
                     let layout = self.zone_slot_layout(scene, zone_name, publishes, policy, zh, zw);
                     // Cards and alert banners take every size and colour from
-                    // their `NotificationStyle` (hud-h51u7.4.1, hud-h51u7.4.2).
+                    // their `NotificationStyle`.
                     let style = NotificationStyle::for_zone(zone_name, zone_tokens, policy);
 
                     for (pub_idx, card) in layout.iter_visible(Rect::new(zx, zy, zw, zh)) {
@@ -882,7 +882,7 @@ impl super::Compositor {
     pub(super) fn collect_text_items(&self, scene: &SceneGraph, sw: f32, sh: f32) -> Vec<TextItem> {
         let mut items: Vec<TextItem> = Vec::new();
 
-        // Transcript optimal-measure cap (hud-rivcy): resolve once per frame; a
+        // Transcript optimal-measure cap: resolve once per frame; a
         // positive value narrows portal-surface transcript wrapping, `0` leaves
         // it unbounded. Gated to portal (scrollable) tiles per-tile below, the
         // same surface signal that selects the portal markdown token scope.
@@ -897,7 +897,7 @@ impl super::Compositor {
                 //     (× drag boost). The exemplar minimize path drives this to 0
                 //     via `update_tile_opacity(0.0)`; it is a persistent state, not
                 //     a per-frame animation.
-                //   • the §6.3 portal-transition animation opacity — a TRANSIENT
+                //   • the portal-transition animation opacity — a TRANSIENT
                 //     per-frame fade that a portal passes through while collapsing
                 //     or expanding.
                 //
@@ -905,14 +905,14 @@ impl super::Compositor {
                 // has `base_opacity == 1` while its animation opacity ramps up from
                 // 0; shaping it now (and blending the item alpha down) warms the
                 // shaped-buffer cache so the fade reuses one shape instead of
-                // re-shaping when it crosses the visibility threshold (hud-991cj).
+                // re-shaping when it crosses the visibility threshold.
                 // Gating the skip on the *combined* value would defer that shape
                 // into the middle of the animation — a per-frame re-shape hitch.
                 let base_opacity = self.rendered_tile_opacity(tile, scene);
                 if base_opacity <= TILE_TEXT_OPACITY_EPSILON {
                     // Durably invisible (minimized / dragged to zero): collect,
                     // shape, truncate, and draw nothing — no floating glyphs
-                    // (hud-dat3x). Matches the quad/backdrop path, which paints
+                    //. Matches the quad/backdrop path, which paints
                     // nothing at a zero-alpha tile.
                     continue;
                 }
@@ -923,14 +923,13 @@ impl super::Compositor {
 
                 // Compute scroll offset once per tile and pass it down so text
                 // glyph positions track the scrolled content (Bounded Transcript
-                // Viewport requirement — hud-w5ih).
+                // Viewport requirement — ).
                 let (scroll_x, scroll_y) = self.display_tile_scroll_offset(scene, tile.id);
                 // Determine follow-tail state so Ellipsis TextItems receive the
                 // correct TruncationViewport (TailAnchored vs HeadAnchored).
                 // Uses the shared helper that prime_truncation_cache /
                 // collect_ellipsis_text_items_from_node also calls, so the
-                // per-frame key always matches the primed cache entry (hud-lu50e,
-                // hud-plz8q).
+                // per-frame key always matches the primed cache entry.
                 let at_tail = super::tile_at_tail_for_ellipsis(tile.id, scene);
 
                 // Track item count before so the tile's whole-tile opacity can be
@@ -944,7 +943,7 @@ impl super::Compositor {
                 } else {
                     0.0
                 };
-                // Per-part portal-surface consumption (hud-s4lrw): when the tile
+                // Per-part portal-surface consumption: when the tile
                 // declares a `PortalSurface`, resolve each node's part so the
                 // recursion applies transcript scope + a per-part clip band only
                 // where the schema says. `None` preserves legacy tile-level
@@ -967,7 +966,7 @@ impl super::Compositor {
                 // Fractional opacity: blend every glyph (transcript, cached
                 // markdown, plain, and ellipsis/truncation items alike) the tile
                 // just contributed, proportionally — matching the backdrop fade.
-                // This includes the §6.3 portal animation opacity, since
+                // This includes the portal animation opacity, since
                 // `tile_effective_opacity` already folds it in.
                 if tile_opacity < 1.0 {
                     for item in &mut items[items_before..] {
@@ -975,9 +974,9 @@ impl super::Compositor {
                     }
                 }
 
-                // The per-segment streaming-reveal fade (hud-bl7yi) is applied
+                // The per-segment streaming-reveal fade is applied
                 // inline in `collect_text_items_from_node`, routed by
-                // `(tile, node)` identity (hud-g8xpg), so it never cross-fades a
+                // `(tile, node)` identity, so it never cross-fades a
                 // settled node onto a same-text revealing sibling. Nothing to do
                 // here.
             }
@@ -985,7 +984,7 @@ impl super::Compositor {
 
         self.collect_zone_text_items(scene, sw, sh, false, &mut items);
 
-        // ── Composer echo text (hud-r3ax6) ───────────────────────────────────
+        // ── Composer echo text ───────────────────────────────────
         // Inject a TextItem for the local composer draft + caret glyph on top of
         // the composer-active tile.  The background geometry is handled in
         // render_composer_overlay / render_frame tile loop.
@@ -997,7 +996,7 @@ impl super::Compositor {
                 {
                     // Fold the whole-tile opacity into the composer draft so it
                     // fades with (and vanishes alongside) the tile backdrop
-                    // rather than floating over a minimized tile (hud-dat3x).
+                    // rather than floating over a minimized tile.
                     // Skip only on DURABLE invisibility (scene tile.opacity); a
                     // transient portal fade still shapes and blends.
                     if self.rendered_tile_opacity(tile, scene) > TILE_TEXT_OPACITY_EPSILON {
@@ -1085,7 +1084,7 @@ impl super::Compositor {
         }
 
         // System card text is NOT here: it has its own final overlay layer
-        // (`encode_system_card_pass`) so nothing can cover it (hud-w5zon).
+        // (`encode_system_card_pass`) so nothing can cover it.
 
         items
     }
@@ -1206,15 +1205,15 @@ impl super::Compositor {
     /// `at_tail`: whether the owning tile is currently in follow-tail/at-tail
     /// mode.  When `true` and the node uses `TextOverflow::Ellipsis`, the
     /// resulting `TextItem`'s viewport is set to `TailAnchored` so the
-    /// per-frame truncation key matches the primed cache entry (hud-lu50e).
-    /// Apply the viewer-local whole-portal resize font scaling (hud-ovjxu.1) to a
+    /// per-frame truncation key matches the primed cache entry.
+    /// Apply the viewer-local whole-portal resize font scaling to a
     /// base `font_size_px`.
     ///
     /// When the tile carries a font-scale multiplier (from a whole-portal
     /// resize), the effective font is `base * scale` clamped to the token-defined
     /// legible min/max — so text grows and shrinks with the portal, and further
     /// shrink past the minimum holds the font at the floor while only the content
-    /// window keeps shrinking (spec §Portal Resize Text Scaling). At the default
+    /// window keeps shrinking. At the default
     /// scale (1.0 — no resize) the adapter-published font is returned untouched,
     /// so non-resized portals and all other text are unaffected.
     ///
@@ -1236,7 +1235,7 @@ impl super::Compositor {
     }
 
     /// Resolve the legible font clamp range `(min, max)` from the display token
-    /// map, falling back to the tze_hud_scene defaults (hud-ovjxu.1). Shared by
+    /// map, falling back to the tze_hud_scene defaults. Shared by
     /// the render path and the truncation-prime path so both clamp identically.
     pub(super) fn portal_font_clamp_range(&self) -> (f32, f32) {
         let min = self
@@ -1280,15 +1279,15 @@ impl super::Compositor {
         };
 
         // The part governing this node: its own declared part, else the one
-        // inherited from an ancestor container part (hud-s4lrw, PR #1099 Codex
-        // P2). Threaded into children below so a container part scopes its whole
+        // inherited from an ancestor container part. Threaded into children
+        // below so a container part scopes its whole
         // subtree.
         let effective_part = resolve_effective_part(part_index, node_id, active_part);
         let (node_scroll_x, node_scroll_y) =
             scene.node_document_scroll_offset(tile.id, node_id, (scroll_x, scroll_y));
 
         if let NodeData::TextMarkdown(tm) = &node.data {
-            // hud-pd9bp: when this node is a `NodeLayout::VerticalFlow` child, its
+            // when this node is a `NodeLayout::VerticalFlow` child, its
             // glyph origin moves to the runtime-resolved stacked y. The
             // `from_text_markdown_*` constructors add `node.bounds.y` internally,
             // so fold the delta `(resolved_y - tm.bounds.y)` into the `tile_y`
@@ -1307,10 +1306,10 @@ impl super::Compositor {
             // resident portal surfaces keep their frame/header/pane labels fixed;
             // this mirrors `render_node` and the rounded-rect draw-list.
             //
-            // Phase-1 (hud-5jbra.2): try the markdown cache first.  Use
+            // Phase-1: try the markdown cache first. Use
             // `get_by_key` with a precomputed key (O(1) — no re-hash on the
             // frame path).  The cache is primed by `prime_markdown_cache` on
-            // every scene-version change (commit-time prime, hud-380dl).
+            // every scene-version change (commit-time prime).
             //
             // color_runs bypass: `from_text_markdown_cached` uses markdown
             // plain_text as the text base and discards `node.color_runs`.
@@ -1325,16 +1324,16 @@ impl super::Compositor {
             // content string).  The lookup is a 32-byte HashMap read — O(1).
             // If the key is absent (first frame before any prime, or a node
             // added mid-frame) the fallback re-computes the key once and
-            // consults the markdown_cache directly.  (hud-gpqde)
+            // consults the markdown_cache directly.
             //
-            // Cache-miss fallback (hud-xcp9b): if the markdown cache is cold
+            // Cache-miss fallback: if the markdown cache is cold
             // (first frame before any commit-time prime, or a node added
             // mid-frame after prime_markdown_cache ran), we parse the content
             // inline on the spot and use from_text_markdown_cached so markdown
             // structure and styling are preserved.  This honors the 'never
-            // dropped' contract (spec task 2.2).  A tracing::warn! fires so the
+            // dropped' contract.  A tracing::warn! fires so the
             // miss is observable in production logs.  No debug_assert: the
-            // first-frame miss is normal operation, not a bug. [hud-rbf91]
+            // first-frame miss is normal operation, not a bug.
             // In steady-state (commit-time-primed) frames this branch is never taken.
             //
             // Gate on *pixel-bearing* runs, not `is_empty()`: zero-length
@@ -1342,8 +1341,8 @@ impl super::Compositor {
             // content bytes, so a node carrying only sentinels stays on the
             // cached/styled markdown path instead of dropping to the lossy
             // raw-content constructor.  Only genuine pixel runs (start < end)
-            // force the legacy path. (hud-9v3t6)
-            // Per-tile token scope (hud-3ryie): a portal surface (scrollable
+            // force the legacy path.
+            // Per-tile token scope: a portal surface (scrollable
             // tile) resolves the portal token set; any other markdown surface
             // resolves the generic set.  Used for the cache-miss key/inline
             // parse so it agrees with the scope `prime_markdown_cache` used.
@@ -1360,7 +1359,7 @@ impl super::Compositor {
                     .unwrap_or_else(|| {
                         crate::markdown::MarkdownCache::compute_key(&tm.content, md_tokens)
                     });
-                // Load the current snapshot lock-free (hud-33qo7).  Pinned by the
+                // Load the current snapshot lock-free. Pinned by the
                 // returned Arc for the duration of this lookup.
                 let markdown_cache = self.markdown_cache();
                 if let Some(parsed) = markdown_cache.get_by_key(&content_key) {
@@ -1377,9 +1376,9 @@ impl super::Compositor {
                     // after prime_markdown_cache ran — both are normal operation.
                     // In steady-state (commit-time-primed) frames this branch is
                     // never taken.  The warn! makes the miss observable in
-                    // production logs without panicking. [hud-rbf91]
+                    // production logs without panicking.
                     //
-                    // Counted (hud-u4lq2): a growing count past the first
+                    // Counted: a growing count past the first
                     // post-prime frame means the primer's background result
                     // never landed and this "rare" fallback became the
                     // permanent per-frame path — see `markdown_cache_miss_count`.
@@ -1391,21 +1390,21 @@ impl super::Compositor {
                         "markdown cache miss on render path — expected commit-time prime \
                          (hud-xcp9b); parsing inline to preserve styling [hud-380dl]"
                     );
-                    // Self-healing fallback cache (hud-u4lq2 defense-in-depth):
+                    // Self-healing fallback cache (defense-in-depth):
                     // check the small side cache before paying a fresh parse.
                     // Whatever caused the primer's authoritative snapshot to
                     // miss this key, we must not re-pay the full parse cost
                     // every single frame — see `Compositor::markdown_fallback_cache`.
                     // Scope the immutable `Ref` to this block so it is
                     // dropped before the `else` branch below might need
-                    // `borrow_mut()`.  The scrutinee of `if let ... else`
+                    // `borrow_mut()`.  The scrutinee of `if let... else`
                     // has its temporary lifetime extended to the end of the
                     // WHOLE if/else (not just the `then` arm) — leaving the
                     // `.borrow()` call directly in the `if let` condition
                     // would keep the `Ref` alive into the `else` arm and
                     // panic with `already borrowed: BorrowMutError` on
                     // every genuine fallback-cache miss. Confirmed via a
-                    // standalone repro during hud-u4lq2 review.
+                    // standalone repro during review.
                     let cache_hit = {
                         self.markdown_fallback_cache
                             .borrow()
@@ -1445,12 +1444,12 @@ impl super::Compositor {
                     tile.bounds.y - node_scroll_y + flow_dy,
                 )
             };
-            // Viewer-local whole-portal resize font scaling (hud-ovjxu.1): scale
+            // Viewer-local whole-portal resize font scaling: scale
             // the shaped font by the tile's resize multiplier, clamped to the
             // token legible range. No-op at the default scale. Must mirror the
             // ellipsis collector so truncation keys match this shaped font.
             item.font_size_px = self.scaled_portal_font(item.font_size_px, tile.id, scene);
-            // Per-part transcript scope (hud-s4lrw): under the multi-node model
+            // Per-part transcript scope: under the multi-node model
             // only the declared `Transcript` part receives the optimal-measure
             // clamp + tail-anchored ellipsis; composer/header/frame part nodes
             // wrap to their own width and stay head-anchored. `None` (legacy
@@ -1462,7 +1461,7 @@ impl super::Compositor {
             } else {
                 0.0
             };
-            // Optimal-measure clamp (hud-rivcy): cap the transcript's effective
+            // Optimal-measure clamp: cap the transcript's effective
             // wrap width to `portal.transcript.max_measure_px` (0 = unbounded).
             // Applied BEFORE the clip computation below so `clip_bounds_width`
             // (derived from `item.bounds_width`) tracks the clamped measure, and
@@ -1470,7 +1469,7 @@ impl super::Compositor {
             // reflect the cap — matching the prime path in
             // `collect_ellipsis_text_items_from_node`.
             item.bounds_width = clamp_transcript_measure(item.bounds_width, node_measure_px);
-            // Override viewport for at-tail Ellipsis tiles (hud-lu50e).
+            // Override viewport for at-tail Ellipsis tiles.
             // The prime path (collect_ellipsis_text_items_from_node) already
             // primes TailAnchored keys for these tiles; the per-frame key must
             // match or `prepare_text_items` will miss the primed entry and fall
@@ -1480,7 +1479,7 @@ impl super::Compositor {
             if node_is_transcript && at_tail && tm.overflow == TextOverflow::Ellipsis {
                 item.viewport = crate::overflow::TruncationViewport::TailAnchored;
             }
-            // Clip envelope (hud-s4lrw): the drawn content is clamped to the
+            // Clip envelope: the drawn content is clamped to the
             // tile viewport and — for a declared portal part — additionally to
             // that part's band, so one part's overflow can never paint over a
             // sibling part's region (e.g. a long transcript over the composer
@@ -1515,8 +1514,8 @@ impl super::Compositor {
                 item.bounds_height = f32::MAX;
             }
 
-            // Per-segment streaming-reveal fade (hud-bl7yi), routed by node
-            // identity (hud-g8xpg). Reveal state is keyed per `(tile, node)`, so
+            // Per-segment streaming-reveal fade, routed by node
+            // identity. Reveal state is keyed per `(tile, node)`, so
             // look up *this* node's reveal directly instead of matching by
             // plain-text in a tile-wide post-pass. Text-only matching cross-faded
             // a settled node onto a revealing sibling that laid out the same
@@ -1532,7 +1531,7 @@ impl super::Compositor {
                 }
             }
 
-            // Transcript-tail streaming cursor (hud-zlq2v): when the node carries
+            // Transcript-tail streaming cursor: when the node carries
             // the streaming-cursor tail marker, paint the trailing cursor glyph in
             // its token-resolved accent at the precise, layout-measured tail of the
             // latest agent turn. Derived per-render from the marker (which the
@@ -1567,7 +1566,7 @@ impl super::Compositor {
 
 // ─── Module-level text helpers ────────────────────────────────────────────────
 
-/// Core math for viewer-local resize font scaling (hud-ovjxu.1): `base * scale`
+/// Core math for viewer-local resize font scaling: `base * scale`
 /// clamped to the legible `[min, max]` range. A `scale` of 1.0 returns `base`
 /// unchanged (adapter font untouched). Guards an inverted `(min, max)` pair so
 /// `clamp` never panics. Shared by the render path (`scaled_portal_font`) and the
@@ -1582,7 +1581,7 @@ pub(super) fn scale_portal_font_px(base_font_px: f32, scale: f32, min: f32, max:
 }
 
 /// Clamp a transcript node's wrapping measure to the optimal-measure cap
-/// (`portal.transcript.max_measure_px`, hud-rivcy).
+/// (`portal.transcript.max_measure_px`).
 ///
 /// A portal transcript wraps its body text to `bounds_width` (the node width).
 /// On a wide surface that yields overlong, hard-to-read lines; this cap holds a
@@ -1607,7 +1606,7 @@ pub(super) fn clamp_transcript_measure(bounds_width: f32, max_measure_px: f32) -
 }
 
 /// Borrow a tile's declared [`PortalSurface`](tze_hud_scene::types::PortalSurface)
-/// part list for per-part render consumption, if any (hud-s4lrw).
+/// part list for per-part render consumption, if any.
 ///
 /// Returns the surface's `&[PortalPart]` so the text collectors can resolve
 /// **per-part** overflow scope (transcript vs. composer/header/…) and the
@@ -1653,7 +1652,7 @@ pub(super) fn resolve_effective_part<'a>(
 
 /// Resolve whether a node should receive **transcript** overflow treatment
 /// (optimal-measure wrap clamp + tail-anchored ellipsis) under the multi-node
-/// portal-part model (hud-s4lrw).
+/// portal-part model.
 ///
 /// - `part_index == None` (legacy single-node portal, or a non-portal markdown
 ///   surface): returns `true` so every node inherits the caller's tile-level
@@ -1697,7 +1696,7 @@ fn portal_part_clip_band(
 }
 
 /// Apply the per-segment streaming-reveal fade to a portal-tile markdown
-/// [`TextItem`], in place (hud-bl7yi).
+/// [`TextItem`], in place.
 ///
 /// Rewrites `item.styled_runs` into a *full-coverage* run list so every laid-out
 /// byte carries an explicit alpha, driven by `reveal.alpha_for_byte`:
@@ -1808,7 +1807,7 @@ fn apply_portal_reveal_fade(
 const STREAMING_CURSOR_GLYPH: char = '\u{258D}';
 
 /// Byte range of the streaming-cursor glyph at the tail of the latest agent turn,
-/// located in the LAID-OUT (post-markdown-strip) plain text (hud-zlq2v).
+/// located in the LAID-OUT (post-markdown-strip) plain text.
 ///
 /// Measured against the rendered text — the last occurrence of the cursor glyph —
 /// never against raw-markdown byte arithmetic, so an emphasized or multibyte tail
@@ -1820,7 +1819,7 @@ fn tail_cursor_glyph_range(text: &str) -> Option<(usize, usize)> {
     Some((start, start + STREAMING_CURSOR_GLYPH.len_utf8()))
 }
 
-/// Paint the transcript-tail streaming-cursor glyph in its token accent (hud-zlq2v).
+/// Paint the transcript-tail streaming-cursor glyph in its token accent.
 ///
 /// Overlays a color-only styled run on exactly the trailing cursor glyph's byte
 /// range (located via [`tail_cursor_glyph_range`] on the laid-out text), so the
@@ -1917,11 +1916,11 @@ fn apply_tail_streaming_cursor(item: &mut TextItem, color: [u8; 4]) {
 /// `at_tail`: whether the tile owning these nodes is currently in follow-tail/at-tail
 /// mode.  Callers must obtain this value via [`super::tile_at_tail_for_ellipsis`] to
 /// guarantee alignment with the per-frame key built by `collect_text_items_from_node`.
-/// `true` → `TailAnchored` truncation (spec §3.2 — newest lines visible);
-/// `false` → `HeadAnchored` (spec §3.3 — viewport stability after user scroll-back).
+/// `true` → `TailAnchored` truncation (newest lines visible);
+/// `false` → `HeadAnchored` (viewport stability after user scroll-back).
 ///
 /// `markdown_tokens`: used for the cache-miss non-lossy inline parse fallback
-/// (hud-xcp9b); in steady-state this argument is never consumed.
+///; in steady-state this argument is never consumed.
 // All arguments are required: node identity, scene reference, tile position,
 // tail-follow state, markdown cache, node key cache, token store, and the output
 // accumulator.  The parameter set mirrors the sibling method
@@ -1950,7 +1949,7 @@ pub(super) fn collect_ellipsis_text_items_from_node(
 
     // Effective part for this node (own declared part, else inherited from an
     // ancestor container part) — must mirror the render path exactly so the
-    // primed truncation keys match (hud-s4lrw, PR #1099 Codex P2).
+    // primed truncation keys match.
     let effective_part = resolve_effective_part(part_index, node_id, active_part);
 
     if let NodeData::TextMarkdown(tm) = &node.data {
@@ -1962,20 +1961,20 @@ pub(super) fn collect_ellipsis_text_items_from_node(
             // Key lookup: use the per-node key cache (populated at prime time)
             // to avoid re-hashing content on the frame path.  Falls back to
             // compute_key only if the entry is absent (pre-prime first frame).
-            // (hud-gpqde)
             //
-            // Cache-miss fallback (hud-xcp9b): same non-lossy inline-parse
+            //
+            // Cache-miss fallback: same non-lossy inline-parse
             // strategy as collect_text_items_from_node.  See that site for the
             // full rationale.  In steady-state (commit-time-primed) frames this
             // branch is never taken.
             //
             // Gate on *pixel-bearing* runs, not `is_empty()`: zero-length
             // sentinel runs carry metadata only and must not force the lossy
-            // raw-content path. (hud-9v3t6)
+            // raw-content path.
             let mut item = if !crate::text::markdown_node_has_pixel_runs(tm) {
                 let content_key = node_key_cache.get(&node_id).copied().unwrap_or_else(|| {
                     // Key with the tile-scoped tokens the caller selected
-                    // (hud-3ryie) so it agrees with prime_markdown_cache.
+                    // so it agrees with prime_markdown_cache.
                     crate::markdown::MarkdownCache::compute_key(&tm.content, markdown_tokens)
                 });
                 if let Some(parsed) = markdown_cache.get_by_key(&content_key) {
@@ -1983,7 +1982,7 @@ pub(super) fn collect_ellipsis_text_items_from_node(
                 } else {
                     // Cache miss: same non-lossy inline-parse strategy as
                     // collect_text_items_from_node — normal on first frame /
-                    // mid-frame node add.  warn! provides observability. [hud-rbf91]
+                    // mid-frame node add. warn! provides observability.
                     tracing::warn!(
                         node_id = ?node_id,
                         content_len = tm.content.len(),
@@ -1998,7 +1997,7 @@ pub(super) fn collect_ellipsis_text_items_from_node(
                 TextItem::from_text_markdown_node(tm, tile_x, tile_y)
             };
             // Apply the SAME viewer-local resize font scaling as the render path
-            // (hud-ovjxu.1) so the primed truncation key (which includes
+            // so the primed truncation key (which includes
             // font_size_px) matches what collect_text_items_from_node shapes.
             item.font_size_px = scale_portal_font_px(
                 item.font_size_px,
@@ -2006,7 +2005,7 @@ pub(super) fn collect_ellipsis_text_items_from_node(
                 font_clamp.0,
                 font_clamp.1,
             );
-            // Per-part transcript scope (hud-s4lrw): mirror the render path's
+            // Per-part transcript scope: mirror the render path's
             // `node_gets_transcript_treatment` gate so the primed key (measure +
             // viewport) matches exactly. Under a multi-node surface only the
             // `Transcript` part is clamped/tail-anchored; `None` → legacy
@@ -2017,7 +2016,7 @@ pub(super) fn collect_ellipsis_text_items_from_node(
             } else {
                 0.0
             };
-            // Optimal-measure clamp (hud-rivcy): apply the SAME transcript wrap
+            // Optimal-measure clamp: apply the SAME transcript wrap
             // cap as the render path so this primed truncation key (which
             // includes `bounds_width`) matches what `collect_text_items_from_node`
             // shapes.
@@ -2060,7 +2059,7 @@ mod portal_reveal_render_tests {
     use crate::text::TextItem;
     use std::sync::Arc;
 
-    // hud-ovjxu.1: resize font-scale clamp math (pure — no GPU).
+    // resize font-scale clamp math (pure — no GPU).
     #[test]
     fn scale_portal_font_px_scales_and_clamps() {
         use super::scale_portal_font_px;
@@ -2206,7 +2205,7 @@ mod portal_reveal_render_tests {
         );
     }
 
-    // ── Transcript-tail streaming cursor (hud-zlq2v) ──────────────────────────
+    // ── Transcript-tail streaming cursor ──────────────────────────
 
     use super::{apply_tail_streaming_cursor, tail_cursor_glyph_range};
     use crate::text::markdown_node_tail_cursor_color;
@@ -2339,7 +2338,7 @@ mod transcript_measure_tests {
     use crate::renderer::token_colors::resolve_transcript_max_measure_px;
     use std::collections::HashMap;
 
-    // ── clamp_transcript_measure: pure logic (no GPU, hud-rivcy) ──────────────
+    // ── clamp_transcript_measure: pure logic (no GPU) ──────────────
 
     #[test]
     fn clamp_unbounded_returns_full_width() {
@@ -2363,7 +2362,7 @@ mod transcript_measure_tests {
         assert!((clamp_transcript_measure(300.0, 300.0) - 300.0).abs() < 1e-4);
     }
 
-    // ── resolve_transcript_max_measure_px: token resolution (hud-rivcy) ───────
+    // ── resolve_transcript_max_measure_px: token resolution ───────
 
     #[test]
     fn resolve_defaults_to_unbounded_when_absent() {

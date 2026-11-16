@@ -40,7 +40,7 @@ pub struct ElementStoreEntry {
     pub last_published_at: u64,
     /// Tile z-order at creation, used as the stable per-member key when
     /// re-homing a durable override onto a portal member tile that was recreated
-    /// with a fresh `SceneId` after a runtime restart (hud-08nls).
+    /// with a fresh `SceneId` after a runtime restart.
     ///
     /// A text-stream portal is N tiles that share one namespace, so namespace
     /// alone cannot map a recreated member back to its prior override. The
@@ -51,10 +51,9 @@ pub struct ElementStoreEntry {
     #[serde(default)]
     pub z_order: u32,
     /// Consecutive runtime restarts this tile entry has survived without a live
-    /// tile reclaiming it (hud-fwgv7 for override-bearing, hud-m1ok3 for
-    /// override-free entries).
+    /// tile reclaiming it, for both override-bearing and override-free entries.
     ///
-    /// `adopt_orphaned_tile_overrides` (hud-08nls) only removes an orphaned
+    /// `adopt_orphaned_tile_overrides` only removes an orphaned
     /// *override-bearing* entry when a same-namespace member tile is recreated,
     /// and an override-*free* entry is never migrated at all — its portal simply
     /// republishes under a fresh `SceneId`, stranding the old entry. Either way a
@@ -83,7 +82,7 @@ pub struct ElementStore {
     pub entries: HashMap<SceneId, ElementStoreEntry>,
 }
 
-/// A freshly created tile awaiting durable-override adoption (hud-08nls).
+/// A freshly created tile awaiting durable-override adoption.
 ///
 /// Passed to [`ElementStore::adopt_orphaned_tile_overrides`] so a portal member
 /// recreated with a fresh `SceneId` can reclaim the override its predecessor
@@ -122,7 +121,7 @@ impl ElementStore {
     /// writes a single entry, this targets one exact entry by its stable
     /// `SceneId`. Portal members share a namespace but have distinct scene ids,
     /// so a whole-portal resize/move must key each member's durable override by
-    /// id — a namespace match would only reach one arbitrary member (hud-8vejp).
+    /// id — a namespace match would only reach one arbitrary member.
     ///
     /// Returns `true` if an entry existed and was updated; `false` if no entry
     /// is keyed by `element_id` (no-op — the element is not yet registered).
@@ -158,11 +157,11 @@ impl ElementStore {
     }
 
     /// Re-home durable geometry overrides from orphaned (dead-id) tile entries
-    /// onto freshly recreated portal member tiles (hud-08nls).
+    /// onto freshly recreated portal member tiles.
     ///
     /// # Why this exists
     ///
-    /// `set_geometry_override` (hud-8vejp) keys each portal member's durable
+    /// `set_geometry_override` keys each portal member's durable
     /// override by the member tile's `SceneId`. But portal projection tiles are
     /// recreated with *fresh* `SceneId`s whenever an adapter republishes after a
     /// runtime restart (the adapter's in-memory tile id is gone, so its first
@@ -290,7 +289,7 @@ impl ElementStore {
         if let Some(target) = self.entries.get_mut(&target_id) {
             target.geometry_override = Some(override_policy);
             // The adopting tile is live and just republished, so it starts a fresh
-            // retention window (hud-fwgv7). The orphan carried the accumulated
+            // retention window. The orphan carried the accumulated
             // count and is about to be removed.
             target.unseen_restarts = 0;
             self.entries.remove(&orphan_id);
@@ -300,7 +299,7 @@ impl ElementStore {
         }
     }
 
-    /// Bounded retention for orphan tile entries (hud-fwgv7, hud-m1ok3).
+    /// Bounded retention for orphan tile entries.
     ///
     /// Call once per runtime bootstrap, **before** any tile is recreated. At that
     /// point *every* persisted `Tile` entry is an orphan by construction: tiles
@@ -313,11 +312,11 @@ impl ElementStore {
     ///
     /// Both flavours of orphan are covered by one retention model:
     ///
-    /// - **Override-bearing** (hud-fwgv7): reclaimed on the first restart-republish
+    /// - **Override-bearing**: reclaimed on the first restart-republish
     ///   when `adopt_orphaned_tile_overrides` migrates the override to a fresh,
     ///   zero-counter entry and removes the orphan, so a live portal's entry never
     ///   exceeds `1` before being replaced.
-    /// - **Override-free** (hud-m1ok3): a portal that republishes always issues a
+    /// - **Override-free**: a portal that republishes always issues a
     ///   fresh `CreateTile` with a new `SceneId`, so the previous restart's
     ///   override-free entry is never reclaimed by name and nothing removed it —
     ///   an unbounded, slower leak. Here that entry simply ages out: it accrues one
@@ -355,8 +354,7 @@ impl ElementStore {
     }
 }
 
-/// Outcome of [`ElementStore::gc_expired_orphan_tile_overrides`] (hud-fwgv7,
-/// hud-m1ok3).
+/// Outcome of [`ElementStore::gc_expired_orphan_tile_overrides`].
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct OrphanOverrideGc {
     /// Ids of orphan tile entries (override-bearing or override-free) pruned for
@@ -369,7 +367,7 @@ pub struct OrphanOverrideGc {
 }
 
 /// Maximum consecutive runtime restarts an orphan tile entry may survive
-/// unreclaimed before it is pruned (hud-fwgv7, hud-m1ok3).
+/// unreclaimed before it is pruned.
 ///
 /// A live portal member's entry is reclaimed (override-bearing) or republished
 /// under a fresh id (override-free) well within this window, so a still-live
@@ -509,7 +507,7 @@ mod tests {
     fn set_geometry_override_updates_only_the_keyed_entry() {
         // Two Tile entries that SHARE a namespace — exactly the portal-member
         // shape: a namespace match would be ambiguous, so the override must be
-        // keyed by id (hud-8vejp).
+        // keyed by id.
         let now = 1_710_000_000_000u64;
         let a = SceneId::new();
         let b = SceneId::new();
@@ -557,7 +555,7 @@ mod tests {
         );
     }
 
-    // ── adopt_orphaned_tile_overrides (hud-08nls) ─────────────────────────
+    // ── adopt_orphaned_tile_overrides ─────────────────────────
 
     fn tile_entry(namespace: &str, z_order: u32, created_at: u64) -> ElementStoreEntry {
         ElementStoreEntry {
@@ -755,7 +753,7 @@ mod tests {
         assert!(store.entries[&new_id].geometry_override.is_none());
     }
 
-    // ── gc_expired_orphan_tile_overrides (hud-fwgv7) ──────────────────────
+    // ── gc_expired_orphan_tile_overrides ──────────────────────
 
     fn tile_entry_with_override(namespace: &str, z_order: u32, x: f32) -> ElementStoreEntry {
         let mut entry = tile_entry(namespace, z_order, 100);
@@ -854,7 +852,7 @@ mod tests {
     #[test]
     fn gc_ignores_zones_and_widgets_but_tracks_override_free_tiles() {
         // GC touches only Tile entries — now including override-FREE ones
-        // (hud-m1ok3). A zone and an (override-bearing) widget are never tile
+        //. A zone and an (override-bearing) widget are never tile
         // orphans and stay untouched; the bare tile's counter is bumped.
         let zone_id = SceneId::new();
         let widget_id = SceneId::new();
@@ -893,7 +891,7 @@ mod tests {
         // A permanently-closed portal member that never carried a user override
         // still strands a fresh-id tile entry on every restart (nothing migrates
         // an override-free entry). It must age out just like an override-bearing
-        // orphan instead of leaking unbounded (hud-m1ok3).
+        // orphan instead of leaking unbounded.
         let orphan_id = SceneId::new();
         let mut store = ElementStore::default();
         store
@@ -922,7 +920,7 @@ mod tests {
         // An override-free entry reclaimed within the retention window (its tile
         // republishes under the same id, resetting the counter the way the
         // session/runtime create-tile reconcile does) must NOT be pruned — it
-        // survives and keeps accumulating from zero (hud-m1ok3).
+        // survives and keeps accumulating from zero.
         let tile_id = SceneId::new();
         let mut store = ElementStore::default();
         store

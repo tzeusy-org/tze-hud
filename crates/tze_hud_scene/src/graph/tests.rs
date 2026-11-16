@@ -180,7 +180,7 @@ fn test_hit_test_applies_tile_scroll_offset() {
 
 /// During an in-flight smoothed scroll, `hit_test` must map pointer coordinates
 /// using the *displayed* (lagged) offset the renderer drew with — not the
-/// authoritative scroll target (hud-3lynp). When no displayed offset is
+/// authoritative scroll target. When no displayed offset is
 /// published (headless / snap), hit-testing falls back to the authoritative
 /// offset and behavior is unchanged.
 #[test]
@@ -544,7 +544,7 @@ fn portal_surface_pointing_at(node: SceneId) -> PortalSurface {
 }
 
 /// A reconnecting session must recover its declared portal surface from the
-/// snapshot rather than re-declaring blindly (hud-ruynm reconnect parity).
+/// snapshot rather than re-declaring blindly (reconnect parity).
 #[test]
 fn snapshot_carries_previously_declared_portal_surface() {
     let (mut scene, tile_id, root_id) = portal_snapshot_scene("agent");
@@ -666,7 +666,7 @@ fn snapshot_portal_surfaces_are_tile_keyed_for_namespace_visibility() {
 /// A snapshot with no portal surfaces must omit the `portal_surfaces` key from
 /// its canonical JSON, so its checksum is byte-identical to a pre-field snapshot.
 /// This preserves `verify_checksum()` for older surface-less snapshots produced
-/// before this field existed (hud-ruynm backward-compat; guards the P2 raised on
+/// before this field existed (backward-compat; guards the P2 raised on
 /// PR #1098 where an unconditionally-serialized empty map broke old checksums).
 #[test]
 fn snapshot_without_portal_surfaces_omits_field_and_verifies_like_old_format() {
@@ -1514,7 +1514,7 @@ fn test_contention_replace() {
 // specifically cover the behaviors that were either untested or diverged in
 // the pre-extraction widget copy.
 //
-// Issue: hud-r5q6p
+// Issue:
 //   - max_publishers rejection was untested on zones, absent on widgets.
 //   - max_depth == 0 was treated as "unbounded" on widgets but "reject all"
 //     (trim-to-zero) on zones — the zone behavior is canonical.
@@ -2034,7 +2034,7 @@ fn batch_clear_zone_does_not_cancel_later_pending_publish() {
 
 #[test]
 fn test_clear_zone_via_mutation_batch() {
-    // Per spec: ClearZone clears publications by THIS agent (batch.agent_namespace).
+    // ClearZone clears publications by THIS agent (batch.agent_namespace).
     // Publish as "agent", then clear as "agent" — should clear.
     let mut scene = SceneGraph::new(1920.0, 1080.0);
     scene.register_zone(make_subtitle_zone());
@@ -2581,9 +2581,9 @@ fn test_update_static_image_decoded_bytes_zero_after_resource_change_is_zero() {
     }
 }
 
-// ─── Resource ref-count tracking tests (hud-uar4) ────────────────────
+// ─── Resource ref-count tracking tests ────────────────────
 //
-// Spec: resource-store/spec.md §Requirement: Resource Freed On Last Tile Removal
+// Spec: Resource Freed On Last Tile Removal
 // When the last tile referencing a resource is removed (via lease expiry,
 // explicit DeleteTile, or SetTileRoot replacement), the resource MUST be freed
 // from the registry.  If another tile still references the same resource the
@@ -2784,7 +2784,7 @@ fn resource_freed_on_lease_expiry() {
     );
 }
 
-/// hud-i429x: `expire_lease` reaps ONLY the named lease when its grace has
+/// `expire_lease` reaps ONLY the named lease when its grace has
 /// elapsed, leaving a sibling lease and its tiles untouched — the scoped
 /// counterpart to the whole-scene `expire_leases` sweep. It returns `None` for a
 /// lease that is not yet due, and bumps the scene version on reap.
@@ -3062,7 +3062,7 @@ fn resource_refs_unchanged_on_update_node_content_same_resource() {
     );
 }
 
-// ─── Lease State Machine Tests (RFC 0008) ───────────────────────────
+// ─── Lease State Machine Tests ───────────────────────────
 
 #[test]
 fn test_lease_state_defaults_to_active() {
@@ -3575,7 +3575,7 @@ fn test_grace_period_expiry_cleans_up() {
     assert_eq!(scene.tile_count(), 0); // Tiles cleaned up
 }
 
-/// hud-0q1dh: a DEGRADED (disconnected) portal surface is removed when its
+/// a DEGRADED (disconnected) portal surface is removed when its
 /// lease's grace period expires, through the EXISTING orphan lifecycle — there
 /// is no second timer and no leak.
 ///
@@ -3670,7 +3670,7 @@ fn degraded_portal_surface_removed_on_lease_grace_expiry_via_orphan_path() {
         !scene.tiles.contains_key(&tile_id),
         "no dangling tile entry after orphan-path removal"
     );
-    // ...and its id is queued on the removed-tile drain so out-of-graph per-tile
+    //...and its id is queued on the removed-tile drain so out-of-graph per-tile
     // state (driver drive entries, portal resize states) is pruned — the same
     // hook the windowed loop uses for any tile removal, not a degraded special case.
     let drained = scene.drain_removed_tile_ids();
@@ -3801,8 +3801,8 @@ fn test_suspension_timeout_revokes() {
     assert_eq!(scene.tile_count(), 0);
 }
 
-// Spec §Requirement: Priority Assignment (lease-governance/spec.md lines 49-60)
-// Spec §Requirement: Priority Sort Semantics (lease-governance/spec.md lines 62-69)
+// Priority Assignment
+// Priority Sort Semantics
 
 // ─── Resource Usage Tests ───────────────────────────────────────────
 
@@ -3849,7 +3849,7 @@ fn test_renew_lease_fails_when_not_active() {
     assert!(err.is_err());
 }
 
-/// hud-pk9pz: `lease_is_active` is the liveness predicate that distinguishes a
+/// `lease_is_active` is the liveness predicate that distinguishes a
 /// usable lease from a merely-resident terminal one. It returns `false` for an
 /// unknown lease, and — critically — `false` for an `Expired` lease that
 /// grace-period reaping (`expire_leases`) left resident in the map. This is
@@ -3913,7 +3913,7 @@ fn test_lease_expiry_returns_lease_expiry_struct() {
     assert!(expiries[0].removed_tiles.contains(&tile_id));
 }
 
-/// hud-lyqun viewer geometry authority: once a tile is viewer-geometry-locked
+/// viewer geometry authority: once a tile is viewer-geometry-locked
 /// (the viewer moved/resized the whole portal), an adapter's `update_tile_bounds`
 /// republish MUST NOT reposition it — the call succeeds but the bounds are held.
 /// Unlocking restores adapter control. This is the guard that keeps a portal
@@ -4002,7 +4002,7 @@ fn removing_tile_clears_viewer_geometry_lock() {
     );
 }
 
-// ── hud-643dv: portal header-band drag handle + precedence ───────────────────
+// ──: portal header-band drag handle + precedence ───────────────────
 
 /// Build a minimal portal: a large frame tile (the anchor) carrying a minimize
 /// HitRegion node in its header, plus a scrollable pane sharing the lease so the
@@ -4141,7 +4141,7 @@ fn header_band_drags_empty_header_but_yields_to_minimize_control() {
 
 #[test]
 fn header_band_survives_full_tile_click_to_focus_region() {
-    // Regression (hud-643dv): the #981/#987 projection portal publishes its
+    // Regression: the #981/#987 projection portal publishes its
     // composer hit-region spanning the WHOLE tile (x:0,y:0,w,h, accepts_pointer)
     // for click-anywhere-to-focus. On a single-tile projection portal that region
     // overlaps the header band at EVERY point. A blanket "yield to any pointer
@@ -4301,7 +4301,7 @@ fn portal_anchor_tile_picks_largest_area_member() {
     assert_eq!(scene.portal_anchor_tile(frame_id), Some(frame_id));
 }
 
-// ── hud-m4xay F5: drag band keys off the first-class surface Header part ──────
+// ── F5: drag band keys off the first-class surface Header part ──────
 
 /// Build a single-tile portal that has DECLARED a first-class portal surface with
 /// a `Header` part (empty backing node) + a `Transcript` part. Returns
@@ -4373,7 +4373,7 @@ fn portal_header_band_anchors_keys_off_declared_header_part() {
 
 /// A `Header` part with a negative local origin (accepted by `validate_structure`,
 /// which only requires non-negative extents) is clamped to the tile origin — the
-/// band never starts above/left of the frame (Codex review, hud-m4xay).
+/// band never starts above/left of the frame (Codex review).
 #[test]
 fn portal_header_band_clamps_negative_part_origin_to_tile() {
     let mut scene = SceneGraph::new(1920.0, 1080.0);
@@ -4459,9 +4459,9 @@ fn portal_header_band_anchors_falls_back_without_header_part() {
     );
 }
 
-// ── hud-ovjxu.1: viewer-local resize font-scale multiplier ───────────────────
+// ──: viewer-local resize font-scale multiplier ───────────────────
 
-// ── hud-cpjqe: live top-band drag flakiness diagnosis ────────────────────────
+// ──: live top-band drag flakiness diagnosis ────────────────────────
 
 /// Build the EXACT live exemplar portal tile structure (PORTAL_W=860, H=680):
 /// a capture-backstop and a frame with IDENTICAL bounds sharing the lease, plus
@@ -4606,7 +4606,7 @@ fn populate_live_drag_handles(scene: &mut SceneGraph) {
 
 #[test]
 fn header_band_anchor_is_deterministically_the_visible_frame_not_backstop() {
-    // hud-cpjqe root cause: the capture-backstop and the frame have IDENTICAL
+    // root cause: the capture-backstop and the frame have IDENTICAL
     // bounds, so the largest-area anchor pick tie-breaks on random UUIDs — the
     // header band lands on a non-deterministic tile each session ("fails half the
     // time"). The band MUST deterministically anchor on the visible interactive
@@ -4627,7 +4627,7 @@ fn header_band_anchor_is_deterministically_the_visible_frame_not_backstop() {
 
 #[test]
 fn header_band_drag_engages_across_full_empty_header_width() {
-    // hud-cpjqe: sweep hit_test across the full band width at three header y
+    // sweep hit_test across the full band width at three header y
     // values against the real live tile structure. Every empty-header point (past
     // the minimize control) MUST resolve to a whole-portal drag; the minimize
     // control MUST still win in its own rect. A DragHandle whose element resolves
@@ -4727,7 +4727,7 @@ fn tile_font_scale_cleared_on_tile_removal() {
     );
 }
 
-// ─── Lifecycle-accent lease gate (hud-a745w) ─────────────────────────────────
+// ─── Lifecycle-accent lease gate ─────────────────────────────────
 //
 // The in-process portal scene-apply path (`portal::apply_render`)
 // bypasses the `apply_batch` Stage-1 lease check, so it must reach the accent
@@ -4885,7 +4885,7 @@ fn test_lifecycle_accent_checked_rejected_while_orphaned_then_applies_after_grac
     );
 }
 
-// ── Inline subtree materialization: set_tile_root_tree (hud-ga4md) ───────────
+// ── Inline subtree materialization: set_tile_root_tree ───────────
 
 #[cfg(test)]
 mod inline_subtree_materialization {

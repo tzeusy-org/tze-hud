@@ -1,10 +1,10 @@
-//! Lease management helpers for the session stream (RFC 0005 §3.1, §3.2, §5.3).
+//! Lease management helpers for the session stream.
 //!
 //! This module provides:
 //!
 //! - [`LeaseCorrelationCache`] — per-session deduplication cache for lease
 //!   operations.  Lease operations use the client `sequence` number as the
-//!   correlation key (RFC 0005 §5.3): if an agent retransmits with the same
+//!   correlation key: if an agent retransmits with the same
 //!   sequence number the server returns the previously cached response without
 //!   re-applying the operation.
 
@@ -20,7 +20,7 @@ use std::collections::HashMap;
 /// hit.
 pub const DEFAULT_LEASE_CORRELATION_CACHE_CAPACITY: usize = 256;
 
-// ─── Retransmit correlation (RFC 0005 §5.3) ──────────────────────────────────
+// ─── Retransmit correlation ──────────────────────────────────
 
 /// Cached reply to a Hold / Clear request.
 ///

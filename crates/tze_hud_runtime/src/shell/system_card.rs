@@ -1,4 +1,4 @@
-//! Runtime system card and toast model (hud-i2e10.4).
+//! Runtime system card and toast model.
 //!
 //! A centred card (pairing code + address) or a timed toast, shown by the
 //! compositor above all content. It lives here, outside the scene graph, so

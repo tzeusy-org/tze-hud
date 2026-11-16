@@ -2,7 +2,7 @@ use super::test_helpers::{make_scene, make_scene_with_clock};
 use super::*;
 use crate::types::{Node, NodeData, Rect, Rgba, SceneId, SolidColorNode};
 
-// ─ Tab limit enforcement (spec line 50) ──────────────────────────────────
+// ─ Tab limit enforcement ──────────────────────────────────
 // WHEN an agent attempts CreateTab and 256 tabs already exist
 // THEN the runtime MUST reject with BudgetExceeded
 
@@ -28,7 +28,7 @@ fn tab_limit_256_enforced() {
     );
 }
 
-// ─ Tile limit enforcement (spec line 54) ─────────────────────────────────
+// ─ Tile limit enforcement ─────────────────────────────────
 // WHEN an agent attempts CreateTile on a tab that already has 1024 tiles
 // THEN the runtime MUST reject with BudgetExceeded
 
@@ -87,7 +87,7 @@ fn tile_limit_1024_per_tab_enforced() {
     );
 }
 
-// ─ Node limit enforcement (spec line 58) ─────────────────────────────────
+// ─ Node limit enforcement ─────────────────────────────────
 // WHEN an agent attempts InsertNode on a tile with 64 nodes
 // THEN the runtime MUST reject with NodeCountExceeded
 
@@ -166,7 +166,7 @@ fn node_limit_64_per_tile_enforced() {
     );
 }
 
-// ─ Duplicate NodeId rejection (spec line 62) ─────────────────────────────
+// ─ Duplicate NodeId rejection ─────────────────────────────
 // WHEN an agent attempts to add a node with a NodeId that already exists in the scene
 // THEN the runtime MUST reject with DuplicateId
 
@@ -218,7 +218,7 @@ fn duplicate_node_id_rejected() {
     );
 }
 
-// ─ Tab name too long (spec line 79) ──────────────────────────────────────
+// ─ Tab name too long ──────────────────────────────────────
 // WHEN an agent submits CreateTab with a name exceeding 128 UTF-8 bytes
 // THEN the runtime MUST reject with InvalidFieldValue
 
@@ -233,7 +233,7 @@ fn tab_name_too_long_rejected() {
     );
 }
 
-// ─ Create and switch tab (spec line 71) ──────────────────────────────────
+// ─ Create and switch tab ──────────────────────────────────
 // WHEN an agent with manage_tabs submits CreateTab + SwitchActiveTab
 // THEN the new tab MUST be created and become active
 
@@ -248,7 +248,7 @@ fn create_and_switch_tab_with_capability() {
     assert_eq!(scene.active_tab, Some(tab_id));
 }
 
-// ─ Create tile with valid lease (spec line 92) ────────────────────────────
+// ─ Create tile with valid lease ────────────────────────────
 // WHEN an agent with a valid lease submits CreateTile
 // THEN the tile MUST be created with specified bounds, z_order, and opacity
 
@@ -271,7 +271,7 @@ fn create_tile_checked_with_active_lease() {
     assert!((scene.tiles[&tile_id].opacity - 1.0).abs() < f32::EPSILON);
 }
 
-// ─ Tile mutation with expired lease (spec line 96) ───────────────────────
+// ─ Tile mutation with expired lease ───────────────────────
 // WHEN an agent submits UpdateTileBounds but the tile's lease has expired
 // THEN the runtime MUST reject with LeaseExpired
 
@@ -302,7 +302,7 @@ fn tile_mutation_with_expired_lease_rejected() {
     );
 }
 
-// ─ Delete tile (spec line 100) ─────────────────────────────────────────────
+// ─ Delete tile ─────────────────────────────────────────────
 // WHEN an agent submits DeleteTile for a tile it owns with a valid lease
 // THEN the tile and all its nodes MUST be removed
 
@@ -349,7 +349,7 @@ fn delete_tile_removes_tile_and_nodes() {
     );
 }
 
-// ─ Ambient unread count per tile (hud-g1ena.3) ───────────────────────────
+// ─ Ambient unread count per tile ───────────────────────────
 
 #[test]
 fn tile_unread_count_set_get_and_prune() {
@@ -390,7 +390,7 @@ fn tile_unread_count_set_get_and_prune() {
     assert!(!scene.overlay.tile_unread_counts.contains_key(&tile_id));
 }
 
-// ─ Opacity out of range (spec line 109) ──────────────────────────────────
+// ─ Opacity out of range ──────────────────────────────────
 // WHEN an agent submits UpdateTileOpacity with opacity = 1.5
 // THEN the runtime MUST reject with InvalidFieldValue
 
@@ -435,7 +435,7 @@ fn opacity_out_of_range_rejected() {
     );
 }
 
-// ─ Zero-size bounds (spec line 113) ──────────────────────────────────────
+// ─ Zero-size bounds ──────────────────────────────────────
 // WHEN an agent submits CreateTile with width = 0.0
 // THEN the runtime MUST reject with BoundsOutOfRange
 
@@ -479,7 +479,7 @@ fn zero_size_bounds_rejected() {
     );
 }
 
-// ─ Bounds outside tab area (spec line 117) ───────────────────────────────
+// ─ Bounds outside tab area ───────────────────────────────
 // WHEN UpdateTileBounds with x + width exceeding tab display width
 // THEN reject with BoundsOutOfRange
 
@@ -504,7 +504,7 @@ fn bounds_outside_display_rejected() {
     );
 }
 
-// ─ Z-order in reserved zone band (spec line 121) ─────────────────────────
+// ─ Z-order in reserved zone band ─────────────────────────
 // WHEN CreateTile with z_order = ZONE_TILE_Z_MIN
 // THEN reject with InvalidFieldValue
 
@@ -569,7 +569,7 @@ fn z_order_reserved_zone_band_rejected() {
         .expect("z_order just below ZONE_TILE_Z_MIN must succeed");
 }
 
-// ─ Cross-namespace tile access denied (spec line 37) ─────────────────────
+// ─ Cross-namespace tile access denied ─────────────────────
 // WHEN agent "weather-agent" attempts to mutate a tile owned by namespace "cal"
 // THEN reject with NamespaceMismatch
 
@@ -598,15 +598,13 @@ fn cross_namespace_tile_access_denied() {
     );
 }
 
-// ─ Struct size budgets (spec line 307, 311) ───────────────────────────────
+// ─ Struct size budgets ───────────────────────────────
 // Tile < 200 bytes, Node < 160 bytes
 //
-// hud-yfj8u: the Node budget was raised 150 → 160 when the additive
+// the Node budget was raised 150 → 160 when the additive
 // `layout: NodeLayout` field (vertical-flow layout mode) grew `Node` from 144 to
 // 152 bytes — one enum byte plus 8-aligned padding, as `Node` sat exactly on an
-// 8-byte boundary. 64 nodes/tile ≈ 9.9 KB structural overhead (still ~the RFC
-// 0001 §8/§10 ~9.8 KB target). See §Struct Overhead Budgets in the scene-graph
-// spec (amended in the portal-vertical-flow-layout change).
+// 8-byte boundary. 64 nodes/tile ≈ 9.9 KB structural overhead.
 
 #[test]
 fn tile_struct_size_under_200_bytes() {
@@ -614,7 +612,7 @@ fn tile_struct_size_under_200_bytes() {
     let tile_size = size_of::<Tile>();
     assert!(
         tile_size < 200,
-        "Tile struct is {tile_size} bytes, must be < 200 bytes per RFC 0001 §8"
+        "Tile struct is {tile_size} bytes, must be < 200 bytes"
     );
 }
 
@@ -624,8 +622,8 @@ fn node_struct_size_under_160_bytes() {
     let node_size = size_of::<Node>();
     assert!(
         node_size < 160,
-        "Node struct is {node_size} bytes, must be < 160 bytes per RFC 0001 §8 \
-         (raised 150 → 160 for the additive NodeLayout field, hud-yfj8u)"
+        "Node struct is {node_size} bytes, must be < 160 bytes \
+         (includes the additive NodeLayout field)"
     );
 }
 

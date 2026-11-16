@@ -473,8 +473,11 @@ source links when implementation changes the status.
   are currently declared. The orphaned windowed benchmark mode and unbounded
   frame history are removed; telemetry keeps cumulative session totals and
   bounded recent latency samples. Headless benchmarks and the windowed
-  quiescent-efficiency artifact remain. Pre-reset references remain in the projection and
-  protocol crate docs. `hud-bstmy` and its reconciliation work remain open;
+  quiescent-efficiency artifact remain. Current-source comments and protos now
+  describe behavior without retired design citations, and behavior names replace
+  the remaining `spec_*` test names. `just current-references` and the existing
+  CI static job share one citation guard; the historical performance CSV is
+  excluded and remains byte-identical. `hud-bstmy` and its reconciliation work remain open;
   a passing test inventory alone does not establish that the diet is complete.
 - **T8 — frame correlation KEEP [Observed].** `hud-uehz7` retains the existing
   optional [`FramePresented`](api.md#grpc-resident-sessions) contract after the

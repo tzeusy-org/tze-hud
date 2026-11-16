@@ -104,7 +104,7 @@ ZONES: list[dict[str, Any]] = [
 ]
 
 # Load profiles: (name, rate_per_sec, concurrency, duration_sec)
-# Spec §Load Profiles table.
+# Load Profiles table.
 PROFILES: list[tuple[str, float, int, int]] = [
     ("idle",   1,  1, 30),
     ("low",    5,  1, 30),
@@ -893,7 +893,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help="Read the PSK from this environment variable instead of the paired file",
     )
-    # Spec §Connection Parameters: --output with dynamic default.
+    # Connection Parameters: --output with dynamic default.
     # We also accept --report as a backward-compatible alias.
     parser.add_argument(
         "--output",
@@ -923,7 +923,7 @@ def parse_args() -> argparse.Namespace:
         metavar="N",
         help="Override per-profile concurrency with a fixed worker count",
     )
-    # Spec §Load Profiles: duration override (default 30s per profile).
+    # Load Profiles: duration override (default 30s per profile).
     parser.add_argument(
         "--duration",
         type=int,
@@ -934,7 +934,7 @@ def parse_args() -> argparse.Namespace:
             "(default: per-profile — idle/low/medium/high=30s, burst=10s)"
         ),
     )
-    # Spec §TTL Variation: short-ttl flag.
+    # TTL Variation: short-ttl flag.
     parser.add_argument(
         "--short-ttl",
         action="store_true",
@@ -978,7 +978,7 @@ def main() -> int:
     output_path = args.output if args.output is not None else _default_output_path()
 
     # Resolve effective TTL.
-    # Spec §TTL Variation: --short-ttl → 1s; default → 60s.
+    # TTL Variation: --short-ttl → 1s; default → 60s.
     ttl_us = SHORT_TTL_US if args.short_ttl else DEFAULT_TTL_US
     ttl_mode = "short" if args.short_ttl else "default"
 
@@ -989,7 +989,7 @@ def main() -> int:
         return 2
 
     # Resolve which profiles to run.
-    # Spec §Connection Parameters: --profiles is a comma-separated subset.
+    # Connection Parameters: --profiles is a comma-separated subset.
     raw_profiles = args.profiles.strip()
     if raw_profiles == "all":
         selected_names = {p[0] for p in PROFILES}
@@ -1008,7 +1008,7 @@ def main() -> int:
     profiles_to_run = [p for p in PROFILES if p[0] in selected_names]
 
     # Apply --duration override if provided.
-    # Spec §Load Profiles: --duration overrides the duration of ALL profiles,
+    # Load Profiles: --duration overrides the duration of ALL profiles,
     # including burst. The burst default of 10s is just its per-profile default.
     if args.duration is not None:
         profiles_to_run = [
@@ -1087,7 +1087,7 @@ def main() -> int:
     print_summary_table(results)
 
     # Write JSON report.
-    # Spec §Report Output: include timestamp, target URL, profiles run,
+    # Report Output: include timestamp, target URL, profiles run,
     # total duration, and flags (short-ttl, large-payloads, concurrency).
     report: dict[str, Any] = {
         "run_id": run_id,
@@ -1104,7 +1104,7 @@ def main() -> int:
         },
         "profiles": [r.to_dict() for r in results],
     }
-    # Spec §TTL Variation: include ttl_mode: "short" in report when --short-ttl.
+    # TTL Variation: include ttl_mode: "short" in report when --short-ttl.
     if args.short_ttl:
         report["ttl_mode"] = "short"
 

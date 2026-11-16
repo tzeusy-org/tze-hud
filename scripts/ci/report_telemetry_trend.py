@@ -5,8 +5,7 @@ This is the *informational* trend surface that complements the hard PASS/FAIL
 baseline gate in ``check_windows_perf_budgets.py`` (hud-ipmj0/PR #887). That gate
 fails any regression against the checked-in baseline but does not retain prior
 numeric values, so a within-budget drift (e.g. frame_time p99 14.1ms -> 14.8ms,
-+5%) is invisible. validation.md §5.6 ("surface trends, not just pass/fail")
-wants the numbers, not just the verdict.
++5%) is invisible. This report preserves the numbers alongside the verdict.
 
 Input is the budget-gate report JSON emitted by ``check_windows_perf_budgets.py
 --output-json`` (schema ``tze_hud.windows_perf_budget_gate.v1``). Given a current

@@ -108,7 +108,7 @@ pub fn apply_subtitle_token_defaults(policy: &mut RenderingPolicy, tokens: &Desi
             .margin_px
             .or_else(|| token_f32(tokens, "space.subtitle.vertical"));
     }
-    // overflow: Ellipsis per subtitle exemplar spec (hardcoded, not token-driven)
+    // overflow: Ellipsis (hardcoded, not token-driven)
     if policy.overflow.is_none() {
         policy.overflow = Some(TextOverflow::Ellipsis);
     }
@@ -123,7 +123,7 @@ pub fn apply_subtitle_token_defaults(policy: &mut RenderingPolicy, tokens: &Desi
 
 /// Apply token-derived defaults for the `notification-area` zone to `policy`.
 ///
-/// Token mappings (the notification card roles, hud-h51u7.4.1; the
+/// Token mappings (the notification card roles,; the
 /// compositor's `NotificationStyle` reads every other card metric and colour
 /// from tokens directly):
 /// - `text_color` ← `color.on_surface`
@@ -235,7 +235,7 @@ pub fn apply_status_bar_token_defaults(policy: &mut RenderingPolicy, tokens: &De
 
 /// Apply token-derived defaults for the `alert-banner` zone to `policy`.
 ///
-/// Token mappings (the alert banner roles, hud-h51u7.4.2; the compositor's
+/// Token mappings (the alert banner roles,; the compositor's
 /// `NotificationStyle` reads every other banner metric and colour from
 /// tokens directly):
 /// - `text_color` ← `color.on_alert` (non-notification stream text)
@@ -423,7 +423,7 @@ mod tests {
         // outline_color should be set
         assert!(policy.outline_color.is_some());
 
-        // overflow should be Ellipsis (subtitle exemplar spec)
+        // overflow should be Ellipsis
         assert_eq!(
             policy.overflow,
             Some(TextOverflow::Ellipsis),
@@ -552,7 +552,7 @@ mod tests {
         let mut policy = RenderingPolicy::default();
         apply_token_defaults_for_zone("notification-area", &mut policy, &tokens);
 
-        // The card reads its own notification roles (hud-h51u7.4.1).
+        // The card reads its own notification roles.
         assert_eq!(policy.text_color, token_color(&tokens, "color.on_surface"));
         assert!(policy.font_family.is_some());
         assert_eq!(

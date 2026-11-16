@@ -534,7 +534,7 @@ mod tests {
     use tze_hud_scene::HitResult;
     use tze_hud_scene::types::ZoneInteractionKind;
 
-    /// Regression (hud-dwcr7): composer keystroke echo must apply to the draft
+    /// Regression: composer keystroke echo must apply to the draft
     /// even while the scene mutex is held by a gRPC mutation batch.
     ///
     /// Before the fix, keyboard dispatch read `scene.active_tab` by `try_lock`ing
@@ -653,7 +653,7 @@ mod tests {
         drop(st);
     }
 
-    /// Regression (hud-dwcr7): the pending-keyboard drain must DRAIN, not
+    /// Regression: the pending-keyboard drain must DRAIN, not
     /// livelock.
     ///
     /// The bug: `dispatch_key_down_event` (the public Stage-1 entry) re-queues
@@ -670,7 +670,7 @@ mod tests {
     /// keystroke is applied to a real composer draft — while a guarded
     /// (public-style) dispatcher would rotate and never drain.
     ///
-    /// NOTE (hud-nu0ea): the drain loop *reconstruction* below now has a
+    /// NOTE: the drain loop *reconstruction* below now has a
     /// production-path counterpart. `event_loop_harness::tests::
     /// drain_routes_characters_through_real_dispatch_into_composer_draft` drives
     /// the genuine `WinitApp::drain_pending_keyboard_events` through the headless
@@ -799,10 +799,10 @@ mod tests {
         );
     }
 
-    // ── Surface dimension resolution (hud-q5hx regression) ───────────────
+    // ── Surface dimension resolution ───────────────
     //
     // These tests document the contract for the `window.inner_size()` fallback
-    // logic added to fix the crash at non-default dimensions (hud-q5hx).
+    // logic added to fix the crash at non-default dimensions.
     //
     // The actual window creation path cannot be tested without a real GPU and
     // display, but we can verify the helper logic for dimension fallback.
@@ -843,7 +843,7 @@ mod tests {
         assert_eq!(h, 1440, "configured size must be used when actual is zero");
     }
 
-    // ── DPI scaling correctness (hud-22by) ────────────────────────────────────
+    // ── DPI scaling correctness ────────────────────────────────────
 
     /// At 125% DPI on a 2560x1440 monitor, `MonitorHandle::size()` returns
     /// physical pixels (2560, 1440) when the process has per-monitor DPI
@@ -945,14 +945,14 @@ mod tests {
         assert_eq!(old_surface_w, 3200, "old code over-counted surface width");
     }
 
-    // ── Zone interaction: dismiss hit wiring (hud-ltgk.6) ────────────────────
+    // ── Zone interaction: dismiss hit wiring ────────────────────
 
     use tze_hud_scene::types::{NotificationPayload, Rect, ZoneHitRegion};
 
     /// Pointer-up on a zone dismiss hit-region must remove the notification from
     /// `zone_registry.active_publishes`.
     ///
-    /// This is the regression test for hud-ltgk.6: the dismiss button rendered
+    /// Previously the dismiss button rendered
     /// visually but clicks had no effect because the `InputResult` was discarded
     /// without acting on `HitResult::ZoneInteraction { kind: Dismiss }`.
     #[test]
@@ -1155,14 +1155,14 @@ mod tests {
         );
     }
 
-    // ── Click-to-focus tab resolution (hud-dwcr7) ───────────────────────────
+    // ── Click-to-focus tab resolution ───────────────────────────
 
     /// Regression: click-to-focus must acquire focus on a composer tile whose
     /// tab is NOT the global active_tab.  Keying focus off the stale active_tab
     /// (the pre-fix behavior) drops the focus transition at FocusManager::on_click
     /// (focus.rs tab-mismatch guard); resolving the tab from the hit tile fixes
     /// it.  This pins the core behavior the windowed pointer-down handler relies
-    /// on (hud-dwcr7).
+    /// on.
     #[test]
     fn click_focus_uses_hit_tile_tab_not_stale_active_tab() {
         use tze_hud_input::{FocusManager, InputProcessor, PointerEvent, PointerEventKind};
@@ -1230,8 +1230,7 @@ mod tests {
     }
 
     /// Verify that `PendingKeyboardEvent` can hold all three keyboard event
-    /// variants without loss, and that the variants are `Debug`-printable
-    /// (hud-2fz34).
+    /// variants without loss, and that the variants are `Debug`-printable.
     ///
     /// This is a lightweight structural test confirming the enum is correctly
     /// wired.  The runtime-level deferral logic (try_lock → push_back →
@@ -1305,7 +1304,7 @@ mod tests {
 
     /// Verify that `active_tab_for_keyboard_dispatch` returns `None` (lock-busy
     /// signal) when the shared-state Tokio mutex is already held, and returns
-    /// `Some(inner)` when the lock is available (hud-2fz34).
+    /// `Some(inner)` when the lock is available.
     ///
     /// This is the core no-blocking contract: the function must never call
     /// `blocking_lock` on the event-loop thread.
@@ -1335,7 +1334,7 @@ mod tests {
 
     /// Verify that a non-empty `pending_keyboard_events` queue preserves FIFO
     /// ordering — a new incoming event must be pushed to the back, never bypass
-    /// already-queued events (hud-fyaog / hud-2fz34).
+    /// already-queued events.
     ///
     /// This tests the queue data-structure invariant directly without spinning
     /// up the full winit runtime.  The entry-point FIFO guards in
@@ -1407,8 +1406,7 @@ mod tests {
     }
 
     /// Verify that `drain_pending_keyboard_events` stops immediately when the
-    /// lock check returns busy, preserving FIFO order across the queue boundary
-    /// (hud-fyaog / hud-2fz34).
+    /// lock check returns busy, preserving FIFO order across the queue boundary.
     ///
     /// The pre-pop lock check (`active_tab_for_keyboard_dispatch().is_none()` →
     /// break) is the authoritative FIFO barrier in the drain loop.  When the
@@ -1481,7 +1479,7 @@ mod tests {
     }
 
     /// Ordering contract: safe_mode_atomic check precedes the FIFO guard in
-    /// all three dispatch functions (hud-e8qwo).
+    /// all three dispatch functions.
     ///
     /// `dispatch_key_down_event`, `dispatch_key_up_event`, and
     /// `dispatch_character_event` all share the same ordering invariant:

@@ -1390,7 +1390,7 @@ async fn degradation_notice_send_failure_unregisters_session() {
 }
 
 /// A handshake that read the directory before the owner unpaired its agent is
-/// refused at registration, so Unpair's close cannot miss it (hud-vniri.6).
+/// refused at registration, so Unpair's close cannot miss it.
 #[tokio::test]
 async fn test_handshake_unpaired_mid_flight_is_refused_at_registration() {
     let service = HudSessionImpl::new(SceneGraph::new(800.0, 600.0), "test-key");

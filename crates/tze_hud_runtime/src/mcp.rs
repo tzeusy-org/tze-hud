@@ -110,7 +110,7 @@ pub struct McpServerConfig {
 /// * `config`          — MCP server configuration (bind addresses, agents).
 /// * `shutdown`        — token that stops the accept loops when triggered.
 /// * `portals` — optional shared portal hub and clock
-///   (hud-bq0gl.2).  When `Some`, MCP calls this hub directly; the winit driver shares the same state and clock.
+///. When `Some`, MCP calls this hub directly; the winit driver shares the same state and clock.
 ///
 /// # Returns
 ///
@@ -552,7 +552,7 @@ async fn handle_connection(
     let response = match request {
         Ok(req) => match http::route(&req.method, &req.path) {
             Route::Mcp => {
-                // Config-gated resident-principal grant (hud-nu65o); the PSK
+                // Config-gated resident-principal grant; the PSK
                 // check still happens independently inside `dispatch`.
                 let ctx = server.caller_context(req.bearer);
                 let body = std::str::from_utf8(&req.body).unwrap_or("");
@@ -627,7 +627,7 @@ async fn handle_connection(
     }
 }
 
-/// `POST /admin/update {"channel": ...}`: download and verify on a blocking
+/// `POST /admin/update {"channel":...}`: download and verify on a blocking
 /// thread, answer, and let the swap and handoff continue in the background.
 async fn update_response(
     update: &crate::operator::update::UpdateHandle,

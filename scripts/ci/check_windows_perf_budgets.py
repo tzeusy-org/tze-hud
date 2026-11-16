@@ -83,7 +83,7 @@ WINDOWS_HEADLESS_BUDGETS = (
 # budget` CI run and compares the current artifact against this checked-in
 # baseline, any regression that pushes a counter above its baseline surfaces as
 # a CI failure — this is the cross-run trend/regression surface for these
-# counters (validation.md §5.6: "surface trends, not just pass/fail").
+# counters, exposing trends alongside the pass/fail verdict.
 #
 # `scene_lock_misses` is the cumulative compositor frame-loop `try_lock` miss
 # count (scene-lock contention between the frame loop and concurrent gRPC/MCP
@@ -95,7 +95,7 @@ WINDOWS_HEADLESS_BUDGETS = (
 #
 # To raise a baseline (only with data justifying it), add or update a
 # session-scoped BASELINE_COUNTERS entry with its documented ceiling, and record
-# the rationale in about/craft-and-care/engineering-bar.md.
+# the measured reference profile.
 ZERO_COUNTERS = (
     "lease_violations",
     "budget_overruns",

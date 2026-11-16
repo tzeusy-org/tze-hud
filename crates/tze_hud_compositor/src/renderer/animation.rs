@@ -2,7 +2,7 @@
 //!
 //! Moved from `renderer/mod.rs` (the animation-update method cluster, approx.
 //! L4288–5095 at plan date) by Step R-5 of the renderer module split
-//! (hud-fgryk).  No logic was changed; only visibility modifiers were added
+//!. No logic was changed; only visibility modifiers were added
 //! where Rust's module-privacy rules require them.
 //!
 //! Animation-state **types** (`ZoneAnimationState`, `PublicationAnimationState`,
@@ -66,7 +66,7 @@ impl Compositor {
                 // Transition interrupt semantics: if a fade-out is currently in
                 // progress (target_opacity == 0.0), we MUST start the fade-in from
                 // the current composite opacity rather than from 0 to prevent a
-                // blank frame.  Per spec §Subtitle Contention Policy: "the fade-out
+                // blank frame. "the fade-out
                 // MUST be cancelled immediately and the new content MUST begin its
                 // transition_in_ms fade-in from the current composite opacity (not
                 // from zero)."
@@ -146,7 +146,7 @@ impl Compositor {
         self.prev_active_zones = current_active;
     }
 
-    /// Update per-portal-tile fade animation state (§6.3 — transition tokens).
+    /// Update per-portal-tile fade animation state (— transition tokens).
     ///
     /// Runs the same appear/disappear transition logic as [`update_zone_animations_at`]
     /// but for portal tiles (scrollable tiles identified by a registered
@@ -174,7 +174,7 @@ impl Compositor {
         scene: &SceneGraph,
         now: std::time::Instant,
     ) {
-        // Resolve transition durations from design tokens (§6.1 — no literals).
+        // Resolve transition durations from design tokens (— no literals).
         let transition_in_ms: u32 = self
             .token_map
             .get("portal.transition.in_ms")
@@ -213,7 +213,7 @@ impl Compositor {
                 // seeded from the eased (on-screen) opacity rather than the linear
                 // `current_opacity()`. Seeding from the linear value would make the
                 // new fade-in start at a different opacity than the frame just
-                // rendered, producing a visible jump (hud-uir0w). Reusing
+                // rendered, producing a visible jump. Reusing
                 // `portal_tile_anim_opacity` keeps the seed tied to the exact
                 // displayed value, so the easing curve can never drift between the
                 // two paths.
@@ -262,7 +262,7 @@ impl Compositor {
     /// Used by tile text collection and background rendering to fade portal
     /// tiles in/out using the token-configured duration.
     ///
-    /// The fade is shaped by [`Easing::EaseInOut`] (hud-bq0gl.10) so portal
+    /// The fade is shaped by [`Easing::EaseInOut`] so portal
     /// collapse/expand transitions accelerate and decelerate rather than ramping
     /// linearly. Endpoints (`t=0`, `t=1`) are unchanged, so this is a motion-only
     /// refinement: a freshly-appearing tile still starts fully transparent and a
@@ -299,7 +299,6 @@ impl Compositor {
     /// - Zones with empty breakpoints (or no StreamText) have their reveal state
     ///   pruned so text renders at full immediately.
     ///
-    /// Per spec §Subtitle Streaming Word-by-Word Reveal:
     /// - Breakpoints identify byte offsets for progressive reveal.
     /// - Empty breakpoints → reveal all at once.
     /// - Replacement during streaming → cancel old reveal, start new.
@@ -360,7 +359,7 @@ impl Compositor {
         }
     }
 
-    /// Update per-portal-tile streaming-reveal state (hud-bl7yi).
+    /// Update per-portal-tile streaming-reveal state.
     ///
     /// Must be called once per frame (after `update_portal_tile_animations`),
     /// the portal-tile analogue of [`Compositor::update_stream_reveals`].
@@ -385,7 +384,7 @@ impl Compositor {
     pub(crate) fn update_portal_tile_reveals(&mut self, scene: &SceneGraph) {
         // Phase 1: snapshot (tile_id, node_id, plain_text) for **every eligible
         // markdown node** under every portal tile — not just the first-eligible
-        // one (hud-tbdfx). Done in a separate pass so the immutable cache/scene
+        // one. Done in a separate pass so the immutable cache/scene
         // borrow is released before we mutate `self.portal_tile_reveal_states`.
         //
         // Reveal state is keyed per `(tile_id, node_id)`. Keying per node (vs
@@ -455,7 +454,7 @@ impl Compositor {
 
     /// Collect `(tile_id, node_id, plain_text)` for **every eligible
     /// `TextMarkdownNode`** in the subtree rooted at `node_id`, using the
-    /// commit-time-primed markdown cache (hud-tbdfx).
+    /// commit-time-primed markdown cache.
     ///
     /// A node contributes an entry when it is a `TextMarkdownNode` that does not
     /// carry pixel-bearing color runs (the legacy raw path indexes raw content,
@@ -483,7 +482,7 @@ impl Compositor {
                     .copied()
                     .unwrap_or_else(|| {
                         // Portal transcript nodes key with the portal token set
-                        // (hud-3ryie); the primed `node_key_cache` normally makes
+                        //; the primed `node_key_cache` normally makes
                         // this fallback unreachable.
                         crate::markdown::MarkdownCache::compute_key(
                             &tm.content,
@@ -675,7 +674,7 @@ impl Compositor {
     }
 
     /// Advance per-portal-tile scroll smoothing toward the scene's authoritative
-    /// scroll targets (smooth scroll / animated follow-tail, hud-bq0gl.10).
+    /// scroll targets (smooth scroll / animated follow-tail).
     ///
     /// Must be called once per frame, before any render pass reads a tile's
     /// displayed scroll offset via [`Compositor::display_tile_scroll_offset`].
@@ -688,8 +687,8 @@ impl Compositor {
     ///
     /// A newly-observed tile starts *settled* on its current offset (no initial
     /// jump); only subsequent target changes — user scroll or follow-tail
-    /// content appends — animate. User scroll stays authoritative (RFC 0013
-    /// §3.2): only the visual catch-up is eased, never the target.
+    /// content appends — animate. User scroll stays authoritative:
+    /// only the visual catch-up is eased, never the target.
     pub(crate) fn update_scroll_smoothing(&mut self, scene: &SceneGraph) {
         self.update_scroll_smoothing_at(scene, std::time::Instant::now());
     }
@@ -755,7 +754,7 @@ impl Compositor {
 
     /// Publish the per-tile *displayed* (smoothed/lagged) scroll offsets into the
     /// scene so the live hit-test path maps pointer coordinates against the same
-    /// offset the renderer drew with (hud-3lynp).
+    /// offset the renderer drew with.
     ///
     /// Must be called once per frame, after [`update_scroll_smoothing`] has
     /// advanced the smoothers (so the published offsets reflect this frame's
@@ -828,7 +827,7 @@ impl Compositor {
     /// still in flight — i.e. the next presented frame's pixels would differ
     /// from the last even though `scene.version` is unchanged.
     ///
-    /// The windowed frame loop's idle render gate (hud-ilivg) consults this so it
+    /// The windowed frame loop's idle render gate consults this so it
     /// can skip the build/encode/present pass only when BOTH the scene version is
     /// unchanged AND nothing is animating. Returning `true` here is what keeps an
     /// in-flight eased transition, TTL fade-out, word-by-word reveal, or
@@ -887,7 +886,7 @@ impl Compositor {
             return true;
         }
 
-        // Portal-tile fade-in / fade-out transitions (§6.3 collapse/expand).
+        // Portal-tile fade-in / fade-out transitions.
         if self
             .portal_tile_anim_states
             .iter()
@@ -924,7 +923,7 @@ impl Compositor {
         }
 
         // Portal-tile per-segment streaming-reveal fade still in flight
-        // (hud-bl7yi). An active StreamFadeRamp must keep the tile rendering so
+        //. An active StreamFadeRamp must keep the tile rendering so
         // the fade advances instead of freezing mid-reveal (#943).
         if self
             .portal_tile_reveal_states

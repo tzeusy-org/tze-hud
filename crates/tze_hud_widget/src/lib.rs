@@ -27,21 +27,6 @@
 //! validation at bundle load time, but does NOT upload SVG files to the resource
 //! store — that is the responsibility of the runtime startup code.
 //!
-//! ## Spec references
-//!
-//! - widget-system/spec.md §Requirement: Widget Asset Bundle Format
-//! - widget-system/spec.md §Requirement: SVG Layer Parameter Bindings
-//! - resource-store/spec.md §Requirement: V1 Resource Type Enumeration (IMAGE_SVG)
-//! - resource-store/spec.md §Requirement: SVG Resource Budget Accounting
-//!
-//! ## Module structure
-//!
-//! | Module | Contents |
-//! |---|---|
-//! | [`error`] | Structured bundle error codes |
-//! | [`manifest`] | TOML manifest deserialization types |
-//! | [`svg_ids`] | SVG element ID scanner for binding resolution |
-//! | [`loader`] | Bundle directory scanner and WidgetDefinition builder |
 
 pub mod error;
 pub mod loader;

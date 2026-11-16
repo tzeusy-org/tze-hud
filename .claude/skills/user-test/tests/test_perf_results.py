@@ -16,7 +16,14 @@ def test_header_migration_preserves_historical_results(tmp_path, monkeypatch):
     original = skill / "reference/results.csv"
     with original.open(newline="") as source:
         rows = list(csv.DictReader(source))
-    obsolete = {"trace_spec_ref", "trace_rfc_ref", "trace_doctrine_ref"}
+    # Recover retired columns from the preserved measurement identities.
+    obsolete = {
+        key
+        for row in rows
+        for key in json.loads(row["primary_key_fields_json"])
+        if key.startswith("trace_") and key != "trace_budget_ref"
+    }
+    assert len(obsolete) == 3
     old_header = [*common.RESULTS_CSV_HEADER, *sorted(obsolete)]
     result_file = tmp_path / "results.csv"
     with result_file.open("w", newline="") as target:

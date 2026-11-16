@@ -3,7 +3,7 @@
 //! Implements the doctrinal core: "Local feedback first. Touch/interaction
 //! acknowledgement happens locally and instantly; remote semantics follow."
 //!
-//! # Default feedback styles (spec §Local Feedback Defaults and Customization)
+//! # Default feedback styles
 //!
 //! | State   | Default visual                            |
 //! |---------|-------------------------------------------|
@@ -13,7 +13,7 @@
 //!
 //! These defaults are overridable per `HitRegionNode` via `LocalFeedbackStyle`.
 //!
-//! # Rollback semantics (spec §Local Feedback Rollback on Agent Rejection)
+//! # Rollback semantics
 //!
 //! - Agent **explicitly rejects** an interaction → 100ms reverse animation.
 //! - Agent **silent / slow** (>50ms, no response) → pressed state remains true
@@ -106,7 +106,7 @@ pub struct ResolvedFeedbackStyle {
     pub focus_ring_width_px: f32,
 }
 
-/// System-wide defaults for local feedback (matches spec §Local Feedback Defaults).
+/// System-wide defaults for local feedback.
 pub const DEFAULT_HOVER_TINT: Rgba = Rgba {
     r: 1.0,
     g: 1.0,
@@ -144,7 +144,7 @@ impl ResolvedFeedbackStyle {
 
 // ─── RollbackAnimation ───────────────────────────────────────────────────────
 
-/// Duration of the rollback reverse animation per spec §Local Feedback Rollback.
+/// Duration of the rollback reverse animation per Local Feedback Rollback.
 pub const ROLLBACK_ANIMATION_MS: u64 = 100;
 
 /// State of a pending rollback animation for a single node.

@@ -4,7 +4,7 @@
 //! `ScrollState::reset_to_tail` can snap a tile's viewport back to the tail,
 //! but there was no user-facing control to trigger it — a viewer scrolled up
 //! into transcript history had no way back to the live edge short of manually
-//! scrolling all the way down (hud-9ci61).
+//! scrolling all the way down.
 //!
 //! This module computes the geometry of a small clickable pill that:
 //! - the compositor renders ONLY when a tile is scrolled away from the tail
@@ -26,10 +26,9 @@
 //! are intentionally minimal for this first pass; the owner may refine
 //! sizing, iconography, or position in a follow-up.
 //!
-//! ## Ambient unread count (hud-g1ena.3)
+//! ## Ambient unread count
 //!
-//! Per portal-chat-grade-affordances §Jump-to-Latest Affordance, the pill MAY
-//! carry the ambient unread count. When the tile has a nonzero, non-redacted
+//! The pill may carry the ambient unread count. When the tile has a nonzero, non-redacted
 //! unread-output count (plumbed onto the tile by the portal projection driver
 //! from `PortalView::unread_output_count`), the compositor renders
 //! the [`jump_to_latest_badge_label`] centered in the pill. The count is a
@@ -71,7 +70,7 @@ pub struct JumpToLatestTokens {
     /// `gpu_color_raw`, which assumes linear input; the token-set path resolves
     /// `portal.jump_to_latest.color` through `parse_hex_color` (sRGB→linear), so
     /// the DEFAULT below must also be linear for default and token-set to render
-    /// the same intended color (hud-25pee). Alpha carries no color-space transform.
+    /// the same intended color. Alpha carries no color-space transform.
     pub color_r: f32,
     pub color_g: f32,
     pub color_b: f32,
@@ -79,7 +78,7 @@ pub struct JumpToLatestTokens {
     /// Ambient unread-count badge text color. STRAIGHT (non-linear) sRGB
     /// components in [0.0, 1.0], matching the `color_*` default convention above;
     /// the compositor encodes these to sRGB u8 by a plain scale. Used only when
-    /// the pill carries an unread count (hud-g1ena.3); the plain pill (no unread)
+    /// the pill carries an unread count; the plain pill (no unread)
     /// draws no text.
     pub text_r: f32,
     pub text_g: f32,
@@ -105,7 +104,7 @@ impl Default for JumpToLatestTokens {
             // thumb, ambient rather than alarming. Stored LINEAR (via
             // srgb_to_linear) to match the token-set path, which parses the same
             // hex through the compositor's parse_hex_color (sRGB→linear); the
-            // compositor's gpu_color_raw consumes color_* as linear (hud-25pee).
+            // compositor's gpu_color_raw consumes color_* as linear.
             color_r: srgb_to_linear(0x4A as f32 / 255.0),
             color_g: srgb_to_linear(0x55 as f32 / 255.0),
             color_b: srgb_to_linear(0x68 as f32 / 255.0),
@@ -124,9 +123,7 @@ impl Default for JumpToLatestTokens {
     }
 }
 
-/// Format the ambient unread-count badge the jump-to-latest pill MAY carry
-/// (portal-chat-grade-affordances §Jump-to-Latest Affordance: "The affordance
-/// MAY carry the ambient unread count").
+/// Format the ambient unread-count badge carried by the jump-to-latest pill.
 ///
 /// The input is the runtime-owned aggregate unread-output count already tracked
 /// end-to-end (`PortalView::unread_output_count`, plumbed onto the
@@ -228,7 +225,7 @@ mod tests {
         JumpToLatestTokens::default()
     }
 
-    // ─── Color-space convention (hud-25pee) ───────────────────────────────
+    // ─── Color-space convention ───────────────────────────────
 
     /// The pill FILL default is stored LINEAR — the space `gpu_color_raw`
     /// consumes and the space the token-set path (`parse_hex_color`) produces —
@@ -331,7 +328,7 @@ mod tests {
         assert!(compute_jump_to_latest_pill(400.0, -1.0, true, &tokens).is_none());
     }
 
-    // ─── Ambient unread-count badge (hud-g1ena.3) ─────────────────────────
+    // ─── Ambient unread-count badge ─────────────────────────
 
     #[test]
     fn badge_hidden_when_redacted_or_zero() {

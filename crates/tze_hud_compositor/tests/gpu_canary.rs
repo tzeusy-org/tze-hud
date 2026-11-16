@@ -5,8 +5,7 @@
 //! Compositor GPU tests silently self-skip (bare `return`) when no wgpu adapter
 //! is found or `TZE_HUD_SKIP_GPU_TESTS=1` is set.  On a host that is supposed
 //! to have a GPU (real or software), a silently-skipped suite is
-//! indistinguishable from a passing one, which masks regressions (see hud-2sxfk,
-//! hud-5jbra).
+//! indistinguishable from a passing one, which masks regressions.
 //!
 //! This module provides a single **always-on** canary test:
 //!

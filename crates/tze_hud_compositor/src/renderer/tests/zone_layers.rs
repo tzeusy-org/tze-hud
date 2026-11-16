@@ -521,7 +521,7 @@ async fn test_three_pass_ordering_independent_of_registration_order() {
     // vertical margin plus the 25 px body line at the 20 px title size).
     // Chrome starts at x=380, covering the card's right hairline but leaving
     // its left hairline as an independent positive control. An idle × draws
-    // no SDF shape (hud-h51u7.4.1).
+    // no SDF shape.
     compositor.set_token_map(HashMap::from([
         (
             "color.notification.outline".to_owned(),
@@ -878,7 +878,7 @@ fn test_publication_ttl_ms_uses_expires_at_wall_us() {
     );
 }
 
-// ── Transition interrupt semantics [hud-hzub.2] ─────────────────────────
+// ── Transition interrupt semantics ─────────────────────────
 
 /// fade_in_from starts from a non-zero opacity.
 ///
@@ -1124,7 +1124,7 @@ async fn test_transition_interrupt_starts_fade_in_from_current_opacity() {
     );
 }
 
-// ── Streaming word-by-word reveal [hud-hzub.2] ──────────────────────────
+// ── Streaming word-by-word reveal ──────────────────────────
 
 /// StreamRevealState.visible_byte_offset returns usize::MAX when no breakpoints.
 #[test]

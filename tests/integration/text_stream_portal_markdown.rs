@@ -1,7 +1,6 @@
-//! Phase-1 markdown rendering subset integration tests (hud-5jbra.2).
+//! Phase-1 markdown rendering subset integration tests.
 //!
-//! Covers spec requirement "Phase-1 Markdown Rendering Subset" and
-//! "Markdown Parsing Outside the Frame Loop":
+//! Covers the supported markdown rendering subset and parsing outside the frame loop:
 //!
 //! ## Task 2.4 — Integration tests
 //! - Each supported subset construct produces styled runs and correct plain text
@@ -365,7 +364,7 @@ fn repeated_gets_are_all_cache_hits() {
     }
 }
 
-/// Stage-budget test (spec task 2.5): zero per-frame parse cost for unchanged
+/// Stage-budget test: zero per-frame parse cost for unchanged
 /// content and stage-budget compliance when a 65535-byte payload commits.
 ///
 /// The spec requires:

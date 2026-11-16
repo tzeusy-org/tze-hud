@@ -356,7 +356,7 @@ def test_hook_lifecycle_over_real_mcp_surface(tmp_path):
 
 def test_hook_parallel_tool_updates_queue_instead_of_dropping(tmp_path):
     # Parallel tools fire their Post hooks together; the second must wait for
-    # the in-flight delivery rather than lose its update (hud-x38zn.8).
+    # the in-flight delivery rather than lose its update .
     with HookHarness(tmp_path / "parallel") as h:
         h.boot()
         h.event("PreToolUse", tool_use_id="ok", tool_name="Bash")

@@ -1,6 +1,6 @@
 // ─── Session Lifecycle State Machine ────────────────────────────────────────
 
-/// Session lifecycle states per RFC 0005 §1.1.
+/// Session lifecycle states.
 ///
 /// The state machine progresses through these states in response to protocol
 /// events (stream open/close, SessionInit/Resume, heartbeat timeout, etc.).

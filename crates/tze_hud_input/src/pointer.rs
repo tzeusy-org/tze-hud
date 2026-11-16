@@ -1,8 +1,6 @@
 //! Rich pointer event types for the dispatch pipeline.
 //!
-//! Implements spec §Requirement: Pointer Event Types (lines 278-280) and the
-//! protobuf schema concepts from §Requirement: Protobuf Schema for Input Events
-//! (lines 367-369).
+//! Pointer event data mapped to the protocol schema.
 //!
 //! All events carry:
 //! - `tile_id`, `node_id` as `SceneId` (16-byte little-endian UUIDv7)
@@ -82,39 +80,39 @@ pub struct PointerFields {
 
 // ─── Per-event types ─────────────────────────────────────────────────────────
 
-/// Pointer button pressed (spec line 279).
+/// Pointer button pressed.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PointerDownEvent {
     pub fields: PointerFields,
     pub button: PointerButton,
 }
 
-/// Pointer button released (spec line 279).
+/// Pointer button released.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PointerUpEvent {
     pub fields: PointerFields,
     pub button: PointerButton,
 }
 
-/// Pointer moved while over the node (spec line 279).
+/// Pointer moved while over the node.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PointerMoveEvent {
     pub fields: PointerFields,
 }
 
-/// Pointer entered the node's bounds (spec line 279).
+/// Pointer entered the node's bounds.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PointerEnterEvent {
     pub fields: PointerFields,
 }
 
-/// Pointer left the node's bounds (spec line 279).
+/// Pointer left the node's bounds.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PointerLeaveEvent {
     pub fields: PointerFields,
 }
 
-/// Press + release on the same node (spec line 279).
+/// Press + release on the same node.
 ///
 /// Maps to primary button (left-click) interaction. Dispatched only after
 /// PointerUpEvent, in the same event batch.
@@ -124,15 +122,14 @@ pub struct ClickEvent {
     pub button: PointerButton,
 }
 
-/// Two clicks within 300ms on the same node (spec line 279, v1-reserved tap
-/// pipeline, but DoubleClick recognition ships per V1 Gesture Fallback).
+/// Two clicks within 300ms on the same node.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DoubleClickEvent {
     pub fields: PointerFields,
     pub button: PointerButton,
 }
 
-/// Right-click context menu request (spec lines 433-435).
+/// Right-click context menu request.
 ///
 /// Produced by the event preprocessor directly from right-click, bypassing
 /// the gesture recognizer pipeline.
@@ -141,7 +138,7 @@ pub struct ContextMenuEvent {
     pub fields: PointerFields,
 }
 
-/// In-progress pointer interaction cancelled (spec line 279).
+/// In-progress pointer interaction cancelled.
 ///
 /// Terminal event for an interaction. Agents MUST treat this as the end
 /// of the interaction sequence — no PointerUp follows a PointerCancel.
@@ -199,7 +196,7 @@ pub enum RawPointerEventKind {
     Down,
     Up,
     /// Right-click (preprocessor produces ContextMenuEvent instead of passing
-    /// through the gesture pipeline — spec §3.2, §3.3).
+    /// through the gesture pipeline — 3.2,).
     RightClick,
     Cancel,
 }

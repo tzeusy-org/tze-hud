@@ -570,7 +570,7 @@ async fn status_bar_long_value_is_ellipsized_not_wrapped() {
     );
 }
 
-/// hud-iicg5: a RenderingPolicy colour taken from a design token draws as the
+/// a RenderingPolicy colour taken from a design token draws as the
 /// hex the token declares, the same as the compositor's own token fallback.
 #[tokio::test]
 async fn status_bar_token_policy_backdrop_draws_its_declared_hex() {

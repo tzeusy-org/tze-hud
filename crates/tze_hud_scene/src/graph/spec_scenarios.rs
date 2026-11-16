@@ -9,7 +9,7 @@ use crate::types::{
 /// `remove_tile_and_nodes` populates `recently_removed_tile_ids`; draining
 /// that queue via `drain_removed_tile_ids` yields the removed tile ID.
 ///
-/// This is the scene-layer half of the hud-4tuw5 contract.  The windowed
+/// This is the scene-layer half of the contract. The windowed
 /// runtime drains this queue in `prune_portal_resize_states` to eagerly
 /// remove the tile's entry from `portal_resize_states`.
 #[test]

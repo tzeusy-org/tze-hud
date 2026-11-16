@@ -228,7 +228,7 @@ fn scene_node_layout_to_proto(layout: NodeLayout) -> i32 {
 }
 
 /// Recursively convert a `NodeProto` (with optional inline `children`,
-/// hud-ga4md) into a FLAT list of scene [`Node`]s, ROOT FIRST, with every
+/// ) into a FLAT list of scene [`Node`]s, ROOT FIRST, with every
 /// node's `children` field populated with its direct children's assigned
 /// [`SceneId`]s.
 ///
@@ -525,7 +525,7 @@ pub fn proto_zone_content_to_scene(c: &proto::ZoneContent) -> Option<ZoneContent
             entries: sb.entries.clone(),
         })),
         Payload::SolidColor(c) => Some(ZoneContent::SolidColor(proto_rgba_to_scene(c))),
-        // StaticImageRef → ZoneContent::StaticImage (WM-S2b types.proto delta; RFC 0011 resource identity).
+        // StaticImageRef → ZoneContent::StaticImage (WM-S2b types.proto delta; resource identity).
         // The resource_id carries the 32-byte BLAKE3 hash identifying the uploaded resource.
         Payload::StaticImageRef(r) => {
             if r.resource_id.len() == 32 {
@@ -673,7 +673,7 @@ pub(crate) fn scene_node_to_proto(n: &Node) -> proto::NodeProto {
         data,
         // Flat scene->proto: a bare scene `Node` carries only child SceneId refs,
         // which cannot be resolved to child structs without the graph, so the
-        // inline-children field is left empty (hud-ga4md). Use
+        // inline-children field is left empty. Use
         // [`scene_node_tree_to_proto`] with a node lookup to emit a nested subtree.
         children: vec![],
         layout: scene_node_layout_to_proto(n.layout),
@@ -681,7 +681,7 @@ pub(crate) fn scene_node_to_proto(n: &Node) -> proto::NodeProto {
 }
 
 /// Convert a scene `Node` and its descendants into a nested `NodeProto` with
-/// inline `children` (hud-ga4md) — the reverse of [`proto_node_tree_to_scene`].
+/// inline `children` — the reverse of [`proto_node_tree_to_scene`].
 ///
 /// `root.children` are resolved against `lookup` (a flat id→node map, e.g. a
 /// `SceneGraph`'s node map) and emitted recursively as `NodeProto.children`. A
@@ -1056,7 +1056,7 @@ mod tests {
         }
     }
 
-    // ── Inline NodeProto.children subtree round-trips (hud-ga4md) ─────────────
+    // ── Inline NodeProto.children subtree round-trips ─────────────
 
     fn text_proto(id: &[u8], content: &str, children: Vec<proto::NodeProto>) -> proto::NodeProto {
         proto::NodeProto {
@@ -1171,8 +1171,7 @@ mod tests {
 
     /// The additive `NodeLayout` field round-trips proto ↔ scene, with Absolute
     /// re-emitting UNSPECIFIED (0) so a flat/absolute node stays byte-identical to
-    /// the pre-layout wire, and unknown wire values coercing to Absolute
-    /// (hud-yfj8u).
+    /// the pre-layout wire, and unknown wire values coercing to Absolute.
     #[test]
     fn node_layout_round_trips_proto_scene_proto() {
         let rid = SceneId::new().to_bytes_le();

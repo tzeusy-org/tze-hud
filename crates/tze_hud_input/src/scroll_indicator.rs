@@ -1,6 +1,5 @@
 //! Token-styled, geometry-only scroll-position indicators for portal panes.
 //!
-//! Implements §6b.5 of `text-stream-portal-phase1/tasks.md` (amendment 2026-06-10):
 //!
 //! > Implement token-styled, geometry-only scroll-position indicators for
 //! > overflowing transcript/composer panes, redaction-safe.
@@ -93,7 +92,7 @@ impl Default for ScrollIndicatorTokens {
 /// overflowing — callers MUST not render the indicator in that case.
 ///
 /// This struct is **geometry-only**: it carries no content information.
-/// It is safe to deliver to any viewer under any redaction policy (§6b.5).
+/// It is safe to deliver to any viewer under any redaction policy.
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ScrollIndicatorGeometry {
     /// Y offset of the thumb's top edge within the track (0.0 = track top).

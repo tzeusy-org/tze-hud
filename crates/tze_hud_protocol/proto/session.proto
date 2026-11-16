@@ -8,7 +8,7 @@ import "events.proto";
 // ─── Session Protocol ─────────────────────────────────────────────────────────
 //
 // Bidirectional streaming session protocol for resident agent <-> runtime
-// communication. Implements RFC 0005 (Session/Protocol).
+// communication.
 //
 // This replaces the unary-RPC model in SceneService with a single
 // multiplexed bidirectional stream per agent.
@@ -43,7 +43,7 @@ message ClientMessage {
     // Keepalive
     Heartbeat         heartbeat          = 31;
 
-    // Resident scene-resource upload (RFC 0011; session-protocol spec §Resident Upload Handshake).
+    // Resident scene-resource upload.
     ResourceUploadStart    resource_upload_start    = 36;
     ResourceUploadChunk    resource_upload_chunk    = 37;
     ResourceUploadComplete resource_upload_complete = 38;
@@ -94,10 +94,10 @@ message ServerMessage {
     SessionEstablished    session_established    = 10;
     SessionError          session_error          = 11;
 
-    // Server response to SessionResume (RFC 0005 §6.3)
+    // Server response to SessionResume
     SessionResumeResult   session_resume_result  = 12;
 
-    // Safe-mode lifecycle notifications (RFC 0005 §3.7)
+    // Safe-mode lifecycle notifications
     // Both are transactional (never dropped).
     SessionSuspended      session_suspended      = 13;
     SessionResumed        session_resumed        = 14;
@@ -105,21 +105,21 @@ message ServerMessage {
     // Keepalive
     Heartbeat             heartbeat              = 33;
 
-    // Event batch (defined in events.proto; RFC 0004 §8.3, §8.4, RFC 0005 §3.1)
+    // Event batch (defined in events.proto)
     // Carries per-frame InputEnvelope variants (pointer, keyboard, focus, capture,
-    // scroll, command events). Variants are filtered per RFC 0005 §7.1 before delivery.
+    // scroll, command events). Variants are filtered before delivery.
     tze_hud.protocol.v1.EventBatch event_batch   = 34;
 
-    // Scene-resource upload responses (RFC 0011 resident upload flow).
+    // Resident scene-resource upload responses.
     ResourceUploadAccepted resource_upload_accepted = 41;
     ResourceStored         resource_stored          = 42;
 
-    // Degradation notice (RFC 0005 §3.4, §7.1).
+    // Degradation notice.
     // Transactional — never dropped. Delivered to ALL active sessions unconditionally
     // on degradation level change, regardless of subscription configuration.
     DegradationNotice     degradation_notice      = 46;
 
-    // Scene-resource upload-specific semantic errors (RFC 0011 resident upload flow).
+    // Resident scene-resource upload-specific semantic errors.
     ResourceErrorResponse resource_error_response = 49;
 
     // Element repositioned event — emitted on drag completion or reset-to-default.
@@ -173,7 +173,7 @@ message ServerMessage {
     "list_elements_response";
 }
 
-// ─── Authentication credentials (RFC 0005 §1.4) ──────────────────────────────
+// ─── Authentication credentials ──────────────────────────────
 
 // Pre-shared key credential (v1 primary auth mechanism).
 message PreSharedKeyCredential {
@@ -238,7 +238,7 @@ message SessionResume {
   bytes  resume_token               = 2;  // Token from previous SessionEstablished
   uint64 last_seen_server_sequence  = 3;  // Last server sequence the client processed
 
-  // Structured auth credential for re-authentication (RFC 0005 §6.2).
+  // Structured auth credential for re-authentication.
   AuthCredential auth_credential    = 5;
 }
 
@@ -256,7 +256,7 @@ message SessionEstablished {
   reserved 11;
   reserved "negotiated_protocol_version";
   bytes  session_id               = 1;  // Opaque session identifier (UUIDv7)
-  string namespace                = 2;  // Agent's namespace in the scene (RFC 0001 SS1.2)
+  string namespace                = 2;  // Agent's namespace in the scene
   // Field 3 (granted_capabilities) removed in T5 S2.
   reserved 3;
   reserved "granted_capabilities";
@@ -288,7 +288,7 @@ message SessionError {
   string hint    = 3;  // Machine-readable correction suggestion
 }
 
-// Server response to a valid SessionResume (RFC 0005 §6.3).
+// Server response to a valid SessionResume.
 // Followed immediately by the current DegradationNotice.
 // Agents MUST use the subscription state from this message rather than assuming
 // their pre-disconnect subscription set is intact.
@@ -310,7 +310,7 @@ message SessionResumeResult {
   repeated string denied_subscriptions   = 8;   // Denied (not in allow list)
 }
 
-// ─── Safe-mode lifecycle messages (RFC 0005 §3.7) ─────────────────────────────
+// ─── Safe-mode lifecycle messages ─────────────────────────────
 
 // Runtime notifies all active sessions that safe mode has been entered.
 // While suspended, Publish is rejected with SAFE_MODE_ACTIVE. The session remains
@@ -328,7 +328,7 @@ message SessionResumed {
 
 // ─── Mutation messages ────────────────────────────────────────────────────────
 
-// Optional timing semantics for a MutationBatch (RFC 0003 §3.5, §4.5).
+// Optional timing semantics for a MutationBatch.
 // Clock domain: wall-clock (UTC µs since Unix epoch).
 // 0 in either field means "no constraint" (present immediately / no expiry).
 message TimingHints {
@@ -346,10 +346,10 @@ message TimingHints {
 
 // Internal-only container for scene mutation conversion. No public session route.
 message MutationBatch {
-  bytes  batch_id  = 1;  // UUIDv7; deduplication key (RFC 0005 SS5.2)
+  bytes  batch_id  = 1;  // UUIDv7; deduplication key
   bytes  lease_id  = 2;  // Lease under which mutations execute
   repeated tze_hud.protocol.v1.MutationProto mutations = 3;  // Ordered; applied atomically
-  TimingHints timing = 4;  // Optional timing semantics (RFC 0003 §3.5)
+  TimingHints timing = 4;  // Optional timing semantics
 }
 
 // ─── Lifecycle verbs (docs/api.md) ───────────────────────────────────────────
@@ -483,12 +483,12 @@ message ResourceErrorResponse {
 // ─── Heartbeat ────────────────────────────────────────────────────────────────
 
 // Bidirectional keepalive. Same message type in both directions.
-// Clock domain: _mono_us for RTT measurement (RFC 0005 SS2.4).
+// Clock domain: _mono_us for RTT measurement.
 message Heartbeat {
   uint64 timestamp_mono_us = 1;  // Monotonic clock (us); echoed for RTT calculation
 }
 
-// ─── Degradation (RFC 0005 §3.4, §7.1) ───────────────────────────────────────
+// ─── Degradation ───────────────────────────────────────
 
 // Degradation level reported by the runtime: full rendering, or the single
 // Simplified fallback (downscaled textures, opaque fills, snapped animations).
@@ -504,9 +504,9 @@ enum DegradationLevel {
 }
 
 // Runtime notifies all active sessions of a change in degradation level.
-// Transactional — never dropped under backpressure (RFC 0005 §3.4).
+// Transactional — never dropped under backpressure.
 // Delivered unconditionally to ALL active sessions regardless of subscription config.
-// degradation_notices subscriptions SHALL NOT be filterable (RFC 0005 §7.1).
+// degradation_notices subscriptions SHALL NOT be filterable.
 message DegradationNotice {
   DegradationLevel level              = 1;  // Current degradation level
   string           reason             = 2;  // Human-readable reason for the change

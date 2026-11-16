@@ -85,7 +85,7 @@ pub struct WindowedConfig {
     /// Filesystem path of the loaded configuration file, if known.
     ///
     /// Used to resolve relative `[widget_bundles].paths` entries relative to the
-    /// config file's parent directory (per spec §Widget Bundle Configuration).
+    /// config file's parent directory.
     /// When `None`, relative paths are resolved from the current working directory.
     ///
     /// ## Source
@@ -109,7 +109,7 @@ pub struct WindowedConfig {
     /// one: report ready after the first frame, take over, then bind the ports.
     pub handoff: Option<crate::operator::handoff::HandoffChild>,
     /// Set when `POST /admin/update` started this instance (`--updated-from
-    /// <old sha>`): show the "Updated to ..." toast.
+    /// <old sha>`): show the "Updated to..." toast.
     pub updated_from: Option<String>,
     /// Which settings a flag or variable pinned, and which came from config,
     /// for the control panel.
@@ -149,7 +149,7 @@ mod tests {
         assert_eq!(
             cfg.window.mode,
             WindowMode::Fullscreen,
-            "default mode must be fullscreen (spec §Window Modes)"
+            "default mode must be fullscreen"
         );
     }
 }

@@ -158,16 +158,15 @@ pub struct ScrollOffsetChangedEvent {
 
 /// The scroll-anchor state for a streaming transcript tile.
 ///
-/// This type encodes the spec task 3.2 / 3.3 contract for the follow-tail
+/// This type encodes the follow-tail contract for the
 /// scroll model:
 ///
 /// - **`AtTail`** — the viewport is currently at the tail of the content.
 ///   When new content is appended, the scroll offset advances by exactly N
-///   whole lines (spec task 3.2: "follow-tail advances by whole lines").
+///   whole lines.
 ///
 /// - **`ScrolledBack`** — the user has scrolled back from the tail.  When new
-///   content is appended, the scroll offset is **not changed** (spec task 3.3:
-///   "append does not disturb a scrolled-back viewport").
+///   content is appended, the scroll offset is **not changed**.
 ///
 /// # Transition rules
 ///
@@ -201,7 +200,7 @@ pub enum FollowTailAnchor {
 ///
 /// If the new content height does not add at least one full line, no change is
 /// made (returns the current offset unchanged).  This ensures the "whole-line
-/// advancement" invariant from spec task 3.2.
+/// advancement" invariant.
 ///
 /// # Parameters
 ///
@@ -378,8 +377,7 @@ impl ScrollTileState {
     /// Notify this tile that new content has been appended (e.g. a streaming
     /// transcript received new lines).
     ///
-    /// Implements spec task 3.2 ("follow-tail advances by whole lines") and
-    /// task 3.3 ("append does not disturb a scrolled-back viewport"):
+    /// Appending preserves the current anchor:
     ///
     /// - When `self.follow_tail == AtTail`, the scroll offset advances by
     ///   whole lines to track the new tail.
@@ -552,10 +550,10 @@ impl ScrollTileState {
     ///
     /// Unlike [`Self::notify_content_appended`], which deliberately preserves
     /// a `ScrolledBack` viewport when ordinary (remote/streamed) content grows
-    /// (spec task 3.3), this is for a deliberate LOCAL action — e.g. the
+    ///, this is for a deliberate LOCAL action — e.g. the
     /// viewer typing into or submitting their own composer — where staying
     /// scrolled away from the tail would strand them from their own live
-    /// input (hud-qbcp8: input-history "reset to tail on typing/submit").
+    /// input (input-history "reset to tail on typing/submit").
     ///
     /// Returns `true` if the offset or anchor changed.
     pub fn reset_to_tail(&mut self) -> bool {
@@ -755,7 +753,7 @@ impl ScrollState {
 
     /// Notify a tile that content has been appended (e.g. new streaming lines).
     ///
-    /// Implements spec task 3.2 / 3.3 at the registry level:
+    /// Applies content-append anchor behavior at the registry level:
     /// - `AtTail` tiles advance their scroll offset by whole lines.
     /// - `ScrolledBack` tiles have their offset left unchanged.
     ///
@@ -817,7 +815,7 @@ impl ScrollState {
     /// Callers that maintain their own running content-height total (rather
     /// than re-measuring it) can read this back before adding a delta and
     /// re-calling [`Self::notify_content_appended`], instead of tracking a
-    /// duplicate counter (hud-qbcp8).
+    /// duplicate counter.
     pub fn total_content_height_px(&self, tile_id: SceneId) -> f32 {
         self.tiles
             .get(&tile_id)
@@ -1125,12 +1123,12 @@ mod tests {
         assert_eq!(scroll.offset(tile_id).1, 160.0);
     }
 
-    // ── Spec task 3.2 — follow-tail advances by whole lines ──────────────────
+    // ──  follow-tail advances by whole lines ──────────────────
 
     /// A tile starting at the tail should advance its offset by exactly N whole
     /// lines when content is appended, never by a fractional line.
     ///
-    /// Spec task 3.2: "follow-tail advances by whole lines"
+    /// Follow-tail advances by whole lines.
     #[test]
     fn follow_tail_advances_by_whole_lines_on_append() {
         let tile_id = SceneId::new();
@@ -1215,12 +1213,12 @@ mod tests {
         );
     }
 
-    // ── Spec task 3.3 — append does not disturb a scrolled-back viewport ─────
+    // ──  append does not disturb a scrolled-back viewport ─────
 
     /// When the user has scrolled back from the tail, appending new content
     /// must NOT change the scroll offset.
     ///
-    /// Spec task 3.3: "append stability for scrolled-back viewports"
+    /// Appends preserve a scrolled-back viewport.
     #[test]
     fn scrolled_back_append_does_not_disturb_viewport() {
         let tile_id = SceneId::new();
@@ -1314,7 +1312,7 @@ mod tests {
         );
     }
 
-    // ── Spec task 3.3 — head-trim does not disturb a scrolled-back viewport ─────
+    // ──  head-trim does not disturb a scrolled-back viewport ─────
     //
     // Defect #4 regression test: when head content is removed (byte-cap / window
     // trim), a ScrolledBack viewport must shift downward by the removed height so
@@ -1566,7 +1564,7 @@ mod tests {
         assert!((result - 50.0).abs() < f32::EPSILON);
     }
 
-    // ── reset_to_tail (hud-qbcp8) ──────────────────────────────────────────
+    // ── reset_to_tail ──────────────────────────────────────────
 
     /// `reset_to_tail` on a `ScrolledBack` tile must force the offset to the
     /// tail (the tracked max-scroll-offset) and flip the anchor back to

@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 /// Per-frame telemetry record.
 ///
 /// All stage timings are in microseconds (us). Stage names map to the
-/// 8-stage frame pipeline defined in RFC 0002 §3.2:
+/// 8-stage frame pipeline defined
 ///
 /// | Stage | Thread     | Budget (p99) |
 /// |-------|-----------|-------------|
@@ -69,7 +69,7 @@ pub struct FrameTelemetry {
     ///
     /// Records the wall-clock time spent in `prime_markdown_cache` at **commit
     /// time** (Stage 4, before the render stages execute).  Parsing is moved
-    /// fully off the render thread by hud-380dl (Option A — commit-time prime):
+    /// fully off the render thread by (Option A — commit-time prime):
     /// the runtime calls `prime_markdown_cache` at the end of Stage 4 and passes
     /// the measured cost here; `render_frame` / `render_frame_headless` are
     /// parse-free in steady state.
@@ -142,7 +142,7 @@ pub struct FrameTelemetry {
 
     // ── Per-frame correctness fields ─────────────────────────────────────────
     //
-    // RFC 0002 §3.2 Stage 8 requires per-frame invariant violation counts so
+    // Stage 8 requires per-frame invariant violation counts so
     // that LLM-driven debugging can detect scene corruption at the frame level,
     // not just at session boundary via SessionSummary counters.
     /// Number of scene-commit rejections this frame (Stage 4 batches where
@@ -498,8 +498,8 @@ pub struct SessionSummary {
     ///
     /// Zero is the expected value under no contention; persistent non-zero
     /// values indicate lock contention between the compositor and scene
-    /// mutation handlers, which is the primary signal for the deferred
-    /// double-buffer evaluation described in hud-3qpgv.2's close reason.
+    /// mutation handlers. This is a signal for evaluating whether a buffered
+    /// scene snapshot would reduce contention.
     #[serde(default)]
     pub scene_lock_misses: u64,
 }
@@ -791,7 +791,7 @@ mod tests {
         assert!(result.unwrap_err().contains("no samples"));
     }
 
-    // ── Per-frame correctness fields (RFC 0002 §3.2 Stage 8) ─────────────────
+    // ── Per-frame correctness fields (Stage 8) ─────────────────
 
     /// Verify FrameTelemetry has per-frame invariant violation count field,
     /// initialized to zero by FrameTelemetry::new().
@@ -921,7 +921,7 @@ mod tests {
         assert_eq!(decoded.degradation_level, 0);
     }
 
-    // ── hud-gpqde: markdown_prime_us telemetry field ─────────────────────────
+    // ──: markdown_prime_us telemetry field ─────────────────────────
 
     /// FrameTelemetry.markdown_prime_us is zero-initialized by FrameTelemetry::new.
     ///
@@ -986,7 +986,7 @@ mod tests {
         );
     }
 
-    // ── hud-3qpgv.2: scene_lock_miss_count telemetry ─────────────────────────
+    // ──: scene_lock_miss_count telemetry ─────────────────────────
 
     /// FrameTelemetry.scene_lock_miss_count is zero-initialized by
     /// FrameTelemetry::new, matching the no-contention default.
@@ -1030,7 +1030,7 @@ mod tests {
     /// `#[serde(default)]`.
     #[test]
     fn scene_lock_miss_count_defaults_on_missing_json() {
-        // JSON without scene_lock_miss_count — simulates a pre-hud-3qpgv.2 record.
+        // JSON without scene_lock_miss_count — simulates a previous record.
         let json = r#"{"frame_number":1,"timestamp_us":0,"frame_time_us":0,
             "stage1_input_drain_us":0,"stage2_local_feedback_us":0,
             "stage3_mutation_intake_us":0,"stage4_scene_commit_us":0,
@@ -1104,7 +1104,7 @@ mod tests {
         );
     }
 
-    // ── hud-1rxbs: LatencyBucket bounded sliding window ───────────────────────
+    // ──: LatencyBucket bounded sliding window ───────────────────────
 
     /// Samples beyond LATENCY_BUCKET_WINDOW capacity evict the oldest entry.
     ///

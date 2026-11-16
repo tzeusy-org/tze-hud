@@ -1,4 +1,4 @@
-//! Core types for the scene graph, following RFC 0001.
+//! Core types for the scene graph, following.
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -11,7 +11,7 @@ use uuid::Uuid;
 /// # Wire format
 /// Serialized as 16 raw bytes in little-endian UUID byte order (as returned by
 /// [`Uuid::to_bytes_le`]). The all-zero value (`[0u8; 16]`) is the null/absent
-/// sentinel per RFC 0001 §1.1.
+/// sentinel.
 ///
 /// # Invariants
 /// - `size_of::<SceneId>() == 16`
@@ -35,7 +35,7 @@ impl SceneId {
         &self.0
     }
 
-    /// Null/zero ID used as the "absent" sentinel (RFC 0001 §1.1).
+    /// Null/zero ID used as the "absent" sentinel.
     ///
     /// When encoded as a protobuf `bytes` field, this value serializes to 16
     /// zero bytes. Note that in proto3 an unset `bytes` field defaults to an
@@ -70,7 +70,7 @@ impl SceneId {
     /// Serialize to 16 bytes in little-endian UUID byte order.
     ///
     /// Used for protobuf `bytes` fields. The encoding is stable and matches
-    /// the wire contract from RFC 0001 §4.1.
+    /// the wire contract.
     pub fn to_bytes_le(&self) -> [u8; 16] {
         self.0.to_bytes_le()
     }
@@ -101,7 +101,7 @@ impl std::fmt::Display for SceneId {
 /// Content-addressed resource identity — 32-byte BLAKE3 hash.
 ///
 /// Two agents uploading identical content MUST receive the same `ResourceId`;
-/// the runtime stores the resource once (RFC 0001 §1.1).
+/// the runtime stores the resource once.
 ///
 /// # Wire format
 /// Stored and transmitted as raw 32 bytes. Hex encoding is a display/debug
@@ -272,26 +272,22 @@ pub struct LifecycleAccent {
     pub width_px: f32,
 }
 
-// ─── Portal surface (RFC 0013 §7.2 promotion) ────────────────────────────────
+// ─── Portal surface ──────────────────────────────────────────────────
 //
-// First-class text-stream portal surface schema. RFC 0013 §7.2 authorizes, once
-// the promotion evidence gate passes (hud-qfyfg, PASSED 2026-07-05), promotion of
-// the Phase-0 raw-tile pilot to "a first-class runtime portal surface or node
-// type". These types are the scene-model half of that promotion: a governed
+// First-class text-stream portal surface schema. These types define a
 // descriptor that groups the portal's named parts, identity, and lifecycle/
 // display state into one coalescible object instead of an ad-hoc six-tile
 // assembly.
 //
-// The part set and its cross-map to the Phase-0 raw tiles is defined by the
-// `text-portal` component type (component-shape-language delta, hud-2ey2w). This
-// schema carries no transcript history and adds no transport: a portal surface is
+// Each named part refers to an existing scene node. This schema carries no
+// transcript history and adds no transport: a portal surface is
 // declared over an existing lease-governed tile via `set_portal_surface` and its
 // lifecycle/display state is patched via `update_portal_surface_state`.
-// Per-part layout, styling, and rendering are owned by the renderer promotion beads (hud-s4lrw);
+// Per-part layout, styling, and rendering are owned by the renderer;
 // this type deliberately holds only the declarative surface contract.
 
 /// Peer class of the party on the far side of a portal's text stream
-/// (RFC 0013 §2.1 "optional peer class"). Advisory metadata only — the runtime's
+/// as optional advisory metadata only — the runtime's
 /// governance does not branch on it; it exists for identity presentation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PortalPeerClass {
@@ -308,7 +304,7 @@ pub enum PortalPeerClass {
     Adapter,
 }
 
-/// Portal lifecycle state (RFC 0013 §3.2 / §6.2). Drives the coalescible
+/// Portal lifecycle state. Drives the coalescible
 /// left-edge [`LifecycleAccent`] the compositor already paints; carried on the
 /// surface descriptor so the promoted surface owns its own lifecycle rather than
 /// inferring it from tile state.
@@ -329,7 +325,7 @@ pub enum PortalLifecycleState {
     Detached,
 }
 
-/// Collapsed vs. expanded portal presentation (RFC 0013 §3.2).
+/// Collapsed vs. expanded portal presentation.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub enum PortalDisplayState {
     /// Unspecified / not yet reported.
@@ -409,7 +405,7 @@ fn unique_document_line(text: &str, line: &str) -> Option<usize> {
 }
 
 /// One of the eight named parts of the first-class portal surface, per the
-/// `text-portal` component-shape-language part model (hud-2ey2w). Each variant
+/// `text-portal` component-shape-language part model. Each variant
 /// cross-maps to the Phase-0 raw-tile assembly so promotion preserves — rather
 /// than redefines — the proven layout.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -465,7 +461,7 @@ impl PortalPartKind {
 ///
 /// Carries the part's kind, its surface-local geometry, and an optional
 /// reference to the scene node that backs its content — "one scene node per
-/// part" (the renderer promotion, hud-s4lrw). `node` is `None` for parts whose
+/// part". `node` is `None` for parts whose
 /// appearance is purely derived (e.g. a geometry-only `Divider`) or not yet
 /// materialized. The referenced node is an ordinary visual node
 /// (`TextMarkdown`/`SolidColor`/`HitRegion`/`StaticImage`) within the surface's
@@ -481,7 +477,7 @@ pub struct PortalPart {
     pub node: Option<SceneId>,
 }
 
-/// Stable identity / status metadata for a portal surface (RFC 0013 §2.1).
+/// Stable identity / status metadata for a portal surface.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct PortalIdentity {
     /// Stable adapter-assigned session id (max [`PORTAL_SESSION_ID_MAX_BYTES`]).
@@ -492,7 +488,7 @@ pub struct PortalIdentity {
     pub peer_class: PortalPeerClass,
 }
 
-/// A first-class text-stream portal surface (RFC 0013 §7.2 promotion).
+/// A first-class text-stream portal surface.
 ///
 /// Groups the [eight named parts](PortalPartKind) under one governed,
 /// coalescible descriptor together with the portal's [identity](PortalIdentity)
@@ -502,8 +498,7 @@ pub struct PortalIdentity {
 /// Stored as runtime overlay state keyed by the host **tile id** (mirroring
 /// [`LifecycleAccent`]), so it survives `SetTileRoot`/`PublishToTile` transcript
 /// republishes that replace the tile's node tree. The surface is **content-layer
-/// and lease-governed** exactly as the raw-tile pilot is (RFC 0013 §6); this
-/// schema grants no capability beyond what the §7.2 promotion already permits and
+/// and lease-governed**; this schema grants no additional permissions and
 /// materializes **no transcript history** — parts reference the existing
 /// bounded-viewport nodes.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
@@ -645,7 +640,7 @@ pub struct Tab {
 /// (used by `tze_hud_scene::lease::budget` and `tze_hud_runtime::budget` for
 /// per-mutation admission checks).
 ///
-/// # Defaults (spec §Requirement: Per-Agent Resource Envelope)
+/// # Defaults
 ///
 /// | Field               | Default   | Hard max |
 /// |---------------------|-----------|----------|
@@ -658,7 +653,7 @@ pub struct Tab {
 ///
 /// # Memory layout
 ///
-/// The `Tile` struct embeds this type by value. Per RFC 0001 §8, `Tile` must
+/// The `Tile` struct embeds this type by value., `Tile` must
 /// remain under 200 bytes. Additions to this struct that would push `Tile` past
 /// that limit require a corresponding RFC amendment.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -667,7 +662,7 @@ pub struct ResourceBudget {
     /// Range [1, 64]. Default: 8.
     pub max_tiles: u32,
     /// Maximum texture memory across all tiles, in bytes.
-    /// Default: 256 MiB (spec §Per-Agent Resource Envelope).
+    /// Default: 256 MiB.
     pub max_texture_bytes: u64,
     /// Maximum scene mutation rate in Hz (sliding window over last 1 second).
     /// Default: 30.0 Hz.
@@ -714,7 +709,7 @@ impl Default for ResourceBudget {
 /// Spatial constraints on a tile's dimensions, enforced at interactive resize time.
 ///
 /// Stored on the `Lease` object (see `Lease::spatial_budget`).  Not embedded in
-/// `Tile` — the `Tile` struct size is budgeted at < 200 bytes (RFC 0001 §8) and
+/// `Tile` — the `Tile` struct size is budgeted at < 200 bytes and
 /// spatial limits are not needed on the tile itself.
 ///
 /// `0.0` for either dimension means unconstrained; the display boundary is the
@@ -776,7 +771,7 @@ pub struct Tile {
     ///
     /// Set by the scene graph in response to lease state changes.
     /// The compositor renders the indicated badge/overlay within 1 frame
-    /// of this field being set (spec line 133).
+    /// of this field being set.
     #[serde(default)]
     pub visual_hint: crate::lease::TileVisualHint,
 }
@@ -813,7 +808,7 @@ impl TileScrollConfig {
 
 // ─── Nodes ──────────────────────────────────────────────────────────────────
 
-/// How a node positions its direct children (hud-txkbh / hud-yfj8u).
+/// How a node positions its direct children.
 ///
 /// `Absolute` (the default) is the pre-existing behavior: every child is drawn at
 /// its own explicit `bounds.y`, exactly as before this field existed — so an
@@ -948,7 +943,7 @@ pub struct TextMarkdownNode {
     /// Overlapping runs are resolved last-writer-wins (last entry wins).
     ///
     /// Stored as a boxed slice (16 bytes) rather than `Vec` (24 bytes) to keep
-    /// `TextMarkdownNode` within the Node structural size budget (RFC 0001 §8).
+    /// `TextMarkdownNode` within the Node structural size budget.
     #[serde(default)]
     pub color_runs: Box<[TextColorRun]>,
 }
@@ -957,7 +952,6 @@ pub struct TextMarkdownNode {
 ///
 /// These are compositor-managed overrides — the agent provides the values; the
 /// compositor applies them in real time based on `HitRegionLocalState`.
-/// Source: RFC 0004 §7.1, input-model/spec.md line 249.
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 pub struct LocalStyle {
     /// Highlight tint applied while the pointer hovers over the node.
@@ -980,8 +974,6 @@ pub struct LocalStyle {
 /// 3. Within each tile, nodes in reverse tree order (last sibling first, depth-first).
 /// 4. Only [`NodeData::HitRegion`] nodes whose `bounds` contain the point qualify.
 ///
-/// Source: RFC 0001 §5.1-5.2, scene-graph/spec.md lines 250-265,
-///         input-model/spec.md lines 263-274.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum HitResult {
     /// A [`NodeData::HitRegion`] node was hit.
@@ -1039,9 +1031,8 @@ pub enum HitResult {
 /// # Local feedback
 /// The runtime updates `HitRegionLocalState` (`hovered`, `pressed`) immediately
 /// on hit, without waiting for the owning agent to acknowledge.  This satisfies
-/// the "local feedback first" doctrine.
+/// the "local feedback first" rule.
 ///
-/// Source: RFC 0004 §7.1, RFC 0001 §2.4, input-model/spec.md lines 248-259.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct HitRegionNode {
     /// Bounding rectangle in tile-local coordinates (origin = tile top-left).
@@ -1056,22 +1047,20 @@ pub struct HitRegionNode {
     pub accepts_pointer: bool,
     /// When `true`, the runtime automatically acquires pointer capture for this
     /// node on PointerDownEvent without requiring an explicit CaptureRequest.
-    /// Source: RFC 0004 §7.1 / input-model/spec.md line 142.
     #[serde(default)]
     pub auto_capture: bool,
     /// When `true`, pointer capture is released automatically on PointerUpEvent.
-    /// Source: RFC 0004 §7.1 / input-model/spec.md line 120.
     #[serde(default)]
     pub release_on_up: bool,
     /// Tooltip text shown after the pointer has hovered for 500 ms.
     /// `None` means no tooltip.
     ///
     /// Boxed (alongside `composer_placeholder` below) to keep `HitRegionNode`
-    /// within the 150-byte `Node` struct budget (scene-graph/spec.md line 302,
-    /// RFC 0001 §8): a bare new `Option<String>`-sized field here ties
+    /// within the `Node` struct's inline size budget:
+    /// a bare new `Option<String>`-sized field here ties
     /// `HitRegionNode`'s size with `TextMarkdownNode`'s and forces the
     /// `NodeData` enum discriminant out of its niche, growing `Node` past
-    /// budget (verified empirically — see hud-se6hs).
+    /// budget (verified empirically — see ).
     #[serde(default)]
     pub tooltip: Box<Option<String>>,
     /// When `true`, keystroke events targeting this focused node are intercepted
@@ -1081,11 +1070,10 @@ pub struct HitRegionNode {
     /// Native portal rendering owns this internal flag. Only submitted text
     /// enters the portal hub; resident wire regions cannot enable this behavior.
     ///
-    /// Source: spec §4.1 (hud-5jbra.4 / hud-qwqxy).
     #[serde(default)]
     pub accepts_composer_input: bool,
     /// Per-composer override for the empty-draft placeholder hint rendered by
-    /// the compositor (`portal.composer.placeholder_color`, hud-evk0j).
+    /// the compositor (`portal.composer.placeholder_color`).
     /// Ignored when `accepts_composer_input` is `false`.
     ///
     /// - `None` — inherit the runtime's built-in default hint for this
@@ -1096,15 +1084,13 @@ pub struct HitRegionNode {
     /// - `Some(text)` — show this exact hint instead of the runtime default.
     ///
     /// Boxed alongside `tooltip` above to stay within the `Node` struct's
-    /// 150-byte budget.
+    /// 160-byte budget.
     ///
-    /// Follow-up to hud-evk0j (source: hud-se6hs).
     #[serde(default)]
     pub composer_placeholder: Box<Option<String>>,
     /// Compositor-applied visual style overrides for hover/press/focus states.
     ///
     /// Boxed to stay within the 150-byte `Node` struct budget
-    /// (scene-graph/spec.md line 302, RFC 0001 §8).
     #[serde(default)]
     pub local_style: Box<LocalStyle>,
 }
@@ -1179,7 +1165,7 @@ impl Default for HitRegionNode {
 
 /// A static image node that references a resource by its content-addressed identity.
 ///
-/// Per resource-store/spec.md §Requirement: Ephemeral Storage in V1 (lines 244-246),
+/// Ephemeral Storage in V1 (lines 244-246),
 /// scene snapshots reference resources by `ResourceId` only — blob data is NOT
 /// embedded.  On restart, the resource store is empty; agents must re-upload
 /// referenced resources before the scene can fully render.
@@ -1231,9 +1217,9 @@ impl HitRegionLocalState {
     }
 }
 
-// ─── Lease state machine (RFC 0008) ──────────────────────────────────────────
+// ─── Lease state machine ──────────────────────────────────────────
 
-/// Lease lifecycle state per RFC 0008 SS3.
+/// Lease lifecycle state.
 ///
 /// All 8 canonical states from the spec are present.
 /// Terminal states (no further transitions): `Denied`, `Revoked`, `Expired`, `Released`.
@@ -1271,7 +1257,7 @@ impl LeaseState {
 /// Lease caps violation error.
 #[derive(Clone, Debug, PartialEq)]
 pub enum CapsError {
-    /// Runtime-wide lease limit (64) exceeded — spec §Requirement: Lease Caps.
+    /// Runtime-wide lease limit (64) exceeded — Requirement: Lease Caps.
     MaxRuntimeLeasesExceeded { current: usize, limit: usize },
 }
 
@@ -1368,7 +1354,7 @@ pub struct Lease {
     /// Parent session identifier. Lease is invalidated if session is revoked.
     pub session_id: SceneId,
     pub state: LeaseState,
-    /// Wall-clock grant timestamp in milliseconds since Unix epoch (RFC 0003 wall-clock domain).
+    /// Wall-clock grant timestamp in milliseconds since Unix epoch.
     /// Corresponds to `granted_at_wall_us / 1000` in the wire protocol.
     pub granted_at_ms: u64,
     pub ttl_ms: u64,
@@ -1394,7 +1380,7 @@ impl Lease {
     /// Check if the lease has expired based on effective TTL elapsed.
     ///
     /// Accounts for suspension: time spent in Suspended state does not count
-    /// toward TTL consumption (RFC 0008 SS4.3).
+    /// toward TTL consumption.
     pub fn is_expired(&self, now_ms: u64) -> bool {
         match self.state {
             // Terminal states are already past expiry semantics.
@@ -1559,12 +1545,12 @@ impl Lease {
 /// agent tiles but in the reserved upper band (≥ ZONE_TILE_Z_MIN). Agent tiles
 /// must use z_order values below this constant.
 ///
-/// Per scene-graph/spec.md §Requirement: Zone Layer Attachment.
+/// Zone Layer Attachment.
 pub const ZONE_TILE_Z_MIN: u32 = 0x8000_0000;
 
 /// Layer attachment for a zone instance — determines rendering order.
 ///
-/// Per RFC 0001 §2.5 and scene-graph/spec.md line 241.
+/// and.
 ///
 /// The default is `Content` (within content-layer z-order space).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -1813,7 +1799,7 @@ pub enum ZoneMediaType {
     SolidColor,
 }
 
-/// Design token key for the portal header-band drag-handle height (hud-643dv).
+/// Design token key for the portal header-band drag-handle height.
 ///
 /// The runtime resolves this from the display token map; when absent the
 /// compositor falls back to [`PORTAL_HEADER_DRAG_BAND_PX_DEFAULT`]. Operators can
@@ -1828,7 +1814,7 @@ pub const PORTAL_HEADER_DRAG_BAND_TOKEN: &str = "portal.header.drag_band_px";
 pub const PORTAL_HEADER_DRAG_BAND_PX_DEFAULT: f32 = 52.0;
 
 /// Design token key for the minimum legible font size (px) when whole-portal
-/// resize scales text down (hud-ovjxu.1, spec §Portal Resize Text Scaling).
+/// resize scales text down.
 /// The compositor reads this from the display token map; when absent it falls
 /// back to [`PORTAL_TEXT_MIN_FONT_PX_DEFAULT`]. Never hardcode the clamp in the
 /// compositor (CLAUDE.md "never hardcode visual properties in the compositor").
@@ -1947,7 +1933,7 @@ pub enum ContentionPolicy {
     Replace,
 }
 
-/// Full zone definition per RFC 0001 §2.5.
+/// Full zone definition.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ZoneDefinition {
     pub id: SceneId,
@@ -1962,7 +1948,6 @@ pub struct ZoneDefinition {
     pub auto_clear_ms: Option<u64>,
     /// When true, publishes to this zone are fire-and-forget (no ZonePublishResult).
     /// When false (default), publishes are transactional and receive a ZonePublishResult.
-    /// Per RFC 0005 §3.1, §8.6.
     #[serde(default)]
     pub ephemeral: bool,
     /// Layer attachment — determines rendering order and z-space.
@@ -2111,11 +2096,11 @@ pub enum ZoneInteractionKind {
         /// drag surface, so the runtime activates it IMMEDIATELY on press+move —
         /// no 250 ms long-press hold and no early-movement cancel — while the grip
         /// keeps the long-press hysteresis that disambiguates tap-to-focus from
-        /// drag (hud-cpjqe).
+        /// drag.
         is_header_band: bool,
     },
     /// Runtime "jump to latest" pill shown over a portal tile that is
-    /// scrolled away from the tail of its content (hud-9ci61).
+    /// scrolled away from the tail of its content.
     ///
     /// Activating this snaps the tile's viewport back to the tail via
     /// `ScrollState::reset_to_tail`. The `interaction_id` follows the pattern
@@ -2124,7 +2109,7 @@ pub enum ZoneInteractionKind {
         /// Tile the pill belongs to.
         tile_id: SceneId,
     },
-    /// Runtime close button shown on a hovered agent tile (hud-jm8nq.11).
+    /// Runtime close button shown on a hovered agent tile.
     ///
     /// Activating this is a viewer override: the tile's lease is revoked and its
     /// content disappears immediately. The `interaction_id` follows the
@@ -2162,7 +2147,7 @@ pub enum DragHandleElementKind {
 /// to the zone hit region list.  The first region whose `bounds` contain the
 /// display-space point produces a [`HitResult::ZoneInteraction`] result.
 ///
-/// Per RFC 0004 §7.1 doctrine: HitRegionNode is the sole interactive
+/// rule: HitRegionNode is the sole interactive
 /// primitive; zone hit regions are a thin adapter that maps zone geometry
 /// to the same `interaction_id`-based routing model without requiring
 /// agent-managed tiles for each notification slot.
@@ -2219,7 +2204,7 @@ pub struct DragHandleHitRegion {
     /// overlaps interactive controls (e.g. the minimize button), so — unlike the
     /// grip — it yields to any `accepts_pointer` HitRegionNode under the point:
     /// the band drags empty header space but a control on the band still wins
-    /// (hud-643dv).  Legacy grips leave this `false` and keep their original
+    ///. Legacy grips leave this `false` and keep their original
     /// chrome-priority precedence.
     #[serde(default)]
     pub is_header_band: bool,
@@ -2322,7 +2307,7 @@ pub struct ZonePublishRecord {
     pub zone_name: String,
     pub publisher_namespace: String,
     pub content: ZoneContent,
-    /// UTC wall-clock timestamp in microseconds (per timing-model/spec.md Clock Domain Naming Convention).
+    /// UTC wall-clock timestamp in microseconds.
     pub published_at_wall_us: u64,
     /// Exact publisher-scoped routing key for notifications; also used by
     /// generic MergeByKey contention for other zone content.
@@ -2366,7 +2351,7 @@ pub struct ZonePublishRecord {
 /// In v1, zone instances are static (loaded from config; one instance per tab
 /// per zone type). Agents MUST NOT create zone instances.
 ///
-/// Per scene-graph/spec.md §Requirement: Zone Registry (line 185).
+/// Zone Registry (line 185).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ZoneInstance {
     /// The zone type (definition) this instance belongs to.
@@ -2380,10 +2365,8 @@ pub struct ZoneInstance {
 /// Zone occupancy — the resolved state after applying the contention policy.
 ///
 /// This is the fourth level of the zone ontology. In v1, effective_geometry
-/// is NOT exposed (deferred to post-v1 per spec line 360).
+/// is NOT exposed.
 ///
-/// Per scene-graph/spec.md §Requirement: Zone Occupancy Query API (line 360,
-/// post-v1), and §Requirement: Zone Registry (line 185, v1-mandatory).
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ZoneOccupancy {
     pub zone_name: String,
@@ -2392,7 +2375,7 @@ pub struct ZoneOccupancy {
     pub active_publications: Vec<ZonePublishRecord>,
     /// Occupant count after contention resolution.
     pub occupant_count: u32,
-    // NOTE: effective_geometry intentionally absent in v1 (post-v1 per spec line 360).
+    // NOTE: effective_geometry intentionally absent in v1.
 }
 
 // ─── Zone registry ───────────────────────────────────────────────────────────
@@ -2407,7 +2390,7 @@ pub struct ZoneRegistrySnapshot {
 // ─── Widget types ────────────────────────────────────────────────────────────
 
 /// Minimum z-order for widget tiles. Widget tiles appear above zone tiles when
-/// they overlap spatially. Per widget-system spec §Requirement: Widget Contention
+/// they overlap spatially. Per widget-system Requirement: Widget Contention
 /// and Governance.
 pub const WIDGET_TILE_Z_MIN: u32 = 0x9000_0000;
 
@@ -2965,7 +2948,7 @@ pub struct WidgetRegistrySnapshot {
 
 /// Deterministic snapshot of the widget registry for inclusion in SceneGraphSnapshot.
 ///
-/// Uses BTreeMap/sorted Vec for deterministic iteration order per RFC 0001 §4.1.
+/// Uses BTreeMap/sorted Vec for deterministic iteration order.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SceneGraphWidgetRegistry {
     /// Widget definitions sorted by id for deterministic serialization.
@@ -2981,8 +2964,8 @@ pub struct SceneGraphWidgetRegistry {
 
 /// Deterministic snapshot of the zone registry for inclusion in SceneGraphSnapshot.
 ///
-/// Uses BTreeMap/sorted Vec for deterministic iteration order per RFC 0001 §4.1.
-/// MUST NOT include effective_geometry (post-v1 per spec line 360).
+/// Uses BTreeMap/sorted Vec for deterministic iteration order.
+/// MUST NOT include effective_geometry.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SceneGraphZoneRegistry {
     /// Zone definitions sorted by zone name for deterministic serialization.
@@ -2996,7 +2979,7 @@ pub struct SceneGraphZoneRegistry {
 
 /// Full deterministic scene snapshot at a specific sequence number.
 ///
-/// Implements the v1 snapshot semantics from RFC 0001 §4.1 and §4.2:
+/// Snapshot behavior:
 /// - Complete, deterministic serialization at a single point in time
 /// - All maps use BTreeMap for deterministic iteration order
 /// - BLAKE3 checksum over the canonical serialized content (excluding the
@@ -3008,18 +2991,17 @@ pub struct SceneGraphZoneRegistry {
 ///
 /// # v1 Scope Constraints
 /// - Resources are ephemeral: snapshot references ResourceIds but MUST NOT
-///   embed blob data (resource-store/spec.md §Requirement: Ephemeral Storage)
-/// - effective_geometry is NOT included (post-v1, spec line 360)
-/// - Incremental diff is NOT available (post-v1, spec line 342)
+///   embed blob data
+/// - effective_geometry is NOT included (post-v1)
+/// - Incremental diff is NOT available (post-v1)
 ///
 /// # Reconnection
 /// When an agent reconnects, the runtime MUST send a full SceneGraphSnapshot.
 /// The agent discards prior state and resumes from `sequence`.
 ///
-/// Source: RFC 0001 §4.1, §4.2, §6, §10.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct SceneGraphSnapshot {
-    /// Sequence number at the time this snapshot was taken (RFC 0001 §3.5).
+    /// Sequence number at the time this snapshot was taken.
     pub sequence: u64,
 
     /// UTC wall-clock at snapshot time, microseconds since Unix epoch.
@@ -3039,13 +3021,13 @@ pub struct SceneGraphSnapshot {
     pub nodes: std::collections::BTreeMap<SceneId, Node>,
 
     /// First-class text-stream portal surface descriptors, keyed by host tile id
-    /// (BTreeMap for deterministic iteration order; RFC 0013 §7.2, hud-tc153).
+    /// (BTreeMap for deterministic iteration order).
     ///
     /// These are runtime overlay state (`RuntimeOverlayState::portal_surfaces`,
     /// `#[serde(skip)]`) rather than scene nodes, so they are otherwise invisible
     /// to the serialized graph. Including them here lets a reconnecting resident
     /// session recover its declared surfaces from the snapshot instead of
-    /// re-declaring blindly (hud-ruynm reconnect parity).
+    /// re-declaring blindly.
     ///
     /// Visibility mirrors [`tiles`](Self::tiles): a surface is keyed by its host
     /// tile id, so a session filtering the snapshot to the tiles it owns keeps
@@ -3065,7 +3047,7 @@ pub struct SceneGraphSnapshot {
     pub portal_surfaces: std::collections::BTreeMap<SceneId, PortalSurface>,
 
     /// Zone registry snapshot: types, instances, active publications.
-    /// Does NOT include effective_geometry (post-v1, spec line 360).
+    /// Does NOT include effective_geometry (post-v1).
     pub zone_registry: SceneGraphZoneRegistry,
 
     /// Widget registry snapshot: types, instances, active publications.
@@ -3161,7 +3143,7 @@ impl ZoneRegistry {
 
     /// Create a registry pre-populated with the default v1 zones.
     ///
-    /// V1 zone set (scene-graph/spec.md §Implementation Details):
+    /// V1 zone set:
     /// subtitle, notification-area, status-bar, pip, ambient-background, alert-banner.
     pub fn with_defaults() -> Self {
         let mut registry = Self::new();
@@ -3276,8 +3258,8 @@ impl ZoneRegistry {
         //
         // Styling (fill, text, type, padding, corners, inset) comes from the
         // alert banner design-token roles (`color.alert.*`, `type.alert.*`,
-        // `space.alert.*`, ...) through the config policy builder and the
-        // compositor; the zone default carries none (hud-h51u7.4.2).
+        // `space.alert.*`,...) through the config policy builder and the
+        // compositor; the zone default carries none.
         //
         // Chrome-layer positioning: renders above all agent content, full
         // display width. height_pct is the nominal geometry for edge anchoring
@@ -3378,7 +3360,7 @@ impl ZoneRegistry {
     /// In v1, active publishes are global (not tab-scoped); `tab_id` is echoed
     /// through to the returned `ZoneOccupancy` but is NOT used as a filter.
     /// Tab-scoped zone instances are a post-v1 feature. In v1, `effective_geometry`
-    /// is also not exposed (deferred to post-v1 per spec line 360).
+    /// is also not exposed.
     ///
     /// Returns `None` if the zone is not found.
     #[cfg(any(test, feature = "test-support"))]
@@ -3424,7 +3406,7 @@ mod tests {
     use super::*;
     use std::mem::size_of;
 
-    // ── Portal surface structural validation (RFC 0013 §7.2; hud-tc153) ──────
+    // ── Portal surface structural validation ──────────────────────────
 
     fn portal_part(kind: PortalPartKind) -> PortalPart {
         PortalPart {
@@ -3983,7 +3965,7 @@ mod tests {
             rel(0.4, 0.4, 0.2, 0.2).zoomed(0.5),
             rel(0.45, 0.45, 0.1, 0.1),
         );
-        // ...but a box in a corner stays in it.
+        //...but a box in a corner stays in it.
         close(
             rel(0.8, 0.0, 0.2, 0.1).zoomed(0.5),
             rel(0.9, 0.0, 0.1, 0.05),

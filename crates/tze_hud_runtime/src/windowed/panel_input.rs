@@ -1,4 +1,4 @@
-//! The winit side of the control panel (hud-vniri.2): while the panel is open
+//! The winit side of the control panel: while the panel is open
 //! it owns the keyboard and the pointer over its surface. Keys, text, clicks
 //! and the wheel become [`PanelEvent`]s for the panel task; nothing reaches an
 //! agent. Points outside the panel pass through to the desktop. Opening takes

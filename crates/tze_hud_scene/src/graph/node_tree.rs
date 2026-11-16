@@ -8,7 +8,7 @@ impl SceneGraph {
     /// Register the per-node side effects an inserted node owns: image-resource
     /// ref counting and hit-region local input state. Centralized here (rather
     /// than duplicated at each `insert_node_tree` call site) so every node of a
-    /// materialized subtree — root AND inline descendants (hud-ga4md) — is
+    /// materialized subtree — root AND inline descendants — is
     /// treated identically. `remove_node_tree` unwinds both (dec ref + drop
     /// hit-region state) symmetrically.
     fn register_inserted_node(&mut self, node: &Node) {
@@ -22,7 +22,7 @@ impl SceneGraph {
         }
     }
 
-    /// Materialize a node subtree into the flat node map (hud-ga4md).
+    /// Materialize a node subtree into the flat node map.
     ///
     /// `node` is inserted, its side effects registered, and each SceneId in
     /// `node.children` is looked up in `descendants` and materialized
@@ -61,18 +61,18 @@ impl SceneGraph {
 
     /// Scale a viewer-locked tile's freshly-published subtree (rooted at
     /// `subtree_root`) so its tile-local extent tracks the tile's viewer-defined
-    /// content bounds (hud-rpmwt).
+    /// content bounds.
     ///
     /// Once the viewer takes geometry authority over a portal member via a
     /// whole-portal resize (`is_viewer_geometry_locked`), the tile-bounds lock
-    /// (hud-lyqun) already ignores adapter-originated `UpdateTileBounds`. But a
+    /// already ignores adapter-originated `UpdateTileBounds`. But a
     /// content republish rebuilds the node tree — `set_tile_root` installs the
     /// transcript, then a separate `AddNode` attaches the composer hit region —
     /// and the compositor wraps `TextMarkdownNode` text to `node.bounds.width`
     /// and clips to `tile.bounds`. An adapter that republishes its stale
     /// attach-time (config) node geometry would therefore re-home the content
     /// back to the old width — overflowing the resized pane *unclipped* and
-    /// wrapping at the stale width (the exact hud-rpmwt live repro). Reconciling
+    /// wrapping at the stale width (the exact live repro). Reconciling
     /// each published subtree to the tile bounds — the same scaling
     /// `scale_tile_node_tree` applies at resize time — makes the tile the single
     /// wrap-width / hit-geometry authority after a viewer resize.
@@ -170,7 +170,7 @@ impl SceneGraph {
         self.overlay.tile_follow_tail_at_tail.remove(&tile_id);
         self.overlay.tile_unread_counts.remove(&tile_id);
         self.overlay.tile_lifecycle_accents.remove(&tile_id);
-        // hud-iofav: the derived composer hit-region node is dropped with the root
+        // the derived composer hit-region node is dropped with the root
         // subtree above; prune the tile's composer-interaction overlay + node map.
         self.overlay.tile_composer_interactions.remove(&tile_id);
         self.overlay.tile_composer_nodes.remove(&tile_id);

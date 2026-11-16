@@ -22,7 +22,6 @@ pub const CAPABILITY_UPLOAD_RESOURCE: &str = "upload_resource";
 
 /// Verify that `agent_capabilities` contains `upload_resource`.
 ///
-/// Spec: lines 88-90, RFC 0011 §5.2.
 pub fn check_capability(agent_capabilities: &[String]) -> Result<(), ResourceError> {
     if agent_capabilities
         .iter()
@@ -38,10 +37,8 @@ pub fn check_capability(agent_capabilities: &[String]) -> Result<(), ResourceErr
 
 /// Compute the BLAKE3 hash of `data` and verify it matches `expected`.
 ///
-/// Spec: lines 66-68, RFC 0011 §3.4.
 ///
 /// BLAKE3 achieves ~3 GB/s on modern hardware; 1 MiB hashes in < 1 ms
-/// (spec line 330).
 pub fn check_hash(data: &[u8], expected: &[u8; 32]) -> Result<[u8; 32], ResourceError> {
     let hash = blake3::hash(data);
     let computed = *hash.as_bytes();
@@ -61,7 +58,6 @@ pub fn check_hash(data: &[u8], expected: &[u8; 32]) -> Result<[u8; 32], Resource
 
 /// Verify that `byte_count` does not exceed `config.max_resource_bytes`.
 ///
-/// Spec: lines 286-288, RFC 0011 §8.1.
 pub fn check_raw_size(
     byte_count: usize,
     config: &ResourceStoreConfig,
@@ -105,7 +101,6 @@ impl AgentBudget {
 /// Verify that `decoded_bytes` fits within the agent's texture budget and the
 /// runtime-wide texture ceiling.
 ///
-/// Spec: lines 96-98, 300-303, RFC 0011 §8.3, §11.2.
 pub fn check_budget(
     decoded_bytes: usize,
     agent: &AgentBudget,
@@ -144,7 +139,6 @@ pub fn check_budget(
 
 /// Verify that `resource_type` is in the v1-supported set.
 ///
-/// Spec: lines 41-42, RFC 0011 §2.2.
 pub fn check_resource_type(resource_type: ResourceType) -> Result<(), ResourceError> {
     if resource_type.is_v1_supported() {
         Ok(())
@@ -159,7 +153,7 @@ pub fn check_resource_type(resource_type: ResourceType) -> Result<(), ResourceEr
 /// `DecodedMeta`.
 ///
 /// For `IMAGE_RGBA8`: validates byte count against explicit `width`/`height`
-/// from upload metadata (per RFC 0011), enforces dimension limits.
+/// from upload metadata, enforces dimension limits.
 /// For PNG/JPEG: full decode to RGBA8 — validates pixel count and dimension
 /// limits.  For fonts: parse the font file (no full render).
 ///
@@ -169,9 +163,8 @@ pub fn check_resource_type(resource_type: ResourceType) -> Result<(), ResourceEr
 ///
 /// If a PNG/JPEG decodes to a texture exceeding `config.max_decoded_texture_bytes`
 /// or to a dimension > `MAX_TEXTURE_DIMENSION_PX`, the decode is aborted with
-/// `ResourceError::SizeExceeded` (spec lines 290-292).
+/// `ResourceError::SizeExceeded`.
 ///
-/// Spec: lines 93-94, RFC 0011 §3.5, step 6.
 pub fn decode_and_validate(
     data: &[u8],
     resource_type: ResourceType,
@@ -195,14 +188,14 @@ fn validate_raw_rgba8(
     height: u32,
 ) -> Result<DecodedMeta, ResourceError> {
     // For raw RGBA8, width and height are provided by the upload metadata
-    // (ResourceUploadStart.metadata.width/height per RFC 0011).
+    // (ResourceUploadStart.metadata.width/height ).
     if width == 0 || height == 0 {
         return Err(ResourceError::DecodeError(
             "IMAGE_RGBA8 requires non-zero width and height".into(),
         ));
     }
 
-    // Dimension check (spec lines 281-283, MAX_TEXTURE_DIMENSION_PX = 8192).
+    // Dimension check (MAX_TEXTURE_DIMENSION_PX = 8192).
     if width > MAX_TEXTURE_DIMENSION_PX || height > MAX_TEXTURE_DIMENSION_PX {
         return Err(ResourceError::SizeExceeded {
             detail: format!(
@@ -281,7 +274,7 @@ fn decode_image(
 
     let (width_px, height_px) = decoder.dimensions();
 
-    // Dimension check (decompression bomb defense, spec lines 290-292).
+    // Dimension check (decompression bomb defense).
     if width_px > MAX_TEXTURE_DIMENSION_PX || height_px > MAX_TEXTURE_DIMENSION_PX {
         return Err(ResourceError::SizeExceeded {
             detail: format!(
@@ -339,8 +332,7 @@ fn decode_image(
 /// The returned `DecodedMeta::decoded_bytes` holds the estimated rasterized
 /// size (`width_px * height_px * 4`) — this is the budget charge.
 ///
-/// Source: resource-store/spec.md §Requirement: V1 Resource Type Enumeration,
-///         §Requirement: SVG Resource Budget Accounting.
+///: SVG Resource Budget Accounting.
 fn validate_svg(data: &[u8]) -> Result<DecodedMeta, ResourceError> {
     // Parse as UTF-8 text.
     let text = std::str::from_utf8(data)
@@ -369,7 +361,6 @@ fn validate_svg(data: &[u8]) -> Result<DecodedMeta, ResourceError> {
 /// `[1, SVG_MAX_DIMENSION_PX]` and applying the `SVG_DEFAULT_DIMENSION_PX`
 /// fallback.
 ///
-/// Source: resource-store/spec.md §Requirement: SVG Resource Budget Accounting.
 pub fn parse_svg_dimensions(text: &str) -> Result<(u32, u32), ResourceError> {
     use quick_xml::Reader;
     use quick_xml::events::Event;
@@ -547,7 +538,6 @@ mod tests {
     #[test]
     fn capability_check_denied_for_empty_caps() {
         // Acceptance: guest agent rejected with RESOURCE_CAPABILITY_DENIED
-        // (spec lines 88-90).
         let err = check_capability(&caps_empty()).unwrap_err();
         assert_eq!(err, ResourceError::CapabilityDenied);
         assert_eq!(err.wire_code(), "RESOURCE_CAPABILITY_DENIED");
@@ -565,7 +555,6 @@ mod tests {
     #[test]
     fn hash_check_mismatch() {
         // Acceptance: RESOURCE_HASH_MISMATCH when computed ≠ expected
-        // (spec lines 66-68).
         let data = b"some bytes";
         let wrong_hash = [0xffu8; 32];
         let err = check_hash(data, &wrong_hash).unwrap_err();
@@ -583,7 +572,7 @@ mod tests {
 
     #[test]
     fn raw_size_exceeded() {
-        // Acceptance: 20 MiB rejected (spec lines 286-288).
+        // Acceptance: 20 MiB rejected.
         let config = default_config();
         let twenty_mib = 20 * 1024 * 1024;
         let err = check_raw_size(twenty_mib, &config).unwrap_err();
@@ -604,7 +593,6 @@ mod tests {
     #[test]
     fn budget_check_agent_exceeded() {
         // Acceptance: RESOURCE_BUDGET_EXCEEDED when agent limit is full
-        // (spec lines 96-98).
         let config = default_config();
         let budget = AgentBudget {
             texture_bytes_total_limit: 10 * 1024 * 1024,
@@ -617,7 +605,7 @@ mod tests {
 
     #[test]
     fn budget_check_runtime_exceeded() {
-        // Acceptance: runtime-wide limit rejected (spec lines 300-303).
+        // Acceptance: runtime-wide limit rejected.
         let config = default_config();
         let budget = unlimited_budget();
         // Simulate runtime at 512 MiB ceiling.
@@ -630,7 +618,7 @@ mod tests {
 
     #[test]
     fn type_check_png_accepted() {
-        // Acceptance: IMAGE_PNG accepted (spec lines 37-38).
+        // Acceptance: IMAGE_PNG accepted.
         assert!(check_resource_type(ResourceType::ImagePng).is_ok());
     }
 
@@ -680,7 +668,7 @@ mod tests {
 
     #[test]
     fn decode_png_corrupt_rejected() {
-        // Acceptance: corrupt PNG → RESOURCE_DECODE_ERROR (spec lines 93-94).
+        // Acceptance: corrupt PNG → RESOURCE_DECODE_ERROR.
         let corrupt_png = b"this is not a valid png";
         let config = default_config();
         let err =
@@ -710,7 +698,7 @@ mod tests {
 
     #[test]
     fn decode_rgba8_size_exceeded() {
-        // Acceptance: decoded size exceeds budget (spec lines 290-292).
+        // Acceptance: decoded size exceeds budget.
         let config = ResourceStoreConfig {
             max_decoded_texture_bytes: 8, // very small for test
             ..Default::default()
@@ -757,7 +745,6 @@ mod tests {
     #[test]
     fn svg_valid_minimal_accepted() {
         // Acceptance: well-formed XML with <svg> root MUST be accepted.
-        // Source: resource-store/spec.md §Scenario: IMAGE_SVG upload accepted with valid SVG
         let svg = b"<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>";
         let config = default_config();
         let meta = decode_and_validate(svg, ResourceType::ImageSvg, &config, 0, 0).unwrap();
@@ -770,7 +757,6 @@ mod tests {
     #[test]
     fn svg_with_viewbox_budget_estimated_correctly() {
         // Acceptance: viewBox="0 0 800 600" → budget = 800*600*4 = 1,920,000.
-        // Source: resource-store/spec.md §Scenario: SVG with viewBox budget estimated
         let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 600"></svg>"#;
         let config = default_config();
         let meta = decode_and_validate(svg, ResourceType::ImageSvg, &config, 0, 0).unwrap();
@@ -782,7 +768,6 @@ mod tests {
     #[test]
     fn svg_large_dimensions_clamped_to_2048() {
         // Acceptance: width=4096 height=4096 → clamped to 2048×2048.
-        // Source: resource-store/spec.md §Scenario: SVG exceeding 2048 clamped
         let svg = br#"<svg xmlns="http://www.w3.org/2000/svg" width="4096" height="4096"></svg>"#;
         let config = default_config();
         let meta = decode_and_validate(svg, ResourceType::ImageSvg, &config, 0, 0).unwrap();
@@ -804,7 +789,6 @@ mod tests {
     #[test]
     fn svg_invalid_xml_rejected() {
         // Acceptance: not well-formed XML → RESOURCE_DECODE_ERROR.
-        // Source: resource-store/spec.md §Scenario: IMAGE_SVG upload rejected with invalid XML
         let bad = b"this is not xml at all";
         let config = default_config();
         let err = decode_and_validate(bad, ResourceType::ImageSvg, &config, 0, 0).unwrap_err();
@@ -815,7 +799,6 @@ mod tests {
     #[test]
     fn svg_non_svg_root_rejected() {
         // Acceptance: well-formed XML but root is not <svg> → RESOURCE_DECODE_ERROR.
-        // Source: resource-store/spec.md §Scenario: IMAGE_SVG upload rejected with non-SVG XML root
         let html = b"<html><body>hello</body></html>";
         let config = default_config();
         let err = decode_and_validate(html, ResourceType::ImageSvg, &config, 0, 0).unwrap_err();

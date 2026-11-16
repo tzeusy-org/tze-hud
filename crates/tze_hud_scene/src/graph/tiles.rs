@@ -158,7 +158,7 @@ impl SceneGraph {
         self.require_active_lease(lease_id)?;
         self.require_active_lease(lease_id)?;
 
-        // Viewer geometry authority (hud-lyqun): once the viewer has moved or
+        // Viewer geometry authority: once the viewer has moved or
         // resized this tile as part of a whole-portal gesture, the adapter no
         // longer controls its bounds. Silently accept the mutation but leave the
         // bounds untouched — the adapter's content updates still apply within the
@@ -302,7 +302,7 @@ impl SceneGraph {
     }
 
     /// Set a tile root together with an inline descendant subtree, materialized
-    /// atomically (hud-ga4md).
+    /// atomically.
     ///
     /// `node` is the root; `descendants` is the flat list of every node below it
     /// (any depth, root excluded), as produced by
@@ -311,7 +311,7 @@ impl SceneGraph {
     /// subtree is validated and inserted in a single call — the point being that
     /// a multi-node portal body arrives as ONE `SetTileRoot`/`PublishToTile`
     /// mutation and stays coalescible StateStream, never a per-node `AddNode`
-    /// fan-out that would break republish latest-wins coalescing (hud-mzk74).
+    /// fan-out that would break republish latest-wins coalescing.
     ///
     /// Passing an empty `descendants` is exactly [`set_tile_root`](Self::set_tile_root).
     pub fn set_tile_root_tree(
@@ -325,7 +325,7 @@ impl SceneGraph {
 
     /// Subtree-aware [`set_tile_root_checked`](Self::set_tile_root_checked):
     /// enforces the lease, then materializes the
-    /// root and its inline `descendants` atomically (hud-ga4md).
+    /// root and its inline `descendants` atomically.
     pub fn set_tile_root_tree_checked(
         &mut self,
         tile_id: SceneId,
@@ -350,7 +350,7 @@ impl SceneGraph {
         }
 
         // Validate the ENTIRE incoming subtree (root + inline descendants,
-        // hud-ga4md) BEFORE mutating anything, so an invalid subtree leaves the
+        // ) BEFORE mutating anything, so an invalid subtree leaves the
         // graph untouched (atomic materialization). `all_incoming` walks the root
         // first, then every descendant.
         let all_incoming = || std::iter::once(&node).chain(descendants.iter());
@@ -441,11 +441,10 @@ impl SceneGraph {
         // Replacing the root subtree removes the previous node tree, so any portal
         // surface part still pointing at a removed node would dangle. Prune those
         // stale refs back to `None` (the adapter re-binds on its next
-        // set_portal_surface) so consumers never resolve a stale SceneId
-        // (hud-tc153 review P2).
+        // set_portal_surface) so consumers never resolve a stale SceneId.
         self.revalidate_portal_surface_part_nodes(tile_id);
 
-        // Node-bounds authority after a viewer whole-portal resize (hud-rpmwt):
+        // Node-bounds authority after a viewer whole-portal resize:
         // if the viewer has taken geometry authority over this tile, reconcile the
         // just-published root subtree to the tile's resized bounds so an adapter's
         // stale-wide content cannot re-home the transcript back to its attach-time
@@ -454,13 +453,13 @@ impl SceneGraph {
         self.reconcile_locked_subtree_to_tile_bounds(tile_id, node_id);
 
         // Re-attach the composer interaction hit region as a derived consequence of
-        // the tile's stored composer-interaction overlay state (hud-iofav). The old
+        // the tile's stored composer-interaction overlay state. The old
         // root subtree removal above wiped any prior derived node, so an
         // interaction-enabled portal's composer would vanish on this republish
         // without this reattach. Deriving it here — rather than requiring the
         // adapter to re-send a per-republish `AddNode` — is what keeps the batch
         // coalescible StateStream on the hottest path (streaming transcript with an
-        // interactive composer, hud-mzk74 / hud-iofav).
+        // interactive composer, / ).
         self.ensure_tile_composer_node(tile_id);
         if let Some(state) = composer_state
             && self.overlay.tile_composer_nodes.get(&tile_id) == Some(&state.node_id)
@@ -473,7 +472,7 @@ impl SceneGraph {
     }
 
     /// Reconcile the tile's derived composer hit-region node to its stored
-    /// composer-interaction overlay spec (hud-iofav).
+    /// composer-interaction overlay spec.
     ///
     /// Idempotent: if the tile has a composer spec and the current derived node is
     /// still valid (exists and is a child of the current root), this is a no-op.
@@ -543,7 +542,7 @@ impl SceneGraph {
     }
 
     /// Detach and drop the tile's derived composer hit-region node, if any
-    /// (hud-iofav). Removes it from `nodes`, its parent's `children`, the
+    ///. Removes it from `nodes`, its parent's `children`, the
     /// hit-region local-state map, and the tile→node mapping. Safe to call when no
     /// derived node exists (or it was already removed with a prior root subtree).
     pub(crate) fn detach_tile_composer_node(&mut self, tile_id: SceneId) {
@@ -658,7 +657,7 @@ impl SceneGraph {
         // inline descendants on this path — AddNode adds one node at a time.
         self.insert_node_tree(&node, &std::collections::HashMap::new());
 
-        // Node-bounds authority (hud-rpmwt): a portal render batch adds the
+        // Node-bounds authority: a portal render batch adds the
         // composer hit region as a separate `AddNode` after the transcript root,
         // so reconcile this newly-added subtree to the tile too — otherwise, on a
         // viewer-locked (resized) tile, a child published at stale attach-time
