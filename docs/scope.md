@@ -659,7 +659,7 @@ The existing read-only GitHub token supplies public-asset access.
   [630 s](https://github.com/tzeusy-org/tze-hud/actions/runs/41579684395),
   [411 s](https://github.com/tzeusy-org/tze-hud/actions/runs/41584648704) and
   [403 s](https://github.com/tzeusy-org/tze-hud/actions/runs/42604228419)
-  through required-check completion (the last aggregate completed at 404 s).
+  through required-check completion (the last aggregate state was updated at 404 s).
   Independent jobs were created immediately, but waited before hosted
   execution; no repository dependency, concurrency delay or execution overrun
   was demonstrated. Provider internals and account-wide historical occupancy
