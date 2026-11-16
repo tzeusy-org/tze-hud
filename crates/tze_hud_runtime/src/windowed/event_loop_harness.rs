@@ -199,6 +199,7 @@ impl WindowedRuntimeState {
             pending_keyboard_events: VecDeque::new(),
             pending_scroll: VecDeque::new(),
             pending_pointer_move: false,
+            pending_pointer_buttons: VecDeque::new(),
             interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
         }
     }
@@ -7528,6 +7529,84 @@ mod tests {
             scene.tile_scroll_offset_local(tile_id).1,
             40.0,
             "both wheel deltas made while the scene was busy must apply"
+        );
+    }
+
+    /// A click made while the scene lock is busy is not lost (hud-87xoh):
+    /// the press and release retain their own positions and replay in order
+    /// once the lock frees: the press focuses the button it was made on even
+    /// though the pointer has since left, and the release ends the press.
+    #[test]
+    fn held_scene_lock_retains_click_and_replays_it_in_order() {
+        use std::time::{Duration, Instant};
+
+        let mut harness = HeadlessEventLoopHarness::new();
+        let (_tile_id, node_id, mut rx) = install_button(&mut harness, false);
+        received_events(&mut rx);
+        let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
+        let held = scene_handle.blocking_lock();
+        let main_work_before = harness.app.state.wake.main_work_generation();
+
+        // Press and release on the button (local 10..170 x 10..58)...
+        harness.app.state.cursor_x = 50.0;
+        harness.app.state.cursor_y = 30.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Down);
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        // ...then the pointer leaves before the lock frees.
+        harness.app.state.cursor_x = 900.0;
+        harness.app.state.cursor_y = 900.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Move);
+        assert_eq!(
+            harness
+                .app
+                .state
+                .pending_pointer_buttons
+                .iter()
+                .map(|b| (b.kind.clone(), b.x, b.y))
+                .collect::<Vec<_>>(),
+            vec![
+                (PointerEventKind::Down, 50.0, 30.0),
+                (PointerEventKind::Up, 50.0, 30.0)
+            ],
+            "a busy lock retains each press and release at its own position"
+        );
+        drop(held);
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while harness.app.state.wake.main_work_generation() == main_work_before {
+            assert!(
+                Instant::now() < deadline,
+                "releasing the scene lock must wake the main loop to replay"
+            );
+            std::thread::yield_now();
+        }
+        harness.app.settle_scene_work();
+
+        assert!(harness.app.state.pending_pointer_buttons.is_empty());
+        assert_eq!(
+            (harness.app.state.cursor_x, harness.app.state.cursor_y),
+            (900.0, 900.0),
+            "replay restores the live cursor"
+        );
+        let kinds: Vec<&str> = received_events(&mut rx)
+            .iter()
+            .filter_map(|(_, event)| match event {
+                ProtoInputEvent::FocusGained(_) => Some("focus"),
+                ProtoInputEvent::PointerDown(_) => Some("down"),
+                _ => None,
+            })
+            .collect();
+        // The same agent-visible events as an uncontended click on this button.
+        assert_eq!(
+            kinds,
+            ["focus", "down"],
+            "the retained press focuses and reaches the button where it was made"
+        );
+        let shared = harness.app.state.shared_state.blocking_lock();
+        let scene = shared.scene.blocking_lock();
+        assert!(
+            !scene.hit_region_states[&node_id].pressed,
+            "the replayed release ends the press"
         );
     }
 
