@@ -1505,7 +1505,7 @@ pub(super) mod panel_task_tests {
         use winit::event::MouseButton::{Middle, Right};
         use winit::keyboard::{Key, KeyCode, NamedKey, PhysicalKey, SmolStr};
 
-        struct TextRows;
+        struct TextRows(Arc<AtomicUsize>);
         impl Section for TextRows {
             fn id(&self) -> &'static str {
                 "text"
@@ -1536,12 +1536,14 @@ pub(super) mod panel_task_tests {
                 })
             }
             fn apply<'a>(&'a self, _: &'a str, _: Edit) -> BoxFuture<'a, Result<(), String>> {
+                self.0.fetch_add(1, Ordering::SeqCst);
                 Box::pin(async { Ok(()) })
             }
         }
+        let text_edits = Arc::new(AtomicUsize::new(0));
         let f = fixture_with(|deps| {
             let mut sections = default_sections(deps);
-            sections.push(Box::new(TextRows));
+            sections.push(Box::new(TextRows(Arc::clone(&text_edits))));
             sections
         });
         let panel = f.panel.clone();
@@ -1570,6 +1572,62 @@ pub(super) mod panel_task_tests {
             PanelPart::Body
         )));
         assert!(!panel.accepts_text(&PanelHitTarget::Panel));
+
+        // Winit sends ordinary Space as a named key, while letters are text.
+        // Rebuild after each letter so the first word really auto-focuses a row.
+        {
+            let mut query = String::new();
+            for character in "disclosure".chars() {
+                let (code, logical) = letter(&character.to_string());
+                assert!(app.panel_key_input(code, &logical, None, true));
+                assert!(app.panel_key_input(code, &logical, None, false));
+                query.push(character);
+                wait("query word", || {
+                    panel.current_model().is_some_and(|m| m.query == query)
+                })
+                .await;
+            }
+            let space = (
+                PhysicalKey::Code(KeyCode::Space),
+                Key::Named(NamedKey::Space),
+            );
+            assert!(app.panel_key_input(space.0, &space.1, Some(" "), true));
+            assert!(app.panel_key_input(space.0, &space.1, None, false));
+            let (code, logical) = letter("text");
+            assert!(app.panel_key_input(code, &logical, None, true));
+            assert!(app.panel_key_input(code, &logical, None, false));
+            wait("second query word", || {
+                panel
+                    .current_model()
+                    .is_some_and(|m| m.query.ends_with("text"))
+            })
+            .await;
+            let model = panel.current_model().unwrap();
+            assert_eq!(model.query, "disclosure text");
+            assert_eq!(
+                model.focus,
+                tze_hud_compositor::PanelFocus::Row("text.disclosure".into())
+            );
+            assert_eq!(text_edits.load(Ordering::SeqCst), 0);
+
+            // Explicit keyboard selection gives Space its row action again.
+            for named in [NamedKey::ArrowUp, NamedKey::ArrowDown, NamedKey::Space] {
+                let logical = Key::Named(named);
+                let physical =
+                    PhysicalKey::Unidentified(winit::keyboard::NativeKeyCode::Unidentified);
+                assert!(app.panel_key_input(physical, &logical, None, true));
+                assert!(app.panel_key_input(physical, &logical, None, false));
+            }
+            wait("explicit disclosure action", || {
+                text_edits.load(Ordering::SeqCst) == 1
+            })
+            .await;
+            panel.send(PanelEvent::Key(PanelKey::Escape));
+            wait("search cleared", || {
+                panel.current_model().is_some_and(|m| m.query.is_empty())
+            })
+            .await;
+        }
 
         // A typed key searches; its release is swallowed too.
         assert!(app.panel_key_input(code, &logical, None, true));

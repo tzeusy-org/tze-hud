@@ -2032,6 +2032,40 @@ mod tests {
         // Leading spaces and control characters are not typed.
         on_text(&mut open, &nav, " \u{8}");
         assert_eq!(open.query, "");
+
+        // An automatically focused result still belongs to the query being
+        // typed. Its Space must not toggle, preview, or confirm that result.
+        for (first, rest, row) in [
+            ("pause", "agents", "agents.pause"),
+            ("input", "theme", "input.theme"),
+            ("clear", "all", "agents.clear"),
+        ] {
+            let mut open = Open::new(PANEL);
+            let (_, nav) = built(&mut open);
+            on_text(&mut open, &nav, first);
+            let (_, nav) = built(&mut open);
+            assert!(matches!(open.focus, PanelFocus::Row(_)));
+            assert!(on_key(&mut open, &nav, PanelKey::Space, None).is_empty());
+            assert!(open.confirming.is_none());
+            assert!(open.preview.is_none());
+            on_text(&mut open, &nav, rest);
+            let (_, nav) = built(&mut open);
+            assert_eq!(open.query, format!("{first} {rest}"));
+            assert_eq!(open.focus, PanelFocus::Row(row.into()));
+
+            // Deliberate keyboard selection restores Space activation even
+            // with the same nonempty query and the same focused result.
+            on_key(&mut open, &nav, PanelKey::Up, None);
+            on_key(&mut open, &nav, PanelKey::Down, None);
+            let effects = on_key(&mut open, &nav, PanelKey::Space, None);
+            assert_eq!(open.query, format!("{first} {rest}"));
+            if row == "agents.clear" {
+                assert!(effects.is_empty());
+                assert_eq!(open.confirming.as_deref(), Some(row));
+            } else {
+                assert!(!effects.is_empty());
+            }
+        }
     }
 
     /// Focus survives a rebuild when its row is still there and falls back to
