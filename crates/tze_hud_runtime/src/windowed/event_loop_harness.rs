@@ -1175,27 +1175,48 @@ impl HeadlessEventLoopHarness {
         });
     }
 
+    /// Read the scene for a geometry lookup. Runtime tasks (an availability
+    /// waiter, a session handler) may hold the lock for a moment; wait that
+    /// out instead of reporting a target missing.
+    fn with_scene<T>(
+        &self,
+        read: impl FnOnce(&tze_hud_scene::graph::SceneGraph) -> T,
+    ) -> Option<T> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            if let Ok(state) = self.app.state.shared_state.try_lock()
+                && let Ok(scene) = state.scene.try_lock()
+            {
+                return Some(read(&scene));
+            }
+            if std::time::Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::yield_now();
+        }
+    }
+
     /// Display-space center of the first composer input region on screen
     /// (a portal armed with `expects_reply`), where a user would click to type.
     pub fn composer_center(&self) -> Option<(f32, f32)> {
-        let state = self.app.state.shared_state.try_lock().ok()?;
-        let scene = state.scene.try_lock().ok()?;
-        scene.tiles.values().find_map(|tile| {
-            let mut stack: Vec<SceneId> = tile.root_node.into_iter().collect();
-            while let Some(id) = stack.pop() {
-                let node = scene.nodes.get(&id)?;
-                if let NodeData::HitRegion(region) = &node.data
-                    && region.accepts_composer_input
-                {
-                    return Some((
-                        tile.bounds.x + region.bounds.x + region.bounds.width / 2.0,
-                        tile.bounds.y + region.bounds.y + region.bounds.height / 2.0,
-                    ));
+        self.with_scene(|scene| {
+            scene.tiles.values().find_map(|tile| {
+                let mut stack: Vec<SceneId> = tile.root_node.into_iter().collect();
+                while let Some(id) = stack.pop() {
+                    let node = scene.nodes.get(&id)?;
+                    if let NodeData::HitRegion(region) = &node.data
+                        && region.accepts_composer_input
+                    {
+                        return Some((
+                            tile.bounds.x + region.bounds.x + region.bounds.width / 2.0,
+                            tile.bounds.y + region.bounds.y + region.bounds.height / 2.0,
+                        ));
+                    }
+                    stack.extend(node.children.iter().copied());
                 }
-                stack.extend(node.children.iter().copied());
-            }
-            None
-        })
+                None
+            })
+        })?
     }
 
     /// Display-space center of the on-screen notification action button
@@ -1214,19 +1235,19 @@ impl HeadlessEventLoopHarness {
         &self,
         matches: impl Fn(&tze_hud_scene::NotificationAction) -> bool,
     ) -> Option<(f32, f32)> {
-        let state = self.app.state.shared_state.try_lock().ok()?;
-        let scene = state.scene.try_lock().ok()?;
-        scene
-            .overlay
-            .zone_hit_regions
-            .iter()
-            .find(|region| scene.notification_action(region).is_some_and(&matches))
-            .map(|region| {
-                (
-                    region.bounds.x + region.bounds.width / 2.0,
-                    region.bounds.y + region.bounds.height / 2.0,
-                )
-            })
+        self.with_scene(|scene| {
+            scene
+                .overlay
+                .zone_hit_regions
+                .iter()
+                .find(|region| scene.notification_action(region).is_some_and(&matches))
+                .map(|region| {
+                    (
+                        region.bounds.x + region.bounds.width / 2.0,
+                        region.bounds.y + region.bounds.height / 2.0,
+                    )
+                })
+        })?
     }
 
     /// Widget instance `name`'s geometry override and auto-clear limit.
