@@ -2636,7 +2636,7 @@ impl WinitApp {
     /// - Inside a hit-region → `set_cursor_hittest(true)` (window captures events).
     /// - Outside all hit-regions → `set_cursor_hittest(false)` (events pass through).
     pub(super) fn enqueue_pointer_event(&mut self, kind: PointerEventKind) {
-        // A press or release behind retained ones waits its turn (hud-87xoh):
+        // A press or release behind retained ones waits its turn:
         // replaying them in order is what keeps a click a click.
         if !self.state.pending_pointer_buttons.is_empty() {
             if kind == PointerEventKind::Move {
@@ -2651,7 +2651,7 @@ impl WinitApp {
         self.process_pointer_event(kind, true, Instant::now());
     }
 
-    /// Retain a press or release the scene lock could not take (hud-87xoh),
+    /// Retain a press or release the scene lock could not take,
     /// with everything it arrived with: cursor position, pressed window and
     /// time. Bounded: under pathological contention the oldest entry is
     /// dropped rather than growing memory.
@@ -2686,7 +2686,7 @@ impl WinitApp {
     }
 
     /// Keyboard events drained ahead of retained pointer input no longer
-    /// precede it (hud-87xoh).
+    /// precede it.
     pub(super) fn note_keys_drained(&mut self, drained: usize) {
         for retained in &mut self.state.pending_pointer_buttons {
             retained.keys_ahead = retained.keys_ahead.saturating_sub(drained);
@@ -2695,7 +2695,7 @@ impl WinitApp {
 
     /// Run one pointer event through hit-testing and the scene. Returns false
     /// when a press or release could not reach the scene; with `retain` it is
-    /// then queued (hud-87xoh), while a replay leaves it at the queue's front.
+    /// then queued, while a replay leaves it at the queue's front.
     fn process_pointer_event(&mut self, kind: PointerEventKind, retain: bool, at: Instant) -> bool {
         if kind == PointerEventKind::Down && self.state.answer_keyboard.focus.take().is_some() {
             self.state.input_processor.chrome_feedback_cancel_pending = true;
@@ -3358,7 +3358,7 @@ impl WinitApp {
             self.state.zone_press = None;
         }
         // Nor may it be lost: a dropped Down left focus and buttons untouched
-        // while the Up still landed (hud-87xoh). Retain it, and the Up that
+        // while the Up still landed. Retain it, and the Up that
         // follows, for an in-order replay once the lock frees. A drag's Up is
         // already retained as the gesture's terminal below.
         let retained_as_terminal =
@@ -3451,7 +3451,7 @@ impl WinitApp {
         let y = self.state.cursor_y;
         self.update_overlay_cursor_hittest();
 
-        // Behind a retained click, the wheel waits its turn (hud-87xoh), so
+        // Behind a retained click, the wheel waits its turn, so
         // the click hit-tests the content as it was when it was made.
         if !self.state.pending_pointer_buttons.is_empty() {
             let scroll = RetainedScroll {
@@ -3538,7 +3538,7 @@ impl WinitApp {
     pub(super) fn drain_retained_pointer_input(&mut self) -> bool {
         let scrolled = self.apply_retained_scroll().unwrap_or(false);
         // Presses and releases replay in arrival order, each at the position
-        // it arrived at (hud-87xoh); the first that still finds the lock busy
+        // it arrived at; the first that still finds the lock busy
         // stops the replay and keeps its place.
         let mut pressed = false;
         while let Some(retained) = self.state.pending_pointer_buttons.front().cloned() {
@@ -3616,7 +3616,7 @@ impl WinitApp {
 }
 
 /// Pointer input retained in arrival order behind a press or release that
-/// found the scene lock busy (hud-87xoh).
+/// found the scene lock busy.
 #[derive(Clone, Debug, PartialEq)]
 pub(super) struct RetainedButton {
     /// Keyboard events queued before this input arrived; they replay first.

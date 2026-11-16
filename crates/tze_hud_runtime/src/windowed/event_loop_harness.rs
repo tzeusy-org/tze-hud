@@ -7554,7 +7554,7 @@ mod tests {
     }
 
     /// A wheel burst behind a retained click coalesces into one entry, so it
-    /// can neither evict the click nor overtake it (hud-87xoh).
+    /// can neither evict the click nor overtake it.
     #[test]
     fn held_scene_lock_wheel_burst_waits_behind_click_without_evicting_it() {
         use std::time::{Duration, Instant};
@@ -7602,7 +7602,7 @@ mod tests {
         assert!(harness.app.state.pending_scroll.is_empty());
     }
 
-    /// A click made while the scene lock is busy is not lost (hud-87xoh):
+    /// A click made while the scene lock is busy is not lost:
     /// the press and release retain their own positions and replay in order
     /// once the lock frees: the press focuses the button it was made on even
     /// though the pointer has since left, and the release ends the press.

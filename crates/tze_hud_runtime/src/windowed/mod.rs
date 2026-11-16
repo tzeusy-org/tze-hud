@@ -637,7 +637,7 @@ struct WindowedRuntimeState {
     /// retry replays a Move at the current cursor position.
     pending_pointer_move: bool,
     /// Pointer presses and releases that found the scene lock busy
-    /// (hud-87xoh). Unlike a Move, each is a discrete action at its own
+    ///. Unlike a Move, each is a discrete action at its own
     /// position, so they replay in arrival order rather than coalescing.
     pending_pointer_buttons: VecDeque<lifecycle::RetainedButton>,
     /// Cumulative count of interactive-feedback scene updates dropped because the

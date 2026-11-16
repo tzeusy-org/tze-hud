@@ -2156,7 +2156,7 @@ impl WinitApp {
         // don't loop forever if a genuine lock-busy defer re-grows the queue
         // (e.g. the agent-routing namespace try_lock inside an inner fn).
         // The bound lives inside `drain_keyboard_queue_bounded`.
-        // Keys queued after retained pointer input wait for it (hud-87xoh).
+        // Keys queued after retained pointer input wait for it.
         let queued = self.state.pending_keyboard_events.len();
         let limit = self
             .state

@@ -4794,7 +4794,7 @@ mod tests {
                 .finish_main_work_after_settle(checkpoint, settled.scene_changed())
         );
         // The newer Down was retained behind the terminal, never merged into
-        // it (hud-87xoh): it replays as its own press once the drag ended.
+        // it: it replays as its own press once the drag ended.
         assert!(
             app.state
                 .primary_drag_gesture
