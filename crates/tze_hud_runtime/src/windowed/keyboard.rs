@@ -4103,6 +4103,100 @@ mod tests {
             format!("{draft_before_retry}!")
         );
 
+        // A newer wheel must win over a retained reset; conversely an older
+        // retained wheel must settle before a later character resets INPUT.
+        app.state.cursor_x = tile_bounds.x + tile_bounds.width * 0.25;
+        app.state.cursor_y = tile_bounds.y + 200.0;
+        let mut ordered_offsets = Vec::new();
+        let mut observed_tail = Vec::new();
+        for wheel_after_edit in [true, false] {
+            app.reset_input_history_scroll_to_tail(tile_id);
+            let output_before = scene_handle
+                .try_lock()
+                .unwrap()
+                .tile_scroll_offset_local(tile_id);
+            let scene_guard = scene_handle.try_lock().unwrap();
+            let mut generation = app.state.wake.main_work_generation();
+            if wheel_after_edit {
+                app.reset_input_history_scroll_to_tail(tile_id);
+                drop(scene_guard);
+                app.enqueue_scroll_event(0.0, -50.0, tze_hud_input::WheelStep::Pixels);
+            } else {
+                app.enqueue_scroll_event(0.0, -50.0, tze_hud_input::WheelStep::Pixels);
+                app.dispatch_character_event(&RawCharacterEvent {
+                    character: "?".into(),
+                    timestamp_mono_us: tze_hud_scene::MonoUs(9),
+                });
+                drop(scene_guard);
+            }
+            // Retaining a wheel already schedules availability. A reset alone
+            // uses about_to_wait's deferred-work wake. Observe the scheduled
+            // completion without creating a competing fixture waiter.
+            if app.state.pending_pointer_buttons.is_empty() && app.state.pending_scroll.is_empty() {
+                app.schedule_shared_scene_availability_wake();
+            }
+            for _ in 0..2 {
+                let deadline = std::time::Instant::now()
+                    + std::time::Duration::from_micros(tze_hud_scene::perf_budget::test_budget(
+                        1_000_000,
+                    ));
+                while app.state.wake.main_work_generation() == generation {
+                    assert!(
+                        std::time::Instant::now() < deadline,
+                        "scene availability must wake deferred input"
+                    );
+                    std::thread::yield_now();
+                }
+                app.settle_scene_work();
+                if app.state.pending_keyboard_events.is_empty()
+                    && app.state.pending_pointer_buttons.is_empty()
+                {
+                    break;
+                }
+                // The earlier pointer used this turn; about_to_wait schedules
+                // the remaining keyboard work through the same availability seam.
+                generation = app.state.wake.main_work_generation();
+                app.schedule_shared_scene_availability_wake();
+            }
+            assert!(app.state.pending_keyboard_events.is_empty());
+            assert!(app.state.pending_pointer_buttons.is_empty());
+            assert!(app.state.pending_scroll.is_empty());
+            app.push_focus_ring_owner();
+            let scene = scene_handle.try_lock().unwrap();
+            ordered_offsets.push(scene.portal_input_scroll_offset(tile_id).1);
+            let status = crate::operator::surface_status::portals_json(
+                &scene,
+                &app.state.surface_ui.lock().unwrap(),
+                &[],
+            );
+            assert_eq!(status.as_array().unwrap().len(), 1);
+            observed_tail.push(
+                status[0]["input"]["at_tail"]
+                    .as_bool()
+                    .expect("current shaped INPUT"),
+            );
+            assert_eq!(
+                status[0]["input"]["draft_chars"],
+                app.state.input_processor.composer_draft_chars().unwrap()
+            );
+            assert_eq!(status[0]["output"]["at_tail"], false);
+            assert_eq!(scene.tile_scroll_offset_local(tile_id), output_before);
+            assert!(!scene.tile_follow_tail_at_tail(tile_id));
+        }
+        assert_eq!(
+            (ordered_offsets, observed_tail),
+            (vec![750.0, 800.0], vec![false, true]),
+            "wheel and accepted edits must retain their arrival order and actual observer tail"
+        );
+        assert_eq!(
+            app.state
+                .input_processor
+                .composer_draft_snapshot()
+                .unwrap()
+                .0,
+            format!("{draft_before_retry}!?")
+        );
+
         // A stale target has no editor or scene work to recover. It must leave
         // no perpetually deferred reset and must not retarget the live portal.
         let stale_tile = SceneId::new();
