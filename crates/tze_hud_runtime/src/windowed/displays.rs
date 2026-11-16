@@ -629,6 +629,22 @@ pub(super) fn secondary_index(secondaries: &[SecondaryDisplay], id: WindowId) ->
     secondaries.iter().position(|s| s.window.id() == id)
 }
 
+/// The monitor-native size an overlay keeps across a DPI change: its own
+/// monitor's. Only the registered primary window takes the primary's size; a
+/// window not registered yet (a secondary still being created) gets none, and
+/// the display sync fits it once it is registered.
+pub(super) fn scale_change_target<'a>(
+    secondary: Option<&'a MonitorSpec>,
+    is_primary_window: bool,
+    primary: Option<&'a MonitorSpec>,
+) -> Option<&'a MonitorSpec> {
+    match secondary {
+        Some(spec) => Some(spec),
+        None if is_primary_window => primary,
+        None => None,
+    }
+}
+
 /// Final swapchain outcomes: successful secondary present and deferred encodes.
 pub(super) type SecondaryPresentation =
     (bool, Vec<tze_hud_compositor::surface::PresentAvailability>);
@@ -1863,6 +1879,30 @@ pub(super) fn spawn_display_change_watcher(dirty: DisplaysDirty, wake: impl Fn()
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Mixed DPI: each overlay keeps its own monitor's physical rectangle
+    /// through a scale change, and an unregistered window never takes the
+    /// primary's.
+    #[test]
+    fn scale_change_targets_own_monitor_never_primary_for_unknown_window() {
+        let primary = MonitorSpec {
+            scale: 1.0,
+            width: 1920,
+            height: 1080,
+            ..spec("PRIMARY", 0, 0)
+        };
+        let secondary = spec("HIDPI", 1920, 0);
+        assert_eq!(
+            scale_change_target(Some(&secondary), false, Some(&primary)),
+            Some(&secondary)
+        );
+        assert_eq!(
+            scale_change_target(None, true, Some(&primary)),
+            Some(&primary)
+        );
+        assert_eq!(scale_change_target(None, false, Some(&primary)), None);
+        assert_eq!(scale_change_target(None, true, None), None);
+    }
 
     fn spec(name: &str, x: i32, y: i32) -> MonitorSpec {
         MonitorSpec {

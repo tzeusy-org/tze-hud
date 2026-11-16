@@ -2270,10 +2270,16 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                 self.state
                     .displays_dirty
                     .store(true, std::sync::atomic::Ordering::Release);
-                let spec = match secondary {
-                    Some(i) => Some(&self.state.secondaries[i].spec),
-                    None => self.state.primary_monitor.as_ref(),
-                };
+                let is_primary_window = self
+                    .state
+                    .window
+                    .as_ref()
+                    .is_some_and(|w| w.id() == window_id);
+                let spec = displays::scale_change_target(
+                    secondary.map(|i| &self.state.secondaries[i].spec),
+                    is_primary_window,
+                    self.state.primary_monitor.as_ref(),
+                );
                 if let Some(spec) = spec
                     && self.state.effective_mode == WindowMode::Overlay
                     && self.state.config.overlay_auto_size
