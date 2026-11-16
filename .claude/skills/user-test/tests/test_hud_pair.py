@@ -800,6 +800,19 @@ def test_admin_sends_the_paired_psk_as_bearer(hud, monkeypatch, capsys):
         assert row["surface"] in {agent["surfaces"][0]["surface"] for agent in crowded["holdings"]["agents"]}
     forged = {**diagnostic, "state": "complete"}
     assert not admin.valid_diagnostics(forged)
+    # Bounded upstream counters may already be saturated. Trimming must not
+    # produce an invalid integer that replaces the original primary failure.
+    maximal = copy.deepcopy(crowded)
+    maximal["holdings"].update(omitted_agents=2**64-1, omitted_records=2**64-1)
+    maximal["warnings"]["omitted_events"] = 2**64-1
+    outcome.clear()
+    outcome.update(metadata=maximal, firewall="blocked")
+    assert admin.main(["--host", host, "doctor"]) == 1
+    observed = json.loads(capsys.readouterr().out)
+    assert observed["layer"] == "firewall" and observed["reason"] == "blocked"
+    assert admin.valid_diagnostics(observed["diagnostics"])
+    assert all(observed["diagnostics"][key] == 2**64-1 for key in
+               ("omitted_agents", "omitted_records", "omitted_warning_events"))
 
     # Invalid nested metadata must not bypass the parent whitelist by naming
     # one of the supervisor's own failure reasons before validation completes.

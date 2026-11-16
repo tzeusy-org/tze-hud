@@ -100,6 +100,11 @@ def unsigned(value, nullable=False):
     return (nullable and value is None) or (type(value) is int and 0 <= value <= 2**64 - 1)
 
 
+def add_count(value, extra):
+    # Keep the runtime's saturating u64 counter contract through local trims.
+    return None if value is None else min(2**64 - 1, value + extra)
+
+
 def bounded_string(value, size, nullable=False):
     return (nullable and value is None) or (isinstance(value, str) and len(value.encode("utf-8")) <= size)
 
@@ -192,19 +197,19 @@ def project_diagnostics(status):
         omitted = holdings["omitted_records"]
         if len(rows) > 8:
             if omitted is not None:
-                omitted += sum(row["count"] for row in rows[8:])
+                omitted = add_count(omitted, sum(row["count"] for row in rows[8:]))
             reasons.add("cardinality")
         warning_items = warnings["items"]
         if len(warning_items) > 4:
             reasons.add("cardinality")
         omitted_agents = holdings["omitted_agents"]
         if omitted_agents is not None:
-            omitted_agents += len({row["agent"] for row in rows} - {row["agent"] for row in rows[:8]})
+            omitted_agents = add_count(omitted_agents, len({row["agent"] for row in rows} - {row["agent"] for row in rows[:8]}))
         return {"state": "complete" if not reasons else ("unavailable" if holdings["state"] == warnings["state"] == "unavailable" else "partial"),
                 "holdings_state": holdings["state"], "warnings_state": warnings["state"],
                 "holdings": rows[:8], "warnings": warning_items[:4],
                 "omitted_agents": omitted_agents, "omitted_records": omitted,
-                "omitted_warning_events": None if warnings["state"] == "unavailable" else warnings["omitted_events"] + max(0, len(warning_items) - 4), "reasons": sorted(reasons)}
+                "omitted_warning_events": None if warnings["state"] == "unavailable" else add_count(warnings["omitted_events"], max(0, len(warning_items) - 4)), "reasons": sorted(reasons)}
     except (KeyError, TypeError, ValueError, UnicodeError):
         return unavailable_diagnostics("malformed")
 
@@ -223,13 +228,13 @@ def diagnostic_result(result, diagnostics):
             if len((json.dumps({"result": {**result, "diagnostics": single}}) + "\n").encode()) > 3072:
                 reasons.add("oversize_row")
             if diagnostics["omitted_agents"] is not None and not any(row["agent"] == dropped["agent"] for row in diagnostics["holdings"]):
-                diagnostics["omitted_agents"] += 1
+                diagnostics["omitted_agents"] = add_count(diagnostics["omitted_agents"], 1)
             if diagnostics["omitted_records"] is not None:
-                diagnostics["omitted_records"] += dropped["count"]
+                diagnostics["omitted_records"] = add_count(diagnostics["omitted_records"], dropped["count"])
         elif diagnostics["warnings"]:
             diagnostics["warnings"].pop()
             if diagnostics["omitted_warning_events"] is not None:
-                diagnostics["omitted_warning_events"] += 1
+                diagnostics["omitted_warning_events"] = add_count(diagnostics["omitted_warning_events"], 1)
         else:
             # The scalar envelope and fixed primary-result vocabulary fit alone.
             raise ValueError("diagnostic envelope cannot fit")
