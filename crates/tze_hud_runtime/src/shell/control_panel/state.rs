@@ -176,6 +176,9 @@ pub(crate) struct Open {
     pub focus_refused: bool,
     /// The query just changed: focus the best match on the next build.
     pub focus_first_result: bool,
+    /// Ordinary typing still edits the query after automatic result focus.
+    /// Explicit navigation or activation gives Space back to the control.
+    typing_search: bool,
     /// Connect an agent is showing in place of the sections.
     pub connect: Option<ConnectPage>,
     /// A field row being typed into: (row id, text so far). Enter submits
@@ -204,6 +207,7 @@ impl Open {
             error: None,
             focus_refused: false,
             focus_first_result: false,
+            typing_search: false,
             connect: None,
             editing: None,
             selected_field: None,
@@ -839,6 +843,10 @@ pub(crate) fn on_key(
     ) {
         open.editing = None;
         open.selected_field = None;
+        open.typing_search = false;
+    }
+    if key == PanelKey::Enter {
+        open.typing_search = false;
     }
     match key {
         PanelKey::Escape => {
@@ -982,6 +990,9 @@ pub(crate) fn on_key(
             focus_row(open, nav, target, geometry);
         }
         PanelKey::Enter | PanelKey::Space => match open.focus.clone() {
+            _ if key == PanelKey::Space && open.typing_search && !open.query.is_empty() => {
+                on_text(open, nav, " ")
+            }
             PanelFocus::Search if key == PanelKey::Space => on_text(open, nav, " "),
             PanelFocus::Row(_) if key == PanelKey::Space && typing_name(open) => {
                 on_text(open, nav, " ")
@@ -1050,6 +1061,7 @@ pub(crate) fn on_key(
             } else if open.query.pop().is_some() {
                 open.scroll = 0.0;
                 open.focus_first_result = true;
+                open.typing_search = true;
             }
         }
         PanelKey::Delete => {
@@ -1187,6 +1199,7 @@ pub(crate) fn on_text(open: &mut Open, nav: &Nav, text: &str) {
     open.scroll = 0.0;
     open.confirming = None;
     open.focus_first_result = true;
+    open.typing_search = true;
 }
 
 /// A click (press and release on the same target).
@@ -1200,6 +1213,7 @@ pub(crate) fn on_click(
         // Clicks are explicit focus choices, including when a query update
         // has a pending automatic first-result focus.
         open.focus_first_result = false;
+        open.typing_search = false;
         let same_field = matches!(target, PanelHitTarget::Row(id, _)
             if open.focus == PanelFocus::Row(id.clone()));
         if !same_field {
