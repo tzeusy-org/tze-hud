@@ -95,6 +95,15 @@ source links when implementation changes the status.
   worker handoff. Windows default-browser foreground/card-stays acceptance
   remains unexecuted.
 
+- **Runtime frame turn [Source].** `hud-ximtf.10` consolidates render-relevant
+  sweep, animation/cache/composer preparation, idle decision and deadline
+  ownership in `pipeline::FrameTurnState::run_frame_turn`. Windowed, explicit
+  headless readback and the real event-loop harness use that owner. Its opt-in
+  harness backend submits real offscreen work against the harness scene;
+  renderer-free turns do not acknowledge a frame. Local-feedback repaint debt
+  now survives a failed ordinary submission. Source and offscreen proof do not
+  establish Windows scanout or owner multi-monitor acceptance.
+
 - **T6 — delivery [Observed].** The [Windows workflow](../.github/workflows/windows.yml)
   builds, tests, smoke-checks, and publishes signed releases. The runtime has
   [self-install](../crates/tze_hud_runtime/src/operator/install.rs),

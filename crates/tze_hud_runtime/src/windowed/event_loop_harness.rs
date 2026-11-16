@@ -28,26 +28,9 @@
 //!
 //! ## Scope
 //!
-//! This is deliberately NOT an attempt to run a real headless `WinitApp` with a
-//! GPU — that is the `cargo test -p tze_hud_compositor` llvmpipe pixel-readback
-//! deadlock this harness is meant to avoid. It drives only the parts of the
-//! state machine that are GPU-independent (input/keyboard dispatch, portal/
-//! composer routing over the shared scene). The window, surface, and compositor
-//! fields are left `None`. The capture-accounting gate additionally uses a
-//! headless compositor for real frame builds, substituting only GPU readback
-//! and swapchain operations through production-used frame/present seams.
-//!
-//! ## Networked mode (POC acceptance)
-//!
-//! [`HeadlessEventLoopHarness::with_network`] boots the same state from a real
-//! config with the production MCP HTTP server on a loopback ephemeral port and
-//! the MCP → event-loop portal-op channel, plus the gRPC session server on
-//! another (all over one `SharedState`), all reading one injected clock. The
-//! control panel task runs too ([`HeadlessEventLoopHarness::press_chord`]).
-//! [`HeadlessEventLoopHarness::tick`] runs one event-loop turn: the main-thread
-//! settle sequence `about_to_wait` runs, then the compositor's Stage 4
-//! timed-content sweep and notification hit-region refresh, minus the GPU.
-//! `tests/integration/poc_acceptance.rs` drives it (feature `test-harness`).
+//! Construction stays GPU-free. An opt-in test/dev offscreen backend uses the
+//! canonical HeadlessRuntime factory and the same scene/settle/production turn.
+//! It measures real local GPU submissions, never OS presentation or scanout.
 
 use std::net::SocketAddr;
 use std::sync::Arc;
@@ -266,6 +249,16 @@ impl SharedStateBuilder {
 /// end-to-end tests (see the module docs).
 pub struct HeadlessEventLoopHarness {
     app: WinitApp,
+    frame_turn: crate::pipeline::FrameTurnState,
+    offscreen: Option<(
+        tze_hud_compositor::Compositor,
+        tze_hud_compositor::HeadlessSurface,
+    )>,
+    last_turn_submitted: bool,
+    offscreen_work: (u64, u64),
+    offscreen_tokens_seen: u64,
+    next_frame_wall_us: Option<u64>,
+    next_animation_at: Option<std::time::Instant>,
     mcp_addr: Option<SocketAddr>,
     grpc_addr: Option<SocketAddr>,
     clipboard: Arc<std::sync::Mutex<Vec<String>>>,
@@ -332,6 +325,7 @@ impl HeadlessEventLoopHarness {
                         .text_fit
                         .register_widget_svg(widget_type, svg_file, svg);
                 }
+                state.pending_widget_svgs.extend(startup.widget_svg_assets);
                 startup.global_tokens
             }
             None => {
@@ -529,6 +523,13 @@ impl HeadlessEventLoopHarness {
         state.config = cfg;
         Ok(HeadlessEventLoopHarness {
             app: WinitApp { state },
+            frame_turn: crate::pipeline::FrameTurnState::default(),
+            offscreen: None,
+            last_turn_submitted: false,
+            offscreen_work: (0, 0),
+            offscreen_tokens_seen: 0,
+            next_frame_wall_us: None,
+            next_animation_at: None,
             mcp_addr: Some(mcp_addr),
             grpc_addr: Some(grpc_addr),
             clipboard,
@@ -929,14 +930,59 @@ impl HeadlessEventLoopHarness {
             .collect()
     }
 
-    /// Run one GPU-free event-loop turn: the main-thread settle sequence from
-    /// `about_to_wait` (composer flush, deferred keys, MCP portal ops, portal
-    /// projection drain), then the compositor's Stage 4 timed-content sweep
-    /// and the notification hit-region refresh its post-render pass does.
-    ///
-    /// Returns `false` when a lock was busy and part of the turn was deferred;
-    /// call again.
+    /// Attach a real offscreen compositor using the canonical headless factory.
+    /// The temporary factory scene is discarded; every turn uses this harness's
+    /// actual shared scene, injected clock and production portal/composer state.
+    /// Repeated calls retain the already attached backend and its frame ledger.
+    pub async fn enable_offscreen_rendering(&mut self) -> Result<(), Box<dyn std::error::Error>> {
+        if self.offscreen.is_some() {
+            return Ok(());
+        }
+        let runtime = crate::headless::HeadlessRuntime::new(crate::headless::HeadlessConfig {
+            width: self.app.state.config.window.width,
+            height: self.app.state.config.window.height,
+            grpc_port: 0,
+            agents: self.app.state.config.agents.load().as_ref().clone(),
+            config_toml: self.app.state.config.config_toml.clone(),
+        })
+        .await?;
+        let mut compositor = runtime.compositor;
+        crate::widget_runtime_registration::process_pending_widget_svgs(
+            compositor.widget_renderer_mut(),
+            self.app.state.pending_widget_svgs.drain(..),
+        );
+        compositor.set_token_map(self.app.state.global_tokens.clone());
+        compositor.local_composer_state = Arc::clone(&self.app.state.local_composer_state);
+        compositor.focus_ring_owner_state = Arc::clone(&self.app.state.focus_ring_owner_state);
+        compositor.resize_grip_hover_state = Arc::clone(&self.app.state.resize_grip_hover_state);
+        compositor.tile_close_hover_state = Arc::clone(&self.app.state.tile_close_hover_state);
+        compositor.drag_handle_hover_state = Arc::clone(&self.app.state.drag_handle_hover_state);
+        compositor.composer_visual_layout = Arc::clone(&self.app.state.composer_visual_layout);
+        self.offscreen_tokens_seen = self.app.state.tokens_seen;
+        self.offscreen = Some((compositor, runtime.surface));
+        Ok(())
+    }
+
+    /// Real full-frame backend entries and successful local queue submissions.
+    pub fn offscreen_work_counts(&self) -> (u64, u64) {
+        self.offscreen_work
+    }
+
+    /// None identifies a renderer-unavailable turn, not an idle success.
+    pub fn last_frame_submitted(&self) -> Option<bool> {
+        self.offscreen.as_ref().map(|_| self.last_turn_submitted)
+    }
+
+    /// Content/lease/widget and animation deadlines from the production turn.
+    pub fn frame_deadlines(&self) -> (Option<u64>, Option<std::time::Instant>) {
+        (self.next_frame_wall_us, self.next_animation_at)
+    }
+
+    /// Run the real main-thread settle followed by the production frame turn.
+    /// A missing renderer is explicit and never acknowledges a successful frame.
+    /// Returns false on lock contention or deferred settle work.
     pub fn tick(&mut self) -> bool {
+        self.last_turn_submitted = false;
         self.app.sync_design_tokens();
         if let Some((primary, secondaries)) = &self.display_fixture {
             self.app.sync_zone_assignments_for(primary, secondaries);
@@ -945,24 +991,87 @@ impl HeadlessEventLoopHarness {
         }
         let settled = !self.app.settle_scene_work().is_deferred();
         let (width, height) = (
-            self.app.state.config.window.width as f32,
-            self.app.state.config.window.height as f32,
+            self.app.state.config.window.width,
+            self.app.state.config.window.height,
         );
         let Ok(state) = self.app.state.shared_state.try_lock() else {
+            self.app.schedule_shared_scene_availability_wake();
             return false;
         };
-        let Ok(mut scene) = state.scene.try_lock() else {
+        let scene_arc = Arc::clone(&state.scene);
+        drop(state);
+        let Ok(mut scene) = scene_arc.try_lock() else {
+            let waiting_scene = Arc::clone(&scene_arc);
+            self.app
+                .state
+                .wake
+                .schedule_compositor_after_availability(move || {
+                    drop(waiting_scene.blocking_lock());
+                });
             return false;
         };
-        crate::pipeline::sweep_timed_scene_state(&mut scene);
-        tze_hud_compositor::renderer::hit_regions::populate_notification_hit_regions(
+        let mut repaint = false;
+        let (renderer, surface) = match self.offscreen.as_mut() {
+            Some((renderer, surface)) => {
+                repaint = renderer.set_safe_mode_overlay(
+                    self.app
+                        .state
+                        .safe_mode_atomic
+                        .load(std::sync::atomic::Ordering::Acquire),
+                );
+                if self.offscreen_tokens_seen != self.app.state.tokens_seen {
+                    renderer.set_token_map(self.app.state.global_tokens.clone());
+                    self.offscreen_tokens_seen = self.app.state.tokens_seen;
+                    repaint = true;
+                }
+                (Some(renderer), Some(surface))
+            }
+            None => (None, None),
+        };
+        let turn = self.frame_turn.run_frame_turn(
             &mut scene,
-            width,
-            height,
-            &std::collections::HashMap::new(),
+            renderer,
+            crate::pipeline::FrameTurnRequest {
+                repaint,
+                ..Default::default()
+            },
+            |_| (),
+            |renderer, scene, needs_render| {
+                let (telemetry, submitted) = if needs_render {
+                    self.offscreen_work.0 += 1;
+                    let (telemetry, submitted) = renderer.render_frame_headless_with_submission(
+                        scene,
+                        surface.expect("attached renderer owns a surface"),
+                    );
+                    self.offscreen_work.1 += u64::from(submitted);
+                    (Some(telemetry), submitted)
+                } else {
+                    (None, false)
+                };
+                crate::pipeline::FrameTurnBuild {
+                    work: telemetry,
+                    submitted,
+                }
+            },
         );
-        // The compositor hands terminal lease transitions to the owning
-        // sessions; removal is immediate without agent cooperation.
+        self.last_turn_submitted = turn.submitted;
+        self.next_frame_wall_us = turn.next_wall_us;
+        self.next_animation_at = turn.next_animation_at;
+        if turn.work.is_none() {
+            // GPU-free callers need approximate notification geometry, but do
+            // not claim render/snapshot/presentation evidence.
+            tze_hud_compositor::renderer::hit_regions::populate_notification_hit_regions(
+                &mut scene,
+                width as f32,
+                height as f32,
+                &std::collections::HashMap::new(),
+            );
+        }
+        let wakes = scene.take_notification_wait_notifiers();
+        drop(scene);
+        for wake in wakes {
+            wake.notify();
+        }
         settled
     }
 
@@ -1190,6 +1299,13 @@ impl HeadlessEventLoopHarness {
             app: WinitApp {
                 state: WindowedRuntimeState::new_headless(),
             },
+            frame_turn: crate::pipeline::FrameTurnState::default(),
+            offscreen: None,
+            last_turn_submitted: false,
+            offscreen_work: (0, 0),
+            offscreen_tokens_seen: 0,
+            next_frame_wall_us: None,
+            next_animation_at: None,
             mcp_addr: None,
             grpc_addr: None,
             clipboard: Arc::default(),
@@ -1377,6 +1493,236 @@ mod tests {
     use tze_hud_protocol::proto::input_envelope::Event as ProtoInputEvent;
     use tze_hud_protocol::proto::{CommandAction, CommandSource};
     use tze_hud_scene::MonoUs;
+
+    #[tokio::test]
+    async fn production_turn_skips_idle_and_renders_scene_changes_and_animation() {
+        let _gpu = crate::test_support::lock_headless_runtime().await;
+        let mut cfg = super::super::WindowedConfig::default();
+        cfg.window.width = 320;
+        cfg.window.height = 240;
+        cfg.config_toml = Some(
+            r#"
+            [[tabs]]
+            name = "gate"
+            [[tabs.widgets]]
+            instance_id = "gate-progress"
+            widget_type = "progress-bar"
+        "#
+            .into(),
+        );
+        let mut harness = HeadlessEventLoopHarness::with_network(
+            cfg,
+            Arc::new(tze_hud_scene::TestClock::new(1_000)),
+        )
+        .await
+        .unwrap();
+        assert!(harness.tick());
+        assert_eq!(harness.last_frame_submitted(), None);
+        assert_eq!(harness.frame_turn.last_rendered(), (u64::MAX, u64::MAX));
+        harness
+            .enable_offscreen_rendering()
+            .await
+            .expect("real offscreen backend");
+        assert!(harness.tick());
+        assert_eq!(harness.last_frame_submitted(), Some(true));
+        assert_eq!(harness.offscreen_work_counts(), (1, 1));
+        assert!(
+            harness
+                .offscreen
+                .as_mut()
+                .unwrap()
+                .0
+                .take_work_counts()
+                .is_some()
+        );
+        for _ in 0..3 {
+            assert!(harness.tick());
+            assert_eq!(harness.last_frame_submitted(), Some(false));
+            assert_eq!(
+                harness.offscreen_work_counts(),
+                (1, 1),
+                "settled empty turns do no build or submit"
+            );
+            assert!(
+                harness
+                    .offscreen
+                    .as_mut()
+                    .unwrap()
+                    .0
+                    .take_work_counts()
+                    .is_none()
+            );
+        }
+        harness.enable_offscreen_rendering().await.unwrap();
+        assert!(harness.tick());
+        assert_eq!(
+            harness.offscreen_work_counts(),
+            (1, 1),
+            "repeated enable retains the existing backend and its ledger"
+        );
+        {
+            let mut scene = harness.scene();
+            scene.zone_registry = tze_hud_scene::ZoneRegistry::with_defaults();
+            scene
+                .zone_registry
+                .zones
+                .get_mut("subtitle")
+                .unwrap()
+                .rendering_policy
+                .transition_in_ms = Some(0);
+            scene
+                .publish_to_zone(
+                    "subtitle",
+                    tze_hud_scene::ZoneContent::StreamText("held".into()),
+                    "gate",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+        assert!(harness.tick());
+        assert_eq!(
+            harness.offscreen_work_counts(),
+            (2, 2),
+            "a real publication builds and submits"
+        );
+        harness
+            .offscreen
+            .as_mut()
+            .unwrap()
+            .0
+            .take_work_counts()
+            .unwrap();
+        for _ in 0..3 {
+            assert!(harness.tick());
+            assert_eq!(
+                harness.offscreen_work_counts(),
+                (2, 2),
+                "held content does no further build or submit"
+            );
+            assert!(
+                harness
+                    .offscreen
+                    .as_mut()
+                    .unwrap()
+                    .0
+                    .take_work_counts()
+                    .is_none()
+            );
+        }
+        {
+            let mut scene = harness.scene();
+            scene
+                .zone_registry
+                .zones
+                .get_mut("subtitle")
+                .unwrap()
+                .rendering_policy
+                .transition_out_ms = Some(0);
+            scene.clear_zone_for_publisher("subtitle", "gate").unwrap();
+        }
+        assert!(harness.tick());
+        {
+            let mut scene = harness.scene();
+            // Long content transition is an input fixture, not a gate timeout.
+            scene
+                .zone_registry
+                .zones
+                .get_mut("subtitle")
+                .unwrap()
+                .rendering_policy
+                .transition_in_ms = Some(60_000);
+            scene
+                .publish_to_zone(
+                    "subtitle",
+                    tze_hud_scene::ZoneContent::StreamText("animation".into()),
+                    "gate",
+                    None,
+                    None,
+                    None,
+                )
+                .unwrap();
+        }
+        assert!(harness.tick());
+        let versions = {
+            let scene = harness.scene();
+            (scene.version, scene.geometry_epoch)
+        };
+        assert_eq!(harness.frame_turn.last_rendered(), versions);
+        let before = harness.offscreen_work_counts();
+        assert!(harness.tick());
+        assert_eq!(
+            harness.frame_turn.last_rendered(),
+            versions,
+            "animation renders with both version ledgers pinned"
+        );
+        assert_eq!(
+            harness.offscreen_work_counts(),
+            (before.0 + 1, before.1 + 1)
+        );
+        assert!(
+            harness
+                .offscreen
+                .as_mut()
+                .unwrap()
+                .0
+                .take_work_counts()
+                .is_some()
+        );
+        {
+            let mut scene = harness.scene();
+            scene.clear_zone_for_publisher("subtitle", "gate").unwrap();
+        }
+        assert!(harness.tick());
+        assert!(harness.tick());
+        assert_eq!(harness.last_frame_submitted(), Some(false));
+        let before = harness.offscreen_work_counts();
+        let old_tokens = harness.offscreen.as_ref().unwrap().0.token_map.clone();
+        let appearance = Arc::clone(harness.app.state.appearance.as_ref().unwrap());
+        appearance
+            .apply(std::collections::HashMap::from([(
+                "theme".into(),
+                "blueprint".into(),
+            )]))
+            .await
+            .unwrap();
+        assert!(harness.tick());
+        assert_eq!(
+            harness.offscreen_work_counts(),
+            (before.0 + 1, before.1 + 1)
+        );
+        assert_eq!(
+            harness.offscreen.as_ref().unwrap().0.token_map,
+            harness.app.state.global_tokens
+        );
+        assert_ne!(harness.offscreen.as_ref().unwrap().0.token_map, old_tokens);
+        assert!(harness.tick());
+        assert_eq!(
+            harness.offscreen_work_counts(),
+            (before.0 + 1, before.1 + 1),
+            "live tokens repaint once then settle"
+        );
+        {
+            let mut scene = harness.scene();
+            scene
+                .publish_to_widget("gate-progress", Default::default(), "gate", None, 0, None)
+                .unwrap();
+        }
+        assert!(harness.tick());
+        let renderer = harness
+            .offscreen
+            .as_ref()
+            .unwrap()
+            .0
+            .widget_renderer()
+            .unwrap();
+        assert!(
+            renderer.texture_entry("gate-progress").is_some(),
+            "configured SVGs render on the actual harness scene"
+        );
+        assert!(renderer.raster_count("gate-progress") > 0);
+    }
 
     /// Real frame builds and runtime accounting; only offscreen readback and
     /// swapchain acquire/submit/present are synthetic. GPU pixels and PNG have
@@ -2212,6 +2558,30 @@ mod tests {
         assert_eq!(
             runtime.events.app.state.wake.counters().snapshot(),
             counters
+        );
+        let versions = runtime.frames.last_rendered();
+        *runtime.compositor.focus_ring_owner_state.lock().unwrap() =
+            Some(tze_hud_compositor::renderer::FocusRingOwner {
+                tab_id: SceneId::new(),
+                tile_id: SceneId::new(),
+                node_id: None,
+            });
+        assert!(
+            runtime.turn(false),
+            "local-only feedback requests an ordinary attempt"
+        );
+        assert_eq!(
+            runtime.frames.last_rendered(),
+            versions,
+            "failed attempt does not acknowledge feedback"
+        );
+        assert!(
+            runtime.turn(true),
+            "consumed local-only feedback must retry until submission succeeds"
+        );
+        assert!(
+            !runtime.turn(true),
+            "the successful local-feedback retry returns to idle"
         );
         // A submitted image can be reused by a later encode before the main
         // thread presents it. If that encode is still busy, consuming the ready
@@ -5610,10 +5980,21 @@ mod tests {
                 // Neither contention point may block the event loop or force cleanup.
                 let shared_guard = (!busy_scene).then(|| shared_handle.blocking_lock());
                 let scene_guard = busy_scene.then(|| scene_handle.blocking_lock());
+                let main_before = harness.app.state.wake.main_work_generation();
+                let compositor_before = harness.app.state.wake.compositor().checkpoint();
                 assert!(!harness.tick());
                 assert_retained_focus(&harness);
                 drop(scene_guard);
                 drop(shared_guard);
+                // As in the real loop, retry after the availability wakes. The
+                // waiters briefly acquire the released lock themselves.
+                while if busy_scene {
+                    harness.app.state.wake.compositor().checkpoint() == compositor_before
+                } else {
+                    harness.app.state.wake.main_work_generation() == main_before
+                } {
+                    std::thread::yield_now();
+                }
                 for _ in 0..3 {
                     assert!(harness.tick());
                     assert_eq!(
@@ -7103,6 +7484,16 @@ mod tests {
             main_work_before,
             "a held scene lock must cause no periodic retry wakes"
         );
+        let compositor_before = harness.app.state.wake.compositor().checkpoint();
+        for _ in 0..2 {
+            assert!(!harness.tick());
+            assert_eq!(harness.offscreen_work_counts(), (0, 0));
+            assert_eq!(harness.frame_turn.last_rendered(), (u64::MAX, u64::MAX));
+            assert_eq!(
+                harness.app.state.wake.compositor().checkpoint(),
+                compositor_before
+            );
+        }
         drop(held);
 
         let deadline = Instant::now() + Duration::from_secs(1);
@@ -7113,6 +7504,18 @@ mod tests {
             );
             std::thread::yield_now();
         }
+        while harness.app.state.wake.compositor().checkpoint() == compositor_before {
+            assert!(
+                Instant::now() < deadline,
+                "frame turn resumes on availability, never a polling cadence"
+            );
+            std::thread::yield_now();
+        }
+        assert_eq!(
+            harness.app.state.wake.compositor().checkpoint(),
+            compositor_before + 1,
+            "two busy turns share one compositor availability wake"
+        );
         harness.app.settle_scene_work();
 
         let shared = harness.app.state.shared_state.blocking_lock();

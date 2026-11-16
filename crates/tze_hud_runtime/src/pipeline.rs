@@ -1,7 +1,7 @@
 //! # Frame pipeline state
 //!
 //! The lock-free [`HitTestSnapshot`] the compositor thread publishes after each
-//! scene commit, the shared timed-content sweep every frame driver runs, and
+//! scene commit, the production frame turn shared by all three drivers, and
 //! the latency budgets the portal tests assert against.
 //!
 //! ## ArcSwap Hit-Test Snapshot
@@ -27,6 +27,205 @@ pub const STAGE4_BUDGET_US: u64 = 1_000;
 pub const STAGE5_BUDGET_US: u64 = 1_000;
 /// Input-to-next-present p99 budget — 33ms (two frames at 60fps).
 pub const INPUT_TO_NEXT_PRESENT_BUDGET_US: u64 = 33_000;
+
+// ─── Production frame turn ───────────────────────────────────────────────────
+
+/// Explicit API readback needs a fresh frame; event-driven turns obey idle.
+#[derive(Clone, Copy, Default)]
+pub(crate) enum FrameDemand {
+    #[default]
+    EventDriven,
+    Readback,
+}
+
+#[derive(Default)]
+pub(crate) struct FrameTurnRequest {
+    pub demand: FrameDemand,
+    pub repaint: bool,
+    pub degradation: Option<tze_hud_compositor::CompositorDegradationPolicy>,
+}
+
+/// The ordinary frame ledger advances only after an actual successful submit.
+pub(crate) struct FrameTurnState {
+    last_rendered: (u64, u64),
+    widget_repaint_pending: bool,
+    fallback_repaint_pending: bool,
+    local_repaint_pending: bool,
+}
+
+impl Default for FrameTurnState {
+    fn default() -> Self {
+        Self {
+            last_rendered: (u64::MAX, u64::MAX),
+            widget_repaint_pending: false,
+            fallback_repaint_pending: false,
+            local_repaint_pending: false,
+        }
+    }
+}
+
+/// Backend-specific work. Windowed work is prepared under the lock and submitted
+/// later; offscreen work includes the real copy-to-buffer and queue submission.
+pub(crate) struct FrameTurnBuild<T> {
+    pub work: T,
+    pub submitted: bool,
+}
+
+pub(crate) struct FrameTurnOutcome<C, T> {
+    pub committed: C,
+    /// None explicitly means no renderer was attached, never a successful frame.
+    pub work: Option<T>,
+    pub submitted: bool,
+    pub markdown_prime_us: u64,
+    pub stage4_us: u64,
+    pub next_wall_us: Option<u64>,
+    pub next_animation_at: Option<std::time::Instant>,
+}
+
+impl FrameTurnState {
+    /// One stage order and idle decision for all runtime frame drivers.
+    ///
+    /// Adapters own scene acquisition. `commit` preserves the headless Stage 2/3
+    /// input boundary, and `build` implements only the surface-specific tail.
+    /// Windowed builds leave submission deferred until after releasing the lock.
+    pub fn run_frame_turn<C, T>(
+        &mut self,
+        scene: &mut SceneGraph,
+        mut compositor: Option<&mut tze_hud_compositor::Compositor>,
+        request: FrameTurnRequest,
+        commit: impl FnOnce(&mut SceneGraph) -> C,
+        build: impl FnOnce(
+            &mut tze_hud_compositor::Compositor,
+            &mut SceneGraph,
+            bool,
+        ) -> FrameTurnBuild<T>,
+    ) -> FrameTurnOutcome<C, T> {
+        let turn_started_at = std::time::Instant::now();
+        if let Some(renderer) = compositor.as_mut() {
+            crate::widget_runtime_registration::process_pending_widget_svgs(
+                renderer.widget_renderer_mut(),
+                scene.drain_pending_widget_svg_assets(),
+            );
+        }
+        sweep_timed_scene_state(scene);
+        if let Some(renderer) = compositor.as_mut() {
+            if let Some(policy) = request.degradation {
+                renderer.set_degradation_policy(policy);
+            }
+            renderer.update_publication_animations(scene);
+            renderer.prune_faded_publications(scene);
+        }
+        let commit_started_at = std::time::Instant::now();
+        let committed = commit(scene);
+        let commit_elapsed = commit_started_at.elapsed();
+        let mut stage4_us = turn_started_at
+            .elapsed()
+            .saturating_sub(commit_elapsed)
+            .as_micros() as u64;
+        let mut markdown_prime_us = 0;
+        let mut submitted = false;
+        let mut needs_render = false;
+        let work = compositor.as_mut().map(|renderer| {
+            self.fallback_repaint_pending |= renderer.poll_font_fallback();
+            let start = std::time::Instant::now();
+            renderer.prime_markdown_cache(scene);
+            markdown_prime_us = start.elapsed().as_micros() as u64;
+            renderer.prime_truncation_cache(scene);
+            // The drain consumes one-shot echo/blur/hover observations. Keep
+            // their repaint owed across capture, lock misses and failed submits.
+            self.local_repaint_pending |= renderer.drain_local_composer_and_needs_render();
+            self.widget_repaint_pending &= scene.widgets_shown() && !scene.widget_time_paused();
+            self.widget_repaint_pending |= renderer.widget_deadline_needs_render(scene);
+            needs_render = frame_needs_render(
+                scene.version != self.last_rendered.0,
+                scene.geometry_epoch != self.last_rendered.1,
+                renderer.has_inflight_animation(scene),
+                self.local_repaint_pending,
+                request.repaint || self.widget_repaint_pending || self.fallback_repaint_pending,
+            ) || matches!(request.demand, FrameDemand::Readback);
+            stage4_us = turn_started_at
+                .elapsed()
+                .saturating_sub(commit_elapsed)
+                .as_micros() as u64;
+            let result = build(renderer, scene, needs_render);
+            submitted = result.submitted;
+            result.work
+        });
+        let versions = (scene.version, scene.geometry_epoch);
+        self.record_submission(submitted, versions);
+        // A full windowed frame already schedules the following cadence turn.
+        // Avoid scanning all lease/content deadlines on every active frame.
+        let (next_wall_us, next_animation_at) = if needs_render {
+            (None, None)
+        } else {
+            let wall = scene
+                .next_publication_expiry_wall_us()
+                .into_iter()
+                .chain(
+                    compositor
+                        .as_ref()
+                        .and_then(|renderer| renderer.next_widget_deadline_wall_us(scene)),
+                )
+                .chain(scene.next_timed_content_wall_us())
+                .chain(
+                    scene
+                        .next_lease_deadline_ms(SceneGraph::DEFAULT_MAX_SUSPENSION_MS)
+                        .map(|ms| ms.saturating_mul(1_000)),
+                )
+                .min();
+            let animation = compositor
+                .as_ref()
+                .and_then(|renderer| renderer.next_animation_deadline());
+            (wall, animation)
+        };
+        FrameTurnOutcome {
+            committed,
+            work,
+            submitted,
+            markdown_prime_us,
+            stage4_us,
+            next_wall_us,
+            next_animation_at,
+        }
+    }
+
+    pub fn record_submission(&mut self, submitted: bool, versions: (u64, u64)) {
+        if submitted {
+            self.last_rendered = versions;
+            self.widget_repaint_pending = false;
+            self.fallback_repaint_pending = false;
+            self.local_repaint_pending = false;
+        }
+    }
+
+    #[cfg(test)]
+    pub fn last_rendered(&self) -> (u64, u64) {
+        self.last_rendered
+    }
+}
+
+pub(crate) fn frame_needs_render(
+    scene_changed: bool,
+    geometry_changed: bool,
+    animation_inflight: bool,
+    composer_needs_render: bool,
+    surface_repaint_pending: bool,
+) -> bool {
+    scene_changed
+        || geometry_changed
+        || animation_inflight
+        || composer_needs_render
+        || surface_repaint_pending
+}
+
+/// Recovery debt survives lock misses and failed acquisitions.
+pub(crate) const fn update_surface_repaint_pending(
+    was_pending: bool,
+    recovered: bool,
+    submitted: bool,
+) -> bool {
+    (was_pending || recovered) && !submitted
+}
 
 // ─── Hit-Test Snapshot ────────────────────────────────────────────────────────
 
