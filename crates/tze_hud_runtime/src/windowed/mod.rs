@@ -1827,95 +1827,25 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                     // too long when a session handler or MCP handler holds the
                     // scene lock momentarily.
                     if let Ok(mut scene) = compositor_scene.try_lock() {
-                        // Register runtime-uploaded widget SVG assets before
-                        // rendering so newly registered widget types/layers can
-                        // be referenced by publish calls immediately.
-                        process_pending_widget_svgs(
-                            compositor.widget_renderer_mut(),
-                            scene.drain_pending_widget_svg_assets(),
-                        );
-
-                        // ── Timed-content sweep (invariants 1 and 4) ──────
-                        // Expired publications, tiles, and leases MUST be
-                        // cleared before the next frame.
-                        crate::pipeline::sweep_timed_scene_state(&mut scene);
-
                         let applied_degradation_level = degradation_controller.level();
-                        compositor
-                            .set_degradation_policy(degradation_controller.compositor_policy());
-
-                        // ── Per-publication TTL fade-out sweep ───────────
-                        // update_publication_animations seeds new state and ticks
-                        // existing ones; prune_faded_publications removes any
-                        // publications whose 150ms fade-out has completed.
-                        compositor.update_publication_animations(&scene);
-                        compositor.prune_faded_publications(&mut scene);
-
-                        // ── Commit-time markdown cache prime (hud-380dl) ──
-                        // Prime the markdown parse cache here — at scene-commit
-                        // time, before the render path executes — so that
-                        // render_frame never performs parsing in the frame loop.
-                        // This satisfies the "parse-on-commit, zero per-frame
-                        // parse cost" contract (Option A, hud-380dl).
-                        //
-                        // The prime is gated internally on scene.version so it
-                        // is a no-op when the scene has not changed.  The measured
-                        // cost is attached to the stage4 window so it is visible in
-                        // telemetry without inflating the Stage 6 render budget.
-                        // ── System fallback fonts landed (hud-ljhku.13) ──
-                        // Install faces a background load finished and drop
-                        // what was shaped without them, before the primes, so
-                        // tofu text re-lays out once this frame.
-                        // Owed like a surface repaint: kept until a frame submits.
-                        surface_repaint_pending |= compositor.poll_font_fallback();
-
-                        let markdown_prime_start = Instant::now();
-                        compositor.prime_markdown_cache(&scene);
-                        let markdown_prime_us = markdown_prime_start.elapsed().as_micros() as u64;
-
-                        // ── Commit-time truncation cache prime (hud-v2z6u) ─
-                        // Prime the truncation cache here — at commit time,
-                        // after prime_markdown_cache — so that render_frame
-                        // never performs shaping in the frame loop.  Gated
-                        // internally on scene.version; no-op when unchanged.
-                        compositor.prime_truncation_cache(&scene);
-
-                        // ── Local composer drain (hud-ilivg / hud-r3ax6) ──
-                        // Drain the local composer echo slot BEFORE the gate.  The
-                        // draft echo and the caret blink are driven off out-of-band
-                        // state that never bumps scene.version, so the gate would
-                        // freeze them unless we both (a) apply a pending keystroke
-                        // here — `local_composer` is only populated by this drain,
-                        // so it must run before the gate can observe it — and (b)
-                        // treat a focused composer (blinking caret) as dirty.
-                        // Returns true while a composer is focused/visible or on
-                        // the single deactivation frame; false once it is gone, so
-                        // the truly-static idle case still skips.
-                        let composer_needs_render =
-                            compositor.drain_local_composer_and_needs_render();
-
-                        // ── Idle render gate (hud-ilivg) ──────────────────
-                        // Build/encode/present only when the scene graph changed
-                        // since the last presented frame OR an animation is in
-                        // flight OR a focused/just-deactivated composer needs a
-                        // frame.  The cheap sweeps above (expiry, publication
-                        // tick, prune, cache primes) ALWAYS run, so a fade-out
-                        // start or expiry still bumps scene.version and re-arms the
-                        // gate; an in-flight eased transition / TTL fade / reveal /
-                        // smooth-scroll forces a render so it never freezes.
+                        // The runtime turn owns sweep/prime/composer/gate order;
+                        // this adapter retains windowed build and lock-free submit.
                         let (surf_w, surf_h) = surface_for_compositor.size();
                         let frame_work::PreparedFrameWork {
                             plan,
                             render,
                             capture,
+                            markdown_prime_us,
+                            next_wall_us,
+                            next_animation_at,
                         } = frame_work.prepare(
                             &mut compositor,
                             &mut scene,
                             (surf_w, surf_h),
                             &capture_inbox,
                             frame_work::RenderTriggers {
-                                composer: composer_needs_render,
                                 surface: surface_repaint_pending,
+                                degradation: Some(degradation_controller.compositor_policy()),
                             },
                             |needs_render| {
                                 displays::frame_plan(
@@ -1933,18 +1863,8 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             // signalling the main thread to present. A secondary
                             // whose retry came due gets a build, presented to it
                             // alone (nothing animates, so building steps nothing).
-                            let scene_deadline = scene
-                                .next_publication_expiry_wall_us()
+                            let scene_deadline = next_wall_us
                                 .into_iter()
-                                .chain(compositor.next_widget_deadline_wall_us(&scene))
-                                .chain(scene.next_timed_content_wall_us())
-                                .chain(
-                                    scene
-                                        .next_lease_deadline_ms(
-                                            tze_hud_scene::graph::SceneGraph::DEFAULT_MAX_SUSPENSION_MS,
-                                        )
-                                        .map(|ms| ms.saturating_mul(1_000)),
-                                )
                                 .chain(card_frame.wake_at_wall_us)
                                 .min()
                                 .map(|wall_us| {
@@ -2002,7 +1922,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
                             // focused composer's caret both change pixels at a
                             // known instant with no other event. Wake exactly
                             // then instead of rendering every frame in between.
-                            if let Some(at) = compositor.next_animation_deadline() {
+                            if let Some(at) = next_animation_at {
                                 timed_deadline = timed_deadline
                                     .into_iter()
                                     .chain(Some(Deadline::new(

@@ -31,6 +31,21 @@ flowchart TD
     HUB -->|"hud_input replies"| MCP
 ```
 
+The production frame turn is [`FrameTurnState::run_frame_turn`](../crates/tze_hud_runtime/src/pipeline.rs):
+widget registration, timed sweep, animation/prune, fallback fonts, markdown then
+truncation prime, composer drain, idle decision and backend build/result accounting.
+The windowed [`frame_work`](../crates/tze_hud_runtime/src/windowed/frame_work.rs)
+adapter builds under the scene lock, releases it before surface submission, and
+acknowledges only successful ordinary primary work. Winit still owns settle and
+OS presentation; display retry/chrome/degradation wake adapters remain windowed.
+[`HeadlessRuntime`](../crates/tze_hud_runtime/src/headless.rs) uses the same turn
+with explicit fresh-readback demand and its original input-response boundary.
+The [`event-loop harness`](../crates/tze_hud_runtime/src/windowed/event_loop_harness.rs)
+runs real settle followed by that turn; GPU-free construction reports renderer
+absence, while its opt-in dev backend performs real offscreen builds/submissions
+against the harness scene. Local GPU completion proves neither Windows scanout
+nor owner acceptance.
+
 The runtime returns per-frame telemetry to its caller and records cumulative
 session totals with bounded recent latency samples; the collector retains no
 frame history. Headless benchmarks own their artifact samples separately.

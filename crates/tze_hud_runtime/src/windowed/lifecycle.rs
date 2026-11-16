@@ -1652,35 +1652,9 @@ pub(super) fn drain_windowed_input_latency(
     )
 }
 
-/// Decide whether the windowed compositor must build and present this frame.
-///
-pub(super) fn windowed_frame_needs_render(
-    scene_changed: bool,
-    geometry_changed: bool,
-    animation_inflight: bool,
-    composer_needs_render: bool,
-    surface_repaint_pending: bool,
-) -> bool {
-    scene_changed
-        || geometry_changed
-        || animation_inflight
-        || composer_needs_render
-        || surface_repaint_pending
-}
-
-/// Carry a recovered-surface repaint requirement until its first fresh submit.
-///
-/// A successful reconfigure can race with a temporarily held scene lock. The
-/// compositor must retain the repaint requirement across that lock miss (and
-/// across a failed subsequent acquire) so an unchanged scene does not strand a
-/// recovered swapchain without visible content.
-pub(super) const fn update_surface_repaint_pending(
-    was_pending: bool,
-    surface_recovered: bool,
-    frame_submitted: bool,
-) -> bool {
-    (was_pending || surface_recovered) && !frame_submitted
-}
+#[cfg(test)]
+use crate::pipeline::frame_needs_render;
+pub(super) use crate::pipeline::update_surface_repaint_pending;
 
 /// Maximum time to wait for the first real surface presentation before the
 /// bounded measurement emits a fail-closed diagnostic artifact.
@@ -4017,21 +3991,19 @@ mod tests {
 
     #[test]
     fn unchanged_windowed_scene_sleeps_after_animation_completes() {
-        assert!(!windowed_frame_needs_render(
-            false, false, false, false, false
-        ));
+        assert!(!frame_needs_render(false, false, false, false, false));
         for (scene, geometry, animation, composer) in [
             (true, false, false, false),
             (false, true, false, false),
             (false, false, true, false),
             (false, false, false, true),
         ] {
-            assert!(windowed_frame_needs_render(
+            assert!(frame_needs_render(
                 scene, geometry, animation, composer, false
             ));
         }
         assert!(
-            !windowed_frame_needs_render(false, false, false, false, false),
+            !frame_needs_render(false, false, false, false, false),
             "the same production consumer sleeps after the transition lands"
         );
     }
@@ -4039,7 +4011,7 @@ mod tests {
     #[test]
     fn successful_surface_recovery_repaints_an_unchanged_scene() {
         assert!(
-            windowed_frame_needs_render(false, false, false, false, true),
+            frame_needs_render(false, false, false, false, true),
             "a reconfigured surface needs one fresh frame even when scene state is unchanged"
         );
     }
@@ -4049,7 +4021,7 @@ mod tests {
         let pending_after_recovery = update_surface_repaint_pending(false, true, false);
         assert!(pending_after_recovery);
         assert!(
-            windowed_frame_needs_render(false, false, false, false, pending_after_recovery),
+            frame_needs_render(false, false, false, false, pending_after_recovery),
             "the recovered surface must request a fresh frame even for an unchanged scene"
         );
 
