@@ -1,7 +1,7 @@
 //! # Frame pipeline state
 //!
 //! The lock-free [`HitTestSnapshot`] the compositor thread publishes after each
-//! scene commit, the shared timed-content sweep every frame driver runs, and
+//! scene commit, the production frame turn shared by all three drivers, and
 //! the latency budgets the portal tests assert against.
 //!
 //! ## ArcSwap Hit-Test Snapshot
@@ -50,6 +50,7 @@ pub(crate) struct FrameTurnState {
     last_rendered: (u64, u64),
     widget_repaint_pending: bool,
     fallback_repaint_pending: bool,
+    local_repaint_pending: bool,
 }
 
 impl Default for FrameTurnState {
@@ -58,6 +59,7 @@ impl Default for FrameTurnState {
             last_rendered: (u64::MAX, u64::MAX),
             widget_repaint_pending: false,
             fallback_repaint_pending: false,
+            local_repaint_pending: false,
         }
     }
 }
@@ -129,14 +131,16 @@ impl FrameTurnState {
             renderer.prime_markdown_cache(scene);
             markdown_prime_us = start.elapsed().as_micros() as u64;
             renderer.prime_truncation_cache(scene);
-            let composer = renderer.drain_local_composer_and_needs_render();
+            // The drain consumes one-shot echo/blur/hover observations. Keep
+            // their repaint owed across capture, lock misses and failed submits.
+            self.local_repaint_pending |= renderer.drain_local_composer_and_needs_render();
             self.widget_repaint_pending &= scene.widgets_shown() && !scene.widget_time_paused();
             self.widget_repaint_pending |= renderer.widget_deadline_needs_render(scene);
             needs_render = frame_needs_render(
                 scene.version != self.last_rendered.0,
                 scene.geometry_epoch != self.last_rendered.1,
                 renderer.has_inflight_animation(scene),
-                composer,
+                self.local_repaint_pending,
                 request.repaint || self.widget_repaint_pending || self.fallback_repaint_pending,
             ) || matches!(request.demand, FrameDemand::Readback);
             stage4_us = turn_started_at
@@ -190,6 +194,7 @@ impl FrameTurnState {
             self.last_rendered = versions;
             self.widget_repaint_pending = false;
             self.fallback_repaint_pending = false;
+            self.local_repaint_pending = false;
         }
     }
 
