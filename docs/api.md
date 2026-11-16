@@ -1009,8 +1009,10 @@ something and what they hold ("3 agents · 2 portals · 5 zones · 1 widget")
 and says "restart pending" while a saved setting waits for a
 restart (Restart now is in System, Alt+8). It takes keyboard focus when it
 opens (if Windows refuses, the header says to click it) and returns focus
-on close. Typing searches every row; arrows, Tab, Enter and Space move and
-act; Esc clears the search, then closes. A row whose value differs from
+on close. Typing searches every row; Space continues the query after automatic
+result focus. Arrows and Tab navigate, Enter acts on the best match, and Space
+acts on an explicitly selected control. Esc clears the search, then closes.
+A row whose value differs from
 its default (an override that matches the theme does not) shows Reset:
 clicking it, or Delete on the row (not while typing in a field or the
 search), puts the default back live and removes the key from the config

@@ -176,6 +176,9 @@ pub(crate) struct Open {
     pub focus_refused: bool,
     /// The query just changed: focus the best match on the next build.
     pub focus_first_result: bool,
+    /// Ordinary typing still edits the query after automatic result focus.
+    /// Explicit navigation or activation gives Space back to the control.
+    typing_search: bool,
     /// Connect an agent is showing in place of the sections.
     pub connect: Option<ConnectPage>,
     /// A field row being typed into: (row id, text so far). Enter submits
@@ -204,6 +207,7 @@ impl Open {
             error: None,
             focus_refused: false,
             focus_first_result: false,
+            typing_search: false,
             connect: None,
             editing: None,
             selected_field: None,
@@ -786,6 +790,7 @@ fn focus_row(open: &mut Open, nav: &Nav, index: usize, geometry: Option<&Control
     let Some((id, _)) = nav.rows.get(index) else {
         return;
     };
+    open.typing_search = false;
     open.focus = PanelFocus::Row(id.clone());
     if let Some(g) = geometry
         && let Some(span) = g.rows.iter().find(|s| s.id == *id)
@@ -839,6 +844,24 @@ pub(crate) fn on_key(
     ) {
         open.editing = None;
         open.selected_field = None;
+    }
+    // Zoom and unhandled accelerators leave focus alone; they must not turn
+    // an automatic result into an explicitly selected control.
+    if matches!(
+        key,
+        PanelKey::Enter
+            | PanelKey::Up
+            | PanelKey::Down
+            | PanelKey::Left
+            | PanelKey::Right
+            | PanelKey::Tab
+            | PanelKey::BackTab
+            | PanelKey::Home
+            | PanelKey::End
+            | PanelKey::PageUp
+            | PanelKey::PageDown
+    ) {
+        open.typing_search = false;
     }
     match key {
         PanelKey::Escape => {
@@ -982,6 +1005,9 @@ pub(crate) fn on_key(
             focus_row(open, nav, target, geometry);
         }
         PanelKey::Enter | PanelKey::Space => match open.focus.clone() {
+            _ if key == PanelKey::Space && open.typing_search && !open.query.is_empty() => {
+                on_text(open, nav, " ")
+            }
             PanelFocus::Search if key == PanelKey::Space => on_text(open, nav, " "),
             PanelFocus::Row(_) if key == PanelKey::Space && typing_name(open) => {
                 on_text(open, nav, " ")
@@ -1050,6 +1076,7 @@ pub(crate) fn on_key(
             } else if open.query.pop().is_some() {
                 open.scroll = 0.0;
                 open.focus_first_result = true;
+                open.typing_search = true;
             }
         }
         PanelKey::Delete => {
@@ -1070,6 +1097,7 @@ pub(crate) fn on_key(
             if let Some(quick) = quick
                 && nav.control(quick.row).is_some()
             {
+                open.typing_search = false;
                 if let Some(i) = nav.tiles.iter().position(|t| t == quick.row) {
                     open.focus = PanelFocus::Tile(i);
                 }
@@ -1187,6 +1215,7 @@ pub(crate) fn on_text(open: &mut Open, nav: &Nav, text: &str) {
     open.scroll = 0.0;
     open.confirming = None;
     open.focus_first_result = true;
+    open.typing_search = true;
 }
 
 /// A click (press and release on the same target).
@@ -1200,6 +1229,7 @@ pub(crate) fn on_click(
         // Clicks are explicit focus choices, including when a query update
         // has a pending automatic first-result focus.
         open.focus_first_result = false;
+        open.typing_search = false;
         let same_field = matches!(target, PanelHitTarget::Row(id, _)
             if open.focus == PanelFocus::Row(id.clone()));
         if !same_field {
@@ -2032,6 +2062,47 @@ mod tests {
         // Leading spaces and control characters are not typed.
         on_text(&mut open, &nav, " \u{8}");
         assert_eq!(open.query, "");
+
+        // An automatically focused result still belongs to the query being
+        // typed. Its Space must not toggle, preview, or confirm that result.
+        for (first, rest, row) in [
+            ("pause", "agents", "agents.pause"),
+            ("input", "theme", "input.theme"),
+            ("clear", "all", "agents.clear"),
+        ] {
+            let mut open = Open::new(PANEL);
+            let (_, nav) = built(&mut open);
+            on_text(&mut open, &nav, first);
+            let (_, nav) = built(&mut open);
+            assert!(matches!(open.focus, PanelFocus::Row(_)));
+            // Commands that leave focus alone do not select the automatic
+            // result. The next ordinary Space must still belong to typing.
+            for key in [PanelKey::ZoomIn, PanelKey::ZoomOut, PanelKey::Alt('z')] {
+                let focus = open.focus.clone();
+                on_key(&mut open, &nav, key, None);
+                assert_eq!(open.focus, focus);
+            }
+            assert!(on_key(&mut open, &nav, PanelKey::Space, None).is_empty());
+            assert!(open.confirming.is_none());
+            assert!(open.preview.is_none());
+            on_text(&mut open, &nav, rest);
+            let (_, nav) = built(&mut open);
+            assert_eq!(open.query, format!("{first} {rest}"));
+            assert_eq!(open.focus, PanelFocus::Row(row.into()));
+
+            // Deliberate keyboard selection restores Space activation even
+            // with the same nonempty query and the same focused result.
+            on_key(&mut open, &nav, PanelKey::Up, None);
+            on_key(&mut open, &nav, PanelKey::Down, None);
+            let effects = on_key(&mut open, &nav, PanelKey::Space, None);
+            assert_eq!(open.query, format!("{first} {rest}"));
+            if row == "agents.clear" {
+                assert!(effects.is_empty());
+                assert_eq!(open.confirming.as_deref(), Some(row));
+            } else {
+                assert!(!effects.is_empty());
+            }
+        }
     }
 
     /// Focus survives a rebuild when its row is still there and falls back to
