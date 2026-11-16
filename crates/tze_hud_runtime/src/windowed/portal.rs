@@ -4793,6 +4793,19 @@ mod tests {
                 .wake
                 .finish_main_work_after_settle(checkpoint, settled.scene_changed())
         );
+        // The newer Down was retained behind the terminal, never merged into
+        // it: it replays as its own press once the drag ended.
+        assert!(
+            app.state
+                .primary_drag_gesture
+                .as_ref()
+                .is_some_and(
+                    |gesture| gesture.press_start != original_press && gesture.terminal.is_none()
+                ),
+            "the retained Down is a new press, not the ended drag"
+        );
+        app.enqueue_pointer_event(PointerEventKind::Up);
+        app.settle_scene_work();
         assert!(app.state.primary_drag_gesture.is_none());
         assert!(!app.state.input_processor.drag_states.contains_key(&0));
         for id in [frame_id, transcript_id, composer_id, backstop] {

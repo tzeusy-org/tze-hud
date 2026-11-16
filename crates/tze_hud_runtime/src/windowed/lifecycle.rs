@@ -2636,6 +2636,67 @@ impl WinitApp {
     /// - Inside a hit-region → `set_cursor_hittest(true)` (window captures events).
     /// - Outside all hit-regions → `set_cursor_hittest(false)` (events pass through).
     pub(super) fn enqueue_pointer_event(&mut self, kind: PointerEventKind) {
+        // A press or release behind retained ones waits its turn:
+        // replaying them in order is what keeps a click a click.
+        if !self.state.pending_pointer_buttons.is_empty() {
+            if kind == PointerEventKind::Move {
+                // Hover follows once the buttons ahead of it have replayed.
+                self.state.pending_pointer_move = true;
+                self.schedule_shared_scene_availability_wake();
+            } else {
+                self.retain_pointer_button(kind, Instant::now());
+            }
+            return;
+        }
+        self.process_pointer_event(kind, true, Instant::now());
+    }
+
+    /// Retain a press or release the scene lock could not take,
+    /// with everything it arrived with: cursor position, pressed window and
+    /// time. Bounded: under pathological contention the oldest entry is
+    /// dropped rather than growing memory.
+    fn retain_pointer_button(&mut self, kind: PointerEventKind, at: Instant) {
+        let event = RetainedPointerEvent::Button {
+            kind,
+            x: self.state.cursor_x,
+            y: self.state.cursor_y,
+            press_window: self.state.press_window,
+            at,
+        };
+        self.retain_pointer(event);
+    }
+
+    fn retain_pointer(&mut self, event: RetainedPointerEvent) {
+        if self.state.pending_pointer_buttons.len() >= RETAINED_BUTTON_MAX {
+            // Shed wheel input before any press or release.
+            let evict = self
+                .state
+                .pending_pointer_buttons
+                .iter()
+                .position(|r| matches!(r.event, RetainedPointerEvent::Wheel(_)))
+                .unwrap_or(0);
+            self.state.pending_pointer_buttons.remove(evict);
+        }
+        // Keys already waiting arrived first and replay first.
+        let keys_ahead = self.state.pending_keyboard_events.len();
+        self.state
+            .pending_pointer_buttons
+            .push_back(RetainedButton { keys_ahead, event });
+        self.schedule_shared_scene_availability_wake();
+    }
+
+    /// Keyboard events drained ahead of retained pointer input no longer
+    /// precede it.
+    pub(super) fn note_keys_drained(&mut self, drained: usize) {
+        for retained in &mut self.state.pending_pointer_buttons {
+            retained.keys_ahead = retained.keys_ahead.saturating_sub(drained);
+        }
+    }
+
+    /// Run one pointer event through hit-testing and the scene. Returns false
+    /// when a press or release could not reach the scene; with `retain` it is
+    /// then queued, while a replay leaves it at the queue's front.
+    fn process_pointer_event(&mut self, kind: PointerEventKind, retain: bool, at: Instant) -> bool {
         if kind == PointerEventKind::Down && self.state.answer_keyboard.focus.take().is_some() {
             self.state.input_processor.chrome_feedback_cancel_pending = true;
         }
@@ -2643,7 +2704,7 @@ impl WinitApp {
             // The context menu owns the pointer; a retained Move is moot and
             // must not keep the deferred-work wake alive.
             self.state.pending_pointer_move = false;
-            return;
+            return true;
         }
         // A press or release hit-tests the content the earlier wheel
         // notches scrolled to, so settle them first when the lock allows.
@@ -2666,11 +2727,15 @@ impl WinitApp {
                 .as_ref()
                 .is_some_and(|gesture| gesture.terminal.is_some())
             {
+                self.schedule_shared_scene_availability_wake();
                 if kind == PointerEventKind::Move {
                     self.state.pending_pointer_move = true;
+                    return true;
                 }
-                self.schedule_shared_scene_availability_wake();
-                return;
+                if retain {
+                    self.retain_pointer_button(kind, at);
+                }
+                return false;
             }
         }
         let original_window_is_live = self.primary_drag_window_is_live();
@@ -2697,7 +2762,9 @@ impl WinitApp {
             y,
             kind,
             device_id: 0,
-            timestamp: Some(input_started_at),
+            // A replayed press keeps its arrival time, so retained clicks
+            // never merge into a multi-click they were not.
+            timestamp: Some(at),
         };
         // Acquire the scene lock directly (without going through SharedState) so that
         // the main-thread input path does not contend with session handlers that hold
@@ -3290,6 +3357,16 @@ impl WinitApp {
         if !pointer_processed && pointer_event.kind == PointerEventKind::Down {
             self.state.zone_press = None;
         }
+        // Nor may it be lost: a dropped Down left focus and buttons untouched
+        // while the Up still landed. Retain it, and the Up that
+        // follows, for an in-order replay once the lock frees. A drag's Up is
+        // already retained as the gesture's terminal below.
+        let retained_as_terminal =
+            pointer_event.kind == PointerEventKind::Up && self.state.primary_drag_gesture.is_some();
+        let retain_button = (!pointer_processed
+            && pointer_event.kind != PointerEventKind::Move
+            && !retained_as_terminal)
+            .then(|| pointer_event.kind.clone());
 
         if !pointer_processed
             && pointer_event.kind == PointerEventKind::Up
@@ -3344,6 +3421,14 @@ impl WinitApp {
         // `active_edge`/`drag_active` reflect the event we just processed; the
         // CursorIconTracker suppresses redundant winit calls on the move stream.
         self.update_portal_cursor_icon();
+
+        let reached = retain_button.is_none();
+        if let Some(kind) = retain_button
+            && retain
+        {
+            self.retain_pointer_button(kind, at);
+        }
+        reached
     }
 
     /// Enqueue and process a local-first scroll event.
@@ -3365,6 +3450,34 @@ impl WinitApp {
         let x = self.state.cursor_x;
         let y = self.state.cursor_y;
         self.update_overlay_cursor_hittest();
+
+        // Behind a retained click, the wheel waits its turn, so
+        // the click hit-tests the content as it was when it was made.
+        if !self.state.pending_pointer_buttons.is_empty() {
+            let scroll = RetainedScroll {
+                x,
+                y,
+                delta_x,
+                delta_y,
+                step,
+            };
+            // Consecutive notches share one entry and coalesce there, so a
+            // burst of wheel input can never evict the click ahead of it.
+            let keys_ahead = self.state.pending_keyboard_events.len();
+            if let Some(RetainedButton {
+                keys_ahead: back_keys,
+                event: RetainedPointerEvent::Wheel(deltas),
+            }) = self.state.pending_pointer_buttons.back_mut()
+                && *back_keys == keys_ahead
+            {
+                retain_scroll(deltas, scroll);
+                return;
+            }
+            self.retain_pointer(RetainedPointerEvent::Wheel(
+                std::collections::VecDeque::from([scroll]),
+            ));
+            return;
+        }
 
         retain_scroll(
             &mut self.state.pending_scroll,
@@ -3388,8 +3501,20 @@ impl WinitApp {
         if self.state.pending_scroll.is_empty() {
             return Some(false);
         }
+        self.apply_scroll_with(std::collections::VecDeque::new())
+    }
+
+    /// Apply retained wheel deltas, then `later` ones, under one scene lock.
+    /// None leaves both untouched for a retry.
+    fn apply_scroll_with(
+        &mut self,
+        later: std::collections::VecDeque<RetainedScroll>,
+    ) -> Option<bool> {
         let state = self.state.shared_state.try_lock().ok()?;
         let mut scene = state.scene.try_lock().ok()?;
+        for scroll in later {
+            retain_scroll(&mut self.state.pending_scroll, scroll);
+        }
         for retained in self.state.pending_scroll.drain(..) {
             if let Some(ev) = self.state.input_processor.process_wheel_event(
                 &tze_hud_input::ScrollEvent {
@@ -3412,14 +3537,109 @@ impl WinitApp {
     /// Move at the current cursor. True when either reached the scene.
     pub(super) fn drain_retained_pointer_input(&mut self) -> bool {
         let scrolled = self.apply_retained_scroll().unwrap_or(false);
+        // Presses and releases replay in arrival order, each at the position
+        // it arrived at; the first that still finds the lock busy
+        // stops the replay and keeps its place.
+        let mut pressed = false;
+        while let Some(retained) = self.state.pending_pointer_buttons.front().cloned() {
+            if retained.keys_ahead > 0 {
+                // Keys typed before this pointer input go first.
+                self.drain_pending_keyboard_events();
+                if self
+                    .state
+                    .pending_pointer_buttons
+                    .front()
+                    .is_some_and(|front| front.keys_ahead > 0)
+                {
+                    break;
+                }
+            }
+            let reached = match retained.event {
+                RetainedPointerEvent::Wheel(deltas) => {
+                    // Earlier wheel deltas are already ahead of these in
+                    // `pending_scroll`; joining them keeps their order. A busy
+                    // lock keeps the entry, and what follows it, in place.
+                    self.apply_scroll_with(deltas).is_some()
+                }
+                RetainedPointerEvent::Button {
+                    kind,
+                    x,
+                    y,
+                    press_window,
+                    at,
+                } => {
+                    let live = (
+                        self.state.cursor_x,
+                        self.state.cursor_y,
+                        self.state.press_window,
+                    );
+                    (
+                        self.state.cursor_x,
+                        self.state.cursor_y,
+                        self.state.press_window,
+                    ) = (x, y, press_window);
+                    // A release first moves to where it happened, so a
+                    // press-drag whose moves were deferred still travels.
+                    let reached = (kind != PointerEventKind::Up
+                        || self.process_pointer_event(PointerEventKind::Move, false, at))
+                        && self.process_pointer_event(kind, false, at);
+                    (
+                        self.state.cursor_x,
+                        self.state.cursor_y,
+                        self.state.press_window,
+                    ) = live;
+                    reached
+                }
+            };
+            if !reached {
+                break;
+            }
+            self.state.pending_pointer_buttons.pop_front();
+            pressed = true;
+        }
+        if pressed {
+            // Replay hit-tested at past positions and windows; re-derive
+            // overlay capture from the live pointer.
+            self.update_overlay_cursor_hittest();
+        }
+        if pressed && self.state.pending_pointer_buttons.is_empty() {
+            // Keys typed after the replayed pointer input follow it now.
+            self.drain_pending_keyboard_events();
+        }
         let mut moved = false;
         if self.state.pending_pointer_move {
             self.enqueue_pointer_event(PointerEventKind::Move);
             moved = !self.state.pending_pointer_move;
         }
-        scrolled || moved
+        scrolled || pressed || moved
     }
 }
+
+/// Pointer input retained in arrival order behind a press or release that
+/// found the scene lock busy.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) struct RetainedButton {
+    /// Keyboard events queued before this input arrived; they replay first.
+    pub(super) keys_ahead: usize,
+    pub(super) event: RetainedPointerEvent,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum RetainedPointerEvent {
+    Button {
+        kind: PointerEventKind,
+        x: f32,
+        y: f32,
+        press_window: Option<winit::window::WindowId>,
+        at: Instant,
+    },
+    /// Wheel deltas that arrived behind a retained press or release,
+    /// coalesced as `pending_scroll` coalesces them.
+    Wheel(std::collections::VecDeque<RetainedScroll>),
+}
+
+/// Upper bound on retained presses and releases.
+const RETAINED_BUTTON_MAX: usize = 16;
 
 /// One wheel delta retained across a busy scene lock.
 #[derive(Clone, Copy, Debug, PartialEq)]

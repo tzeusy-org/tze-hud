@@ -358,6 +358,7 @@ pub(super) fn make_windowed_keyboard_test_app(
         pending_keyboard_events: VecDeque::new(),
         pending_scroll: VecDeque::new(),
         pending_pointer_move: false,
+        pending_pointer_buttons: VecDeque::new(),
         interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
     };
 

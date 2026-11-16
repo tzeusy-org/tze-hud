@@ -636,6 +636,10 @@ struct WindowedRuntimeState {
     /// hit-testing follow the latest position, so one flag suffices: the
     /// retry replays a Move at the current cursor position.
     pending_pointer_move: bool,
+    /// Pointer presses and releases that found the scene lock busy
+    ///. Unlike a Move, each is a discrete action at its own
+    /// position, so they replay in arrival order rather than coalescing.
+    pending_pointer_buttons: VecDeque<lifecycle::RetainedButton>,
     /// Cumulative count of interactive-feedback scene updates dropped because the
     /// main-thread `spin_acquire` timed out on the scene / shared-state lock
     /// during a guaranteed-feedback gesture (drag-move / live resize) — the exact
@@ -1146,6 +1150,7 @@ impl ApplicationHandler<RuntimeWakeEvent> for WinitApp {
             || !self.state.pending_keyboard_events.is_empty()
             || !self.state.pending_scroll.is_empty()
             || self.state.pending_pointer_move
+            || !self.state.pending_pointer_buttons.is_empty()
             || self
                 .state
                 .primary_drag_gesture
@@ -3343,6 +3348,7 @@ impl WindowedRuntime {
             pending_keyboard_events: VecDeque::new(),
             pending_scroll: VecDeque::new(),
             pending_pointer_move: false,
+            pending_pointer_buttons: VecDeque::new(),
             interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
         };
 

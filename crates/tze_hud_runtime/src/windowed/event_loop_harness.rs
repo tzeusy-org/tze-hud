@@ -199,6 +199,7 @@ impl WindowedRuntimeState {
             pending_keyboard_events: VecDeque::new(),
             pending_scroll: VecDeque::new(),
             pending_pointer_move: false,
+            pending_pointer_buttons: VecDeque::new(),
             interaction_feedback_lock_misses: std::sync::atomic::AtomicU64::new(0),
         }
     }
@@ -1174,27 +1175,48 @@ impl HeadlessEventLoopHarness {
         });
     }
 
+    /// Read the scene for a geometry lookup. Runtime tasks (an availability
+    /// waiter, a session handler) may hold the lock for a moment; wait that
+    /// out instead of reporting a target missing.
+    fn with_scene<T>(
+        &self,
+        read: impl FnOnce(&tze_hud_scene::graph::SceneGraph) -> T,
+    ) -> Option<T> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+        loop {
+            if let Ok(state) = self.app.state.shared_state.try_lock()
+                && let Ok(scene) = state.scene.try_lock()
+            {
+                return Some(read(&scene));
+            }
+            if std::time::Instant::now() >= deadline {
+                return None;
+            }
+            std::thread::yield_now();
+        }
+    }
+
     /// Display-space center of the first composer input region on screen
     /// (a portal armed with `expects_reply`), where a user would click to type.
     pub fn composer_center(&self) -> Option<(f32, f32)> {
-        let state = self.app.state.shared_state.try_lock().ok()?;
-        let scene = state.scene.try_lock().ok()?;
-        scene.tiles.values().find_map(|tile| {
-            let mut stack: Vec<SceneId> = tile.root_node.into_iter().collect();
-            while let Some(id) = stack.pop() {
-                let node = scene.nodes.get(&id)?;
-                if let NodeData::HitRegion(region) = &node.data
-                    && region.accepts_composer_input
-                {
-                    return Some((
-                        tile.bounds.x + region.bounds.x + region.bounds.width / 2.0,
-                        tile.bounds.y + region.bounds.y + region.bounds.height / 2.0,
-                    ));
+        self.with_scene(|scene| {
+            scene.tiles.values().find_map(|tile| {
+                let mut stack: Vec<SceneId> = tile.root_node.into_iter().collect();
+                while let Some(id) = stack.pop() {
+                    let node = scene.nodes.get(&id)?;
+                    if let NodeData::HitRegion(region) = &node.data
+                        && region.accepts_composer_input
+                    {
+                        return Some((
+                            tile.bounds.x + region.bounds.x + region.bounds.width / 2.0,
+                            tile.bounds.y + region.bounds.y + region.bounds.height / 2.0,
+                        ));
+                    }
+                    stack.extend(node.children.iter().copied());
                 }
-                stack.extend(node.children.iter().copied());
-            }
-            None
-        })
+                None
+            })
+        })?
     }
 
     /// Display-space center of the on-screen notification action button
@@ -1213,19 +1235,19 @@ impl HeadlessEventLoopHarness {
         &self,
         matches: impl Fn(&tze_hud_scene::NotificationAction) -> bool,
     ) -> Option<(f32, f32)> {
-        let state = self.app.state.shared_state.try_lock().ok()?;
-        let scene = state.scene.try_lock().ok()?;
-        scene
-            .overlay
-            .zone_hit_regions
-            .iter()
-            .find(|region| scene.notification_action(region).is_some_and(&matches))
-            .map(|region| {
-                (
-                    region.bounds.x + region.bounds.width / 2.0,
-                    region.bounds.y + region.bounds.height / 2.0,
-                )
-            })
+        self.with_scene(|scene| {
+            scene
+                .overlay
+                .zone_hit_regions
+                .iter()
+                .find(|region| scene.notification_action(region).is_some_and(&matches))
+                .map(|region| {
+                    (
+                        region.bounds.x + region.bounds.width / 2.0,
+                        region.bounds.y + region.bounds.height / 2.0,
+                    )
+                })
+        })?
     }
 
     /// Widget instance `name`'s geometry override and auto-clear limit.
@@ -7528,6 +7550,150 @@ mod tests {
             scene.tile_scroll_offset_local(tile_id).1,
             40.0,
             "both wheel deltas made while the scene was busy must apply"
+        );
+    }
+
+    /// A wheel burst behind a retained click coalesces into one entry, so it
+    /// can neither evict the click nor overtake it.
+    #[test]
+    fn held_scene_lock_wheel_burst_waits_behind_click_without_evicting_it() {
+        use std::time::{Duration, Instant};
+
+        let mut harness = HeadlessEventLoopHarness::new();
+        let (_tile_id, _node_id, _rx) = install_button(&mut harness, false);
+        let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
+        let held = scene_handle.blocking_lock();
+        let main_work_before = harness.app.state.wake.main_work_generation();
+        harness.app.state.cursor_x = 50.0;
+        harness.app.state.cursor_y = 30.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Down);
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        for _ in 0..40 {
+            harness
+                .app
+                .enqueue_scroll_event(0.0, -10.0, tze_hud_input::WheelStep::Pixels);
+        }
+        let retained = &harness.app.state.pending_pointer_buttons;
+        assert_eq!(retained.len(), 3, "the burst shares one wheel entry");
+        assert!(matches!(
+            &retained[0].event,
+            crate::windowed::lifecycle::RetainedPointerEvent::Button {
+                kind: PointerEventKind::Down,
+                ..
+            }
+        ));
+        assert!(matches!(
+            &retained[2].event,
+            crate::windowed::lifecycle::RetainedPointerEvent::Wheel(deltas) if deltas.len() == 1
+        ));
+        assert!(
+            harness.app.state.pending_scroll.is_empty(),
+            "wheel behind the click does not join the scroll ahead of it"
+        );
+        drop(held);
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while harness.app.state.wake.main_work_generation() == main_work_before {
+            assert!(Instant::now() < deadline, "release must wake the replay");
+            std::thread::yield_now();
+        }
+        harness.app.settle_scene_work();
+        assert!(harness.app.state.pending_pointer_buttons.is_empty());
+        assert!(harness.app.state.pending_scroll.is_empty());
+    }
+
+    /// A click made while the scene lock is busy is not lost:
+    /// the press and release retain their own positions and replay in order
+    /// once the lock frees: the press focuses the button it was made on even
+    /// though the pointer has since left, and the release ends the press.
+    #[test]
+    fn held_scene_lock_retains_click_and_replays_it_in_order() {
+        use std::time::{Duration, Instant};
+
+        let mut harness = HeadlessEventLoopHarness::new();
+        let (_tile_id, node_id, mut rx) = install_button(&mut harness, false);
+        received_events(&mut rx);
+        let scene_handle = Arc::clone(&harness.app.state.shared_state.blocking_lock().scene);
+        let held = scene_handle.blocking_lock();
+        let main_work_before = harness.app.state.wake.main_work_generation();
+
+        // Press and release on the button (local 10..170 x 10..58)...
+        harness.app.state.cursor_x = 50.0;
+        harness.app.state.cursor_y = 30.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Down);
+        harness.app.enqueue_pointer_event(PointerEventKind::Up);
+        // Typing that follows the click waits behind it, even though the
+        // keyboard path itself is free.
+        let PendingKeyboardEvent::Character(typed) = character("x", 2_000) else {
+            unreachable!()
+        };
+        harness.app.dispatch_character_event(&typed);
+        assert_eq!(harness.app.state.pending_keyboard_events.len(), 1);
+        // ...then the pointer leaves before the lock frees.
+        harness.app.state.cursor_x = 900.0;
+        harness.app.state.cursor_y = 900.0;
+        harness.app.enqueue_pointer_event(PointerEventKind::Move);
+        assert_eq!(
+            harness
+                .app
+                .state
+                .pending_pointer_buttons
+                .iter()
+                .map(|b| match &b.event {
+                    crate::windowed::lifecycle::RetainedPointerEvent::Button {
+                        kind, x, y, ..
+                    } => {
+                        (kind.clone(), *x, *y)
+                    }
+                    other => panic!("only buttons were retained: {other:?}"),
+                })
+                .collect::<Vec<_>>(),
+            vec![
+                (PointerEventKind::Down, 50.0, 30.0),
+                (PointerEventKind::Up, 50.0, 30.0)
+            ],
+            "a busy lock retains each press and release at its own position"
+        );
+        drop(held);
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while harness.app.state.wake.main_work_generation() == main_work_before {
+            assert!(
+                Instant::now() < deadline,
+                "releasing the scene lock must wake the main loop to replay"
+            );
+            std::thread::yield_now();
+        }
+        harness.app.settle_scene_work();
+
+        assert!(harness.app.state.pending_pointer_buttons.is_empty());
+        assert!(harness.app.state.pending_keyboard_events.is_empty());
+        assert_eq!(
+            (harness.app.state.cursor_x, harness.app.state.cursor_y),
+            (900.0, 900.0),
+            "replay restores the live cursor"
+        );
+        let kinds: Vec<&str> = received_events(&mut rx)
+            .iter()
+            .filter_map(|(_, event)| match event {
+                ProtoInputEvent::FocusGained(_) => Some("focus"),
+                ProtoInputEvent::PointerDown(_) => Some("down"),
+                ProtoInputEvent::Character(_) => Some("char"),
+                _ => None,
+            })
+            .collect();
+        // The same agent-visible events as an uncontended click on this
+        // button, and the key typed after it reaches the focus it gave.
+        assert_eq!(
+            kinds,
+            ["focus", "down", "char"],
+            "the retained press focuses the button where it was made, then the typing follows"
+        );
+        let shared = harness.app.state.shared_state.blocking_lock();
+        let scene = shared.scene.blocking_lock();
+        assert!(
+            !scene.hit_region_states[&node_id].pressed,
+            "the replayed release ends the press"
         );
     }
 
