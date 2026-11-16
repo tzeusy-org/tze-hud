@@ -3978,6 +3978,86 @@ mod tests {
             "the second reply also leaves no perpetual local dirty frame"
         );
 
+        // Model either lock becoming busy after the composer target lookup,
+        // at the post-edit reset boundary. Accepted text is already local;
+        // retrying the raw character would duplicate it or submit it twice.
+        let shared_handle = Arc::clone(&app.state.shared_state);
+        let scene_handle = {
+            let shared = shared_handle.try_lock().unwrap();
+            Arc::clone(&shared.scene)
+        };
+        let mut recovered_input_offsets = Vec::new();
+        for busy_scene in [false, true] {
+            let output_offset = {
+                let mut scene = scene_handle.try_lock().unwrap();
+                crate::portal::tests::measured_panes(&mut scene, tile_id, 900.0, 900.0);
+                app.state
+                    .input_processor
+                    .reconcile_portal_document_layouts(&mut scene);
+                app.state
+                    .input_processor
+                    .reset_portal_input_scroll_to_tail(tile_id, &mut scene);
+                assert_eq!(scene.portal_input_scroll_offset(tile_id).1, 800.0);
+                app.state.input_processor.process_scroll_event(
+                    &tze_hud_input::ScrollEvent {
+                        x: tile_bounds.x + tile_bounds.width * 0.25,
+                        y: tile_bounds.y + 200.0,
+                        delta_x: 0.0,
+                        delta_y: -50.0,
+                    },
+                    &mut scene,
+                );
+                assert_eq!(scene.portal_input_scroll_offset(tile_id).1, 750.0);
+                assert!(!scene.tile_follow_tail_at_tail(tile_id));
+                scene.tile_scroll_offset_local(tile_id)
+            };
+            app.state.input_processor.route_character_to_composer("z");
+            app.push_local_composer_echo(std::time::Instant::now());
+            let accepted_draft = app
+                .state
+                .input_processor
+                .composer_draft_snapshot()
+                .unwrap()
+                .0;
+            let shared_guard = (!busy_scene).then(|| shared_handle.try_lock().unwrap());
+            let scene_guard = busy_scene.then(|| scene_handle.try_lock().unwrap());
+            app.reset_input_history_scroll_to_tail(tile_id);
+            // A maintenance turn while still busy must retain the reset intent.
+            app.drain_pending_keyboard_events();
+            drop(scene_guard);
+            drop(shared_guard);
+            app.settle_scene_work();
+            let scene = scene_handle.try_lock().unwrap();
+            recovered_input_offsets.push(scene.portal_input_scroll_offset(tile_id).1);
+            assert_eq!(scene.tile_scroll_offset_local(tile_id), output_offset);
+            assert!(!scene.tile_follow_tail_at_tail(tile_id));
+            assert_eq!(
+                app.state
+                    .input_processor
+                    .composer_draft_snapshot()
+                    .unwrap()
+                    .0,
+                accepted_draft
+            );
+            drop(scene);
+            let hub = handle.hub.lock().unwrap();
+            let portal = hub
+                .get(&tze_hud_portal::hub::PortalKey::new(
+                    "test-agent",
+                    "proj-npcdf",
+                ))
+                .unwrap();
+            assert_eq!(portal.inputs.len(), 2, "tail recovery sends no reply");
+            assert_eq!(portal.replies.len(), 2, "tail recovery authors no echo");
+            assert!(!notified.as_mut().enable());
+        }
+
+        assert_eq!(
+            recovered_input_offsets,
+            [800.0, 800.0],
+            "accepted draft reset must survive both shared-state and scene contention"
+        );
+
         // A known portal whose hub is unavailable must not fall back to a raw
         // success echo. Register readiness before the refusal, as a real poll does.
         let limit = handle.hub.lock().unwrap().limits().input_item_bytes;
