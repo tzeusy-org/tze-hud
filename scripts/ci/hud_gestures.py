@@ -1277,8 +1277,11 @@ def shrink(run: Run, s: str, times: int = 4) -> dict:
     before = portal_entry(run.status(), s)["rect"]
     for _ in range(times):
         run.key("ctrl+minus")
-    return run.expect("Ctrl+- shrinks the portal",
-                      on(s, lambda p: p["rect"]["w"] < before["w"] or p["rect"]["h"] < before["h"]))
+    run.expect("Ctrl+- shrinks the portal",
+               on(s, lambda p: p["rect"]["w"] < before["w"] or p["rect"]["h"] < before["h"]))
+    # The first shrink can show before the later presses land; return only
+    # once they all have, so the caller's next resize starts from rest.
+    return run.settle()
 
 
 def scenario_drag_alignment(run: Run) -> None:
