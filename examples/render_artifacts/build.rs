@@ -3,6 +3,18 @@
 
 use std::process::Command;
 
+/// Everything the rendered pixels compile from: the crates, the files they
+/// embed (themes, widget bundles, fonts), dependency versions, and this
+/// example. Relative to this package.
+const SOURCES: &[&str] = &[
+    "../../crates",
+    "../../assets",
+    "../../fonts",
+    "../../Cargo.toml",
+    "../../Cargo.lock",
+    ".",
+];
+
 fn git(args: &[&str]) -> Option<String> {
     Command::new("git")
         .args(args)
@@ -17,8 +29,9 @@ fn main() {
     // Any rendering source change re-runs this script (cargo scans these
     // directories recursively), as do commits and checkouts. Paths come from
     // git so linked worktrees, whose `.git` is a file, are tracked too.
-    println!("cargo::rerun-if-changed=../../crates");
-    println!("cargo::rerun-if-changed=src");
+    for path in SOURCES {
+        println!("cargo::rerun-if-changed={path}");
+    }
     for path in ["HEAD", "index", "packed-refs", "refs"] {
         if let Some(p) = git(&["rev-parse", "--path-format=absolute", "--git-path", path]) {
             println!("cargo::rerun-if-changed={p}");
@@ -26,14 +39,9 @@ fn main() {
     }
     let head = git(&["rev-parse", "HEAD"]).unwrap_or_else(|| "unknown".to_owned());
     // Uncommitted edits to the rendering sources at build time.
-    let dirty = git(&[
-        "status",
-        "--porcelain",
-        "--",
-        "../../crates",
-        "../../examples/render_artifacts",
-    ])
-    .map_or("unknown", |s| if s.is_empty() { "false" } else { "true" });
+    let mut status = vec!["status", "--porcelain", "--"];
+    status.extend(SOURCES);
+    let dirty = git(&status).map_or("unknown", |s| if s.is_empty() { "false" } else { "true" });
     println!("cargo::rustc-env=RENDER_SCENE_BUILD_HEAD={head}");
     println!("cargo::rustc-env=RENDER_SCENE_BUILD_DIRTY={dirty}");
 }
