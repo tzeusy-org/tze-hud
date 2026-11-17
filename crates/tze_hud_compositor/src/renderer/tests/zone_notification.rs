@@ -1638,7 +1638,7 @@ async fn test_notification_card_border_is_an_sdf_border() {
         );
         let xs: Vec<_> = commands
             .iter()
-            // Backdrops span the full384px zone; action controls are inset.
+            // Backdrops span the full 384px zone; action controls are inset.
             .filter(|c| (c.width - 384.0).abs() < 0.01)
             .map(|c| c.x)
             .collect();

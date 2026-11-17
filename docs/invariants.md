@@ -164,6 +164,23 @@ the existing input-state error and releases ownership for ordinary polling.
 
 ## 3. The runtime owns the screen; the human override always wins
 
+Visible zone publications traverse Background, Content, then Chrome, with
+ascending zone names inside each layer. Flat geometry, rounded SDF shapes and
+text share that order, independent of registration or map seed. Each zone keeps
+its existing publication, urgency and slot order; owner-hidden zones contribute
+no drawing or controls. Existing primitive-pass boundaries still apply: this
+does not interleave all primitives into an atomic per-zone composite.
+
+Overlapping notification controls choose the later-painted zone first while
+preserving control order within each card. Keyboard tab order remains ascending
+by zone name, and runtime close/jump controls retain their existing priority.
+The existing compositor parents
+[`test_three_pass_ordering_independent_of_registration_order`](../crates/tze_hud_compositor/src/renderer/tests/zone_layers.rs)
+and [`test_notification_card_border_is_an_sdf_border`](../crates/tze_hud_compositor/src/renderer/tests/zone_notification.rs)
+cover flat/SDF/text order, real overlap pixels, visibility and pointer/keyboard
+precedence. These source and readback checks do not establish owner visual
+acceptance.
+
 Safe mode and dismiss work without any agent's cooperation and take
 effect even when agents are hung. Agents never see or address chrome, and
 shell state exposes no portal identity or transcript. A subsequent portal
